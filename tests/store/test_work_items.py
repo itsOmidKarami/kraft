@@ -1,257 +1,158 @@
-import asyncio
 import json
 import subprocess
 
-from support.store_fixtures import CHAIN, mk_item, open_db
+import pytest
+from support.store_fixtures import CHAIN, mk_item
 
 from kraft import db, events, store
 
 
-def test_create_work_item_writes_row_and_event(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert row["status"] == "active"
-            assert row["current_node_id"] is None
-            assert row["bead_id"] == "B-1"
-            evs = database.read(lambda c: events.read_after(c, 0))
-            assert [e["type"] for e in evs] == ["work_item_created"]
-            assert evs[0]["payload"] == {"title": "t", "repo": "/r", "chain_template": "quick-task"}
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+@pytest.fixture
+def conn(tmp_path):
+    """A migrated connection with no writer: for the store calls that are plain
+    functions of a connection."""
+    conn = db._connect(tmp_path / "s.db")
+    db.migrate(conn)
+    yield conn
+    conn.close()
 
 
-def test_create_work_item_round_trips_a_description(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id="B-1",
-                    title="short label",
-                    description="the long brief the spec is written from",
-                    repo="/r",
-                    chain_template="quick-task",
-                    chain_definition=CHAIN,
-                )
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert row["description"] == "the long brief the spec is written from"
-
-            # The event payload stays a scannable label: the brief does not go in it.
-            evts = database.read(lambda c: events.read_after(c, 0, "w1"))
-            created = [e for e in evts if e["type"] == "work_item_created"]
-            assert len(created) == 1
-            assert "description" not in created[0]["payload"]
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+def _mk_item(conn, wid="w1", status="active", **kw):
+    fields = {"bead_id": "B-1", "title": "t", "repo": "/r", "chain_template": "quick-task"}
+    store.create_work_item(conn, id=wid, chain_definition=CHAIN, **(fields | kw))
+    conn.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
 
 
-def test_create_work_item_without_a_description_stores_null(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert row["description"] is None
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+def _row(database, wid="w1", columns="*"):
+    return database.read(
+        lambda c: c.execute(f"SELECT {columns} FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
 
 
-def test_auto_gate_defaults_off_and_round_trips(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id=None,
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w2",
-                    bead_id=None,
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition="{}",
-                    auto_gate=True,
-                )
-            )
-            rows = {
-                r["id"]: r["auto_gate"]
-                for r in database.read(
-                    lambda c: c.execute("SELECT id, auto_gate FROM work_items").fetchall()
-                )
-            }
-            assert rows == {"w1": 0, "w2": 1}
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+async def test_create_work_item_writes_row_and_event(database):
+    await mk_item(database)
+    row = _row(database)
+    assert row["status"] == "active"
+    assert row["current_node_id"] is None
+    assert row["bead_id"] == "B-1"
+    evs = database.read(lambda c: events.read_after(c, 0))
+    assert [e["type"] for e in evs] == ["work_item_created"]
+    assert evs[0]["payload"] == {"title": "t", "repo": "/r", "chain_template": "quick-task"}
 
 
-def test_mark_needs_human_and_completed(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database, "wh")
-            await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "boom"))
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM work_items WHERE id='wh'").fetchone()
-            )
-            assert row["status"] == "needs_human"
-            ev = database.read(lambda c: events.read_after(c, 0))[-1]
-            assert ev["type"] == "work_item_needs_human"
-            assert ev["payload"] == {"node_id": "verify", "reason": "boom"}
-
-            await mk_item(database, "wc")
-            await database.write(lambda c: store.mark_completed(c, "wc"))
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM work_items WHERE id='wc'").fetchone()
-            )
-            assert row["status"] == "completed"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+_PLAN = [{"kind": "plan", "path": ".engineering/plans/p.md"}]
 
 
-def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(tmp_path):
+@pytest.mark.parametrize(
+    ("kwargs", "column", "stored", "extra_event"),
+    [
+        ({"description": "the long brief"}, "description", "the long brief", None),
+        ({}, "description", None, None),
+        ({"attachments": _PLAN}, "attachments", json.dumps(_PLAN), "work_item_attachments"),
+        ({}, "attachments", None, None),
+        ({}, "auto_gate", 0, None),
+        ({"auto_gate": True}, "auto_gate", 1, None),
+        ({"title": "Readable merge records"}, "branch", "kraft/readable-merge-records-w1", None),
+    ],
+    ids=[
+        "description",
+        "no-description-is-null",
+        "attachments",
+        "no-attachments-is-null",
+        "auto-gate-defaults-off",
+        "auto-gate",
+        "branch-from-the-title",
+    ],
+)
+def test_create_work_item_stores_its_column(conn, kwargs, column, stored, extra_event):
+    """Every intake field lands in its column. The `work_item_created` payload
+    stays a scannable label (no description in it), and attachments get their
+    own event: the timeline has to explain why the chain has no spec node."""
+    _mk_item(conn, **kwargs)
+    assert conn.execute(f"SELECT {column} FROM work_items WHERE id='w1'").fetchone()[0] == stored
+    evs = events.read_after(conn, 0, "w1")
+    assert set(evs[0]["payload"]) == {"title", "repo", "chain_template"}
+    assert [e["type"] for e in evs[1:]] == ([extra_event] if extra_event else [])
+
+
+@pytest.mark.parametrize(
+    ("branch", "expected"),
+    [("kraft/readable-w1", "kraft/readable-w1"), (None, "kraft/w1")],
+    ids=["the-row-is-the-truth", "falls-back-when-the-row-predates-the-column"],
+)
+def test_branch_for(conn, branch, expected):
+    """The no-stranding guarantee: an in-flight item whose row was written
+    before the migration keeps the `kraft/<id>` branch its worktree is on."""
+    _mk_item(conn)
+    conn.execute("UPDATE work_items SET branch = ? WHERE id='w1'", (branch,))
+    assert store.branch_for(conn.execute("SELECT * FROM work_items").fetchone()) == expected
+
+
+async def test_mark_needs_human_and_completed(database):
+    await mk_item(database, "wh")
+    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "boom"))
+    assert _row(database, "wh")["status"] == "needs_human"
+    ev = database.read(lambda c: events.read_after(c, 0))[-1]
+    assert ev["type"] == "work_item_needs_human"
+    assert ev["payload"] == {"node_id": "verify", "reason": "boom"}
+
+    await mk_item(database, "wc")
+    await database.write(lambda c: store.mark_completed(c, "wc"))
+    assert _row(database, "wc")["status"] == "completed"
+
+
+async def test_needs_human_names_the_stop_it_is_about_not_an_older_failure(database):
     """Kraft-eh6p's "view log" button hangs off `session_id`. A node that failed
     once, was retried, and then stopped for a *question* must not hand the human
     the older failure's log: it looks like the answer and is not. And a stop with
     no session to explain it (a budget breach) must offer no button at all."""
+    await mk_item(database, "wh")
 
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database, "wh")
-            for sid, status in (("older", "failed"), ("asked", "needs_context")):
-                await database.write(
-                    lambda c, sid=sid: store.create_session(
-                        c,
-                        id=sid,
-                        work_item_id="wh",
-                        node_id="verify",
-                        hook_point="on.test.run",
-                        log_path="/l",
-                        result_path="/r",
-                    )
-                )
-                await database.write(
-                    lambda c, sid=sid, status=status: store.session_exited(c, sid, status)
-                )
-
-            await database.write(
-                lambda c: store.mark_needs_human(c, "wh", "verify", "needs_context: which db?")
+    def session(sid, hook_point="on.test.run"):
+        return database.write(
+            lambda c: store.create_session(
+                c,
+                id=sid,
+                work_item_id="wh",
+                node_id="verify",
+                hook_point=hook_point,
+                log_path="/l",
+                result_path="/r",
             )
-            asked = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]
+        )
 
-            # A later session that explains nothing (a budget-refused launch) —
-            # the button goes away rather than pointing back at "asked".
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="refused",
-                    work_item_id="wh",
-                    node_id="verify",
-                    hook_point="on.implementation.start",
-                    log_path="/l",
-                    result_path="/r",
-                )
-            )
-            await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "over budget"))
-            broke = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]
-            return asked["payload"], broke["payload"]
-        finally:
-            await database.close()
+    for sid, status in (("older", "failed"), ("asked", "needs_context")):
+        await session(sid)
+        await database.write(lambda c, sid=sid, status=status: store.session_exited(c, sid, status))
+    await database.write(
+        lambda c: store.mark_needs_human(c, "wh", "verify", "needs_context: which db?")
+    )
+    asked = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
 
-    asked, broke = asyncio.run(scenario())
+    # A later session that explains nothing (a budget-refused launch) —
+    # the button goes away rather than pointing back at "asked".
+    await session("refused", "on.implementation.start")
+    await database.write(lambda c: store.mark_needs_human(c, "wh", "verify", "over budget"))
+    broke = database.read(lambda c: events.read_after(c, 0, "wh"))[-1]["payload"]
 
     assert asked["session_id"] == "asked", "the stop names an older, unrelated failure"
     assert "session_id" not in broke, "a stop no session explains still offered a log"
 
 
-def test_set_base_ref(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/r",
-        chain_template="quick-task",
-        chain_definition="{}",
-    )
-    assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] is None
-    store.set_base_ref(conn, "w1", "abc123")
-    assert conn.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()[0] == "abc123"
-
-
-def test_set_ci_pipeline_ref_writes_the_column(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/r",
-        chain_template="quick-task",
-        chain_definition="{}",
-    )
-    assert (
-        conn.execute("SELECT ci_pipeline_ref FROM work_items WHERE id='w1'").fetchone()[0] is None
-    )
-    store.set_ci_pipeline_ref(conn, "w1", "abc123:456")
-    assert (
-        conn.execute("SELECT ci_pipeline_ref FROM work_items WHERE id='w1'").fetchone()[0]
-        == "abc123:456"
-    )
-
-
-def test_set_escalation_session(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/r",
-        chain_template="quick-task",
-        chain_definition="{}",
-    )
-    row = conn.execute("SELECT escalation_session_id FROM work_items WHERE id='w1'").fetchone()
-    assert row[0] is None
-    store.set_escalation_session(conn, "w1", "cli-session-abc")
-    row = conn.execute("SELECT escalation_session_id FROM work_items WHERE id='w1'").fetchone()
-    assert row[0] == "cli-session-abc"
+@pytest.mark.parametrize(
+    ("setter", "column", "value"),
+    [
+        (store.set_base_ref, "base_ref", "abc123"),
+        (store.set_ci_pipeline_ref, "ci_pipeline_ref", "abc123:456"),
+        (store.set_escalation_session, "escalation_session_id", "cli-session-abc"),
+    ],
+    ids=["base_ref", "ci_pipeline_ref", "escalation_session"],
+)
+def test_a_setter_writes_its_column(conn, setter, column, value):
+    _mk_item(conn)
+    assert conn.execute(f"SELECT {column} FROM work_items WHERE id='w1'").fetchone()[0] is None
+    setter(conn, "w1", value)
+    assert conn.execute(f"SELECT {column} FROM work_items WHERE id='w1'").fetchone()[0] == value
 
 
 def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
@@ -304,194 +205,49 @@ def test_branch_name_slugs_the_title_and_stays_a_legal_ref(tmp_path):
         ), f"{got!r} is not a legal branch name"
 
 
-def test_create_work_item_stores_the_branch(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id="B-1",
-                    title="Readable merge records",
-                    repo="/r",
-                    chain_template="quick-task",
-                    chain_definition=CHAIN,
-                )
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert row["branch"] == "kraft/readable-merge-records-w1"
-            assert store.branch_for(row) == "kraft/readable-merge-records-w1"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_branch_for_falls_back_when_the_row_predates_the_column(tmp_path):
-    """The no-stranding guarantee: an in-flight item whose row was written
-    before the migration keeps the `kraft/<id>` branch its worktree is on."""
-
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(
-                lambda c: c.execute("UPDATE work_items SET branch = NULL WHERE id='w1'")
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert store.branch_for(row) == "kraft/w1"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_mark_rate_limited_sets_status_and_retry_at(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(
-                lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
-            )
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
-                ).fetchone()
-            )
-            assert row["status"] == "rate_limited"
-            assert row["retry_at"] == "2026-09-10T00:00:00Z"
-            ev = database.read(lambda c: events.read_after(c, 0))[-1]
-            assert ev["type"] == "work_item_rate_limited"
-            assert ev["payload"] == {
-                "node_id": "implementation",
-                "retry_at": "2026-09-10T00:00:00Z",
-            }
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_mark_waiting_sets_the_status_retry_at_and_event(tmp_path):
-    """The direct mirror of mark_rate_limited: the poller reads status +
+@pytest.mark.parametrize(
+    ("mark", "status", "event", "node"),
+    [
+        (store.mark_rate_limited, "rate_limited", "work_item_rate_limited", "implementation"),
+        (store.mark_waiting, "waiting", "work_item_waiting", "mr_checks"),
+    ],
+    ids=["rate_limited", "waiting"],
+)
+async def test_a_timed_stop_sets_the_status_retry_at_and_event(database, mark, status, event, node):
+    """`mark_waiting` mirrors `mark_rate_limited`: the poller reads status +
     retry_at, and the event is what the timeline shows a human."""
-
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(
-                lambda c: store.mark_waiting(c, "w1", "mr_checks", "2099-01-01T00:00:00+00:00")
-            )
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
-                ).fetchone()
-            )
-            assert row["status"] == "waiting"
-            assert row["retry_at"] == "2099-01-01T00:00:00+00:00"
-            ev = database.read(lambda c: events.read_after(c, 0))[-1]
-            assert ev["type"] == "work_item_waiting"
-            assert ev["payload"] == {
-                "node_id": "mr_checks",
-                "retry_at": "2099-01-01T00:00:00+00:00",
-            }
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await mk_item(database)
+    await database.write(lambda c: mark(c, "w1", node, "2099-01-01T00:00:00+00:00"))
+    row = _row(database, columns="status, retry_at")
+    assert (row["status"], row["retry_at"]) == (status, "2099-01-01T00:00:00+00:00")
+    ev = database.read(lambda c: events.read_after(c, 0))[-1]
+    assert ev["type"] == event
+    assert ev["payload"] == {"node_id": node, "retry_at": "2099-01-01T00:00:00+00:00"}
 
 
-def test_mark_needs_human_clears_retry_at(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(
-                lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
-            )
-            await database.write(
-                lambda c: store.mark_needs_human(c, "w1", "implementation", "boom")
-            )
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
-                ).fetchone()
-            )
-            assert row["status"] == "needs_human"
-            assert row["retry_at"] is None
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+async def test_mark_needs_human_clears_retry_at(database):
+    await mk_item(database)
+    await database.write(
+        lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
+    )
+    await database.write(lambda c: store.mark_needs_human(c, "w1", "implementation", "boom"))
+    row = _row(database, columns="status, retry_at")
+    assert row["status"] == "needs_human"
+    assert row["retry_at"] is None
 
 
-def test_set_title_records_an_event(tmp_path):
+async def test_set_title_records_an_event(database):
     """A title edit gets its own event type. Not a shared `work_item_edited`
     with `set_description`: the description is prepended to every agent
     instruction and the title is a label, so a timeline that cannot tell them
     apart answers neither question."""
+    await mk_item(database)
+    await database.write(lambda c: store.set_title(c, "w1", "a better label"))
+    assert _row(database)["title"] == "a better label"
 
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(lambda c: store.set_title(c, "w1", "a better label"))
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone()
-            )
-            assert row["title"] == "a better label"
-
-            evs = database.read(lambda c: events.read_after(c, 0, "w1"))
-            edits = [e for e in evs if e["type"] == "work_item_title_edited"]
-            assert [e["payload"]["title"] for e in edits] == ["a better label"]
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_create_work_item_stores_attachments_and_events_them(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/repo",
-        chain_template="default",
-        chain_definition="{}",
-        attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
-    )
-    row = conn.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
-    assert json.loads(row["attachments"]) == [{"kind": "plan", "path": ".engineering/plans/p.md"}]
-    types = [e["type"] for e in events.read_after(conn, 0, "w1")]
-    assert "work_item_attachments" in types
-
-
-def test_create_work_item_without_attachments_stores_null(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/repo",
-        chain_template="default",
-        chain_definition="{}",
-    )
-    row = conn.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
-    assert row["attachments"] is None
-    types = [e["type"] for e in events.read_after(conn, 0, "w1")]
-    assert "work_item_attachments" not in types
+    evs = database.read(lambda c: events.read_after(c, 0, "w1"))
+    edits = [e for e in evs if e["type"] == "work_item_title_edited"]
+    assert [e["payload"]["title"] for e in edits] == ["a better label"]
 
 
 def test_merge_rank_order_puts_the_deepest_path_first():
@@ -502,18 +258,8 @@ def test_merge_rank_order_puts_the_deepest_path_first():
     ]
 
 
-def test_add_repo_and_repos_for_round_trip(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/r",
-        chain_template="default",
-        chain_definition="{}",
-    )
+def test_add_repo_and_repos_for_round_trip(conn):
+    _mk_item(conn)
     sub_id = store.add_repo(
         conn,
         work_item_id="w1",
@@ -539,37 +285,12 @@ def test_add_repo_and_repos_for_round_trip(tmp_path):
     assert repos[0]["mr_ref"] == {"number": 3, "url": "http://x/3"}
 
 
-def test_repos_for_is_empty_for_a_single_repo_item(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B",
-        title="t",
-        repo="/r",
-        chain_template="default",
-        chain_definition="{}",
-    )
+def test_repos_for_is_empty_for_a_single_repo_item(conn):
+    _mk_item(conn)
     assert store.repos_for(conn, "w1") == []
 
 
-def _mk_item(conn, wid="w1", status="active"):
-    store.create_work_item(
-        conn,
-        id=wid,
-        bead_id="B-1",
-        title="t",
-        repo="/r",
-        chain_template="quick-task",
-        chain_definition=CHAIN,
-    )
-    conn.execute("UPDATE work_items SET status = ? WHERE id = ?", (status, wid))
-
-
-def test_archive_sets_archived_at_and_by_without_touching_status(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
+def test_archive_sets_archived_at_and_by_without_touching_status(conn):
     _mk_item(conn, status="completed")
 
     store.archive_work_item(conn, "w1", "you")
@@ -580,11 +301,11 @@ def test_archive_sets_archived_at_and_by_without_touching_status(tmp_path):
     assert row["status"] == "completed"
     assert row["archived_by"] == "you"
     assert row["archived_at"]
+    evs = [e for e in events.read_after(conn, 0, "w1") if e["type"] == "work_item_archived"]
+    assert [e["payload"] for e in evs] == [{"by": "you"}]
 
 
-def test_restore_clears_archived_columns(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
+def test_restore_clears_archived_columns(conn):
     _mk_item(conn, status="abandoned")
     store.archive_work_item(conn, "w1", "auto")
 
@@ -595,229 +316,107 @@ def test_restore_clears_archived_columns(tmp_path):
     assert row["archived_by"] is None
 
 
-def test_archive_appends_work_item_archived_event(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    _mk_item(conn, status="completed")
-
-    store.archive_work_item(conn, "w1", "you")
-
-    evs = [e for e in events.read_after(conn, 0, "w1") if e["type"] == "work_item_archived"]
-    assert evs and evs[0]["payload"] == {"by": "you"}
-
-
-def test_recent_auto_pickups_excludes_manually_created_items(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id=None,
-        title="manual",
-        repo="/a",
-        chain_template="default",
-        chain_definition="{}",
-    )
-    store.create_work_item(
-        conn,
-        id="w2",
-        bead_id="B-1",
-        title="auto",
-        repo="/a",
-        chain_template="default",
-        chain_definition="{}",
-        source="auto_intake",
-        bead_priority=2,
-    )
+def _auto_and_manual(conn):
+    """`w1` filed by hand on /b, `w2` picked up by auto-intake on /a."""
+    _mk_item(conn, "w1", bead_id=None, title="manual", repo="/b")
+    _mk_item(conn, "w2", title="auto", repo="/a", source="auto_intake", bead_priority=2)
     conn.commit()
+
+
+def test_recent_auto_pickups_excludes_manually_created_items(conn):
+    _auto_and_manual(conn)
     pickups = store.recent_auto_pickups(conn)
     assert [p["work_item_id"] for p in pickups] == ["w2"]
     assert pickups[0]["priority"] == 2
 
 
-def test_last_auto_pickup_at_only_tracks_auto_intake_repos(tmp_path):
-    conn = db._connect(tmp_path / "s.db")
-    db.migrate(conn)
-    store.create_work_item(
-        conn,
-        id="w1",
-        bead_id="B-1",
-        title="auto",
-        repo="/a",
-        chain_template="default",
-        chain_definition="{}",
-        source="auto_intake",
-    )
-    store.create_work_item(
-        conn,
-        id="w2",
-        bead_id=None,
-        title="manual",
-        repo="/b",
-        chain_template="default",
-        chain_definition="{}",
-    )
-    conn.commit()
+def test_last_auto_pickup_at_only_tracks_auto_intake_repos(conn):
+    _auto_and_manual(conn)
     last = store.last_auto_pickup_at(conn)
     assert "/a" in last
     assert "/b" not in last
 
 
-def test_claim_for_run_is_atomic_between_two_callers(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
-            await database.write(lambda c: store.pause_work_item(c, "w1", []))
-            first = await database.write(
-                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
-            )
-            second = await database.write(
-                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
-            )
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, retry_at FROM work_items WHERE id='w1'"
-                ).fetchone()
-            )
-            return first, second, row["status"], row["retry_at"]
-        finally:
-            await database.close()
-
-    first, second, status, retry_at = asyncio.run(scenario())
+async def test_claim_for_run_is_atomic_between_two_callers(database):
+    await mk_item(database)
+    await database.write(lambda c: store.pause_work_item(c, "w1", []))
+    first = await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"]))
+    second = await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"]))
     assert (first, second) == (True, False)
-    assert status == "active"
-    assert retry_at is None
+    row = _row(database, columns="status, retry_at")
+    assert row["status"] == "active"
+    assert row["retry_at"] is None
 
 
-def test_claim_for_run_refuses_a_status_outside_the_set(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)  # created 'active'
-            claimed = await database.write(
-                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"])
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
-            )
-            return claimed, row["status"]
-        finally:
-            await database.close()
-
-    claimed, status = asyncio.run(scenario())
+async def test_claim_for_run_refuses_a_status_outside_the_set(database):
+    await mk_item(database)  # created 'active'
+    claimed = await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"]))
     assert claimed is False
+    assert _row(database)["status"] == "active"
 
 
-def test_claim_for_run_limit_lets_only_one_of_two_racing_items_through(tmp_path):
+async def test_claim_for_run_limit_lets_only_one_of_two_racing_items_through(database):
     """Kraft-m43g, Kraft-nxht: two different items resumed/retried within
     milliseconds of each other must not both win the last slot. A snapshot
     `active_count()` read ahead of the claim can't catch this -- two reads can
     both see the same free slot before either write lands -- so the capacity
     check has to run inside the same `UPDATE` as the flip, the way this test
     drives it directly rather than hoping asyncio scheduling hits the race."""
-
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database, wid="w0")  # created 'active', occupies one slot
-            await mk_item(database, wid="w1")
-            await mk_item(database, wid="w2")
-            await database.write(lambda c: store.pause_work_item(c, "w1", []))
-            await database.write(lambda c: store.pause_work_item(c, "w2", []))
-            # limit=2, one slot already taken by w0: exactly one of the two
-            # paused items below may claim the last slot.
-            first = await database.write(
-                lambda c: store.claim_for_run(c, "w2", from_statuses=["paused"], limit=2)
-            )
-            second = await database.write(
-                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=2)
-            )
-            statuses = database.read(
-                lambda c: {
-                    r["id"]: r["status"]
-                    for r in c.execute("SELECT id, status FROM work_items").fetchall()
-                }
-            )
-            return first, second, statuses
-        finally:
-            await database.close()
-
-    first, second, statuses = asyncio.run(scenario())
+    for wid in ("w0", "w1", "w2"):  # w0 stays 'active' and occupies one slot
+        await mk_item(database, wid=wid)
+    await database.write(lambda c: store.pause_work_item(c, "w1", []))
+    await database.write(lambda c: store.pause_work_item(c, "w2", []))
+    # limit=2, one slot already taken by w0: exactly one of the two
+    # paused items below may claim the last slot.
+    first = await database.write(
+        lambda c: store.claim_for_run(c, "w2", from_statuses=["paused"], limit=2)
+    )
+    second = await database.write(
+        lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=2)
+    )
+    statuses = database.read(
+        lambda c: {
+            r["id"]: r["status"] for r in c.execute("SELECT id, status FROM work_items").fetchall()
+        }
+    )
     assert (first, second) == (True, False)
     assert statuses == {"w0": "active", "w1": "paused", "w2": "active"}
 
 
-def test_claim_for_run_limit_admits_when_a_slot_is_free(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database, wid="w1")
-            await database.write(lambda c: store.pause_work_item(c, "w1", []))
-            claimed = await database.write(
-                lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=1)
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
-            )
-            return claimed, row["status"]
-        finally:
-            await database.close()
-
-    claimed, status = asyncio.run(scenario())
+async def test_claim_for_run_limit_admits_when_a_slot_is_free(database):
+    await mk_item(database, wid="w1")
+    await database.write(lambda c: store.pause_work_item(c, "w1", []))
+    claimed = await database.write(
+        lambda c: store.claim_for_run(c, "w1", from_statuses=["paused"], limit=1)
+    )
     assert claimed is True
-    assert status == "active"
+    assert _row(database)["status"] == "active"
 
 
-def test_pause_for_broken_base_pauses_and_records_who_and_what(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database, "w1")
-            await mk_item(database, "w2")
-            await database.write(
-                lambda c: store.pause_for_broken_base(
-                    c, "w2", broken_by="w1", follow_up_bead="Kraft-xyz"
-                )
-            )
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, retry_at FROM work_items WHERE id = 'w2'"
-                ).fetchone()
-            )
-            evts = database.read(lambda c: events.read_after(c, 0, "w2"))
-            return row["status"], row["retry_at"], evts
-        finally:
-            await database.close()
-
-    status, retry_at, evts = asyncio.run(scenario())
-    assert status == "paused"
-    assert retry_at is None
+async def test_pause_for_broken_base_pauses_and_records_who_and_what(database):
+    await mk_item(database, "w1")
+    await mk_item(database, "w2")
+    await database.write(
+        lambda c: store.pause_for_broken_base(c, "w2", broken_by="w1", follow_up_bead="Kraft-xyz")
+    )
+    row = _row(database, "w2", "status, retry_at")
+    assert row["status"] == "paused"
+    assert row["retry_at"] is None
+    evts = database.read(lambda c: events.read_after(c, 0, "w2"))
     payload = next(e["payload"] for e in evts if e["type"] == "paused_by_broken_base")
     assert payload == {"broken_by": "w1", "follow_up_bead": "Kraft-xyz"}
 
 
-def test_current_step_round_trips_and_resets_when_the_node_moves(tmp_path):
-    async def scenario():
-        database = await open_db(tmp_path)
-        try:
-            await mk_item(database)
+async def test_current_step_round_trips_and_resets_when_the_node_moves(database):
+    await mk_item(database)
 
-            def step():
-                return database.read(
-                    lambda c: c.execute(
-                        "SELECT current_step FROM work_items WHERE id='w1'"
-                    ).fetchone()[0]
-                )
+    def step():
+        return _row(database, columns="current_step")[0]
 
-            await database.write(lambda c: store.enter_node(c, "w1", "a"))
-            await database.write(lambda c: store.set_current_step(c, "w1", 3))
-            assert step() == 3
-            await database.write(lambda c: store.enter_node(c, "w1", "a"))
-            assert step() == 3, "re-entering the same node keeps the cursor"
-            await database.write(lambda c: store.enter_node(c, "w1", "b"))
-            assert step() == 0
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    await database.write(lambda c: store.enter_node(c, "w1", "a"))
+    await database.write(lambda c: store.set_current_step(c, "w1", 3))
+    assert step() == 3
+    await database.write(lambda c: store.enter_node(c, "w1", "a"))
+    assert step() == 3, "re-entering the same node keeps the cursor"
+    await database.write(lambda c: store.enter_node(c, "w1", "b"))
+    assert step() == 0
