@@ -8,19 +8,16 @@ import os
 import sys
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_library
 
-from kraft import config, db, policy, store
+from kraft import config, policy, store
 from kraft import intake as intake_mod
 from kraft.adapters import beads
-from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
 
 
@@ -36,49 +33,37 @@ def _ready(rows, *, seen: list | None = None):
     return ready
 
 
-@dataclass
-class _Stub:
-    """What `intake.tick` reads off `app.state`, and nothing else.
+def _state(
+    tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, max_concurrent=3, **intake_overrides
+) -> dict:
+    """What `intake.tick` reads off `app.state` besides the database
+    (`stub_app`), and nothing else.
 
     Not a TestClient: `tick` makes a scheduling decision, and driving a whole
     server to observe one is slower and hides which of these it actually used.
     """
-
-    state: SimpleNamespace
-
-
-async def _stub(
-    tmp_path, *, repo_entry=None, budget=policy.NO_BUDGET, max_concurrent=3, **intake_overrides
-) -> _Stub:
-    rd = RunDirs(tmp_path / "run").ensure()
-    database = await db.Database.open(rd.db)
     templates_dir = fake_templates_dir(tmp_path, sys.executable)
     repo = make_repo(tmp_path)
     entry = {"path": str(repo), "enabled": True, "default_chain_template": "default"}
     entry.update(repo_entry or {})
     (templates_dir / "repos.yaml").write_text(yaml.safe_dump({"repos": [entry]}))
     registry = load_registry(templates_dir / "registry.yaml")
-    return _Stub(
-        state=SimpleNamespace(
-            db=database,
-            run_dirs=rd,
-            registry=registry,
-            templates=load_templates(templates_dir, registry),
-            library=v1_library(templates_dir),
-            templates_dir=templates_dir,
-            skills_dir=tmp_path / "skills",
-            policy=policy.Policy(
-                loops={},
-                default=policy.Cap(attempts=3, wall_clock_s=3600),
-                budget=budget,
-                max_concurrent=max_concurrent,
-            ),
-            invalid_policy=[],
-            instance_policy=policy.InstancePolicy.from_input(policy.InstancePolicyInput()),
-            intake={**config.INTAKE_DEFAULT, "enabled": True, **intake_overrides},
-            tasks={},
-        )
-    )
+    return {
+        "registry": registry,
+        "templates": load_templates(templates_dir, registry),
+        "library": v1_library(templates_dir),
+        "templates_dir": templates_dir,
+        "skills_dir": tmp_path / "skills",
+        "policy": policy.Policy(
+            loops={},
+            default=policy.Cap(attempts=3, wall_clock_s=3600),
+            budget=budget,
+            max_concurrent=max_concurrent,
+        ),
+        "invalid_policy": [],
+        "instance_policy": policy.InstancePolicy.from_input(policy.InstancePolicyInput()),
+        "intake": {**config.INTAKE_DEFAULT, "enabled": True, **intake_overrides},
+    }
 
 
 def _work_items(app) -> list[dict]:
@@ -150,69 +135,48 @@ def _no_agent_launch(request, monkeypatch):
     monkeypatch.setattr(intake_mod.executor, "run", run)
 
 
-def _run(build, body):
-    """Build a stub, run `body(app)` against it, always close the database."""
-
-    async def main():
-        app = await build()
-        try:
-            return await body(app)
-        finally:
-            # Let the spawned chains finish rather than cancelling them: with
-            # `executor.run` stubbed they return immediately, and a task
-            # cancelled before it starts leaves its inner coroutine un-awaited.
-            await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-            await app.state.db.close()
-
-    return asyncio.run(main())
-
-
-def test_disabled_by_default_does_nothing(tmp_path, monkeypatch):
+async def test_disabled_by_default_does_nothing(tmp_path, monkeypatch, stub_app):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        assert await intake_mod.tick(app) == []
-        assert _work_items(app) == []
-
-    _run(lambda: _stub(tmp_path, enabled=False), body)
+    app = stub_app(**_state(tmp_path, enabled=False))
+    assert await intake_mod.tick(app) == []
+    assert _work_items(app) == []
 
 
-def test_starts_one_bead_when_enabled(tmp_path, monkeypatch):
+async def test_starts_one_bead_when_enabled(tmp_path, monkeypatch, stub_app):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
     )
 
-    async def body(app):
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        rows = _work_items(app)
-        assert [(r["id"], r["bead_id"], r["title"]) for r in rows] == [
-            (started[0], "B-1", "pick me up")
-        ]
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    rows = _work_items(app)
+    assert [(r["id"], r["bead_id"], r["title"]) for r in rows] == [
+        (started[0], "B-1", "pick me up")
+    ]
 
 
-def test_a_started_pickup_is_recorded_with_source_and_priority(tmp_path, monkeypatch):
+async def test_a_started_pickup_is_recorded_with_source_and_priority(
+    tmp_path, monkeypatch, stub_app
+):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
     )
 
-    async def body(app):
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        pickups = app.state.db.read(store.recent_auto_pickups)
-        assert len(pickups) == 1
-        assert pickups[0]["priority"] == 3
-        last = app.state.db.read(store.last_auto_pickup_at)
-        assert last  # at least one repo recorded
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    pickups = app.state.db.read(store.recent_auto_pickups)
+    assert len(pickups) == 1
+    assert pickups[0]["priority"] == 3
+    last = app.state.db.read(store.last_auto_pickup_at)
+    assert last  # at least one repo recorded
 
 
-def test_auto_intake_carries_the_beads_description(tmp_path, monkeypatch):
+async def test_auto_intake_carries_the_beads_description(tmp_path, monkeypatch, stub_app):
     """The bead already carries the brief its author wrote. Auto-intake is the one
     path with no human present to notice it being dropped."""
     monkeypatch.setattr(
@@ -221,29 +185,25 @@ def test_auto_intake_carries_the_beads_description(tmp_path, monkeypatch):
         _ready([{"id": "B-1", "title": "pick me up", "priority": 3, "description": "the brief"}]),
     )
 
-    async def body(app):
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        assert [r["description"] for r in _work_items(app)] == ["the brief"]
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    assert [r["description"] for r in _work_items(app)] == ["the brief"]
 
 
-def test_respects_max_concurrent_counting_every_active_item(tmp_path, monkeypatch):
+async def test_respects_max_concurrent_counting_every_active_item(tmp_path, monkeypatch, stub_app):
     """A person working on one thing must not find the poller adding a second."""
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        await _file(app, bead_id="HAND-1", status="active")
-        assert await intake_mod.tick(app) == []
-        assert [r["bead_id"] for r in _work_items(app)] == ["HAND-1"]
-
-    _run(lambda: _stub(tmp_path, max_concurrent=1), body)
+    app = stub_app(**_state(tmp_path, max_concurrent=1))
+    await _file(app, bead_id="HAND-1", status="active")
+    assert await intake_mod.tick(app) == []
+    assert [r["bead_id"] for r in _work_items(app)] == ["HAND-1"]
 
 
-def test_a_waiting_item_does_not_hold_an_intake_slot(tmp_path, monkeypatch):
+async def test_a_waiting_item_does_not_hold_an_intake_slot(tmp_path, monkeypatch, stub_app):
     """Kraft-g15w: three slow pipelines used to stall auto-intake for the full
     poll_timeout. A waiting row is not an active one, so the slot is free.
 
@@ -256,20 +216,18 @@ def test_a_waiting_item_does_not_hold_an_intake_slot(tmp_path, monkeypatch):
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        wid = await _file(app, bead_id="HAND-1", status="active")
-        await app.state.db.write(
-            lambda c: store.mark_waiting(c, wid, "mr_checks", "2099-01-01T00:00:00+00:00")
-        )
-        assert app.state.db.read(lambda c: store.active_count(c)) == 0
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        assert sorted(r["bead_id"] for r in _work_items(app)) == ["B-1", "HAND-1"]
-
-    _run(lambda: _stub(tmp_path, max_concurrent=1), body)
+    app = stub_app(**_state(tmp_path, max_concurrent=1))
+    wid = await _file(app, bead_id="HAND-1", status="active")
+    await app.state.db.write(
+        lambda c: store.mark_waiting(c, wid, "mr_checks", "2099-01-01T00:00:00+00:00")
+    )
+    assert app.state.db.read(lambda c: store.active_count(c)) == 0
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    assert sorted(r["bead_id"] for r in _work_items(app)) == ["B-1", "HAND-1"]
 
 
-def test_skips_a_bead_that_already_has_a_work_item(tmp_path, monkeypatch):
+async def test_skips_a_bead_that_already_has_a_work_item(tmp_path, monkeypatch, stub_app):
     monkeypatch.setattr(
         intake_mod.beads,
         "ready",
@@ -281,17 +239,15 @@ def test_skips_a_bead_that_already_has_a_work_item(tmp_path, monkeypatch):
         ),
     )
 
-    async def body(app):
-        # needs_human, so it is not active and does not consume a slot either.
-        await _file(app, bead_id="B-1", status="needs_human")
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        assert sorted(r["bead_id"] for r in _work_items(app)) == ["B-1", "B-2"]
-
-    _run(lambda: _stub(tmp_path, max_concurrent=5), body)
+    app = stub_app(**_state(tmp_path, max_concurrent=5))
+    # needs_human, so it is not active and does not consume a slot either.
+    await _file(app, bead_id="B-1", status="needs_human")
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    assert sorted(r["bead_id"] for r in _work_items(app)) == ["B-1", "B-2"]
 
 
-def test_skips_a_bead_above_the_priority_ceiling(tmp_path, monkeypatch):
+async def test_skips_a_bead_above_the_priority_ceiling(tmp_path, monkeypatch, stub_app):
     """P0 is the highest priority, so `priority_ceiling: 2` keeps P2 and below."""
     monkeypatch.setattr(
         intake_mod.beads,
@@ -304,40 +260,34 @@ def test_skips_a_bead_above_the_priority_ceiling(tmp_path, monkeypatch):
         ),
     )
 
-    async def body(app):
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        assert [r["bead_id"] for r in _work_items(app)] == ["B-BACKLOG"]
-
-    _run(lambda: _stub(tmp_path, max_concurrent=5, priority_ceiling=2), body)
+    app = stub_app(**_state(tmp_path, max_concurrent=5, priority_ceiling=2))
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    assert [r["bead_id"] for r in _work_items(app)] == ["B-BACKLOG"]
 
 
-def test_does_not_run_while_the_daily_budget_is_breached(tmp_path, monkeypatch):
+async def test_does_not_run_while_the_daily_budget_is_breached(tmp_path, monkeypatch, stub_app):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        await _spend(app, 5.0)
-        assert await intake_mod.tick(app) == []
-        assert [r["bead_id"] for r in _work_items(app)] == ["SPENT-1"]
-
-    _run(lambda: _stub(tmp_path, budget=policy.Budget(daily_usd=1.0)), body)
+    app = stub_app(**_state(tmp_path, budget=policy.Budget(daily_usd=1.0)))
+    await _spend(app, 5.0)
+    assert await intake_mod.tick(app) == []
+    assert [r["bead_id"] for r in _work_items(app)] == ["SPENT-1"]
 
 
-def test_starts_when_the_daily_budget_is_not_reached(tmp_path, monkeypatch):
+async def test_starts_when_the_daily_budget_is_not_reached(tmp_path, monkeypatch, stub_app):
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        await _spend(app, 0.25)
-        assert len(await intake_mod.tick(app)) == 1
-
-    _run(lambda: _stub(tmp_path, budget=policy.Budget(daily_usd=1.0)), body)
+    app = stub_app(**_state(tmp_path, budget=policy.Budget(daily_usd=1.0)))
+    await _spend(app, 0.25)
+    assert len(await intake_mod.tick(app)) == 1
 
 
-def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch):
+async def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch, stub_app):
     seen: list = []
     monkeypatch.setattr(
         intake_mod.beads,
@@ -345,14 +295,12 @@ def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch):
         _ready([{"id": "B-1", "title": "t", "priority": 3}], seen=seen),
     )
 
-    async def body(app):
-        assert await intake_mod.tick(app) == []
-        assert seen == []
-
-    _run(lambda: _stub(tmp_path, repo_entry={"enabled": False}), body)
+    app = stub_app(**_state(tmp_path, repo_entry={"enabled": False}))
+    assert await intake_mod.tick(app) == []
+    assert seen == []
 
 
-def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch):
+async def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch, stub_app):
     """Spec §5 reached by configuration: a chain that gates nowhere would take a
     bead to merge unattended with no human anywhere."""
     monkeypatch.setattr(
@@ -374,15 +322,13 @@ def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch):
         "      - { id: build, kind: subprocess, command: 'true' }\n"
     )
 
-    async def body(app):
-        assert app.state.library.resolve_chain("gateless"), "the fixture chain must resolve"
-        assert await intake_mod.tick(app) == []
-        assert _work_items(app) == []
-
-    _run(lambda: _stub(tmp_path, repo_entry={"default_chain_template": "gateless"}), body)
+    app = stub_app(**_state(tmp_path, repo_entry={"default_chain_template": "gateless"}))
+    assert app.state.library.resolve_chain("gateless"), "the fixture chain must resolve"
+    assert await intake_mod.tick(app) == []
+    assert _work_items(app) == []
 
 
-def test_skips_an_epic(tmp_path, monkeypatch):
+async def test_skips_an_epic(tmp_path, monkeypatch, stub_app):
     """An epic is a container for work, not work: its title describes a quarter."""
     monkeypatch.setattr(
         intake_mod.beads,
@@ -395,37 +341,33 @@ def test_skips_an_epic(tmp_path, monkeypatch):
         ),
     )
 
-    async def body(app):
-        assert len(await intake_mod.tick(app)) == 1
-        assert [r["bead_id"] for r in _work_items(app)] == ["B-TASK"]
-
-    _run(lambda: _stub(tmp_path, max_concurrent=5), body)
+    app = stub_app(**_state(tmp_path, max_concurrent=5))
+    assert len(await intake_mod.tick(app)) == 1
+    assert [r["bead_id"] for r in _work_items(app)] == ["B-TASK"]
 
 
-def test_an_auto_started_item_is_left_at_its_first_gate(tmp_path, monkeypatch):
+async def test_an_auto_started_item_is_left_at_its_first_gate(tmp_path, monkeypatch, stub_app):
     """§5: auto-intake removes the typing, not the judgement. The chain it files
     is the template's own, gates intact — nothing is pre-satisfied."""
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
-    async def body(app):
-        (wid,) = await intake_mod.tick(app)
-        row = app.state.db.read(
-            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
-        )
-        # The V1 snapshot, not `chain_definition`: `materialized_chain` is the
-        # executor's only input, and an auto-intaken item is materialized from
-        # the library chain with nothing satisfied in advance.
-        nodes = store.materialized_chain_of(row).chain.chain.nodes
-        gates = [n.id for n in nodes if n.kind == "gate"]
-        assert gates, "the filed chain has no gate at all; §5 has nothing to stop at"
-        assert gates[0] == "spec_approval"
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    (wid,) = await intake_mod.tick(app)
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    # The V1 snapshot, not `chain_definition`: `materialized_chain` is the
+    # executor's only input, and an auto-intaken item is materialized from
+    # the library chain with nothing satisfied in advance.
+    nodes = store.materialized_chain_of(row).chain.chain.nodes
+    gates = [n.id for n in nodes if n.kind == "gate"]
+    assert gates, "the filed chain has no gate at all; §5 has nothing to stop at"
+    assert gates[0] == "spec_approval"
 
 
-def test_a_failing_tick_does_not_end_the_poller(tmp_path, monkeypatch):
+async def test_a_failing_tick_does_not_end_the_poller(tmp_path, monkeypatch, stub_app):
     """A poller that dies stops picking work up, silently and until a restart."""
     ticks = 0
 
@@ -441,12 +383,10 @@ def test_a_failing_tick_does_not_end_the_poller(tmp_path, monkeypatch):
     monkeypatch.setattr(intake_mod, "tick", boom)
     monkeypatch.setattr(intake_mod.asyncio, "sleep", sleep)
 
-    async def body(app):
-        with pytest.raises(asyncio.CancelledError):
-            await intake_mod.poller(app)
-        assert ticks == 2
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    with pytest.raises(asyncio.CancelledError):
+        await intake_mod.poller(app)
+    assert ticks == 2
 
 
 def test_unreadable_intake_yaml_raises_configerror(tmp_path):
@@ -462,7 +402,7 @@ def test_unreadable_intake_yaml_raises_configerror(tmp_path):
         config.load_intake(path)
 
 
-def test_a_nonsense_interval_does_not_kill_the_poller(tmp_path, monkeypatch):
+async def test_a_nonsense_interval_does_not_kill_the_poller(tmp_path, monkeypatch, stub_app):
     """`intake.yaml` is hand-edited and unvalidated; a typo in it must not leave
     an enabled poller that silently never ticks."""
     slept: list = []
@@ -473,12 +413,10 @@ def test_a_nonsense_interval_does_not_kill_the_poller(tmp_path, monkeypatch):
 
     monkeypatch.setattr(intake_mod.asyncio, "sleep", sleep)
 
-    async def body(app):
-        with pytest.raises(asyncio.CancelledError):
-            await intake_mod.poller(app)
-        assert slept == [config.INTAKE_DEFAULT["interval_s"]]
-
-    _run(lambda: _stub(tmp_path, interval_s="five minutes"), body)
+    app = stub_app(**_state(tmp_path, interval_s="five minutes"))
+    with pytest.raises(asyncio.CancelledError):
+        await intake_mod.poller(app)
+    assert slept == [config.INTAKE_DEFAULT["interval_s"]]
 
 
 _FAKE_CLAUDE = Path(__file__).resolve().parents[1] / "fixtures" / "fake-claude.sh"
@@ -603,20 +541,20 @@ def test_a_malformed_intake_yaml_still_boots_with_intake_off(tmp_path, monkeypat
         assert client.app.state.intake_task is None
 
 
-def test_a_repos_filter_that_matches_nothing_says_so(tmp_path, caplog):
+async def test_a_repos_filter_that_matches_nothing_says_so(tmp_path, caplog, stub_app):
     """`repos.yaml` paths are never normalised, so a `~` or a trailing slash in
     `intake.yaml`'s filter matches nothing. Without the warning that is a poller
     ticking forever, picking nothing up, saying nothing."""
 
-    async def body(app):
-        with caplog.at_level("WARNING", logger="kraft.intake"):
-            assert await intake_mod.tick(app) == []
-        assert "matched no configured repo" in caplog.text
-
-    _run(lambda: _stub(tmp_path, repos=["~/code/nowhere"]), body)
+    app = stub_app(**_state(tmp_path, repos=["~/code/nowhere"]))
+    with caplog.at_level("WARNING", logger="kraft.intake"):
+        assert await intake_mod.tick(app) == []
+    assert "matched no configured repo" in caplog.text
 
 
-def test_an_auto_intaken_bead_records_the_repo_as_its_bd_workspace(tmp_path, monkeypatch):
+async def test_an_auto_intaken_bead_records_the_repo_as_its_bd_workspace(
+    tmp_path, monkeypatch, stub_app
+):
     """The bead is adopted from the repo's own `.beads`, never filed into the
     instance-wide `KRAFT_BD_CWD`, so closing it has to happen there (Kraft-8mu.5.2).
 
@@ -627,14 +565,12 @@ def test_an_auto_intaken_bead_records_the_repo_as_its_bd_workspace(tmp_path, mon
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
     )
 
-    async def body(app):
-        started = await intake_mod.tick(app)
-        assert len(started) == 1
-        row = app.state.db.read(
-            lambda c: c.execute(
-                "SELECT repo, bead_cwd FROM work_items WHERE id = ?", (started[0],)
-            ).fetchone()
-        )
-        assert row["bead_cwd"] == row["repo"]
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+    row = app.state.db.read(
+        lambda c: c.execute(
+            "SELECT repo, bead_cwd FROM work_items WHERE id = ?", (started[0],)
+        ).fetchone()
+    )
+    assert row["bead_cwd"] == row["repo"]
