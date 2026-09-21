@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, make_repo, make_repo_with_submodule, v1_chain, workspace_target
+from support.harness import _git, make_repo, make_repo_with_submodule, v1_chain
+from support.workspace import workspace_target
 
 from kraft import store
 from kraft.adapters import forge

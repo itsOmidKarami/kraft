@@ -561,31 +561,8 @@ def v1_resolved(
     )
 
 
-def workspace_target(mounts: dict[str, str], *, root_pointer_policy: str = "ignore"):
-    """A workspace `WorkItemTarget` selecting every member of `mounts` (member
-    id -> mount path in the root), each member its own repository id."""
-    from kraft.templates.environment import WorkItemTarget, Workspace, WorkspaceMember
-
-    workspace = Workspace(
-        id="ws",
-        root="ws",
-        members={m: WorkspaceMember(repository=m, path=p) for m, p in mounts.items()},
-    )
-    return WorkItemTarget.from_selection(
-        workspace, members=list(mounts), root_pointer_policy=root_pointer_policy
-    )
-
-
-def v1_chain(
-    nodes,
-    *,
-    repo: Path | str,
-    chain_id: str = "t",
-    steering: dict | None = None,
-    target=None,
-):
-    """A `MaterializedChain` bound to `target`, by default a single-repository
-    target on `repo`.
+def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, target=None):
+    """A `MaterializedChain` bound to `target`, else to one repository, `repo`.
 
     `nodes` is authored V1 node mappings, the same list as YAML text, or an
     already-resolved `ResolvedChain` (e.g. `v1_named_chain(...)` for a shipped
@@ -738,8 +715,7 @@ async def make_item(
       intake leaves it: no current node.
     - `worktree=True` creates the (empty) worktree directory, for code that
       only checks it exists.
-    - `target`: the item's `WorkItemTarget` (`workspace_target(...)` for a
-      workspace item); a single-repository target on `repo` by default.
+    - `target`: its `WorkItemTarget` (`support.workspace.workspace_target`).
     - `item_kwargs` go to `store.create_work_item` (`status`, `title`, ...).
 
     The item has no bead (`bead_id` NULL): filing one is `executor.intake`'s

@@ -389,7 +389,7 @@ describe("IntakeModal", () => {
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
-  it("sends the workspace, its picked members and the root pointer policy, the workspace's by default", async () => {
+  it("sends the workspace with its picked members and the workspace's root pointer policy by default", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({
       repos: [
         { ...REPO_A, id: "a" },

@@ -206,12 +206,14 @@ repos:
 |---|---|---|
 | `path` | *(required)* | Absolute path to the repo. The only field with no default. |
 | `name` | — | Display name; set at connect time, not otherwise validated. |
+| `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
 | `managed` | `true` | Keeps a human-connected repo out of Settings' "Detected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
 | `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude_review: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
 | `test_command` | `null` (falls back to the registry's `on.test.run`) | The command CI actually runs for this repo — lets `verify`'s local test run and CI's differ deliberately, rather than drift apart by accident. |
+| `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets, layered onto the worker baseline allowlist. |
@@ -228,6 +230,47 @@ No key on an entry passes silently. A key within two edits of a field above (`au
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any connected repo still
 missing one.
+
+### Workspaces
+
+A workspace is a root repository with other repositories mounted in it as
+submodules. It is declared beside the `repos:` list, naming entries by `id`:
+
+```yaml
+workspaces:
+  product:
+    root: product
+    root_pointer_default: ignore     # or bump
+    members:
+      api: { repository: api, path: services/api }
+```
+
+Connecting a repo that has submodules declares its workspace for you, each
+submodule a member. When you file a work item against the root, you choose which
+members it changes and its root-pointer policy (the workspace's default unless
+you pick one); both are frozen into the item. The item's worktree holds exactly
+those members, each on the item's branch, and a task with `scope:
+each_repository` runs once per selected repository.
+
+Each selected repository binds the tasks that run in it with its own policy
+layer. A task in the assembled worktree, which holds all of them at once, runs
+under the tightest of their layers: allowlists intersect, deny lists add up, and
+numbers take their minimum. Two different sandboxes cannot both hold, so filing
+such an item is refused.
+
+Publication goes members first. A member's merge request merges before the root
+moves. A root with source changes of its own gets its own merge request, and it
+stays a draft until every member has merged and the root names their merged
+revisions. A root whose only change is the members' pointers follows the item's
+root-pointer policy: `ignore` leaves it alone, and `bump` pushes the new pointers
+to its default branch. If that push is refused, it opens a merge request for them
+instead. A member that fails to merge stops publication and leaves the root
+untouched.
+
+Upgrading: a `repos.yaml` from before workspaces still loads. `default_model`
+and `default_root_merge_policy` are dropped with a warning. Items with submodules
+now need a declared workspace: connect the root again, or add the `workspaces:`
+block and the `id`s by hand.
 
 ## `access.yaml` — bind, password, remote access
 

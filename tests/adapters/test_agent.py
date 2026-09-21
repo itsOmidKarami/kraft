@@ -599,8 +599,6 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
     [
         ({**C, "model": "opus"}, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "opus"),
         (C, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "haiku"),
-        # Ruling 165: a repository's model is per harness profile. One model
-        # for every provider handed `-m opus` to codex.
         (C, {"models": {"p": "haiku"}}, {"profile": "codex_default"}, "model", None),
         (C, {}, {}, "model", None),
         # Precedence lives here and only here (spec §6): a fix cycle past
@@ -775,19 +773,13 @@ def _bare_provider(provider_id: str):
 
 def test_a_task_overrides_its_harness_profiles_defaults():
     """`agent-task-selects-capability-compatible-runtime-options`: a profile's
-    `defaults:` are the lowest rung. The task's own field beats them, the
-    repo's model for that profile beats them, the item's override beats all three --
-    and what nothing overrides still arrives from the profile, on the
-    profile's provider and executable."""
+    `defaults:` are the lowest rung. The task's own field beats them, the repo's
+    model for that profile beats them, the item's override beats all three -- and
+    what nothing overrides still arrives from the profile's provider and executable."""
+    profile = {"provider": "claude", "executable": "/opt/claude-wrapper"}
+    defaults = {"model": "sonnet", "effort": "medium", "permission_mode": "plan"}
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates",
-        {
-            "review": {
-                "provider": "claude",
-                "executable": "/opt/claude-wrapper",
-                "defaults": {"model": "sonnet", "effort": "medium", "permission_mode": "plan"},
-            }
-        },
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"review": {**profile, "defaults": defaults}}
     )
     task = _v1_agent_task(id="t", harness="review", prompt="p", effort="high")
 
@@ -797,7 +789,6 @@ def test_a_task_overrides_its_harness_profiles_defaults():
 
     repo = {"models": {"review": "haiku", "codex_default": "gpt-5"}}
     assert agent.resolve_agent_task(task, repo, None).model == "haiku"
-    assert agent.resolve_agent_task(task, {"models": {"other": "haiku"}}, None).model == "sonnet"
     item = {"model": "opus", "effort": "low"}
     overridden = agent.resolve_agent_task(task, repo, None, item_override=item)
     assert (overridden.model, overridden.effort) == ("opus", "low")

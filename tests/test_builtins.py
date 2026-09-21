@@ -10,8 +10,8 @@ from support.harness import (
     make_repo_with_submodule,
     v1_chain,
     v1_resolved,
-    workspace_target,
 )
+from support.workspace import workspace_target
 
 from kraft import builtins as kraft_builtins
 from kraft import store

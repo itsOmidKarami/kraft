@@ -73,7 +73,6 @@ LINE_BUDGET = 800
 #: ceiling). A file that isn't here has never earned an exception: it is
 #: held to LINE_BUDGET from the day it's added.
 LINE_BUDGET_ALLOWLIST: dict[str, int] = {
-    "tests/api/test_work_items.py": 811,
     "tests/support/harness.py": 837,
     "tests/adapters/test_agent.py": 856,
     "tests/executor/test_gates.py": 903,

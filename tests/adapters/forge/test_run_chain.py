@@ -9,7 +9,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo_with_submodule, workspace_target
+from support.harness import isolated_bd, make_repo_with_submodule
+from support.workspace import workspace_target
 
 from kraft import builtins as _builtins
 from kraft import events, executor, policy, store
