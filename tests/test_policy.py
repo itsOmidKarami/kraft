@@ -655,16 +655,18 @@ def test_policy_override_rejects_unknown_fields_field_specifically():
         policy.TemplatePolicyOverride.model_validate({"not_a_real_field": 1})
 
 
-def test_policy_is_layered_from_instance_through_repository_to_work_item(instance_policy):
-    """The same override mechanism resolves at every scope, broadest to
-    narrowest (`policy-is-layered-by-execution-scope`); a repository cannot
-    hand a work item back room the instance already closed
-    (`repository-policy-cannot-relax-instance-safety`)."""
-    repository_policy = instance_policy.apply_template_override({"allowed_tools": ["git", "shell"]})
-    work_item_policy = repository_policy.apply_template_override({"allowed_tools": ["git"]})
-    assert work_item_policy.allowed_tools == ("git",)
+def test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one(instance_policy):
+    """The same override mechanism composes, broadest to narrowest
+    (`policy-is-layered-by-execution-scope`): a second override applied to the
+    result of a first cannot hand back room the first already closed. The
+    layers here are anonymous on purpose. No Repository policy layer exists yet
+    (`repository-policy-cannot-relax-instance-safety` is unpinned, Kraft-jzv1l),
+    so this test names none."""
+    outer = instance_policy.apply_template_override({"allowed_tools": ["git", "shell"]})
+    inner = outer.apply_template_override({"allowed_tools": ["git"]})
+    assert inner.allowed_tools == ("git",)
     with pytest.raises(policy.PolicyError, match="allowed_tools"):
-        repository_policy.apply_template_override({"allowed_tools": ["git", "shell", "pytest"]})
+        outer.apply_template_override({"allowed_tools": ["git", "shell", "pytest"]})
 
 
 # --- V1 `defaults:`/`maxima:` through the one policy.yaml loader (Ruling 37) ---

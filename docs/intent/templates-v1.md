@@ -577,7 +577,7 @@ base, the system SHALL apply that node's `on_base_changed` restart behaviour.
 The effective task policy SHALL resolve from instance policy through repository,
 work-item, chain, node, step, and task policy overrides, from broadest scope
 to narrowest scope.
-enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
+enforced-by: tests/test_policy.py::test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one
 origin: docs/templates-v1-design.md "Policy" -- the chain/node/step/task layers are Task 8's, deliberately not added earlier because nothing consumes them until `retry-overrides-are-policy-bounded`; this pins the mechanism through the scopes typed so far.
 
 ## REQ policy-has-defaults-and-administrator-maxima
@@ -606,7 +606,7 @@ enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_too
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
+origin: NOT ENFORCED YET, and no task in docs/superpowers/plans/2026-09-20-template-schema-v1.md builds it. `Repository` (src/kraft/templates/environment.py) has no `policy:` field, and nothing applies a repository-scoped override: `apply_template_override`'s only `src/` caller is the chain policy in `templates/models.py`. Ruling 105 fixed the destination (`sandbox`/`deny_tools` move into a Repository `policy:` block) but no plan task owns building it. Task 2 pinned only the typing, and Task 8 adds the node/step/task layers, not this one. Tracked as Kraft-jzv1l; pin it at materialization when the layer exists.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
