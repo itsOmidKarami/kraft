@@ -282,6 +282,32 @@ async def test_a_second_pass_starts_its_own_wait_clock(database, repo, wait_cloc
     assert starts == [wait_clock.at(60), wait_clock.at(3660)]
 
 
+async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clock):
+    """A `/retry` (`executor.retry`: a run fork over the waiting node) is a
+    fresh budget. The wait it re-observes starts its own clock rather than
+    timing out on the one the first pass started an hour ago."""
+    from kraft.templates.forks import ChainPath
+
+    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m"))])
+    fake = forge.FakeForge(ci_states=["pending"])
+    assert await walk(fake, it) == "waiting"
+    wait_clock.advance(3600)
+    await it.database.write(lambda c: store.mark_reentered(c, it.id))
+
+    result = await executor.retry(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        target=ChainPath.parse(store.materialized_chain_of(it.row()), "ci"),
+        registry=None,
+        launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
+    )
+
+    assert result == "waiting", "the retried wait timed out on its first pass's clock"
+    starts = [e["payload"]["deadline"] for e in it.events("external_wait_started")]
+    assert starts == [wait_clock.at(60), wait_clock.at(3660)]
+
+
 # --- automated review feedback enters the node's controls ----------------------
 
 

@@ -22,8 +22,8 @@ own cursor, the waiting step (Kraft-c3dab) -- and that re-entry makes the next
 observation.
 
 A wait instance is one task path's run of observations from its start to its
-outcome, or to a restart of the item under it (`work_item_retried`,
-`base_change_restart`): its clock belongs to it alone, so a second pass over
+outcome, or to a restart of the item under it (`_RESTARTS`: a retry, a run
+fork, a base-change restart): its clock belongs to it alone, so a second pass over
 the same node starts fresh (Kraft-3r9fe).
 """
 
@@ -50,8 +50,10 @@ STARTED = "external_wait_started"
 OBSERVED = "external_wait_observed"
 ENDED = "external_wait_ended"
 #: Events that end every open wait on the item: a restart is a fresh budget.
-#: The same pair `store.sessions` reads as "this item started over".
-_RESTARTS = ("work_item_retried", "base_change_restart")
+#: The same set `store.sessions` reads as "this item started over". A `/retry`
+#: writes both `work_item_retried` and `run_forked` (`executor.retry`); the
+#: rate-limit relaunch writes only the first, a base-change restart the last.
+_RESTARTS = ("work_item_retried", "run_forked", "base_change_restart")
 
 State = Literal["pending", "settled", "error"]
 
@@ -83,8 +85,8 @@ def open_wait(conn, work_item_id: str, task: str) -> OpenWait | None:
     rows = conn.execute(
         "SELECT type, payload FROM events WHERE work_item_id = ? AND ("
         f"(type IN ('{STARTED}', '{OBSERVED}', '{ENDED}') AND json_extract(payload, '$.task') = ?)"
-        f" OR type IN {_RESTARTS}) ORDER BY seq DESC",
-        (work_item_id, task),
+        f" OR type IN ({', '.join('?' * len(_RESTARTS))})) ORDER BY seq DESC",
+        (work_item_id, task, *_RESTARTS),
     ).fetchall()
     last = None
     for row in rows:
