@@ -113,7 +113,7 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 
 When a selected harness profile is unavailable at runtime, the task SHALL stop
 for human action and SHALL NOT silently select a different harness.
-enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[absent], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[disabled], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unknown-provider], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[no-file], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unapplied-default]
+enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[absent], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[disabled], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unknown-provider], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[no-file], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unapplied-default], tests/skills/test_gate_review.py::test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing
 
 ## REQ agent-roles-use-ordinary-agent-task-runtime-configuration
 

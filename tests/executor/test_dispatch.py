@@ -2697,26 +2697,36 @@ def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("profiles", "why"),
+    ("selected", "profiles", "why"),
     [
-        # No profile `ghost` -- and, below, none named `codex` either, though
-        # `codex` *is* an installed provider: the id a task names is never
-        # read as one.
-        ({"claude": {"provider": "claude"}}, "defines no such profile"),
-        ({"ghost": {"provider": "claude", "enabled": False}}, "'ghost' is disabled"),
-        ({"ghost": {"provider": "nonesuch"}}, "provider 'nonesuch' is not an installed harness"),
-        (None, "cannot read/parse"),
+        # Every case selects an id that *is* an installed provider (`codex`,
+        # `claude`), so a fallback onto the provider of the same name would
+        # fire here -- and launch the real binary -- rather than go unnoticed.
+        ("codex", {"claude": {"provider": "claude"}}, "defines no such profile"),
+        ("claude", {"claude": {"provider": "claude", "enabled": False}}, "'claude' is disabled"),
+        (
+            "claude",
+            {"claude": {"provider": "nonesuch"}},
+            "provider 'nonesuch' is not an installed harness",
+        ),
+        ("claude", None, "cannot read/parse"),
         # A default Kraft would not pass on is refused, not dropped unread.
-        ({"ghost": {"provider": "claude", "defaults": {"autocompact": "50"}}}, "does not apply"),
+        (
+            "claude",
+            {"claude": {"provider": "claude", "defaults": {"autocompact": "50"}}},
+            "does not apply",
+        ),
     ],
     ids=["absent", "disabled", "unknown-provider", "no-file", "unapplied-default"],
 )
-def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch, profiles, why):
+def test_an_unavailable_selected_harness_stops_for_a_human(
+    tmp_path, monkeypatch, selected, profiles, why
+):
     """`unavailable-selected-harness-needs-human`: never silently another
-    harness. The task selects profile `ghost`; each case makes it unavailable a
-    different way -- absent, disabled, on a provider this install lacks, no
-    `harnesses.yaml` at all, or carrying a default Kraft cannot apply -- and each
-    stops before anything launches."""
+    harness. Each case makes the selected profile unavailable a different
+    way -- absent, disabled, on a provider this install lacks, no
+    `harnesses.yaml` at all, or carrying a default Kraft cannot apply -- and
+    each stops before anything launches."""
     repo = make_repo(tmp_path)
     monkeypatch.setenv("KRAFT_HOME", str(tmp_path / "empty-home"))
     templates = tmp_path / "templates"
@@ -2724,7 +2734,6 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
     if profiles is not None:
         (templates / "harnesses.yaml").write_text(json.dumps({"harnesses": profiles}))
-    selected = "codex" if why == "defines no such profile" else "ghost"
     chain = v1_chain(
         [
             {

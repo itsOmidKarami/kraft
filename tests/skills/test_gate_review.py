@@ -244,6 +244,59 @@ def test_dispatch_is_a_worker_with_no_resume(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing(
+    tmp_path, monkeypatch
+):
+    """`unavailable-selected-harness-needs-human`, at the gate: a reviewer whose
+    profile is disabled raises `HarnessUnavailable` before any launch and before
+    `store.approve_gate`'s claim, so the gate stays pending for a person. The
+    raise reaches `deps.guard`, which stops the item for a human; the dangling
+    `gate_auto_review_started` counts as the attempt, so the gate is not
+    re-armed. `claude` is a real provider, so a fallback onto it would launch."""
+    from kraft.adapters import agent
+
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates",
+        {"claude": {"provider": "claude", "enabled": False}},
+    )
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _seed(database, rd, "w1")
+            launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+            with pytest.raises(agent.HarnessUnavailable, match="'claude' is disabled"):
+                await gate_review.review(
+                    database,
+                    rd,
+                    work_item_id="w1",
+                    gate="spec_approval",
+                    node=_gate(rd),
+                    launch=launch,
+                )
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+            return dict(row), types
+        finally:
+            await database.close()
+
+    row, types = asyncio.run(scenario())
+
+    assert seen == {}
+    # Still parked at the gate, as `_seed` left it: nothing claimed it.
+    assert (row["status"], row["current_node_id"]) == ("needs_human", "spec_approval"), row
+    assert types[-1] == "gate_auto_review_started", types
+    assert "gate_approved" not in types and "gate_rejected" not in types, types
+
+
 def _chain2(rd, *, auto_review=True):
     """implementation (exec) -> human_review_approval (gate, reject_to
     implementation, reviewed unless `auto_review=False`)."""
