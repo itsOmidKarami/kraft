@@ -99,17 +99,21 @@ def test_optional_file_and_line(tmp_path):
     assert f.file is None and f.line is None
 
 
-def test_fingerprint_ignores_line(tmp_path):
-    a = Finding("important", "same message", "a.py", 10, "p")
-    b = Finding("important", "same message", "a.py", 400, "p")
-    assert a.fingerprint == b.fingerprint
-
-
-def test_fingerprint_ignores_severity(tmp_path):
-    """The same defect re-reported at a different severity is the same defect."""
-    a = Finding("important", "m", "a.py", 1, "p")
-    b = Finding("critical", "m", "a.py", 1, "p")
-    assert a.fingerprint == b.fingerprint
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (("important", "same message", "a.py", 10), ("important", "same message", "a.py", 400)),
+        # the same defect re-reported at a different severity is the same defect
+        (("important", "m", "a.py", 1), ("critical", "m", "a.py", 1)),
+        (
+            ("important", "Swallowed   exception", "a.py", 1),
+            ("important", "swallowed exception", "a.py", 1),
+        ),
+    ],
+    ids=["ignores-line", "ignores-severity", "normalizes-whitespace-and-case"],
+)
+def test_fingerprint_is_the_same_for_the_same_defect(a, b):
+    assert Finding(*a, "p").fingerprint == Finding(*b, "p").fingerprint
 
 
 def test_jobs_field_never_affects_fingerprint(tmp_path):
@@ -214,12 +218,6 @@ def test_resolve_identity_keeps_a_tag_that_was_shown():
 def test_resolve_identity_leaves_an_untagged_finding_alone():
     plain = Finding("minor", "m", "a.py", 1, "p")
     assert resolve_identity([plain], known=set()) == [plain]
-
-
-def test_fingerprint_normalizes_whitespace_and_case(tmp_path):
-    a = Finding("important", "Swallowed   exception", "a.py", 1, "p")
-    b = Finding("important", "swallowed exception", "a.py", 1, "p")
-    assert a.fingerprint == b.fingerprint
 
 
 def test_fingerprint_separates_file_plugin_and_message(tmp_path):
@@ -371,13 +369,41 @@ def test_from_blind_failure_extracts_marker_lines(tmp_path):
     assert "Test timeout" in f.message
 
 
-def test_from_blind_failure_strips_duration_and_timestamp_noise(tmp_path):
-    """The same failure at two different wall-clock costs must fingerprint
-    the same -- that's the entire point of this feature."""
-    a = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n14:03:11 done\n")
-    b = _log(tmp_path, "✘ 1 e2e/x.spec.ts:1:1 › t (2.3m)\n14:09:58 done\n")
-    fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, None)])
-    fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, None)])
+@pytest.mark.parametrize(
+    ("hook", "command", "log_a", "log_b"),
+    [
+        # the same failure at two different wall-clock costs -- the entire point
+        # of this feature
+        (
+            "on.test.run",
+            None,
+            "✘ 1 e2e/x.spec.ts:1:1 › t (2.0m)\n14:03:11 done\n",
+            "✘ 1 e2e/x.spec.ts:1:1 › t (2.3m)\n14:09:58 done\n",
+        ),
+        # G1: a different Playwright run ordinal (the evidence's own shape)
+        (
+            "on.test.run",
+            "just e2e-ci",
+            "  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n",
+            "  ✘  25 e2e/regression.spec.ts:65:1 › a flaky test (2.3m)\n",
+        ),
+        # G1: on.ci.poll's own log (adapters/forge/ci.py:111) opens with a
+        # pipeline URL whose numeric id changes every rerun. No command here
+        # (forge has none), so this is also the no-reproduce message shape.
+        (
+            "on.ci.poll",
+            None,
+            "pipeline failed: https://gitlab.example.com/x/-/pipelines/111\n  job lint: failed\n",
+            "pipeline failed: https://gitlab.example.com/x/-/pipelines/222\n  job lint: failed\n",
+        ),
+    ],
+    ids=["duration-and-timestamp-noise", "playwright-ordinal-shift", "ci-poll-pipeline-url-shift"],
+)
+def test_from_blind_failure_fingerprints_the_same_failure_the_same(
+    tmp_path, hook, command, log_a, log_b
+):
+    fa = from_blind_failure(hook, "wid1", [BlindJob("sess1", _log(tmp_path, log_a), command)])
+    fb = from_blind_failure(hook, "wid1", [BlindJob("sess2", _log(tmp_path, log_b), command)])
     assert fa.fingerprint == fb.fingerprint
 
 
@@ -480,31 +506,3 @@ def test_from_blind_failure_different_content_is_a_different_fingerprint(tmp_pat
     fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, "just e2e-ci")])
     fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, "just e2e-ci")])
     assert fa.fingerprint != fb.fingerprint
-
-
-def test_from_blind_failure_playwright_ordinal_shift_is_stable(tmp_path):
-    """End-to-end G1: the same failure, reported with a different Playwright
-    run ordinal (the evidence's own shape), must fingerprint the same."""
-    a = _log(tmp_path, "  ✘  27 e2e/regression.spec.ts:65:1 › a flaky test (2.0m)\n")
-    b = _log(tmp_path, "  ✘  25 e2e/regression.spec.ts:65:1 › a flaky test (2.3m)\n")
-    fa = from_blind_failure("on.test.run", "wid1", [BlindJob("sess1", a, "just e2e-ci")])
-    fb = from_blind_failure("on.test.run", "wid1", [BlindJob("sess2", b, "just e2e-ci")])
-    assert fa.fingerprint == fb.fingerprint
-
-
-def test_from_blind_failure_ci_poll_pipeline_url_shift_is_stable(tmp_path):
-    """End-to-end G1: on.ci.poll's own log (adapters/forge/ci.py:111) opens
-    with a pipeline URL carrying a numeric id that changes every rerun --
-    same failure, different id, must fingerprint the same. No command here
-    (forge has none), so this also exercises the no-reproduce message shape."""
-    a = _log(
-        tmp_path,
-        "pipeline failed: https://gitlab.example.com/x/-/pipelines/111\n  job lint: failed\n",
-    )
-    b = _log(
-        tmp_path,
-        "pipeline failed: https://gitlab.example.com/x/-/pipelines/222\n  job lint: failed\n",
-    )
-    fa = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess1", a, None)])
-    fb = from_blind_failure("on.ci.poll", "wid1", [BlindJob("sess2", b, None)])
-    assert fa.fingerprint == fb.fingerprint
