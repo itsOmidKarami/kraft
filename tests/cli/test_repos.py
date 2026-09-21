@@ -297,20 +297,36 @@ def test_repos_yaml_round_trips_a_test_command(tmp_path):
     assert entry["test_command"] == "just ci"
 
 
-def test_repos_yaml_defaults_test_command_to_none(tmp_path):
+@pytest.mark.parametrize("field", ["test_command", "test_scopes"])
+def test_repos_yaml_defaults_an_absent_test_field_to_none(tmp_path, field):
     from kraft import config
 
     p = tmp_path / "repos.yaml"
     p.write_text("repos:\n  - path: /r\n")
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_command"] is None
+    assert entry[field] is None
 
 
-def test_repos_yaml_rejects_a_non_string_test_command(tmp_path):
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "    test_command: 3\n",
+        "    test_scopes:\n      - command: just test\n",
+        "    test_scopes:\n      - paths: ['**']\n        command: ''\n",
+        "    test_scopes: nope\n",
+    ],
+    ids=[
+        "non-string-test-command",
+        "scope-missing-paths",
+        "scope-empty-command",
+        "non-list-scopes",
+    ],
+)
+def test_repos_yaml_rejects_a_malformed_test_field(tmp_path, tail):
     from kraft import config
 
     p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_command: 3\n")
+    p.write_text("repos:\n  - path: /r\n" + tail)
     with pytest.raises(config.ConfigError):
         config.load_repos(p, validate_steering=False)
 
@@ -348,15 +364,6 @@ def test_repos_yaml_test_command_edit_is_not_shadowed_by_a_stale_scope(tmp_path)
     assert reloaded["test_scopes"] is None
 
 
-def test_repos_yaml_test_scopes_is_none_when_both_fields_are_absent(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n")
-    (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_scopes"] is None
-
-
 def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
     from kraft import config
 
@@ -368,35 +375,6 @@ def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
     config.save_repos(p, [{"path": "/r", "test_scopes": scopes}])
     (entry,) = config.load_repos(p, validate_steering=False)
     assert entry["test_scopes"] == scopes
-
-
-def test_repos_yaml_rejects_test_scopes_missing_paths(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_scopes:\n      - command: just test\n")
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
-
-
-def test_repos_yaml_rejects_test_scopes_with_an_empty_command(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text(
-        "repos:\n  - path: /r\n    test_scopes:\n      - paths: ['**']\n        command: ''\n"
-    )
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
-
-
-def test_repos_yaml_rejects_a_non_list_test_scopes(tmp_path):
-    from kraft import config
-
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_scopes: nope\n")
-    with pytest.raises(config.ConfigError):
-        config.load_repos(p, validate_steering=False)
 
 
 def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):
