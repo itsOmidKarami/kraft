@@ -24,7 +24,7 @@ def _walk_to_the_end(client, wid, timeout=120):
     deadline = time.monotonic() + timeout
     while (item := client.get(f"/api/work-items/{wid}").json())["status"] != "completed":
         assert time.monotonic() < deadline, item
-        if deps.task_is_live(client.app, wid):
+        if item["status"] in ("active", "pending") or deps.task_is_live(client.app, wid):
             time.sleep(0.02)
         elif item["pending_gate"]:
             assert _approve_gate(client, wid, item["pending_gate"]).status_code == 200

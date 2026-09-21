@@ -270,8 +270,8 @@ class Policy:
     #: one-attempt-per-request contract this bound replaces a hardcode with.
     auto_review_attempts: int = 1
     #: Seconds one forge CLI call (`gh`/`glab`/`git`) may run before it is killed
-    #: and raised as a `ForgeError`. Bounds a single invocation, not a pipeline
-    #: wait -- that is `loops.ci_wait`.
+    #: and raised as a `ForgeError`. Bounds a single invocation, not a wait --
+    #: that is the task's own `wait:` (`kraft.waits`).
     forge_cli_timeout_s: float = 120.0
 
     @classmethod
@@ -405,7 +405,7 @@ def with_cap_override(cap: Cap, override: CapOverride | dict | None) -> Cap:
 
 
 def load_policy(path: str | Path) -> Policy:
-    """Delegator kept for its 15 callers (`executor/`, `ci_wait.py`, ...).
+    """Delegator kept for its callers (`executor/`, ...).
     Real implementation: `PolicyInput.from_yaml` + `Policy.from_input`."""
     return Policy.from_input(PolicyInput.from_yaml(path), source=path)
 
@@ -482,6 +482,11 @@ class PolicyMaximaInput(BaseModel):
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    #: The longest any external wait may be configured to wait
+    #: (`external-wait-has-configurable-timeout-and-polling`, Kraft-5p69g).
+    #: Separate from `timeout_minutes`, a fix loop's wall clock: the design
+    #: seeds a seven-day approval wait, which no fix-loop ceiling would admit.
+    wait_timeout_minutes: PositiveInt | None = None
 
 
 class InstancePolicyInput(BaseModel):

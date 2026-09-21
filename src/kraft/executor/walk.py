@@ -20,6 +20,7 @@ from kraft.executor.context import (
     CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
+    WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
     OnApprove,
@@ -331,6 +332,18 @@ async def _stop_for_config_error(
     return "needs_human"
 
 
+async def _stop_for_wait_timeout(
+    db, work_item_id: str, node: ResolvedNode, timed_out: list[ResolvedTask]
+) -> str:
+    """An external wait ran out (`external-wait-timeout-needs-human`): a stop
+    for a person naming the wait, never a failure for a fix loop."""
+    named = ", ".join(t.path for t in timed_out)
+    causes = [c for t in timed_out if (c := _task_cause(db, work_item_id, node, t, WAIT_TIMED_OUT))]
+    reason = f"{named} timed out waiting" + (f": {'; '.join(causes)}" if causes else "")
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
 async def _sentinel_stop(
     db,
     work_item_id: str,
@@ -353,7 +366,9 @@ async def _sentinel_stop(
     if verdict == RATE_LIMITED:
         return await stops.stop_for_rate_limit(db, work_item_id, node)
     if verdict == WAITING:
-        return await stops.stop_for_waiting(db, work_item_id, node)
+        return await stops.stop_for_waiting(db, work_item_id, node, failed)
+    if verdict == WAIT_TIMED_OUT:
+        return await _stop_for_wait_timeout(db, work_item_id, node, failed)
     if verdict == INFRA_STOP:
         return await stops.stop_for_infra(db, work_item_id, node)
     if verdict == BUDGET:
@@ -382,7 +397,7 @@ _STUCK_ESCALATION_ROUND = -2
 
 def _escalation_key(node: ResolvedNode) -> str:
     """The `retry_counters` key that bounds a node's stuck escalations. Built
-    from the node id like `ci_wait:<node>`, so `store.clear_loop_counters`
+    from the node id like `ci_infra:<node>`, so `store.clear_loop_counters`
     clears it on a `/retry` without being handed it."""
     return f"{node.id}.escalation"
 
@@ -864,7 +879,7 @@ async def _walk_node_once(
     round = counter_row["count"] if counter_row is not None else 0
     # One repair per call to `walk_node` -- exactly one per entry into the
     # node (a fresh call on every re-entry via `run_once`'s loop, a crash
-    # resume, or the `ci_wait` poller).
+    # resume, or the wait scheduler).
     _repair_tried = False
     # "First iteration of this entry" used to be spelled `round == 0`. Since
     # `round` now seeds from the counter the two are different questions, and
@@ -1655,11 +1670,11 @@ async def run_once(
         # Only when the walk is actually starting, unlike `ensure_worktree`
         # above it. `env_setup` was an ordinary node, so a re-entry at
         # `start_index > 0` skipped it -- and `run_once` is re-entered that way
-        # by the `ci_wait` poller (up to `loops.ci_wait` times for one pipeline),
+        # by the wait scheduler (once per observation of an external wait),
         # `rate_limit_retry`, gate approval and every `/retry`. Running the
         # repo's `setup_command` per dispatch attempt rather than per item would
-        # re-`uv sync` a worktree sixty times over one CI wait and append its
-        # whole stdout to the events table each time.
+        # re-`uv sync` a worktree dozens of times over one CI wait and append
+        # its whole stdout to the events table each time.
         report = (
             await _builtins.prepare_runtime(
                 worktree, Path(row["repo"]), launch.repo_entry if launch else None

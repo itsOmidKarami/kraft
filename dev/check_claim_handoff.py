@@ -4,7 +4,7 @@ A *claim* is a write that leaves a work item runnable (`UPDATE work_items SET
 status = 'active'`). It means "a walk is behind this". A region that claims and
 then leaves without either handing the item to a walk or moving the status again
 leaves the item reading `active` with nothing behind it: it looks running, is
-not, and nothing will select it again -- `ci_wait.tick` filters
+not, and nothing will select it again -- `waits.tick` filters
 `status = 'waiting'`, `rate_limit_retry.tick` filters `status = 'rate_limited'`,
 and no selector filters `active`.
 
@@ -210,7 +210,7 @@ def _bracketed(node: ast.AST, parents: dict) -> bool:
     """Whether a `claimed_or_stopped` block encloses `node`.
 
     The walk crosses function boundaries deliberately: a nested `def` written
-    inside a bracket (`ci_wait`'s `db.write` transaction body) claims on behalf
+    inside a bracket (the wait scheduler's claim, written under its bracket) claims on behalf
     of a region that *is* bracketed, so it is covered too.
     """
     cur = node

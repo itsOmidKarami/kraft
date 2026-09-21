@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from kraft import events, store
+from kraft import events, store, waits
 from kraft import policy as _policy
-from kraft.adapters import forge as _forge
 from kraft.executor.context import RATE_LIMITED, WAITING
 from kraft.store import _now as _now
-from kraft.templates.models import ResolvedNode
+from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 
 
 @asynccontextmanager
@@ -30,7 +29,7 @@ async def claimed_or_stopped(
     end by either handing the item to a walk, or leaving it in a status some
     selector will pick up again. A path that does neither leaves the item
     claimed with nothing behind it -- it *looks* running and is not, and nothing
-    will ever select it: `ci_wait.tick` filters `status = 'waiting'`,
+    will ever select it: `waits.tick` filters `status = 'waiting'`,
     `rate_limit_retry.tick` filters `status = 'rate_limited'`, the board shows it
     as live, and the only trace is whatever was logged on the way out.
 
@@ -180,18 +179,17 @@ async def stop_for_rate_limit(db, work_item_id: str, node: ResolvedNode) -> str:
     return RATE_LIMITED
 
 
-async def stop_for_waiting(db, work_item_id: str, node: ResolvedNode) -> str:
-    # Counter-driven backoff, growing the same way `poll_ci`'s in-loop sleep
-    # grows today (`adapters/forge/ci.py`'s `DEFAULT_POLL_INTERVAL`/
-    # `_MAX_POLL_INTERVAL`): doubling from the first wait, capped. The counter
-    # is `ci_wait.py`'s (`ci_wait:<node_id>`) -- read, not bumped, here; the
-    # poller bumps it on each re-entry, so a node waiting for the first time
-    # (no row yet) starts at the base interval.
-    row = db.read(lambda c: store.read_counter(c, work_item_id, f"ci_wait:{node.id}"))
-    count = (row["count"] if row else 0) + 1
-    interval = min(_forge.DEFAULT_POLL_INTERVAL * (2 ** (count - 1)), _forge._MAX_POLL_INTERVAL)
-    retry_at = (datetime.fromisoformat(_now()) + timedelta(seconds=interval)).isoformat()
-    await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, retry_at))
+async def stop_for_waiting(
+    db, work_item_id: str, node: ResolvedNode, waiting: list[ResolvedTask]
+) -> str:
+    """Park the item until the earliest next observation among `waiting`'s
+    external waits (`kraft.waits`), and release the walk. A waiting task that
+    somehow recorded no next observation is looked at again after the default
+    initial interval rather than never."""
+    due = db.read(lambda c: waits.next_observation(c, work_item_id, [t.path for t in waiting]))
+    if due is None:
+        due = (datetime.fromisoformat(_now()) + DEFAULT_WAIT.initial_interval).isoformat()
+    await db.write(lambda c: store.mark_waiting(c, work_item_id, node.id, due))
     return WAITING
 
 

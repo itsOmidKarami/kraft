@@ -183,6 +183,25 @@ class ForgeAction(StrEnum):
     MR_MERGE = "mr.merge"
     MR_POST_MERGE_CI = "mr.post_merge_ci"
 
+    @property
+    def waits(self) -> bool:
+        """Whether this target observes an external condition, and so runs as
+        an external wait (`external-wait-covers-merge-request-lifecycle`).
+        `mr.merge` is one: its pipeline, its approval and its landing are all
+        conditions outside Kraft."""
+        return self in _WAIT_TARGETS
+
+
+_WAIT_TARGETS = frozenset(
+    {
+        ForgeAction.MR_CI,
+        ForgeAction.MR_AUTOMATED_REVIEW,
+        ForgeAction.MR_EXTERNAL_APPROVAL,
+        ForgeAction.MR_MERGE,
+        ForgeAction.MR_POST_MERGE_CI,
+    }
+)
+
 
 class AgentInput(StrEnum):
     """What Kraft hands an agent task beyond its prompt, when the task asks for
@@ -258,6 +277,44 @@ class WaitPolicy(BaseModel):
     polling: PollingPolicy = Field(default_factory=PollingPolicy)
 
 
+@dataclass(frozen=True)
+class WaitBounds:
+    """One external wait's resolved timeout and polling bounds
+    (`external-wait-has-configurable-timeout-and-polling`).
+
+    The next observation comes `initial_interval` after the first, then
+    doubles, never past `max_interval` (`external-waits-use-a-shared-due-
+    scheduler`)."""
+
+    timeout: timedelta
+    initial_interval: timedelta
+    max_interval: timedelta
+
+    @classmethod
+    def from_seconds(cls, *, timeout: float, initial: float, maximum: float) -> WaitBounds:
+        return cls(
+            timedelta(seconds=timeout), timedelta(seconds=initial), timedelta(seconds=maximum)
+        )
+
+    def interval_after(self, observation: int) -> timedelta:
+        """The gap after the `observation`-th (1-based) pending observation."""
+        return min(self.initial_interval * 2 ** (observation - 1), self.max_interval)
+
+
+#: What a wait that authors no `wait:` runs under. 90 minutes (Kraft-7xpv4):
+#: the 30-minute default this replaces stopped real pipelines that would have
+#: gone green -- this repository's own CI finishes near 30 minutes with a
+#: queued or retried job eating the margin, and its author raised a live
+#: install to 60. 90 is the design's own seeded CI timeout, three times the
+#: observed run, and a stop that comes too late costs less than one that pages
+#: a human over a pipeline about to pass.
+DEFAULT_WAIT = WaitBounds(
+    timeout=timedelta(minutes=90),
+    initial_interval=timedelta(seconds=30),
+    max_interval=timedelta(minutes=5),
+)
+
+
 class TaskBase(BaseModel):
     """What every task kind carries. `kind` itself is declared by each concrete
     model as a `Literal`, which is what makes the union discriminated
@@ -314,6 +371,25 @@ class ForgeTask(TaskBase):
     kind: Literal[TaskKind.FORGE]
     target: Annotated[ForgeAction, _LOOSE]
     wait: WaitPolicy | None = None
+
+    def wait_bounds(self, policy: InstancePolicy) -> WaitBounds:
+        """This wait's bounds under `policy`, the task's own resolved policy
+        (Kraft-5p69g). An authored timeout past `maxima.wait_timeout_minutes`
+        is refused; an unauthored one takes `DEFAULT_WAIT`'s, clamped to that
+        maximum rather than refusing a chain whose author chose no number."""
+        wait = self.wait or WaitPolicy()
+        ceiling = policy.maxima.wait_timeout_minutes
+        limit = timedelta(minutes=ceiling) if ceiling is not None else None
+        if wait.timeout is not None and limit is not None and wait.timeout > limit:
+            raise PolicyError(
+                f"wait timeout {_duration_text(wait.timeout)} cannot exceed the administrator "
+                f"maximum wait_timeout_minutes {ceiling}",
+                field="wait_timeout_minutes",
+            )
+        timeout = wait.timeout or min(DEFAULT_WAIT.timeout, limit or DEFAULT_WAIT.timeout)
+        initial = wait.polling.initial_interval or DEFAULT_WAIT.initial_interval
+        maximum = wait.polling.max_interval or max(DEFAULT_WAIT.max_interval, initial)
+        return WaitBounds(timeout=timeout, initial_interval=initial, max_interval=maximum)
 
 
 AnyTask = Annotated[
@@ -912,6 +988,11 @@ class ResolvedChain:
                 _scoped(step.path, policy, step.scopes)
             for task in node.tasks():
                 task_policy = _scoped(task.path, policy, task.scopes)
+                if isinstance(task.task, ForgeTask) and task.task.target.waits:
+                    try:
+                        task.task.wait_bounds(task_policy)
+                    except PolicyError as exc:
+                        raise PolicyError(f"{task.path}: {exc}", field=exc.field) from exc
                 allowed = task_policy.allowed_harnesses
                 if isinstance(task.task, AgentTask) and allowed is not None:
                     if task.task.harness not in allowed:

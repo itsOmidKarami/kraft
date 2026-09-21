@@ -47,7 +47,7 @@ def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
     return list(latest.values())
 
 
-class GhCli:
+class GhCli(mr_ops.CliWaits):
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
     async def open_mr(

@@ -32,6 +32,7 @@ from kraft.executor.context import (
     INFRA_STOP,
     RATE_LIMITED,
     SCOPE,
+    WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
     Steer,
@@ -469,13 +470,6 @@ async def dispatch_node(
         )
 
     if isinstance(t, ForgeTask):
-        wait = t.wait
-        poll = {}
-        if wait is not None:
-            if wait.timeout is not None:
-                poll["poll_timeout"] = wait.timeout.total_seconds()
-            if wait.polling.initial_interval is not None:
-                poll["poll_interval"] = wait.polling.initial_interval.total_seconds()
         return await _forge.run_task(
             db,
             run_dirs,
@@ -500,7 +494,9 @@ async def dispatch_node(
             # of re-verifying the rebased head itself (`merge`'s conflict
             # rebase leans on this).
             has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
-            **poll,
+            # Resolved through this task's own policy (Kraft-5p69g); already
+            # checked against its maximum when the item was filed.
+            wait=t.wait_bounds(task_policy) if t.target.waits else None,
             **common,
         )
 
@@ -963,8 +959,12 @@ async def measure_node(
         return CONFIG_ERROR, [t for t, r in outcomes if r == CONFIG_ERROR], []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
+    if any(r == WAIT_TIMED_OUT for r in results):
+        return WAIT_TIMED_OUT, [t for t, r in outcomes if r == WAIT_TIMED_OUT], []
     if any(r == WAITING for r in results):
-        return WAITING, [], []
+        # The waiting tasks, so the stop can park the item until the earliest
+        # of their next observations.
+        return WAITING, [t for t, r in outcomes if r == WAITING], []
     if any(r == INFRA_STOP for r in results):
         return INFRA_STOP, [], []
     # Not a failure, so it must not reach `failed` and open a fix loop or an
@@ -1140,7 +1140,7 @@ def collect_findings(
     unfiltered query folds the fix agent's result file into the cycle. Only the
     most recent row per hook point, because a re-entry can measure at a round a
     previous pass already used -- `round` seeds from the persisted fix-loop
-    counter, which a gate rejection or a `ci_wait` poll does not clear, and a
+    counter, which a gate rejection or a wait re-entry does not clear, and a
     `/retry` deletes the counter row so the next pass restarts at 1 instead.
     Either way stale rows sit at the same number.
 
@@ -1240,7 +1240,7 @@ def needs_context_question(
     any fix row at this round belongs to a bygone one. It matters because
     `walk_node` now seeds `round` from the persisted counter, and it is also
     re-entered on paths that are not resumes -- a gate rejection walking back
-    to a fix_loop node, and the `ci_wait` poller -- where the `retry_counters`
+    to a fix_loop node, and the wait scheduler -- where the `retry_counters`
     row survives (only `retry_after_cap` deletes it). Without this, the last
     pass's fix question would stop the new pass before it ran a single cycle:
     the same stranding `ESCALATION_HOOK` below closes, through a third door.
@@ -1295,7 +1295,7 @@ def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.R
     `walk_node`'s own local counter, and on a fresh entry into that function it
     seeds from the persisted `retry_counters` row -- so it lands back on a
     number a *previous* pass over this node already used (a gate rejection
-    walking back here, or the `ci_wait` poller, neither of which clears the
+    walking back here, or the wait scheduler, neither of which clears the
     counter), or on 0 after a `/retry` that deleted the row so the next
     `bump_counter` restarts at 1. Either way the `worker_sessions` rows from
     before that re-entry are still in the table. A lookup keyed on the caller's
@@ -1446,7 +1446,7 @@ def judge_history(
     """
     # Kept in event order in a list, never keyed by the event's own `cycle`:
     # `walk_node` seeds `round` from the loop counter on every re-entry
-    # (ci_wait poller, crash resume, /retry), and that counter persists across
+    # (wait scheduler, crash resume, /retry), and that counter persists across
     # the re-entries that are not resumes -- so a new entry's first measurement
     # lands on a cycle number the previous entry already measured at, and a
     # /retry that cleared the counter lands back on 0 where the first entry

@@ -1,8 +1,8 @@
 """What one observation of each forge wait reads: automated review, external
 approval, and the merge node's own waits (its pre-merge pipeline, a missing
 approval, and the merge landing). Parking, backoff, timeout and the scheduler
-are tests/test_waits.py; `ci_poll` and `merge_watch` reads are test_run.py
-and test_merge_watch.py."""
+are tests/test_waits.py; `ci_poll` and `merge_watch` reads, and a forge error
+ending a wait, are test_run.py and test_merge_watch.py."""
 
 from __future__ import annotations
 
@@ -27,16 +27,6 @@ def _trail(run_forge, task="on.ci.poll") -> list[tuple[str, str | None, str | No
         for p in run_forge.events(t)
         if p["task"] == task
     ]
-
-
-def _types(run_forge) -> list[str]:
-    evts = run_forge.database.read(
-        lambda c: c.execute(
-            "SELECT type FROM events WHERE work_item_id = 'w1' AND type LIKE 'external_wait_%' "
-            "ORDER BY seq"
-        ).fetchall()
-    )
-    return [e["type"] for e in evts]
 
 
 # --- automated review ----------------------------------------------------------
@@ -199,18 +189,3 @@ async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_aga
         ("external_wait_observed", "settled", "merge"),
         ("external_wait_ended", "settled", None),
     ]
-
-
-async def test_a_forge_error_mid_wait_ends_the_wait_with_a_trace(run_forge):
-    """Kraft-vzq2q: a wait left no record of how it ended. Whatever ends one --
-    here the forge CLI failing -- is written as its outcome."""
-
-    class Exploding(forge.FakeForge):
-        async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
-            raise forge.ForgeError("glab fell over")
-
-    assert await run_forge(Exploding(), "ci_poll", "e1") == ("failed", "failed")
-
-    assert _types(run_forge) == ["external_wait_started", "external_wait_ended"]
-    (ended,) = run_forge.events("external_wait_ended")
-    assert ended["outcome"] == "error" and "glab fell over" in ended["result"]

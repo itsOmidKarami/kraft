@@ -29,13 +29,10 @@ def test_policy_input_rejects_wrong_scalar_bounds_and_shapes():
 
 def test_load_shipped_policy():
     p = policy.load_policy(_SHIPPED)
-    # `ci_wait`, not `verify_fix_loop`: Ruling 57 removed the four keys that
-    # bound no live loop, and `ci_wait` is the one `resolve_cap` still names.
-    assert "ci_wait" in p.loops
-    c = p.loops["ci_wait"]
+    c = p.default
+    assert isinstance(c, policy.Cap)
     assert isinstance(c.attempts, int) and c.attempts >= 1
     assert isinstance(c.wall_clock_s, int) and c.wall_clock_s >= 1
-    assert isinstance(p.default, policy.Cap)
 
 
 def test_resolve_cap_falls_back_to_default(tmp_path):
@@ -656,10 +653,11 @@ def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
     """Ruling 57. A `loops:` key naming no live loop is *silently* unused --
     `Policy.cap_for` is `self.loops.get(key, self.default)`, no error and no
     warning -- so a stale cap in the seed looks live and binds nothing. The V1
-    fix loop's key is `walk._loop_key(node)`, which is per-node, and Task 7b
-    decides the node it hangs off; until then the seed names none."""
+    fix loop's key is `walk._loop_key(node)`, which is per-node, so the seed
+    names none; and `ci_wait` went with the poller that read it (Task 9: a
+    wait's timeout is its task's own `wait:`)."""
     parsed = policy.PolicyInput.from_yaml(_SHIPPED)
-    assert parsed.loops == {} or set(parsed.loops) <= {"ci_wait"}, parsed.loops
+    assert not parsed.loops, parsed.loops
 
 
 def test_the_shipped_policy_yaml_has_no_unknown_key():

@@ -160,20 +160,21 @@ async def test_merge_watch_does_not_pin_a_pipeline_read_for_a_different_commit(r
     assert run_forge.item.row()["ci_pipeline_ref"] == f"{head_sha}:222"
 
 
-async def test_merge_watch_gives_up_watching_a_pipeline_that_never_settles(run_forge, repo):
-    """Plan-review finding 3, second half: `ci_wait.py`'s shared cap
-    (1800s/60 attempts) has no notion of which handler is behind a waiting
-    node, so left alone a merely-slow (never infra, never red) target-branch
-    pipeline would eventually turn into `needs_human` after this item's own
-    work is already merged, and -- since `post_merge_watch` is the chain's
-    terminal node -- its tracking bead would never close either.
-    `_POST_MERGE_WAIT_CAP` (40) bounds this node's own patience first, and
-    reports "done" rather than paging anyone."""
+async def test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human(
+    run_forge, repo, wait_clock
+):
+    """`external-wait-timeout-needs-human`, for this wait too. It used to give
+    up after its own 40-entry cap and report `done` -- a pipeline nobody saw
+    finish, read as a finished chain. Now it runs out like every wait: the
+    session is `capped_out`, which the walk stops on for a person."""
     fake = forge.FakeForge(ci_states=["pending"])
 
-    results = [(await run_forge(fake, "merge_watch", f"s{i}", repo=repo))[0] for i in range(41)]
+    first = await run_forge(fake, "merge_watch", "s1", repo=repo)
+    wait_clock.advance(90 * 60)
+    last = await run_forge(fake, "merge_watch", "s2", repo=repo)
 
-    assert results == ["waiting"] * 40 + ["done"]
+    assert (first[0], last[0]) == ("waiting", "capped_out")
+    assert "timed out" in run_forge.log("s1")
 
 
 async def test_merge_watch_runs_once_for_a_multi_repo_item(run_forge, item_on, database, repo):

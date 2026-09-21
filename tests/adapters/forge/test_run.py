@@ -134,36 +134,16 @@ async def test_auto_with_no_recorded_forge_stops_as_a_config_error_rather_than_e
     assert not fake.opened, "no merge request may be opened with no forge resolved"
 
 
-async def test_a_declared_but_unimplemented_forge_target_stops_for_a_human(run_forge):
-    """Ruling 48. `mr.automated_review` and `mr.external_approval` are
-    `ForgeAction` members with no handler, and the seeded V1 chain names both --
-    so `failed` told an operator their pipeline had broken and burned the node's
-    fix loop finding out. A declared-but-unimplemented action is a configuration
-    limit: `config_error`, which is terminal at every tier, so `walk_node` stops
-    for a person with the target and its owning task named.
-
-    (Retargeted from `mr.mark_ready` when Task 5a implemented that one -- the
-    assertion is about the *unimplemented* arm, so it has to name a target that
-    is still unimplemented or it stops testing anything.)
-    """
-    handler = forge.run.handler_for("mr.automated_review")
-
-    assert await run_forge(forge.FakeForge(), handler, "s-unimpl") == ("config_error",) * 2
-    log = run_forge.log("s-unimpl")
-    assert "mr.automated_review" in log and "Task 9" in log
-
-
-def test_every_v1_forge_target_either_maps_or_names_its_owner():
-    """The two tables must not drift: a target with neither a handler nor an
-    owner would reach the stop above with "a later task" and tell the human
-    nothing."""
+def test_every_v1_forge_target_maps_to_a_handler():
+    """Ruling 48 left `mr.automated_review` and `mr.external_approval`
+    unmapped until the wait scheduler; a target with no handler stops every
+    chain that names it. And every wait target is one of `run`'s waits, so it
+    is observed and recorded, never slept on."""
     from kraft.templates.models import ForgeAction
 
-    for action in ForgeAction:
-        assert (
-            action.value in forge.run.V1_HANDLERS
-            or action.value in forge.run._UNIMPLEMENTED_TARGETS
-        ), action
+    assert {a.value for a in ForgeAction} <= set(forge.run.V1_HANDLERS)
+    waits = {forge.run.V1_HANDLERS[a.value] for a in ForgeAction if a.waits}
+    assert waits == set(forge.run._WAITS)
 
 
 class _Exploding(forge.FakeForge):
@@ -172,10 +152,12 @@ class _Exploding(forge.FakeForge):
 
 
 async def test_a_forge_error_mid_poll_fails_the_node_rather_than_escaping(run_forge):
-    """The poll widened the window a flaky CLI can raise in from one call to
-    the whole timeout; it still has to land as a failed node."""
-    assert await run_forge(_Exploding(), "ci_poll", "s7", poll_interval=0) == ("failed", "failed")
+    """A flaky CLI still lands as a failed node -- and, since a wait left no
+    record of how it ended (Kraft-vzq2q), as the wait's `error` outcome."""
+    assert await run_forge(_Exploding(), "ci_poll", "s7") == ("failed", "failed")
     assert "glab fell over" in run_forge.log("s7")
+    (ended,) = run_forge.events("external_wait_ended")
+    assert ended["outcome"] == "error" and "glab fell over" in ended["result"]
 
 
 # --- open_mr / sync_mr / mark_ready --------------------------------------------
@@ -320,7 +302,7 @@ class _Recording(forge.FakeForge):
 async def test_a_node_pushes_before_it_acts_on_the_head(run_forge, tmp_path, handler, expected):
     fake = await _opened(_Recording(ci_states=["success"]), tmp_path)
 
-    assert await run_forge(fake, handler, "b1", poll_interval=0) == ("done", "done")
+    assert await run_forge(fake, handler, "b1") == ("done", "done")
 
     assert list(dict.fromkeys(fake.order)) == expected, "first call of each kind, in order"
     assert fake.pushed == ["kraft/w1"]
@@ -451,7 +433,7 @@ async def test_merge_reads_the_mr_state_off_the_cli(
     ],
 )
 async def test_ci_poll_settles_the_node_from_the_pipeline(run_forge, fake_kw, expected, phrase):
-    assert await run_forge(forge.FakeForge(**fake_kw), "ci_poll", "e1", poll_interval=0) == (
+    assert await run_forge(forge.FakeForge(**fake_kw), "ci_poll", "e1") == (
         expected,
         expected,
     )
@@ -546,9 +528,7 @@ async def test_infra_red_is_retried_across_entries_then_stops_with_the_reason(
         ci_failed_jobs=[(forge.FailedJob("build", "failed", "runner_system_failure"),)] * 5,
     )
 
-    results = [
-        (await run_forge(fake, handler, sid, repo=repo, poll_interval=0))[0] for sid in "abc"
-    ]
+    results = [(await run_forge(fake, handler, sid, repo=repo))[0] for sid in "abc"]
 
     assert results == ["waiting", "waiting", "infra_stop"]
     assert len(fake.retried) == 2
@@ -605,24 +585,23 @@ class _ClosedAfterwards(_AutoMergeScheduled):
 
 
 @pytest.mark.parametrize(
-    "make, opened, extra, expected, phrases",
+    "make, opened, expected, phrases",
     [
-        # Kraft-266b/x10m: mr_sync's push after human_review re-arms a pipeline
-        # mr_checks never watched; merge waits it out before `forge.merge()`,
-        # and success is decided by a read of the forge, not by an exit code.
+        # Kraft-266b/x10m: a push after the final gate re-arms a pipeline the
+        # feedback node never watched; merge waits it out -- through the
+        # scheduler, one observation per entry -- before `forge.merge()`, and
+        # success is decided by a read of the forge, not by an exit code.
         (
-            lambda: _MergesOnlyOnGreen(ci_states=["pending", "pending", "success"]),
+            lambda: _MergesOnlyOnGreen(ci_states=["pending", "success"]),
             True,
-            {},
-            "done",
+            ["waiting", "done"],
             ["merged !1"],
         ),
         # ... and a re-armed pipeline that comes back red stops the node first.
         (
             lambda: forge.FakeForge(ci_states=["pending", "failed"]),
             True,
-            {},
-            "failed",
+            ["waiting", "failed"],
             ["pipeline failed"],
         ),
         # A conflict is an answer, not something `forge.merge()` should be asked
@@ -632,43 +611,34 @@ class _ClosedAfterwards(_AutoMergeScheduled):
                 ci_states=["success"], mergeable=False, merge_detail="conflict"
             ),
             True,
-            {},
-            "conflict",
+            ["conflict"],
             ["not mergeable: conflict"],
         ),
-        # Green and conflict-free can still lack a required approval, which
-        # mr_checks (pre-gate) must read as undecided; merge (post-gate) must not.
+        # Green and conflict-free can still lack a required approval: an
+        # ordinary pending state, waited out rather than failed
+        # (`missing-external-approval-is-normal-pending-state`).
         (
             lambda: forge.FakeForge(ci_states=["success"], block_reason="not_approved"),
             True,
-            {},
-            "failed",
-            ["needs approval"],
+            ["waiting"],
+            ["required approval"],
         ),
-        # A pipeline that never settles times out on `poll_timeout`, not
-        # `merge_timeout`: each wait needs its own name in the log.
-        (
-            lambda: forge.FakeForge(ci_states=["pending"]),
-            True,
-            {"poll_timeout": 0},
-            "failed",
-            ["timed out"],
-        ),
-        # Conflicts and unmet approval rules must still stop the chain.
-        (_Refusing, True, {}, "failed", ["1 approval required"]),
-        (_AutoMergeScheduled, True, {"merge_timeout": 0}, "failed", ["still open", "auto-merge"]),
+        # A refusal the forge raises still fails the node.
+        (_Refusing, True, ["failed"], ["1 approval required"]),
+        # Kraft-79x3: exit 0 and nothing merged is a merge still to land --
+        # waited for, never reported as done.
+        (_AutoMergeScheduled, True, ["waiting"], ["still open"]),
         # Closed is not merged: nothing landed, and the branch is gone.
-        (_ClosedAfterwards, True, {"merge_timeout": 0}, "failed", ["closed"]),
+        (_ClosedAfterwards, True, ["failed"], ["closed"]),
         # No MR at all: the node records the ForgeError as a failure rather
         # than a traceback out of the executor.
-        (lambda: forge.FakeForge(ci_states=["success"]), False, {}, "failed", []),
+        (lambda: forge.FakeForge(ci_states=["success"]), False, ["failed"], []),
     ],
     ids=[
         "re-armed-pipeline-waited-out",
         "re-armed-pipeline-red",
         "unmergeable",
         "missing-approval",
-        "pipeline-never-settles",
         "forge-refuses",
         "still-open-after-merge",
         "closed-after-merge",
@@ -676,18 +646,19 @@ class _ClosedAfterwards(_AutoMergeScheduled):
     ],
 )
 async def test_merge_lands_only_a_green_mergeable_head(
-    run_forge, tmp_path, make, opened, extra, expected, phrases
+    run_forge, tmp_path, make, opened, expected, phrases
 ):
+    """One merge node, entered once per scheduler observation."""
     fake = make()
     if opened:
         await _opened(fake, tmp_path)
 
-    result = await run_forge(fake, "merge", "m1", poll_interval=0, merge_interval=0, **extra)
+    results = [(await run_forge(fake, "merge", f"m{i}"))[0] for i in range(len(expected))]
 
-    assert result == (expected, expected)
-    log = run_forge.log("m1")
+    assert results == expected
+    log = run_forge.log("m0")
     assert all(p in log for p in phrases), log
-    assert fake.merged == ([1] if expected == "done" else []), (
+    assert fake.merged == ([1] if expected[-1] == "done" else []), (
         "merged, or claimed to, when it must not"
     )
 
@@ -703,7 +674,7 @@ async def test_merge_rebases_a_conflict_away_before_calling_merge(run_forge, rep
         forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict"), repo
     )
 
-    assert await run_forge(fake, "merge", "r1", repo=repo, poll_interval=0) == (
+    assert await run_forge(fake, "merge", "r1", repo=repo) == (
         "conflict",
         "conflict",
     )

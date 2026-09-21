@@ -52,7 +52,7 @@ _GLAB_MR_STATES: dict[str, str] = {
 _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 
 
-class GlabCli:
+class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
     async def open_mr(
@@ -149,7 +149,7 @@ class GlabCli:
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
     ) -> CIStatus:
         # The merge request's own state first: a conflict fails the check node
-        # whatever colour the pipeline is, and `ci.poll_ci` must not wait out a
+        # whatever colour the pipeline is, and no wait should sit out a
         # pipeline to learn it (Kraft-ejj9). Only meaningful pre-merge, on the
         # checked-out feature branch that actually has an open MR -- see
         # `branch_ci_status` for the post-merge, no-MR read.

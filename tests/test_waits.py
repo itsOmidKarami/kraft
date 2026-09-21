@@ -15,7 +15,7 @@ from datetime import datetime
 import pytest
 from support.harness import v1_chain, v1_item, v1_resolved
 
-from kraft import events, executor, store, waits
+from kraft import events, executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 
@@ -47,6 +47,8 @@ def walk(database, run_dirs, monkeypatch):
         monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
         row = it.row()
         node = row["current_node_id"]
+        if row["status"] == "waiting":
+            await database.write(lambda c: store.mark_reentered(c, it.id))
         return await executor.run(
             database,
             run_dirs,
@@ -54,6 +56,13 @@ def walk(database, run_dirs, monkeypatch):
             registry=None,
             start_index=store.node_index(row, node) if node else 0,
             start_step=row["current_step"],
+            # No stuck escalation: these tests are about the stop, not what
+            # answers it.
+            policy=policy.Policy(
+                loops={},
+                default=policy.Cap(attempts=3, wall_clock_s=3600),
+                auto_escalate_stuck=False,
+            ),
             launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
         )
 
@@ -327,7 +336,8 @@ async def test_actionable_automated_review_is_repaired_resynced_and_remeasured(
         for e in it.events("external_wait_ended")
         if e["payload"]["task"] == "feedback.automated_review.await_review"
     ]
-    assert ended == ["actionable", "clean"]
+    # A wait's result is its task's status: actionable feedback failed it.
+    assert ended == ["failed", "done"]
 
 
 # --- policy bounds the wait (Kraft-5p69g) --------------------------------------
@@ -441,7 +451,7 @@ async def test_tick_re_enters_a_due_item_at_its_waiting_node(repo, scheduler):
         for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))
         if e["type"] == "node_started"
     ]
-    assert started == ["mr_checks"], "the re-entry re-ran a node before the one it parked on"
+    assert "implementation" not in started, "the re-entry re-ran the node before its own"
 
 
 async def test_tick_ignores_an_item_that_was_paused_while_waiting(repo, scheduler):

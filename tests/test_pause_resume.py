@@ -541,21 +541,21 @@ def test_pausing_a_waiting_item_is_accepted(monkeypatch, repo, client):
 
 
 def test_pausing_a_waiting_item_clears_retry_at(monkeypatch, repo, client):
-    """Otherwise ci_wait.tick wakes it straight back up -- the pause would look
+    """Otherwise waits.tick wakes it straight back up -- the pause would look
     like it worked and then silently undo itself."""
     _seed_waiting(client, repo)
     assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
     assert client.get("/api/work-items/w1").json()["retry_at"] is None
 
 
-def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(monkeypatch, repo, client):
+def test_a_paused_item_is_not_woken_by_the_wait_scheduler(monkeypatch, repo, client):
     """The behavioural assertion the other two exist to support: run tick()
     after the pause and assert nothing was re-entered."""
-    from kraft import ci_wait
+    from kraft import waits
 
     _seed_waiting(client, repo)
     assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
-    assert client.portal.call(ci_wait.tick, client.app) == []
+    assert client.portal.call(waits.tick, client.app) == []
     assert client.get("/api/work-items/w1").json()["status"] == "paused"
 
 

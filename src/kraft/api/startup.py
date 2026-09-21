@@ -11,9 +11,9 @@ from fastapi import FastAPI
 from kraft import (
     archive,
     auto_escalate_delay,
-    ci_wait,
     executor,
     rate_limit_retry,
+    waits,
 )
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -218,15 +218,16 @@ async def lifespan(app: FastAPI):
     # behaviour an operator enables, it is what this feature promises.
     app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
     # Always on, for the same reason the rate-limit poller is: a work item
-    # parked on a pipeline has to be woken by something, and that something
-    # cannot be the coroutine that used to sit in the wait (Kraft-ru98).
-    app.state.ci_wait_task = asyncio.ensure_future(ci_wait.poller(app))
-    # Always on, for the same reason rate-limit/ci-wait are: an item sitting
+    # parked on an external wait has to be woken by something, and that
+    # something cannot be the coroutine that used to sit in the wait
+    # (Kraft-ru98). One scheduler for every wait kind.
+    app.state.wait_task = asyncio.ensure_future(waits.poller(app))
+    # Always on, for the same reason rate-limit/waits are: an item sitting
     # past its own auto_escalate_delay_s has to be re-checked by something,
     # and that something cannot be the coroutine that made the original
     # inline call and already returned (Kraft-vyk8).
     app.state.auto_escalate_delay_task = asyncio.ensure_future(auto_escalate_delay.poller(app))
-    # Always on, for the same reason the rate-limit and ci-wait pollers are:
+    # Always on, for the same reason the rate-limit poller and wait scheduler are:
     # an item aged past policy.archive_after_days has to be archived by
     # something, and an operator who forgets to check the board is exactly
     # who auto-archive exists for (UI v2 · 03).
@@ -264,8 +265,8 @@ async def lifespan(app: FastAPI):
         if app.state.trigger_task is not None:
             app.state.trigger_task.cancel()
             await asyncio.gather(app.state.trigger_task, return_exceptions=True)
-        app.state.ci_wait_task.cancel()
-        await asyncio.gather(app.state.ci_wait_task, return_exceptions=True)
+        app.state.wait_task.cancel()
+        await asyncio.gather(app.state.wait_task, return_exceptions=True)
         app.state.auto_escalate_delay_task.cancel()
         await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()

@@ -182,7 +182,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
         )
     except deps.AlreadyRunning:
         # Structurally unreachable today (every `_start` call is a freshly
-        # intaken id), kept for the same reason ci_wait/rate_limit_retry are:
+        # intaken id), kept for the same reason waits/rate_limit_retry are:
         # a poller finding its own target already running must log and move
         # on, never crash the tick.
         logger.warning("auto-intake: %s already has a live walk, not double-starting", wid)
