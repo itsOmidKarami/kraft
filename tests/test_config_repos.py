@@ -326,3 +326,24 @@ def test_a_git_failure_logs_by_whether_the_caller_expects_it(caplog, expected_fa
     assert any(r.levelno >= logging.WARNING for r in caplog.records) is warns
     if not warns:
         assert any(r.levelno == logging.DEBUG for r in caplog.records)
+
+
+# ── config file IO ──
+
+
+def test_an_atomic_write_leaves_no_half_file_behind(tmp_path):
+    target = tmp_path / "policy.yaml"
+    config.write_yaml(target, {"default": {"attempts": 3}})
+    assert yaml.safe_load(target.read_text()) == {"default": {"attempts": 3}}
+    assert [p.name for p in tmp_path.iterdir()] == ["policy.yaml"]
+
+
+def test_a_broken_config_file_raises_rather_than_reading_as_empty(tmp_path):
+    bad = tmp_path / "repos.yaml"
+    bad.write_text("repos: [not-a-mapping]")
+    with pytest.raises(config.ConfigError):
+        config.load_repos(bad)
+    bad.write_text("{{{")
+    with pytest.raises(config.ConfigError):
+        config.load_repos(bad)
+    assert config.load_repos(tmp_path / "missing.yaml") == []
