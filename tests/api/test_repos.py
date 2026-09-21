@@ -1125,13 +1125,17 @@ def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch)
         assert "test command" in r.json()["detail"]
 
 
-def test_add_repo_enabled_with_no_repo_test_command_falls_back_to_registry(tmp_path, client):
-    # templates_dir binds `on.test.run` to a real subprocess command, so a
-    # repo with neither `test_command` nor `test_scopes` can still enable —
-    # `executor.dispatch` runs the registry's command for it.
+def test_add_repo_enabled_with_no_repo_test_command_is_refused_despite_the_registry(
+    tmp_path, client
+):
+    """Kraft-vd1ed: the default `client` registry binds `on.test.run` to a real
+    command, and the guard used to accept that. V1 verification never reads
+    the registry -- it stops every item on a repo that declares neither
+    `test_scopes` nor `test_command` -- so enabling one is refused."""
     repo = make_repo(tmp_path)
     r = client.post("/api/repos", json={"path": str(repo), "enabled": True})
-    assert r.status_code == 201, r.text
+    assert r.status_code == 422, r.text
+    assert "on.test.run" not in r.json()["detail"], "V1 does not read on.test.run"
 
 
 def test_add_repo_disabled_with_no_test_command_is_allowed(tmp_path, client):
@@ -1149,11 +1153,12 @@ def test_patch_repo_cannot_enable_without_a_test_command(tmp_path, monkeypatch):
         assert r.status_code == 422, r.text
 
 
-def test_patch_repo_can_enable_relying_on_the_registrys_test_command(tmp_path, client):
+def test_patch_repo_cannot_enable_relying_on_the_registrys_test_command(tmp_path, client):
+    """Kraft-vd1ed: same as above, through PATCH."""
     repo = make_repo(tmp_path)
     path = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()["path"]
     r = client.patch(f"/api/repos?path={path}", json={"enabled": True})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 422, r.text
 
 
 def test_patch_repo_can_enable_alongside_a_test_command_in_the_same_request(

@@ -171,7 +171,7 @@ async def add_repo(body: RepoBody, request: Request):
     }
     repos.append(entry)
     _auto_connect_children(repos, entry, probed["submodules"])
-    _refuse_enable_without_test_command(st, entry)
+    _refuse_enable_without_test_command(entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     # Index it now: a repo connected mid-session would otherwise stay invisible
@@ -201,24 +201,21 @@ class RepoPatch(BaseModel):
     default_root_merge_policy: RootMergePolicy | None = None
 
 
-def _refuse_enable_without_test_command(st, entry: dict) -> None:
+def _refuse_enable_without_test_command(entry: dict) -> None:
     """25's "disabled — new items can't target it" is the read side of this:
-    the write side refuses to flip a repo on with nothing for `on.test.run`
-    to run, rather than let it enable silently and fail every verify.
+    the write side refuses to flip a repo on with nothing for verification to
+    run, rather than let it enable silently and fail every verify.
 
-    A repo with neither `test_command` nor `test_scopes` still has something
-    to run: `executor.dispatch` falls back to the registry's `on.test.run`
-    binding (config.load_repos: "None keeps the registry's command"). Only
-    refuse when that fallback is also empty.
+    The repo's own `test_command`/`test_scopes` only. V1 verification has no
+    registry fallback (`executor.dispatch._select_scopes`): a repo declaring
+    neither stops every item, whatever the legacy registry's `on.test.run`
+    says, so that binding cannot stand in for one here (Kraft-vd1ed).
     """
     if entry.get("enabled") and not (entry.get("test_command") or entry.get("test_scopes")):
-        registry_command = st.registry.hooks.get("on.test.run", {}).get("command")
-        if not registry_command:
-            raise HTTPException(
-                422,
-                "cannot enable a repo with no test command — set one first "
-                "(Plugins → on.test.run, or per repo)",
-            )
+        raise HTTPException(
+            422,
+            "cannot enable a repo with no test command — set its test command or test scopes first",
+        )
 
 
 @api_router.patch("/repos")
@@ -238,7 +235,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     # enabling it still promotes it out of the Detected section. One-way: a
     # later disable leaves this True, so the row reads as deliberately off.
     entry["managed"] = True
-    _refuse_enable_without_test_command(st, entry)
+    _refuse_enable_without_test_command(entry)
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     return entry
