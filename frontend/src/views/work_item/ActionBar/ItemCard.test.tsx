@@ -62,6 +62,7 @@ describe("ItemCard (W11 · A)", () => {
     ["gate without a named document", gateItem({ pending_gate: "code_review" }), [], [], ["Approve", "Reject", "Read document"]],
     ["running", item({ status: "active" }), [], [], ["Pause"]],
     ["paused", item({ status: "paused" }), [], [], ["Resume", "Steer"]],
+    ["paused, steerable false", item({ status: "paused", steerable: false }), [], [], ["Resume"]],
     ["capped", item(capped), [], [], ["Steer & retry", "Escalate"]],
     ["budget", item({ status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }), [], [], ["Raise budget", "Escalate"]],
     ["question", item({ status: "needs_human", needs_context_question: "which?" }), [], [], ["Answer"]],
@@ -275,11 +276,6 @@ describe("ItemCard (W11 · A)", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByLabelText(/composer message/i)).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: /^steer$/i })).toHaveFocus());
-  });
-
-  it("paused, steerable false: no Steer", () => {
-    renderCard(item({ status: "paused", steerable: false }));
-    expect(rowNames()).toEqual(["Resume"]);
   });
 
   it("paused: Escalate is offered from More actions and posts through (Kraft-k5ol)", async () => {

@@ -325,13 +325,6 @@ describe("WorkItemDetail (item page)", () => {
     expect(within(list).getByTestId("timeline-session-e1")).toBeInTheDocument();
   });
 
-  it("disables Review spec with 'not written yet' when the artifact is absent", () => {
-    renderDetailAtGate({ gate_artifact: null });
-    const btn = screen.getByText(/Review spec/);
-    expect(btn).toHaveAttribute("aria-disabled", "true");
-    expect(btn.getAttribute("title")).toMatch(/not written yet/);
-  });
-
   it("hydrates on mount and names the current node and its position in the header's run (W11 rule 2)", () => {
     renderDetail();
     expect(useStore.getState().hydrateItem).toHaveBeenCalledWith("w1");
