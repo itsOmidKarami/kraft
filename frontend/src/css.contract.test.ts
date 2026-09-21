@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Pins on stylesheet source text, in one file (Wave 4). jsdom applies no
 // imported CSS and has no viewport, so cascade order, breakpoints and a few
 // load-bearing declarations are asserted against the CSS source. Real layout

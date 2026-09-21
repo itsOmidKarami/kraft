@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Kraft-m1e8: a missing fixture server must fail the run, not silently
