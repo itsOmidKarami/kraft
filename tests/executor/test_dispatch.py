@@ -3084,7 +3084,14 @@ def test_every_seeded_agent_task_launches_with_the_never_signal_rule(tmp_path, m
         "default:spec.main.author",
         "quick-task:implementation.main.implement",
     } <= found, found
-    assert "KRAFT_DAEMON_PID" in agent_adapter.SAFETY_RULES
+    # The rule itself, not only its env-var hint: dropping the headline
+    # sentence must go red too (Kraft-5x93b review, finding 1).
+    for phrase in (
+        "Never signal a process you did not start",
+        "KRAFT_DAEMON_PID",
+        "a question for a human",
+    ):
+        assert phrase in agent_adapter.SAFETY_RULES, phrase
     missing = sorted(p for p in found if agent_adapter.SAFETY_RULES not in argv[p])
     assert missing == [], missing
 
