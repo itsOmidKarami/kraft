@@ -272,7 +272,12 @@ def test_shipped_default_chain_validates():
     # gate even though `.get()` works, so this must convert the same way, or
     # every node "fails" on shape before its real content is even looked at.
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
-    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
+    loaded = templates.load_templates(TEMPLATES_DIR, reg)
+    # load_templates runs this exact validate_nodes call itself before ever
+    # admitting a template to `.valid` -- so a broken default chain fails
+    # *here*, by name, rather than as a bare KeyError three lines down.
+    assert "default" in loaded.valid, loaded.invalid.get("default", loaded.invalid)
+    nodes = loaded.valid["default"].nodes
     dumped = [n.model_dump(exclude_unset=True) for n in nodes]
     assert templates.validate_nodes(dumped, reg) == []
 
