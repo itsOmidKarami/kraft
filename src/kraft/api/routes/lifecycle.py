@@ -911,7 +911,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     if deps.skip_lock(request.app, wid).locked():
         raise HTTPException(409, "a walk is already running for this work item")
     async with deps.skip_lock(request.app, wid):
-        row = deps._live_work_item_row(st, wid)
+        row = deps._work_item_row(st, wid)
         if row["status"] not in ("active", "waiting", "paused", "needs_human"):
             raise HTTPException(409, f"work item is {row['status']}, cannot skip")
         running = escalate.escalation_running(st.db, wid)
