@@ -14,7 +14,7 @@ const SEVERITIES = ["critical", "important", "minor", "info"] as const;
  *  regular loop, `<gate>_reject_loop` for a gate's reject loop
  *  (`executor.gates.reject_target`) — same "used by" idiom PluginsPage's
  *  `templatesUsingHook` reads for hooks. */
-function templatesUsingLoop(templates: TemplateSummary[], key: string) {
+export function templatesUsingLoop(templates: TemplateSummary[], key: string) {
   return templates
     .filter((t) =>
       t.nodes.some((n) => n.fix_loop === key || (n.gate_after && `${n.gate_after}_reject_loop` === key)),
