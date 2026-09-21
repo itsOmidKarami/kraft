@@ -159,13 +159,16 @@ async def test_cancel_with_timeout_returns_before_a_slow_task_finishes_unwinding
 async def test_cancel_on_an_absent_or_already_done_task_is_a_noop():
     app = _app()
     await deps.cancel(app, "nope")  # nothing there at all
+    assert "nope" not in app.state.tasks
 
     async def quick():
         return 1
 
     task = deps.spawn(app, "w1", quick())
     await task
+    await asyncio.sleep(0)  # let the done-callback pop "w1" first
     await deps.cancel(app, "w1")  # already done -- must not raise
+    assert "w1" not in app.state.tasks
 
 
 def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
