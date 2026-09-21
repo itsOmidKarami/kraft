@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import psutil
 from fastapi import HTTPException, Request
@@ -23,14 +24,9 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
 from kraft.templates import Registry
-from kraft.templates.forks import (
-    ChainPath,
-    PathError,
-    RetryOverride,
-    RetryOverrideError,
-    validate_retry_override,
-)
+from kraft.templates.forks import ChainPath, PathError
 from kraft.templates.models import AgentTask, GateNode
+from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +39,11 @@ class Retry(BaseModel):
     #: Rerun the whole chain from its first node instead
     #: (`work-item-restart-reruns-the-complete-chain`).
     restart: bool = False
-    #: Task configuration and policy for the retried task
-    #: (`retry-overrides-are-policy-bounded`).
-    override: RetryOverride | None = None
+    #: Task fields to change for the retried task, and the retried scope's
+    #: policy (`retry-overrides-are-policy-bounded`), validated against the
+    #: chain and its policy bounds before anything forks.
+    task_config: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
 
 
 class Skip(BaseModel):
@@ -658,7 +656,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         raise HTTPException(409, "work item is not stopped")
     chain = walk.chain_of(row)
     target = _retry_target(chain, row, body)
-    override = _retry_override(chain, target, body.override)
+    override = _retry_override(chain, target, body)
     # The node the rerun starts at: what a steer has to reach from, whose
     # findings seed one, and which counters the retry clears (Kraft-bzwi: a
     # node with no fix loop just has none to clear).
@@ -930,15 +928,19 @@ def _retry_target(chain, row, body: Retry) -> ChainPath | None:
     return target
 
 
-def _retry_override(chain, target: ChainPath | None, override: RetryOverride | None):
+def _retry_override(chain, target: ChainPath | None, body: Retry):
     """The validated override, or a 422 naming the field it was refused for
-    (`retry-overrides-are-policy-bounded`)."""
-    if override is None or override.is_empty():
+    (`retry-overrides-are-policy-bounded`). Refused before the claim, so a
+    refusal forks nothing."""
+    if not body.task_config and not body.policy:
         return None
     if target is None:
-        raise HTTPException(422, "override: a work-item restart carries no task override")
+        field = "task_config" if body.task_config else "policy"
+        raise HTTPException(422, f"{field}: a work-item restart carries no override")
     try:
-        return validate_retry_override(chain, target.path, override)
+        return validate_retry_override(
+            chain, target.path, task_config=body.task_config, policy=body.policy
+        )
     except RetryOverrideError as exc:
         raise HTTPException(422, str(exc)) from None
 

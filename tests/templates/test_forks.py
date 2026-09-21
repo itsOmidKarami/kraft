@@ -6,15 +6,8 @@ from __future__ import annotations
 import pytest
 from support.harness import v1_chain
 
-from kraft.templates.forks import (
-    ChainPath,
-    ControlScope,
-    PathError,
-    RetryOverride,
-    RetryOverrideError,
-    RunFork,
-    validate_retry_override,
-)
+from kraft.templates.forks import ChainPath, ControlScope, PathError, RunFork
+from kraft.templates.retry import validate_retry_override
 
 NODES = """
 - id: build
@@ -99,53 +92,28 @@ def test_a_path_contains_what_is_under_it_and_nothing_beside_it(chain):
     assert not step.contains("build.compile2.cc") and not step.contains("build.test.suite")
 
 
-def test_the_stub_validator_passes_only_an_empty_override(chain):
-    """TODO(8a): until the policy-bounded validator lands, nothing unvalidated
-    reaches a fork -- every non-empty override is refused, naming its field."""
-    assert validate_retry_override(chain, "build", RetryOverride()).is_empty()
-    for override, field in (
-        (RetryOverride(task={"model": "opus"}), "task"),
-        (RetryOverride(policy={"max_attempts": 2}), "policy"),
-    ):
-        with pytest.raises(RetryOverrideError) as refused:
-            validate_retry_override(chain, "build.compile.cc", override)
-        assert refused.value.field == field
-
-
-def test_a_task_override_lands_on_the_forks_copy_only(chain):
-    """Applied to the retried task in the fork's copy of the chain; the chain it
-    forked from is untouched (`materialized-chain-is-immutable-work-item-input`)."""
+def test_a_validated_override_is_the_forks_copy_and_its_record(chain):
+    """`validate_retry_override` writes the override into a copy of the chain;
+    the fork keeps that copy as its own materialization and records what
+    changed. The chain it forked from is untouched
+    (`materialized-chain-is-immutable-work-item-input`)."""
     target = ChainPath.parse(chain, "build.compile.cc")
+    override = validate_retry_override(
+        chain, target.path, task_config={"model": "opus", "effort": "high"}
+    )
 
     fork = RunFork.from_retry(
-        work_item_id="w1",
-        parent=None,
-        chain=chain,
-        target=target,
-        override=RetryOverride(task={"model": "opus", "effort": "high"}),
-        after_seq=0,
+        work_item_id="w1", parent=None, chain=chain, target=target, override=override, after_seq=0
     )
 
     patched = ChainPath.parse(fork.chain, "build.compile.cc").task.task
     assert (patched.model, patched.effort) == ("opus", "high")
     assert target.task.task.model is None
-    assert fork.override == RetryOverride(task={"model": "opus", "effort": "high"})
-
-
-@pytest.mark.parametrize(
-    ("override", "path", "field"),
-    [
-        (RetryOverride(task={"kind": "subprocess"}), "build.compile.cc", "task"),
-        (RetryOverride(task={"model": "opus"}), "build", "path"),
-    ],
-    ids=["changes-the-kind", "not-a-task"],
-)
-def test_an_override_that_breaks_the_chain_is_refused_when_applied(chain, override, path, field):
-    """The last line behind the validator: a patch that no longer validates as
-    the chain, or one with no task to land on, never becomes a fork."""
-    with pytest.raises(RetryOverrideError) as refused:
-        override.apply(chain, ChainPath.parse(chain, path))
-    assert refused.value.field == field
+    assert fork.override == {
+        "path": "build.compile.cc",
+        "task_config": {"model": "opus", "effort": "high"},
+        "policy": None,
+    }
 
 
 def test_a_task_retry_preserves_its_step_siblings_and_nothing_wider(chain):

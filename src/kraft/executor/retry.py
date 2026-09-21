@@ -7,8 +7,9 @@ from kraft import store
 from kraft.executor import gates, walk
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.templates import Registry
-from kraft.templates.forks import ChainPath, RetryOverride
+from kraft.templates.forks import ChainPath
 from kraft.templates.models import GateNode
+from kraft.templates.retry import RetryOverride
 
 
 async def retry(
@@ -33,7 +34,7 @@ async def retry(
     (`work-item-restart-reruns-the-complete-chain`).
 
     The caller has claimed the item and validated `override`
-    (`templates.forks.validate_retry_override`). One transaction records the
+    (`templates.retry.validate_retry_override`). One transaction records the
     retry the way every retry is recorded (`store.retry_after_cap`) and the
     fork itself (`store.fork_run`), which reopens the span's gates and clears
     its counters. The walk then starts at the fork's own start: the retried

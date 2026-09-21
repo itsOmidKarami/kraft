@@ -4,12 +4,11 @@
 * `ChainPath` -- a canonical `node`, `node.step` or `node.step.task` path,
   checked against one work item's materialized chain. Retry, skip and steer all
   address work this way.
-* `RetryOverride` -- the task configuration and policy a retry may carry, and
-  how it is applied to a fork's copy of the chain. *Validating* one is
-  `validate_retry_override`, which is a stub until Task 8a's policy-bounded
-  validator is wired in its place.
 * `RunFork` -- one retry: the run it forked from, what it retried, and its own
   immutable copy of the materialization (`retry-creates-an-immutable-run-fork`).
+  A retry's override is validated, and written into that copy, by
+  `kraft.templates.retry.validate_retry_override`
+  (`retry-overrides-are-policy-bounded`).
 """
 
 from __future__ import annotations
@@ -19,21 +18,18 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue
 
-from kraft.policy import TemplatePolicyOverride
 from kraft.templates.models import (
     PATH_SEPARATOR,
-    Chain,
     ExecNode,
     GateNode,
     MaterializedChain,
-    ResolvedChain,
     ResolvedNode,
     ResolvedStep,
     ResolvedTask,
-    first_error,
 )
+from kraft.templates.retry import RetryOverride
 
 
 class ControlScope(StrEnum):
@@ -116,78 +112,6 @@ class ChainPath:
         return task_path == self.path or task_path.startswith(self.path + PATH_SEPARATOR)
 
 
-class RetryOverrideError(ValueError):
-    """A retry override refused, naming the one field it was refused for."""
-
-    def __init__(self, field: str, message: str) -> None:
-        super().__init__(f"{field}: {message}")
-        self.field = field
-
-
-class RetryOverride(BaseModel):
-    """The runtime changes a retry may carry (`retry-overrides-are-policy-
-    bounded`): a sparse patch of the retried task's own configuration, and a
-    policy override for it. Validated by `validate_retry_override`, never
-    here -- what is allowed at a path depends on the chain and its policy."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    task: dict[str, JsonValue] = Field(default_factory=dict)
-    policy: TemplatePolicyOverride | None = None
-
-    def is_empty(self) -> bool:
-        return not self.task and (self.policy is None or not self.policy.model_fields_set)
-
-    def apply(self, chain: MaterializedChain, target: ChainPath | None) -> MaterializedChain:
-        """`chain` with this override applied to the task at `target`, as a new
-        materialization -- the fork's copy. The stored snapshot is the authored
-        chain, so the patch lands on the authored task and the whole chain is
-        re-validated: an override that would break the chain is refused here as
-        a last line, whatever the validator let through."""
-        if self.is_empty():
-            return chain
-        if target is None or target.task is None:
-            raise RetryOverrideError("path", "a retry override needs a node.step.task path")
-        patch = dict(self.task)
-        if self.policy is not None:
-            patch["policy"] = self.policy.model_dump(exclude_unset=True)
-        authored = chain.chain.chain.model_dump(mode="json", exclude_unset=True)
-        node = authored["nodes"][target.node_index]
-        steps = node.get("steps") or [{"tasks": node["tasks"]}]
-        tasks = steps[target.step_index]["tasks"]
-        at = next(i for i, t in enumerate(tasks) if t["id"] == target.task.task.id)
-        tasks[at] = {**tasks[at], **patch}
-        try:
-            patched = Chain.model_validate(authored)
-        except ValidationError as exc:
-            raise RetryOverrideError("task", first_error(exc)) from exc
-        return MaterializedChain(
-            chain=ResolvedChain.from_chain(patched, steering=chain.chain.steering),
-            target=chain.target,
-            policy=chain.policy,
-        )
-
-
-def validate_retry_override(
-    chain: MaterializedChain, path: str, override: RetryOverride
-) -> RetryOverride:
-    """The effective override for a retry of `path`, or a field-specific
-    `RetryOverrideError`.
-
-    TODO(8a): a STUB. Task 8a builds the real validator (the override may not
-    change structure, ids, order or kind, and may not exceed the policy bounds at
-    `path`) with this same signature. Whichever of the two PRs merges second
-    replaces this body with a call to it. Until then every non-empty override
-    is refused, so nothing unvalidated reaches a fork.
-    """
-    if override.is_empty():
-        return override
-    field = "task" if override.task else "policy"
-    raise RetryOverrideError(
-        field, "retry overrides are refused until the policy-bounded validator lands"
-    )
-
-
 class RunFork(BaseModel):
     """One retry of a work item: a new, immutable run that keeps every earlier
     run's data (`retry-creates-an-immutable-run-fork`).
@@ -195,8 +119,10 @@ class RunFork(BaseModel):
     Lineage lives here: `parent` is the fork this one came from, `None` for the
     intake run. `materialized_chain` is the fork's own copy of the chain it
     runs, with its override applied; `after_seq` is the event it starts after,
-    so everything up to it is the prior runs' record. Frozen here and refused
-    an UPDATE or a DELETE by the table (`db._RUN_FORK_TRIGGERS`).
+    so everything up to it is the prior runs' record. `override` records what
+    the retry changed -- its path, task configuration and scope policy -- and
+    is None when it changed nothing. Frozen here and refused an UPDATE or a
+    DELETE by the table (`db._RUN_FORK_TRIGGERS`).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -208,7 +134,7 @@ class RunFork(BaseModel):
     path: str | None
     after_seq: int
     materialized_chain: str
-    override: RetryOverride | None = None
+    override: dict[str, JsonValue] | None = None
 
     @classmethod
     def from_retry(
@@ -224,9 +150,10 @@ class RunFork(BaseModel):
         """The fork a retry of `target` creates -- `None` restarts the work
         item from its first node (`work-item-restart-reruns-the-complete-
         chain`). `chain` is the run being forked from: the parent's copy, or the
-        intake snapshot when there is no parent."""
-        effective = override if override is not None and not override.is_empty() else None
-        copied = effective.apply(chain, target) if effective is not None else chain
+        intake snapshot when there is no parent. A validated `override` already
+        carries the fork's copy, `chain` with the override written in at its
+        path (`validate_retry_override`)."""
+        copied = override.chain if override is not None else chain
         return cls(
             id=uuid.uuid4().hex,
             work_item_id=work_item_id,
@@ -235,7 +162,19 @@ class RunFork(BaseModel):
             path=target.path if target is not None else None,
             after_seq=after_seq,
             materialized_chain=copied.to_json(),
-            override=effective,
+            override=(
+                {
+                    "path": override.path,
+                    "task_config": override.task_config,
+                    "policy": (
+                        override.policy.model_dump(mode="json", exclude_none=True)
+                        if override.policy is not None
+                        else None
+                    ),
+                }
+                if override is not None
+                else None
+            ),
         )
 
     @property
@@ -272,7 +211,7 @@ class RunFork(BaseModel):
             self.path,
             self.after_seq,
             self.materialized_chain,
-            self.override.model_dump_json() if self.override is not None else None,
+            json.dumps(self.override) if self.override is not None else None,
         )
 
     @classmethod
@@ -285,7 +224,5 @@ class RunFork(BaseModel):
             path=row["path"],
             after_seq=row["after_seq"],
             materialized_chain=row["materialized_chain"],
-            override=RetryOverride.model_validate(json.loads(row["override"]))
-            if row["override"]
-            else None,
+            override=json.loads(row["override"]) if row["override"] else None,
         )

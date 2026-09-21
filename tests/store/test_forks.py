@@ -9,7 +9,8 @@ import pytest
 from support import schema
 
 from kraft import events, policy, store
-from kraft.templates.forks import ChainPath, ControlScope, RetryOverride
+from kraft.templates.forks import ChainPath, ControlScope
+from kraft.templates.retry import validate_retry_override
 
 #: exec `a` (two concurrent tasks) -> gate `g1` -> exec `b` -> gate `g2` -> exec `c`.
 CHAIN = """
@@ -157,13 +158,13 @@ async def test_the_fork_boundary_is_where_the_current_run_starts(item_on, databa
 
 async def test_the_item_runs_its_forks_copy_of_the_chain(item_on, database):
     """Every reader of the row gets the fork's copy, override applied; the
-    intake snapshot stays as it was filed. (`fork_run` is handed the override
-    here directly -- the route hands it only what `validate_retry_override`
-    returned.)"""
+    intake snapshot stays as it was filed."""
     it = await item_on(CHAIN, "c")
     snapshot = it.row()["materialized_chain"]
+    chain = store.materialized_chain_of(it.row())
+    override = validate_retry_override(chain, "b.main.run", task_config={"command": "make again"})
 
-    await _fork(database, it, "b.main.run", override=RetryOverride(task={"command": "make again"}))
+    await _fork(database, it, "b.main.run", override=override)
 
     runs = ChainPath.parse(store.materialized_chain_of(it.row()), "b.main.run").task.task
     assert runs.command == "make again"

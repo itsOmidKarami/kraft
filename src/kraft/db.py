@@ -217,7 +217,7 @@ CREATE TABLE run_forks (
   -- prior runs' data, kept
   after_seq          INTEGER NOT NULL,
   materialized_chain TEXT NOT NULL,
-  -- the effective retry override (`RetryOverride`), NULL when none
+  -- what the retry changed (path, task_config, policy), NULL when nothing
   override           TEXT,
   created_at         TEXT NOT NULL
 );

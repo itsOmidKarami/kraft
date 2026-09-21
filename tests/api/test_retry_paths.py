@@ -63,13 +63,37 @@ def test_a_retry_hands_its_target_to_the_fork(client, repo, retried, body, path,
         ({"path": "merge"}, 409, "path: 'merge' is after the node the item stands on"),
         ({"path": "spec", "restart": True}, 422, "path: a restart reruns the whole chain"),
         (
-            {"path": "verification.review.code_review", "override": {"task": {"model": "x"}}},
+            {"path": "verification.review.code_review", "task_config": {"kind": "subprocess"}},
             422,
-            "task: retry overrides are refused",
+            "task_config.kind: a retry cannot change",
         ),
-        ({"restart": True, "override": {"task": {"model": "x"}}}, 422, "override: a work-item"),
+        (
+            {"path": "verification.review.code_review", "task_config": {"id": "other"}},
+            422,
+            "task_config.id: a retry cannot change",
+        ),
+        (
+            {"path": "verification.review", "task_config": {"model": "x"}},
+            422,
+            "task_config: task configuration applies to a task",
+        ),
+        (
+            {"path": "verification", "policy": {"max_attempts": "lots"}},
+            422,
+            "policy.max_attempts: ",
+        ),
+        ({"restart": True, "task_config": {"model": "x"}}, 422, "task_config: a work-item"),
     ],
-    ids=["unknown-path", "forward", "path-and-restart", "override-refused", "override-on-restart"],
+    ids=[
+        "unknown-path",
+        "forward",
+        "path-and-restart",
+        "override-changes-the-kind",
+        "override-renames-the-task",
+        "override-task-config-on-a-step",
+        "override-policy-of-the-wrong-type",
+        "override-on-restart",
+    ],
 )
 def test_a_retry_the_route_cannot_honour_is_refused_naming_the_field(
     client, repo, retried, body, status, says
@@ -90,12 +114,81 @@ def test_an_empty_override_is_no_override(client, repo, retried):
 
     r = client.post(
         f"/api/work-items/{wid}/retry",
-        json={"path": "verification.review.code_review", "override": {}},
+        json={"path": "verification.review.code_review", "task_config": {}, "policy": {}},
     )
 
     assert r.status_code == 200, r.text
     _wait_for(lambda: "target" in retried)
     assert retried["override"] is None
+
+
+@pytest.fixture
+def walked(monkeypatch):
+    """`executor.retry` runs for real -- it records the fork -- and only the
+    walk after it is stood in for."""
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        seen.update(kwargs)
+        return "completed"
+
+    monkeypatch.setattr("kraft.executor.walk.run", fake)
+    return seen
+
+
+def _forks(client, wid):
+    """The item's forks, read through a connection of this thread's own."""
+    import os
+    import sqlite3
+    from pathlib import Path
+
+    from kraft import store
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        return store.run_forks(conn, wid), conn.execute(
+            "SELECT * FROM work_items WHERE id = ?", (wid,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def test_an_override_within_bounds_is_applied_to_the_fork(client, repo, walked):
+    """`retry-overrides-are-policy-bounded`, end to end: the override the
+    validator accepts is the fork's own chain, and the item runs it."""
+    from kraft import store
+    from kraft.templates.forks import ChainPath
+
+    wid = _stopped_at(client, repo, "verification")
+    path = "verification.review.code_review"
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={"path": path, "task_config": {"effort": "low"}, "policy": {"deny_tools": ["Bash"]}},
+    )
+
+    assert r.status_code == 200, r.text
+    _wait_for(lambda: walked)
+    [fork], row = _forks(client, wid)
+    assert fork.override["task_config"] == {"effort": "low"}
+    assert "Bash" in fork.override["policy"]["deny_tools"]
+    task = ChainPath.parse(store.materialized_chain_of(row), path).task.task
+    assert task.effort == "low" and "Bash" in task.policy.deny_tools
+
+
+def test_an_override_out_of_bounds_forks_nothing(client, repo, walked):
+    wid = _stopped_at(client, repo, "verification")
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={"path": "verification.review.code_review", "task_config": {"kind": "subprocess"}},
+    )
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("task_config.kind: ")
+    assert _forks(client, wid)[0] == []
+    assert walked == {}
 
 
 def _wait_for(predicate, timeout=10.0):
