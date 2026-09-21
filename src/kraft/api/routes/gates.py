@@ -110,7 +110,7 @@ def _decided_by(request: Request) -> str:
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     _gate_or_404(gate_nodes(st, row), gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
@@ -197,7 +197,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     gate is the reject loop's own cap.
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     nodes = gate_nodes(st, row)
     _gate_or_404(nodes, gate)
     if board._pending_gate(st, wid) != gate:

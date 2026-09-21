@@ -422,14 +422,14 @@ enforced-by: tests/executor/test_skip_scopes.py::test_skip_task_does_not_skip_si
 An operator MAY explicitly mark a work item complete. The action SHALL require
 a reason, stop active work, record an audit event, and prevent further chain
 execution.
-enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-complete], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[complete], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[complete], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[complete], tests/api/test_terminal_actions.py::test_manual_completion_closes_beads_only_when_asked[by-default], tests/api/test_terminal_actions.py::test_manual_completion_closes_beads_only_when_asked[opted-in]
+enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-complete], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[complete], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[complete], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[complete], tests/api/test_terminal_actions.py::test_manual_completion_closes_beads_only_when_asked[by-default], tests/api/test_terminal_actions.py::test_manual_completion_closes_beads_only_when_asked[opted-in], tests/api/test_terminal_actions.py::test_no_door_runs_an_ended_items_chain_again[approve-complete], tests/api/test_terminal_actions.py::test_no_door_runs_an_ended_items_chain_again[reject-complete], tests/api/test_terminal_actions.py::test_ending_an_item_closes_its_pending_gate[complete], tests/executor/test_entry_paths.py::test_no_entry_into_the_walk_runs_an_ended_item[walk-complete-completed], tests/executor/test_entry_paths.py::test_no_entry_into_the_walk_runs_an_ended_item[crash-resume-complete-completed], tests/test_waits.py::test_an_item_ended_as_its_wait_came_due_stays_ended[complete-completed]
 
 ## REQ manual-cancellation-is-an-explicit-work-item-terminal-action
 
 An operator MAY explicitly cancel a work item. The action SHALL require a
 reason, stop active work, record an audit event, and prevent further chain
 execution.
-enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[cancel], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[cancel]
+enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[cancel], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[cancel], tests/api/test_terminal_actions.py::test_no_door_runs_an_ended_items_chain_again[approve-cancel], tests/api/test_terminal_actions.py::test_no_door_runs_an_ended_items_chain_again[reject-cancel], tests/api/test_terminal_actions.py::test_ending_an_item_closes_its_pending_gate[cancel], tests/executor/test_entry_paths.py::test_no_entry_into_the_walk_runs_an_ended_item[walk-cancel-abandoned], tests/executor/test_entry_paths.py::test_no_entry_into_the_walk_runs_an_ended_item[crash-resume-cancel-abandoned], tests/test_waits.py::test_an_item_ended_as_its_wait_came_due_stays_ended[cancel-abandoned]
 
 ## REQ manual-escalation-reuses-context-by-default
 
@@ -633,7 +633,7 @@ enforced-by: tests/skills/test_fix_loop_judge.py::test_judge_result_resolution[d
 
 An execution node MAY declare a bounded escalation task that runs only after
 its recovery and fix-loop controls cannot advance the node.
-enforced-by: tests/executor/test_stuck_escalation.py::test_escalation_runs_only_after_recovery_and_the_fix_loop_and_retries_the_node, tests/executor/test_stuck_escalation.py::test_escalation_is_bounded_per_node, tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[needs_context], tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[config_error]
+enforced-by: tests/executor/test_stuck_escalation.py::test_escalation_runs_only_after_recovery_and_the_fix_loop_and_retries_the_node, tests/executor/test_stuck_escalation.py::test_escalation_is_bounded_per_node, tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[needs_context], tests/executor/test_stuck_escalation.py::test_a_stop_the_controls_did_not_reach_is_not_escalated[config_error], tests/executor/test_stuck_escalation.py::test_a_stuck_stop_is_escalated_by_exactly_one_mechanism[stall-declared], tests/executor/test_stuck_escalation.py::test_a_stuck_stop_is_escalated_by_exactly_one_mechanism[judge stop_needs_human-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[infra stop-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[budget-declared]
 
 ## REQ successful-stuck-escalation-retries-the-node
 
@@ -913,7 +913,7 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure.
-enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart
+enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared]
 
 ## REQ external-wait-covers-merge-request-lifecycle
 

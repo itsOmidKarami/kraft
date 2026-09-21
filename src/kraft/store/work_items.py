@@ -6,6 +6,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.store._common import ENDED
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -257,18 +258,23 @@ def mark_blocked_by_dependency(
     )
 
 
-def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> None:
+def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
     """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
     its own poller decides to re-enter it, before the spawned run has done
     anything -- so the *next* tick's `WHERE status = 'waiting'` no longer
     matches this row (Kraft-ppk9). No event: `node_started` already narrates
     the re-entry once the walk actually begins; this is bookkeeping to make
     the row stop looking due, not something a human reads.
+
+    False, and nothing written, for an item an operator ended after the
+    poller selected it (Kraft-dncfg).
     """
-    conn.execute(
-        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
-        (_now(), work_item_id),
+    cur = conn.execute(
+        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? "
+        "WHERE id = ? AND status NOT IN (?, ?)",
+        (_now(), work_item_id, *ENDED),
     )
+    return cur.rowcount == 1
 
 
 def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:

@@ -610,6 +610,29 @@ async def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claime
     assert _status(app) != "waiting"
 
 
+@pytest.mark.parametrize(("verb", "ended"), [("complete", "completed"), ("cancel", "abandoned")])
+async def test_an_item_ended_as_its_wait_came_due_stays_ended(
+    repo, scheduler, monkeypatch, verb, ended
+):
+    """Kraft-dncfg: an operator ends the item between the tick selecting it
+    and re-entering it. The re-entry claims nothing and runs nothing."""
+    app = scheduler()
+    await _seed_waiting(app, repo, retry_at="2000-01-01T00:00:00+00:00")
+    reentered = store.mark_reentered
+
+    def end_first(c, wid):
+        store.end_work_item(c, wid, verb, "done by hand")
+        return reentered(c, wid)
+
+    monkeypatch.setattr(store, "mark_reentered", end_first)
+
+    assert await waits.tick(app) == []
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    assert _status(app) == ended
+    types = [e["type"] for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "node_started" not in types[types.index("work_item_" + ended) :]
+
+
 async def test_a_reentry_resumes_at_the_waiting_step(repo, scheduler, monkeypatch):
     """A node whose waiting step was its fourth must not re-run the first
     three -- a paid agent session per tick on a node that opens the MR. The

@@ -1592,6 +1592,10 @@ async def run_once(
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
+    if row["status"] in store.ENDED:
+        # Whatever door got here, an ended item's chain does not run again
+        # (Kraft-dncfg) -- not even the bookkeeping and worktree set-up below.
+        return row["status"]
     nodes = chain_of(row).chain.nodes
     if start_index is None:
         start_index, cursor_step = _cursor(row, nodes)

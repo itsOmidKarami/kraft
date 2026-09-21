@@ -126,3 +126,64 @@ def test_manual_completion_closes_beads_only_when_asked(client, repo, monkeypatc
 
     assert client.post(f"/api/work-items/{wid}/complete", json=body).status_code == 200
     assert closed == ([wid] if close else [])
+
+
+# -- Kraft-dncfg: no action on an ended item runs its chain again -------------
+
+#: Every HTTP door onto an item's chain, with a body it would otherwise accept.
+DOORS = {
+    "approve": ("gates/spec_approval/approve", {}),
+    "reject": ("gates/spec_approval/reject", {"note": "no"}),
+    "resume": ("resume", {"steer": "go on"}),
+    "retry": ("retry", {}),
+    "skip": ("skip", {}),
+    "steer": ("steer", {"text": "go on"}),
+    "escalate": ("escalate", {"message": "look"}),
+    "budget-raise": ("budget/raise", {"budget_usd": 100.0}),
+}
+
+
+def _ended_at_a_gate(client, repo, verb):
+    """An item stopped at `spec_approval`, then ended by `verb`."""
+    from kraft import store
+
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    _force_node(wid, "spec_approval", "needs_human")
+    db = client.app.state.db
+
+    async def gate():
+        await db.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
+
+    client.portal.call(gate)
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+    assert client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "x"}).status_code == 200
+    return wid
+
+
+@VERBS
+def test_ending_an_item_closes_its_pending_gate(client, repo, verb):
+    wid = _ended_at_a_gate(client, repo, verb)
+
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] is None
+
+
+@VERBS
+@pytest.mark.parametrize("door", list(DOORS))
+def test_no_door_runs_an_ended_items_chain_again(client, repo, verb, door):
+    """Kraft-dncfg: approve on a cancelled item answered 200 and walked the
+    chain on. Every door refuses with a 409 naming the status, and leaves the
+    item where it was."""
+    wid = _ended_at_a_gate(client, repo, verb)
+    before = len(client.get(f"/api/work-items/{wid}/events").json())
+    path, body = DOORS[door]
+
+    r = client.post(f"/api/work-items/{wid}/{path}", json=body)
+
+    status = ENDS[verb][0]
+    assert r.status_code == 409, r.text
+    assert f"work item is {status}" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == status
+    assert len(client.get(f"/api/work-items/{wid}/events").json()) == before

@@ -149,6 +149,65 @@ async def test_crash_resume_stops_on_an_item_no_longer_active(
     assert dispatched == []
 
 
+ENDED = pytest.mark.parametrize(
+    ("verb", "ended"), [("complete", "completed"), ("cancel", "abandoned")]
+)
+
+
+async def _ended(item_on, verb):
+    """An item on `THREE_NODES` whose first node's session finished, ended
+    by an operator's `verb` -- which crash resume must not settle or walk on."""
+    it = await item_on(THREE_NODES, "n", worktree=True, status="active")
+    await it.session("s-a", "n.main.a", "done")
+    await it.database.write(lambda c: store.end_work_item(c, it.id, verb, "by hand"))
+    return it
+
+
+@ENDED
+@pytest.mark.parametrize("entry", ["walk", "crash-resume"])
+async def test_no_entry_into_the_walk_runs_an_ended_item(
+    item_on, database, run_dirs, dispatched, verb, ended, entry
+):
+    """Kraft-dncfg: the executor's own half of "no action on an ended item
+    runs its chain again" -- whatever door reached it, and before the walk
+    touches the worktree, the bead tracker or the item's cursor."""
+    it = await _ended(item_on, verb)
+    before = len(it.events())
+
+    if entry == "walk":
+        result = await executor.run_once(
+            database, run_dirs, work_item_id=it.id, policy=_policy(), launch=LAUNCH
+        )
+    else:
+        result = await _crash_resume(database, run_dirs, it)
+
+    assert (result, it.status()) == (ended, ended)
+    assert dispatched == []
+    assert len(it.events()) == before
+
+
+@ENDED
+@pytest.mark.parametrize(
+    "claim",
+    [
+        lambda c, wid: store.approve_gate(c, wid, "n"),
+        lambda c, wid: store.reject_gate(c, wid, "n", "no", reopen=True),
+        lambda c, wid: store.mark_reentered(c, wid),
+        lambda c, wid: store.skip_node(c, wid, "n", None, None),
+    ],
+    ids=["approve_gate", "reject_gate", "mark_reentered", "skip_node"],
+)
+async def test_no_claim_takes_an_ended_item(item_on, database, verb, ended, claim):
+    """Every store write that makes an item runnable (`dev/check_claim_handoff.py`
+    derives the set) leaves an ended item ended, whichever door calls it and
+    however late: the backstop behind every door's own 409."""
+    it = await _ended(item_on, verb)
+
+    await database.write(lambda c: claim(c, it.id))
+
+    assert it.status() == ended
+
+
 def _policy() -> policy.Policy:
     return policy.Policy(
         loops={}, default=policy.Cap(attempts=2, wall_clock_s=3600), auto_escalate_stuck=True

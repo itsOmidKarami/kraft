@@ -18,6 +18,16 @@ from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 logger = logging.getLogger(__name__)
 
 
+#: What closes a requested gate.
+_GATE_CLOSED = (
+    "gate_approved",
+    "gate_rejected",
+    "node_skipped",
+    "work_item_completed",
+    "work_item_abandoned",
+)
+
+
 def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     """The gate name this item is currently stopped on, or None (Kraft-zr3s).
 
@@ -34,10 +44,13 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     so without this a gate bypassed by skip reads as pending forever --
     the delay poller (`auto_escalate_delay.tick`) would then auto-review a
     dead gate and rewind the chain back to it (code review finding).
+
+    An ending (`work_item_completed`, `work_item_abandoned`) closes it too: a
+    cancelled or hand-completed item has no gate left to answer (Kraft-dncfg).
     """
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] in ("gate_requested", "gate_approved", "gate_rejected", "node_skipped"):
+        if e["type"] in _GATE_CLOSED or e["type"] == "gate_requested":
             return e["payload"]["gate"] if e["type"] == "gate_requested" else None
     return None
 

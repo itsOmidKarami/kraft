@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+#: The statuses an item never leaves (Kraft-dncfg): no door runs its chain
+#: again, and no write that makes an item runnable takes one.
+ENDED = ("completed", "abandoned")
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
