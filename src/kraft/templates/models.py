@@ -1139,12 +1139,11 @@ class MaterializedChain:
         authored chain on every call, never stored beside it -- the two could
         only disagree. `materialize` already checked every scope resolves.
         `LookupError` for a repository this item did not select."""
-        if repository is None:
-            base = self.policy
-        elif repository in self.repository_policies:
-            base = self.repository_policies[repository]
-        else:
+        if repository is not None and repository not in self.target.repositories():
             raise LookupError(f"this work item selects no repository {repository!r}")
+        # A repository with no policy of its own frozen falls back to the
+        # item's, which is the meet of them all: never looser than its own.
+        base = self.repository_policies.get(repository, self.policy) if repository else self.policy
         return base.layered(scope.scopes)
 
     def policy_at(self, path: str) -> InstancePolicy:

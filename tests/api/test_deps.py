@@ -27,9 +27,12 @@ def test_launch_returns_the_matching_repo_entry(tmp_path):
     st = _st(tmp_path)
     (st.templates_dir / "repos.yaml").write_text(
         "repos:\n  - path: /work/repo\n    models: {claude_review: opus}\n"
+        "  - {path: /work/repo/libs/a, id: lib-a}\n  - {path: /work/other}\n"
     )
     ctx = deps.launch(st, "/work/repo")
     assert ctx.repo_entry["models"] == {"claude_review": "opus"}
+    # What a task fanned out to a workspace member reads: every entry by id.
+    assert {k: v["path"] for k, v in ctx.repositories.items()} == {"lib-a": "/work/repo/libs/a"}
 
 
 def test_launch_on_a_malformed_repos_yaml_does_not_raise(tmp_path):
@@ -56,6 +59,8 @@ def test_launch_on_a_malformed_repos_yaml_fails_the_dispatch_that_reads_it(tmp_p
     ctx = deps.launch(st, "/work/repo")
     with pytest.raises(config_mod.ConfigError):
         ctx.repo_entry.get("sandbox")
+    with pytest.raises(config_mod.ConfigError):
+        ctx.repositories.get("lib-a")  # a fanned-out member fails the same way
     # Falsy fallbacks (`launch.repo_entry or {}`) must not discard the
     # poisoned entry for a harmless empty dict before that `.get` runs.
     assert bool(ctx.repo_entry)

@@ -251,15 +251,18 @@ async def _config_error(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
-def scope_policy(row, scope: ResolvedNode | ResolvedStep | ResolvedTask) -> _policy.InstancePolicy:
+def scope_policy(
+    row, scope: ResolvedNode | ResolvedStep | ResolvedTask, repository: str | None = None
+) -> _policy.InstancePolicy:
     """The effective policy `scope` runs under, from its item's snapshot
-    (`MaterializedChain.policy_for`). A V1 walk only ever runs a chain read out
+    (`MaterializedChain.policy_for`) -- `repository`'s own when the task is
+    fanned out to one (Kraft-jc39p). A V1 walk only ever runs a chain read out
     of that snapshot, so a row without one has no policy anyone could know --
     and running it unbounded is the silent reading this refuses."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
         raise LookupError(f"work item {row['id']} has no materialized chain to read policy from")
-    return snapshot.policy_for(scope)
+    return snapshot.policy_for(scope, repository)
 
 
 def _task_sandbox(frozen: _policy.SandboxPolicy | None, repo_entry: dict | None) -> dict | None:
@@ -276,14 +279,25 @@ def _frozen_steering(row) -> dict[str, str] | None:
     return snapshot.chain.steering if snapshot is not None else None
 
 
-def _extra_repositories(db, work_item_id: str) -> int:
-    """Repositories this item spans beyond the first, from `work_item_repos`."""
-    row = db.read(
-        lambda c: c.execute(
-            "SELECT COUNT(*) AS n FROM work_item_repos WHERE work_item_id = ?", (work_item_id,)
-        ).fetchone()
-    )
-    return max(0, (row["n"] if row else 0) - 1)
+def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Path, LaunchContext]]:
+    """Where a `scope: each_repository` task runs: once per repository the
+    item's frozen target selects -- the root in the assembled checkout, each
+    member in its own mount -- with that repository's own entry
+    (`task-may-explicitly-fan-out-by-repository`). One repository is one
+    run, in the ordinary context: returns `[]`."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None or snapshot.target.kind != "workspace":
+        return []
+    target = snapshot.target
+    entries = launch.repositories if launch is not None else {}
+    base = launch or LaunchContext(repo_entry=None, steering_dir=None)
+    runs = [(target.root, Path(worktree), base)] if target.root else []
+    for mount in target.mounts.values():
+        entry = entries.get(mount.repository)
+        runs.append(
+            (mount.repository, Path(worktree) / mount.path, replace(base, repo_entry=entry))
+        )
+    return runs
 
 
 async def _run_changed_test_scopes(
@@ -391,6 +405,9 @@ async def dispatch_node(
     budget: _policy.Budget = _policy.NO_BUDGET,
     escalate: bool = False,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+    #: The repository a fanned-out run is for (`_fan_out`): its policy is
+    #: that repository's, and it does not fan out again.
+    repository: str | None = None,
 ) -> str:
     """Run one resolved task and report its status.
 
@@ -410,7 +427,33 @@ async def dispatch_node(
     # The policy this task runs under, resolved at the scope it sits in
     # (`MaterializedChain.policy_for`): its sandbox, tool lists, harness
     # allowlist and token budget are all read from here.
-    task_policy = scope_policy(work_item_row, task)
+    if t.scope is TaskScope.EACH_REPOSITORY and repository is None and not isinstance(t, ForgeTask):
+        # A forge task is exempt: `forge.run_task` already walks every
+        # selected repository itself, in publication order.
+        runs = _fan_out(work_item_row, worktree, launch)
+        if runs:
+            status = "done"
+            for rid, cwd, member_launch in runs:
+                status = await dispatch_node(
+                    db,
+                    run_dirs,
+                    task,
+                    node,
+                    work_item_row,
+                    cwd,
+                    instruction_override=instruction_override,
+                    round=round,
+                    steer=steer,
+                    launch=member_launch,
+                    budget=budget,
+                    escalate=escalate,
+                    loop_severities=loop_severities,
+                    repository=rid,
+                )
+                if status != "done":
+                    break
+            return status
+    task_policy = scope_policy(work_item_row, task, repository)
     session_id = uuid.uuid4().hex
     # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
     # dispatch: a sha read later would be whatever HEAD moved to while the task
@@ -424,21 +467,6 @@ async def dispatch_node(
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
-    # `scope: each_repository` is read, not ignored, and deliberately
-    # degenerate: one repository is one execution here, and real fan-out is
-    # Task 10's workspace assembly. A forge task is exempt because
-    # `forge.run_task` already walks `work_item_repos` itself.
-    if t.scope is TaskScope.EACH_REPOSITORY and not isinstance(t, ForgeTask):
-        extra = _extra_repositories(db, work_item_row["id"])
-        if extra:
-            return await _config_error(
-                db,
-                run_dirs,
-                common,
-                f"{task.path} asks to fan out by repository over {extra + 1} repositories, "
-                "which Kraft does not run yet — a single-repository target runs it once\n",
-            )
-
     if isinstance(t, BuiltinTask):
         # `BuiltinAction` has exactly one member, so there is no branch to take
         # on `ref`: a reference Kraft does not own was rejected by the type

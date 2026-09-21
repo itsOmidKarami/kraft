@@ -487,11 +487,17 @@ def launch(st, repo: str) -> executor.LaunchContext:
         repos = config_mod.load_repos(repos_path(st), validate_steering=False)
     except config_mod.ConfigError as exc:
         logger.warning("repo config invalid, failing dispatch that reads it: %s", exc)
+        # The members' entries too: a fanned-out task must fail the same
+        # way, never run with no sandbox because its entry was unreadable.
         return executor.LaunchContext(
-            repo_entry=_PoisonedRepoEntry(exc), steering_dir=steering_dir, skills_dir=st.skills_dir
+            repo_entry=_PoisonedRepoEntry(exc),
+            steering_dir=steering_dir,
+            skills_dir=st.skills_dir,
+            repositories=_PoisonedRepoEntry(exc),
         )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),
         steering_dir=steering_dir,
         skills_dir=st.skills_dir,
+        repositories={r["id"]: r for r in repos if r.get("id")},
     )
