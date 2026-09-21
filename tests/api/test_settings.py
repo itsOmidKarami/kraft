@@ -293,6 +293,7 @@ _POLICY = {"loops": {}, "default": {"attempts": 3, "wall_clock_s": 3600}}
 def test_put_policy_persists_a_block(client, templates_dir, key, value):
     saved = client.put("/api/policy", json={**_POLICY, key: value})
     assert saved.status_code == 200, saved.text
+    assert saved.json()[key] == value
     assert yaml.safe_load((templates_dir / "policy.yaml").read_text())[key] == value
     assert client.get("/api/policy").json()[key] == value
 
