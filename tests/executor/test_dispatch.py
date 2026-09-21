@@ -250,10 +250,10 @@ async def test_dispatch_carries_the_notes_authorship_into_the_prompt(
 # -- overrides and the launch context ------------------------------------------
 
 
-async def test_repo_default_model_reaches_the_agent_launch(tmp_path, repo, fake_agent):
+async def test_repo_model_for_the_profile_reaches_the_agent_launch(tmp_path, repo, fake_agent):
     """`executor.run_once` -> `walk.walk_node` -> `dispatch.measure_node` ->
     `dispatch.dispatch_node` must carry the launch context all the way to
-    `run_agent_task`, or a repo's configured default_model silently never
+    `run_agent_task`, or a repo's configured per-profile model silently never
     reaches the agent.
 
     An agent task that sets no `model:` of its own: the shipped implementer
@@ -262,7 +262,7 @@ async def test_repo_default_model_reaches_the_agent_launch(tmp_path, repo, fake_
         tmp_path,
         repo,
         [_exec("implementation", _agent())],
-        repo_entry={"default_model": "haiku", "setup_command": ""},
+        repo_entry={"models": {"fake": "haiku"}, "setup_command": ""},
     )
 
     assert status == "completed"

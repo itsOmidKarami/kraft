@@ -117,7 +117,7 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
     assert client.delete(f"/api/repos?path={path}").status_code == 404
 
 
-def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templates_dir):
+def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_dir):
     (templates_dir / "steering").mkdir(exist_ok=True)
     (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
     repo = make_repo(tmp_path)
@@ -126,7 +126,7 @@ def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templ
         json={
             "path": str(repo),
             "enabled": False,
-            "default_model": "anything-at-all",
+            "models": {"claude_review": "anything-at-all"},
             "deny_tools": ["WebFetch"],
             "steering": ["house-style"],
         },
@@ -134,12 +134,13 @@ def test_add_repo_round_trips_default_model_and_steering(tmp_path, client, templ
     assert created.status_code == 201, created.text
 
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
-    assert on_disk["repos"][0]["default_model"] == "anything-at-all"
+    assert on_disk["repos"][0]["models"] == {"claude_review": "anything-at-all"}
+    assert "default_model" not in on_disk["repos"][0]
     assert on_disk["repos"][0]["deny_tools"] == ["WebFetch"]
     assert on_disk["repos"][0]["steering"] == ["house-style"]
 
     fetched = client.get("/api/repos").json()["repos"][0]
-    assert fetched["default_model"] == "anything-at-all"
+    assert fetched["models"] == {"claude_review": "anything-at-all"}
     assert fetched["steering"] == ["house-style"]
 
 
@@ -165,8 +166,8 @@ def _disabled(client, repo):
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("local_files", [".python-version"]), ("default_root_merge_policy", "skip")],
-    ids=["local-files", "root-merge-policy-as-a-yaml-string"],
+    [("local_files", [".python-version"]), ("models", {"codex_default": "gpt-5"})],
+    ids=["local-files", "models"],
 )
 def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, value):
     """The Settings UI's only write path for these (Kraft-gxcmy): PATCH goes
@@ -201,10 +202,10 @@ def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, valu
 
 
 @pytest.mark.parametrize("model, payload", [(RepoBody, {"path": "/r"}), (RepoPatch, {})])
-def test_repo_request_models_reject_an_unknown_root_merge_policy(model, payload):
-    """An API schema must reject an invalid policy before a route touches disk."""
+def test_repo_request_models_reject_a_non_string_model(model, payload):
+    """An API schema must reject a malformed model map before a route touches disk."""
     with pytest.raises(ValidationError):
-        model.model_validate({**payload, "default_root_merge_policy": "nope"})
+        model.model_validate({**payload, "models": {"claude_review": ["opus"]}})
 
 
 def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):
@@ -290,7 +291,7 @@ def test_patch_repo_can_clear_a_field_with_an_explicit_null(client, tmp_path):
     client.post("/api/repos", json={"path": str(repo), "enabled": False})
     r = client.patch(
         f"/api/repos?path={repo}",
-        json={"forge": None, "project": None, "default_model": None},
+        json={"forge": None, "project": None},
     )
     assert r.status_code == 200, r.text
     (entry,) = [
@@ -298,7 +299,6 @@ def test_patch_repo_can_clear_a_field_with_an_explicit_null(client, tmp_path):
     ]
     assert entry["forge"] is None
     assert entry["project"] is None
-    assert entry["default_model"] is None
 
 
 def test_add_repo_with_a_test_command_still_records_probed_scopes(tmp_path, client):
@@ -456,7 +456,7 @@ def test_a_broken_repos_yaml_does_not_500_the_approve_path(tmp_path, monkeypatch
         assert r.status_code == 200
 
 
-def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkeypatch):
+def test_connected_repos_model_for_its_profile_reaches_the_agent_launch(tmp_path, monkeypatch):
     """Pins the `_connected` wiring the executor tests bypass by constructing
     `LaunchContext` by hand: connect a repo through the real API (its path
     round-trips through git's symlink-resolving `--show-toplevel`, the whole
@@ -464,7 +464,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
     against the same, unresolved path and check `--model` reaches the agent."""
     templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
     # An agent task that names no `model:` of its own: the shipped implementer
-    # names one, and a task's own model rightly beats the repo's default.
+    # names one, and a task's own model rightly beats the repo's.
     (templates_dir / "chains" / "impl-only.yaml").write_text(
         "id: impl-only\n"
         "nodes:\n"
@@ -486,7 +486,7 @@ def test_connected_repos_default_model_reaches_the_agent_launch(tmp_path, monkey
             "/api/repos",
             json={
                 "path": str(repo),
-                "default_model": "haiku",
+                "models": {"fake": "haiku"},
                 "test_command": "pytest",
                 "setup_command": "",
             },

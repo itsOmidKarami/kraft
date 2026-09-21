@@ -199,6 +199,8 @@ repositories:
       test_scopes:
         - paths: [src/**, tests/**]
           command: just test
+    managed: false
+    models: { claude_review: opus }
     policy:
       allowed_harnesses: [codex_default, claude_review]
       deny_tools: [WebFetch]
@@ -231,6 +233,11 @@ def test_repository_table_loads_repositories_and_workspaces(tmp_path):
     assert api.policy.allowed_harnesses == ["codex_default", "claude_review"]
     assert api.policy.deny_tools == ["WebFetch"]
     assert table.repositories["product_root"].policy is None
+    # Ruling 165: `managed` is a top-level repository flag, not policy, and a
+    # repository's model is chosen per harness profile.
+    assert (api.managed, table.repositories["product_root"].managed) == (False, True)
+    assert api.models == {"claude_review": "opus"}
+    assert table.repositories["product_root"].models == {}
 
     workspace = table.workspaces["product"]
     assert workspace.root == "product_root"

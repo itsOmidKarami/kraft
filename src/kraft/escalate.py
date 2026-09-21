@@ -386,7 +386,7 @@ async def dispatch(
     )
 
     # A minimal binding, no hook: `resolve_invocation` still folds in repo-level
-    # deny_tools/steering/default_model, which is all "full tools" means here --
+    # deny_tools/steering/models, which is all "full tools" means here --
     # repo policy still applies, only a hook's own narrowing is absent because
     # there is no hook. Its own `escalate:` kwarg (left at the `False` default)
     # is the fix loop's unrelated "buy a stronger model" bump -- same word,

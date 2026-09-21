@@ -192,7 +192,7 @@ repos:
     env: {}
     env_passthrough: []
     local_files: []
-    default_root_merge_policy: bump
+    models: {}
     deny_tools: []
     steering: []
     sandbox: null
@@ -210,14 +210,13 @@ repos:
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
-| `default_model` | `null` | Overrides the agent model for every hook on this repo, where set. |
+| `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude_review: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
 | `test_command` | `null` (falls back to the registry's `on.test.run`) | The command CI actually runs for this repo — lets `verify`'s local test run and CI's differ deliberately, rather than drift apart by accident. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets, layered onto the worker baseline allowlist. |
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist doesn't cover. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. |
-| `default_root_merge_policy` | `bump` | How a submodule bump at this repo's root is handled by default. |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent hook on this repo, layered under the registry's own defaults. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |

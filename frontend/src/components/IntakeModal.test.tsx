@@ -14,11 +14,10 @@ const REPO_A = {
   test_scopes: null,
   forge: null,
   project: null,
-  default_model: null,
+  models: {},
   deny_tools: [],
   steering: [],
   local_files: [],
-  default_root_merge_policy: "bump" as const,
   managed: true,
 };
 

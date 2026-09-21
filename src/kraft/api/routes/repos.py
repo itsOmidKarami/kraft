@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from kraft import config as config_mod
 from kraft.api import api_router, deps
-from kraft.store.repos import RootMergePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +28,10 @@ class RepoBody(BaseModel):
     # caller that does supply one still gets the enable-without-test-command
     # refusal below.
     enabled: bool | None = None
-    default_model: str | None = None
+    #: Model per harness profile id (Ruling 165); the loader checks the keys.
+    models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
-    default_root_merge_policy: RootMergePolicy | None = None
 
 
 class ProbeBody(BaseModel):
@@ -75,10 +74,9 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
                 "project": probed["project"],
                 "enabled": False,
                 "managed": False,
-                "default_model": None,
+                "models": {},
                 "deny_tools": [],
                 "steering": [],
-                "default_root_merge_policy": "bump",
             }
         )
 
@@ -160,10 +158,9 @@ async def add_repo(body: RepoBody, request: Request):
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
         "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
-        "default_model": body.default_model,
+        "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
-        "default_root_merge_policy": body.default_root_merge_policy or "bump",
         # A human typed this path. Set here rather than defaulted in the
         # loader, because `_auto_connect_children` below writes entries
         # through the same file and must NOT get this value.
@@ -194,11 +191,10 @@ class RepoPatch(BaseModel):
     forge: str | None = None
     project: str | None = None
     enabled: bool | None = None
-    default_model: str | None = None
+    models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
     local_files: list[str] | None = None
-    default_root_merge_policy: RootMergePolicy | None = None
 
 
 def _refuse_enable_without_test_command(entry: dict) -> None:
@@ -227,7 +223,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
         raise HTTPException(404, f"{path} is not connected")
     # exclude_unset, not `v is not None`: a field the caller left out of the
     # JSON body must not clobber the saved value, but one sent as an explicit
-    # `null` (clearing forge, test_command, default_model, project — the
+    # `null` (clearing forge, test_command, project — the
     # RepoDetail draft round-trips the whole Repo, nulls included) has to
     # actually take effect rather than being silently dropped.
     entry.update(body.model_dump(exclude_unset=True))

@@ -26,10 +26,10 @@ def _st(tmp_path):
 def test_launch_returns_the_matching_repo_entry(tmp_path):
     st = _st(tmp_path)
     (st.templates_dir / "repos.yaml").write_text(
-        "repos:\n  - path: /work/repo\n    default_model: opus\n"
+        "repos:\n  - path: /work/repo\n    models: {claude_review: opus}\n"
     )
     ctx = deps.launch(st, "/work/repo")
-    assert ctx.repo_entry["default_model"] == "opus"
+    assert ctx.repo_entry["models"] == {"claude_review": "opus"}
 
 
 def test_launch_on_a_malformed_repos_yaml_does_not_raise(tmp_path):

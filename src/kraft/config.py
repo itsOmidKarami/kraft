@@ -36,7 +36,6 @@ from pydantic import (
 
 from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride
-from kraft.store.repos import RootMergePolicy
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
@@ -140,6 +139,17 @@ class TestScope(BaseModel):
     # time (Kraft-9wzy). Callers that need the wrap do it at the point of use.
 
 
+#: Keys an older `repos.yaml` entry may still carry, and where each went.
+_RETIRED_KEYS = {
+    "default_model": "set a model per harness profile under 'models:'",
+    "default_root_merge_policy": "a workspace's 'root_pointer_default' replaces it",
+}
+
+#: A harness profile id, the key of `RepoEntry.models`: the same rule as
+#: `kraft.templates.environment.Identifier`, the id a task's `harness:` names.
+_PROFILE_ID = r"^[a-z][a-z0-9_-]*$"
+
+
 class RepoEntry(BaseModel):
     """One `repos.yaml` entry. Strict, so `managed: "true"` is rejected as the
     hand-rolled loader rejected it; unknown keys ride along (`extra="allow"`)
@@ -156,7 +166,11 @@ class RepoEntry(BaseModel):
     # Settings' "Detected" section. Auto-connected children are written with an
     # explicit `managed: false` instead of relying on a default.
     managed: bool = True
-    default_model: str | None = None
+    #: The model an agent task launches with in this repository, per harness
+    #: profile id (Ruling 165): under the task's own `model:` and the item's
+    #: override, over the profile's `defaults:`. Keyed by profile because one
+    #: repo-wide `default_model` was handed to every provider alike.
+    models: dict[Annotated[str, Field(pattern=_PROFILE_ID)], str] = {}
     # The command CI runs for this repo. The registry's `on.test.run` binding
     # is one command for every repo on the install, which is what lets verify
     # and CI drift apart (Kraft-579). None keeps the registry's command.
@@ -180,7 +194,6 @@ class RepoEntry(BaseModel):
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: list[str] = []
     steering: list[str] = []
-    default_root_merge_policy: RootMergePolicy = "bump"
     sandbox: Any = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-
     #: safety`): applied after the instance policy and before everything a
@@ -202,6 +215,20 @@ class RepoEntry(BaseModel):
         if not isinstance(data, dict):
             return data
         data = dict(data)
+        # Ruling 165: retired, so dropped here rather than carried along as an
+        # unknown extra that every re-save would write back. `default_model`
+        # has no one-to-one successor (it was one model for every provider);
+        # `default_root_merge_policy` was never read at run time -- a
+        # workspace's `root_pointer_default` is where that decision lives now.
+        for retired in _RETIRED_KEYS:
+            if retired in data:
+                logger.warning(
+                    "repos.yaml: %s: %r is no longer read and is dropped (%s)",
+                    data.get("path"),
+                    retired,
+                    _RETIRED_KEYS[retired],
+                )
+                del data[retired]
         legacy = data.pop("gitlab_project", None)
         # Both `forge` and `project` must be absent: a hand-edited
         # half-migrated entry carrying an explicit `project` beside the legacy

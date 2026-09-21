@@ -150,7 +150,15 @@ class Repository(BaseModel):
     id: Identifier
     path: StrictStr = Field(min_length=1)
     enabled: StrictBool = True
+    #: A person connected or edited this repository, as opposed to Kraft
+    #: detecting it as a workspace child (Ruling 165: bookkeeping, not
+    #: policy). It keeps a detected child out of Settings' main list, out of
+    #: `kraft repo list`, and out of the client's cwd-to-repository resolution.
+    managed: StrictBool = True
     default_chain: Identifier | None = None
+    #: The model an agent task runs with here, per harness profile id
+    #: (Ruling 165) -- over the profile's `defaults:`, under the task's own.
+    models: dict[Identifier, StrictStr] = Field(default_factory=dict)
     forge: ForgeTarget | None = None
     worktree: Worktree = Field(default_factory=Worktree)
     verification: Verification = Field(default_factory=Verification)

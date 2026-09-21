@@ -874,7 +874,7 @@ async def test_fix_cycle_dispatch_gets_the_same_launch_context(
 
     await _walk(
         it,
-        repo_entry={"default_model": "haiku", "setup_command": ""},
+        repo_entry={"models": {"fake": "haiku"}, "setup_command": ""},
         policy=_loop_policy(tmp_path, attempts=1),
     )
 

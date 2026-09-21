@@ -48,7 +48,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"sandbox": None}),
         ({"sandbox": _SANDBOX}, {"sandbox": _SANDBOX}),
         ({"sandbox": False}, {"sandbox": False}),
-        ({}, {"default_root_merge_policy": "bump"}),
+        ({}, {"models": {}}),
+        ({"models": {"claude_review": "opus"}}, {"models": {"claude_review": "opus"}}),
         # Anything already in a repos.yaml was connected by a human --
         # auto-connect did not exist when it was written. Defaulting to False
         # would hide every repo behind the Detected section on first load.
@@ -68,7 +69,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "sandbox-defaults-to-none",
         "passes-through-a-well-formed-sandbox",
         "passes-through-an-explicit-sandbox-off",
-        "defaults-root-merge-policy",
+        "models-default-to-empty",
+        "keeps-a-per-profile-model",
         "managed-defaults-true-for-a-pre-existing-entry",
         "keeps-an-explicit-managed-false",
         "local-files-default-to-empty",
@@ -97,7 +99,8 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"setup_command": ["uv", "sync"]}, "setup_command"),
         ({"env": {"A": 1}}, "'env'"),
         ({"env_passthrough": ["", "OK"]}, "env_passthrough"),
-        ({"default_root_merge_policy": "nope"}, "default_root_merge_policy"),
+        ({"models": {"Claude Review": "opus"}}, "models"),
+        ({"models": {"claude_review": 4}}, "models"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),
     ],
     ids=[
@@ -113,13 +116,35 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         "a-non-string-setup-command",
         "a-non-flat-string-map-env",
         "an-empty-env-passthrough-entry",
-        "an-unknown-root-merge-policy",
+        "a-models-key-that-is-no-profile-id",
+        "a-non-string-model",
         "a-test-scope-with-no-command",
     ],
 )
 def test_load_repos_rejects_an_entry(tmp_path, entry, match):
     with pytest.raises(config.ConfigError, match=match):
         _load(tmp_path, {"path": "/r", **entry})
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [{"default_model": "sonnet"}, {"default_root_merge_policy": "skip"}],
+    ids=["default-model", "default-root-merge-policy"],
+)
+def test_a_retired_repo_key_is_dropped_on_read_and_gone_after_a_save(tmp_path, caplog, legacy):
+    """Ruling 165's upgrade path: an existing `repos.yaml` still loads, the
+    retired key is not carried along as an unknown extra (it would otherwise
+    round-trip forever), a warning names it, and the next save persists the
+    new shape. `default_model` has no one-to-one successor -- it was one model
+    for every provider -- so it is dropped, not guessed into `models:`."""
+    (key,) = legacy
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        (entry,) = _load(tmp_path, {"path": "/r", **legacy})
+    assert key not in entry
+    assert entry["models"] == {}
+    assert key in caplog.text
+    config.save_repos(tmp_path / "repos.yaml", [entry])
+    assert key not in (tmp_path / "repos.yaml").read_text()
 
 
 def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):

@@ -184,6 +184,9 @@ def resolve_invocation(
     #: A harness profile's `defaults:` (`resolve_agent_task`): the lowest rung,
     #: filling only what the item, the binding and the repo all left unset.
     profile_defaults: dict | None = None,
+    #: The harness profile id the launch runs on: the key the repo's
+    #: per-profile `models:` is read at (Ruling 165). None reads no repo model.
+    profile: str | None = None,
     #: A V1 task's own steering, already resolved to text from its item's
     #: snapshot (`resolve_agent_task`). Injected after the repo's, where a
     #: binding's `steering:` file names would go.
@@ -249,7 +252,7 @@ def resolve_invocation(
         # model: an unset `escalate_model` falls through to the ordinary chain.
         model=(eff_escalate_model if escalate else None)
         or eff_model
-        or repo.get("default_model")
+        or ((repo.get("models") or {}).get(profile) if profile else None)
         or pd.get("model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
@@ -351,8 +354,8 @@ def resolve_agent_task(
     `task.harness` is a *profile* id (`harness_profile`): the launch runs the
     profile's provider, from its `executable` when it sets one, and its
     `defaults` fill whatever nothing else chose -- they are the lowest rung,
-    under the item's override, the task's own field and the repo's
-    `default_model`. Raises `HarnessUnavailable`.
+    under the item's override, the task's own field and the repo's model for
+    this profile (`models:`). Raises `HarnessUnavailable`.
 
     `policy` is the task's resolved policy (`MaterializedChain.policy_for`),
     the only source of its tool lists and the winning source of its sandbox:
@@ -400,6 +403,7 @@ def resolve_agent_task(
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,
+        profile=profile.id,
         steering_texts=tuple(steering[n] for n in task.steering) if task.steering else (),
     )
     if policy is None:
@@ -637,7 +641,7 @@ async def run_agent_task(
     # `load_registry` checks that a binding's own model/effort/deny_tools/etc.
     # names a capability its harness declares, at config load -- but
     # `resolve_invocation` folds in values `load_registry` never sees: a
-    # repo's `deny_tools`/`default_model` (repos.yaml, editable in Settings ->
+    # repo's `deny_tools`/`models` (repos.yaml, editable in Settings ->
     # Repos) and a work item's own `agent_overrides` (model/effort). This is
     # the one place the fully merged value and the resolved harness are both
     # in hand, so a capability the harness does not declare is refused loudly

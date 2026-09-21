@@ -16,11 +16,10 @@ export const repo = (overrides: Partial<Repo> = {}): Repo => ({
   forge: "github",
   project: "acme/repo-a",
   enabled: true,
-  default_model: null,
+  models: {},
   deny_tools: [],
   steering: [],
   local_files: [],
-  default_root_merge_policy: "bump",
   managed: true,
   ...overrides,
 });
