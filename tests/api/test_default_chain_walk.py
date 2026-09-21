@@ -70,8 +70,26 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
     ]
     assert fake.merged == [1]
     evts = client.get(f"/api/work-items/{wid}/events").json()
-    completed = [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"]
-    assert completed[-1] == "post_merge_ci"
+    # `default-post-draft-flow-is-ordered`: every node, in the seeded order --
+    # the summary and final gate before the approval wait, merge after it.
+    assert [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"] == [
+        "spec",
+        "spec_approval",
+        "plan",
+        "plan_approval",
+        "implementation",
+        "verification",
+        "work_brief",
+        "local_review",
+        "draft_merge_request",
+        "merge_request_feedback",
+        "work_item_summary",
+        "chain_review",
+        "mark_ready",
+        "external_approval",
+        "merge",
+        "post_merge_ci",
+    ]
     ended = [e["payload"] for e in evts if e["type"] == "external_wait_ended"]
     assert {e["task"] for e in ended} == {
         "merge_request_feedback.ci.await_ci",

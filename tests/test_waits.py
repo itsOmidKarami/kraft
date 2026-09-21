@@ -340,6 +340,32 @@ async def test_actionable_automated_review_is_repaired_resynced_and_remeasured(
     assert ended == ["failed", "done"]
 
 
+async def test_a_chain_without_an_automated_review_task_never_waits_for_one(walk, item_on):
+    """`automated-review-is-an-explicit-optional-task`: a reviewer that would
+    stay pending forever is never asked, because nothing declared it."""
+
+    class NeverAsk(forge.FakeForge):
+        async def automated_review(self, *, repo, branch):
+            raise AssertionError("asked for an automated review no task declared")
+
+    it = await item_on([forge_node("open", "mr.open_draft"), forge_node("ci", "mr.ci")])
+
+    assert await walk(NeverAsk(review_results=["pending"]), it) == "completed"
+
+
+@pytest.mark.parametrize("key", ["webhook_event", "check_name", "comment_author", "command"])
+def test_a_template_cannot_configure_how_automated_review_is_read(key):
+    """`automated-review-implementation-is-not-template-configuration`: a
+    transport detail on the task, or on its wait, is refused at load -- the
+    forge backend owns it."""
+    from pydantic import ValidationError
+
+    task = {"id": "review", "kind": "forge", "target": "mr.automated_review"}
+    for authored in ({**task, key: "x"}, {**task, "wait": {key: "x"}}):
+        with pytest.raises(ValidationError, match=key):
+            v1_resolved([{"id": "feedback", "kind": "exec", "tasks": [authored]}])
+
+
 # --- policy bounds the wait (Kraft-5p69g) --------------------------------------
 
 
