@@ -21,7 +21,7 @@ import yaml
 from pydantic import ValidationError
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
-from kraft.templates.environment import Repository, RootPointerPolicy, WorkItemTarget, Workspace
+from kraft.templates.environment import RootPointerPolicy, WorkItemTarget, Workspace
 from kraft.templates.library import CHAINS_DIR, LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import (
     AgentTask,
@@ -53,7 +53,7 @@ def policy(**maxima) -> InstancePolicy:
 
 
 def repository_target() -> WorkItemTarget:
-    return WorkItemTarget.for_repository(Repository(id="api", path="/work/api"))
+    return WorkItemTarget.for_repository("api")
 
 
 def workspace_target() -> WorkItemTarget:
@@ -593,3 +593,33 @@ def test_a_task_fanned_out_to_a_repository_runs_under_that_repositorys_policy():
     assert materialized.policy_for(task, repository="api").deny_tools == ("Bash",)
     with pytest.raises(LookupError, match="nope"):
         materialized.policy_for(task, repository="nope")
+
+
+def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
+    """Kraft-iep21 (Ruling 177): the doc's `repos.yaml` is loaded by the one
+    reader the daemon uses, `config.load_repos`/`load_workspaces` -- a file
+    written from the doc connects its repositories rather than none. Areas
+    stay inside their repository's entry: a path-scoped context, never a
+    repository or forge target of its own
+    (`repositories-workspaces-and-areas-are-distinct`)."""
+    from kraft import config
+
+    path = tmp_path / "repos.yaml"
+    path.write_text(_fenced("repos.yaml"))
+
+    repos = {r["id"]: r for r in config.load_repos(path, validate_steering=False)}
+    assert sorted(repos) == ["api", "platform", "product_root"]
+    api, platform = repos["api"], repos["platform"]
+    assert (api["forge"], api["project"]) == ("github", "acme/api")
+    assert api["setup_command"] == "just setup" and api["local_files"] == [".env.test"]
+    assert (api["env"], api["env_passthrough"]) == ({"CI": "1"}, ["NPM_TOKEN"])
+    assert api["test_scopes"] == [{"paths": ["src/**", "tests/**"], "command": "just test"}]
+    assert api["policy"] == {"allowed_harnesses": ["codex_default", "claude_review"]}
+    assert set(platform["areas"]) == {"python_api", "java_worker"}
+    assert platform["areas"]["python_api"]["paths"] == ["services/api/**"]
+    assert repos["product_root"]["default_chain_template"] == "default"
+
+    (workspace,) = config.load_workspaces(path).values()
+    assert (workspace.id, workspace.root) == ("product", "product_root")
+    assert workspace.members["api"].path == "services/api"
+    assert workspace.root_pointer_default is RootPointerPolicy.IGNORE

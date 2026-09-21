@@ -447,7 +447,7 @@ async def test_a_chain_whose_plan_node_was_trimmed_still_reaches_chain_finalized
     nobody re-derives the legacy rule from the trimmed chain's shape.
     """
     from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
 
     resolved = v1_resolved(
         [
@@ -467,7 +467,7 @@ async def test_a_chain_whose_plan_node_was_trimmed_still_reaches_chain_finalized
         ]
     )
     chain = resolved.materialize(
-        target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
         attachment_kinds=frozenset({"plan"}),
     )

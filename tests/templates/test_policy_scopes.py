@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
-from kraft.templates.environment import Repository, WorkItemTarget
+from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, MaterializedChain, ResolvedChain
 
 
@@ -28,7 +28,7 @@ def _agent(id: str, **kw) -> dict:
 def _materialize(nodes: list[dict], *, instance: InstancePolicy | None = None, **chain):
     resolved = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes, **chain}))
     return resolved.materialize(
-        target=WorkItemTarget.for_repository(Repository(id="target", path="/r")),
+        target=WorkItemTarget.for_repository("target"),
         effective_policy=instance if instance is not None else _instance(),
     )
 

@@ -440,7 +440,7 @@ def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, 
     already-resolved `ResolvedChain` (e.g. `v1_named_chain(...)` for a shipped
     chain). A `MaterializedChain` passes through unchanged."""
     from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
     from kraft.templates.models import MaterializedChain, ResolvedChain
 
     if isinstance(nodes, MaterializedChain):
@@ -451,7 +451,7 @@ def v1_chain(nodes, *, repo, chain_id: str = "t", steering: dict | None = None, 
         else v1_resolved(nodes, chain_id=chain_id, steering=steering)
     )
     return resolved.materialize(
-        target=target or WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        target=target or WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
 

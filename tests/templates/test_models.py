@@ -10,7 +10,6 @@ from kraft.templates import models as tm
 from kraft.templates.environment import (
     HarnessProfile,
     HarnessProfileInput,
-    Repository,
     WorkItemTarget,
 )
 
@@ -287,7 +286,7 @@ def _materialized(chain: tm.ResolvedChain, kinds: frozenset[str]) -> tm.Resolved
     the production path, `materialize(attachment_kinds=...)`, not the
     `trim_for_attachments` wrapper nothing in `src/` calls."""
     return chain.materialize(
-        WorkItemTarget.for_repository(Repository(id="r", path="/r")),
+        WorkItemTarget.for_repository("r"),
         InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
         attachment_kinds=kinds,
     ).chain
@@ -327,7 +326,7 @@ def test_a_trim_that_orphans_a_reject_target_clears_it_rather_than_dangling():
     # which a dangling name would fail.
     assert tm.MaterializedChain.from_json(
         trimmed.materialize(
-            WorkItemTarget.for_repository(Repository(id="r", path="/r")),
+            WorkItemTarget.for_repository("r"),
             InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
         ).to_json()
     )
@@ -635,7 +634,7 @@ def policy(**maxima) -> InstancePolicy:
 
 def test_materialize_binds_the_target_and_effective_policy():
     chain = resolved(exec_node("spec", tasks=[agent("author")]))
-    target = WorkItemTarget.for_repository(Repository(id="api", path="/work/api"))
+    target = WorkItemTarget.for_repository("api")
     materialized = chain.materialize(target, policy())
 
     assert materialized.chain is chain
@@ -654,9 +653,7 @@ def test_materialize_applies_the_chains_own_policy_override():
             }
         )
     )
-    materialized = chain.materialize(
-        WorkItemTarget.for_repository(Repository(id="api", path="/work/api")), policy()
-    )
+    materialized = chain.materialize(WorkItemTarget.for_repository("api"), policy())
     assert materialized.policy.timeout_minutes == 15
 
 
@@ -672,7 +669,7 @@ def test_materialize_cannot_exceed_an_administrator_maximum():
     )
     with pytest.raises(PolicyError, match="administrator maximum"):
         chain.materialize(
-            WorkItemTarget.for_repository(Repository(id="api", path="/work/api")),
+            WorkItemTarget.for_repository("api"),
             policy(timeout_minutes=120),
         )
 
@@ -726,7 +723,7 @@ def test_a_skip_and_an_attachment_trim_are_one_drop_not_two():
             },
         ]
     )
-    target = WorkItemTarget.for_repository(Repository(id="target", path="/r"))
+    target = WorkItemTarget.for_repository("target")
     policy = InstancePolicy.from_input(InstancePolicyInput())
 
     # Either alone leaves one node standing.
@@ -777,7 +774,7 @@ def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
     # And it still round-trips: that is the failure a dangling target causes.
     tm.MaterializedChain.from_json(
         kept.materialize(
-            WorkItemTarget.for_repository(Repository(id="target", path="/r")),
+            WorkItemTarget.for_repository("target"),
             InstancePolicy.from_input(InstancePolicyInput()),
         ).to_json()
     )

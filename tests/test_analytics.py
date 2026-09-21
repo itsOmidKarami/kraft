@@ -564,10 +564,10 @@ def _v1_item(conn, wid, resolved, *, created):
     """A V1 row: `chain_definition` is `"{}"` (as `executor.entry.intake` writes
     it) and the chain lives only in `materialized_chain`."""
     from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
 
     materialized = resolved.materialize(
-        target=WorkItemTarget.for_repository(Repository(id="a", path="/a")),
+        target=WorkItemTarget.for_repository("a"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
     )
     _item(conn, wid, status="completed", created=created)

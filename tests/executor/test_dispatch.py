@@ -662,14 +662,14 @@ def _seeded(tmp_path, monkeypatch):
 
 def _materialize(templates, chain_id, repo):
     from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
     from kraft.templates.library import TemplateLibrary
 
     return (
         TemplateLibrary.from_yaml_dir(templates)
         .resolve_chain(chain_id)
         .materialize(
-            target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+            target=WorkItemTarget.for_repository("target"),
             effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
         )
     )
