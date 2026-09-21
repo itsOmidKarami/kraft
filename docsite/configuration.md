@@ -269,8 +269,8 @@ untouched.
 
 Upgrading: a `repos.yaml` from before workspaces still loads. `default_model`
 and `default_root_merge_policy` are dropped with a warning. Items with submodules
-now need a declared workspace: connect the root again, or add the `workspaces:`
-block and the `id`s by hand.
+now need a declared workspace: add the `workspaces:` block and the `id`s by
+hand, or disconnect the root and connect it again (which loses its settings).
 
 ## `access.yaml` — bind, password, remote access
 
