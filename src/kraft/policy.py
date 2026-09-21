@@ -701,3 +701,63 @@ class InstancePolicy:
 # means the legacy schema has to carry the V1 sections, and the V1 models sit
 # with the override engine that reads them.
 PolicyInput.model_rebuild()
+
+
+@dataclass(frozen=True)
+class CarriedPolicy:
+    """A pre-V1 `policy.yaml` moved onto the V1 seed's (Ruling 172): the seed,
+    with the operator's value for every key the V1 schema still has, and every
+    key it no longer has -- or whose value it refuses -- dropped and named with
+    the value it had, so a major update never resets a spend cap or a timeout
+    without saying so.
+
+    `loops:` is the one section whose *keys* changed: a legacy fix-loop cap
+    (`verify_fix_loop`, `rebase_bounce`, ...) names a loop V1 never runs, so an
+    entry is carried only when the V1 seed names the same loop."""
+
+    data: dict
+    #: Dotted key -> the value it had.
+    dropped: dict[str, object]
+
+    @classmethod
+    def from_legacy(cls, legacy: dict, seed: dict) -> CarriedPolicy:
+        data = {key: value for key, value in seed.items()}
+        dropped: dict[str, object] = {}
+        live_loops = set(seed.get("loops") or {})
+        for key, value in legacy.items():
+            if value is None:
+                continue
+            if key not in PolicyInput.model_fields:
+                dropped[key] = value
+            elif key == "loops" and isinstance(value, dict):
+                loops = dict(data.get("loops") or {})
+                for name, cap in value.items():
+                    if name in live_loops:
+                        loops[name] = cap
+                    else:
+                        dropped[f"loops.{name}"] = cap
+                data["loops"] = loops
+            else:
+                data[key] = value
+        # A carried value V1 refuses goes too: the result always loads.
+        while True:
+            try:
+                PolicyInput.model_validate(data)
+                return cls(data, dropped)
+            except ValidationError as exc:
+                loc = exc.errors()[0]["loc"]
+                if not loc or loc[0] not in legacy:
+                    raise
+                key, *rest = loc
+                if key == "loops" and rest:
+                    # One loop's cap, not the section: put back the seed's.
+                    name = rest[0]
+                    dropped[f"loops.{name}"] = data["loops"].pop(name)
+                    if name in live_loops:
+                        data["loops"][name] = seed["loops"][name]
+                    continue
+                dropped[key] = legacy[key]
+                if key in seed:
+                    data[key] = seed[key]
+                else:
+                    del data[key]

@@ -319,10 +319,10 @@ def chain_view(row) -> dict:
         raw = row["chain_definition"] if "chain_definition" in row.keys() else None
         legacy = json.loads(raw) if raw else {}
         return {**legacy, "nodes": legacy.get("nodes") or []}
-    return {"template_id": v1.chain.id, "nodes": [_node_view(n) for n in v1.chain.nodes]}
+    return {"template_id": v1.chain.id, "nodes": [node_view(n) for n in v1.chain.nodes]}
 
 
-def _node_view(node) -> dict:
+def node_view(node) -> dict:
     """One resolved V1 node in the shape the SPA's `ChainNode` speaks. See
     `chain_view` for why a gate reports itself under `gate_after`."""
     from kraft.templates.models import GateNode
@@ -348,6 +348,10 @@ def _node_view(node) -> dict:
         "fix_loop": f"{node.id}.fix_loop" if node.fix_loop else None,
         "auto_escalate": node.auto_review is not None if gate is not None else None,
         "on_failure": [task.path for step in node.on_failure for task in step.tasks] or None,
+        # The attachment kind that would drop this node at intake -- what the
+        # intake preview strikes through (Kraft-ene04). Declared, not decided:
+        # on an item's own chain the covered nodes are already gone.
+        "covered_by": node.covered_by,
     }
 
 

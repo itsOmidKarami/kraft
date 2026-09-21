@@ -134,7 +134,9 @@ kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
 kraft admin reload             # reread templates/registry from disk, no restart
-kraft admin update [--restart] # install the newest release (brew upgrade, if that's how you installed)
+kraft admin update [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
+kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
+kraft admin templates show ID --resolved  # one chain with its library components expanded
 kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
 kraft admin mcp                # serve the MCP tools over stdio
 ```
@@ -152,6 +154,19 @@ installed, back into the background if it was `--detach`ed, or — if it was
 running attached to a terminal — stopped with a note that only that terminal
 can bring it back. `kraft admin update --restart` chains the same restart
 onto a successful update.
+
+A home still holding the pre-V1 template configuration (a `registry.yaml` and
+no `library.yaml`) is not converted and not overwritten. The server starts
+degraded and refuses new work, and `kraft admin update` says what will change,
+asks, and only then moves the whole directory to a `templates.pre-v1-<time>`
+backup beside it and installs the V1 configuration. `-y` accepts without the
+question; with no terminal and no `-y` it changes nothing. `access.yaml`,
+`notify.yaml`, `theme.yaml`, `repos.yaml`, `intake.yaml`, `steering/` and
+`harnesses/` are carried across. `policy.yaml` starts from the V1 default and
+keeps your value for every key V1 still has; each key it drops is printed with
+its old value. The old chains and registry stay only in the backup. There is no
+migration helper. An update interrupted mid-swap is finished by the next start
+or `kraft admin update`, never reseeded over.
 
 The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an

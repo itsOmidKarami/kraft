@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -23,6 +23,14 @@ from kraft.templates import (
     load_registry,
     load_templates,
 )
+from kraft.templates.library import (
+    CHAINS_DIR,
+    LIBRARY_FILE,
+    TemplateIssue,
+    TemplateLibrary,
+    TemplateLibraryError,
+)
+from kraft.templates.models import ResolvedChain
 from kraft.worker import steering as steering_mod
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
@@ -57,6 +65,124 @@ async def list_templates(request: Request):
         }
         for tid, t in sorted(st.templates.valid.items())
     ]
+
+
+# ── Template Schema V1 inspection (docs/templates-v1-design.md "Validation
+# surface"). Declared before `/templates/{tid}`, which would otherwise take
+# `lint` for a template id. Every one of these reads and none writes: not a
+# file, and not the library the daemon is running (`st.library`).
+
+
+def _resolved_view(chain: ResolvedChain) -> dict:
+    """A resolved chain as the API shows it: the chain with `extends` expanded
+    -- what the author wrote plus what it inherited, no defaults filled in --
+    its canonical task paths, the steering text it selects, and the nodes in
+    the SPA's `ChainNode` shape. Nothing per work item: no target, no policy,
+    no attachment trim (`resolved-template-is-deterministic`)."""
+    return {
+        "id": chain.id,
+        "chain": chain.chain.model_dump(mode="json", exclude_unset=True),
+        "task_paths": list(chain.task_paths),
+        "steering": chain.steering or {},
+        "nodes": [store.node_view(n) for n in chain.nodes],
+    }
+
+
+def _issue_view(issue: TemplateIssue) -> dict:
+    return {"file": str(issue.file), "chain": issue.chain, "message": issue.message}
+
+
+@api_router.get("/templates/lint")
+async def lint_templates(request: Request):
+    """The installed library as it is on disk now, which is what an operator
+    who just edited it is asking about -- read into a scratch library, never
+    into `st.library` (`template-lint-reports-library-validity`)."""
+    st = request.app.state
+    report = await asyncio.to_thread(
+        TemplateLibrary.lint_dir,
+        st.templates_dir,
+        skills_dir=st.skills_dir,
+        instance_policy=getattr(st, "instance_policy", None),
+    )
+    return {
+        "valid": report.valid,
+        "chains": list(report.chains),
+        "issues": [_issue_view(i) for i in report.issues],
+    }
+
+
+@api_router.get("/templates/{tid}/resolved")
+async def get_resolved_template(tid: str, request: Request):
+    """A saved chain of the library this daemon runs, resolved and not
+    materialized (`resolved-template-api-shows-saved-chain`)."""
+    library = deps.library_or_503(request.app.state)
+    if tid not in library.chain_ids:
+        raise HTTPException(404, f"unknown chain template {tid!r}")
+    try:
+        return _resolved_view(library.resolve_chain(tid))
+    except TemplateLibraryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+class ResolveBody(BaseModel):
+    """`POST /templates/resolve`: one unsaved chain against the installed
+    library, or a complete unsaved library on its own -- never both."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chain: dict | None = None
+    #: `library.yaml`'s content, and the chains beside it.
+    library: dict | None = None
+    chains: list[dict] = []
+
+    @model_validator(mode="after")
+    def _one_input(self):
+        if (self.chain is None) == (self.library is None):
+            raise ValueError("send either 'chain' or 'library', not both and not neither")
+        if self.chains and self.library is None:
+            raise ValueError("'chains' come with a 'library'")
+        return self
+
+
+#: The nominal root of a request's unsaved input, so an error names the part of
+#: the request it is about the same way it would name a file. Nothing is there.
+_UNSAVED = Path("<unsaved>")
+
+
+def _unsaved_chain_path(body: dict, index: int) -> Path:
+    name = body.get("id") if isinstance(body.get("id"), str) else f"chain-{index}"
+    return _UNSAVED / CHAINS_DIR / f"{name}.yaml"
+
+
+@api_router.post("/templates/resolve")
+async def resolve_templates(body: ResolveBody, request: Request):
+    """Resolve input that is not saved, and leave it unsaved
+    (`resolve-api-supports-candidate-and-library-input`). Every chain that
+    resolves is in `chains`; every one that does not is an issue."""
+    st = request.app.state
+    issues: list[TemplateIssue] = []
+    try:
+        if body.chain is not None:
+            path = _unsaved_chain_path(body.chain, 0)
+            library, id = deps.library_or_503(st).with_chain(path, body.chain)
+            ids = [id]
+        else:
+            library = TemplateLibrary.from_mappings(
+                body.library,
+                [(_unsaved_chain_path(c, i), c) for i, c in enumerate(body.chains)],
+                library_path=_UNSAVED / LIBRARY_FILE,
+                skills_dir=st.skills_dir,
+            )
+            ids = list(library.chain_ids)
+    except TemplateLibraryError as exc:
+        return {"chains": [], "issues": [_issue_view(TemplateIssue(_UNSAVED, None, str(exc)))]}
+    chains = []
+    for id in ids:
+        try:
+            chains.append(_resolved_view(library.resolve_chain(id)))
+        except TemplateLibraryError as exc:
+            issues.append(TemplateIssue(_UNSAVED, id, str(exc)))
+    return {"chains": chains, "issues": [_issue_view(i) for i in issues]}
 
 
 @api_router.get("/templates/{tid}")
