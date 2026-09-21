@@ -16,14 +16,6 @@ from support.harness import fake_templates_dir, make_repo
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
-_FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
-
-
-@pytest.fixture
-def templates_dir(tmp_path):
-    return fake_templates_dir(tmp_path, "claude")
-
-
 NODES = [
     {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
     {"id": "verify", "tasks": ["on.test.run"], "gate_after": None, "fix_loop": "verify_fix_loop"},

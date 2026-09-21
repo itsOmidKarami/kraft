@@ -36,11 +36,6 @@ pytestmark = pytest.mark.api_client(default_setup=False)
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
 
-@pytest.fixture
-def templates_dir(tmp_path):
-    return fake_templates_dir(tmp_path, "claude")
-
-
 def _gated_chain():
     """`review` (exec) -> `human_review_approval` (gate)."""
     return v1_chain(

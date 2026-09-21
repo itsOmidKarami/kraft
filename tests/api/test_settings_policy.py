@@ -2,22 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
-from support.harness import fake_templates_dir
 
 #: No default repo entry for an unconnected repo (`support.api._client`): these read real config.
 pytestmark = pytest.mark.api_client(default_setup=False)
-
-
-_FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
-
-
-@pytest.fixture
-def templates_dir(tmp_path):
-    return fake_templates_dir(tmp_path, "claude")
 
 
 def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):

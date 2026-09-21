@@ -21,10 +21,6 @@ from kraft.paths import RunDirs
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
-
-
 def _write(path, text):
     path.write_text(text)
 

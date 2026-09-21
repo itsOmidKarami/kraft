@@ -360,6 +360,7 @@ def client(request, tmp_path, monkeypatch, templates_dir):
         @pytest.mark.api_client(default_setup=False)   # a test about repo config
         @pytest.mark.api_client(host="0.0.0.0")        # the locked-down posture
         @pytest.mark.api_client(bd_workspace=False)    # no KRAFT_BD_CWD
+        @pytest.mark.api_client(edit_templates=fn)     # fn(templates_dir) first
 
     Env a lifespan reads at startup that depends on another fixture goes in a
     module-level autouse fixture: autouse fixtures are set up first. This is
@@ -376,6 +377,10 @@ def client(request, tmp_path, monkeypatch, templates_dir):
     options = {}
     for mark in reversed(list(request.node.iter_markers("api_client"))):
         options |= mark.kwargs
+    # A test's own templates (a policy, a chain, a broken file), written into
+    # `templates_dir` before the lifespan reads it.
+    if edit_templates := options.pop("edit_templates", None):
+        edit_templates(templates_dir)
     with api_support._client(
         tmp_path, monkeypatch, templates_dir=templates_dir, **options
     ) as test_client:

@@ -23,35 +23,33 @@ from support.harness import make_repo
 from kraft import events, store
 
 
-def test_list_work_items_shape_and_cursor(tmp_path, monkeypatch):
-    with _client(tmp_path, monkeypatch) as client:
-        client.post(
-            "/api/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
-        )
-        body = client.get("/api/work-items").json()
-        assert set(body) == {"items", "cursor"}
-        assert isinstance(body["cursor"], int) and body["cursor"] > 0
-        item = body["items"][0]
-        assert set(item) >= {
-            "id",
-            "title",
-            "repo",
-            "status",
-            "chain_template",
-            "chain_definition",
-            "current_node_id",
-            "bead_id",
-            "created_at",
-            "updated_at",
-        }
-        assert isinstance(item["chain_definition"], dict)
-        assert item["chain_definition"]["nodes"][0]["id"]
+def test_list_work_items_shape_and_cursor(client, tmp_path):
+    client.post(
+        "/api/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
+    )
+    body = client.get("/api/work-items").json()
+    assert set(body) == {"items", "cursor"}
+    assert isinstance(body["cursor"], int) and body["cursor"] > 0
+    item = body["items"][0]
+    assert set(item) >= {
+        "id",
+        "title",
+        "repo",
+        "status",
+        "chain_template",
+        "chain_definition",
+        "current_node_id",
+        "bead_id",
+        "created_at",
+        "updated_at",
+    }
+    assert isinstance(item["chain_definition"], dict)
+    assert item["chain_definition"]["nodes"][0]["id"]
 
 
-def test_list_work_items_empty(tmp_path, monkeypatch):
-    with _client(tmp_path, monkeypatch) as client:
-        body = client.get("/api/work-items").json()
-        assert body == {"items": [], "cursor": 0}
+def test_list_work_items_empty(client):
+    body = client.get("/api/work-items").json()
+    assert body == {"items": [], "cursor": 0}
 
 
 def test_spa_catchall_serves_index_when_dist_present(tmp_path, monkeypatch):
@@ -126,42 +124,36 @@ def test_spa_catchall_404s_when_dist_absent(tmp_path, monkeypatch):
         assert client.get("/api/health").status_code == 200
 
 
-def test_list_hides_abandoned_items(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "paused")
-        client.post(f"/api/work-items/{wid}/abandon")
+def test_list_hides_abandoned_items(client, repo):
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+    client.post(f"/api/work-items/{wid}/abandon")
 
-        visible = client.get("/api/work-items").json()["items"]
-        everything = client.get("/api/work-items?include_abandoned=true").json()["items"]
+    visible = client.get("/api/work-items").json()["items"]
+    everything = client.get("/api/work-items?include_abandoned=true").json()["items"]
 
-        assert wid not in [i["id"] for i in visible]
-        assert wid in [i["id"] for i in everything]
+    assert wid not in [i["id"] for i in visible]
+    assert wid in [i["id"] for i in everything]
 
 
-def test_cli_can_list_abandoned_items(tmp_path, monkeypatch):
+def test_cli_can_list_abandoned_items(client, repo, monkeypatch):
     """`kraft abandon` without a way to see the result makes the item vanish:
     hidden from the board by design, and unreachable from the CLI by omission."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "paused")
-        client.post(f"/api/work-items/{wid}/abandon")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+    client.post(f"/api/work-items/{wid}/abandon")
 
-        import kraft.client as kc
-        from kraft.client import transport
+    import kraft.client as kc
+    from kraft.client import transport
 
-        monkeypatch.setattr(
-            transport, "_get", lambda path: _as_coro(client.get(f"/api{path}").json())
-        )
-        visible = asyncio.run(kc.list_work_items())
-        everything = asyncio.run(kc.list_work_items(include_abandoned=True))
+    monkeypatch.setattr(transport, "_get", lambda path: _as_coro(client.get(f"/api{path}").json()))
+    visible = asyncio.run(kc.list_work_items())
+    everything = asyncio.run(kc.list_work_items(include_abandoned=True))
 
-        assert wid not in [i["id"] for i in visible]
-        assert wid in [i["id"] for i in everything]
+    assert wid not in [i["id"] for i in visible]
+    assert wid in [i["id"] for i in everything]
 
 
 def _seed_repo(client, wid, **kwargs):
@@ -217,33 +209,31 @@ async def _as_coro(value):
     return value
 
 
-def test_deferred_minor_findings_reach_the_detail_payload(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        nit = {
-            "severity": "minor",
-            "message": "naming nit",
-            "file": "a.py",
-            "line": 3,
-            "source_plugin": "fake",
-        }
-        real = {
-            "severity": "important",
-            "message": "real",
-            "file": "a.py",
-            "line": 9,
-            "source_plugin": "fake",
-        }
-        payload = {"node_id": "review", "cycle": 0, "findings": [nit, real], "fingerprints": []}
-        # twice: the roll-up must deduplicate by fingerprint
-        _seed_events(client, wid, [payload, payload])
+def test_deferred_minor_findings_reach_the_detail_payload(client, repo):
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    nit = {
+        "severity": "minor",
+        "message": "naming nit",
+        "file": "a.py",
+        "line": 3,
+        "source_plugin": "fake",
+    }
+    real = {
+        "severity": "important",
+        "message": "real",
+        "file": "a.py",
+        "line": 9,
+        "source_plugin": "fake",
+    }
+    payload = {"node_id": "review", "cycle": 0, "findings": [nit, real], "fingerprints": []}
+    # twice: the roll-up must deduplicate by fingerprint
+    _seed_events(client, wid, [payload, payload])
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert [f["message"] for f in body["deferred_findings"]] == ["naming nit"]
 
 
 def _seed_escalation_session(client, wid, *, session_id, thread, status="done"):
@@ -271,174 +261,160 @@ def _seed_escalation_session(client, wid, *, session_id, thread, status="done"):
         conn.close()
 
 
-def test_get_work_item_includes_escalation_threads(tmp_path, monkeypatch):
+def test_get_work_item_includes_escalation_threads(client, repo):
     """Kraft-dkb6g: `escalation_threads` projects one entry per thread,
     oldest first, with the shape the UI reads (`thread`, `session_id`,
     `turns`, `started_at`, `ended_at`, `status`)."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_escalation_session(client, wid, session_id="e1", thread=1, status="done")
-        _seed_escalation_session(client, wid, session_id="e2", thread=1, status="done")
-        _seed_escalation_session(client, wid, session_id="e3", thread=2, status="needs_context")
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_escalation_session(client, wid, session_id="e1", thread=1, status="done")
+    _seed_escalation_session(client, wid, session_id="e2", thread=1, status="done")
+    _seed_escalation_session(client, wid, session_id="e3", thread=2, status="needs_context")
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        threads = body["escalation_threads"]
-        assert [t["thread"] for t in threads] == [1, 2]
-        assert [t["turns"] for t in threads] == [2, 1]
-        assert threads[0]["session_id"] == "e2"
-        assert threads[1]["session_id"] == "e3"
-        assert threads[1]["status"] == "needs_context"
-        assert threads[0]["started_at"] and threads[0]["ended_at"]
+    body = client.get(f"/api/work-items/{wid}").json()
+    threads = body["escalation_threads"]
+    assert [t["thread"] for t in threads] == [1, 2]
+    assert [t["turns"] for t in threads] == [2, 1]
+    assert threads[0]["session_id"] == "e2"
+    assert threads[1]["session_id"] == "e3"
+    assert threads[1]["status"] == "needs_context"
+    assert threads[0]["started_at"] and threads[0]["ended_at"]
 
 
-def test_get_work_item_survives_an_invalid_policy(tmp_path, monkeypatch):
+def test_get_work_item_survives_an_invalid_policy(client, repo):
     """startup.py sets app.state.policy to None on a PolicyError; the detail
     route must fall back to NO_BUDGET like every other st.policy reader
     instead of raising AttributeError on st.policy.budget."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        client.app.state.policy = None
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    client.app.state.policy = None
 
-        resp = client.get(f"/api/work-items/{wid}")
-        assert resp.status_code == 200
-        assert resp.json()["id"] == wid
+    resp = client.get(f"/api/work-items/{wid}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == wid
 
 
-def test_concerns_reach_the_detail_payload(tmp_path, monkeypatch):
+def test_concerns_reach_the_detail_payload(client, repo):
     """`done_with_concerns` text rides `worker_session_exited` (written by
     adapters.subprocess.run_task at session exit) — read from the event log,
     the same shape as `deferred_findings`, one entry per session that reported
     a concern."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_events(
-            client,
-            wid,
-            [{"session_id": "s1", "status": "done_with_concerns", "concerns": "untested path"}],
-            event_type="worker_session_exited",
-        )
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_events(
+        client,
+        wid,
+        [{"session_id": "s1", "status": "done_with_concerns", "concerns": "untested path"}],
+        event_type="worker_session_exited",
+    )
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["concerns"] == ["untested path"]
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["concerns"] == ["untested path"]
 
 
-def test_mr_ref_reaches_the_detail_payload(tmp_path, monkeypatch):
+def test_mr_ref_reaches_the_detail_payload(client, repo):
     """A single-repo item gets no `work_item_repos` row (`repos_for`), so
     `mr_opened` (Kraft-d2sq) is the only place its merge request lives --
     the detail screen's "Open MR" link reads it from here."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        assert client.get(f"/api/work-items/{wid}").json()["mr_ref"] is None
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["mr_ref"] is None
 
-        _seed_events(
-            client,
-            wid,
-            [{"number": 12, "url": "https://forge.example/mr/12"}],
-            event_type="mr_opened",
-        )
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["mr_ref"] == {"number": 12, "url": "https://forge.example/mr/12"}
+    _seed_events(
+        client,
+        wid,
+        [{"number": 12, "url": "https://forge.example/mr/12"}],
+        event_type="mr_opened",
+    )
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["mr_ref"] == {"number": 12, "url": "https://forge.example/mr/12"}
 
-        # A retry that reuses the MR logs a fresh event -- the latest one wins,
-        # not the first-open URL for a branch since force-pushed.
-        _seed_events(
-            client,
-            wid,
-            [{"number": 12, "url": "https://forge.example/mr/12?refresh"}],
-            event_type="mr_opened",
-        )
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["mr_ref"]["url"] == "https://forge.example/mr/12?refresh"
+    # A retry that reuses the MR logs a fresh event -- the latest one wins,
+    # not the first-open URL for a branch since force-pushed.
+    _seed_events(
+        client,
+        wid,
+        [{"number": 12, "url": "https://forge.example/mr/12?refresh"}],
+        event_type="mr_opened",
+    )
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["mr_ref"]["url"] == "https://forge.example/mr/12?refresh"
 
 
-def test_mr_ref_stays_silent_on_a_multi_repo_item(tmp_path, monkeypatch):
+def test_mr_ref_stays_silent_on_a_multi_repo_item(client, repo):
     """A multi-repo item's `open_mr` node emits one `mr_opened` per target
     repo with no repo identifier in the payload -- the latest one is as
     likely to be a submodule's as the root's, so this must not guess."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1)
-        _seed_events(
-            client,
-            wid,
-            [{"number": 3, "url": "https://forge.example/mr/3"}],
-            event_type="mr_opened",
-        )
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["mr_ref"] is None
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1)
+    _seed_events(
+        client,
+        wid,
+        [{"number": 3, "url": "https://forge.example/mr/3"}],
+        event_type="mr_opened",
+    )
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["mr_ref"] is None
 
 
-def test_stop_reason_reaches_the_detail_payload(tmp_path, monkeypatch):
+def test_stop_reason_reaches_the_detail_payload(client, repo):
     """Kraft-esc: the screen has to tell a loop escalation from a crash that
     happened to stop the item on a fix-loop node, and the reason is the only
     thing that distinguishes them."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        assert client.get(f"/api/work-items/{wid}").json()["stop_reason"] is None
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["stop_reason"] is None
 
-        _seed_events(
-            client,
-            wid,
-            [{"node_id": "verify", "reason": "executor crashed: RuntimeError('boom')"}],
-            event_type="work_item_needs_human",
-        )
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["stop_reason"] == "executor crashed: RuntimeError('boom')"
+    _seed_events(
+        client,
+        wid,
+        [{"node_id": "verify", "reason": "executor crashed: RuntimeError('boom')"}],
+        event_type="work_item_needs_human",
+    )
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["stop_reason"] == "executor crashed: RuntimeError('boom')"
 
 
-def test_concerns_stop_at_the_gate_that_answered_them(tmp_path, monkeypatch):
+def test_concerns_stop_at_the_gate_that_answered_them(client, repo):
     """Kraft-ub2: a concern belongs to the *next* gate. Once a gate is resolved,
     concerns raised before it must not be re-posed at every later gate — only
     what a session reported since then."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_events(
-            client,
-            wid,
-            [{"session_id": "s1", "status": "done_with_concerns", "concerns": "old worry"}],
-            event_type="worker_session_exited",
-        )
-        _seed_events(client, wid, [{"gate": "spec_approval"}], event_type="gate_approved")
-        assert client.get(f"/api/work-items/{wid}").json()["concerns"] == []
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_events(
+        client,
+        wid,
+        [{"session_id": "s1", "status": "done_with_concerns", "concerns": "old worry"}],
+        event_type="worker_session_exited",
+    )
+    _seed_events(client, wid, [{"gate": "spec_approval"}], event_type="gate_approved")
+    assert client.get(f"/api/work-items/{wid}").json()["concerns"] == []
 
-        _seed_events(
-            client,
-            wid,
-            [{"session_id": "s2", "status": "done_with_concerns", "concerns": "new worry"}],
-            event_type="worker_session_exited",
-        )
-        assert client.get(f"/api/work-items/{wid}").json()["concerns"] == ["new worry"]
+    _seed_events(
+        client,
+        wid,
+        [{"session_id": "s2", "status": "done_with_concerns", "concerns": "new worry"}],
+        event_type="worker_session_exited",
+    )
+    assert client.get(f"/api/work-items/{wid}").json()["concerns"] == ["new worry"]
 
 
-def test_concerns_excludes_the_judges_own_reasoning(tmp_path, monkeypatch):
+def test_concerns_excludes_the_judges_own_reasoning(client, repo):
     """JUDGE_PROMPT/SKILL.md require the judge to write `concerns` on every
     verdict, including a plain `continue`. Without the same `worker_sessions`
     join `walk._diagnosis_bundle` uses to skip the judge's own sessions, that
@@ -446,201 +422,187 @@ def test_concerns_excludes_the_judges_own_reasoning(tmp_path, monkeypatch):
     answer for."""
     from kraft.executor import dispatch
 
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_session(client, wid, session_id="measure-1", hook_point="on.check")
-        _seed_session(client, wid, session_id="judge-1", hook_point=dispatch.JUDGE_HOOK)
-        _seed_events(
-            client,
-            wid,
-            [
-                {
-                    "session_id": "measure-1",
-                    "status": "done_with_concerns",
-                    "concerns": "flaky under load",
-                }
-            ],
-            event_type="worker_session_exited",
-        )
-        _seed_events(
-            client,
-            wid,
-            [{"session_id": "judge-1", "status": "continue", "concerns": "judge's own reasoning"}],
-            event_type="worker_session_exited",
-        )
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_session(client, wid, session_id="measure-1", hook_point="on.check")
+    _seed_session(client, wid, session_id="judge-1", hook_point=dispatch.JUDGE_HOOK)
+    _seed_events(
+        client,
+        wid,
+        [
+            {
+                "session_id": "measure-1",
+                "status": "done_with_concerns",
+                "concerns": "flaky under load",
+            }
+        ],
+        event_type="worker_session_exited",
+    )
+    _seed_events(
+        client,
+        wid,
+        [{"session_id": "judge-1", "status": "continue", "concerns": "judge's own reasoning"}],
+        event_type="worker_session_exited",
+    )
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["concerns"] == ["flaky under load"]
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["concerns"] == ["flaky under load"]
 
 
-def test_needs_context_question_reaches_the_detail_payload(tmp_path, monkeypatch):
+def test_needs_context_question_reaches_the_detail_payload(client, repo, monkeypatch):
     """The agent's question, end to end: fake-claude writes it to the result
     file, the executor folds it into the `needs_context: <question>` reason
     on `work_item_needs_human`, and the detail endpoint reads it back from
     that reason — without ever reading `result_path` off disk itself."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
-        ).json()["id"]
-        body = _wait_for_status(client, wid, "needs_human")
-        assert body["needs_context_question"] == "which repo does this target?"
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+    ).json()["id"]
+    body = _wait_for_status(client, wid, "needs_human")
+    assert body["needs_context_question"] == "which repo does this target?"
 
 
-def test_needs_context_question_does_not_resurface_a_stale_answer(tmp_path, monkeypatch):
+def test_needs_context_question_does_not_resurface_a_stale_answer(client, repo):
     """A second `needs_context` stop whose result file omitted `question`
     (the fallback kraft.executor.dispatch.needs_context_question uses is folded into the
     reason as `"(no question given)"`) must show that fallback, not an
     earlier stop's already-answered question — the bug an unbounded scan of
     `worker_session_exited.question` events would have produced."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        _seed_events(
-            client,
-            wid,
-            [
-                {"node_id": "implementation", "reason": "needs_context: which db?"},
-                {"node_id": "implementation", "reason": "needs_context: (no question given)"},
-            ],
-            event_type="work_item_needs_human",
-        )
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    _seed_events(
+        client,
+        wid,
+        [
+            {"node_id": "implementation", "reason": "needs_context: which db?"},
+            {"node_id": "implementation", "reason": "needs_context: (no question given)"},
+        ],
+        event_type="work_item_needs_human",
+    )
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert body["needs_context_question"] == "(no question given)"
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["needs_context_question"] == "(no question given)"
 
 
-def test_work_item_detail_reports_steerable_per_current_node(tmp_path, monkeypatch):
+def test_work_item_detail_reports_steerable_per_current_node(client, repo):
     """Kraft-bz9b: the detail screen drops its steer box on `steerable: false`
     rather than offer text `retry` would 409 on. `merge`, not `open_mr`
     (Kraft-cbr): `mr_checks` right after `open_mr` now carries `fix_loop`,
     so a steer given there could reach it; `merge` is the chain's last node
     and forge-kind with no fix_loop, so nothing downstream can ever steer."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
+    wid = _post_default(client, repo)
 
-        _force_node(wid, "merge", "needs_human")
-        assert client.get(f"/api/work-items/{wid}").json()["steerable"] is False
+    _force_node(wid, "merge", "needs_human")
+    assert client.get(f"/api/work-items/{wid}").json()["steerable"] is False
 
-        _force_node(wid, "implementation", "needs_human")
-        assert client.get(f"/api/work-items/{wid}").json()["steerable"] is True
+    _force_node(wid, "implementation", "needs_human")
+    assert client.get(f"/api/work-items/{wid}").json()["steerable"] is True
 
 
-def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(tmp_path, monkeypatch):
+def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(client, repo):
     """The whole capture path in one go: the agent reports tokens on its final
     envelope, the adapter prices and stores them, and GET /work-items/{id}
     rolls them up per node and per item."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed", timeout=120)
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed", timeout=120)
 
-        usage = client.get(f"/api/work-items/{wid}").json()["usage"]
-        impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
-        # 1000 input + 500 cache-read, 200 output
-        assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
-        # cost is the agent's own number, carried through untouched
-        assert impl["cost_usd"] == pytest.approx(0.035)
-        assert impl["cost_complete"] is True
-        assert impl["wall_ms"] is not None and impl["rounds"] == 1
+    usage = client.get(f"/api/work-items/{wid}").json()["usage"]
+    impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
+    # 1000 input + 500 cache-read, 200 output
+    assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
+    # cost is the agent's own number, carried through untouched
+    assert impl["cost_usd"] == pytest.approx(0.035)
+    assert impl["cost_complete"] is True
+    assert impl["wall_ms"] is not None and impl["rounds"] == 1
 
-        # the non-agent node ran but reports no tokens — that is not a hole in
-        # the billing, and must not make the total read as a floor. (V1
-        # quick-task has no `env_setup` node; `verify` is the non-agent one.)
-        verify = next(n for n in usage["by_node"] if n["node"] == "verify")
-        assert verify["tokens_in"] == 0
-        assert verify["cost_complete"] is True
+    # the non-agent node ran but reports no tokens — that is not a hole in
+    # the billing, and must not make the total read as a floor. (V1
+    # quick-task has no `env_setup` node; `verify` is the non-agent one.)
+    verify = next(n for n in usage["by_node"] if n["node"] == "verify")
+    assert verify["tokens_in"] == 0
+    assert verify["cost_complete"] is True
 
-        assert usage["total"]["tokens_in"] == impl["tokens_in"]
-        assert usage["total"]["cost_usd"] == pytest.approx(0.035)
-        assert usage["total"]["cost_complete"] is True
+    assert usage["total"]["tokens_in"] == impl["tokens_in"]
+    assert usage["total"]["cost_usd"] == pytest.approx(0.035)
+    assert usage["total"]["cost_complete"] is True
 
 
-def test_judge_stop_note_reaches_the_detail_payload(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        finding = {
-            "severity": "important",
-            "message": "still broken",
-            "file": "a.py",
-            "line": 4,
-            "source_plugin": "on.check",
-        }
-        continued = {
-            "node_id": "verify",
-            "cycle": 1,
-            "verdict": "continue",
-            "reasoning": "shrinking, worth another cycle",
-            "findings": [finding],
-        }
-        downgraded = {
-            "node_id": "verify",
-            "cycle": 2,
-            "verdict": "stop_downgrade",
-            "reasoning": "real but not worth chasing further",
-            "findings": [finding],
-        }
-        _seed_events(client, wid, [continued, downgraded], event_type="judge_verdict")
+def test_judge_stop_note_reaches_the_detail_payload(client, repo):
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    finding = {
+        "severity": "important",
+        "message": "still broken",
+        "file": "a.py",
+        "line": 4,
+        "source_plugin": "on.check",
+    }
+    continued = {
+        "node_id": "verify",
+        "cycle": 1,
+        "verdict": "continue",
+        "reasoning": "shrinking, worth another cycle",
+        "findings": [finding],
+    }
+    downgraded = {
+        "node_id": "verify",
+        "cycle": 2,
+        "verdict": "stop_downgrade",
+        "reasoning": "real but not worth chasing further",
+        "findings": [finding],
+    }
+    _seed_events(client, wid, [continued, downgraded], event_type="judge_verdict")
 
-        body = client.get(f"/api/work-items/{wid}").json()
-        assert len(body["judge_stop_note"]) == 1  # only the stop_downgrade verdict
-        note = body["judge_stop_note"][0]
-        assert note["node_id"] == "verify"
-        assert note["reasoning"] == "real but not worth chasing further"
-        assert [f["message"] for f in note["findings"]] == ["still broken"]
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert len(body["judge_stop_note"]) == 1  # only the stop_downgrade verdict
+    note = body["judge_stop_note"][0]
+    assert note["node_id"] == "verify"
+    assert note["reasoning"] == "real but not worth chasing further"
+    assert [f["message"] for f in note["findings"]] == ["still broken"]
 
 
-def test_judge_stop_note_stops_at_the_last_resolved_gate(tmp_path, monkeypatch):
+def test_judge_stop_note_stops_at_the_last_resolved_gate(client, repo):
     """A note the human already saw at the gate they approved must not be
     re-posed at every later gate — the same Kraft-ub2 boundary `_concerns`
     keeps."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
-        ).json()["id"]
-        finding = {
-            "severity": "important",
-            "message": "still broken",
-            "file": "a.py",
-            "line": 4,
-            "source_plugin": "on.check",
-        }
-        answered = {
-            "node_id": "verify",
-            "cycle": 2,
-            "verdict": "stop_downgrade",
-            "reasoning": "the human already approved this one",
-            "findings": [finding],
-        }
-        _seed_events(client, wid, [answered], event_type="judge_verdict")
-        _seed_events(client, wid, [{"gate": "human_review_approval"}], event_type="gate_approved")
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+    ).json()["id"]
+    finding = {
+        "severity": "important",
+        "message": "still broken",
+        "file": "a.py",
+        "line": 4,
+        "source_plugin": "on.check",
+    }
+    answered = {
+        "node_id": "verify",
+        "cycle": 2,
+        "verdict": "stop_downgrade",
+        "reasoning": "the human already approved this one",
+        "findings": [finding],
+    }
+    _seed_events(client, wid, [answered], event_type="judge_verdict")
+    _seed_events(client, wid, [{"gate": "human_review_approval"}], event_type="gate_approved")
 
-        assert client.get(f"/api/work-items/{wid}").json()["judge_stop_note"] == []
+    assert client.get(f"/api/work-items/{wid}").json()["judge_stop_note"] == []
 
-        later = dict(answered, node_id="mr_checks", reasoning="new, after the gate")
-        _seed_events(client, wid, [later], event_type="judge_verdict")
-        notes = client.get(f"/api/work-items/{wid}").json()["judge_stop_note"]
-        assert [n["reasoning"] for n in notes] == ["new, after the gate"]
+    later = dict(answered, node_id="mr_checks", reasoning="new, after the gate")
+    _seed_events(client, wid, [later], event_type="judge_verdict")
+    notes = client.get(f"/api/work-items/{wid}").json()["judge_stop_note"]
+    assert [n["reasoning"] for n in notes] == ["new, after the gate"]
 
 
 def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
@@ -705,7 +667,7 @@ def test_steerable_is_answered_off_the_v1_snapshot(tmp_path, monkeypatch):
     assert asyncio.run(scenario()) == {"implementation": True, "merge": False}
 
 
-def test_a_v1_item_lists_and_renders_its_chain_nodes(tmp_path, monkeypatch):
+def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
     """H1's other half. `chain_definition` is `"{}"` on a V1 row, and the board
     draws its stage bar and names the current node from
     `chain_definition.nodes` -- so the raw column made every board row blank
@@ -721,53 +683,49 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(tmp_path, monkeypatch):
     "this chain has no gates", which is why `ItemCard.gateNodeId` returned null
     for every V1 item and the gate's document door disappeared.
     """
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        created = client.post(
-            "/api/work-items",
-            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-        ).json()
-        wid = created["id"]
+    created = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()
+    wid = created["id"]
 
-        listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
-        detail = client.get(f"/api/work-items/{wid}").json()
+    listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+    detail = client.get(f"/api/work-items/{wid}").json()
 
-        for payload in (listed, detail):
-            nodes = payload["chain_definition"]["nodes"]
-            assert [n["id"] for n in nodes[:2]] == ["spec", "spec_approval"]
-            assert nodes[0]["kind"] == "exec" and nodes[1]["kind"] == "gate"
-            # A gate declares no execution shape; an exec node's tasks are
-            # canonical paths, which is what V1 has instead of hook names.
-            assert nodes[0]["tasks"] == ["spec.main.author"] and nodes[1]["tasks"] == []
-            assert nodes[0]["gate_after"] is None, "an exec node is not a gate"
-            assert nodes[1]["gate_after"] == "spec_approval"
-            assert nodes[1]["reject_to"] == "spec"
-            # `gateNodeId`'s question -- "which node owns gate `spec_approval`"
-            # -- resolves, which is the door to the gate's document.
-            assert [n["id"] for n in nodes if n["gate_after"] == "spec_approval"] == [
-                "spec_approval"
-            ]
-            # The fields the Config tab renders, where a blank reads as
-            # "not configured": the fix-loop *cap key*, and whether the gate
-            # declares a reviewing task.
-            impl = next(n for n in nodes if n["id"] == "implementation")
-            assert impl["fix_loop"] == "implementation.fix_loop"
-            assert impl["steps"] == [
-                ["implementation.implementation.implement"],
-                ["implementation.verification.test_changed_scopes"],
-            ]
-            assert nodes[1]["auto_escalate"] is False
-            assert payload["chain_definition"]["template_id"] == "default"
-
-        # And the third door: `POST /work-items`' own 201 body, which only
-        # carries a chain on the autostart branch. It shipped the raw column, so
-        # `kraft item create --json` printed a chain with no nodes.
-        started = client.post(
-            "/api/work-items",
-            json={"title": "t2", "repo": str(repo), "chain_template": "default"},
-        ).json()
-        assert [n["id"] for n in started["chain_definition"]["nodes"][:2]] == [
-            "spec",
-            "spec_approval",
+    for payload in (listed, detail):
+        nodes = payload["chain_definition"]["nodes"]
+        assert [n["id"] for n in nodes[:2]] == ["spec", "spec_approval"]
+        assert nodes[0]["kind"] == "exec" and nodes[1]["kind"] == "gate"
+        # A gate declares no execution shape; an exec node's tasks are
+        # canonical paths, which is what V1 has instead of hook names.
+        assert nodes[0]["tasks"] == ["spec.main.author"] and nodes[1]["tasks"] == []
+        assert nodes[0]["gate_after"] is None, "an exec node is not a gate"
+        assert nodes[1]["gate_after"] == "spec_approval"
+        assert nodes[1]["reject_to"] == "spec"
+        # `gateNodeId`'s question -- "which node owns gate `spec_approval`"
+        # -- resolves, which is the door to the gate's document.
+        assert [n["id"] for n in nodes if n["gate_after"] == "spec_approval"] == ["spec_approval"]
+        # The fields the Config tab renders, where a blank reads as
+        # "not configured": the fix-loop *cap key*, and whether the gate
+        # declares a reviewing task.
+        impl = next(n for n in nodes if n["id"] == "implementation")
+        assert impl["fix_loop"] == "implementation.fix_loop"
+        assert impl["steps"] == [
+            ["implementation.implementation.implement"],
+            ["implementation.verification.test_changed_scopes"],
         ]
-        assert started["current_node_id"] == "spec"
+        assert nodes[1]["auto_escalate"] is False
+        assert payload["chain_definition"]["template_id"] == "default"
+
+    # And the third door: `POST /work-items`' own 201 body, which only
+    # carries a chain on the autostart branch. It shipped the raw column, so
+    # `kraft item create --json` printed a chain with no nodes.
+    started = client.post(
+        "/api/work-items",
+        json={"title": "t2", "repo": str(repo), "chain_template": "default"},
+    ).json()
+    assert [n["id"] for n in started["chain_definition"]["nodes"][:2]] == [
+        "spec",
+        "spec_approval",
+    ]
+    assert started["current_node_id"] == "spec"

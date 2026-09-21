@@ -10,155 +10,136 @@ import subprocess
 import time
 from pathlib import Path
 
-from support.api import _client, _force_node, _poll_events, _post_default, _set_status
-from support.harness import make_repo
+from support.api import _force_node, _poll_events, _post_default, _set_status
 
 
-def test_happy_path_via_api(tmp_path, monkeypatch):
+def test_happy_path_via_api(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={
-                "title": "make the failing test pass",
-                "repo": str(repo),
-                "chain_template": "quick-task",
-            },
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed")
+    wid = client.post(
+        "/api/work-items",
+        json={
+            "title": "make the failing test pass",
+            "repo": str(repo),
+            "chain_template": "quick-task",
+        },
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed")
 
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "completed"
-        # implementation's own agent task and verify's changed-test-scope task.
-        # V1 has no `env_setup` node, so no session stands in for one. C1's
-        # implementation-time test gate (Kraft-s7c04.8) was reverted
-        # 2026-09-16 -- see test_walk.py's test_run_verify_failure_stops_at_verify.
-        assert len(item["worker_sessions"]) == 2
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "completed"
+    # implementation's own agent task and verify's changed-test-scope task.
+    # V1 has no `env_setup` node, so no session stands in for one. C1's
+    # implementation-time test gate (Kraft-s7c04.8) was reverted
+    # 2026-09-16 -- see test_walk.py's test_run_verify_failure_stops_at_verify.
+    assert len(item["worker_sessions"]) == 2
 
-        run_dir = Path(client.app.state.run_dirs.base)
-        assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
+    run_dir = Path(client.app.state.run_dirs.base)
+    assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
 
-        # 4B: each agent session's summary is ingested and linked to the work item
-        impl_session = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
-        assert impl_session["session_summary_ref"] == (
-            f".engineering/sessions/{impl_session['id']}.md"
-        )
-        for _ in range(100):
-            docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
-            if docs:
-                break
-            time.sleep(0.05)
-        summaries = [d for d in docs if d["source_kind"] == "session_summary"]
-        assert summaries, f"no session summary linked to {wid}"
-        assert {d["path"] for d in summaries} >= {impl_session["session_summary_ref"]}
-        assert any(d["worker_session_id"] == impl_session["id"] for d in docs)
+    # 4B: each agent session's summary is ingested and linked to the work item
+    impl_session = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
+    assert impl_session["session_summary_ref"] == (f".engineering/sessions/{impl_session['id']}.md")
+    for _ in range(100):
+        docs = client.get(f"/api/work-items/{wid}/documents").json()["documents"]
+        if docs:
+            break
+        time.sleep(0.05)
+    summaries = [d for d in docs if d["source_kind"] == "session_summary"]
+    assert summaries, f"no session summary linked to {wid}"
+    assert {d["path"] for d in summaries} >= {impl_session["session_summary_ref"]}
+    assert any(d["worker_session_id"] == impl_session["id"] for d in docs)
 
-        # and the summary is searchable, carrying its links inline
-        hits = client.get("/api/search", params={"q": "fake-claude session"}).json()["results"]
-        assert hits, "session summary not searchable"
-        assert any(
-            ln["work_item_id"] == wid for h in hits for ln in h["links"] if ln["work_item_id"]
-        )
+    # and the summary is searchable, carrying its links inline
+    hits = client.get("/api/search", params={"q": "fake-claude session"}).json()["results"]
+    assert hits, "session summary not searchable"
+    assert any(ln["work_item_id"] == wid for h in hits for ln in h["links"] if ln["work_item_id"])
 
-        # log endpoint returns the agent's stdout
-        impl = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
-        log = client.get(f"/api/worker-sessions/{impl['id']}/log")
-        assert log.status_code == 200
-        assert "is_error" in log.text
+    # log endpoint returns the agent's stdout
+    impl = next(s for s in item["worker_sessions"] if s["node_id"] == "implementation")
+    log = client.get(f"/api/worker-sessions/{impl['id']}/log")
+    assert log.status_code == 200
+    assert "is_error" in log.text
 
 
-def test_executor_crash_marks_needs_human(tmp_path, monkeypatch):
+def test_executor_crash_marks_needs_human(client, repo, monkeypatch):
     """A non-task exception in the spawned run task must not wedge the item in 'active'."""
-    repo = make_repo(tmp_path)
     from kraft import executor
 
     async def boom(*a, **kw):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(executor, "run", boom)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            status = client.get(f"/api/work-items/{wid}").json()["status"]
-            if status == "needs_human":
-                break
-            time.sleep(0.2)
-        assert status == "needs_human"
+    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        status = client.get(f"/api/work-items/{wid}").json()["status"]
+        if status == "needs_human":
+            break
+        time.sleep(0.2)
+    assert status == "needs_human"
 
 
-def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(tmp_path, monkeypatch):
+def test_retry_refuses_explicit_steer_on_a_node_with_no_agent_task(client, repo):
     """Kraft-bz9b: `merge` is forge-kind with no fix_loop and is the chain's
     last node, so nothing downstream of it ever calls `Steer.take()`.
     `--steer` used to be accepted and echoed back as if it would reach the
     next launch, when it was silently dropped. (`open_mr`, this test's node
     before Kraft-cbr, no longer qualifies: `mr_checks` right after it now
     carries `fix_loop`, so a steer given at `open_mr` could reach that.)"""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "merge", "needs_human")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "merge", "needs_human")
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
+    r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "commit the leftover file"})
 
-        assert r.status_code == 409, r.text
-        assert "merge" in r.json()["detail"]
+    assert r.status_code == 409, r.text
+    assert "merge" in r.json()["detail"]
 
 
-def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(
-    tmp_path, monkeypatch
-):
+def test_retry_without_explicit_steer_still_works_on_a_node_with_no_agent_task(client, repo):
     """The guard is for text a caller just typed and expects used, not for
     Kraft's own last-rejection carry-forward (Kraft-ko7j) -- that must keep
     working even on a node with nothing to steer."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "merge", "needs_human")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "merge", "needs_human")
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 200, r.text
+    assert r.status_code == 200, r.text
 
 
-def test_resume_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
+def test_resume_refuses_when_all_slots_are_busy(client, repo):
     """A manual start is bounded by the same limit as auto-intake (Kraft-n2d).
 
     The limit lived only in the intake tick, so `resume` started an item no
     matter how many were already running.
     """
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        busy = _post_default(client, repo)
-        _poll_events(client, busy, "gate_requested")
-        idle = _post_default(client, repo)
-        _poll_events(client, idle, "gate_requested")
-        _set_status(busy, "active")
-        _set_status(idle, "paused")
-        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+    busy = _post_default(client, repo)
+    _poll_events(client, busy, "gate_requested")
+    idle = _post_default(client, repo)
+    _poll_events(client, idle, "gate_requested")
+    _set_status(busy, "active")
+    _set_status(idle, "paused")
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
-        r = client.post(f"/api/work-items/{idle}/resume", json={})
+    r = client.post(f"/api/work-items/{idle}/resume", json={})
 
-        assert r.status_code == 409, r.text
-        assert "1" in r.json()["detail"]
-        assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
+    assert r.status_code == 409, r.text
+    assert "1" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{busy}").json()["status"] == "active"
 
 
-def test_resume_works_when_a_slot_is_free(tmp_path, monkeypatch):
+def test_resume_works_when_a_slot_is_free(client, repo):
     """The guard must not wedge the ordinary single-item case shut."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "paused")
-        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
-        r = client.post(f"/api/work-items/{wid}/resume", json={})
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
 
-        assert r.status_code == 200, r.text
+    assert r.status_code == 200, r.text
 
 
 def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
@@ -180,7 +161,7 @@ def _post_past_the_still_finishing_walk(client, path, timeout=10, json=None):
     return r
 
 
-def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch):
     """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
     still stops and escalates exactly as before Kraft-s7c04.23; only a
     conflict gets the new resolver path. Kraft-h48r: `resume_work_item`'s
@@ -207,23 +188,21 @@ def test_resume_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, 
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed")
-        _set_status(wid, "paused")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed")
+    _set_status(wid, "paused")
 
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
+    r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/resume")
 
-        assert r.status_code == 200, r.text
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-        assert calls == [(wid, True)]
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    assert calls == [(wid, True)]
 
 
-def test_resume_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+def test_resume_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeypatch):
     """Regression guard: `auto_escalate_stuck: false` must still no-op here
     exactly like it does on the walk-driven path -- converted to raise
     `RebaseConflict` specifically (Kraft-s7c04.23 review finding: the old
@@ -244,71 +223,65 @@ def test_resume_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkey
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed")
-        # `implementation`, not wherever the walk left it: that node has an
-        # agent task downstream to steer, unlike `verify`'s subprocess-only
-        # tasks, which `_steer_reachable` refuses on principle -- a refusal
-        # this test does not want to exercise.
-        _force_node(wid, "implementation", "paused")
-        client.app.state.policy = dataclasses.replace(
-            client.app.state.policy, auto_escalate_stuck=False
-        )
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed")
+    # `implementation`, not wherever the walk left it: that node has an
+    # agent task downstream to steer, unlike `verify`'s subprocess-only
+    # tasks, which `_steer_reachable` refuses on principle -- a refusal
+    # this test does not want to exercise.
+    _force_node(wid, "implementation", "paused")
+    client.app.state.policy = dataclasses.replace(
+        client.app.state.policy, auto_escalate_stuck=False
+    )
 
-        r = _post_past_the_still_finishing_walk(
-            client, f"/api/work-items/{wid}/resume", json={"steer": "watch the auth module"}
-        )
+    r = _post_past_the_still_finishing_walk(
+        client, f"/api/work-items/{wid}/resume", json={"steer": "watch the auth module"}
+    )
 
-        assert r.status_code == 200, r.text
-        # The stop is now recorded inside the spawned conflict-resolution
-        # task, not synchronously before the route returns (Kraft-s7c04.23
-        # review finding: awaiting it inline blocked the response and hid it
-        # from `task_is_live`, reopening Kraft-s7c04.20).
-        _poll_events(client, wid, "work_item_needs_human")
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "needs_human"
-        assert calls == [], "disarmed must not dispatch the resolver or the escalation"
-        assert item["pending_steer_context"] == "watch the auth module"
+    assert r.status_code == 200, r.text
+    # The stop is now recorded inside the spawned conflict-resolution
+    # task, not synchronously before the route returns (Kraft-s7c04.23
+    # review finding: awaiting it inline blocked the response and hid it
+    # from `task_is_live`, reopening Kraft-s7c04.20).
+    _poll_events(client, wid, "work_item_needs_human")
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
+    assert calls == [], "disarmed must not dispatch the resolver or the escalation"
+    assert item["pending_steer_context"] == "watch the auth module"
 
 
-def test_retry_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
+def test_retry_refuses_when_all_slots_are_busy(client, repo):
     """The same door resume is bounded by (notes 10): a stopped item's
     /retry must not restart it past the cap either."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        busy = _post_default(client, repo)
-        _poll_events(client, busy, "gate_requested")
-        stopped = _post_default(client, repo)
-        _poll_events(client, stopped, "gate_requested")
-        _set_status(busy, "active")
-        _force_node(stopped, "implementation", "needs_human")
-        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+    busy = _post_default(client, repo)
+    _poll_events(client, busy, "gate_requested")
+    stopped = _post_default(client, repo)
+    _poll_events(client, stopped, "gate_requested")
+    _set_status(busy, "active")
+    _force_node(stopped, "implementation", "needs_human")
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
-        r = client.post(f"/api/work-items/{stopped}/retry", json={})
+    r = client.post(f"/api/work-items/{stopped}/retry", json={})
 
-        assert r.status_code == 409, r.text
-        assert "1" in r.json()["detail"]
+    assert r.status_code == 409, r.text
+    assert "1" in r.json()["detail"]
 
 
-def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "implementation", "needs_human")
-        client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
+def test_retry_works_when_a_slot_is_free(client, repo):
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "implementation", "needs_human")
+    client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 200, r.text
+    assert r.status_code == 200, r.text
 
 
-def test_retry_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, monkeypatch):
+def test_retry_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch):
     """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
     still stops and escalates exactly as before Kraft-s7c04.23; only a
     conflict gets the new resolver path. Kraft-h48r: `retry_work_item`'s
@@ -330,23 +303,21 @@ def test_retry_non_conflict_rebase_failure_auto_escalates_when_armed(tmp_path, m
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed")
-        _force_node(wid, "verify", "needs_human")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed")
+    _force_node(wid, "verify", "needs_human")
 
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
+    r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
 
-        assert r.status_code == 200, r.text
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-        assert calls == [(wid, True)]
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    assert calls == [(wid, True)]
 
 
-def test_retry_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeypatch):
+def test_retry_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeypatch):
     """Regression guard: `auto_escalate_stuck: false` must still no-op here
     exactly like it does on the walk-driven path -- converted to raise
     `RebaseConflict` specifically, the same review finding as its `/resume`
@@ -366,32 +337,30 @@ def test_retry_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeyp
 
     monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
     monkeypatch.setattr("kraft.executor.gates.escalate.dispatch", fake_dispatch)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
-        ).json()["id"]
-        _poll_events(client, wid, "work_item_completed")
-        # `implementation`, not `verify`: that node has an agent task
-        # downstream to steer, unlike `verify`'s subprocess-only tasks.
-        _force_node(wid, "implementation", "needs_human")
-        client.app.state.policy = dataclasses.replace(
-            client.app.state.policy, auto_escalate_stuck=False
-        )
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+    ).json()["id"]
+    _poll_events(client, wid, "work_item_completed")
+    # `implementation`, not `verify`: that node has an agent task
+    # downstream to steer, unlike `verify`'s subprocess-only tasks.
+    _force_node(wid, "implementation", "needs_human")
+    client.app.state.policy = dataclasses.replace(
+        client.app.state.policy, auto_escalate_stuck=False
+    )
 
-        r = _post_past_the_still_finishing_walk(
-            client, f"/api/work-items/{wid}/retry", json={"steer": "watch the auth module"}
-        )
+    r = _post_past_the_still_finishing_walk(
+        client, f"/api/work-items/{wid}/retry", json={"steer": "watch the auth module"}
+    )
 
-        assert r.status_code == 200, r.text
-        # See the /resume sibling's comment: the stop is recorded inside the
-        # spawned task now, not before the route returns.
-        _poll_events(client, wid, "work_item_needs_human")
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "needs_human"
-        assert calls == [], "disarmed must not dispatch the resolver or the escalation"
-        assert item["pending_steer_context"] == "watch the auth module"
+    assert r.status_code == 200, r.text
+    # See the /resume sibling's comment: the stop is recorded inside the
+    # spawned task now, not before the route returns.
+    _poll_events(client, wid, "work_item_needs_human")
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
+    assert calls == [], "disarmed must not dispatch the resolver or the escalation"
+    assert item["pending_steer_context"] == "watch the auth module"
 
 
 def _create_escalation_session(
@@ -413,66 +382,60 @@ def _create_escalation_session(
         conn.close()
 
 
-def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session(
-    tmp_path, monkeypatch
-):
+def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session(client, repo):
     """The escalation agent calling `kraft item retry` on itself must not run
     the rebase/spawn inline: its own session is still `running` (it is
     mid-tool-call, blocked on this very response), so racing a `git rebase`
     and a fresh spawn into the worktree it is still live in is exactly the
     collision `escalation_running` exists to prevent everywhere else."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "implementation", "needs_human")
-        _create_escalation_session(wid, "s1", "implementation")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "implementation", "needs_human")
+    _create_escalation_session(wid, "s1", "implementation")
 
-        r = client.post(
-            f"/api/work-items/{wid}/retry",
-            json={},
-            headers={"x-kraft-session-id": "s1"},
-        )
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={},
+        headers={"x-kraft-session-id": "s1"},
+    )
 
-        assert r.status_code == 200, r.text
-        # Deferred, not run: the item is still parked at needs_human, and no
-        # `work_item_retried` (the rebase+spawn path) has fired yet.
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-        events_seen = client.get(f"/api/work-items/{wid}/events").json()
-        types = [e["type"] for e in events_seen]
-        assert "work_item_self_retry_requested" in types
-        assert "work_item_retried" not in types
+    assert r.status_code == 200, r.text
+    # Deferred, not run: the item is still parked at needs_human, and no
+    # `work_item_retried` (the rebase+spawn path) has fired yet.
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    events_seen = client.get(f"/api/work-items/{wid}/events").json()
+    types = [e["type"] for e in events_seen]
+    assert "work_item_self_retry_requested" in types
+    assert "work_item_retried" not in types
 
 
-def test_retry_kills_a_strangers_running_escalation_and_proceeds(tmp_path, monkeypatch):
+def test_retry_kills_a_strangers_running_escalation_and_proceeds(client, repo, monkeypatch):
     """A caller that is *not* the live escalation session (no header, or a
     different one) now gets through: that session is killed first, then the
     retry proceeds the same way it would against a plain needs_human stop --
     distinct from the self-retry deferral path above, which stays a defer,
     not a kill."""
-    repo = make_repo(tmp_path)
     terminated = []
     monkeypatch.setattr("kraft.api.routes.lifecycle._terminate", lambda pid: terminated.append(pid))
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "implementation", "needs_human")
-        _create_escalation_session(wid, "s1", "implementation", pid=4242)
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "implementation", "needs_human")
+    _create_escalation_session(wid, "s1", "implementation", pid=4242)
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 200, r.text
-        assert terminated == [4242]
-        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
-        assert "work_item_retried" in types
-        # The turn is stopped, not the item: `retry` claims the item out of
-        # `needs_human` itself a few lines later, which a `pause_requested`
-        # (status -> paused) would have made impossible.
-        assert "worker_session_paused" in types
-        assert "pause_requested" not in types
+    assert r.status_code == 200, r.text
+    assert terminated == [4242]
+    types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert "work_item_retried" in types
+    # The turn is stopped, not the item: `retry` claims the item out of
+    # `needs_human` itself a few lines later, which a `pause_requested`
+    # (status -> paused) would have made impossible.
+    assert "worker_session_paused" in types
+    assert "pause_requested" not in types
 
 
-def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
     """A `needs_human` item can still have a live walk task behind it -- a
     pending gate under auto_escalate review, or the brief window while the
     walk that just called request_gate/mark_needs_human is still unwinding.
@@ -480,68 +443,64 @@ def test_retry_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, mo
     clear the fix-loop cap only for `spawn` to 409 on top of those writes."""
     from kraft.api import deps
 
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "verify", "needs_human")
 
-        async def _never_returning():
-            await asyncio.Event().wait()
+    async def _never_returning():
+        await asyncio.Event().wait()
 
-        async def inject():
-            deps.spawn(client.app, wid, _never_returning())
+    async def inject():
+        deps.spawn(client.app, wid, _never_returning())
 
-        client.portal.call(inject)
+    client.portal.call(inject)
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 409, r.text
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "needs_human"
+    assert r.status_code == 409, r.text
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
 
-        async def cleanup():
-            task = client.app.state.tasks.pop(wid)
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+    async def cleanup():
+        task = client.app.state.tasks.pop(wid)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
-        client.portal.call(cleanup)
+    client.portal.call(cleanup)
 
 
-def test_resume_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+def test_resume_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
     """Same race as retry, from `paused`: `/resume` must not claim, rebase,
     and `resume_work_item` an item that still has a live walk task behind it."""
     from kraft.api import deps
 
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "paused")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
 
-        async def _never_returning():
-            await asyncio.Event().wait()
+    async def _never_returning():
+        await asyncio.Event().wait()
 
-        async def inject():
-            deps.spawn(client.app, wid, _never_returning())
+    async def inject():
+        deps.spawn(client.app, wid, _never_returning())
 
-        client.portal.call(inject)
+    client.portal.call(inject)
 
-        r = client.post(f"/api/work-items/{wid}/resume", json={})
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
 
-        assert r.status_code == 409, r.text
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "paused"
+    assert r.status_code == 409, r.text
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "paused"
 
-        async def cleanup():
-            task = client.app.state.tasks.pop(wid)
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+    async def cleanup():
+        task = client.app.state.tasks.pop(wid)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
-        client.portal.call(cleanup)
+    client.portal.call(cleanup)
 
 
-def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path, monkeypatch):
+def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(client, repo):
     """Kraft-s7c04.20: same race as `/retry` and `/resume`, reached through
     `/escalate` -- a gate's own auto-review is a live walk task under this
     same `wid`, invisible to `escalation_running`'s check (that only sees
@@ -550,129 +509,117 @@ def test_escalate_refuses_and_writes_nothing_when_a_walk_is_still_live(tmp_path,
     writing to (43717ee6: two agents, one worktree, both committed)."""
     from kraft.api import deps
 
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "verify", "needs_human")
 
-        async def _never_returning():
-            await asyncio.Event().wait()
+    async def _never_returning():
+        await asyncio.Event().wait()
 
-        async def inject():
-            deps.spawn(client.app, wid, _never_returning())
+    async def inject():
+        deps.spawn(client.app, wid, _never_returning())
 
-        client.portal.call(inject)
+    client.portal.call(inject)
 
-        r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
+    r = client.post(f"/api/work-items/{wid}/escalate", json={"message": "help"})
 
-        assert r.status_code == 409, r.text
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["status"] == "needs_human"
+    assert r.status_code == 409, r.text
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
 
-        async def cleanup():
-            task = client.app.state.tasks.pop(wid)
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+    async def cleanup():
+        task = client.app.state.tasks.pop(wid)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
-        client.portal.call(cleanup)
+    client.portal.call(cleanup)
 
 
-def test_abandon_sets_terminal_status_and_removes_the_worktree(tmp_path, monkeypatch):
+def test_abandon_sets_terminal_status_and_removes_the_worktree(client, repo):
     """A rejected or dead item stayed on the board forever, worktree and all."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
-        assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    assert worktree.is_dir(), "fixture never made a worktree; the test would prove nothing"
+    _set_status(wid, "paused")
+
+    r = client.post(f"/api/work-items/{wid}/abandon")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "abandoned"
+    assert not worktree.exists()
+
+
+def test_abandon_reclaims_the_attachment_storage(client, repo):
+    """The worktree is already reclaimed; the documents that fed it should not
+    outlive it in $KRAFT_HOME."""
+    doc = repo / ".engineering" / "specs" / "s.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("# s\n")
+    wid = client.post(
+        "/api/work-items",
+        json={
+            "title": "x",
+            "repo": str(repo),
+            "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
+        },
+    ).json()["id"]
+    stored = client.app.state.run_dirs.attachments / wid
+    assert stored.is_dir()
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+
+    client.post(f"/api/work-items/{wid}/abandon")
+
+    assert not stored.exists()
+
+
+def test_abandon_refuses_an_active_item(client, repo):
+    """Pause first. Otherwise this races a running agent's writes."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "active")
+
+    r = client.post(f"/api/work-items/{wid}/abandon")
+
+    assert r.status_code == 409, r.text
+    assert "active" in r.json()["detail"]
+
+
+def test_abandon_kills_a_process_left_running_from_the_worktree(client, repo):
+    """Kraft-ugm6: a server (or anything else) an agent started by hand from
+    inside the worktree is invisible to `pause`'s session teardown and used to
+    outlive the directory it was launched from."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
+    orphan = subprocess.Popen(["sleep", "60"], cwd=worktree, start_new_session=True)
+    try:
         _set_status(wid, "paused")
 
         r = client.post(f"/api/work-items/{wid}/abandon")
 
         assert r.status_code == 200, r.text
-        assert r.json()["status"] == "abandoned"
-        assert not worktree.exists()
+        for _ in range(50):
+            if orphan.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert orphan.poll() is not None, "orphan process outlived the abandon"
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+        orphan.wait()
 
 
-def test_abandon_reclaims_the_attachment_storage(tmp_path, monkeypatch):
-    """The worktree is already reclaimed; the documents that fed it should not
-    outlive it in $KRAFT_HOME."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        doc = repo / ".engineering" / "specs" / "s.md"
-        doc.parent.mkdir(parents=True, exist_ok=True)
-        doc.write_text("# s\n")
-        wid = client.post(
-            "/api/work-items",
-            json={
-                "title": "x",
-                "repo": str(repo),
-                "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
-            },
-        ).json()["id"]
-        stored = client.app.state.run_dirs.attachments / wid
-        assert stored.is_dir()
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "paused")
-
-        client.post(f"/api/work-items/{wid}/abandon")
-
-        assert not stored.exists()
-
-
-def test_abandon_refuses_an_active_item(tmp_path, monkeypatch):
-    """Pause first. Otherwise this races a running agent's writes."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _set_status(wid, "active")
-
-        r = client.post(f"/api/work-items/{wid}/abandon")
-
-        assert r.status_code == 409, r.text
-        assert "active" in r.json()["detail"]
-
-
-def test_abandon_kills_a_process_left_running_from_the_worktree(tmp_path, monkeypatch):
-    """Kraft-ugm6: a server (or anything else) an agent started by hand from
-    inside the worktree is invisible to `pause`'s session teardown and used to
-    outlive the directory it was launched from."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
-        orphan = subprocess.Popen(["sleep", "60"], cwd=worktree, start_new_session=True)
-        try:
-            _set_status(wid, "paused")
-
-            r = client.post(f"/api/work-items/{wid}/abandon")
-
-            assert r.status_code == 200, r.text
-            for _ in range(50):
-                if orphan.poll() is not None:
-                    break
-                time.sleep(0.1)
-            assert orphan.poll() is not None, "orphan process outlived the abandon"
-        finally:
-            if orphan.poll() is None:
-                orphan.kill()
-            orphan.wait()
-
-
-def test_post_triggers_files_a_paused_item(tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        r = client.post(
-            "/api/triggers",
-            json={"repo": str(repo), "title": "from a trigger", "description": "d"},
-        )
-        assert r.status_code == 201, r.text
-        body = r.json()
-        assert body["status"] == "paused"
-        assert body["title"] == "from a trigger"
+def test_post_triggers_files_a_paused_item(client, repo):
+    r = client.post(
+        "/api/triggers",
+        json={"repo": str(repo), "title": "from a trigger", "description": "d"},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "paused"
+    assert body["title"] == "from a trigger"
 
 
 def _seed_counter(wid: str, key: str, *, count: int = 2) -> None:
@@ -705,94 +652,88 @@ def _counter_exists(wid: str, key: str) -> bool:
         conn.close()
 
 
-def test_retry_clears_the_ci_wait_counter_for_the_current_node(tmp_path, monkeypatch):
+def test_retry_clears_the_ci_wait_counter_for_the_current_node(client, repo):
     """Seed a ci_wait:<node> counter (as if the item had re-entered a wait
     twice already), stop the item at needs_human, retry it, and assert the
     counter row is gone -- a fresh ci_wait poll after retry starts back at
     count 1, not 3."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "merge_request_feedback", "needs_human")
-        _seed_counter(wid, "ci_wait:merge_request_feedback")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "merge_request_feedback", "needs_human")
+    _seed_counter(wid, "ci_wait:merge_request_feedback")
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 200, r.text
-        assert not _counter_exists(wid, "ci_wait:merge_request_feedback")
+    assert r.status_code == 200, r.text
+    assert not _counter_exists(wid, "ci_wait:merge_request_feedback")
 
 
-def test_retry_clears_the_ci_infra_counter_for_the_current_node(tmp_path, monkeypatch):
+def test_retry_clears_the_ci_infra_counter_for_the_current_node(client, repo):
     """Same shape, for the persisted infra-retry counter: seed
     ci_infra:<node> at count 2 (one kick short of the cap), retry, and
     assert the counter row is gone -- the retried item's next infra-red
     poll gets a fresh budget, not an instant breach on its first one."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "merge_request_feedback", "needs_human")
-        _seed_counter(wid, "ci_infra:merge_request_feedback")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "merge_request_feedback", "needs_human")
+    _seed_counter(wid, "ci_infra:merge_request_feedback")
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
 
-        assert r.status_code == 200, r.text
-        assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
+    assert r.status_code == 200, r.text
+    assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
 
 
-def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monkeypatch):
+def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
     """Kraft-7sec, second half: a retry after a fix-loop cap breach with no
     explicit steer must seed the agent with the last measurement's unresolved
     findings, not start blind."""
     from kraft import events as kraft_events
 
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "implementation", "needs_human")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "implementation", "needs_human")
 
-        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-        try:
-            kraft_events.append(
-                conn,
-                wid,
-                "findings_measured",
-                {
-                    "node_id": "implementation",
-                    "cycle": 0,
-                    "findings": [
-                        {
-                            "severity": "important",
-                            "message": "missing null check",
-                            "file": "a.py",
-                            "line": 10,
-                            "source_plugin": "reviewer",
-                        }
-                    ],
-                    "fingerprints": ["x"],
-                    "noop_hooks": [],
-                },
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        kraft_events.append(
+            conn,
+            wid,
+            "findings_measured",
+            {
+                "node_id": "implementation",
+                "cycle": 0,
+                "findings": [
+                    {
+                        "severity": "important",
+                        "message": "missing null check",
+                        "file": "a.py",
+                        "line": 10,
+                        "source_plugin": "reviewer",
+                    }
+                ],
+                "fingerprints": ["x"],
+                "noop_hooks": [],
+            },
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
-        assert r.status_code == 200, r.text
-        assert "missing null check" in r.json()["steer"]
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+    assert r.status_code == 200, r.text
+    assert "missing null check" in r.json()["steer"]
 
-        evts = client.get(f"/api/work-items/{wid}/events").json()
-        retried = next(e for e in evts if e["type"] == "work_item_retried")
-        assert retried["payload"]["seeded"] is True
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    retried = next(e for e in evts if e["type"] == "work_item_retried")
+    assert retried["payload"]["seeded"] is True
 
 
 def _status_of(client, wid: str) -> str:
     return client.get(f"/api/work-items/{wid}").json()["status"]
 
 
-def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(tmp_path, monkeypatch):
+def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(client, repo):
     """H1, and the reason it is high severity rather than a 500.
 
     `chain_definition` is `"{}"` on a V1 row, and `resume`/`retry`/`skip` read
@@ -807,47 +748,40 @@ def test_resume_retry_and_skip_do_not_strand_a_v1_item_claimed(tmp_path, monkeyp
     not only on the response code, because a 200 with a stranded row was never
     the failure mode.
     """
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _poll_events(client, wid, "gate_requested")
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
 
-        _set_status(wid, "paused")
-        r = client.post(f"/api/work-items/{wid}/resume", json={})
-        assert r.status_code == 200, r.text
-        _poll_events(client, wid, "gate_requested", count=2)
+    _set_status(wid, "paused")
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+    assert r.status_code == 200, r.text
+    _poll_events(client, wid, "gate_requested", count=2)
 
-        _set_status(wid, "needs_human")
-        r = client.post(f"/api/work-items/{wid}/retry", json={})
-        assert r.status_code == 200, r.text
-        _poll_events(client, wid, "gate_requested", count=3)
+    _set_status(wid, "needs_human")
+    r = client.post(f"/api/work-items/{wid}/retry", json={})
+    assert r.status_code == 200, r.text
+    _poll_events(client, wid, "gate_requested", count=3)
 
-        # And skip, whose own read runs after `cancel` has taken the walk away.
-        r = client.post(f"/api/work-items/{wid}/skip", json={"note": "by hand"})
-        assert r.status_code == 200, r.text
-        assert (
-            _status_of(client, wid) != "active"
-            or client.get(f"/api/work-items/{wid}/events").json()
-        ), "skip left the item claimed with nothing behind it"
+    # And skip, whose own read runs after `cancel` has taken the walk away.
+    r = client.post(f"/api/work-items/{wid}/skip", json={"note": "by hand"})
+    assert r.status_code == 200, r.text
+    assert (
+        _status_of(client, wid) != "active" or client.get(f"/api/work-items/{wid}/events").json()
+    ), "skip left the item claimed with nothing behind it"
 
 
-def test_resume_of_an_item_that_never_reached_a_node_starts_at_the_chain_head(
-    tmp_path, monkeypatch
-):
+def test_resume_of_an_item_that_never_reached_a_node_starts_at_the_chain_head(client, repo):
     """`store.node_index(..., default=0)`'s reason for existing: a paused item
     with a null `current_node_id` has no index to find, and the honest fallback
     is node 0 rather than a refusal or a raise."""
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-        ).json()["id"]
-        assert client.get(f"/api/work-items/{wid}").json()["current_node_id"] is None
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    assert client.get(f"/api/work-items/{wid}").json()["current_node_id"] is None
 
-        r = client.post(f"/api/work-items/{wid}/resume", json={})
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
 
-        assert r.status_code == 200, r.text
-        evts = _poll_events(client, wid, "node_started")
-        first = next(e for e in evts if e["type"] == "node_started")
-        assert first["payload"]["node_id"] == "spec"
+    assert r.status_code == 200, r.text
+    evts = _poll_events(client, wid, "node_started")
+    first = next(e for e in evts if e["type"] == "node_started")
+    assert first["payload"]["node_id"] == "spec"

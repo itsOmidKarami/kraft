@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
-from support.harness import fake_templates_dir, make_repo
+from support.harness import make_repo
 
 from kraft import config
 from kraft import intake as intake_mod
@@ -20,13 +20,7 @@ from kraft.worker import steering as steering_mod
 pytestmark = pytest.mark.api_client(default_setup=False)
 
 
-_FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-@pytest.fixture
-def templates_dir(tmp_path):
-    return fake_templates_dir(tmp_path, "claude")
 
 
 def _steering_dir(templates_dir):
