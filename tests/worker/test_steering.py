@@ -24,32 +24,42 @@ def test_no_names_never_touches_the_directory(tmp_path):
     steering.validate(tmp_path / "absent", [], where="x")
 
 
-def test_validate_names_the_missing_file_and_the_config_that_asked(tmp_path):
-    d = _dir(tmp_path, {"a": "alpha"})
-    with pytest.raises(steering.SteeringError, match="nope"):
-        steering.validate(d, ["nope"], where="registry.yaml")
+_HALF = "x" * (steering.MAX_BYTES // 2 + 10)
 
 
-def test_validate_rejects_a_traversing_name(tmp_path):
-    """`../../repo/CLAUDE` would read a file inside a target repo, which is the
-    exact channel the context-injection boundary forbids."""
-    d = _dir(tmp_path, {"a": "alpha"})
-    for bad in ("../secret", "nested/thing", "/etc/passwd"):
-        with pytest.raises(steering.SteeringError):
-            steering.validate(d, [bad], where="x")
-
-
-def test_validate_rejects_an_over_budget_total(tmp_path):
-    d = _dir(tmp_path, {"big": "x" * steering.MAX_BYTES})
-    with pytest.raises(steering.SteeringError, match="8192"):
-        steering.validate(d, ["big"], where="x")
-
-
-def test_the_budget_is_the_total_not_per_file(tmp_path):
-    half = "x" * (steering.MAX_BYTES // 2 + 10)
-    d = _dir(tmp_path, {"a": half, "b": half})
-    with pytest.raises(steering.SteeringError):
-        steering.validate(d, ["a", "b"], where="x")
+@pytest.mark.parametrize(
+    "names, match",
+    [
+        # Names the missing file (and so the config that asked for it).
+        (["nope"], "nope"),
+        # `../../repo/CLAUDE` would read a file inside a target repo, the exact
+        # channel the context-injection boundary forbids.
+        (["../secret"], "bare file name"),
+        (["nested/thing"], "bare file name"),
+        (["/etc/passwd"], "bare file name"),
+        (["big"], "8192"),
+        # The budget is the total, not per file.
+        (["half1", "half2"], "8192"),
+        # Invalid UTF-8 is a SteeringError, not a traceback.
+        (["binary"], "binary"),
+    ],
+    ids=[
+        "missing-file",
+        "parent-traversal",
+        "nested-path",
+        "absolute-path",
+        "one-file-over-budget",
+        "total-over-budget",
+        "invalid-utf8",
+    ],
+)
+def test_validate_rejects(tmp_path, names, match):
+    d = _dir(
+        tmp_path, {"a": "alpha", "big": "x" * steering.MAX_BYTES, "half1": _HALF, "half2": _HALF}
+    )
+    (d / "binary.md").write_bytes(b"\xff\xfe\x00")
+    with pytest.raises(steering.SteeringError, match=match):
+        steering.validate(d, names, where="registry.yaml")
 
 
 @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
@@ -61,13 +71,6 @@ def test_a_permissions_error_is_not_reported_as_missing(tmp_path):
             steering.validate(d, ["a"], where="x")
     finally:
         (d / "a.md").chmod(0o644)
-
-
-def test_validate_reports_invalid_utf8_as_a_steering_error_not_a_traceback(tmp_path):
-    d = _dir(tmp_path, {"a": "alpha"})
-    (d / "a.md").write_bytes(b"\xff\xfe\x00")
-    with pytest.raises(steering.SteeringError, match="a"):
-        steering.validate(d, ["a"], where="x")
 
 
 def test_validate_accepts_a_total_exactly_at_the_budget(tmp_path):
