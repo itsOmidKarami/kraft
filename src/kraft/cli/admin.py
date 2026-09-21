@@ -25,6 +25,7 @@ import yaml
 from kraft import client, config, render
 from kraft.cli import common
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.policy import CarriedPolicy
 
 #: launchd label / systemd unit name. One daemon, one name -- not
 #: per-instance, since the spec is about supervising *the* daemon.
@@ -194,7 +195,7 @@ def seed_home(templates_dir: Path) -> bool:
     notify.yaml and runs `just install` -- if either file ever slips into
     `BUNDLED / "templates"`, it must still not reach a seeded home.
     """
-    if templates_dir.exists():
+    if finish_interrupted_update(templates_dir) or templates_dir.exists():
         return False
     if not (BUNDLED / "templates").is_dir():
         raise SystemExit(
@@ -243,14 +244,26 @@ MACHINE_CONFIG = (
 )
 
 
-def replace_pre_v1_config(templates_dir: Path, backup: Path) -> None:
+#: Written into a major update's staging directory once it is complete, naming
+#: the backup the old home moves to. Its presence is what tells a later start
+#: that a missing home is a swap to finish, not a home to seed.
+UPDATE_STAGED = ".pre-v1-update"
+
+
+def replace_pre_v1_config(templates_dir: Path, backup: Path) -> CarriedPolicy | None:
     """Install the bundled V1 configuration in place of a pre-V1 home, which
     moves to `backup` whole (`major-update-preserves-replaced-configuration`).
 
     Nothing is converted (`migration-helper-is-not-guaranteed`): the old
-    chains and registry are only in the backup. Built beside the home and
-    swapped in with two renames, so at every point the operator's files are
-    either still in place or already in the backup."""
+    chains and registry are only in the backup. The operator's `policy.yaml`
+    values move onto the V1 seed's where V1 still has the key (Ruling 172);
+    the result says what was dropped, `None` if there was no readable policy.
+
+    Crash-safe (Kraft-cttgx): the new home is built complete beside the old
+    one and marked (`UPDATE_STAGED`) before anything moves. Then two renames:
+    old -> backup, staged -> home. Between them the home is missing, and
+    `finish_interrupted_update` -- run by the next start and the next update --
+    completes the swap from the marked staging instead of seeding over it."""
     if not (BUNDLED / "templates").is_dir():
         raise SystemExit(
             "kraft admin update: this build shipped no bundled configuration to install; "
@@ -264,8 +277,53 @@ def replace_pre_v1_config(templates_dir: Path, backup: Path) -> None:
             shutil.copytree(kept, staging / name, dirs_exist_ok=True)
         elif kept.is_file():
             shutil.copy2(kept, staging / name)
+    carried = _carry_policy(templates_dir / "policy.yaml", staging / "policy.yaml", backup)
+    (staging / UPDATE_STAGED).write_text(f"{backup.name}\n")
     templates_dir.rename(backup)
     staging.rename(templates_dir)
+    (templates_dir / UPDATE_STAGED).unlink()
+    return carried
+
+
+def _carry_policy(old: Path, new: Path, backup: Path) -> CarriedPolicy | None:
+    try:
+        legacy = yaml.safe_load(old.read_text())
+        seed = yaml.safe_load(new.read_text()) or {}
+    except OSError, ValueError, yaml.YAMLError:
+        return None
+    if not isinstance(legacy, dict):
+        return None
+    carried = CarriedPolicy.from_legacy(legacy, seed)
+    if carried.data != seed:
+        new.write_text(
+            f"# The V1 policy, with the values `kraft admin update` carried over from\n"
+            f"# the pre-V1 policy.yaml; that file is unchanged in {backup}.\n"
+            + yaml.safe_dump(carried.data, sort_keys=False)
+        )
+    return carried
+
+
+def finish_interrupted_update(templates_dir: Path) -> bool:
+    """Complete a major update that stopped between its two renames: the home
+    is missing and its staging is marked complete. True if it did, and says so.
+
+    That is the only half-state the swap can leave -- the marker is written
+    after the staging is whole, and the home moves only after the marker -- so
+    there is nothing to roll back. An unmarked staging is an interrupted
+    *seed*, and seeding over it is right."""
+    staging = templates_dir.with_name(templates_dir.name + ".seeding")
+    marker = staging / UPDATE_STAGED
+    if templates_dir.exists() or not marker.is_file():
+        return False
+    backup = templates_dir.with_name(marker.read_text().strip())
+    staging.rename(templates_dir)
+    (templates_dir / UPDATE_STAGED).unlink()
+    print(
+        f"kraft: finished an interrupted update: installed the staged V1 configuration "
+        f"in {templates_dir}; the old one is at {backup}",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _warn_if_pre_v1(templates_dir: Path) -> None:
@@ -809,7 +867,9 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
         "V1 configuration and moves the current one, whole, to a backup at\n"
         f"  {backup}\n"
         f"Carried across unchanged: {', '.join(MACHINE_CONFIG)}.\n"
-        "Your chains, registry.yaml and policy.yaml are replaced; they stay in the backup.",
+        "policy.yaml keeps your value for every key V1 still has; any other key is\n"
+        "dropped and listed. Your chains and registry.yaml are replaced. All of it\n"
+        "stays in the backup.",
         file=sys.stderr,
     )
     # No terminal to ask on is a refusal, never a default yes.
@@ -821,8 +881,15 @@ def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    replace_pre_v1_config(templates_dir, backup)
+    carried = replace_pre_v1_config(templates_dir, backup)
     print(f"kraft: installed the V1 configuration in {templates_dir}; the old one is at {backup}")
+    if carried is None:
+        print("kraft: policy.yaml: no readable pre-V1 policy; the V1 default is installed")
+    for key, value in (carried.dropped if carried else {}).items():
+        print(
+            f"kraft: policy.yaml: dropped {key} = {value!r} "
+            "(V1 has no such key, or refuses the value)"
+        )
 
 
 def _cmd_update(ns: argparse.Namespace) -> None:
@@ -832,6 +899,7 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     # The configuration first: a pre-V1 home is what a legacy install's first V1
     # binary finds, and that binary is the one running this.
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    finish_interrupted_update(templates_dir)
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)
 

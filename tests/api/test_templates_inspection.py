@@ -56,6 +56,8 @@ def test_lint_reports_all_library_errors_without_writing(client, templates_dir):
     )
     twice = exec_node("n", kind="subprocess", command="true")
     (chains / "twice.yaml").write_text(yaml.safe_dump({"id": "twice", "nodes": [twice, twice]}))
+    # A second file claiming a chain id `chains/default.yaml` already declares.
+    (chains / "impostor.yaml").write_text(yaml.safe_dump({**SOLO, "id": "default"}))
     before = snapshot(templates_dir)
 
     response = client.get("/api/templates/lint")
@@ -64,7 +66,8 @@ def test_lint_reports_all_library_errors_without_writing(client, templates_dir):
     body = response.json()
     assert body["valid"] is False
     issues = {i["chain"]: i for i in body["issues"]}
-    assert set(issues) == {"garbled", "dangling", "twice"}
+    assert set(issues) == {"garbled", "dangling", "twice", "impostor"}
+    assert "already declared by" in issues["impostor"]["message"]
     assert "cannot read/parse" in issues["garbled"]["message"]
     assert "no_such_task" in issues["dangling"]["message"]
     assert "duplicate" in issues["twice"]["message"]
@@ -217,3 +220,22 @@ def test_a_legacy_home_starts_degraded_and_names_the_update_command(tmp_path, mo
     assert lint["valid"] is False
     assert "kraft admin update" in lint["issues"][0]["message"]
     assert snapshot(legacy) == before
+
+
+def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch):
+    """Kraft-p2011. A daemon whose `library.yaml` did not load has no saved
+    chain to show and no library to resolve a candidate against: 503 naming the
+    file, the same door intake answers through. An unsaved library needs no
+    installed one, so it still resolves."""
+    broken = fake_templates_dir(tmp_path, "true")
+    (broken / "library.yaml").write_text("tasks: [unclosed\n")
+
+    with _client(tmp_path, monkeypatch, templates_dir=broken) as client:
+        saved = client.get("/api/templates/default/resolved")
+        candidate = client.post("/api/templates/resolve", json={"chain": SOLO})
+        alone = client.post("/api/templates/resolve", json={"library": {}, "chains": [SOLO]})
+
+    assert saved.status_code == candidate.status_code == 503
+    assert "library.yaml" in saved.json()["detail"]
+    assert alone.status_code == 200
+    assert [c["id"] for c in alone.json()["chains"]] == ["solo"]

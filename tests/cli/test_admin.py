@@ -103,6 +103,12 @@ def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
     assert printed["nodes"][0]["tasks"][0]["skill"] == "kraft:spec"
 
 
+def test_admin_templates_show_prints_the_saved_template(app, capsys):
+    """Without `--resolved`: the template as `GET /templates/{id}` has it."""
+    cli.main(["admin", "templates", "show", "default"])
+    assert yaml.safe_load(capsys.readouterr().out) == asyncio.run(client.template("default"))
+
+
 def test_health_exit_code_follows_status(app, monkeypatch, capsys):
     async def degraded():
         return {
