@@ -213,9 +213,11 @@ describe("Board", () => {
   // The New work item dialog omits `chain_template` when `default` is chosen
   // (Kraft-cd47), so a board holding one explicit template and one default
   // item mixes a real id with a null. Sorting those keys with
-  // `localeCompare` threw on the null and blanked the whole board -- and only
-  // when the null sorted first, which is why it survived so long. The null
-  // item is created first here on purpose: that is the order that threw.
+  // `localeCompare` threw on the null and blanked the whole board. It throws
+  // when the null is the *receiver*, so it fired only when `sort` passed the
+  // null key as a comparison's first argument -- which is why a full board
+  // survived it and a small one did not. This test does not reproduce that
+  // pairing directly; it pins the guard, and reverting `tplOf` reddens it.
   it("counts an item with no explicit template as `default` instead of blanking the board", async () => {
     setItems(
       wi({ id: "w0", repo: "/repo-a", status: "active", chain_template: null as never }),

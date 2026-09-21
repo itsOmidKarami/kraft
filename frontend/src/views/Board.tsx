@@ -23,8 +23,11 @@ const FILTERS_KEY = "kraft.board_filters";
  *  dialog omits the field for exactly that choice. So the board routinely
  *  holds a mix of null and real ids -- and `tally`/`axisGroups` sorted those
  *  keys with `localeCompare`, which threw on the null and took the entire
- *  board down with it (a blank page, not a missing chip). Order-dependent, so
- *  it only fired when the null key happened to sort first. */
+ *  board down with it (a blank page, not a missing chip). `a.localeCompare(b)`
+ *  throws when the null is the *receiver*, so whether it fired depended on
+ *  which side of a comparison `sort` happened to pass the null key -- not on
+ *  where it sorted. That is why a full board survived it and a filtered one
+ *  did not. */
 const tplOf = (i: WorkItem) => i.chain_template ?? "default";
 
 /** Sidebar counts, sorted by name so the list does not reorder as work moves. */
