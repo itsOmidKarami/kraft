@@ -492,9 +492,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     target=previous.target
                     if previous is not None
                     else entry.single_repo_target(row["repo"]),
-                    effective_policy=previous.policy
-                    if previous is not None
-                    else st.instance_policy,
+                    # The instance policy, never `previous.policy`: that one
+                    # already carries the old chain's own override, and
+                    # layering the new chain's on top of it stacks the two
+                    # (Kraft-yaq99). Filing on the new chain would start here.
+                    effective_policy=st.instance_policy,
                     attachment_kinds=frozenset(
                         a.get("kind") for a in json.loads(row["attachments"] or "[]")
                     )

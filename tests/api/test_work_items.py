@@ -978,3 +978,28 @@ def test_a_chain_policy_past_the_ceiling_is_a_422_at_intake_not_a_500(tmp_path, 
         )
         assert r.status_code == 422, r.text
         assert "rm_rf" in r.json()["detail"]
+
+
+def test_switching_template_applies_only_the_new_chains_policy(tmp_path, monkeypatch):
+    """Kraft-yaq99: the switch re-materializes from the instance policy, so the
+    old chain's override does not stack under the new one's -- and a switch
+    that is legal from the instance policy is not refused by the old chain's."""
+    client = _client(tmp_path, monkeypatch, templates_dir=_policy_chains(tmp_path))
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "a", "autostart": False},
+        ).json()["id"]
+        assert _snapshot_policy(client, wid)["allowed_tools"] == ["git"]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "c"})
+        assert r.status_code == 200, r.text
+        on_c = _snapshot_policy(client, wid)
+        assert on_c["allowed_tools"] == ["git", "shell", "editor"]
+        assert on_c["timeout_minutes"] is None
+
+        client.patch(f"/api/work-items/{wid}", json={"chain_template": "a"})
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "b"})
+        assert r.status_code == 200, r.text
+        assert _snapshot_policy(client, wid)["allowed_tools"] == ["git", "shell"]
