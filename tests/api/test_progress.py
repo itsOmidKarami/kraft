@@ -8,18 +8,11 @@ import os
 import sqlite3
 from pathlib import Path
 
-import pytest
 from support.api import _client, _force_node
 from support.harness import _git, make_repo
 
 from kraft import events
 from kraft.config import git_read
-
-#: The V1 blank-progress defect is Task 6's (task-6-brief.md, Ruling 54); strict, so
-#: the fix XPASSes and forces these markers off.
-_TASK_6 = pytest.mark.xfail(
-    strict=True, reason="V1 blank-progress fix is Task 6; see task-6-brief.md"
-)
 
 PLAN = "# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n\n## Task 3 — render\n"
 
@@ -83,11 +76,11 @@ def _seed_run(wid: str, head_sha: str | None) -> None:
         conn.close()
 
 
-def _task_progress_events(wid: str) -> list[dict]:
+def _plan_progress_events(wid: str) -> list[dict]:
     conn = _db()
     try:
         rows = conn.execute(
-            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'task_progress' "
+            "SELECT payload FROM events WHERE work_item_id = ? AND type = 'plan_progress' "
             "ORDER BY seq",
             (wid,),
         ).fetchall()
@@ -100,7 +93,6 @@ def _board_row(client, wid: str) -> dict:
     return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
 
 
-@_TASK_6
 def test_a_report_moves_progress_on_the_detail_and_the_board(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -112,7 +104,7 @@ def test_a_report_moves_progress_on_the_detail_and_the_board(tmp_path, monkeypat
 
         assert response.status_code == 200, response.text
         assert response.json()["progress"]["current"] == 2
-        assert _task_progress_events(wid) == [
+        assert _plan_progress_events(wid) == [
             {"node_id": "implementation", "task": 2, "total": 3, "title": "serve"}
         ]
         detail = client.get(f"/api/work-items/{wid}").json()["progress"]
@@ -130,7 +122,6 @@ def _set_base_ref(wid: str, sha: str) -> None:
         conn.close()
 
 
-@_TASK_6
 def test_commits_naming_a_task_move_progress_without_a_report(tmp_path, monkeypatch):
     """Every task commit on the item's branch counts, including ones an earlier
     run of the same node made.
@@ -155,10 +146,9 @@ def test_commits_naming_a_task_move_progress_without_a_report(tmp_path, monkeypa
         assert client.get(f"/api/work-items/{wid}").json()["progress"]["current"] == 3
 
 
-@_TASK_6
 def test_a_bounced_run_with_no_reports_keeps_the_committed_progress(tmp_path, monkeypatch):
     """The reject-bounce shape: a second `node_started` for the same node, no
-    `task_progress` after it, every task already committed."""
+    `plan_progress` after it, every task already committed."""
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = _paused_item(client, repo)
@@ -175,7 +165,6 @@ def test_a_bounced_run_with_no_reports_keeps_the_committed_progress(tmp_path, mo
         assert [t["state"] for t in detail["tasks"]] == ["done", "done", "current"]
 
 
-@_TASK_6
 def test_a_report_from_before_the_latest_node_start_does_not_count(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -208,10 +197,9 @@ def test_a_report_off_the_running_implementation_node_is_a_409(tmp_path, monkeyp
         assert client.post(f"/api/work-items/{wid}/progress", json={"task": 1}).status_code == 409
         _force_node(wid, "implementation", "paused")
         assert client.post(f"/api/work-items/{wid}/progress", json={"task": 1}).status_code == 409
-        assert _task_progress_events(wid) == []
+        assert _plan_progress_events(wid) == []
 
 
-@_TASK_6
 def test_a_task_outside_the_plan_is_a_400(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -221,10 +209,9 @@ def test_a_task_outside_the_plan_is_a_400(tmp_path, monkeypatch):
         for task in (0, 4):
             response = client.post(f"/api/work-items/{wid}/progress", json={"task": task})
             assert response.status_code == 400, task
-        assert _task_progress_events(wid) == []
+        assert _plan_progress_events(wid) == []
 
 
-@_TASK_6
 def test_a_plan_without_task_headings_is_a_400_and_no_progress(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:

@@ -1,7 +1,7 @@
 """Where the implementer is in its plan: "Task 3 of 6".
 
 Derived on read, never stored. The plan's `## Task N` headings give the tasks;
-the agent's latest `task_progress` event and the highest `task N` its commits
+the agent's latest `plan_progress` event and the highest `task N` its commits
 name give the position. Tasks are numbered by position in the plan.
 """
 
@@ -101,20 +101,44 @@ def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> dic
 
 
 def implementation_node(chain: dict) -> str | None:
-    """By hook, not by name: a custom chain may call the node anything."""
+    """By hook, not by name: a custom chain may call the node anything.
+
+    Legacy chains only -- `chain` is the `chain_view`/`chain_definition` dict
+    shape. A V1 chain has no hook-name strings on its nodes; see
+    `_v1_implementation_node` for the V1 rule."""
     return next(
         (n["id"] for n in chain.get("nodes", []) if IMPLEMENTATION_HOOK in n.get("tasks", [])),
         None,
     )
 
 
+def _v1_implementation_node(chain) -> str | None:
+    """V1's rule for "the node doing the work from the brief": the node
+    containing an `AgentTask` whose `skill` is `None` -- the same predicate
+    `prompts.py` depends on twice (`progress_note`, `scope_note`, both citing
+    Kraft-s7c04.45 "never a node id"). No new marker field: against the seeded
+    library this selects `implementer` alone -- `spec_author`, `plan_author`
+    and `write_summary` all declare a skill."""
+    from kraft.templates.models import AgentTask
+
+    return next(
+        (
+            node.id
+            for node in chain.nodes
+            if any(isinstance(t.task, AgentTask) and t.task.skill is None for t in node.tasks())
+        ),
+        None,
+    )
+
+
 def active_implementation_node(row) -> str | None:
     """The implementation node's id while `row` is running it, else None."""
-    # `store.chain_view`, not the raw column: a V1 row's `chain_definition` is
-    # `"{}"`. (A V1 chain has no `on.implementation.start` hook name, so this
-    # answers None for one -- correct until progress reads a task path instead,
-    # and never a KeyError.)
-    node_id = implementation_node(_store.chain_view(row))
+    v1 = _store.materialized_chain_of(row)
+    node_id = (
+        _v1_implementation_node(v1.chain)
+        if v1 is not None
+        else implementation_node(_store.chain_view(row))
+    )
     if node_id and row["status"] == "active" and row["current_node_id"] == node_id:
         return node_id
     return None
@@ -156,7 +180,7 @@ def run_state(conn, work_item_id: str, node_id: str) -> int:
         default=-1,
     )
     return next(
-        (e["payload"]["task"] for e in reversed(evs[start + 1 :]) if e["type"] == "task_progress"),
+        (e["payload"]["task"] for e in reversed(evs[start + 1 :]) if e["type"] == "plan_progress"),
         0,
     )
 

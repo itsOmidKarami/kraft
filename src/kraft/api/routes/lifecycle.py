@@ -290,7 +290,7 @@ async def pause_work_item(wid: str, request: Request):
 @api_router.post("/work-items/{wid}/progress")
 async def report_progress(wid: str, body: Progress, request: Request):
     """The implementer saying which plan task it is starting. Recorded as a
-    `task_progress` event carrying everything a client needs to show it."""
+    `plan_progress` event carrying everything a client needs to show it."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     node_id = progress_mod.active_implementation_node(row)
@@ -308,7 +308,7 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "total": len(tasks),
         "title": tasks[body.task - 1][0],
     }
-    await st.db.write(lambda c: events.append(c, wid, "task_progress", payload))
+    await st.db.write(lambda c: events.append(c, wid, "plan_progress", payload))
     return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}
 
 

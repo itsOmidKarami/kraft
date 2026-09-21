@@ -251,7 +251,7 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     if (n.id === "implement") {
       const total = long ? 40 : 6;
       const shown = long ? 40 : 6;
-      for (let k = 1; k <= shown; k++) ev("task_progress", { node_id: n.id, task: k, total, title: long ? `Task ${k}: ${LONG_TITLES.running.slice(0, 70)}` : ["Read the verify contract", "Thread findings into the prompt", "Skip clean plugins", "Update gate card", "Tests", "Docs"][k - 1] }, 1.5);
+      for (let k = 1; k <= shown; k++) ev("plan_progress", { node_id: n.id, task: k, total, title: long ? `Task ${k}: ${LONG_TITLES.running.slice(0, 70)}` : ["Read the verify contract", "Thread findings into the prompt", "Skip clean plugins", "Update gate card", "Tests", "Docs"][k - 1] }, 1.5);
     }
     if (n.id === "verify") {
       ev("findings_measured", { node_id: n.id, findings: [
@@ -318,7 +318,7 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
       startCurrent("running");
       if (!quick) {
         const p = long ? [12, 40] : [3, 6];
-        for (let k = 1; k <= p[0]; k++) ev("task_progress", { node_id: currentNode, task: k, total: p[1], title: progress(k, p[1]).tasks[k - 1].title }, 2);
+        for (let k = 1; k <= p[0]; k++) ev("plan_progress", { node_id: currentNode, task: k, total: p[1], title: progress(k, p[1]).tasks[k - 1].title }, 2);
         item.progress = progress(p[0], p[1]);
       }
       break;

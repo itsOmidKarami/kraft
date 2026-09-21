@@ -625,7 +625,7 @@ _AUTO_ESCALATE_MESSAGE = (
 #: itself, every `escalation_message` (counted, not boundary-checked,
 #: below), and every session-lifecycle/progress event
 #: (`worker_session_created`/`_started`/`_exited`/`_paused`,
-#: `session_unknown`, `session_reattached`, `task_progress`,
+#: `session_unknown`, `session_reattached`, `plan_progress`,
 #: `budget_changed`, ...) -- is ignored by the scan rather than treated as
 #: a boundary. That distinction is load-bearing: `store.create_session`
 #: appends `worker_session_created` unconditionally for *every* dispatched

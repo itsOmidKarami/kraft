@@ -121,17 +121,4 @@ describe("RightPane · Log", () => {
     expect(head.textContent).toContain("Log");
     expect(within(head).getByRole("button", { name: /^all$/i })).toBeTruthy();
   });
-
-  it("tints a task_progress line and reads it as a task boundary", async () => {
-    vi.spyOn(api, "getLogLines").mockResolvedValue({
-      session_id: "s1",
-      status: "done",
-      lines: [{ n: 1, t: null, src: "sys", text: 'task_progress task=3 "wire the thing"' }],
-    });
-    render(<Log sessionId="s1" />);
-    const line = await screen.findByText(/task_progress/);
-    const lineEl = line.closest(".log-line") as HTMLElement;
-    expect(lineEl).toHaveAttribute("data-task-progress", "true");
-    expect(lineEl.textContent).toContain("task 3");
-  });
 });

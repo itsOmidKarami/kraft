@@ -49,7 +49,7 @@ export type NodeOverrides = Record<
 
 /** Where the implementer is in its plan (Kraft-qqz8): "Task 3 of 6", derived
  *  server-side from the plan's `## Task N` headings, the latest
- *  `task_progress` report and the highest task a commit subject names
+ *  `plan_progress` report and the highest task a commit subject names
  *  (`progress.combine`). `null`/absent off the implementation node or for a
  *  plan with no headings. The list endpoint (`_board_progress`) sends it too,
  *  without `tasks`, for the board row's "Task 3/6" line. */

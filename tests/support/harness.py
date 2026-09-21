@@ -549,7 +549,9 @@ def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = 
             repo=str(repo),
             chain_template=chain.chain.id,
             # Not `""`: the column is NOT NULL and Task 5 removes it. Nothing
-            # in a V1 walk reads it.
+            # in a V1 *walk* reads it -- true of the executor only.
+            # `progress.py` is called from the API layer, not the executor,
+            # and reads `materialized_chain` for the board's "Task N of M".
             chain_definition="{}",
             materialized_chain=chain.to_json(),
             **kwargs,
