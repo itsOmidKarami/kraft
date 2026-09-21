@@ -535,3 +535,31 @@ def test_lint_reports_a_chain_policy_the_instance_ceiling_refuses(tmp_path):
     assert [i.chain for i in issues] == ["wide"]
     assert issues[0].file == tmp_path / CHAINS_DIR / "wide.yaml"
     assert "rm_rf" in issues[0].message
+
+
+def test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling(tmp_path):
+    """Per-scope policy is checked by lint too, and needs no instance policy
+    to be wrong: a task that widens its own node's `allowed_tools` can never
+    materialize, whatever the instance allows. The library component's own
+    `policy:` reaches the task through `extends`."""
+    library = write(
+        tmp_path,
+        {"tasks": {"base": agent_task(policy={"allowed_tools": ["git", "rm_rf"]})}},
+        {
+            "narrow": {
+                "nodes": [
+                    {
+                        "id": "n",
+                        "kind": "exec",
+                        "policy": {"allowed_tools": ["git"]},
+                        "tasks": [{"id": "t", "extends": "base"}],
+                    }
+                ],
+            },
+        },
+    )
+
+    issues = library.lint()
+
+    assert [i.chain for i in issues] == ["narrow"]
+    assert issues[0].message.startswith("n.main.t: 'allowed_tools'"), issues[0].message

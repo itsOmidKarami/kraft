@@ -43,7 +43,7 @@ from pydantic import (
     model_validator,
 )
 
-from kraft.policy import InstancePolicy, TemplatePolicyOverride
+from kraft.policy import InstancePolicy, PolicyError, TaskPolicyOverride, TemplatePolicyOverride
 from kraft.templates.environment import Identifier, WorkItemTarget
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
@@ -274,6 +274,9 @@ class TaskBase(BaseModel):
     #: (`_refuse_nested_handlers`), since a handler inside a handler, a fix
     #: loop or a dedicated slot has no failure of its own to recover.
     on_failure: RecoveryPlan | None = None
+    #: The task scope's own policy, applied last
+    #: (`policy-is-layered-by-execution-scope`). Its recovery plan inherits it.
+    policy: TaskPolicyOverride | None = None
 
 
 class BuiltinTask(TaskBase):
@@ -326,6 +329,9 @@ class Step(BaseModel):
     #: Step-level recovery: the handler for a failed task in this step that
     #: declares none of its own (`nearest-recovery-handler-wins`).
     on_failure: RecoveryPlan | None = None
+    #: Applied between the node's policy and each task's; its recovery plan
+    #: inherits it.
+    policy: TaskPolicyOverride | None = None
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -365,34 +371,52 @@ class ExecutionShape(BaseModel):
             _unique("step", [s.id for s in self.steps])
         return self
 
-    def resolve_steps(self, prefix: str) -> tuple[ResolvedStep, ...]:
+    def resolve_steps(self, prefix: str, scopes: Scopes = ()) -> tuple[ResolvedStep, ...]:
         """This container's ordered steps and their tasks, each at its canonical
         path under `prefix`, with a `tasks` group normalized to one step named
         `main` (`task-group-shorthand-resolves-to-one-step`). `Step` itself
         refuses the reserved id, so that `main` step is built past validation --
         deliberately: the reservation exists exactly so that this construction
-        is the only thing that can occupy it."""
+        is the only thing that can occupy it.
+
+        `scopes` are the policy overrides enclosing this container, broadest
+        first; each step and task appends its own, and a recovery plan inherits
+        the scopes of the step or task that declares it."""
         steps = (
             self.steps
             if self.steps is not None
-            else [Step.model_construct(id=MAIN_STEP, tasks=list(self.tasks or ()), on_failure=None)]
+            else [
+                Step.model_construct(
+                    id=MAIN_STEP, tasks=list(self.tasks or ()), on_failure=None, policy=None
+                )
+            ]
         )
-        return tuple(
-            ResolvedStep(
-                path=(path := f"{prefix}{PATH_SEPARATOR}{step.id}"),
-                id=step.id,
-                tasks=tuple(
+        resolved = []
+        for step in steps:
+            path = f"{prefix}{PATH_SEPARATOR}{step.id}"
+            step_scopes = (*scopes, *_own(step.policy))
+            tasks = []
+            for task in step.tasks:
+                task_path = f"{path}{PATH_SEPARATOR}{task.id}"
+                task_scopes = (*step_scopes, *_own(task.policy))
+                tasks.append(
                     ResolvedTask(
-                        path=(task_path := f"{path}{PATH_SEPARATOR}{task.id}"),
+                        path=task_path,
                         task=task,
-                        on_failure=_handler_steps(task.on_failure, task_path),
+                        on_failure=_handler_steps(task.on_failure, task_path, task_scopes),
+                        scopes=task_scopes,
                     )
-                    for task in step.tasks
-                ),
-                on_failure=_handler_steps(step.on_failure, path),
+                )
+            resolved.append(
+                ResolvedStep(
+                    path=path,
+                    id=step.id,
+                    tasks=tuple(tasks),
+                    on_failure=_handler_steps(step.on_failure, path, step_scopes),
+                    scopes=step_scopes,
+                )
             )
-            for step in steps
-        )
+        return tuple(resolved)
 
     def own_tasks(self) -> Iterator[AnyTask]:
         """Every task this shape runs directly, whichever form it took."""
@@ -401,9 +425,24 @@ class ExecutionShape(BaseModel):
             yield from step.tasks
 
 
-def _handler_steps(plan: RecoveryPlan | None, owner: str) -> tuple[ResolvedStep, ...]:
-    """`plan`'s steps at `<owner>.on_failure`, or none."""
-    return plan.resolve_steps(f"{owner}{PATH_SEPARATOR}on_failure") if plan is not None else ()
+#: The policy overrides enclosing one scope, broadest first: a node's own, then
+#: its step's, then its task's. The chain's own and every broader layer are
+#: already folded into `MaterializedChain.policy`.
+Scopes = tuple[TaskPolicyOverride, ...]
+
+
+def _own(policy: TaskPolicyOverride | None) -> Scopes:
+    return (policy,) if policy is not None else ()
+
+
+def _handler_steps(
+    plan: RecoveryPlan | None, owner: str, scopes: Scopes = ()
+) -> tuple[ResolvedStep, ...]:
+    """`plan`'s steps at `<owner>.on_failure`, or none. The plan sits in its
+    owner's scope, so it inherits `scopes`, the owner's."""
+    return (
+        plan.resolve_steps(f"{owner}{PATH_SEPARATOR}on_failure", scopes) if plan is not None else ()
+    )
 
 
 def _refuse_nested_handlers(where: str, shape: ExecutionShape | None) -> None:
@@ -491,6 +530,11 @@ class ExecNode(ExecutionShape):
     #: so -- unlike a fix loop's judge -- this id *is* a path segment.
     escalation: AnyTask | None = None
     on_base_changed: BaseChangePolicy | None = None
+    #: The node scope's policy. Everything the node runs inherits it -- its
+    #: steps, its recovery plan, its fix loop and judge, its escalation task,
+    #: its conflict handler -- and only here may `max_attempts`/
+    #: `timeout_minutes` appear, because they bound this node's fix loop.
+    policy: TemplatePolicyOverride | None = None
 
     @model_validator(mode="after")
     def _escalation_identifier(self) -> Self:
@@ -539,6 +583,9 @@ class GateNode(BaseModel):
     auto_review: AgentTask | None = None
     #: `chain-finalized-remains-a-dedicated-marker`.
     chain_finalized: StrictBool = False
+    #: The gate scope's policy, inherited by `auto_review`. A task's fields
+    #: only: a gate has no fix loop for `max_attempts` to bound.
+    policy: TaskPolicyOverride | None = None
 
     @model_validator(mode="after")
     def _no_handler(self) -> Self:
@@ -590,6 +637,22 @@ class Chain(BaseModel):
         return self
 
 
+def _dedicated(path: str, task: AnyTask | None, scopes: Scopes) -> ResolvedTask | None:
+    """A named-slot task (judge, escalation, gate reviewer) at `path`, in its
+    node's `scopes` plus its own override."""
+    if task is None:
+        return None
+    return ResolvedTask(path=path, task=task, scopes=(*scopes, *_own(task.policy)))
+
+
+def _scoped(path: str, policy: InstancePolicy, scopes: Scopes) -> InstancePolicy:
+    """`policy.layered(scopes)`, with a refusal prefixed by the scope's path."""
+    try:
+        return policy.layered(scopes)
+    except PolicyError as exc:
+        raise PolicyError(f"{path}: {exc}", field=exc.field) from exc
+
+
 @dataclass(frozen=True)
 class ResolvedTask:
     """One task occurrence, at its complete canonical execution path
@@ -599,6 +662,9 @@ class ResolvedTask:
     task: BuiltinTask | AgentTask | SubprocessTask | ForgeTask
     #: The task's own recovery plan, at `<task path>.on_failure`.
     on_failure: tuple[ResolvedStep, ...] = ()
+    #: Every policy override enclosing this task, its own last
+    #: (`MaterializedChain.policy_for`).
+    scopes: Scopes = ()
 
 
 @dataclass(frozen=True)
@@ -608,6 +674,7 @@ class ResolvedStep:
     tasks: tuple[ResolvedTask, ...]
     #: The step's own recovery plan, at `<step path>.on_failure`.
     on_failure: tuple[ResolvedStep, ...] = ()
+    scopes: Scopes = ()
 
 
 @dataclass(frozen=True)
@@ -629,14 +696,21 @@ class ResolvedNode:
     auto_review: ResolvedTask | None = None
     #: `on_base_changed.on_conflict`, at `<node>.on_base_changed.on_conflict`.
     on_conflict: tuple[ResolvedStep, ...] = ()
+    #: The node's own policy override, if it declares one. Its fix loop's
+    #: bounds resolve here (`walk.walk_node`).
+    scopes: Scopes = ()
 
-    def tasks(self) -> Iterator[ResolvedTask]:
+    def steps_in(self) -> Iterator[ResolvedStep]:
+        """Every step this node runs, handlers' steps included."""
         for group in (self.steps, self.on_failure, self.fix_loop, self.on_conflict):
             for step in group:
-                yield from step.tasks
+                yield step
                 for handler in (step.on_failure, *(t.on_failure for t in step.tasks)):
-                    for inner in handler:
-                        yield from inner.tasks
+                    yield from handler
+
+    def tasks(self) -> Iterator[ResolvedTask]:
+        for step in self.steps_in():
+            yield from step.tasks
         for dedicated in (self.judge, self.escalation, self.auto_review):
             if dedicated is not None:
                 yield dedicated
@@ -696,19 +770,22 @@ class ResolvedChain:
     def from_chain(cls, chain: Chain, steering: dict[str, str] | None = None) -> ResolvedChain:
         nodes = []
         for node in chain.nodes:
+            # Every handler and control task sits in its node's scope (or its
+            # gate's): `node_scopes` is what each of them inherits before its
+            # own step's or task's override.
+            node_scopes = _own(node.policy)
+
             if isinstance(node, GateNode):
                 nodes.append(
                     ResolvedNode(
                         id=node.id,
                         node=node,
-                        auto_review=(
-                            ResolvedTask(
-                                path=f"{node.id}{PATH_SEPARATOR}{AUTO_REVIEW_SEGMENT}",
-                                task=node.auto_review,
-                            )
-                            if node.auto_review is not None
-                            else None
+                        auto_review=_dedicated(
+                            f"{node.id}{PATH_SEPARATOR}{AUTO_REVIEW_SEGMENT}",
+                            node.auto_review,
+                            node_scopes,
                         ),
+                        scopes=node_scopes,
                     )
                 )
                 continue
@@ -717,42 +794,37 @@ class ResolvedChain:
                 ResolvedNode(
                     id=node.id,
                     node=node,
-                    steps=node.resolve_steps(node.id),
-                    on_failure=(
-                        node.on_failure.resolve_steps(f"{node.id}{PATH_SEPARATOR}on_failure")
-                        if node.on_failure is not None
-                        else ()
-                    ),
+                    steps=node.resolve_steps(node.id, node_scopes),
+                    on_failure=_handler_steps(node.on_failure, node.id, node_scopes),
                     fix_loop=(
-                        loop.resolve_steps(f"{node.id}{PATH_SEPARATOR}fix_loop")
+                        loop.resolve_steps(f"{node.id}{PATH_SEPARATOR}fix_loop", node_scopes)
                         if loop is not None
                         else ()
                     ),
-                    judge=(
-                        ResolvedTask(
-                            path=f"{node.id}{PATH_SEPARATOR}fix_loop{PATH_SEPARATOR}{JUDGE_SEGMENT}",
-                            task=loop.judge,
-                        )
-                        if loop is not None and loop.judge is not None
-                        else None
+                    judge=_dedicated(
+                        f"{node.id}{PATH_SEPARATOR}fix_loop{PATH_SEPARATOR}{JUDGE_SEGMENT}",
+                        loop.judge if loop is not None else None,
+                        node_scopes,
                     ),
                     escalation=(
-                        ResolvedTask(
-                            path=f"{node.id}{PATH_SEPARATOR}escalation"
-                            f"{PATH_SEPARATOR}{node.escalation.id}",
-                            task=node.escalation,
+                        _dedicated(
+                            f"{node.id}{PATH_SEPARATOR}escalation{PATH_SEPARATOR}{node.escalation.id}",
+                            node.escalation,
+                            node_scopes,
                         )
                         if node.escalation is not None
                         else None
                     ),
                     on_conflict=(
                         node.on_base_changed.on_conflict.resolve_steps(
-                            f"{node.id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict"
+                            f"{node.id}{PATH_SEPARATOR}on_base_changed{PATH_SEPARATOR}on_conflict",
+                            node_scopes,
                         )
                         if node.on_base_changed is not None
                         and node.on_base_changed.on_conflict is not None
                         else ()
                     ),
+                    scopes=node_scopes,
                 )
             )
         return cls(chain=chain, nodes=tuple(nodes), steering=steering)
@@ -779,13 +851,47 @@ class ResolvedChain:
         already written (an intake `--spec`/`--plan`), and they trim the chain
         here rather than at a route handler -- see `trim_for_attachments`.
         """
-        policy = effective_policy
-        if self.chain.policy is not None:
-            policy = policy.apply_template_override(self.chain.policy)
+        policy = self.chain_policy(effective_policy)
         dropped = {n.id for n in self.nodes if _redundant_given(n, attachment_kinds)} | (
             skip_nodes & {n.id for n in self.nodes}
         )
         return MaterializedChain(chain=self.without_nodes(dropped), target=target, policy=policy)
+
+    def chain_policy(self, effective_policy: InstancePolicy) -> InstancePolicy:
+        """`effective_policy` with this chain's own override on top, after
+        checking every node, step and task scope under it resolves too
+        (`policy-is-layered-by-execution-scope`,
+        `template-policy-cannot-relax-safety-ceilings`). Raises `PolicyError`
+        naming the scope that a broader one refuses, so a chain that could
+        not run is refused when the item is filed, never mid-run -- by
+        `materialize` and by `TemplateLibrary.lint` alike."""
+        policy = effective_policy
+        if self.chain.policy is not None:
+            policy = policy.apply_template_override(self.chain.policy)
+        for node in self.nodes:
+            _scoped(node.id, policy, node.scopes)
+            loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
+            ceiling = policy.maxima.max_attempts
+            if loop is not None and loop.max_attempts is not None and ceiling is not None:
+                if loop.max_attempts > ceiling:
+                    raise PolicyError(
+                        f"{node.id}: fix_loop.max_attempts {loop.max_attempts} cannot exceed "
+                        f"the administrator maximum max_attempts {ceiling}",
+                        field="max_attempts",
+                    )
+            for step in node.steps_in():
+                _scoped(step.path, policy, step.scopes)
+            for task in node.tasks():
+                task_policy = _scoped(task.path, policy, task.scopes)
+                allowed = task_policy.allowed_harnesses
+                if isinstance(task.task, AgentTask) and allowed is not None:
+                    if task.task.harness not in allowed:
+                        raise PolicyError(
+                            f"{task.path}: harness {task.task.harness!r} is not in its "
+                            f"allowed_harnesses {sorted(allowed)!r}",
+                            field="allowed_harnesses",
+                        )
+        return policy
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
         """This chain without the nodes an attachment of each kind in `kinds`
@@ -888,6 +994,25 @@ class MaterializedChain:
     @property
     def task_paths(self) -> tuple[str, ...]:
         return self.chain.task_paths
+
+    def policy_for(self, scope: ResolvedNode | ResolvedStep | ResolvedTask) -> InstancePolicy:
+        """The effective policy `scope` runs under: this item's policy with
+        every enclosing node, step and task override applied, broadest first
+        (`policy-is-layered-by-execution-scope`). Derived from the stored
+        authored chain on every call, never stored beside it -- the two could
+        only disagree. `materialize` already checked every scope resolves."""
+        return self.policy.layered(scope.scopes)
+
+    def policy_at(self, path: str) -> InstancePolicy:
+        """`policy_for` the node, step or task at canonical `path`, or
+        `LookupError`."""
+        for node in self.chain.nodes:
+            if node.id == path:
+                return self.policy_for(node)
+            for scope in (*node.steps_in(), *node.tasks()):
+                if scope.path == path:
+                    return self.policy_for(scope)
+        raise LookupError(f"no node, step or task at {path!r} in this chain")
 
     def to_json(self) -> str:
         """The immutable work-item input, as one JSON document: the authored
