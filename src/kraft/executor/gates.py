@@ -939,6 +939,14 @@ async def resume_after_escalation(
     # bracket would stamp `needs_human` over an item a walk owns, which is the exact
     # opposite of what `work_item_self_retry_dropped` means. The bracket covers only
     # the claim *this* call made; whoever else set the status owns it.
+    #
+    # It is a proxy, and worth knowing which one: `claimed` answers "did the
+    # assignment happen", not "did the UPDATE commit". An exception raised between
+    # `claim_for_run`'s commit and the binding below leaves `claimed` False and the
+    # bracket standing aside over an item this call did claim. Narrower than
+    # anything else on this path -- `db.write` commits and returns with nothing
+    # between -- and the alternative (reading the status back) is the thing this
+    # predicate exists to skip.
     claimed = False
     async with stops.claimed_or_stopped(
         db,

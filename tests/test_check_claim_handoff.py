@@ -16,7 +16,10 @@ are not free: the derived vocabulary, and a claim reached through a helper.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
+import pathlib
+import shutil
 import textwrap
 from pathlib import Path
 
@@ -44,6 +47,13 @@ _FSTRING_STORE = """
 """
 
 
+#: Re-review 4's V3: a claim that does not assign `status` first.
+_COLUMNS_SWAPPED_STORE = """
+    def reopen(conn, wid):
+        conn.execute("UPDATE work_items SET updated_at = ?, status = 'active' WHERE id = ?")
+"""
+
+
 def _load(root: Path | None = None):
     spec = importlib.util.spec_from_file_location("_check_claim_handoff", _SCRIPT)
     mod = importlib.util.module_from_spec(spec)
@@ -64,8 +74,9 @@ def _tree(tmp_path: Path, body: str, *, store: str = _DEFAULT_STORE) -> Path:
     return root
 
 
-def _bad(root: Path) -> list[tuple[str, str, str, bool]]:
-    return [r for r in _load(root).audit() if not r[3]]
+def _bad(root: Path) -> list[tuple[str, str, str, bool, bool]]:
+    """The violations: neither bracketed nor delegated to a checked caller."""
+    return [r for r in _load(root).audit() if not (r[3] or r[4])]
 
 
 # --------------------------------------------------------------------------
@@ -154,6 +165,25 @@ _UNBRACKETED_SHAPES = {
             await db.write(lambda c: store.reopen(c, wid))
             return "escaped"
     """,
+    # Re-review 4's V3: the same claim with the columns swapped. `_CLAIM_SQL`
+    # wanted `status` to be the *first* assigned column, and every writer in
+    # `store/` happens to put it first -- so this was a one-word spelling change
+    # away in any future `store/` diff, and invisible.
+    "claim_with_status_not_the_first_column": """
+        async def f(db, wid):
+            await db.write(lambda c: store.reopen(c, wid))
+            return "escaped"
+    """,
+    # Re-review 4's V4: the claim reached by a direct import rather than off
+    # `store`. The `base == "store"` rule is there to exclude the HTTP client's
+    # `approve_gate`, and it also made an alias invisible.
+    "claim_called_through_a_direct_import": """
+        from kraft.store.work_items import claim_for_run
+
+        async def f(db, wid):
+            await db.write(lambda c: claim_for_run(c, wid))
+            return "escaped"
+    """,
 }
 
 
@@ -162,6 +192,8 @@ def test_every_unbracketed_claim_is_caught(tmp_path, shape):
     store = _DEFAULT_STORE
     if shape == "claim_written_by_an_f_string":
         store += _FSTRING_STORE
+    if shape == "claim_with_status_not_the_first_column":
+        store += _COLUMNS_SWAPPED_STORE
     root = _tree(tmp_path, _UNBRACKETED_SHAPES[shape], store=store)
     assert _bad(root), f"{shape} claims with no bracket around it and was not reported"
     assert _load(root).main([]) == 1
@@ -186,8 +218,9 @@ def test_a_bracketed_claim_passes(tmp_path):
 def test_a_helper_whose_call_sites_are_all_bracketed_passes(tmp_path):
     """`executor.apply_rejection`'s real shape: the claim is in a helper that
     hands the re-entry index back, so the bracket belongs to its callers. Two
-    doors, both bracketed -- and the helper's own line is not a row of its own,
-    because reporting it would name the wrong line first."""
+    doors, both bracketed -- and the helper's own line is still a *row*, marked
+    delegated rather than deleted. Round 4 deleted it, which is how a colliding
+    name came to delete a real door's claim as well."""
     root = _tree(
         tmp_path,
         """
@@ -207,14 +240,54 @@ def test_a_helper_whose_call_sites_are_all_bracketed_passes(tmp_path):
     )
     mod = _load(root)
     assert mod.main([]) == 0
-    assert sorted(r[2] for r in mod.audit()) == ["agent_door", "human_door"]
+    rows = {r[2]: (r[3], r[4]) for r in mod.audit()}
+    assert rows == {
+        "agent_door": (True, False),
+        "human_door": (True, False),
+        "apply_it": (False, True),  # unbracketed, but delegated -- and still shown
+    }
+
+
+def test_a_door_named_after_the_store_function_it_wraps_is_not_promoted(tmp_path):
+    """The reachable promotion hole, and round 4's high finding.
+
+    Kraft names its route handlers after the store function they wrap:
+    `resume_work_item`, `retry_work_item`, `approve_gate` and `reject_gate` are
+    each both a `store/` function and a door. Round 4 promoted the *owner* of an
+    unbracketed claim on its bare name and then deleted its row, so taking the
+    bracket off `resume_work_item` promoted the door, deleted its claim, found no
+    other unbracketed call of that name and **exited 0 with nothing flagged** --
+    on one of the five sites the original defect occurred at.
+
+    Two guards, both pinned here. A `store/` name is never promoted, and no row is
+    ever deleted.
+    """
+    root = _tree(
+        tmp_path,
+        """
+        async def resume_work_item(db, wid):
+            await db.write(lambda c: store.claim_for_run(c, wid))
+            await db.write(lambda c: store.resume_work_item(c, wid, None))
+            return "escaped"
+
+        async def other(db, wid):
+            async with stops.claimed_or_stopped(db, wid, None, reason="r"):
+                return await resume_work_item(db, wid)
+        """,
+        store=_DEFAULT_STORE
+        + """
+    def resume_work_item(conn, wid, steer):
+        conn.execute("INSERT INTO events (work_item_id) VALUES (?)")
+""",
+    )
+    mod = _load(root)
+    assert mod.main([]) == 1, "the door's own claim must not be promoted away"
+    assert [r[2] for r in _bad(root)] == ["resume_work_item"]
 
 
 def test_an_uncalled_function_is_not_promoted_into_invisibility(tmp_path):
-    """The one way promotion could hurt: a route handler nobody calls, holding
-    an unbracketed claim, promoted into the vocabulary and then found to have no
-    call sites -- its claim would vanish, which is the false negative this whole
-    file exists to refuse."""
+    """The same guard from the other side: a handler nobody calls from inside a
+    bracket is nobody's delegate, so its claim is its own."""
     root = _tree(
         tmp_path,
         """
@@ -224,6 +297,69 @@ def test_an_uncalled_function_is_not_promoted_into_invisibility(tmp_path):
         """,
     )
     assert [r[2] for r in _bad(root)] == ["route"]
+
+
+def test_a_delegating_helper_flags_only_its_unbracketed_door(tmp_path):
+    """Re-review 4's V5. One helper, two doors, one of them bracketed: the helper
+    delegates (so its own row stands aside) and the *unbracketed door* is the
+    violation. Getting this wrong in either direction is a whole class -- flag the
+    helper and the clean tree never goes green, flag neither and a real door
+    hides."""
+    root = _tree(
+        tmp_path,
+        """
+        async def apply_it(db, wid):
+            await db.write(lambda c: store.claim_for_run(c, wid))
+            return 3
+
+        async def good_door(db, wid):
+            async with stops.claimed_or_stopped(db, wid, None, reason="r"):
+                return await apply_it(db, wid)
+
+        async def bad_door(db, wid):
+            return await apply_it(db, wid)
+        """,
+    )
+    assert [r[2] for r in _bad(root)] == ["bad_door"]
+
+
+def test_a_claim_in_a_nested_def_of_an_unbracketed_function_is_caught(tmp_path):
+    """Re-review 4's V6. `ci_wait` writes its claim inside a `db.write`
+    transaction body, so the bracket test crosses function boundaries on purpose
+    -- which must not turn into crediting a nested def with a bracket that is not
+    there."""
+    root = _tree(
+        tmp_path,
+        """
+        async def f(db, wid):
+            def txn(c):
+                store.claim_for_run(c, wid)
+
+            await db.write(txn)
+            return "escaped"
+        """,
+    )
+    assert [r[2] for r in _bad(root)] == ["txn"]
+
+
+def test_a_helper_called_only_from_unbracketed_sites_keeps_its_own_row(tmp_path):
+    """`rate_limit_retry._retry_one`'s shape. Round 4 promoted any owner that was
+    called anywhere, so removing a poller's bracket promoted `_retry_one`, then
+    its caller `poller`, then `lifespan` -- a cascade of 7 to 100+ bogus rows with
+    the real line absent. Promotion now needs the codebase to *say* the bracket
+    belongs to the callers, by having at least one bracketed call site."""
+    root = _tree(
+        tmp_path,
+        """
+        async def _retry_one(db, wid):
+            await db.write(lambda c: store.claim_for_run(c, wid))
+            return False
+
+        async def poller(db, wid):
+            return await _retry_one(db, wid)
+        """,
+    )
+    assert [r[2] for r in _bad(root)] == ["_retry_one"], "no cascade, and the real site named"
 
 
 def test_claims_are_derived_from_store_not_hand_listed(tmp_path):
@@ -291,3 +427,75 @@ def test_the_real_tree_is_clean(capsys):
     """And the property the whole thing exists for, over `src/kraft` itself."""
     assert _load().main([]) == 0
     assert "every one of them is inside" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# The check the other way round, and the one that decides whether this file is
+# worth anything: the gate's job is not to pass on good code, it is to FAIL when
+# somebody takes a bracket off. Round 4's version was silent at 2 of these 9 and
+# named the wrong file at 2 more, while passing every test in this file.
+# --------------------------------------------------------------------------
+
+
+def _brackets() -> list[tuple[pathlib.Path, int, int, int]]:
+    """Every `stops.claimed_or_stopped` block in `src/kraft`, as line spans.
+
+    Enumerated from the tree rather than listed, for the reason the claim
+    vocabulary is: a hand-written list of the sites to test is the same failure
+    one level up, and a tenth bracket added tomorrow has to be covered without
+    anyone remembering to add it here.
+    """
+    src = _SCRIPT.parent.parent / "src" / "kraft"
+    out = []
+    for path in sorted(src.rglob("*.py")):
+        if "_bundled" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.With | ast.AsyncWith) and any(
+                _SCRIPT_BRACKET in ast.dump(i.context_expr) for i in node.items
+            ):
+                out.append((path, node.lineno, node.body[0].lineno, node.body[-1].end_lineno))
+    return out
+
+
+_SCRIPT_BRACKET = "claimed_or_stopped"
+
+
+def _without_bracket(text: str, header: int, body_start: int, body_end: int) -> str:
+    """The same source with one `async with` header gone and its body dedented."""
+    lines = text.split("\n")
+    body = [ln[4:] if ln.startswith("    ") else ln for ln in lines[body_start - 1 : body_end]]
+    return "\n".join(lines[: header - 1] + body + lines[body_end:])
+
+
+def test_there_are_nine_brackets_to_check():
+    """So a bracket deleted outright cannot quietly shrink the sweep below."""
+    assert len(_brackets()) == 9
+
+
+@pytest.mark.parametrize("index", range(9))
+def test_removing_any_real_bracket_is_caught_and_names_its_file(tmp_path, index):
+    """Take bracket `index` off `src/kraft` and the checker must exit 1 with its
+    violations in *that file and no other*.
+
+    Both halves matter. Round 4 exited 0 for `resume_work_item` and
+    `retry_work_item`; for the two gate doors it exited 1 while naming
+    `cli/item.py` and omitting the real line; and for three more it cascaded into
+    7 to 100+ rows reaching `__main__.py`, with the real line absent. An alarm
+    that fires pointing somewhere else is not much better than one that does not
+    fire.
+    """
+    path, header, body_start, body_end = _brackets()[index]
+    src = _SCRIPT.parent.parent / "src" / "kraft"
+    root = tmp_path / "kraft"
+    shutil.copytree(src, root)
+    target = root / path.relative_to(src)
+    target.write_text(_without_bracket(path.read_text(), header, body_start, body_end))
+
+    mod = _load(root)
+    assert mod.main([]) == 1, f"removing the bracket at {path.name}:{header} was not caught"
+    bad = [r for r in mod.audit() if not (r[3] or r[4])]
+    assert {r[0].rsplit(":", 1)[0].split("kraft/", 1)[1] for r in bad} == {
+        str(path.relative_to(src))
+    }, f"flagged the wrong file for {path.name}:{header}: {[r[0] for r in bad]}"
+    assert len(bad) <= 2, f"cascade: {len(bad)} rows for {path.name}:{header}"
