@@ -1,55 +1,61 @@
-"""Enforce the claim-then-hand-off invariant across `src/kraft/`.
+"""Every claim in `src/kraft/` must sit inside `stops.claimed_or_stopped`.
 
-    No path may write a *runnable* status and then take a branch that returns
-    without either handing the item to a walk, or leaving it in a status some
-    selector picks up again.
+A *claim* is a write that leaves a work item runnable (`UPDATE work_items SET
+status = 'active'`). It means "a walk is behind this". A region that claims and
+then leaves without either handing the item to a walk or moving the status again
+leaves the item reading `active` with nothing behind it: it looks running, is
+not, and nothing will select it again -- `ci_wait.tick` filters
+`status = 'waiting'`, `rate_limit_retry.tick` filters `status = 'rate_limited'`,
+and no selector filters `active`.
 
-A path that does leaves the item reading `active` -- which *means* "a walk is
-behind this" -- with nothing behind it. It looks running, is not, and nothing
-will select it again: `ci_wait.tick` filters `status = 'waiting'`,
-`rate_limit_retry.tick` filters `status = 'rate_limited'`, and no selector
-filters `active`.
-
-This is a check, not a report: it exits 1 on any unprotected exit, so it can
+This is a check, not a report: it exits 1 on any unbracketed claim, so it can
 gate CI. Run `uv run python dev/check_claim_handoff.py [-v]`.
 
-## What it derives, and why each rule is the shape it is
+## What it proves, and what it does not
 
-Three rounds of one defect on one branch taught the same lesson twice, once
-about the code and once about this file. Both are written into the rules below,
-because a checker that can be fooled is worse than no checker: it licenses the
-belief it was built to test.
+**It proves: every claim call in `src/kraft/` is lexically inside a
+`stops.claimed_or_stopped` block, or inside a helper whose own call sites all
+are.** That is the whole claim. It is *not* a proof that no work item can be
+stranded -- a bracket with the wrong `handed_off`, or a stop written into the
+`finally` that itself raises, is outside what any AST walk can see.
 
-**CLAIMS is derived from `store/`, not listed here.** A hand-maintained
-vocabulary is the same "hand a fixer a list" failure the invariant is about, one
-level up -- and it had already drifted: the first version of this file omitted
-`store.approve_gate`, which is an unconditional `UPDATE work_items SET status =
-'active'`, so the whole gate-approval family was invisible. `_claims()` reads
-the SQL and the `to_status` default out of the AST instead. Its output is
-printed with `-v` so the input set is auditable rather than trusted.
+But within that scope it is sound, and the earlier shape of this file was not.
+Three rounds of one defect taught the lesson twice, once about the code and once
+about this file:
 
-**Dominance, never lexical order.** A stop only counts if it *must* have run
-before the exit: `_dominators` walks the ancestor chain and keeps, for each
-ancestor block, only the siblings preceding that ancestor. `_must_run` narrows
-again -- a preceding `if` contributes only its test, never its branch bodies.
-This is the load-bearing rule. Round 1's poller bug read as already handled
-under a lexical scan, because its `mark_needs_human` sits in a *different
-branch* of an earlier `if`. The `with` arm recurses into the body (a `with`
-block does run) but not into `except` handlers, for the same reason.
+**Ask "is this claim bracketed", never "is this exit handled".** The first
+version enumerated every way control could leave a function that had claimed,
+and asked of each whether a stop dominated it. That question cannot be answered
+statically: the exits are not all statements. A `KeyError` from a dict index, a
+defaultless `next(...)`, a `LookupError` from a legacy row -- none is a `return`
+or a `raise` node, and the original defect was exactly that shape. Five of seven
+synthetic violations, including that one, passed the exit walk at exit 0.
 
-**"After a claim" is dominance too, not a line-number comparison.** A claim on
-line 10 does not reach an exit on line 20 if the two are in sibling branches,
-and a claim inside a loop body does reach a `break` above it in source order.
+The inverse question needs no exit analysis at all, because `try/finally`
+protects exception exits *by construction*: `claimed_or_stopped`'s body after
+`yield` is a bare `finally` with no `return`, `break` or `raise`, so every way
+control leaves the bracketed region runs the stop. So "the claim is inside a
+bracket" is *sufficient*, where "every enumerable exit is covered" was not. It
+also needs no allowlist: all ten claim sites in `src/kraft` pass.
 
-**Bracket credit is scoped to the bracket.** `stops.claimed_or_stopped` covers
-an exit only when that exit is a descendant of the `async with` that opens it --
-not when the function merely mentions it somewhere. Function-wide credit passes
-a claim made *outside* the bracket, which is the same false-positive shape as a
-lexical stop.
+**The vocabulary is derived from `store/`, not listed here.** A hand-maintained
+set is the same "hand a fixer a list" failure the invariant is about, one level
+up -- and it had already drifted twice. The first version omitted
+`store.approve_gate`, so the whole gate-approval family was invisible. The
+second read SQL out of the AST but only from `ast.Constant`, so
+`store.reject_gate`'s f-string `SET status = {status}` was invisible and hid an
+unbracketed claim site in the human reject door. `_strings` now renders a
+`JoinedStr` with `?` standing in for each interpolation, which is the
+conservative direction. The derived set is printed with `-v` so it is auditable
+rather than trusted.
 
-**Exits include `break`, `continue` and falling off the end.** A function whose
-last statement is not a `return`/`raise` can complete without one, and that is
-an exit like any other.
+**A claim reached through a helper is still a claim.** `executor.apply_rejection`
+wraps `store.reject_gate` and hands the re-entry index back to its caller, so the
+bracket belongs in the caller, not in it. Rather than allowlisting it, a function
+holding an unbracketed claim is *promoted* into the vocabulary and its own call
+sites are checked instead -- but only when it has call sites, because promoting a
+route handler nobody calls would make its claim vanish, which is the false
+negative this whole file exists to refuse.
 """
 
 from __future__ import annotations
@@ -70,15 +76,6 @@ STORE = ROOT / "store"
 #: match, so the UPDATE and the table are both part of the pattern.
 _CLAIM_SQL = re.compile(r"UPDATE\s+work_items\s+SET\s+status\s*=\s*(?:'active'|\?)", re.I)
 
-#: Functions that leave a work item in a status some selector picks up again, or
-#: a terminal one. Read off `store/`'s own `SET status = '<name>'` literals --
-#: anything that is not `active` and not a parameter is a stop.
-_STOP_SQL = re.compile(r"UPDATE\s+work_items\s+SET\s+status\s*=\s*'(?!active')", re.I)
-
-#: Registering or awaiting a walk. Name-based, because the hand-off is a call
-#: into another module rather than a SQL write with a recognisable shape.
-HANDOFF = frozenset({"spawn", "run", "run_once", "_spawn_conflict_resolution"})
-
 #: The bracket that enforces the invariant for a whole region
 #: (`kraft.executor.stops.claimed_or_stopped`).
 BRACKET = "claimed_or_stopped"
@@ -95,26 +92,19 @@ def _called(node: ast.AST) -> set[str]:
 
 
 def _strings(node: ast.AST) -> list[str]:
-    return [
-        n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)
-    ]
+    """Every string literal under `node`, with f-strings rendered.
 
-
-def _store_functions(pattern: re.Pattern[str]) -> set[str]:
-    """Every `store/` function whose own SQL matches `pattern`.
-
-    Nested defs are attributed to themselves, which is right: `store/` has none
-    that matter, and a nested writer would be its own claim.
+    An f-string's SQL arrives as fragments, and the only fragment
+    `store.reject_gate` carries is `"UPDATE work_items SET status = "` -- which
+    matches nothing. `?` stands in for each interpolation: an interpolated status
+    *may* be `'active'`, and over-including is the conservative direction.
     """
-    if not STORE.is_dir():
-        raise SystemExit(f"{STORE} is not a directory; is this a Kraft checkout?")
-    out: set[str] = set()
-    for path in sorted(STORE.glob("*.py")):
-        for fn in ast.walk(ast.parse(path.read_text())):
-            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                pattern.search(s) for s in _strings(fn)
-            ):
-                out.add(fn.name)
+    out = []
+    for n in ast.walk(node):
+        if isinstance(n, ast.JoinedStr):
+            out.append("".join(p.value if isinstance(p, ast.Constant) else "?" for p in n.values))
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str):
+            out.append(n.value)
     return out
 
 
@@ -122,137 +112,45 @@ def claims() -> set[str]:
     """Every `store/` function that leaves an existing work item runnable.
 
     `UPDATE`, never `INSERT`: a claim is a *transition* of a row that already
-    exists, and the hand-off for it belongs to the same function. `create_work_item`
-    also takes `status="active"`, but its hand-off is its caller's -- `intake`
-    returns an id and the route spawns the walk -- so a region spanning two
-    functions is not the shape this invariant is about. `SET status = ?`
-    (`claim_for_run`) counts: over-including a call that passes a non-active
-    status is the conservative direction.
+    exists, and the hand-off for it belongs to the same region.
+    `create_work_item` also takes `status="active"`, but its hand-off is its
+    caller's -- `intake` returns an id and the route spawns the walk. `SET status
+    = ?` (`claim_for_run`) counts: over-including a call that passes a
+    non-active status is the conservative direction.
+
+    Nested defs are attributed to themselves, which is right: `store/` has none
+    that matter, and a nested writer would be its own claim. `rglob`, not
+    `glob`: a future `store/` subpackage must not be silently unread.
     """
-    return _store_functions(_CLAIM_SQL)
-
-
-def stops() -> set[str]:
-    return _store_functions(_STOP_SQL)
-
-
-def _must_run(stmt: ast.stmt) -> set[str]:
-    """Calls guaranteed to have run if `stmt` completed.
-
-    A preceding `if` contributes only its test. Crediting its branch bodies is
-    the over-count that let round 1's poller bug read as handled: their
-    `mark_needs_human` sits in a *different* branch of an earlier `if`, and a
-    lexical "appears above" scan calls that a stop.
-    """
+    if not STORE.is_dir():
+        raise SystemExit(f"{STORE} is not a directory; is this a Kraft checkout?")
     out: set[str] = set()
-    if isinstance(stmt, ast.If | ast.While):
-        out |= _called(stmt.test)
-    elif isinstance(stmt, ast.For | ast.AsyncFor):
-        out |= _called(stmt.iter)
-    elif isinstance(stmt, ast.Try):
-        # The body runs (until an exception); the handlers need not.
-        for s in stmt.body + stmt.finalbody:
-            out |= _must_run(s)
-    elif isinstance(stmt, ast.With | ast.AsyncWith):
-        # The block does run, so recurse -- but into the body only, the same way
-        # `Try` does. `_called(stmt)` here would walk `except` handlers nested
-        # inside it and re-introduce exactly the lexical over-credit this
-        # function exists to remove.
-        for item in stmt.items:
-            out |= _called(item.context_expr)
-        for s in stmt.body:
-            out |= _must_run(s)
-    elif isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-        pass  # a definition is not a call
-    else:
-        out |= _called(stmt)
+    for path in sorted(STORE.rglob("*.py")):
+        for fn in ast.walk(ast.parse(path.read_text())):
+            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                _CLAIM_SQL.search(s) for s in _strings(fn)
+            ):
+                out.add(fn.name)
     return out
 
 
-def _dominators(fn: ast.AST, node: ast.AST, parents: dict) -> list[ast.stmt]:
-    """Statements that must have executed before `node`: for each ancestor
-    block, the siblings preceding that ancestor in it."""
-    out: list[ast.stmt] = []
-    cur = node
-    while cur is not fn and cur in parents:
-        parent = parents[cur]
-        for field in ("body", "orelse", "finalbody"):
-            block = getattr(parent, field, None)
-            if isinstance(block, list) and cur in block:
-                out.extend(block[: block.index(cur)])
-        cur = parent
-    return out
-
-
-def _owner(fn: ast.AST, node: ast.AST, parents: dict) -> ast.AST:
-    """The innermost function that lexically owns `node`."""
+def _owner(node: ast.AST, parents: dict) -> ast.AST | None:
+    """The innermost function lexically containing `node`."""
     cur = node
     while cur in parents:
         cur = parents[cur]
         if isinstance(cur, ast.FunctionDef | ast.AsyncFunctionDef):
             return cur
-    return fn
+    return None
 
 
-def _can_fall_through(stmt: ast.stmt) -> bool:
-    """Whether control can reach the statement *after* `stmt`.
+def _bracketed(node: ast.AST, parents: dict) -> bool:
+    """Whether a `claimed_or_stopped` block encloses `node`.
 
-    Without this, a function whose body ends in the bracket's own `async with`
-    was reported as falling off the end -- and the credit for that phantom exit
-    was computed over the whole compound statement, which is the lexical
-    over-credit this file exists to refuse.
+    The walk crosses function boundaries deliberately: a nested `def` written
+    inside a bracket (`ci_wait`'s `db.write` transaction body) claims on behalf
+    of a region that *is* bracketed, so it is covered too.
     """
-    if isinstance(stmt, ast.Return | ast.Raise | ast.Break | ast.Continue):
-        return False
-    if isinstance(stmt, ast.If):
-        return not stmt.orelse or _body_falls_through(stmt.body) or _body_falls_through(stmt.orelse)
-    if isinstance(stmt, ast.With | ast.AsyncWith):
-        return _body_falls_through(stmt.body)
-    if isinstance(stmt, ast.Try):
-        return _body_falls_through(stmt.body) or any(
-            _body_falls_through(h.body) for h in stmt.handlers
-        )
-    return True
-
-
-def _body_falls_through(body: list[ast.stmt]) -> bool:
-    return not body or _can_fall_through(body[-1])
-
-
-def _exits(fn: ast.FunctionDef | ast.AsyncFunctionDef, parents: dict) -> list[ast.stmt]:
-    """Every way control leaves `fn`: `return`, `raise`, `break`, `continue`,
-    and falling off the end when the last statement is neither a return nor a
-    raise."""
-    out = [
-        n
-        for n in ast.walk(fn)
-        if isinstance(n, ast.Return | ast.Raise | ast.Break | ast.Continue)
-        and _owner(fn, n, parents) is fn
-    ]
-    if _body_falls_through(fn.body):
-        out.append(fn.body[-1])  # falls off the end: an exit like any other
-    return out
-
-
-def _bracketed(node: ast.AST, parents: dict, dom: set[str]) -> bool:
-    """Whether the bracket covers `node`: either it encloses the exit, or it has
-    already completed before it.
-
-    Scoped to the block and to dominance, never to the function: function-wide
-    credit passes a claim made *outside* the bracket, which is the same false
-    positive as a lexical stop. The "already completed" half is what covers a
-    deliberate read *after* the bracket -- `resume_after_escalation` reports the
-    status the bracket may just have written, so that read has to be outside it.
-
-    The walk does not stop at the owning function, deliberately: a nested `def`
-    written inside a bracket (`ci_wait`'s `db.write` transaction body) hands its
-    value back to a caller that *is* bracketed, so it is covered too. That is
-    also why the bracket there starts before the claim rather than after it --
-    placing it after would leave the nested def outside, and the checker would
-    report a row a human has to re-adjudicate on every run.
-    """
-    if BRACKET in dom:
-        return True
     cur = node
     while cur in parents:
         cur = parents[cur]
@@ -263,61 +161,98 @@ def _bracketed(node: ast.AST, parents: dict, dom: set[str]) -> bool:
     return False
 
 
-def audit() -> list[tuple[str, str, str, str, str, str]]:
-    claim_names, stop_names = claims(), stops()
-    rows = []
+def _modules() -> list[tuple[pathlib.Path, ast.Module, dict]]:
+    out = []
     for path in sorted(ROOT.rglob("*.py")):
         if "_bundled" in path.parts:
             continue
         tree = ast.parse(path.read_text())
-        parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
-        for fn in ast.walk(tree):
-            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+        out.append((path, tree, {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}))
+    return out
+
+
+def _sites(
+    mods: list[tuple[pathlib.Path, ast.Module, dict]],
+    store_claims: set[str],
+    promoted: set[str],
+) -> list[tuple[str, str, str, bool, ast.AST | None]]:
+    """(location, claim name, owning function, bracketed, owning function node).
+
+    A `store/`-derived name counts only when called off `store` itself: `mcp.py`
+    and `cli/item.py` both have an `approve_gate` that is the *HTTP client*'s,
+    not the store's. A promoted name is a plain call in this tree, so it is
+    matched on the callee name alone.
+    """
+    out = []
+    for path, tree, parents in mods:
+        for call in ast.walk(tree):
+            if not isinstance(call, ast.Call):
                 continue
-            for ex in _exits(fn, parents):
-                dom: set[str] = set()
-                for stmt in _dominators(fn, ex, parents):
-                    dom |= _must_run(stmt)
-                # "After a claim" by dominance, not by line number: a claim in a
-                # sibling branch does not reach this exit, and a claim in a loop
-                # body does reach a `break` written above it.
-                if not dom & claim_names:
-                    continue
-                dom |= _called(ex)
-                rows.append(
-                    (
-                        f"{path.relative_to(ROOT.parent.parent)}:{ex.lineno}",
-                        fn.name,
-                        type(ex).__name__.lower(),
-                        "STOP" if dom & stop_names else "",
-                        "HANDOFF" if dom & HANDOFF else "",
-                        "BRACKET" if _bracketed(ex, parents, dom) else "",
-                    )
+            f = call.func
+            if isinstance(f, ast.Attribute):
+                name, base = f.attr, getattr(f.value, "id", None)
+            else:
+                name, base = getattr(f, "id", ""), None
+            if not ((name in store_claims and base == "store") or name in promoted):
+                continue
+            fn = _owner(call, parents)
+            out.append(
+                (
+                    f"{path.relative_to(ROOT.parent.parent)}:{call.lineno}",
+                    name,
+                    fn.name if fn is not None else "<module>",
+                    _bracketed(call, parents),
+                    fn,
                 )
-    return rows
+            )
+    return out
+
+
+def audit() -> list[tuple[str, str, str, bool]]:
+    """Every claim site in `src/kraft`, and whether a bracket encloses it."""
+    mods = _modules()
+    store_claims, promoted = claims(), set()
+    while True:
+        sites = _sites(mods, store_claims, promoted)
+        # A function that claims without a bracket claims on its caller's
+        # behalf, so check its call sites instead of it -- but only if it has
+        # any. Promoting an uncalled route handler would make its claim vanish.
+        called = {n for _, tree, _ in mods for n in _called(tree)}
+        grow = {
+            fn.name
+            for _, _, _, ok, fn in sites
+            if not ok and fn is not None and fn.name in called and fn.name not in promoted
+        }
+        if not grow:
+            # A promoted helper's own claim is answered by the checks on its call
+            # sites, so it is not a row of its own -- reporting both says the
+            # same thing twice and names the wrong line first.
+            return [
+                (loc, name, owner, ok) for loc, name, owner, ok, _ in sites if owner not in promoted
+            ]
+        promoted |= grow
 
 
 def main(argv: list[str]) -> int:
     rows = audit()
-    bad = [r for r in rows if not (r[3] or r[4] or r[5])]
+    bad = [r for r in rows if not r[3]]
     if "-v" in argv:
-        print(f"claims derived from store/: {sorted(claims())}")
-        print(f"stops  derived from store/: {sorted(stops())}")
-        print("\nevery exit a claim reaches:")
+        print(f"claims derived from store/: {sorted(claims())}\n")
+        print("every claim site:")
         for r in sorted(rows):
-            print(f"  {r[0]:<46} {r[1]:<28} {r[2]:<9}{r[3]:<6}{r[4]:<9}{r[5]}")
+            print(f"  {'OK  ' if r[3] else 'BAD '}{r[0]:<46} {r[2]:<28} {r[1]}")
         print()
     files = len({r[0].rsplit(":", 1)[0] for r in rows})
-    print(f"{len(rows)} exits a claim reaches, across {files} files")
+    print(f"{len(rows)} claim sites, across {files} files")
     if not bad:
-        print("ok: every one of them stops, hands off, or sits inside the bracket")
+        print(f"ok: every one of them is inside a `stops.{BRACKET}` bracket")
         return 0
-    print(f"{len(bad)} with no dominating stop, hand-off or bracket:\n")
+    print(f"{len(bad)} outside any bracket:\n")
     for r in bad:
-        print(f"  {r[0]:<46} {r[1]:<28} {r[2]}")
+        print(f"  {r[0]:<46} {r[2]:<28} {r[1]}")
     print(
         "\nEach of these can leave a work item reading `active` with nothing behind it. "
-        "Wrap the region in `stops.claimed_or_stopped` rather than adding a stop per exit."
+        f"Wrap the region in `stops.{BRACKET}` rather than adding a stop per exit."
     )
     return 1
 

@@ -376,23 +376,64 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    try:
-        target = await executor.apply_rejection(
-            st.db,
-            st.policy,
-            work_item_id=wid,
-            nodes=nodes,
-            gate=gate,
-            note=body.note,
-            node=body.node,
-            by=_decided_by(request),
-            # A person only ever rejects; `fixed` is a gate-reviewer verdict and
-            # has no door here (Kraft-s7c04.16).
-            verdict="reject",
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if target is None:
+    # Bracketed from *before* the claim to the hand-off, the same way the approve
+    # door above is. `apply_rejection` performs an `UPDATE work_items SET status
+    # = 'active'` when the reject loop still has attempts left (`store.reject_gate`
+    # with `reopen=True`) -- a claim like any other, and the other half of the
+    # pairing `api/deps.py`'s `task_is_live` docstring has been naming all along:
+    # "calling `store.approve_gate`/`apply_rejection` and only then discovering
+    # `spawn` refuses would leave the gate cleared and the item `active` with no
+    # walk behind it". The approve half was bracketed a round before this one; the
+    # f-string SQL in `store.reject_gate` is why `dev/check_claim_handoff.py`
+    # could not see this half until its derivation learned to read a `JoinedStr`.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="gate rejection reopened the gate but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        try:
+            target = await executor.apply_rejection(
+                st.db,
+                st.policy,
+                work_item_id=wid,
+                nodes=nodes,
+                gate=gate,
+                note=body.note,
+                node=body.node,
+                by=_decided_by(request),
+                # A person only ever rejects; `fixed` is a gate-reviewer verdict and
+                # has no door here (Kraft-s7c04.16).
+                verdict="reject",
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if target is None:
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        gates.auto_escalate_stuck(
+                            "needs_human",
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            registry=st.registry,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            bd_cwd=deps.bd_cwd(),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
         try:
             deps.spawn(
                 request.app,
@@ -400,15 +441,16 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.run(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
                         registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
                         bd_cwd=deps.bd_cwd(),
+                        start_index=target,
+                        policy=st.policy,
+                        steer=body.note,
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
                 ),
@@ -416,28 +458,3 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=target,
-                    policy=st.policy,
-                    steer=body.note,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
