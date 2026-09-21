@@ -7,11 +7,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+from support import api as api_support
 from support import harness
 from support.fake_beads import FakeBeads
-from support.harness import fake_templates_dir, isolated_bd
+from support.harness import fake_templates_dir, isolated_bd, make_repo
 
-from kraft import client, db
+from kraft import client as kraft_client
+from kraft import db
 from kraft.paths import RunDirs
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -313,6 +315,48 @@ async def database(run_dirs):
 
 
 @pytest.fixture
+def templates_dir(tmp_path) -> Path:
+    """`KRAFT_TEMPLATES_DIR` for the `client` fixture: `fake_templates_dir` with
+    every agent on `fixtures/fake-claude.sh`. A file that needs another shape
+    (`noop_verify=True`, planning hooks) overrides this fixture and `client`
+    picks its version up."""
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+
+
+@pytest.fixture
+def repo(tmp_path) -> Path:
+    """A committed copy of `tests/support/sample_repo` (`make_repo`)."""
+    return make_repo(tmp_path)
+
+
+@pytest.fixture
+def client(request, tmp_path, monkeypatch, templates_dir):
+    """A started `TestClient` on the Kraft app (lifespan entered), hermetic
+    under `tmp_path`: its own run dir, bd workspace and `templates_dir`.
+    Replaces `with _client(tmp_path, monkeypatch) as client:`.
+
+        def test_x(client, repo):
+            wid = client.post("/api/work-items", json={"repo": str(repo), ...}).json()["id"]
+
+    Options (`support.api._client`'s keywords) go on a marker, per test or per
+    module (`pytestmark = pytest.mark.api_client(...)`):
+
+        @pytest.mark.api_client(peer=("10.0.0.2", 1), env={"KRAFT_INDEX_REPOS": "..."})
+        @pytest.mark.api_client(default_setup=False)   # a test about repo config
+
+    Monkeypatch what the app reads at request time inside the test; patch
+    anything the lifespan reads at startup in a fixture the test lists before
+    `client`. The run dir is `tmp_path / "run"` (`support.api._set_status`
+    and friends find it through `KRAFT_RUN_DIR`).
+    """
+    marker = request.node.get_closest_marker("api_client")
+    with api_support._client(
+        tmp_path, monkeypatch, templates_dir=templates_dir, **(marker.kwargs if marker else {})
+    ) as test_client:
+        yield test_client
+
+
+@pytest.fixture
 def app(tmp_path, monkeypatch):
     """The app wired to client.transport.http(), with its lifespan entered per call.
 
@@ -343,7 +387,7 @@ def app(tmp_path, monkeypatch):
             await self._ctx.__aexit__(*exc)
 
     monkeypatch.setattr(
-        client.transport,
+        kraft_client.transport,
         "http",
         lambda: Lifespan(transport=httpx.ASGITransport(app=api.app), base_url="http://kraft"),
     )
