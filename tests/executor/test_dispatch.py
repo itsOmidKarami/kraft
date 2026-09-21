@@ -664,7 +664,7 @@ def test_the_implementer_is_told_which_commands_gate_its_paths(tmp_path, monkeyp
             {
                 "id": "open_mr",
                 "kind": "exec",
-                "tasks": [_agent("describe", skill="kraft:mr-description")],
+                "tasks": [_agent("describe", skill="kraft:mr-metadata")],
             },
         ],
     )
