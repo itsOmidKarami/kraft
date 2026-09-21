@@ -7,7 +7,15 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
+from kraft.adapters.forge.models import (
+    MR,
+    CIState,
+    CIStatus,
+    FailedJob,
+    ForgeError,
+    MRRef,
+    ReviewResult,
+)
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
@@ -181,6 +189,87 @@ class GhCli(mr_ops.CliWaits):
             block_reason=block_reason,
             sha=sha,
             failed_jobs=failed_jobs,
+        )
+
+    async def _json(self, repo: Path, args: list[str], what: str):
+        return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
+
+    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+        """`bot`'s latest review of the PR's current head: pending until
+        there is one. Changes requested, or any inline comment, is actionable
+        -- one finding per comment; anything else is clean."""
+        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        number, head = pr["number"], pr["headRefOid"]
+        # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
+        reviews = await self._json(
+            repo,
+            ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"],
+            "gh api reviews",
+        )
+        mine = [
+            r
+            for r in reviews
+            if mr_ops.same_login(str((r.get("user") or {}).get("login", "")), bot)
+            and r.get("commit_id") == head
+            and r.get("state") != "PENDING"
+        ]
+        if not mine:
+            return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")
+        last = mine[-1]
+        comments = await self._json(
+            repo,
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments?per_page=100",
+            ],
+            "gh api review comments",
+        )
+        findings = tuple(
+            f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
+            for c in comments
+        )
+        if last.get("state") == "CHANGES_REQUESTED" and not findings:
+            findings = (str(last.get("body") or f"{bot} requested changes"),)
+        if findings:
+            return ReviewResult("actionable", findings=findings, detail=f"{bot}: {last['state']}")
+        return ReviewResult("clean", detail=f"{bot}: {last.get('state')}")
+
+    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+        """The check run `check` on the PR's head, or else the commit status
+        of that name: pending until it completes, clean on success, and
+        actionable on anything else, its output the finding."""
+        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        head = pr["headRefOid"]
+        runs = (
+            await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?check_name={check}"],
+                "gh api check-runs",
+            )
+        ).get("check_runs") or []
+        if runs:
+            run = runs[0]
+            if run.get("status") != "completed":
+                return ReviewResult("pending", detail=f"{check}: {run.get('status')}")
+            conclusion = str(run.get("conclusion") or "")
+            if conclusion in ("success", "neutral", "skipped"):
+                return ReviewResult("clean", detail=f"{check}: {conclusion}")
+            output = run.get("output") or {}
+            text = "\n".join(str(output[k]) for k in ("title", "summary", "text") if output.get(k))
+            return ReviewResult("actionable", findings=(f"{check} {conclusion}: {text}",))
+        statuses = (
+            await self._json(
+                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/status"], "gh api status"
+            )
+        ).get("statuses") or []
+        status = next((s for s in statuses if s.get("context") == check), None)
+        if status is None or status.get("state") == "pending":
+            return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
+        if status.get("state") == "success":
+            return ReviewResult("clean", detail=f"{check}: success")
+        return ReviewResult(
+            "actionable",
+            findings=(f"{check} {status.get('state')}: {status.get('description') or ''}",),
         )
 
     async def _checks_sha(self, repo: Path, rollup: list[dict]) -> str:

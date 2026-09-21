@@ -21,8 +21,8 @@ from kraft.adapters.forge.models import (
     FakeForge,
     Forge,
     ForgeError,
-    ForgeUnsupported,
 )
+from kraft.automated_review import AutomatedReview
 from kraft.templates.models import DEFAULT_WAIT, WaitBounds
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,7 @@ async def _run_one(
     hook_point: str,
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
+    automated_review: AutomatedReview | None = None,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -379,7 +380,21 @@ async def _run_one(
             # configuration`); what comes back is only pending, clean,
             # actionable or error (`automated-review-task-uses-ordinary-task-
             # results`).
-            review = await forge.automated_review(repo=repo, branch=branch)
+            review = await forge.automated_review(
+                repo=repo, branch=branch, reviewer=automated_review
+            )
+            if not review.configured:
+                # The repository names no reviewer, so none is expected: the
+                # wait settles, and the record says why rather than reading as
+                # a clean review (Ruling 171).
+                await db.write(
+                    lambda c: events.append(
+                        c,
+                        work_item_id,
+                        "automated_review_not_configured",
+                        {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
+                    )
+                )
             log = f"automated review {review.state}" + (
                 f": {review.detail}\n" if review.detail else "\n"
             )
@@ -862,6 +877,9 @@ async def run_task(
     #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
     #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
     wait: WaitBounds | None = None,
+    #: The repository's `automated_review:` (Ruling 171); None names no
+    #: reviewer. Read only by `mr.automated_review`.
+    automated_review: AutomatedReview | None = None,
     head_sha: str | None = None,
     #: Whether this node's own `chain_definition` entry carries
     #: `rebase_bounce_to` -- see `_run_one`'s docstring. Defaults to False,
@@ -986,6 +1004,7 @@ async def run_task(
                 hook_point=hook_point,
                 meta=meta,
                 has_rebase_bounce=has_rebase_bounce,
+                automated_review=automated_review,
             )
             if not multi:
                 findings = one_findings
@@ -1068,10 +1087,6 @@ async def run_task(
             # to re-verify). Everything above that must not treat this target
             # as landed has already run off the un-normalized value.
             status = "done"
-    except ForgeUnsupported as exc:
-        # Kraft's gap, not the merge request's: a stop for a person.
-        log, status, findings = f"{hook_point} cannot run: {exc}\n", "config_error", None
-        unobserved = str(exc)
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
         unobserved = str(exc)

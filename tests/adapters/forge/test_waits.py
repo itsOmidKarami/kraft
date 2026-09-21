@@ -69,20 +69,6 @@ async def test_automated_review_reports_ordinary_task_results(
         assert "reviewer bot crashed" in run_forge.log("r1")
 
 
-@pytest.mark.parametrize("cls", [forge.GhCli, forge.GlabCli], ids=["gh", "glab"])
-async def test_a_forge_with_no_automated_review_probe_stops_for_a_human_naming_it(
-    run_forge, cli, cls
-):
-    """Which reviewer a real forge's automated review is -- which bot, which
-    check -- is not settled yet, and a guess would wait on a reviewer that
-    never comes. A configuration stop naming the target, never `failed`: a
-    fix loop cannot install a reviewer."""
-    assert await run_forge(cls(), "automated_review", "u1") == ("config_error",) * 2
-
-    assert "mr.automated_review" in run_forge.log("u1")
-    assert _trail(run_forge)[-1][:2] == ("external_wait_ended", "error")
-
-
 # --- external approval ---------------------------------------------------------
 
 

@@ -198,6 +198,8 @@ repos:
     sandbox: null
     policy:
       allowed_tools: [Read, Edit, Bash]
+    automated_review:
+      bot: coderabbitai     # or `check: <name>` -- exactly one of the two
 ```
 
 | Field | Default | Means |
@@ -220,6 +222,7 @@ repos:
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent hook on this repo, layered under the registry's own defaults. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `token_budget`, `allowed_harnesses`, `timeout_minutes`, `max_attempts`, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
+| `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for, named exactly one way. `bot: <login>` settles when that forge login has reviewed the merge request's current head: on GitHub, changes requested or any inline comment is actionable (one finding per comment) and anything else is clean; on GitLab, the bot's unresolved discussions are actionable and its approval is clean. `check: <name>` settles when that check run or commit status on the head completes: success is clean, failure is actionable with its output as the finding. Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for a person rather than spending a repair. |
 
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any connected repo still

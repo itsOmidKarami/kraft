@@ -34,6 +34,7 @@ from pydantic import (
     model_validator,
 )
 
+from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride
 from kraft.store.repos import RootMergePolicy
 from kraft.worker import sandbox as _sandbox
@@ -188,6 +189,9 @@ class RepoEntry(BaseModel):
     #: (Ruling 105) and are folded into it by `repository_override`; V1's
     #: `Repository` has only this block.
     policy: TemplatePolicyOverride | None = None
+    #: The automated reviewer `mr.automated_review` waits for (Ruling 171);
+    #: the same type as V1's `Repository.automated_review`.
+    automated_review: AutomatedReview | None = None
 
     @model_validator(mode="before")
     @classmethod

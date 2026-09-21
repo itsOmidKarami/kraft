@@ -400,6 +400,35 @@ async def test_a_chain_without_an_automated_review_task_never_waits_for_one(walk
     assert await walk(NeverAsk(review_results=["pending"]), it) == "completed"
 
 
+async def test_the_repository_s_named_reviewer_reaches_the_review_task(
+    item_on, database, run_dirs, monkeypatch
+):
+    """Ruling 171: which reviewer is the repository's (`repos.yaml`), handed to
+    the backend at dispatch -- never the template's."""
+    from kraft.automated_review import AutomatedReview
+
+    asked = []
+
+    class Recording(forge.FakeForge):
+        async def automated_review(self, *, repo, branch, reviewer=None):
+            asked.append(reviewer)
+            return await super().automated_review(repo=repo, branch=branch)
+
+    monkeypatch.setattr(forge.run, "resolve", lambda name: Recording())
+    it = await item_on([forge_node("review", "mr.automated_review")])
+    entry = {**ON_A_FORGE, "automated_review": {"bot": "coderabbitai", "check": None}}
+
+    await executor.run(
+        database,
+        run_dirs,
+        work_item_id=it.id,
+        registry=None,
+        launch=executor.LaunchContext(repo_entry=entry, steering_dir=None),
+    )
+
+    assert asked == [AutomatedReview(bot="coderabbitai")]
+
+
 @pytest.mark.parametrize("key", ["webhook_event", "check_name", "comment_author", "command"])
 def test_a_template_cannot_configure_how_automated_review_is_read(key):
     """`automated-review-implementation-is-not-template-configuration`: a

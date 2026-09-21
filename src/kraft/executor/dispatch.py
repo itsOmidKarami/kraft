@@ -22,6 +22,7 @@ from kraft import skill as _skill
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.automated_review import AutomatedReview
 from kraft.executor import entry, prompts, stops
 from kraft.executor.context import (
     _ADVANCING,
@@ -368,6 +369,13 @@ async def _run_changed_test_scopes(
     return next((s for s in results if s != "done"), "done")
 
 
+def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
+    """The repository's named automated reviewer (Ruling 171), if any. The
+    entry was validated when `repos.yaml` was read; this only re-types it."""
+    raw = (launch.repo_entry or {}).get("automated_review") if launch else None
+    return AutomatedReview.model_validate(raw) if raw else None
+
+
 async def dispatch_node(
     db,
     run_dirs,
@@ -479,6 +487,7 @@ async def dispatch_node(
             # repo is on.
             backend="auto",
             repo_forge=(launch.repo_entry or {}).get("forge") if launch else None,
+            automated_review=_automated_review(launch),
             # The worktree, not the repo: every forge CLI resolves the merge
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.

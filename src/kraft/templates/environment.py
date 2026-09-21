@@ -34,6 +34,7 @@ from pydantic import (
     model_validator,
 )
 
+from kraft.automated_review import AutomatedReview
 from kraft.harness import Harness
 from kraft.policy import TemplatePolicyOverride
 
@@ -162,6 +163,9 @@ class Repository(BaseModel):
     #: daemon still reads the legacy `repos:` list, whose `RepoEntry.policy`
     #: is this same type (`config.repository_override`).
     policy: TemplatePolicyOverride | None = None
+    #: The automated reviewer `mr.automated_review` waits for, if any (Ruling
+    #: 171). Mirrored on the legacy `config.RepoEntry`, which the daemon reads.
+    automated_review: AutomatedReview | None = None
 
 
 class WorkspaceMember(BaseModel):

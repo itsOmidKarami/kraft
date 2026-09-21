@@ -14,18 +14,13 @@ if TYPE_CHECKING:
     # already makes every annotation below lazy, so this is type-checking
     # only.
     from kraft.adapters.forge.mr import MRMeta
+    from kraft.automated_review import AutomatedReview
 
 CIState = Literal["pending", "success", "failed"]
 
 
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
-
-
-class ForgeUnsupported(ForgeError):
-    """This backend has no way to answer the question at all -- a gap in
-    Kraft, not a failure of the merge request, so it stops the item for a
-    person rather than failing a task a fix loop would then spend on."""
 
 
 ApprovalState = Literal["pending", "approved"]
@@ -44,6 +39,9 @@ class ReviewResult:
     findings: tuple[str, ...] = ()
     #: What the reviewer said, for the log a human reads.
     detail: str = ""
+    #: False when the repository names no reviewer: settled clean because no
+    #: review is expected, which is recorded as such rather than as a pass.
+    configured: bool = True
 
 
 @dataclass(frozen=True)
@@ -135,7 +133,9 @@ class Forge(Protocol):
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
-    async def automated_review(self, *, repo: Path, branch: str) -> ReviewResult: ...
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+    ) -> ReviewResult: ...
 
 
 @dataclass
@@ -309,7 +309,11 @@ class FakeForge:
     async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState:
         return self._next(self.approval_states)
 
-    async def automated_review(self, *, repo: Path, branch: str) -> ReviewResult:
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None = None
+    ) -> ReviewResult:
+        # The script answers whether or not a reviewer is configured: a dev
+        # instance and a test both script the review they want to walk.
         result = self._next(self.review_results)
         return ReviewResult(result) if isinstance(result, str) else result
 

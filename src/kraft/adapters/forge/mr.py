@@ -13,10 +13,10 @@ from kraft.adapters.forge.models import (
     MR,
     ApprovalState,
     ForgeError,
-    ForgeUnsupported,
     MRRef,
     ReviewResult,
 )
+from kraft.automated_review import AutomatedReview
 from kraft.index.ingest import split_front_matter
 from kraft.worker.worktree_read import read_worktree_file
 
@@ -316,12 +316,22 @@ class CliWaits:
         ci = await self.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
         return "pending" if ci.block_reason == "not_approved" else "approved"
 
-    async def automated_review(self, *, repo: Path, branch: str) -> ReviewResult:
-        # ponytail: which reviewer counts -- a bot's review, a named check, a
-        # webhook -- is an open product question, and guessing one would wait
-        # on a reviewer that never comes. A chain for a repository without a
-        # probe omits the task (`automated-review-is-an-explicit-optional-task`).
-        raise ForgeUnsupported(
-            f"{type(self).__name__} cannot read an automated review yet (mr.automated_review); "
-            "use a chain without the automated-review task for this repository"
-        )
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+    ) -> ReviewResult:
+        """The repository's named reviewer, read off the merge request's
+        current head (Ruling 171). No reviewer named: nothing is asked, and
+        the review settles clean as not configured."""
+        if reviewer is None:
+            return ReviewResult(
+                "clean", detail="no automated reviewer configured", configured=False
+            )
+        if reviewer.bot is not None:
+            return await self._bot_review(repo, reviewer.bot)
+        return await self._check_review(repo, reviewer.check)
+
+
+def same_login(a: str, b: str) -> bool:
+    """A forge login, as a repository names it and as the forge reports it:
+    GitHub reports an app as `name[bot]`, and case never matters."""
+    return a.lower().removesuffix("[bot]") == b.lower().removesuffix("[bot]")

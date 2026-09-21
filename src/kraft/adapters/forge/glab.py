@@ -7,7 +7,15 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
+from kraft.adapters.forge.models import (
+    MR,
+    CIState,
+    CIStatus,
+    FailedJob,
+    ForgeError,
+    MRRef,
+    ReviewResult,
+)
 
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
@@ -351,6 +359,69 @@ class GlabCli(mr_ops.CliWaits):
             for j in failed_raw[2:]
         ]
         return detail, tuple(failed_jobs)
+
+    async def _json(self, repo: Path, args: list[str], what: str):
+        return mr_ops.parse_json(await git.run_git(repo, ["glab", *args]), what)
+
+    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+        """GitLab has no review state: `bot`'s unresolved discussions are
+        actionable, one finding each; its approval is clean; neither yet is
+        pending."""
+        # ponytail: an approval is not tied to a head here -- a project that
+        # keeps approvals across pushes lets an old approval settle a new head.
+        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        iid = mr["iid"]
+        discussions = await self._json(
+            repo,
+            ["api", f"projects/:id/merge_requests/{iid}/discussions?per_page=100"],
+            "glab api discussions",
+        )
+        findings = tuple(
+            f"{(n.get('position') or {}).get('new_path')}:"
+            f"{(n.get('position') or {}).get('new_line')}: {n.get('body', '')}"
+            if n.get("position")
+            else str(n.get("body", ""))
+            for d in discussions
+            for n in (d.get("notes") or [])
+            if mr_ops.same_login(str((n.get("author") or {}).get("username", "")), bot)
+            and n.get("resolvable")
+            and not n.get("resolved")
+        )
+        if findings:
+            return ReviewResult("actionable", findings=findings, detail=f"{bot}: unresolved")
+        approvals = await self._json(
+            repo, ["api", f"projects/:id/merge_requests/{iid}/approvals"], "glab api approvals"
+        )
+        approved = any(
+            mr_ops.same_login(str((a.get("user") or {}).get("username", "")), bot)
+            for a in approvals.get("approved_by") or []
+        )
+        if approved:
+            return ReviewResult("clean", detail=f"{bot}: approved")
+        return ReviewResult("pending", detail=f"waiting for {bot} to review")
+
+    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+        """The commit status (a CI job or an external status) named `check`
+        on the MR's head, its latest if it ran more than once."""
+        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        head = mr["sha"]
+        statuses = await self._json(
+            repo,
+            ["api", f"projects/:id/repository/commits/{head}/statuses?per_page=100"],
+            "glab api statuses",
+        )
+        mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
+        if not mine:
+            return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
+        status = str(mine[-1].get("status"))
+        if status in ("success", "skipped"):
+            return ReviewResult("clean", detail=f"{check}: {status}")
+        if status in ("failed", "canceled"):
+            return ReviewResult(
+                "actionable",
+                findings=(f"{check} {status}: {mine[-1].get('description') or ''}",),
+            )
+        return ReviewResult("pending", detail=f"{check}: {status}")
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         """Retries every failed/canceled job in the pipeline `ci` read.

@@ -343,7 +343,7 @@ enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_o
 
 Resuming paused work SHALL continue from its saved execution point and SHALL
 not rerun work that completed before the pause.
-enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[plain], tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[fix-loop], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[plain], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[fix-loop], tests/test_pause_resume.py::test_resume_leaves_the_position_to_the_walk, tests/test_rate_limit_retry.py::test_a_rate_limit_relaunch_leaves_the_position_to_the_walk, tests/test_ci_wait.py::test_a_ci_wait_reentry_resumes_at_the_waiting_group, tests/executor/test_entry_paths.py::test_crash_resume_dispatches_a_sibling_the_crash_never_started
+enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[plain], tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[fix-loop], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[plain], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[fix-loop], tests/test_pause_resume.py::test_resume_leaves_the_position_to_the_walk, tests/test_rate_limit_retry.py::test_a_rate_limit_relaunch_leaves_the_position_to_the_walk, tests/test_waits.py::test_a_reentry_resumes_at_the_waiting_step, tests/executor/test_entry_paths.py::test_crash_resume_dispatches_a_sibling_the_crash_never_started
 
 ## REQ task-retry-reruns-that-task-and-later-work
 
@@ -864,13 +864,13 @@ enforced-by: tests/test_waits.py::test_pending_wait_releases_worker_and_reschedu
 The system SHALL use one scheduler to observe due external waits. It SHALL
 increase a wait's observation interval from its configured initial interval up
 to its configured maximum interval while the condition remains pending.
-enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_pending, tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/test_waits.py::test_a_node_waiting_on_two_conditions_is_due_at_the_earlier_one
+enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_pending, tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/test_waits.py::test_a_node_waiting_on_two_conditions_is_due_at_the_earlier_one, tests/api/test_wait_scheduler_startup.py::test_the_server_s_scheduler_observes_a_wait_parked_before_it_started, tests/test_waits.py::test_a_retry_on_a_run_fork_starts_a_fresh_wait
 
 ## REQ external-wait-timeout-needs-human
 
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure.
-enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human
+enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart
 
 ## REQ external-wait-covers-merge-request-lifecycle
 
@@ -883,21 +883,21 @@ enforced-by: tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_t
 A chain MAY declare a task that waits for automated merge-request review. When
 no such task is declared, the system SHALL NOT expect automated review for that
 chain.
-enforced-by: tests/test_waits.py::test_a_chain_without_an_automated_review_task_never_waits_for_one
+enforced-by: tests/test_waits.py::test_a_chain_without_an_automated_review_task_never_waits_for_one, tests/adapters/forge/test_automated_review.py::test_a_repository_naming_no_reviewer_settles_clean_and_says_why[gh], tests/adapters/forge/test_automated_review.py::test_a_repository_naming_no_reviewer_settles_clean_and_says_why[glab]
 
 ## REQ automated-review-task-uses-ordinary-task-results
 
 An automated-review task SHALL report ordinary pending, clean, actionable, or
 error results. Actionable feedback SHALL enter the declaring execution node's
 recovery or fix-loop controls.
-enforced-by: tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop]
+enforced-by: tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[pending], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[clean], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[actionable], tests/adapters/forge/test_waits.py::test_automated_review_reports_ordinary_task_results[error], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[on_failure], tests/test_waits.py::test_actionable_automated_review_is_repaired_resynced_and_remeasured[fix_loop], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_s_unresolved_feedback_is_actionable[glab], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[gh], tests/adapters/forge/test_automated_review.py::test_a_review_check_still_running_is_pending[glab], tests/test_waits.py::test_a_reviewer_error_stops_for_a_human_and_spends_no_repair
 
 ## REQ automated-review-implementation-is-not-template-configuration
 
 Templates SHALL NOT expose transport details such as webhook event names,
 provider check names, comment authors, or API and CLI mechanics for automated
 review. The selected task implementation SHALL own those details.
-enforced-by: tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[webhook_event], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[check_name], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[comment_author], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[command], tests/adapters/forge/test_waits.py::test_a_forge_with_no_automated_review_probe_stops_for_a_human_naming_it[gh], tests/adapters/forge/test_waits.py::test_a_forge_with_no_automated_review_probe_stops_for_a_human_naming_it[glab]
+enforced-by: tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[webhook_event], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[check_name], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[comment_author], tests/test_waits.py::test_a_template_cannot_configure_how_automated_review_is_read[command], tests/test_waits.py::test_the_repository_s_named_reviewer_reaches_the_review_task, tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[both], tests/adapters/forge/test_automated_review.py::test_a_reviewer_is_named_exactly_one_way_or_refused_at_load[neither], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[gh], tests/adapters/forge/test_automated_review.py::test_a_bot_review_is_pending_until_the_bot_reviews_the_head_then_clean[glab], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[gh], tests/adapters/forge/test_automated_review.py::test_a_failed_review_check_is_actionable_with_its_output[glab]
 
 ## REQ default-post-draft-flow-is-ordered
 
