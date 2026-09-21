@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from kraft import events, executor
+from kraft import events, executor, store
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.templates.models import AgentTask, ResolvedNode
@@ -138,6 +138,7 @@ async def review(
         )
     )
 
+    snapshot = store.materialized_chain_of(row)
     inv = _agent.resolve_agent_task(
         auto_review.task,
         launch.repo_entry,
@@ -149,6 +150,8 @@ async def review(
         # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
         # a different model does not carry that dial into its own gate review.
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
+        # The reviewer's steering, frozen with the chain at intake.
+        steering=snapshot.chain.steering if snapshot is not None else None,
     )
     status = await _agent.run_agent_task(
         db,

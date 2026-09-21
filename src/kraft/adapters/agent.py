@@ -159,6 +159,10 @@ def resolve_invocation(
     #: A harness profile's `defaults:` (`resolve_agent_task`): the lowest rung,
     #: filling only what the item, the binding and the repo all left unset.
     profile_defaults: dict | None = None,
+    #: A V1 task's own steering, already resolved to text from its item's
+    #: snapshot (`resolve_agent_task`). Injected after the repo's, where a
+    #: binding's `steering:` file names would go.
+    steering_texts: tuple[str, ...] = (),
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
     launch.
@@ -185,7 +189,7 @@ def resolve_invocation(
     # repo first, then hook: the wider context before the narrower one, and
     # fixed rather than merged cleverly — a reader debugging a prompt has to
     # be able to predict what the agent saw.
-    steering_texts = _steering.read(steering_dir, names) if names else ()
+    steering_texts = (_steering.read(steering_dir, names) if names else ()) + steering_texts
     if steering_texts:
         # `steering.validate` (config load) checked repos.yaml's names and the
         # hook's names as two separate lists, each against the budget on its
@@ -299,6 +303,7 @@ def resolve_agent_task(
     escalate: bool = False,
     item_override: dict | None = None,
     harnesses: _harness.HarnessSet | None = None,
+    steering: dict[str, str] | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
 
@@ -313,7 +318,26 @@ def resolve_agent_task(
     `defaults` fill whatever nothing else chose -- they are the lowest rung,
     under the item's override, the task's own field and the repo's
     `default_model`. Raises `HarnessUnavailable`.
+
+    `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
+    and the only place a task's `steering:` names are read from -- never
+    `library.yaml`, never `steering_dir` (which still serves `repos.yaml`'s own
+    steering names). `None` is a snapshot stored before steering was frozen:
+    a task selecting steering then raises `SteeringError` rather than run
+    unsteered or on today's text. The profile is looked up after it, so a
+    harness problem still reports as one.
     """
+    if task.steering and steering is None:
+        raise _steering.SteeringError(
+            f"selects steering {list(task.steering)!r}, but this work item was materialized "
+            "before steering was frozen into its snapshot, so there is no intake-time text "
+            "to run it with. Re-file the item, or switch its chain template before it starts."
+        )
+    missing = [n for n in task.steering if n not in (steering or {})]
+    if missing:
+        raise _steering.SteeringError(
+            f"selects steering {missing!r}, which this work item's snapshot does not carry"
+        )
     profile = harness_profile(
         task.harness, harnesses if harnesses is not None else _harness.load(None)
     )
@@ -322,7 +346,6 @@ def resolve_agent_task(
             "kind": "agent",
             "harness": profile.provider,
             **({"command": profile.executable} if profile.executable else {}),
-            "steering": list(task.steering),
             **({"skill": task.skill} if task.skill is not None else {}),
             **({"model": task.model} if task.model is not None else {}),
             **({"effort": task.effort} if task.effort is not None else {}),
@@ -333,6 +356,7 @@ def resolve_agent_task(
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,
+        steering_texts=tuple(steering[n] for n in task.steering) if task.steering else (),
     )
 
 

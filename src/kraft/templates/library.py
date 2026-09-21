@@ -18,7 +18,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -279,7 +279,17 @@ class TemplateLibrary:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}"
                         )
-        return resolved
+        # The text, not the names: `materialize` freezes it into the item's
+        # snapshot, so a later edit to `library.yaml` cannot reach a running item.
+        return replace(
+            resolved,
+            steering={
+                name: self.steering[name].instructions
+                for node in resolved.nodes
+                for task in node.tasks()
+                for name in task.task.steering
+            },
+        )
 
 
 @dataclass(frozen=True)

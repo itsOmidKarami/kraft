@@ -560,6 +560,14 @@ class ResolvedChain:
 
     chain: Chain
     nodes: tuple[ResolvedNode, ...]
+    #: Each steering profile the chain's tasks select, name to instructions,
+    #: resolved out of the library (`TemplateLibrary.resolve_chain`) and frozen
+    #: into the work item's snapshot with the chain. Steering is chain content,
+    #: so dispatch reads it from here and never from `library.yaml` live
+    #: (`materialized-chain-is-immutable-work-item-input`). `None` means "never
+    #: resolved": a chain built without a library, or a snapshot stored before
+    #: steering was frozen -- a task selecting steering then stops for a human.
+    steering: dict[str, str] | None = None
 
     @property
     def id(self) -> str | None:
@@ -570,7 +578,7 @@ class ResolvedChain:
         return tuple(t.path for node in self.nodes for t in node.tasks())
 
     @classmethod
-    def from_chain(cls, chain: Chain) -> ResolvedChain:
+    def from_chain(cls, chain: Chain, steering: dict[str, str] | None = None) -> ResolvedChain:
         nodes = []
         for node in chain.nodes:
             if isinstance(node, GateNode):
@@ -624,7 +632,7 @@ class ResolvedChain:
                     ),
                 )
             )
-        return cls(chain=chain, nodes=tuple(nodes))
+        return cls(chain=chain, nodes=tuple(nodes), steering=steering)
 
     def materialize(
         self,
@@ -716,7 +724,9 @@ class ResolvedChain:
             for node in self.chain.nodes
             if node.id not in dropped
         ]
-        return ResolvedChain.from_chain(self.chain.model_copy(update={"nodes": kept}))
+        return ResolvedChain.from_chain(
+            self.chain.model_copy(update={"nodes": kept}), steering=self.steering
+        )
 
 
 class _StoredMaterialization(BaseModel):
@@ -733,6 +743,9 @@ class _StoredMaterialization(BaseModel):
     chain: Chain
     target: WorkItemTarget
     policy: InstancePolicy
+    #: `ResolvedChain.steering`. Absent from a snapshot stored before steering
+    #: was frozen, which reads back as `None`.
+    steering: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -761,20 +774,22 @@ class MaterializedChain:
         are derived from it deterministically, so storing both would let the two
         disagree.
 
-        What is NOT frozen here, and a consumer has to know it: steering profile
-        bodies and harness profile configuration. Both are referenced by name --
-        a task carries `steering: [project-standards]` and `harness: codex_default`,
-        and resolution only checks that the names exist. So editing a steering
-        profile's `instructions` in `library.yaml`, or a harness profile's
-        defaults, changes what an already-materialized item's later tasks do.
-        That is intended: `materialized-chain-is-immutable-work-item-input` names
-        effective policy values and intake-specific decisions, and installation-
-        wide guidance prose is neither.
+        Steering profile bodies ARE frozen here (`ResolvedChain.steering`): a
+        steering profile is a library component, chain content like a task, so
+        editing its `instructions` in `library.yaml` reaches items filed
+        afterwards and never one already running.
+
+        What is NOT frozen: harness profile configuration. A task carries
+        `harness: codex_default`, a `harnesses.yaml` profile id, and dispatch
+        resolves it live (`adapters.agent.harness_profile`). That is intended:
+        `harnesses.yaml` holds settings for this Kraft install -- which
+        executable, which defaults -- not the chain's content.
         """
         return _StoredMaterialization(
             chain=self.chain.chain,
             target=self.target,
             policy=self.policy,
+            steering=self.chain.steering,
         ).model_dump_json()
 
     @classmethod
@@ -786,7 +801,7 @@ class MaterializedChain:
         except ValidationError as exc:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(
-            chain=ResolvedChain.from_chain(stored.chain),
+            chain=ResolvedChain.from_chain(stored.chain, steering=stored.steering),
             target=stored.target,
             policy=stored.policy,
         )

@@ -2,9 +2,11 @@ import ast
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.harness import (
@@ -2591,9 +2593,6 @@ def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkey
     skills = tmp_path / "skills"
     (skills / "house-method").mkdir(parents=True)
     (skills / "house-method" / "SKILL.md").write_text("THE-METHOD\n")
-    steering = tmp_path / "steering"
-    steering.mkdir()
-    (steering / "project-standards.md").write_text("THE-STEERING\n")
 
     async def scenario():
         node, task = _v1_task(
@@ -2631,6 +2630,7 @@ def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkey
                 }
             ],
             repo=repo,
+            steering={"project-standards": "THE-STEERING\n"},
         )
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
@@ -2648,7 +2648,7 @@ def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkey
                 repo,
                 launch=LaunchContext(
                     repo_entry={"setup_command": ""},
-                    steering_dir=steering,
+                    steering_dir=None,
                     skills_dir=skills,
                 ),
             )
@@ -2817,28 +2817,21 @@ def test_a_typed_agent_task_reports_the_providers_own_normalized_result(tmp_path
 
 _FAKE_CLAUDE_SH = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
+#: The shipped `project-standards` profile's instructions, as `library.yaml` has them.
+_PROJECT_STANDARDS = "Keep changes focused. Run the relevant checks before finishing."
 
-@pytest.mark.parametrize(
-    ("node_id", "argv_marks"),
-    [
-        # `spec_author` sets no effort, so `codex_default`'s own `effort:
-        # medium` is what reaches the provider's `model_reasoning_effort`.
-        ("spec", ["exec", "--json", "model_reasoning_effort=medium"]),
-        # `write_summary` sets no model, so `claude_review`'s `model: sonnet`.
-        ("work_item_summary", ["-p", "--model", "sonnet"]),
-    ],
-    ids=["codex_default", "claude_review"],
-)
-def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
-    tmp_path, monkeypatch, node_id, argv_marks
-):
-    """The library an operator is seeded with names *profile* ids
-    (`codex_default`, `claude_review`), which `templates/harnesses.yaml`
-    defines. Dispatched unrewritten -- the task's `harness:` untouched, only the
-    profile's `executable:` pointed at a fake -- each must launch its
-    provider's argv with the profile's defaults, not stop at "not available".
-    `seed_v1_library(agent_command=...)` rewrites every id to `fake`, which is
-    why nothing caught that it never could."""
+
+def _dispatch_seeded(tmp_path, monkeypatch, node_id, *, after_intake=None, snapshot=None):
+    """Seed the shipped library, materialize its `default` chain, and run it
+    from `node_id` with only each profile's `executable:` pointed at a fake.
+
+    `templates/steering/` is removed after seeding: the product ships no
+    steering file for a V1 profile, so a test that left one there would pass
+    on a setup no operator has. `after_intake(templates)` runs between intake
+    and dispatch; `snapshot(json_str)` rewrites the stored snapshot.
+
+    Returns the worker sessions and the fake agent's argv log, one argument
+    per line (so a multi-line prompt spans several)."""
     from kraft.executor.context import LaunchContext
     from kraft.policy import InstancePolicy, InstancePolicyInput
     from kraft.templates.environment import Repository, WorkItemTarget
@@ -2846,6 +2839,7 @@ def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
 
     repo = make_repo(tmp_path)
     templates = seed_v1_library(tmp_path / "templates")
+    shutil.rmtree(templates / "steering", ignore_errors=True)
     shipped = (_REPO_ROOT / "templates" / "harnesses.yaml").read_text()
     # The executable only: provider, enabled and defaults stay as shipped.
     (templates / "harnesses.yaml").write_text(
@@ -2868,6 +2862,11 @@ def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
         )
     )
     start = [n.id for n in chain.chain.nodes].index(node_id)
+    if snapshot is not None:
+        stored = snapshot(chain.to_json())
+        chain = SimpleNamespace(chain=chain.chain, to_json=lambda: stored)
+    if after_intake is not None:
+        after_intake(templates)
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -2896,9 +2895,94 @@ def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
             await database.close()
 
     sessions = asyncio.run(scenario())
+    return sessions, argv_log.read_text() if argv_log.exists() else ""
+
+
+@pytest.mark.parametrize(
+    ("node_id", "argv_marks"),
+    [
+        # `spec_author` sets no effort, so `codex_default`'s own `effort:
+        # medium` is what reaches the provider's `model_reasoning_effort`.
+        ("spec", ["exec", "--json", "model_reasoning_effort=medium"]),
+        # `write_summary` sets no model, so `claude_review`'s `model: sonnet`.
+        ("work_item_summary", ["-p", "--model", "sonnet"]),
+    ],
+    ids=["codex_default", "claude_review"],
+)
+def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
+    tmp_path, monkeypatch, node_id, argv_marks
+):
+    """The library an operator is seeded with names *profile* ids
+    (`codex_default`, `claude_review`), which `templates/harnesses.yaml`
+    defines. Dispatched unrewritten -- the task's `harness:` untouched, only the
+    profile's `executable:` pointed at a fake -- each must launch its
+    provider's argv with the profile's defaults, not stop at "not available".
+    `seed_v1_library(agent_command=...)` rewrites every id to `fake`, which is
+    why nothing caught that it never could."""
+    sessions, argv = _dispatch_seeded(tmp_path, monkeypatch, node_id)
 
     first = sessions[0]
     assert first["status"] == "done", Path(first["log_path"]).read_text()
-    argv = argv_log.read_text().split("\n")
     for mark in argv_marks:
-        assert mark in argv, argv
+        assert mark in argv.split("\n"), argv
+
+
+def test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file(
+    tmp_path, monkeypatch
+):
+    """`spec.main.author` selects `steering: [project-standards]`, a profile
+    `library.yaml` declares inline. With no `templates/steering/*.md` on disk
+    -- which is what a fresh install has -- the profile's instructions still
+    reach the agent, after the contract
+    (`agent-task-contract-precedes-skill-and-steering`)."""
+    sessions, argv = _dispatch_seeded(tmp_path, monkeypatch, "spec")
+
+    first = sessions[0]
+    assert (first["hook_point"], first["status"]) == ("spec.main.author", "done"), Path(
+        first["log_path"]
+    ).read_text()
+    prompt = argv
+    assert _PROJECT_STANDARDS in prompt
+    assert prompt.index("Write your spec to") < prompt.index("## Project standards")
+
+
+def test_editing_the_library_after_intake_does_not_change_a_running_items_steering(
+    tmp_path, monkeypatch
+):
+    """`materialized-chain-is-immutable-work-item-input`: steering is chain
+    content, frozen into the snapshot at intake. An edit to `library.yaml` --
+    or a same-named file under `templates/steering/` -- after the item was
+    filed reaches items filed afterwards, never this one."""
+
+    def edit(templates):
+        lib = templates / "library.yaml"
+        lib.write_text(lib.read_text().replace(_PROJECT_STANDARDS, "EDITED AFTER INTAKE"))
+        (templates / "steering").mkdir(exist_ok=True)
+        (templates / "steering" / "project-standards.md").write_text("FILE AFTER INTAKE")
+
+    sessions, argv = _dispatch_seeded(tmp_path, monkeypatch, "spec", after_intake=edit)
+
+    assert sessions[0]["status"] == "done", Path(sessions[0]["log_path"]).read_text()
+    prompt = argv
+    assert _PROJECT_STANDARDS in prompt
+    assert "EDITED AFTER INTAKE" not in prompt
+    assert "FILE AFTER INTAKE" not in prompt
+
+
+def test_a_snapshot_without_frozen_steering_stops_for_a_human(tmp_path, monkeypatch):
+    """An item materialized before steering was frozen into its snapshot has
+    names and no text. It must not run unsteered, and must not quietly take
+    today's library text as if it were the intake's: it stops, saying why and
+    what to do."""
+
+    def unfrozen(raw):
+        stored = json.loads(raw)
+        del stored["steering"]
+        return json.dumps(stored)
+
+    sessions, argv = _dispatch_seeded(tmp_path, monkeypatch, "spec", snapshot=unfrozen)
+
+    assert [s["status"] for s in sessions] == ["config_error"]
+    assert argv == ""
+    log = Path(sessions[0]["log_path"]).read_text()
+    assert "project-standards" in log and "before steering was frozen" in log, log

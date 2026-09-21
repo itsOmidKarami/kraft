@@ -48,6 +48,7 @@ from kraft.templates.models import (
     TaskScope,
 )
 from kraft.worker import sandbox as _sandbox
+from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,12 @@ async def _config_error(db, run_dirs, common: dict, log: str) -> str:
         status=CONFIG_ERROR,
         log=log,
     )
+
+
+def _frozen_steering(row) -> dict[str, str] | None:
+    """The steering text frozen into this item's snapshot at intake."""
+    snapshot = store.materialized_chain_of(row)
+    return snapshot.chain.steering if snapshot is not None else None
 
 
 def _extra_repositories(db, work_item_id: str) -> int:
@@ -524,6 +531,7 @@ async def dispatch_node(
             escalate=escalate,
             item_override=merged_override or None,
             harnesses=harnesses,
+            steering=_frozen_steering(work_item_row),
         )
     except _agent.HarnessUnavailable as exc:
         return await _config_error(
@@ -532,12 +540,13 @@ async def dispatch_node(
             common,
             f"{task.path} selects harness {t.harness!r}, which is not available: {exc}\n",
         )
-    except _skill.SkillError as exc:
+    except (_skill.SkillError, _steering.SteeringError) as exc:
         # A selected skill the environment cannot load stops for a human and
         # never substitutes a method (`selected-skill-must-be-available`). A
         # plugin-qualified reference is not checked here -- Kraft cannot read
         # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
-        # to stop with `needs_context` instead.
+        # to stop with `needs_context` instead. A steering selection the
+        # snapshot cannot supply stops the same way rather than run unsteered.
         return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
     status = await _agent.run_agent_task(
         db,

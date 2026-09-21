@@ -404,19 +404,6 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         if home:
             write_harness_profiles(Path(home) / "templates", profiles)
     (templates_dir / "library.yaml").write_text(library)
-    # KNOWN GAP, bridged here so a V1 fixture can actually run: a V1 steering
-    # profile is *inline* in `library.yaml`, but `adapters/agent.py` still
-    # resolves a task's `steering:` names to `templates/steering/<name>.md`
-    # files -- nothing has wired the library's own `steering` mapping into
-    # dispatch. Until that lands, write each profile out as the file the
-    # dispatcher looks for, so the fixture exercises the chain rather than the
-    # gap. Delete this the day dispatch reads `library.steering`.
-    profiles = yaml.safe_load(library).get("steering") or {}
-    if profiles:
-        steering_dir = templates_dir / "steering"
-        steering_dir.mkdir(exist_ok=True)
-        for name, body in profiles.items():
-            (steering_dir / f"{name}.md").write_text((body or {}).get("instructions", ""))
     chains = templates_dir / "chains"
     chains.mkdir(exist_ok=True)
     for chain in sorted((_REPO_ROOT / "templates" / "chains").glob("*.yaml")):
@@ -523,21 +510,26 @@ def e2e_templates_dir(tmp_path: Path) -> Path:
 # column yet (Task 5), and there is deliberately no legacy fallback to walk.
 
 
-def v1_resolved(nodes: list[dict], *, chain_id: str = "t"):
+def v1_resolved(nodes: list[dict], *, chain_id: str = "t", steering: dict[str, str] | None = None):
     """A `ResolvedChain` over `nodes` (authored V1 node mappings) -- what
-    `executor.intake` takes, and what `v1_chain` materializes."""
+    `executor.intake` takes, and what `v1_chain` materializes. `steering` is
+    the profile text a library would have resolved (`ResolvedChain.steering`)."""
     from kraft.templates.models import Chain, ResolvedChain
 
-    return ResolvedChain.from_chain(Chain.model_validate({"id": chain_id, "nodes": nodes}))
+    return ResolvedChain.from_chain(
+        Chain.model_validate({"id": chain_id, "nodes": nodes}), steering=steering
+    )
 
 
-def v1_chain(nodes: list[dict], *, repo: Path | str, chain_id: str = "t"):
+def v1_chain(
+    nodes: list[dict], *, repo: Path | str, chain_id: str = "t", steering: dict | None = None
+):
     """A `MaterializedChain` over `nodes` (authored V1 node mappings), bound to
     a single-repository target on `repo`."""
     from kraft.policy import InstancePolicy, InstancePolicyInput
     from kraft.templates.environment import Repository, WorkItemTarget
 
-    return v1_resolved(nodes, chain_id=chain_id).materialize(
+    return v1_resolved(nodes, chain_id=chain_id, steering=steering).materialize(
         target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
