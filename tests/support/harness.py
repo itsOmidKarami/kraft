@@ -421,6 +421,21 @@ def v1_library(templates_dir: Path):
     return TemplateLibrary.from_yaml_dir(templates_dir)
 
 
+def v1_named_chain(templates_dir: Path, chain_id: str = "quick-task"):
+    """The `ResolvedChain` for one *shipped* chain, resolved out of
+    `templates_dir` (seeded if it is not already).
+
+    `executor.entry.intake` takes a `ResolvedChain`, and the legacy callers it
+    replaces named a template by string -- overwhelmingly `"quick-task"`, which
+    is why that is the default. Deliberately resolved from the test's own
+    templates directory rather than the packaged one: `seed_v1_library` rewrites
+    every agent task onto the `fake` harness and neuters the
+    `verify_changed_test_scopes` builtin there, so a chain resolved from the
+    packaged tree would launch a real agent and run this suite inside itself.
+    """
+    return v1_library(templates_dir).resolve_chain(chain_id)
+
+
 def e2e_templates_dir(tmp_path: Path) -> Path:
     return fake_templates_dir(tmp_path, "claude --model claude-haiku-4-5-20251001")
 

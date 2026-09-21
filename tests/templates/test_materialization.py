@@ -92,7 +92,10 @@ def snapshot(root: Path) -> dict[Path, bytes]:
 
 def test_the_seed_is_a_library_file_and_one_chain_per_file():
     assert (SEEDED / LIBRARY_FILE).is_file()
-    assert [p.name for p in sorted((SEEDED / CHAINS_DIR).glob("*.yaml"))] == ["default.yaml"]
+    assert [p.name for p in sorted((SEEDED / CHAINS_DIR).glob("*.yaml"))] == [
+        "default.yaml",
+        "quick-task.yaml",
+    ]
 
 
 def test_the_seeded_library_resolves_its_default_chain():
@@ -104,6 +107,45 @@ def test_the_seeded_library_resolves_its_default_chain():
     assert "spec.main.author" in resolved.task_paths
     assert "implementation.verification.test_changed_scopes" in resolved.task_paths
     assert "merge_request_feedback.fix_loop.judge" in resolved.task_paths
+
+
+def test_the_seeded_quick_task_chain_is_gateless():
+    """The assertion that matters about `quick-task`: it has no gate.
+
+    `frontend/e2e/chain.spec.ts` watches a chain run to completion unattended,
+    which only this chain does. A gate creeping in would not fail anything here
+    -- it would silently re-break that spec, and `playwright` is a required
+    check. So the absence is pinned rather than inferred.
+    """
+    resolved = TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("quick-task")
+
+    assert [n.id for n in resolved.nodes if isinstance(n.node, GateNode)] == []
+
+
+def test_the_seeded_quick_task_chain_resolves_and_materializes():
+    """The legacy chain's shape, ported: `implementation` then `verify`, with
+    `env_setup`'s work now implicit (`builtins.prepare_runtime`)."""
+    resolved = TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("quick-task")
+
+    assert [n.id for n in resolved.nodes] == ["implementation", "verify"]
+    assert resolved.task_paths == (
+        "implementation.main.implement",
+        "verify.main.test_changed_scopes",
+    )
+
+    materialized = resolved.materialize(target=repository_target(), effective_policy=policy())
+
+    assert materialized.task_paths == resolved.task_paths
+
+
+def test_the_harness_resolves_a_named_seeded_chain(tmp_path):
+    """`support.harness.v1_named_chain` is the door 5b's ~156
+    `template="quick-task"` call sites go through, so it resolves the seeded
+    chain by name out of a test's own templates directory."""
+    from support.harness import v1_named_chain
+
+    assert v1_named_chain(tmp_path).id == "quick-task"
+    assert v1_named_chain(tmp_path, "default").id == "default"
 
 
 def test_the_seeded_library_has_no_lint_errors():
