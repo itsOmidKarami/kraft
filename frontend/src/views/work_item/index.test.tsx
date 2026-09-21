@@ -508,7 +508,7 @@ describe("WorkItemDetail (item page)", () => {
 
   it("lays the header out as a grid with the state chip leading its run", () => {
     // jsdom has no cascade to compute a grid layout from; pin the source
-    // instead, the way styles.order.test.ts does.
+    // instead, the way css.contract.test.ts does.
     const css = readFileSync(join(here, "../../styles.css"), "utf-8");
     expect(css).toMatch(/\.detail-head\s*\{[^}]*display:\s*grid/);
     expect(css).toMatch(/\.detail-status\s*\{[^}]*margin-left:\s*0/);

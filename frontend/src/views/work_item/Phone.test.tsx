@@ -136,7 +136,7 @@ describe("WorkItemDetail on a phone (m04)", () => {
 
   it("wraps the item card's button row on a phone, its buttons sharing each line (W11 rule 10)", () => {
     // jsdom has no viewport to render a `@media` rule from; pin the source
-    // instead, the way styles.order.test.ts does.
+    // instead, the way css.contract.test.ts does.
     const css = readFileSync(join(here, "work_item.css"), "utf-8");
     expect(css).toMatch(/\.item-card-actions\s*\{[^}]*flex-wrap:\s*wrap/);
     const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
