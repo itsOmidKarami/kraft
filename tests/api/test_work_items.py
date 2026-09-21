@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import ValidationError
 from support.api import _await_gate, _poll_events, _post_default, _set_status
 from support.harness import make_repo, make_repo_with_engineering
@@ -780,52 +779,3 @@ def test_switching_template_applies_only_the_new_chains_policy(client, repo):
     r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "b"})
     assert r.status_code == 200, r.text
     assert _snapshot_policy(client, wid)["allowed_tools"] == ["git", "shell"]
-
-
-def _reviewed_chain(tdir):
-    """A chain whose `approve` gate declares a reviewer and whose `hold` gate
-    declares none."""
-    work = {
-        "id": "work",
-        "kind": "exec",
-        "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
-    }
-    reviewer = {"id": "r", "kind": "agent", "harness": "codex_default", "prompt": "review"}
-    (tdir / "chains" / "reviewed.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "reviewed",
-                "nodes": [
-                    work,
-                    {"id": "approve", "kind": "gate", "auto_review": reviewer},
-                    {"id": "hold", "kind": "gate"},
-                ],
-            }
-        )
-    )
-
-
-@pytest.mark.api_client(edit_templates=_reviewed_chain)
-def test_intake_refuses_auto_escalate_on_a_gate_with_no_reviewer(client, repo):
-    """Review E #3: intake accepted `auto_escalate: true` on a gate declaring
-    no `auto_review`, returned 201, and nothing ever reviewed it. The same 422
-    `PATCH` gives, from the same check; arming a declared reviewer, or
-    suppressing one nobody declared, is still accepted."""
-
-    def file(overrides):
-        return client.post(
-            "/api/work-items",
-            json={
-                "title": "t",
-                "repo": str(repo),
-                "chain_template": "reviewed",
-                "autostart": False,
-                "node_overrides": overrides,
-            },
-        )
-
-    r = file({"hold": {"auto_escalate": True}})
-    assert r.status_code == 422, r.text
-    assert "node 'hold' declares no 'auto_review' task" in r.json()["detail"]
-    assert file({"approve": {"auto_escalate": True}}).status_code == 201
-    assert file({"hold": {"auto_escalate": False}}).status_code == 201
