@@ -192,11 +192,22 @@ function AddRepo({
 
 /* ── 5b repo detail (desktop 25, phone m12 detail) ──────────────────────── */
 
-const ROOT_MERGE_LABEL: Record<Repo["default_root_merge_policy"], string> = {
-  bump: "Bump",
-  skip: "Skip",
-  bump_no_mr: "Bump, no MR",
-};
+/** `profile=model` per line <-> `Repo.models`. A line without `=` is still
+ *  being typed, so it is left out of the map rather than refused. */
+function parseModels(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const at = line.indexOf("=");
+    const [k, v] = [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+    if (at > 0 && k && v) out[k] = v;
+  }
+  return out;
+}
+
+const modelsText = (models: Record<string, string>) =>
+  Object.entries(models)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
 
 function RepoDetail({
   path,
@@ -221,6 +232,9 @@ function RepoDetail({
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Raw text while editing, so a half-typed line survives the re-render (the
+  // map is parsed from it on every change); null shows the saved map.
+  const [models, setModels] = useState<string | null>(null);
   const current = draft ?? repo;
   const dirty = draft !== null;
 
@@ -239,6 +253,7 @@ function RepoDetail({
       };
       await api.patchRepo(path, payload);
       setDraft(null);
+      setModels(null);
       await reload();
       setMessage("saved");
     } catch (e) {
@@ -311,13 +326,17 @@ function RepoDetail({
         </div>
       </div>
       <div className="field">
-        <label htmlFor="repo-default-model">default model</label>
-        <input
-          id="repo-default-model"
-          className="input"
-          placeholder="inherit from registry"
-          value={current.default_model ?? ""}
-          onChange={(e) => set({ default_model: e.target.value || null })}
+        <label htmlFor="repo-models">models</label>
+        <textarea
+          id="repo-models"
+          className="input mono"
+          rows={2}
+          placeholder="claude_review=opus — one harness profile per line; unset inherits the profile's"
+          value={models ?? modelsText(current.models ?? {})}
+          onChange={(e) => {
+            setModels(e.target.value);
+            set({ models: parseModels(e.target.value) });
+          }}
         />
       </div>
 
@@ -474,24 +493,6 @@ function RepoDetail({
         />
       </div>
 
-      <SectionLabel>Cross-repo</SectionLabel>
-      <div className="field">
-        <label>root merge policy</label>
-        <div className="seg" role="radiogroup" aria-label="default root merge policy">
-          {(["bump", "skip", "bump_no_mr"] as const).map((p) => (
-            <label key={p} className="seg-opt">
-              <input
-                type="radio"
-                name="repo-root-merge"
-                checked={current.default_root_merge_policy === p}
-                onChange={() => set({ default_root_merge_policy: p })}
-              />
-              {ROOT_MERGE_LABEL[p]}
-            </label>
-          ))}
-        </div>
-      </div>
-
       <SectionLabel>Agent</SectionLabel>
       <div className="field">
         <label>steering</label>
@@ -549,7 +550,12 @@ function RepoDetail({
           <Check size={14} />
           Save
         </button>
-        <button className="btn btn-ghost" disabled={busy || !dirty} onClick={() => setDraft(null)}>
+        <button className="btn btn-ghost" disabled={busy || !dirty}
+          onClick={() => {
+            setDraft(null);
+            setModels(null);
+          }}
+        >
           Revert
         </button>
         <span className="save-hint">{message ?? "writes repos.yaml"}</span>

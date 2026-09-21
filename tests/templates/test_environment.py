@@ -98,9 +98,31 @@ def test_workspace_declares_root_and_members(workspace):
 
 
 def test_workspace_target_captures_selected_members(workspace):
-    assert te.WorkItemTarget.from_selection(
-        workspace, members=["api"], include_root=False
-    ).members == ("api",)
+    target = te.WorkItemTarget.from_selection(workspace, members=["api"], include_root=False)
+    assert target.members == ("api",)
+    # The mount path is frozen with the selection (`work-item-target-is-typed-
+    # and-immutable`): a later edit to the workspace moves nothing under a
+    # running item.
+    assert target.mounts == {"api": te.WorkspaceMember(repository="api", path="services/api")}
+    # Every repository whose policy binds the item, root first (Kraft-jc39p).
+    assert target.repositories() == ("product_root", "api")
+
+
+def test_a_workspace_target_mounts_exactly_its_selected_members():
+    """A rehydrated target is validated without `from_selection` in the path,
+    so a selected member with no frozen mount -- or a mount nobody selected --
+    is out of the type."""
+    mount = {"api": {"repository": "api", "path": "services/api"}}
+    with pytest.raises(ValidationError, match="mount"):
+        te.WorkItemTarget(
+            kind="workspace", workspace="product", members=("api", "web"), mounts=mount
+        )
+    with pytest.raises(ValidationError, match="mount"):
+        te.WorkItemTarget(kind="workspace", workspace="product", members=(), mounts=mount)
+    with pytest.raises(ValidationError, match="no workspace or members"):
+        te.WorkItemTarget(kind="repository", repository="api", mounts=mount)
+    with pytest.raises(ValidationError, match="no workspace or members"):
+        te.WorkItemTarget(kind="repository", repository="api", root="api")
 
 
 def test_workspace_target_rejects_an_unmounted_member(workspace):
@@ -199,6 +221,8 @@ repositories:
       test_scopes:
         - paths: [src/**, tests/**]
           command: just test
+    managed: false
+    models: { claude_review: opus }
     policy:
       allowed_harnesses: [codex_default, claude_review]
       deny_tools: [WebFetch]
@@ -231,6 +255,11 @@ def test_repository_table_loads_repositories_and_workspaces(tmp_path):
     assert api.policy.allowed_harnesses == ["codex_default", "claude_review"]
     assert api.policy.deny_tools == ["WebFetch"]
     assert table.repositories["product_root"].policy is None
+    # Ruling 165: `managed` is a top-level repository flag, not policy, and a
+    # repository's model is chosen per harness profile.
+    assert (api.managed, table.repositories["product_root"].managed) == (False, True)
+    assert api.models == {"claude_review": "opus"}
+    assert table.repositories["product_root"].models == {}
 
     workspace = table.workspaces["product"]
     assert workspace.root == "product_root"

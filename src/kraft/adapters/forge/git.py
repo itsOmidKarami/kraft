@@ -286,16 +286,28 @@ async def commits_on(repo: Path, branch: str) -> tuple[str, ...]:
     return tuple(line for line in raw.splitlines() if line.strip())
 
 
+async def source_changed(repo: Path, branch: str, *, exclude: set[str]) -> bool:
+    """Whether `branch` changes any path of `repo` outside `exclude` -- a
+    workspace root's member mount paths, so a commit that only moves a
+    member's pointer is not a source change. Against `origin/<default>`, as
+    `commits_on` reads; False when git cannot say (no origin), like it."""
+    try:
+        base = f"origin/{await default_branch(repo)}"
+        raw = await run_git(repo, ["git", "diff", "--name-only", f"{base}...{branch}"])
+    except ForgeError:
+        return False
+    return any(p and p not in exclude for p in raw.splitlines())
+
+
 async def _assert_submodules_covered(repo: Path, covered: set[Path]) -> None:
-    """Refuse to open the root's merge request while an initialized submodule
+    """Refuse to publish a workspace item while an initialized submodule
     holds commits no `work_item_repos` row will carry anywhere.
 
-    The §3a scan (`builtins.scan_submodules`) runs in an earlier node
-    and is what normally covers a submodule the agent touched but nobody
-    declared -- this only fires when that scan itself missed one (submodule
-    init failed, `git submodule status` errored), which must stop the chain
-    rather than silently drop the change, exactly as it did on work item
-    9d0ab38ff3c9439b90506df0f6966660.
+    Membership is typed: the item's frozen target selects the members it may
+    change, and only those get a branch and a merge request. A submodule the
+    agent changed without it being selected must stop the chain rather than
+    silently drop the change, exactly as it did on work item
+    9d0ab38ff3c9439b90506df0f6966660 -- select it when filing the item.
     """
     raw = await run_git(repo, ["git", "submodule", "status"])
     for line in raw.splitlines():

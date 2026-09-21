@@ -685,7 +685,7 @@ enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_too
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy
+enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy, tests/api/test_repository_policy.py::test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all, tests/api/test_repository_policy.py::test_a_member_policy_the_instance_refuses_refuses_the_workspace_item, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy, tests/test_policy.py::test_the_meet_of_repository_layers_is_the_tightest_of_each_field, tests/templates/test_workspace_publication.py::test_each_repository_binds_its_own_task_and_the_checkout_binds_all
 origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `config.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
@@ -693,14 +693,14 @@ origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
-enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent, tests/templates/test_environment.py::test_repository_table_loads_repositories_and_workspaces
+enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent, tests/templates/test_environment.py::test_repository_table_loads_repositories_and_workspaces, tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-naming-a-forge]
 origin: src/kraft/templates/environment.py -- `repos.yaml` keeps the three in separate sections (`repositories:` keyed by id, `workspaces:` beside it, `areas:` only inside a repository), so the distinction holds at the file boundary and not only in the types.
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/templates/test_environment.py::test_a_workspace_mounting_an_unknown_repository_is_refused_at_load, tests/templates/test_environment.py::test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/templates/test_environment.py::test_a_workspace_mounting_an_unknown_repository_is_refused_at_load, tests/templates/test_environment.py::test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id, tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-root], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-member-repository], tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/api/test_repos.py::test_disconnecting_a_repository_a_workspace_mounts_is_refused
 origin: src/kraft/templates/environment.py -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
 
 ## REQ work-item-target-selection-is-immutable
@@ -711,61 +711,71 @@ what was selected is `work-item-target-is-typed-and-immutable`.
 A work item MAY target one repository, selected members of a workspace, or a
 workspace root and its members. The selected targets and root-pointer policy
 SHALL be captured when the work item is materialized.
-enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-workspace-default], tests/api/test_workspace_intake.py::test_a_workspace_selection_that_cannot_assemble_is_a_422[a-member-it-does-not-mount], tests/api/test_workspace_intake.py::test_a_workspace_is_filed_only_against_its_own_root
 
 ## REQ workspace-root-pointer-update-is-explicit
 
 A workspace SHALL declare a default policy for submodule-pointer updates. A
 work item MAY choose an allowed pointer-update policy for its selected target.
+enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-workspace-default], tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-item-chooses], frontend/src/components/IntakeModal.test.tsx::sends the workspace with its picked members and the workspace's root pointer policy by default: bump, frontend/src/components/IntakeModal.test.tsx::sends the workspace with its picked members and the workspace's root pointer policy by default: ignore
 
 ## REQ workspace-root-pointer-update-defaults-to-ignore
 
 The default workspace root-pointer policy SHALL leave the root repository
 unchanged.
+enforced-by: tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[workspace], tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[filed-before-workspaces-skip], tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/adapters/forge/test_run_chain.py::test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660
 
 ## REQ workspace-pointer-bump-prefers-direct-push
 
 When a selected root-pointer policy requests a bump without root source
 changes, the system SHALL commit and push the pointer update directly to the
 workspace root when permitted.
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces]
 
 ## REQ workspace-pointer-bump-falls-back-to-merge-request
 
 When the system cannot push a requested root-pointer bump directly, it SHALL
 create a merge request for the pointer update instead.
+enforced-by: tests/templates/test_workspace_publication.py::test_pointer_bump_falls_back_to_merge_request_when_push_is_denied
 
 ## REQ workspace-root-code-change-gets-a-root-merge-request
 
 When a workspace work item changes source in the root repository, the system
 SHALL create a merge request for that repository. Pointer-only root changes
 SHALL instead follow the selected root-pointer policy.
+enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge_request_per_repo_deepest_first[bump], tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge_request_per_repo_deepest_first[ignore], tests/adapters/forge/test_run_chain.py::test_root_with_no_changes_of_its_own_never_opens_a_merge_request
 
 ## REQ workspace-tasks-have-an-assembled-checkout
 
 A workspace-targeted work item SHALL provide tasks an assembled checkout that
 contains its selected member repositories at their declared paths.
+enforced-by: tests/test_builtins.py::test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch, tests/test_builtins.py::test_ensure_worktree_never_runs_a_blanket_submodule_init, tests/templates/test_workspace_publication.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once
 
 ## REQ task-may-explicitly-fan-out-by-repository
 
 A task MAY explicitly run once for each repository selected by a work item.
 Tasks that do not opt in SHALL run in the work item's ordinary execution
 context.
+enforced-by: tests/templates/test_workspace_publication.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once, tests/templates/test_workspace_publication.py::test_a_fanned_out_task_fails_when_any_repository_fails, tests/templates/test_workspace_publication.py::test_a_fanned_out_run_reads_its_own_repositorys_entry
 
 ## REQ repository-area-can-declare-setup-and-test-scopes
 
 A repository area MAY declare its setup requirements and test scopes. Area
 test scopes SHALL use the same selection and result semantics as repository
 test scopes.
+enforced-by: tests/test_config_repos.py::test_load_repos_reads_an_entry[keeps-an-area-as-written], tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-covering-no-path], tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ selected-test-scope-activates-its-area-setup
 
 Before running a selected test scope belonging to an area, the system SHALL
 apply that area's setup requirements.
+enforced-by: tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ unexpected-area-changes-are-tested
 
 When changed paths select a test scope from an area not chosen at intake, the
 system SHALL still apply that area's setup requirements and run the scope.
+enforced-by: tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ work-item-target-is-typed-and-immutable
 
@@ -773,24 +783,27 @@ A work item SHALL select either one repository or a workspace target. A
 workspace target MAY select member repositories and its root repository. The
 selected targets, mount paths, base revisions, effective repository and area
 policy, and root-pointer policy SHALL remain unchanged for that work item.
-enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/templates/test_environment.py::test_workspace_target_captures_selected_members, tests/templates/test_environment.py::test_a_workspace_target_mounts_exactly_its_selected_members, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy
 
 ## REQ selected-repositories-get-corresponding-branches
 
 The system SHALL create a corresponding work-item branch in every selected
 repository. The branches MAY share one work-item branch name because each
 repository has its own branch namespace.
+enforced-by: tests/test_builtins.py::test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch
 
 ## REQ changed-child-repositories-get-separate-merge-requests
 
 When publishing a workspace work item, the system SHALL create one draft merge
 request for each changed child repository.
+enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge_request_per_repo_deepest_first[bump], tests/adapters/forge/test_run_chain.py::test_root_with_no_changes_of_its_own_never_opens_a_merge_request, tests/adapters/forge/test_run_chain.py::test_a_member_changed_without_being_selected_stops_publication
 
 ## REQ draft-merge-request-enables-external-checks
 
 The system MAY create a draft merge request before final-gate approval so CI
 and automated merge-request review can run. A draft merge request SHALL NOT be
 marked ready or merged before that approval.
+enforced-by: tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
 
 ## REQ default-chain-verification-does-not-rerun-the-implementer
 
@@ -841,11 +854,13 @@ origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision
 A chain MAY declare a gate before draft merge-request creation. Until that gate
 is approved, the work item SHALL remain local and SHALL NOT create a merge
 request.
+enforced-by: tests/templates/test_workspace_publication.py::test_a_pre_draft_gate_keeps_the_work_local
 
 ## REQ final-gate-governs-merge-request-readiness
 
 After final-gate approval, the system SHALL mark the draft merge request ready
 for external approval and merge.
+enforced-by: tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
 
 ## REQ external-wait-has-configurable-timeout-and-polling
 
@@ -906,7 +921,7 @@ declared automated-review task, address CI failures and actionable feedback,
 produce a work-item summary and review, and then request final-gate approval.
 After approval, it SHALL mark the merge request ready, await external approval,
 and merge.
-enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci
+enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 
@@ -927,23 +942,27 @@ enforced-by: tests/adapters/forge/test_waits.py::test_missing_external_approval_
 
 The system SHALL wait for a changed child repository to merge before updating
 a workspace root pointer to that child's revision.
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
 
 ## REQ root-source-draft-merge-request-may-run-early
 
 When a workspace work item changes root source and child repositories, the
 system MAY create a draft root merge request before the child merge requests
 merge so root CI can run.
+enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
 
 ## REQ root-source-merge-request-readiness-waits-for-child-merges
 
 When a workspace work item changes root source and child repositories, the
 system SHALL NOT mark the root merge request ready until the child merge
 requests have merged and the root contains their final pointer revisions.
+enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
 
 ## REQ blocked-child-merge-leaves-parent-unchanged
 
 When a child merge request is rejected, blocked, or fails to merge, the system
 SHALL leave its workspace root pointer unchanged and require human action.
+enforced-by: tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[root-with-source-awaiting-approval], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[pointer-only-root-refused], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[one-member-landed]
 
 ## REQ template-policy-may-replace-operational-defaults
 

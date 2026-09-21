@@ -7,6 +7,9 @@ export interface TestScope {
 
 export interface Repo {
   path: string;
+  /** The repository id a workspace names this entry by; only a workspace's
+   *  root and members carry one. */
+  id?: string | null;
   name: string;
   default_chain_template: string;
   test_command: string | null;
@@ -14,17 +17,26 @@ export interface Repo {
   forge: string | null;
   project: string | null;
   enabled: boolean;
-  default_model: string | null;
+  /** Model per harness profile id (Ruling 165), e.g. `{claude_review: "opus"}`. */
+  models: Record<string, string>;
   deny_tools: string[];
   steering: string[];
   /** Relative file paths carried into every worktree before `uv sync`
    *  (Kraft-gxcmy) -- refused, not copied, if the repo does not gitignore
    *  the entry. */
   local_files: string[];
-  default_root_merge_policy: "bump" | "skip" | "bump_no_mr";
   /** A human has touched this entry — not "this has run". One-way: never
    *  returns to false. Drives the Detected section in ReposPage. */
   managed: boolean;
+}
+
+/** A `repos.yaml` workspace: a root repository and members mounted in it,
+ *  each naming a repository by `Repo.id`. */
+export interface Workspace {
+  id: string;
+  root: string;
+  root_pointer_default: "ignore" | "bump";
+  members: Record<string, { repository: string; path: string }>;
 }
 
 export interface RepoProbe {

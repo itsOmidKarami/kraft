@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +120,10 @@ class LaunchContext:
     repo_entry: dict | None
     steering_dir: Path | None
     skills_dir: Path | None = None
+    #: Every connected repository entry with an `id`, by that id: what a task
+    #: fanned out to a workspace member reads instead of `repo_entry` (its
+    #: setup, test scopes, sandbox). Empty when nothing has an id.
+    repositories: Mapping[str, dict] = field(default_factory=dict)
 
 
 class Steer:

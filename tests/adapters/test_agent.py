@@ -597,8 +597,9 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
 @pytest.mark.parametrize(
     "binding, repo, kw, field, expected",
     [
-        ({**C, "model": "opus"}, {"default_model": "haiku"}, {}, "model", "opus"),
-        (C, {"default_model": "haiku"}, {}, "model", "haiku"),
+        ({**C, "model": "opus"}, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "opus"),
+        (C, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "haiku"),
+        (C, {"models": {"p": "haiku"}}, {"profile": "codex_default"}, "model", None),
         (C, {}, {}, "model", None),
         # Precedence lives here and only here (spec §6): a fix cycle past
         # `escalate_after` asks for the bump, it does not name a model.
@@ -611,7 +612,7 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
             "opus",
         ),
         ({**C, "model": "sonnet"}, {}, {"escalate": True}, "model", "sonnet"),
-        (C, {"default_model": "haiku"}, {"escalate": True}, "model", "haiku"),
+        (C, {"models": {"p": "haiku"}}, {"profile": "p", "escalate": True}, "model", "haiku"),
         ({**C, "model": "sonnet"}, {}, {"item_override": {"model": "opus"}}, "model", "opus"),
         (
             {**C, "escalate_model": "opus"},
@@ -665,6 +666,7 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
     ids=[
         "hook-model-beats-repo-default",
         "repo-default-when-the-hook-is-silent",
+        "repo-model-for-another-profile-does-not-apply",
         "no-model-anywhere",
         "escalate-model-only-when-escalating",
         "escalate-picks-the-escalate-model",
@@ -771,19 +773,13 @@ def _bare_provider(provider_id: str):
 
 def test_a_task_overrides_its_harness_profiles_defaults():
     """`agent-task-selects-capability-compatible-runtime-options`: a profile's
-    `defaults:` are the lowest rung. The task's own field beats them, the
-    repo's `default_model` beats them, the item's override beats all three --
-    and what nothing overrides still arrives from the profile, on the
-    profile's provider and executable."""
+    `defaults:` are the lowest rung. The task's own field beats them, the repo's
+    model for that profile beats them, the item's override beats all three -- and
+    what nothing overrides still arrives from the profile's provider and executable."""
+    profile = {"provider": "claude", "executable": "/opt/claude-wrapper"}
+    defaults = {"model": "sonnet", "effort": "medium", "permission_mode": "plan"}
     write_harness_profiles(
-        Path(os.environ["KRAFT_HOME"]) / "templates",
-        {
-            "review": {
-                "provider": "claude",
-                "executable": "/opt/claude-wrapper",
-                "defaults": {"model": "sonnet", "effort": "medium", "permission_mode": "plan"},
-            }
-        },
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"review": {**profile, "defaults": defaults}}
     )
     task = _v1_agent_task(id="t", harness="review", prompt="p", effort="high")
 
@@ -791,7 +787,7 @@ def test_a_task_overrides_its_harness_profiles_defaults():
     assert (inv.harness, inv.command) == ("claude", "/opt/claude-wrapper")
     assert (inv.model, inv.effort, inv.permission_mode) == ("sonnet", "high", "plan")
 
-    repo = {"default_model": "haiku"}
+    repo = {"models": {"review": "haiku", "codex_default": "gpt-5"}}
     assert agent.resolve_agent_task(task, repo, None).model == "haiku"
     item = {"model": "opus", "effort": "low"}
     overridden = agent.resolve_agent_task(task, repo, None, item_override=item)

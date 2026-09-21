@@ -14,11 +14,11 @@ from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
-from kraft.store.repos import RootMergePolicy
 from kraft.templates import (
     validate_agent_overrides,
     validate_node_override_fields,
 )
+from kraft.templates.environment import RootPointerPolicy
 
 
 class Attachment(BaseModel):
@@ -38,10 +38,13 @@ class NewWorkItem(BaseModel):
     #: stays distinguishable from an item that named `chain_template:
     #: "default"` outright.
     chain_template: str | None = None
-    #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
-    #: repo's .gitmodules, and what happens to the root pointer when they land
-    submodules: list[str] = []
-    root_merge_policy: RootMergePolicy = "bump"
+    #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
+    #: `repo` is the root of, the members it selects, and the root-pointer
+    #: policy -- the workspace's `root_pointer_default` when unset. Frozen into
+    #: the item's target at intake (`deps.workspace_target`).
+    workspace: str | None = None
+    members: list[str] = []
+    root_pointer_policy: RootPointerPolicy | None = None
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
     #: the caller's working directory, sent only when there are attachment paths
@@ -201,11 +204,20 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # The repository layer, once: the dry run and the intake below must
     # materialize from the same policy (`repository-policy-cannot-relax-
     # instance-safety`).
-    policy = deps.item_policy_or_422(st, body.repo)
+    target = deps.workspace_target(
+        st,
+        body.repo,
+        workspace=body.workspace,
+        members=body.members,
+        root_pointer_policy=body.root_pointer_policy,
+    )
+    policy = deps.item_policy_or_422(st, body.repo, target)
+    per_repository = deps.repository_policies_or_422(st, target)
     try:
         chain.materialize(
-            target=entry.single_repo_target(body.repo),
+            target=target or entry.single_repo_target(body.repo),
             effective_policy=policy,
+            repository_policies=per_repository,
             attachment_kinds=attachment_kinds,
             skip_nodes=frozenset(body.skip_nodes),
         )
@@ -233,8 +245,8 @@ async def create_work_item(body: NewWorkItem, request: Request):
             # `chain_template: "default"` outright.
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
-            submodules=body.submodules,
-            root_merge_policy=body.root_merge_policy,
+            target=target,
+            repository_policies=per_repository,
             attachments=attachments,
             status="active" if body.autostart else "paused",
             # Folded into intake's own INSERT transaction, not a separate
@@ -502,7 +514,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     # chain's own override, and layering the new chain's on
                     # top of it stacks the two (Kraft-yaq99). Filing on the
                     # new chain would start here.
-                    effective_policy=deps.item_policy(st, row["repo"]),
+                    effective_policy=deps.item_policy(
+                        st, row["repo"], previous.target if previous is not None else None
+                    ),
+                    repository_policies=deps.repository_policies(
+                        st, previous.target if previous is not None else None
+                    ),
                     attachment_kinds=frozenset(
                         a.get("kind") for a in json.loads(row["attachments"] or "[]")
                     )

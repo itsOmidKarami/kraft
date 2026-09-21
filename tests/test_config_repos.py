@@ -48,7 +48,12 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"sandbox": None}),
         ({"sandbox": _SANDBOX}, {"sandbox": _SANDBOX}),
         ({"sandbox": False}, {"sandbox": False}),
-        ({}, {"default_root_merge_policy": "bump"}),
+        ({}, {"models": {}, "areas": {}}),
+        (
+            {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
+            {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
+        ),
+        ({"models": {"claude_review": "opus"}}, {"models": {"claude_review": "opus"}}),
         # Anything already in a repos.yaml was connected by a human --
         # auto-connect did not exist when it was written. Defaulting to False
         # would hide every repo behind the Detected section on first load.
@@ -68,7 +73,9 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "sandbox-defaults-to-none",
         "passes-through-a-well-formed-sandbox",
         "passes-through-an-explicit-sandbox-off",
-        "defaults-root-merge-policy",
+        "models-and-areas-default-to-empty",
+        "keeps-an-area-as-written",
+        "keeps-a-per-profile-model",
         "managed-defaults-true-for-a-pre-existing-entry",
         "keeps-an-explicit-managed-false",
         "local-files-default-to-empty",
@@ -97,7 +104,10 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"setup_command": ["uv", "sync"]}, "setup_command"),
         ({"env": {"A": 1}}, "'env'"),
         ({"env_passthrough": ["", "OK"]}, "env_passthrough"),
-        ({"default_root_merge_policy": "nope"}, "default_root_merge_policy"),
+        ({"models": {"Claude Review": "opus"}}, "models"),
+        ({"models": {"claude_review": 4}}, "models"),
+        ({"areas": {"api": {"paths": []}}}, "areas"),
+        ({"areas": {"api": {"paths": ["a/**"], "forge": {"kind": "github"}}}}, "areas"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),
     ],
     ids=[
@@ -113,13 +123,40 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         "a-non-string-setup-command",
         "a-non-flat-string-map-env",
         "an-empty-env-passthrough-entry",
-        "an-unknown-root-merge-policy",
+        "a-models-key-that-is-no-profile-id",
+        "a-non-string-model",
+        "an-area-covering-no-path",
+        "an-area-naming-a-forge",
         "a-test-scope-with-no-command",
     ],
 )
 def test_load_repos_rejects_an_entry(tmp_path, entry, match):
     with pytest.raises(config.ConfigError, match=match):
         _load(tmp_path, {"path": "/r", **entry})
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [{"default_model": "sonnet"}, {"default_root_merge_policy": "skip"}],
+    ids=["default-model", "default-root-merge-policy"],
+)
+def test_a_retired_repo_key_is_dropped_on_read_and_gone_after_a_save(tmp_path, caplog, legacy):
+    """Ruling 165's upgrade path: an existing `repos.yaml` still loads, the
+    retired key is not carried along as an unknown extra (it would otherwise
+    round-trip forever), a warning names it, and the next save persists the
+    new shape. `default_model` has no one-to-one successor -- it was one model
+    for every provider -- so it is dropped, not guessed into `models:`."""
+    (key,) = legacy
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        (entry,) = _load(tmp_path, {"path": "/r", **legacy})
+    assert key not in entry
+    assert entry["models"] == {}
+    assert key in caplog.text
+    # Its own warning, never the unrecognised-key one (nor its near-miss
+    # refusal): a retired key is known, and where it went is named.
+    assert "unrecognised" not in caplog.text
+    config.save_repos(tmp_path / "repos.yaml", [entry])
+    assert key not in (tmp_path / "repos.yaml").read_text()
 
 
 def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):
@@ -390,3 +427,72 @@ def test_a_key_one_typo_from_a_field_is_refused_naming_the_field(tmp_path, typo,
     the one outcome Ruling 171 records as a deliberate choice."""
     with pytest.raises(config.ConfigError, match=f"did you mean '{meant}'"):
         config.load_repos(_entry(tmp_path, **{typo: {}}), validate_steering=False)
+
+
+# ── workspaces (`workspace-declares-root-and-members`) ──
+
+
+def _write(tmp_path, repos, workspaces):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
+    return path
+
+
+_WS_REPOS = [{"path": "/ws", "id": "ws"}, {"path": "/ws/libs/a", "id": "lib-a"}]
+
+
+def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
+    """The daemon's `repos.yaml` declares workspaces in the V1 shape, beside
+    the repository list: a root and each member with its mount path, both
+    naming a connected repository by `id`."""
+    path = _write(
+        tmp_path,
+        _WS_REPOS,
+        {
+            "ws": {
+                "root": "ws",
+                "root_pointer_default": "bump",
+                "members": {"a": {"repository": "lib-a", "path": "libs/a"}},
+            }
+        },
+    )
+    (ws,) = config.load_workspaces(path).values()
+    assert (ws.id, ws.root, ws.root_pointer_default) == ("ws", "ws", "bump")
+    assert ws.members["a"].repository == "lib-a"
+    assert ws.members["a"].path == "libs/a"
+    assert config.load_workspaces(_write(tmp_path, _WS_REPOS, None)) == {}
+
+
+@pytest.mark.parametrize(
+    ("repos", "workspaces", "match"),
+    [
+        (_WS_REPOS, {"ws": {"root": "nope"}}, "root 'nope'"),
+        (
+            _WS_REPOS,
+            {"ws": {"root": "ws", "members": {"a": {"repository": "gone", "path": "libs/a"}}}},
+            "'gone'",
+        ),
+        (_WS_REPOS, {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a"}}}}, "path"),
+        ([{"path": "/a", "id": "x"}, {"path": "/b", "id": "x"}], None, "'x'"),
+        ([{"path": "/a", "id": "Not An Id"}], None, "id"),
+    ],
+    ids=[
+        "an-unknown-root",
+        "an-unknown-member-repository",
+        "a-member-with-no-mount-path",
+        "two-repositories-with-one-id",
+        "an-id-no-reference-can-name",
+    ],
+)
+def test_a_workspace_that_cannot_assemble_is_refused_at_load(tmp_path, repos, workspaces, match):
+    with pytest.raises(config.ConfigError, match=match):
+        config.load_workspaces(_write(tmp_path, repos, workspaces))
+
+
+def test_save_repos_keeps_the_workspaces_section(tmp_path):
+    """Every Settings write goes through `save_repos` with the repository list
+    alone; it must not drop the workspaces declared beside it."""
+    workspaces = {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a", "path": "libs/a"}}}}
+    path = _write(tmp_path, _WS_REPOS, workspaces)
+    config.save_repos(path, config.load_repos(path))
+    assert yaml.safe_load(path.read_text())["workspaces"] == workspaces

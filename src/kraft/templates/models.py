@@ -25,8 +25,8 @@ still reads the legacy `kraft.templates` shapes.
 from __future__ import annotations
 
 import re
-from collections.abc import Container, Iterator
-from dataclasses import dataclass
+from collections.abc import Container, Iterator, Mapping
+from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
 from typing import Annotated, Literal, Self
@@ -684,6 +684,10 @@ class GateNode(BaseModel):
 AnyNode = Annotated[ExecNode | GateNode, Field(discriminator="kind")]
 
 
+#: The forge targets that take a merge request past draft.
+_PUBLISHING = frozenset({ForgeAction.MR_MARK_READY, ForgeAction.MR_MERGE})
+
+
 class Chain(BaseModel):
     """One authored chain file, after `extends` expansion. `id` is optional
     because `POST /templates/resolve` accepts an unsaved candidate; a chain
@@ -721,6 +725,33 @@ class Chain(BaseModel):
                     raise ValueError(
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"this or an earlier execution node in {where}"
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def _publishes_after_the_final_gate(self) -> Self:
+        """A draft merge request may open before the final gate, but nothing
+        may mark it ready or merge it ahead of that gate's approval
+        (`draft-merge-request-enables-external-checks`, `final-gate-governs-
+        merge-request-readiness`) -- from any task position the executor can
+        run in a node before it. The positions come from `ResolvedNode.tasks`,
+        the one walker of them (node and step tasks, every recovery plan down
+        to a task's own, the fix loop and its judge, escalation, on_conflict,
+        a gate's reviewer), never a second list here that could drift from it
+        (Kraft-nwonj). A chain with no final gate declares no approval to wait
+        for, and is not constrained here (Kraft-8tjh7)."""
+        final = next(
+            (i for i, n in enumerate(self.nodes) if isinstance(n, GateNode) and n.chain_finalized),
+            None,
+        )
+        if final is None:
+            return self
+        for node in ResolvedChain.from_chain(self).nodes[:final]:
+            for task in node.tasks():
+                if isinstance(task.task, ForgeTask) and task.task.target in _PUBLISHING:
+                    raise ValueError(
+                        f"{task.path}: {task.task.target.value} runs before the final gate "
+                        f"{self.nodes[final].id!r} approves it"
                     )
         return self
 
@@ -932,6 +963,7 @@ class ResolvedChain:
         effective_policy: InstancePolicy,
         attachment_kinds: frozenset[str] = frozenset(),
         skip_nodes: frozenset[str] = frozenset(),
+        repository_policies: Mapping[str, InstancePolicy] | None = None,
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
@@ -947,12 +979,26 @@ class ResolvedChain:
         `attachment_kinds` are the artifact kinds this item arrives with
         already written (an intake `--spec`/`--plan`), and they trim the chain
         here rather than at a route handler -- see `trim_for_attachments`.
+
+        `repository_policies` are a workspace item's per-repository starting
+        policies (instance plus that repository's layer, Kraft-jc39p), keyed
+        by repository id; each gets this chain's layer too, and is what a task
+        fanned out to that repository runs under. `effective_policy` is then
+        the assembled checkout's: the tightest of them all.
         """
         policy = self.chain_policy(effective_policy)
+        per_repository = {
+            rid: self.chain_policy(p) for rid, p in (repository_policies or {}).items()
+        }
         dropped = {n.id for n in self.nodes if _redundant_given(n, attachment_kinds)} | (
             skip_nodes & {n.id for n in self.nodes}
         )
-        return MaterializedChain(chain=self.without_nodes(dropped), target=target, policy=policy)
+        return MaterializedChain(
+            chain=self.without_nodes(dropped),
+            target=target,
+            policy=policy,
+            repository_policies=per_repository,
+        )
 
     def chain_policy(self, effective_policy: InstancePolicy) -> InstancePolicy:
         """`effective_policy` with this chain's own override on top, after
@@ -1084,6 +1130,8 @@ class _StoredMaterialization(BaseModel):
     #: `ResolvedChain.steering`. Absent from a snapshot stored before steering
     #: was frozen, which reads back as `None`.
     steering: dict[str, str] | None = None
+    #: `MaterializedChain.repository_policies`; absent for a single repository.
+    repository_policies: dict[str, InstancePolicy] = {}
 
 
 @dataclass(frozen=True)
@@ -1093,7 +1141,13 @@ class MaterializedChain:
 
     chain: ResolvedChain
     target: WorkItemTarget
+    #: The policy of the item's ordinary execution context: for a workspace
+    #: item, the assembled checkout's -- the tightest of every selected
+    #: repository's layer (Kraft-jc39p).
     policy: InstancePolicy
+    #: A workspace item's policy per selected repository id, what a task
+    #: fanned out to that repository runs under. Empty for one repository.
+    repository_policies: Mapping[str, InstancePolicy] = field(default_factory=dict)
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`
     # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
@@ -1104,13 +1158,24 @@ class MaterializedChain:
     def task_paths(self) -> tuple[str, ...]:
         return self.chain.task_paths
 
-    def policy_for(self, scope: ResolvedNode | ResolvedStep | ResolvedTask) -> InstancePolicy:
-        """The effective policy `scope` runs under: this item's policy with
-        every enclosing node, step and task override applied, broadest first
+    def policy_for(
+        self,
+        scope: ResolvedNode | ResolvedStep | ResolvedTask,
+        repository: str | None = None,
+    ) -> InstancePolicy:
+        """The effective policy `scope` runs under: this item's policy -- or,
+        for a task fanned out to `repository`, that repository's -- with every
+        enclosing node, step and task override applied, broadest first
         (`policy-is-layered-by-execution-scope`). Derived from the stored
         authored chain on every call, never stored beside it -- the two could
-        only disagree. `materialize` already checked every scope resolves."""
-        return self.policy.layered(scope.scopes)
+        only disagree. `materialize` already checked every scope resolves.
+        `LookupError` for a repository this item did not select."""
+        if repository is not None and repository not in self.target.repositories():
+            raise LookupError(f"this work item selects no repository {repository!r}")
+        # A repository with no policy of its own frozen falls back to the
+        # item's, which is the meet of them all: never looser than its own.
+        base = self.repository_policies.get(repository, self.policy) if repository else self.policy
+        return base.layered(scope.scopes)
 
     def policy_at(self, path: str) -> InstancePolicy:
         """`policy_for` the node, step or task at canonical `path`, or
@@ -1147,7 +1212,11 @@ class MaterializedChain:
             target=self.target,
             policy=self.policy,
             steering=self.chain.steering,
-        ).model_dump_json()
+            repository_policies=dict(self.repository_policies),
+        ).model_dump_json(
+            # A single-repository item's snapshot keeps its exact shape.
+            exclude=None if self.repository_policies else {"repository_policies"}
+        )
 
     @classmethod
     def from_json(cls, raw: str) -> MaterializedChain:
@@ -1161,4 +1230,5 @@ class MaterializedChain:
             chain=ResolvedChain.from_chain(stored.chain, steering=stored.steering),
             target=stored.target,
             policy=stored.policy,
+            repository_policies=stored.repository_policies,
         )

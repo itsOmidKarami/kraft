@@ -20,13 +20,14 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     ValidationInfo,
     field_serializer,
@@ -36,9 +37,11 @@ from pydantic import (
 
 from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride
-from kraft.store.repos import RootMergePolicy
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+
+if TYPE_CHECKING:
+    from kraft.templates.environment import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +143,17 @@ class TestScope(BaseModel):
     # time (Kraft-9wzy). Callers that need the wrap do it at the point of use.
 
 
+#: Keys an older `repos.yaml` entry may still carry, and where each went.
+_RETIRED_KEYS = {
+    "default_model": "set a model per harness profile under 'models:'",
+    "default_root_merge_policy": "a workspace's 'root_pointer_default' replaces it",
+}
+
+#: A harness profile id, the key of `RepoEntry.models`: the same rule as
+#: `kraft.templates.environment.Identifier`, the id a task's `harness:` names.
+_PROFILE_ID = r"^[a-z][a-z0-9_-]*$"
+
+
 class RepoEntry(BaseModel):
     """One `repos.yaml` entry. Strict, so `managed: "true"` is rejected as the
     hand-rolled loader rejected it; unknown keys ride along (`extra="allow"`)
@@ -149,6 +163,10 @@ class RepoEntry(BaseModel):
     model_config = ConfigDict(strict=True, extra="allow")
 
     path: str = Field(min_length=1)
+    #: The repository id a workspace names this entry by (`workspaces:`
+    #: below the list). Optional: only a workspace's root and members need
+    #: one, and `kraft repo connect` writes it for them.
+    id: Annotated[str, Field(pattern=_PROFILE_ID)] | None = None
     forge: str | None = None
     project: str | None = None
     # True, not False: every entry that predates this field was connected by a
@@ -156,12 +174,21 @@ class RepoEntry(BaseModel):
     # Settings' "Detected" section. Auto-connected children are written with an
     # explicit `managed: false` instead of relying on a default.
     managed: bool = True
-    default_model: str | None = None
+    #: The model an agent task launches with in this repository, per harness
+    #: profile id (Ruling 165): under the task's own `model:` and the item's
+    #: override, over the profile's `defaults:`. Keyed by profile because one
+    #: repo-wide `default_model` was handed to every provider alike.
+    models: dict[Annotated[str, Field(pattern=_PROFILE_ID)], str] = {}
     # The command CI runs for this repo. The registry's `on.test.run` binding
     # is one command for every repo on the install, which is what lets verify
     # and CI drift apart (Kraft-579). None keeps the registry's command.
     test_command: str | None = None
     test_scopes: list[TestScope] | None = Field(default=None, min_length=1)
+    #: Path-scoped execution contexts inside this repository, in the V1
+    #: `Area` shape (`repository-area-can-declare-setup-and-test-scopes`):
+    #: each area's test scopes join the repository's, and its `setup` runs
+    #: before any of them does. Never forge targets.
+    areas: dict[str, dict] = {}
     # Files `git worktree add` cannot carry: it checks out tracked content at
     # HEAD, so an untracked `.python-version` never reaches the worktree
     # (Kraft-gxcmy). Relative file paths only: a directory here is how a list
@@ -180,7 +207,6 @@ class RepoEntry(BaseModel):
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: list[str] = []
     steering: list[str] = []
-    default_root_merge_policy: RootMergePolicy = "bump"
     sandbox: Any = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-
     #: safety`): applied after the instance policy and before everything a
@@ -202,6 +228,20 @@ class RepoEntry(BaseModel):
         if not isinstance(data, dict):
             return data
         data = dict(data)
+        # Ruling 165: retired, so dropped here rather than carried along as an
+        # unknown extra that every re-save would write back. `default_model`
+        # has no one-to-one successor (it was one model for every provider);
+        # `default_root_merge_policy` was never read at run time -- a
+        # workspace's `root_pointer_default` is where that decision lives now.
+        for retired in _RETIRED_KEYS:
+            if retired in data:
+                logger.warning(
+                    "repos.yaml: %s: %r is no longer read and is dropped (%s)",
+                    data.get("path"),
+                    retired,
+                    _RETIRED_KEYS[retired],
+                )
+                del data[retired]
         legacy = data.pop("gitlab_project", None)
         # Both `forge` and `project` must be absent: a hand-edited
         # half-migrated entry carrying an explicit `project` beside the legacy
@@ -210,6 +250,15 @@ class RepoEntry(BaseModel):
             data["forge"] = "gitlab"
             data["project"] = legacy
         return data
+
+    @field_validator("areas")
+    @classmethod
+    def _typed_areas(cls, v: dict[str, dict]) -> dict[str, dict]:
+        """Checked as V1 `Area`s, kept as written so a re-save round-trips."""
+        from kraft.templates.environment import Area, Identifier  # `kraft.templates` imports us
+
+        TypeAdapter(dict[Identifier, Area]).validate_python(v)
+        return v
 
     @field_validator("local_files")
     @classmethod
@@ -408,11 +457,53 @@ def load_repos(
             if msg.startswith("repos.yaml"):
                 raise ConfigError(msg) from exc
             raise ConfigError(first_error(exc, "repos.yaml")) from exc
+    ids = [r["id"] for r in out if r.get("id")]
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        raise ConfigError(f"repos.yaml: repository id(s) {twice} name more than one entry")
     return out
 
 
-def save_repos(path: str | Path, repos: list[dict]) -> None:
-    write_yaml(path, {"repos": repos})
+def load_workspaces(path: str | Path) -> dict[str, Workspace]:
+    """`repos.yaml`'s `workspaces:`, in the V1 shape: a root repository and
+    each member mounted at its path, both naming a connected entry by `id`
+    (`workspace-declares-root-and-members`). Both ends of every reference are
+    resolved here, when the file is read: a workspace naming no connected
+    repository would otherwise assemble an empty checkout hours later."""
+    # Here, not at the top: `kraft.templates` imports this module.
+    from kraft.templates.environment import Workspace
+
+    repos = load_repos(path, validate_steering=False)
+    ids = {r["id"] for r in repos if r.get("id")}
+    raw = read_yaml(path, REPOS_DEFAULT).get("workspaces") or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("repos.yaml: 'workspaces' must be a mapping keyed by workspace id")
+    out: dict[str, Workspace] = {}
+    for ws_id, body in raw.items():
+        try:
+            ws = Workspace.model_validate({"id": ws_id, **(body or {})})
+        except ValidationError as exc:
+            raise ConfigError(first_error(exc, f"repos.yaml: workspaces.{ws_id}")) from exc
+        if ws.root not in ids:
+            raise ConfigError(
+                f"repos.yaml: workspaces.{ws_id}: root {ws.root!r} is no connected repository id"
+            )
+        for name, member in ws.members.items():
+            if member.repository not in ids:
+                raise ConfigError(
+                    f"repos.yaml: workspaces.{ws_id}.members.{name}: {member.repository!r} "
+                    "is no connected repository id"
+                )
+        out[ws_id] = ws
+    return out
+
+
+def save_repos(path: str | Path, repos: list[dict], workspaces: dict | None = None) -> None:
+    """Write the repository list. `workspaces` None keeps the file's own
+    `workspaces:` section, so a Settings save of one entry never drops them."""
+    if workspaces is None:
+        workspaces = read_yaml(path, REPOS_DEFAULT).get("workspaces")
+    write_yaml(path, {"repos": repos, **({"workspaces": workspaces} if workspaces else {})})
 
 
 def git_read(

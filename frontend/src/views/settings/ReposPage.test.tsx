@@ -207,12 +207,33 @@ describe("Settings · repos (5a)", () => {
 });
 
 describe("Settings · repo detail (5b)", () => {
-  it("opens the repo detail with GENERAL/TESTING/FORGE/CROSS-REPO/AGENT sections", async () => {
+  it("opens the repo detail with GENERAL/TESTING/FORGE/AGENT sections", async () => {
     renderAt("/settings/repos?repo=/repo-a");
     expect(await screen.findByRole("heading", { name: "repo-a" })).toBeInTheDocument();
-    for (const label of ["General", "Testing", "Forge", "Cross-repo", "Agent"]) {
+    for (const label of ["General", "Testing", "Forge", "Agent"]) {
       expect(screen.getByText(label, { exact: false })).toBeInTheDocument();
     }
+    // Ruling 165: the root pointer default is a workspace's, not a repo's.
+    expect(screen.queryByText("Cross-repo")).toBeNull();
+    expect(screen.queryByText("root merge policy")).toBeNull();
+  });
+
+  it("models are set per harness profile and round-trip through patchRepo", async () => {
+    const repoC = repo({ path: "/repo-c", name: "repo-c", models: { claude_review: "sonnet" } });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo(), repoC] });
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
+    renderAt("/settings/repos?repo=/repo-c");
+
+    const models = await screen.findByLabelText("models");
+    expect(models).toHaveValue("claude_review=sonnet");
+    await userEvent.clear(models);
+    await userEvent.type(models, "claude_review=opus{enter}codex_default = gpt-5{enter}half");
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(patch).toHaveBeenCalledWith(
+      "/repo-c",
+      expect.objectContaining({ models: { claude_review: "opus", codex_default: "gpt-5" } }),
+    );
   });
 
   it("no longer offers a per-submodule config table", async () => {

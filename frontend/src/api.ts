@@ -15,6 +15,7 @@ import type {
   Notify,
   Policy,
   Repo,
+  Workspace,
   Theme,
   RepoProbe,
   NodeOverrides,
@@ -96,8 +97,11 @@ export const createWorkItem = (body: {
   title: string;
   description?: string;
   chain_template?: string;
-  submodules?: string[];
-  root_merge_policy?: string;
+  /** A workspace item: the workspace `repo` roots, the member ids picked,
+   *  and the root-pointer policy (`ignore`/`bump`). */
+  workspace?: string;
+  members?: string[];
+  root_pointer_policy?: "ignore" | "bump";
   attachments?: { kind: "spec" | "plan"; path: string }[];
   /** Node ids to drop from the materialized chain at intake (UI v2 · 04
    *  point 6; design 10/m09's click-to-skip). */
@@ -275,7 +279,8 @@ export const getWorkItemArtifact = (id: string) =>
 
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
-export const getRepos = () => req<{ repos: Repo[] }>("/repos");
+export const getRepos = () =>
+  req<{ repos: Repo[]; workspaces?: Record<string, Workspace> }>("/repos");
 export const probeRepo = (path: string) => req<RepoProbe>("/repos/probe", json("POST", { path }));
 export const addRepo = (body: Partial<Repo> & { path: string }) =>
   req<Repo>("/repos", json("POST", body));

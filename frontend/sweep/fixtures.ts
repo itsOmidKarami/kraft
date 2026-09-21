@@ -72,11 +72,10 @@ export function repo(path: string, i: number, long = false) {
     forge: i % 2 === 0 ? "gitlab" : "github",
     project: long ? `acme-corporation/platform-engineering/${name}` : `acme/${name}`,
     enabled: i % 5 !== 4,
-    default_model: i === 1 ? "claude-opus-4-1" : null,
+    models: i === 1 ? { claude_review: "claude-opus-4-1" } : {},
     deny_tools: i === 0 ? ["WebFetch", "Bash(rm -rf*)"] : [],
     steering: i === 0 ? ["house-style", "commit-messages"] : [],
     allow_cross_repo: i === 2,
-    default_root_merge_policy: (["bump", "skip", "bump_no_mr"] as const)[i % 3],
     submodules: long && i === 0
       ? [
           { path: "vendor/kraft-lite", enabled: true, test_command: "pytest -q", chain_override: null },

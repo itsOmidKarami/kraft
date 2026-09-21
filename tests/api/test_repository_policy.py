@@ -13,10 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from support.harness import make_repo_with_submodule
 
 from kraft import config
 from kraft.api import deps
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
+from kraft.templates.environment import WorkItemTarget
 
 _SANDBOX = {"kind": "docker", "image": "kraft/worker:1"}
 
@@ -122,3 +124,72 @@ def test_a_repository_policy_the_instance_refuses_is_a_422_at_intake(client, rep
     r = client.post(door, json={"title": "t", "repo": str(repo), "autostart": False})
     assert r.status_code == 422, r.text
     assert "allowed_tools" in r.json()["detail"]
+
+
+# ── a workspace item: one layer per repository (Kraft-jc39p) ──
+
+
+def _workspace_repos(templates_dir, *, root_policy, member_policy):
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "repos": [
+                    {"path": "/ws", "id": "ws", "policy": root_policy},
+                    {"path": "/ws/libs/a", "id": "a", "policy": member_policy},
+                ],
+                "workspaces": {
+                    "ws": {"root": "ws", "members": {"a": {"repository": "a", "path": "libs/a"}}}
+                },
+            }
+        )
+    )
+    return WorkItemTarget.from_selection(
+        config.load_workspaces(templates_dir / "repos.yaml")["ws"], members=["a"]
+    )
+
+
+def test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all(
+    tmp_path,
+):
+    """A task fanned out to one repository runs under that repository's layer;
+    a task in the assembled checkout, which holds every selected repository at
+    once, runs under the tightest of all their layers
+    (`repository-policy-cannot-relax-instance-safety`: every task that runs
+    in a repository is bound by it)."""
+    target = _workspace_repos(
+        tmp_path,
+        root_policy={"allowed_tools": ["Read", "Bash", "Edit"]},
+        member_policy={"allowed_tools": ["Read", "Bash"], "deny_tools": ["WebFetch"]},
+    )
+    st = SimpleNamespace(templates_dir=tmp_path, instance_policy=_instance())
+
+    assembled = deps.item_policy(st, "/ws", target)
+    per_repository = deps.repository_policies(st, target)
+
+    assert (assembled.allowed_tools, assembled.deny_tools) == (("Read", "Bash"), ("WebFetch",))
+    assert per_repository["ws"].allowed_tools == ("Read", "Bash", "Edit")
+    assert per_repository["ws"].deny_tools == ()
+    assert per_repository["a"].deny_tools == ("WebFetch",)
+
+
+def test_a_member_policy_the_instance_refuses_refuses_the_workspace_item(tmp_path):
+    target = _workspace_repos(
+        tmp_path, root_policy={}, member_policy={"allowed_tools": ["Read", "Bash"]}
+    )
+    st = SimpleNamespace(templates_dir=tmp_path, instance_policy=_instance(allowed_tools=["Read"]))
+    for resolve in (deps.item_policy, lambda st, _repo, t: deps.repository_policies(st, t)):
+        with pytest.raises(PolicyError, match=r"repos\.yaml: /ws/libs/a: 'allowed_tools'"):
+            resolve(st, "/ws", target)
+
+
+def test_a_filed_workspace_item_freezes_each_repositorys_policy(client, tmp_path):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root), "enabled": False})
+    client.patch(f"/api/repos?path={root / 'libs/a'}", json={"deny_tools": ["WebFetch"]})
+
+    wid = _file(client, root, workspace="ws", members=["a"]).json()["id"]
+
+    snapshot = _snapshot(client, wid)
+    assert snapshot["repository_policies"]["a"]["deny_tools"] == ["WebFetch"]
+    assert snapshot["repository_policies"]["ws"]["deny_tools"] == []
+    assert snapshot["policy"]["deny_tools"] == ["WebFetch"]

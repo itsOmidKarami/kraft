@@ -29,9 +29,10 @@ def _paused(client, repo, **body):
     return r.json()["id"]
 
 
-def test_new_work_item_schema_rejects_an_unknown_root_merge_policy():
+@pytest.mark.parametrize("policy", ["nope", "skip"], ids=["unknown", "a-retired-v0-value"])
+def test_new_work_item_schema_rejects_an_unknown_root_pointer_policy(policy):
     with pytest.raises(ValidationError):
-        NewWorkItem.model_validate({"title": "x", "repo": "/r", "root_merge_policy": "nope"})
+        NewWorkItem.model_validate({"title": "x", "repo": "/r", "root_pointer_policy": policy})
 
 
 def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
@@ -472,36 +473,6 @@ def _linked_worktree(repo, tmp_path, name="wt"):
         capture_output=True,
     )
     return worktree
-
-
-def test_cross_repo_intake_records_submodules_but_the_repos_panel_waits_for_the_worktree(
-    client, repo
-):
-    """Design 1g's cross-repo disclosure: `submodules`/`root_merge_policy` are
-    recorded at intake. The repos panel itself (design 3a) is empty until
-    `ensure_worktree` writes `work_item_repos` rows (Kraft-qlsf) -- a
-    deliberate trade-off over an intake-time preview, not a bug: `repos_for`
-    now reports real per-repo merge state instead of a placeholder derived
-    from `merge` node completion."""
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "repo": str(repo),
-            "title": "bump the pointers",
-            "chain_template": "quick-task",
-            "submodules": ["libs/a", "vendor/deep/b"],
-            "root_merge_policy": "skip",
-        },
-    ).json()["id"]
-    body = client.get(f"/api/work-items/{wid}").json()
-    assert body["repos"] == []
-    assert body["root_merge_policy"] == "skip"
-
-    bad = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "x", "root_merge_policy": "nonsense"},
-    )
-    assert bad.status_code == 422
 
 
 def test_a_single_repo_item_has_no_repos_panel(client, repo):

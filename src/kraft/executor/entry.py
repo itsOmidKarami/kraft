@@ -57,8 +57,13 @@ async def intake(
     effective_policy: InstancePolicy | None = None,
     description: str | None = None,
     bd_cwd: str | None = None,
-    submodules: list[str] | None = None,
-    root_merge_policy: str = "bump",
+    #: The item's immutable target (`deps.workspace_target` for a workspace
+    #: item); None is a single-repository target on `repo`.
+    target: WorkItemTarget | None = None,
+    #: A workspace item's policy per selected repository id
+    #: (`deps.repository_policies`); `effective_policy` is then the assembled
+    #: checkout's.
+    repository_policies: dict[str, InstancePolicy] | None = None,
     attachments: list[dict] | None = None,
     status: str = "active",
     #: When given, `status="active"` is downgraded to `"paused"` if
@@ -113,7 +118,7 @@ async def intake(
     # name table this layer looks up -- and it happens in the same drop as
     # `skip_nodes`, so a chain the two together would empty is refused once.
     materialized = chain.materialize(
-        target=single_repo_target(repo),
+        target=target or single_repo_target(repo),
         effective_policy=(
             effective_policy
             if effective_policy is not None
@@ -125,6 +130,7 @@ async def intake(
         # caller that can make them disagree.
         attachment_kinds=frozenset(a["kind"] for a in attachments or []),
         skip_nodes=skip_nodes,
+        repository_policies=repository_policies,
     )
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
@@ -176,8 +182,11 @@ async def intake(
             # Recorded on every new row, so a bead is closed where it was filed
             # whatever KRAFT_BD_CWD says months later.
             bead_cwd=bead_cwd or cwd,
-            submodules=submodules,
-            root_merge_policy=root_merge_policy,
+            # Display copies of the frozen target, for the item's Config
+            # panel: the mount paths and the root-pointer policy. Nothing at
+            # run time reads them -- the snapshot's target is the truth.
+            submodules=[m.path for m in materialized.target.mounts.values()],
+            root_merge_policy=materialized.target.root_pointer_policy.value,
             attachments=attachments,
             status=effective_status,
             implements_beads=implements_beads,

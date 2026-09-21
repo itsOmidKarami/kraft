@@ -156,3 +156,25 @@ def test_a_harness_change_is_held_to_the_paths_allowed_harnesses():
             chain, "build.work.implement", task_config={"harness": "claude_review"}
         )
     assert refused.value.field == "task_config.harness"
+
+
+def test_a_workspace_items_fork_keeps_each_repositorys_policy():
+    """Kraft-jc39p: a retry fork re-materializes nothing, so a workspace
+    item's per-repository policies travel with it unchanged."""
+    from kraft.templates.environment import Workspace
+
+    chain = _chain()
+    workspace = Workspace.model_validate(
+        {"id": "ws", "root": "ws", "members": {"a": {"repository": "a", "path": "libs/a"}}}
+    )
+    member = chain.policy.apply_template_override({"deny_tools": ["Bash"]})
+    workspace_chain = chain.chain.materialize(
+        target=WorkItemTarget.from_selection(workspace, members=["a"]),
+        effective_policy=member,
+        repository_policies={"a": member},
+    )
+
+    fork = validate_retry_override(workspace_chain, "build.work.implement").chain
+
+    assert fork.repository_policies == workspace_chain.repository_policies
+    assert fork.to_json() == workspace_chain.to_json()

@@ -14,13 +14,26 @@ const REPO_A = {
   test_scopes: null,
   forge: null,
   project: null,
-  default_model: null,
+  models: {},
   deny_tools: [],
   steering: [],
   local_files: [],
-  default_root_merge_policy: "bump" as const,
   managed: true,
 };
+
+function workspace(
+  mounts: Record<string, string>,
+  root_pointer_default: "ignore" | "bump" = "ignore",
+) {
+  return {
+    id: "ws",
+    root: "a",
+    root_pointer_default,
+    members: Object.fromEntries(
+      Object.entries(mounts).map(([id, path]) => [id, { repository: id, path }]),
+    ),
+  };
+}
 
 function renderModal(onClose: () => void = () => {}) {
   return render(
@@ -351,31 +364,43 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("offers the cross-repo disclosure only when the repo has connected, enabled children", async () => {
-    renderModal();
-    await selectRepo();
-    expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
-  });
-
-  it("does not offer a connected but disabled child", async () => {
+  it("offers the cross-repo disclosure only when the repo roots a workspace", async () => {
+    // A nested, enabled repo is not a member: membership is declared, never
+    // inferred from where a path happens to sit.
     vi.spyOn(api, "getRepos").mockResolvedValue({
-      repos: [
-        REPO_A,
-        { ...REPO_A, path: "/a/libs/a", name: "libs-a", enabled: false },
-      ],
+      repos: [REPO_A, { ...REPO_A, path: "/a/libs/a", name: "libs-a" }],
+      workspaces: {},
     });
     renderModal();
     await selectRepo();
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
-  it("sends the picked submodules and the root merge policy", async () => {
+  it("does not offer a member whose repository is disabled", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({
       repos: [
-        REPO_A,
-        { ...REPO_A, path: "/a/libs/a", name: "libs-a" },
-        { ...REPO_A, path: "/a/libs/b", name: "libs-b" },
+        { ...REPO_A, id: "a" },
+        { ...REPO_A, id: "lib-a", path: "/a/libs/a", name: "libs-a", enabled: false },
       ],
+      workspaces: { ws: workspace({ "lib-a": "libs/a" }) },
+    });
+    renderModal();
+    await selectRepo();
+    expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
+  });
+
+  // Both defaults: a fixture of only one lets a hardcoded default of the
+  // same value pass (Kraft-3f4kb).
+  it.each(["bump", "ignore"] as const)("sends the workspace with its picked members and the workspace's root pointer policy by default: %s", async (pointer) => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        { ...REPO_A, id: "a" },
+        { ...REPO_A, id: "lib-a", path: "/a/libs/a", name: "libs-a" },
+        { ...REPO_A, id: "lib-b", path: "/a/libs/b", name: "libs-b" },
+      ],
+      workspaces: {
+        ws: workspace({ "lib-a": "libs/a", "lib-b": "libs/b" }, pointer),
+      },
     });
     const create = vi
       .spyOn(api, "createWorkItem")
@@ -391,7 +416,11 @@ describe("IntakeModal", () => {
     await userEvent.click(disclosure);
 
     await userEvent.click(screen.getByRole("button", { name: "libs/a" }));
-    await userEvent.click(screen.getByRole("radio", { name: "Skip" }));
+    // Ruling 165: the default is the workspace's `root_pointer_default`, not
+    // a hardcoded "bump".
+    const other = pointer === "bump" ? "ignore" : "bump";
+    expect(screen.getByRole("radio", { name: new RegExp(pointer, "i") })).toBeChecked();
+    expect(screen.getByRole("radio", { name: new RegExp(other, "i") })).not.toBeChecked();
     await userEvent.click(
       screen.getByRole("button", { name: /create and start/i }),
     );
@@ -400,8 +429,9 @@ describe("IntakeModal", () => {
         expect.objectContaining({
           repo: "/a",
           title: "bump pointers",
-          submodules: ["libs/a"],
-          root_merge_policy: "skip",
+          workspace: "ws",
+          members: ["lib-a"],
+          root_pointer_policy: pointer,
         }),
       ),
     );

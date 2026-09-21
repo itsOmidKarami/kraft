@@ -150,7 +150,15 @@ class Repository(BaseModel):
     id: Identifier
     path: StrictStr = Field(min_length=1)
     enabled: StrictBool = True
+    #: A person connected or edited this repository, as opposed to Kraft
+    #: detecting it as a workspace child (Ruling 165: bookkeeping, not
+    #: policy). It keeps a detected child out of Settings' main list, out of
+    #: `kraft repo list`, and out of the client's cwd-to-repository resolution.
+    managed: StrictBool = True
     default_chain: Identifier | None = None
+    #: The model an agent task runs with here, per harness profile id
+    #: (Ruling 165) -- over the profile's `defaults:`, under the task's own.
+    models: dict[Identifier, StrictStr] = Field(default_factory=dict)
     forge: ForgeTarget | None = None
     worktree: Worktree = Field(default_factory=Worktree)
     verification: Verification = Field(default_factory=Verification)
@@ -201,12 +209,20 @@ class WorkItemTarget(BaseModel):
     kind: Literal["repository", "workspace"]
     repository: Identifier | None = None
     workspace: Identifier | None = None
+    #: A workspace target's root repository id: with each mount's repository,
+    #: the repositories whose policy binds the item (Kraft-jc39p).
+    root: Identifier | None = None
     #: `strict=False` here only: pydantic's strict mode never coerces a plain
     #: (decoded-JSON) list into a tuple, so a frozen target rehydrated as a
     #: dict -- the path `model_validate_json` skips but `json.loads()` then
     #: `model_validate(dict)` takes -- would otherwise fail on its own
     #: `model_dump()` output. `members` stays a tuple on the model either way.
     members: Annotated[tuple[Identifier, ...], Field(strict=False)] = ()
+    #: Each selected member's repository and mount path, frozen at intake
+    #: (`work-item-target-is-typed-and-immutable`): the checkout assembles
+    #: from these, so a later edit to the workspace moves nothing under a
+    #: running item. Keyed by member, exactly the `members` selected.
+    mounts: dict[Identifier, WorkspaceMember] = Field(default_factory=dict)
     #: Meaningless outside a workspace target, so it defaults off; only
     #: `kind="workspace"` may turn it on (`_kind_owns_its_fields` below).
     include_root: bool = False
@@ -222,7 +238,7 @@ class WorkItemTarget(BaseModel):
         if self.kind == "repository":
             if self.repository is None:
                 raise ValueError("a repository target must name a repository")
-            if self.workspace is not None or self.members:
+            if self.workspace is not None or self.members or self.mounts or self.root:
                 raise ValueError("a repository target has no workspace or members")
             if self.include_root:
                 raise ValueError("a repository target has no root to include")
@@ -231,7 +247,18 @@ class WorkItemTarget(BaseModel):
                 raise ValueError("a workspace target must name a workspace")
             if self.repository is not None:
                 raise ValueError("a workspace target has no repository")
+            if set(self.mounts) != set(self.members):
+                raise ValueError(
+                    f"a workspace target mounts exactly its selected members: selected "
+                    f"{sorted(self.members)}, mounted {sorted(self.mounts)}"
+                )
         return self
+
+    def repositories(self) -> tuple[str, ...]:
+        """Every repository id a workspace target selects, root first: the
+        root (whose checkout the item assembles in) and each member's."""
+        members = tuple(m.repository for m in self.mounts.values())
+        return ((self.root,) if self.root else ()) + members
 
     @classmethod
     def for_repository(cls, repository: Repository) -> WorkItemTarget:
@@ -257,7 +284,9 @@ class WorkItemTarget(BaseModel):
         return cls(
             kind="workspace",
             workspace=workspace.id,
+            root=workspace.root,
             members=tuple(members),
+            mounts={m: workspace.members[m] for m in members},
             include_root=include_root,
             root_pointer_policy=root_pointer_policy or workspace.root_pointer_default,
         )

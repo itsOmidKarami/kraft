@@ -134,6 +134,24 @@ def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path):
     assert "legacy_widget" in row["detail"]
 
 
+@pytest.mark.parametrize("retired", ["default_model", "default_root_merge_policy"])
+def test_doctor_passes_a_repo_entry_carrying_a_retired_key(app, tmp_path, retired):
+    """Ruling 165: an older install's retired keys are dropped on read with a
+    warning of their own, so doctor's unrecognised-key check never sees them
+    and must not fail on them."""
+    repo = make_repo(tmp_path, name="older")
+    asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["repos"][0][retired] = "bump" if retired.endswith("policy") else "sonnet"
+    path.write_text(yaml.safe_dump(data))
+
+    checks = asyncio.run(doctor.run_checks())
+
+    assert not [r for r in checks if r["name"].startswith("keys ")]
+    assert any(r["name"].startswith("repo ") and r["ok"] for r in checks)
+
+
 def _bind_auto_forge(tmp_path):
     """Put a `backend: auto` forge hook in the registry the server loaded.
 

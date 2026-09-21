@@ -722,3 +722,42 @@ def test_a_task_scope_override_refuses_the_loop_bounds():
     with pytest.raises(ValidationError, match="timeout_minutes"):
         policy.TaskPolicyOverride.model_validate({"timeout_minutes": 5})
     assert policy.TemplatePolicyOverride.model_validate({"max_attempts": 2}).max_attempts == 2
+
+
+def test_the_meet_of_repository_layers_is_the_tightest_of_each_field():
+    """Kraft-jc39p: a workspace item's assembled checkout holds every selected
+    repository at once, so a task running there is bound by all of their
+    layers -- each field at its tightest, never a relaxation of any one
+    (`repository-policy-cannot-relax-instance-safety`)."""
+    meet = policy.TemplatePolicyOverride.meet(
+        [
+            policy.TemplatePolicyOverride(
+                allowed_tools=["Read", "Bash", "Edit"], token_budget=900, max_attempts=3
+            ),
+            policy.TemplatePolicyOverride(
+                allowed_tools=["Read", "Bash"], deny_tools=["WebFetch"], allowed_harnesses=["a"]
+            ),
+            policy.TemplatePolicyOverride(
+                token_budget=500, deny_tools=["Bash"], sandbox=_SANDBOX, timeout_minutes=9
+            ),
+        ]
+    )
+    assert meet.allowed_tools == ["Read", "Bash"]
+    assert meet.deny_tools == ["WebFetch", "Bash"]
+    assert (meet.token_budget, meet.max_attempts, meet.timeout_minutes) == (500, 3, 9)
+    assert meet.allowed_harnesses == ["a"]
+    assert meet.sandbox == policy.SandboxPolicy(**_SANDBOX)
+    assert policy.TemplatePolicyOverride.meet([]) == policy.TemplatePolicyOverride()
+
+
+def test_repository_layers_with_two_different_sandboxes_have_no_meet():
+    """No process can run in two containers; which one wins would be a guess."""
+    other = {**_SANDBOX, "image": "other"}
+    with pytest.raises(policy.PolicyError, match="sandbox") as refused:
+        policy.TemplatePolicyOverride.meet(
+            [
+                policy.TemplatePolicyOverride(sandbox=_SANDBOX),
+                policy.TemplatePolicyOverride(sandbox=other),
+            ]
+        )
+    assert refused.value.field == "sandbox"
