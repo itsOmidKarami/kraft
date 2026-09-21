@@ -225,6 +225,7 @@ def test_put_intake_persists_and_applies_without_a_restart(client, templates_dir
         {"priority_ceiling": 5},
         {"priority_ceiling": -1},
     ],
+    ids=["interval-below-the-floor", "zero-max-concurrent", "ceiling-above-p4", "negative-ceiling"],
 )
 def test_put_intake_rejects_a_setting_the_poller_would_not_honour(client, over):
     body = {
