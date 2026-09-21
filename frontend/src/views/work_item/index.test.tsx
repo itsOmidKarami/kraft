@@ -4,40 +4,14 @@ import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
-import type { ChainNode, DocumentDetail, KraftEvent, WorkItem, WorkerSession, WorkItemDocument } from "../../types";
+import type { DocumentDetail, KraftEvent, WorkItem, WorkerSession, WorkItemDocument } from "../../types";
 import { WorkItemDetail } from ".";
+import { detailItem as item, NODES, session, setPhoneWidth } from "../../testFixtures";
 
 const here = dirname(fileURLToPath(import.meta.url));
-
-const NODES: ChainNode[] = [
-  { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
-  { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
-  { id: "verify", tasks: ["on.test.run"], gate_after: null },
-];
-
-const item = (over: Partial<WorkItem> = {}): WorkItem =>
-  ({
-    id: "w1", title: "T", repo: "/r", status: "active", chain_template: "default",
-    chain_definition: { template_id: "default", nodes: NODES },
-    current_node_id: "verify", bead_id: "B", created_at: "t", updated_at: "t",
-    completedNodes: ["spec", "plan"],
-    node_overrides: {},
-    node_overrides_count: 0,
-    effective_chain: { template_id: "default", nodes: NODES },
-    budget_cap: { cap_usd: 10, source: "policy", spent_usd: 1 },
-    ...over,
-  }) as WorkItem;
-
-const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
-  ({
-    id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
-    status: "running", attempt: 1, thread: 1, round: 0, created_at: "t", started_at: "t", exited_at: null,
-    tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, model: null, head_sha: null,
-    ...over,
-  }) as WorkerSession;
 
 const setup = (over: Partial<WorkItem> = {}, sessions: WorkerSession[] = []) =>
   useStore.setState({
@@ -56,22 +30,6 @@ beforeEach(() => {
   } as never);
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-/** Forces `usePhone()` to `true` for the life of a test — same stub
- *  `Phone.test.tsx` uses. Needed here for spec §2.1a: node selection is a
- *  page transition only on the phone, so it must push there, not replace. */
-function mockPhone() {
-  const mql: Partial<MediaQueryList> = {
-    matches: true,
-    media: "(max-width: 767px)",
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  };
-  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
-}
 
 /** A back button, so a `MemoryRouter` test (which has no `window.history` to
  *  press) can still exercise `useNodeSelection`'s back/forward claim. */
@@ -435,7 +393,7 @@ describe("WorkItemDetail (item page)", () => {
   // spec §2.1a: on the phone, opening a node is a page transition (m05),
   // not a same-page selection — it must still push, or Back breaks.
   it("phone: selecting a node still pushes, so Back returns to the stage list", async () => {
-    mockPhone();
+    setPhoneWidth();
     renderDetailFromBoard();
     expect(await screen.findByTestId("phone-stage-list")).toBeInTheDocument();
 

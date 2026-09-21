@@ -1,26 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "./store";
+import { item } from "./testFixtures";
 import type { KraftEvent, WorkItem } from "./types";
 
-const baseItem = (over: Partial<WorkItem> = {}): WorkItem => ({
-  id: "w1",
-  title: "t",
-  repo: "/r",
-  status: "active",
-  chain_template: "quick-task",
-  chain_definition: {
-    template_id: "quick-task",
-    nodes: [
-      { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },
-      { id: "verify", tasks: ["on.test.run"], gate_after: null },
-    ],
-  },
-  current_node_id: "env_setup",
-  bead_id: "B-1",
-  created_at: "t",
-  updated_at: "t",
-  ...over,
-});
+const baseItem = (over: Partial<WorkItem> = {}): WorkItem =>
+  item({
+    title: "t", chain_template: "quick-task", current_node_id: "env_setup", bead_id: "B-1",
+    chain_definition: {
+      template_id: "quick-task",
+      nodes: [
+        { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },
+        { id: "verify", tasks: ["on.test.run"], gate_after: null },
+      ],
+    },
+    ...over,
+  });
 
 const ev = (over: Partial<KraftEvent>): KraftEvent => ({
   seq: 1,

@@ -8,27 +8,9 @@ import { useStore } from "../store";
 import type { KraftEvent, WorkerSession, WorkItem } from "../types";
 import type { ToastPayload } from "../components/Toast";
 import { Board } from "./Board";
+import { item, QUICK, setPhoneWidth } from "../testFixtures";
 
-const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({
-    id: over.id ?? "w1",
-    title: over.title ?? "Item",
-    repo: over.repo ?? "/repo-a",
-    status: over.status ?? "active",
-    chain_template: over.chain_template ?? "quick-task",
-    chain_definition: {
-      template_id: "quick-task",
-      nodes: [
-        { id: "plan", tasks: ["a"], gate_after: "plan_approval" },
-        { id: "verify", tasks: ["b"], gate_after: null },
-      ],
-    },
-    current_node_id: "verify",
-    bead_id: "B",
-    created_at: "t",
-    updated_at: "t",
-    ...over,
-  }) as WorkItem;
+const wi = (over: Partial<WorkItem>): WorkItem => item({ title: "Item", repo: "/repo-a", ...QUICK, ...over });
 
 const setItems = (...items: WorkItem[]) =>
   useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])), sessionsByItem: {}, eventsByItem: {} } as never);
@@ -528,7 +510,7 @@ describe("Board", () => {
   });
 
   it("long-press opens the peek pane instead of navigating (phone)", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     renderBoard();
     const row = screen.getByTestId("board-card");
@@ -540,7 +522,7 @@ describe("Board", () => {
   });
 
   it("a plain tap navigates to the item on phone instead of toggling peek", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     const { container } = render(
       <MemoryRouter

@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { dismissTurn } from "./EscalationCard";
 import { ItemCard } from "./ItemCard";
-import { NEEDS_HUMAN_EVENT, escMessage, escSession, item, session } from "./testFixtures";
+import { NEEDS_HUMAN_EVENT, escMessage, escSession, item, session } from "../../../testFixtures";
 
 type Href = (node: string, tab: string, id: string) => string;
 
