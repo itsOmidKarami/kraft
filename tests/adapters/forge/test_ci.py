@@ -1,6 +1,6 @@
 """Waiting for a pipeline to settle: `poll_ci`'s backoff, cap and error
-tolerance, exercised directly against `FakeForge` rather than through a
-CLI."""
+tolerance, and `render_ci`'s verdict on one read, exercised directly against
+`FakeForge` rather than through a CLI."""
 
 from __future__ import annotations
 
@@ -10,162 +10,150 @@ import pytest
 
 from kraft.adapters import forge
 
+MR = forge.MR(1, "http://x")
 
-def test_poll_backs_off_and_caps_the_interval(tmp_path, monkeypatch):
-    """Without a cap, a long pipeline would stretch the gap between checks
-    without bound; without doubling, a 30-minute wait costs 360 CLI calls."""
-    slept: list[float] = []
+
+@pytest.fixture
+def slept(monkeypatch) -> list[float]:
+    """Every `asyncio.sleep` the poll asks for, without sleeping."""
+    calls: list[float] = []
 
     async def fake_sleep(seconds):
-        slept.append(seconds)
+        calls.append(seconds)
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    fake = forge.FakeForge(ci_states=["pending"] * 5 + ["success"])
-    ci, timed_out = asyncio.run(
-        forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=5)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "pending, interval, expected",
+    [
+        # Without a cap, a long pipeline would stretch the gap between checks
+        # without bound; without doubling, a 30-minute wait costs 360 CLI calls.
+        (5, 5, [5, 10, 20, 40, forge._MAX_POLL_INTERVAL]),
+        # The cap bounds the *growth*, not the human's choice: a registry asking
+        # for 300s between checks (a rate-limited forge) must not silently get
+        # 60s and five times the CLI calls, nor double past what it asked for.
+        (3, 300, [300, 300, 300]),
+    ],
+    ids=["backs-off-then-caps", "a-longer-configured-interval-is-kept"],
+)
+async def test_poll_ci_spaces_its_checks(tmp_path, slept, pending, interval, expected):
+    fake = forge.FakeForge(ci_states=["pending"] * pending + ["success"])
+
+    ci, timed_out = await forge.poll_ci(
+        fake, repo=tmp_path, branch="b", timeout=10_000, interval=interval
     )
+
     assert (ci.state, timed_out) == ("success", False)
-    assert slept == [5, 10, 20, 40, forge._MAX_POLL_INTERVAL]
+    assert slept == expected
 
 
-def test_a_configured_interval_longer_than_the_cap_is_not_clamped_down(tmp_path, monkeypatch):
-    """The cap bounds the *growth*, not the human's choice. A registry asking
-    for 300s between checks -- a rate-limited forge -- must not silently get
-    60s and five times the CLI calls. It holds at 300 rather than doubling
-    past it: the configured interval is what was asked for."""
-    slept: list[float] = []
-
-    async def fake_sleep(seconds):
-        slept.append(seconds)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
-    fake = forge.FakeForge(ci_states=["pending"] * 3 + ["success"])
-    asyncio.run(forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=300))
-    assert slept == [300, 300, 300]
-
-
-def test_poll_never_sleeps_past_its_deadline(tmp_path, monkeypatch):
+async def test_poll_never_sleeps_past_its_deadline(tmp_path, slept):
     """An interval longer than what is left would overshoot the timeout and
     report the pipeline late."""
-    slept: list[float] = []
-
-    async def fake_sleep(seconds):
-        slept.append(seconds)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     fake = forge.FakeForge(ci_states=["pending"])
-    _, timed_out = asyncio.run(
-        forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=0.05, interval=100)
-    )
+
+    _, timed_out = await forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=0.05, interval=100)
+
     assert timed_out is True
     assert slept and all(s <= 0.05 for s in slept)
 
 
-def test_poll_returns_early_on_a_conflict_rather_than_waiting_out_the_pipeline(
-    tmp_path, monkeypatch
+async def test_poll_returns_early_on_a_conflict_rather_than_waiting_out_the_pipeline(
+    tmp_path, slept
 ):
     """A conflict will not resolve itself in thirty minutes."""
-    slept: list[float] = []
-
-    async def fake_sleep(seconds):
-        slept.append(seconds)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     fake = forge.FakeForge(ci_states=["pending"], mergeable=False, merge_detail="conflict")
 
-    ci, timed_out = asyncio.run(
-        forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=5)
-    )
+    ci, timed_out = await forge.poll_ci(fake, repo=tmp_path, branch="b", timeout=10_000, interval=5)
 
     assert (ci.state, ci.mergeable, timed_out) == ("pending", False, False)
     assert slept == [], "it waited out a pipeline for a branch that cannot merge"
 
 
-def test_poll_ci_tolerates_a_short_burst_of_transient_forge_errors(tmp_path):
+class _Flaky(forge.FakeForge):
+    """Raises for its first `errors` reads, then answers normally."""
+
+    errors = 0
+    calls = 0
+
+    async def ci_status(self, *, repo, mr, branch=""):
+        self.calls += 1
+        if self.calls <= self.errors:
+            raise forge.ForgeError("transient")
+        return await super().ci_status(repo=repo, mr=mr, branch=branch)
+
+
+async def test_poll_ci_tolerates_a_short_burst_of_transient_forge_errors(tmp_path):
     """Kraft-x92: a flaky/rate-limited `ci_status` call used to fail the whole
-    wait, indistinguishable from a red pipeline. A run of errors under the
-    cap must not end the poll."""
+    wait, indistinguishable from a red pipeline. A run of errors under the cap
+    must not end the poll."""
+    fake = _Flaky(ci_states=["success"])
+    fake.errors = forge.ci._MAX_CONSECUTIVE_POLL_ERRORS
 
-    class FlakyThenGreen(forge.FakeForge):
-        calls = 0
-
-        async def ci_status(self, *, repo, mr, branch=""):
-            self.calls += 1
-            if self.calls <= forge.ci._MAX_CONSECUTIVE_POLL_ERRORS:
-                raise forge.ForgeError("transient")
-            return await super().ci_status(repo=repo, mr=mr, branch=branch)
-
-    fake = FlakyThenGreen(ci_states=["success"])
-
-    ci, timed_out = asyncio.run(
-        forge.poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0)
+    ci, timed_out = await forge.poll_ci(
+        fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0
     )
 
-    assert timed_out is False
-    assert ci.state == "success"
+    assert (ci.state, timed_out) == ("success", False)
 
 
-def test_poll_ci_gives_up_after_too_many_consecutive_forge_errors(tmp_path):
-    """One more error than the tolerance still ends the wait -- this is not
-    an unlimited retry, only a burst allowance."""
-
-    class AlwaysFlaky(forge.FakeForge):
-        async def ci_status(self, *, repo, mr, branch=""):
-            raise forge.ForgeError("transient")
-
-    fake = AlwaysFlaky()
+async def test_poll_ci_gives_up_after_too_many_consecutive_forge_errors(tmp_path):
+    """One more error than the tolerance still ends the wait -- a burst
+    allowance, not an unlimited retry."""
+    fake = _Flaky(ci_states=["success"])
+    fake.errors = forge.ci._MAX_CONSECUTIVE_POLL_ERRORS + 1
 
     with pytest.raises(forge.ForgeError):
-        asyncio.run(forge.poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0))
+        await forge.poll_ci(fake, repo=tmp_path, branch="kraft/w1", timeout=5, interval=0)
 
 
-def test_render_ci_waits_on_a_pending_pipeline_even_when_unmergeable(tmp_path):
-    """The exact !171 bug: a transient unmergeable during GitLab's post-push
-    recompute window must never fail the node."""
-    fake = forge.FakeForge(ci_states=["pending"], mergeable=False, merge_detail="conflict")
-    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
-    log, verdict = asyncio.run(
-        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha=None)
+@pytest.mark.parametrize(
+    "fake_kw, head_sha, expected",
+    [
+        # The exact !171 bug: a transient unmergeable during GitLab's post-push
+        # recompute window must never fail the node.
+        (
+            {"ci_states": ["pending"], "mergeable": False, "merge_detail": "conflict"},
+            None,
+            "waiting",
+        ),
+        # A pipeline not for the branch head is not a result.
+        ({"ci_states": ["success"], "ci_shas": ["old-sha"]}, "new-sha", "waiting"),
+        # A settled green pipeline fails only after a re-fetch confirms the
+        # conflict.
+        (
+            {"ci_states": ["success", "success"], "mergeable": False, "merge_detail": "conflict"},
+            None,
+            "conflict",
+        ),
+    ],
+    ids=["pending-and-unmergeable-waits", "other-sha-waits", "confirmed-conflict"],
+)
+async def test_render_ci_verdict(tmp_path, fake_kw, head_sha, expected):
+    fake = forge.FakeForge(**fake_kw)
+    first = await fake.ci_status(repo=tmp_path, mr=MR)
+
+    _, verdict = await forge.ci.render_ci(
+        first, forge=fake, repo=tmp_path, branch="b", head_sha=head_sha
     )
-    assert verdict == "waiting"
+
+    assert verdict == expected
 
 
-def test_render_ci_waits_on_a_pipeline_not_for_the_branch_head(tmp_path):
-    fake = forge.FakeForge(ci_states=["success"], ci_shas=["old-sha"])
-    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
-    log, verdict = asyncio.run(
-        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha="new-sha")
+@pytest.mark.parametrize(
+    "reason, expected",
+    [("runner_system_failure", "infra"), ("script_failure", "failed")],
+    ids=["infra-red", "code-red"],
+)
+async def test_render_ci_tells_infra_red_from_code_red(tmp_path, reason, expected):
+    ci = forge.CIStatus(
+        state="failed", url="u", failed_jobs=(forge.FailedJob("build", "failed", reason),)
     )
-    assert verdict == "waiting"
 
+    _, verdict = await forge.ci.render_ci(
+        ci, forge=forge.FakeForge(), repo=tmp_path, branch="b", head_sha=None
+    )
 
-def test_render_ci_fails_a_settled_green_pipeline_only_after_a_re_fetch_confirms_conflict(
-    tmp_path,
-):
-    fake = forge.FakeForge(
-        ci_states=["success", "success"], mergeable=False, merge_detail="conflict"
-    )
-    ci_status = asyncio.run(fake.ci_status(repo=tmp_path, mr=forge.MR(1, "http://x")))
-    log, verdict = asyncio.run(
-        forge.ci.render_ci(ci_status, forge=fake, repo=tmp_path, branch="b", head_sha=None)
-    )
-    assert verdict == "conflict"
-
-
-def test_render_ci_infra_red_vs_code_red(tmp_path):
-    infra = forge.CIStatus(
-        state="failed",
-        url="u",
-        failed_jobs=(forge.FailedJob("build", "failed", "runner_system_failure"),),
-    )
-    code = forge.CIStatus(
-        state="failed", url="u", failed_jobs=(forge.FailedJob("test", "failed", "script_failure"),)
-    )
-    fake = forge.FakeForge()
-    _, v1 = asyncio.run(
-        forge.ci.render_ci(infra, forge=fake, repo=tmp_path, branch="b", head_sha=None)
-    )
-    _, v2 = asyncio.run(
-        forge.ci.render_ci(code, forge=fake, repo=tmp_path, branch="b", head_sha=None)
-    )
-    assert (v1, v2) == ("infra", "failed")
+    assert verdict == expected
