@@ -102,11 +102,11 @@ def test_a_title_over_the_tracker_limit_is_refused_before_bd(client, repo, route
     actionable part, and this `detail` is printed straight through by
     `kraft item create`.
     """
-    long_title = "x" * 711
+    long_title = "x" * (beads.MAX_TITLE + 1)
     r = client.post(f"/api/{route}", json={"title": long_title, "repo": str(repo), **extra})
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert "711" in detail
+    assert str(beads.MAX_TITLE + 1) in detail
     assert str(beads.MAX_TITLE) in detail
     assert long_title not in detail
 
