@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from support.api import _await_gate, _client, _force_node, _poll_events, _post_default, _set_status
+from support.api import _client, _force_node, _poll_events, _post_default, _set_status
 from support.harness import make_repo
 
 
@@ -30,11 +30,11 @@ def test_happy_path_via_api(tmp_path, monkeypatch):
 
         item = client.get(f"/api/work-items/{wid}").json()
         assert item["status"] == "completed"
-        # env_setup, implementation's own agent task, and verify's on.test.run.
-        # C1's implementation-time on.test.run gate (Kraft-s7c04.8) was
-        # reverted 2026-09-16 -- see test_executor_walk.py's
-        # test_run_verify_failure_stops_at_verify.
-        assert len(item["worker_sessions"]) == 3
+        # implementation's own agent task and verify's changed-test-scope task.
+        # V1 has no `env_setup` node, so no session stands in for one. C1's
+        # implementation-time test gate (Kraft-s7c04.8) was reverted
+        # 2026-09-16 -- see test_walk.py's test_run_verify_failure_stops_at_verify.
+        assert len(item["worker_sessions"]) == 2
 
         run_dir = Path(client.app.state.run_dirs.base)
         assert "a + b" in (run_dir / "worktrees" / wid / "calc.py").read_text()
@@ -286,7 +286,7 @@ def test_retry_refuses_when_all_slots_are_busy(tmp_path, monkeypatch):
         stopped = _post_default(client, repo)
         _poll_events(client, stopped, "gate_requested")
         _set_status(busy, "active")
-        _force_node(stopped, "verify", "needs_human")
+        _force_node(stopped, "implementation", "needs_human")
         client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
         r = client.post(f"/api/work-items/{stopped}/retry", json={})
@@ -300,7 +300,7 @@ def test_retry_works_when_a_slot_is_free(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
+        _force_node(wid, "implementation", "needs_human")
         client.app.state.policy = dataclasses.replace(client.app.state.policy, max_concurrent=1)
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
@@ -394,196 +394,6 @@ def test_retry_rebase_conflict_does_not_escalate_when_disarmed(tmp_path, monkeyp
         assert item["pending_steer_context"] == "watch the auth module"
 
 
-def test_retry_rebase_conflict_restarts_at_its_own_node_when_before_verify(tmp_path, monkeypatch):
-    """The `min()` assertion (design §4.6): an item stopped before `verify`
-    (here, `plan`) must restart at its own node on a resolving verdict, not
-    jump forward to `verify` -- a plain "jump to verify" would skip
-    implementation entirely, and passes every other resolver test, which all
-    stop at or after `verify`."""
-    import kraft.builtins as builtins_mod
-    from kraft.executor import walk
-
-    starts = []
-
-    async def fail_refresh(*a, **kw):
-        raise builtins_mod.RebaseConflict("conflict")
-
-    async def fake_resolve(*a, **kw):
-        return "ok", None, "deadbeef"
-
-    async def fake_run(database, run_dirs, *, work_item_id, registry, start_index=0, **kw):
-        starts.append(start_index)
-        return "completed"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
-    monkeypatch.setattr("kraft.api.routes.lifecycle.executor.run", fake_run)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _force_node(wid, "plan", "needs_human")
-
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
-
-        assert r.status_code == 200, r.text
-        deadline = time.monotonic() + 5
-        while not starts and time.monotonic() < deadline:
-            time.sleep(0.05)
-    assert starts[-1] == 1, "restarted at verify's index (6) instead of plan's own (1)"
-
-
-def test_retry_rebase_conflict_bounces_to_verify_and_clears_the_span(tmp_path, monkeypatch):
-    """An item stopped *after* `verify` (here, `mr_checks`) restarts at
-    `verify` on a resolving verdict -- and every node in that span has its
-    loop counters cleared, the coupling with .25 the design calls out (§5)."""
-    import kraft.builtins as builtins_mod
-    from kraft import store as kraft_store
-    from kraft.executor import walk
-    from kraft.policy import Cap
-
-    starts = []
-
-    async def fail_refresh(*a, **kw):
-        raise builtins_mod.RebaseConflict("conflict")
-
-    async def fake_resolve(*a, **kw):
-        return "ok", None, "deadbeef"
-
-    async def fake_run(database, run_dirs, *, work_item_id, registry, start_index=0, **kw):
-        starts.append(start_index)
-        return "completed"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
-    monkeypatch.setattr("kraft.api.routes.lifecycle.executor.run", fake_run)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _force_node(wid, "mr_checks", "needs_human")
-        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-        try:
-            cap = Cap(attempts=9, wall_clock_s=3600)
-            kraft_store.bump_counter(conn, wid, "verify_fix_loop", cap)
-            kraft_store.bump_counter(conn, wid, "ci_fix_loop", cap)
-            conn.commit()
-        finally:
-            conn.close()
-
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
-
-        assert r.status_code == 200, r.text
-        deadline = time.monotonic() + 5
-        while not starts and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert starts[-1] == 4, "did not bounce back to verify's index"
-        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-        try:
-            rows = conn.execute(
-                "SELECT key FROM retry_counters WHERE work_item_id = ?", (wid,)
-            ).fetchall()
-        finally:
-            conn.close()
-    assert rows == [], "the bounce span's loop counters survived the resolver's restart"
-
-
-def test_retry_rebase_conflict_resolver_success_actually_advances_the_walk(tmp_path, monkeypatch):
-    """Kraft-s7c04.23 review findings 1 & 2. Awaiting the resolver inline in
-    the route handler (rather than as the item's own spawned task) meant a
-    successful resolve never went anywhere: nothing put the item back to
-    `active` before `executor.run` started, so `run_once`'s own
-    `status != "active"` check at its first node immediately returned
-    "paused" and did nothing. Unlike the restart-index tests above, this one
-    does NOT monkeypatch `executor.run` -- the walk must actually run,
-    through the real (noop-bound) nodes between `verify` and `human_review`,
-    for this to pass."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    import kraft.builtins as builtins_mod
-    from kraft.executor import walk
-
-    calls = {"n": 0}
-
-    async def fail_refresh_once(*a, **kw):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise builtins_mod.RebaseConflict("conflict")
-        return None  # pre_mr_rebase's own later attempt: no movement
-
-    async def fake_resolve(*a, **kw):
-        return "ok", None, "deadbeef"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh_once)
-    monkeypatch.setattr(walk, "resolve_rebase_conflict", fake_resolve)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _force_node(wid, "verify", "needs_human")
-
-        r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
-
-        assert r.status_code == 200, r.text
-        # Under the bug this never becomes pending -- the walk dies at its
-        # very first status check with nothing dispatched past `verify`.
-        item = _await_gate(client, wid, "human_review_approval", timeout=20)
-        assert item["pending_gate"] == "human_review_approval"
-
-
-def test_retry_while_the_resolver_is_running_is_refused(tmp_path, monkeypatch):
-    """Finding 2's other half: for as long as the resolver runs, the item
-    must not be re-claimable by a concurrent `/retry` -- refused with 409
-    rather than starting a second walk in the same worktree (the collision
-    Kraft-s7c04.20 closed). In practice the item's own status (still
-    `active` from the first call's `claim_for_run`, not reverted to
-    `needs_human` until the resolver finishes) refuses the race even before
-    `deps.task_is_live` would -- either guard firing proves no second walk
-    can start; this asserts on the observable one."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    import asyncio as _asyncio
-    import threading
-
-    import kraft.builtins as builtins_mod
-    from kraft.executor import walk
-
-    # `threading.Event`, not `asyncio.Event`: `TestClient` runs the app on a
-    # background-thread event loop, and this signal crosses from the main
-    # (synchronous) test thread into that loop -- an `asyncio.Event.set()`
-    # called cross-thread is not the safe way to do that.
-    started = threading.Event()
-    release = threading.Event()
-
-    async def fail_refresh(*a, **kw):
-        raise builtins_mod.RebaseConflict("conflict")
-
-    async def slow_resolve(*a, **kw):
-        started.set()
-        while not release.is_set():
-            await _asyncio.sleep(0.01)
-        return "ok", None, "deadbeef"
-
-    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", fail_refresh)
-    monkeypatch.setattr(walk, "resolve_rebase_conflict", slow_resolve)
-    repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
-        wid = _post_default(client, repo)
-        _force_node(wid, "verify", "needs_human")
-
-        r1 = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/retry")
-        assert r1.status_code == 200, r1.text
-
-        assert started.wait(timeout=10), "the resolver never started"
-
-        r2 = client.post(f"/api/work-items/{wid}/retry", json={})
-        release.set()
-
-        assert r2.status_code == 409, r2.text
-        assert r2.json()["detail"] in (
-            "work item is not stopped",
-            "a walk is already running for this work item",
-        )
-        # Confirms *why* it's refused: the item never reverted to a
-        # re-claimable state while the resolver was still running.
-        assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
-
-
 def _create_escalation_session(
     wid: str, session_id: str, node_id: str, *, pid: int | None = None
 ) -> None:
@@ -615,8 +425,8 @@ def test_retry_defers_instead_of_racing_its_own_still_running_escalation_session
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
-        _create_escalation_session(wid, "s1", "verify")
+        _force_node(wid, "implementation", "needs_human")
+        _create_escalation_session(wid, "s1", "implementation")
 
         r = client.post(
             f"/api/work-items/{wid}/retry",
@@ -646,8 +456,8 @@ def test_retry_kills_a_strangers_running_escalation_and_proceeds(tmp_path, monke
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
-        _create_escalation_session(wid, "s1", "verify", pid=4242)
+        _force_node(wid, "implementation", "needs_human")
+        _create_escalation_session(wid, "s1", "implementation", pid=4242)
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
@@ -904,13 +714,13 @@ def test_retry_clears_the_ci_wait_counter_for_the_current_node(tmp_path, monkeyp
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "mr_checks", "needs_human")
-        _seed_counter(wid, "ci_wait:mr_checks")
+        _force_node(wid, "merge_request_feedback", "needs_human")
+        _seed_counter(wid, "ci_wait:merge_request_feedback")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
-        assert not _counter_exists(wid, "ci_wait:mr_checks")
+        assert not _counter_exists(wid, "ci_wait:merge_request_feedback")
 
 
 def test_retry_clears_the_ci_infra_counter_for_the_current_node(tmp_path, monkeypatch):
@@ -922,13 +732,13 @@ def test_retry_clears_the_ci_infra_counter_for_the_current_node(tmp_path, monkey
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "mr_checks", "needs_human")
-        _seed_counter(wid, "ci_infra:mr_checks")
+        _force_node(wid, "merge_request_feedback", "needs_human")
+        _seed_counter(wid, "ci_infra:merge_request_feedback")
 
         r = client.post(f"/api/work-items/{wid}/retry", json={})
 
         assert r.status_code == 200, r.text
-        assert not _counter_exists(wid, "ci_infra:mr_checks")
+        assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
 
 
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monkeypatch):
@@ -941,7 +751,7 @@ def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monk
     with _client(tmp_path, monkeypatch) as client:
         wid = _post_default(client, repo)
         _poll_events(client, wid, "gate_requested")
-        _force_node(wid, "verify", "needs_human")
+        _force_node(wid, "implementation", "needs_human")
 
         conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
         try:
@@ -950,7 +760,7 @@ def test_retry_with_no_steer_seeds_the_last_measurements_findings(tmp_path, monk
                 wid,
                 "findings_measured",
                 {
-                    "node_id": "verify",
+                    "node_id": "implementation",
                     "cycle": 0,
                     "findings": [
                         {
