@@ -136,3 +136,20 @@ async def test_each_repository_binds_its_own_task_and_the_checkout_binds_all(
     await dispatch.dispatch_node(database, run_dirs, once, node, row, worktree, launch=LAUNCH)
 
     assert [sandbox for _, sandbox in ran] == [None, _SANDBOX.model_dump(), _SANDBOX.model_dump()]
+
+
+async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_dirs, tmp_path, ran):
+    """A member's run is configured by the member's `repos.yaml` entry -- its
+    live sandbox here -- never the root's."""
+    member = {"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}}
+    launch = LaunchContext(
+        repo_entry=NO_SETUP, steering_dir=None, repositories={"ws": NO_SETUP, "pkg": member}
+    )
+    row, node, worktree = await _workspace_item(
+        database, run_dirs, tmp_path, [_task("each", scope="each_repository")]
+    )
+    (each,) = node.tasks()
+
+    await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
+
+    assert [sandbox for _, sandbox in ran] == [None, member["sandbox"]]
