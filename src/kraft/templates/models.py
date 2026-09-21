@@ -684,6 +684,10 @@ class GateNode(BaseModel):
 AnyNode = Annotated[ExecNode | GateNode, Field(discriminator="kind")]
 
 
+#: The forge targets that take a merge request past draft.
+_PUBLISHING = frozenset({ForgeAction.MR_MARK_READY, ForgeAction.MR_MERGE})
+
+
 class Chain(BaseModel):
     """One authored chain file, after `extends` expansion. `id` is optional
     because `POST /templates/resolve` accepts an unsaved candidate; a chain
@@ -722,6 +726,33 @@ class Chain(BaseModel):
                         f"node {node.id!r}: on_base_changed.restart_from {target!r} must name "
                         f"this or an earlier execution node in {where}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _publishes_after_the_final_gate(self) -> Self:
+        """A draft merge request may open before the final gate, but nothing
+        may mark it ready or merge it ahead of that gate's approval
+        (`draft-merge-request-enables-external-checks`, `final-gate-governs-
+        merge-request-readiness`) -- from any position in a node before it,
+        recovery and fix loop included. A chain with no final gate declares
+        no approval to wait for, and is not constrained here."""
+        final = next(
+            (i for i, n in enumerate(self.nodes) if isinstance(n, GateNode) and n.chain_finalized),
+            None,
+        )
+        for node in self.nodes[:final] if final is not None else ():
+            if not isinstance(node, ExecNode):
+                continue
+            shapes = [node, node.on_failure, node.fix_loop]
+            if node.on_base_changed is not None:
+                shapes.append(node.on_base_changed.on_conflict)
+            for shape in filter(None, shapes):
+                for task in shape.own_tasks():
+                    if isinstance(task, ForgeTask) and task.target in _PUBLISHING:
+                        raise ValueError(
+                            f"node {node.id!r}: {task.target.value} runs before the final gate "
+                            f"{self.nodes[final].id!r} approves it"
+                        )
         return self
 
 
