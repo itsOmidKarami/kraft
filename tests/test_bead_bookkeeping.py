@@ -14,19 +14,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, make_repo
+from support.harness import make_repo, v1_named_chain
 
 from kraft import db, executor
 from kraft.paths import RunDirs
-from kraft.templates import Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
 
 
-def _quick_task() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+def _quick_task(tmp_path):
+    """The shipped gateless `quick-task`, its agent task on the fake agent."""
+    return v1_named_chain(tmp_path / "templates", agent_command=_FAKE)
 
 
 def _bd_status(repo, bead_id) -> str:
@@ -74,7 +74,7 @@ def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
                 title="implements two sub-beads",
                 implements_beads=[sub_a, sub_b],
                 repo=str(tracker),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             row = database.read(
@@ -86,7 +86,7 @@ def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=fake_registry(sys.executable, _FAKE_AGENT),
+                registry=None,
             )
             assert result == "completed"
             assert _bd_status(tracker, sub_a) == "closed"
@@ -119,7 +119,7 @@ def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, 
                 rd,
                 title="filed while bd was down",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
             )
             assert (
                 database.read(
@@ -139,7 +139,7 @@ def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, 
                 database,
                 rd,
                 work_item_id=wid,
-                registry=fake_registry(sys.executable, _FAKE_AGENT),
+                registry=None,
             )
             assert result == "completed"
             row = database.read(
@@ -183,7 +183,7 @@ def test_no_app_fixture_still_avoids_the_operators_real_home(tmp_path, monkeypat
                 rd,
                 title="never touches the real home",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
             )
         finally:
             await database.close()

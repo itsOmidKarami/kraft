@@ -1,12 +1,11 @@
 import asyncio
 from pathlib import Path
 
-from support.harness import _git, isolated_bd, make_repo
+from support.harness import _git, isolated_bd, make_repo, v1_named_chain, v1_resolved
 
 from kraft import db, executor, policy, store
 from kraft.config import git_read
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -15,9 +14,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 NO_SETUP = {"setup_command": ""}
 
 
-def _quick_task() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+def _quick_task(tmp_path):
+    """The shipped gateless `quick-task` (its agent never launches here)."""
+    return v1_named_chain(tmp_path / "templates")
 
 
 def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
@@ -30,19 +29,12 @@ def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.implementation.start": {"kind": "agent", "command": "unused"},
-                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             (rd.worktrees / wid).mkdir(parents=True, exist_ok=True)
@@ -54,7 +46,7 @@ def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
                     id="s-impl",
                     work_item_id=wid,
                     node_id="implementation",
-                    hook_point="on.implementation.start",
+                    hook_point="implementation.main.implement",
                     log_path="/l",
                     result_path="/r",
                 )
@@ -64,7 +56,7 @@ def test_reconcile_accepts_a_done_with_concerns_session(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
                 launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
@@ -92,37 +84,27 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.test.run": {"kind": "subprocess", "command": ["false"]},
-                    "on.review.local.run": {"kind": "subprocess", "command": ["true"]},
-                    "on.implementation.start": {"kind": "agent", "command": "unused"},
-                }
-            )
-            template = Template(
-                id="t",
-                nodes=[
-                    {
-                        "id": "env_setup",
-                        "tasks": ["on.env.prepare"],
-                        "gate_after": None,
-                        "fix_loop": None,
-                    },
+            template = v1_resolved(
+                [
                     {
                         "id": "verify",
-                        "tasks": ["on.test.run", "on.review.local.run"],
-                        "gate_after": None,
-                        "fix_loop": "verify_fix_loop",
-                    },
-                ],
+                        "kind": "exec",
+                        "tasks": [
+                            {"id": "suite", "kind": "subprocess", "command": "false"},
+                            {"id": "review", "kind": "subprocess", "command": "true"},
+                        ],
+                        "fix_loop": {
+                            "tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]
+                        },
+                    }
+                ]
             )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(make_repo(tmp_path)),
-                template=template,
+                chain=template,
                 bd_cwd=str(tracker),
             )
             # Build the worktree by hand, bypassing env_setup, the same way
@@ -145,7 +127,7 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
                     id="s-done",
                     work_item_id=wid,
                     node_id="verify",
-                    hook_point="on.review.local.run",
+                    hook_point="verify.main.review",
                     log_path="/l1",
                     result_path="/r1",
                     round=0,
@@ -159,7 +141,7 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
                     id="s-failed",
                     work_item_id=wid,
                     node_id="verify",
-                    hook_point="on.test.run",
+                    hook_point="verify.main.suite",
                     log_path="/l2",
                     result_path="/r2",
                     round=0,
@@ -173,7 +155,7 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
             zero = policy.Cap(1, 3600)
             object.__setattr__(zero, "attempts", 0)
             pol = policy.Policy(
-                loops={"verify_fix_loop": zero},
+                loops={"verify.fix_loop": zero},
                 default=zero,
                 auto_escalate_stuck=False,
             )
@@ -181,7 +163,7 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
                 policy=pol,
@@ -199,10 +181,10 @@ def test_reconcile_reuses_a_done_measuring_session_after_a_crash(tmp_path):
             await database.close()
 
     result, hooks = asyncio.run(scenario())
-    assert result == "needs_human"  # verify_fix_loop's attempts=0 cap breaches on the first bump
+    assert result == "needs_human"  # verify.fix_loop's attempts=0 cap breaches on the first bump
     # the done review was never redispatched; the failed test was
-    assert hooks.count("on.review.local.run") == 1
-    assert hooks.count("on.test.run") == 2
+    assert hooks.count("verify.main.review") == 1
+    assert hooks.count("verify.main.suite") == 2
 
 
 def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
@@ -218,27 +200,26 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.plan.requested": {"kind": "agent", "command": "unused"},
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=Template(
-                    id="t",
-                    nodes=[
+                chain=v1_resolved(
+                    [
                         {
                             "id": "plan",
-                            "tasks": ["on.plan.requested"],
-                            "gate_after": None,
-                            "fix_loop": None,
+                            "kind": "exec",
+                            "tasks": [
+                                {
+                                    "id": "author",
+                                    "kind": "agent",
+                                    "harness": "claude",
+                                    "prompt": "p",
+                                }
+                            ],
                         }
-                    ],
+                    ]
                 ),
                 bd_cwd=str(tracker),
             )
@@ -248,7 +229,7 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
             # Attempt 1: the task fails, an escalation over it also fails.
             await database.write(lambda c: store.enter_node(c, wid, "plan"))
             for sid, hook, status in (
-                ("s-task-1", "on.plan.requested", "failed"),
+                ("s-task-1", "plan.main.author", "failed"),
                 ("s-esc-1", "escalation", "failed"),
             ):
                 await database.write(
@@ -272,7 +253,7 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
             await database.write(lambda c: store.enter_node(c, wid, "plan"))
             for sid, hook, status in (
                 ("s-esc-2", "escalation", "done"),
-                ("s-task-2", "on.plan.requested", "done"),
+                ("s-task-2", "plan.main.author", "done"),
             ):
                 await database.write(
                     lambda c, sid=sid, hook=hook: store.create_session(
@@ -293,7 +274,7 @@ def test_reconcile_reproduces_kraft_s15p0s_discarded_plan_session(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
                 launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
@@ -320,19 +301,12 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.implementation.start": {"kind": "agent", "command": "unused"},
-                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             (rd.worktrees / wid).mkdir(parents=True, exist_ok=True)
@@ -344,7 +318,7 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
                     id="s-impl-1",
                     work_item_id=wid,
                     node_id="implementation",
-                    hook_point="on.implementation.start",
+                    hook_point="implementation.main.implement",
                     log_path="/l1",
                     result_path="/r1",
                 )
@@ -356,7 +330,7 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
                     id="s-impl-2",
                     work_item_id=wid,
                     node_id="implementation",
-                    hook_point="on.implementation.start",
+                    hook_point="implementation.main.implement",
                     log_path="/l2",
                     result_path="/r2",
                 )
@@ -366,7 +340,7 @@ def test_reconcile_still_needs_human_when_latest_attempt_failed(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
                 launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
@@ -398,20 +372,23 @@ def test_resume_threads_local_files_from_the_launch_context(tmp_path):
     _git(repo, "commit", "-m", "ignore the pin")
     (repo / ".python-version").write_text("3.11\n")
 
-    tmpl = Template(
-        id="env-only",
-        nodes=[{"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None}],
+    # No env node in V1: the worktree is prepared before the first node.
+    tmpl = v1_resolved(
+        [
+            {
+                "id": "work",
+                "kind": "exec",
+                "tasks": [{"id": "noop", "kind": "subprocess", "command": "true"}],
+            }
+        ]
     )
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={"on.env.prepare": {"kind": "builtin", "handler": "env_setup"}}
-            )
             wid = await executor.intake(
-                database, rd, title="t", repo=str(repo), template=tmpl, bd_cwd=str(tracker)
+                database, rd, title="t", repo=str(repo), chain=tmpl, bd_cwd=str(tracker)
             )
             launch = executor.LaunchContext(
                 repo_entry={"local_files": [".python-version"], "setup_command": ""},
@@ -421,7 +398,7 @@ def test_resume_threads_local_files_from_the_launch_context(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
                 launch=launch,

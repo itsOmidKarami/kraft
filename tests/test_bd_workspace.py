@@ -18,27 +18,22 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from support.harness import fake_registry, fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, executor
 from kraft.paths import RunDirs
-from kraft.templates import Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: The fake agent lives under tests/support, not fixtures/ (which holds the
 #: `claude` PATH shim `just dev` uses). Same file tests/test_executor.py:16 uses.
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
 
 
-def _quick_task() -> Template:
-    """The three-node template every executor test drives (no gates).
-
-    Copied verbatim from tests/test_executor.py:19 — the registry names the
-    templates dir, and `load_templates(...).valid` is what parses it.
-    """
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+def _quick_task(tmp_path):
+    """The shipped gateless `quick-task`, its agent task on the fake agent."""
+    return v1_named_chain(tmp_path / "templates", agent_command=_FAKE)
 
 
 def _row(database, wid, columns="*"):
@@ -88,7 +83,7 @@ def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
                 rd,
                 title="file me where I belong",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
             )
             row = _row(database, wid, "bead_id, bead_cwd")
             assert row["bead_id"]
@@ -117,7 +112,7 @@ def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
                 rd,
                 title="the env still wins",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             row = _row(database, wid, "bead_id, bead_cwd")
@@ -182,7 +177,7 @@ def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, ca
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
             )
             assert _row(database, wid, "bead_id")["bead_id"] is None
             with caplog.at_level("WARNING"):
@@ -190,7 +185,7 @@ def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, ca
                     database,
                     rd,
                     work_item_id=wid,
-                    registry=fake_registry(sys.executable, _FAKE_AGENT),
+                    registry=None,
                 )
             assert result == "completed"
             assert "bead close failed" not in caplog.text
