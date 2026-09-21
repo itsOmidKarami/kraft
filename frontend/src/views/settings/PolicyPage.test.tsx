@@ -10,8 +10,8 @@ beforeEach(() => {
 
 describe("Settings · policy (5d)", () => {
   it.each<[string, string | RegExp, string, object]>([
-    ["a loop cap, saving every counter together", "verify_fix_loop attempts", "5", {
-      loops: { verify_fix_loop: { attempts: 5, wall_clock_s: 3600 } },
+    ["a loop cap, saving every counter together", "verify.fix_loop attempts", "5", {
+      loops: { "verify.fix_loop": { attempts: 5, wall_clock_s: 3600 } },
       default: { attempts: 3, wall_clock_s: 3600 },
     }],
     ["max_concurrent", /max concurrent/i, "5", { max_concurrent: 5 }],
@@ -44,7 +44,7 @@ describe("Settings · policy (5d)", () => {
   // policy fixture: max_concurrent 3, rate_limit_retries 5, wall_clock_s 3600.
   it.each([
     ["max concurrent", /max concurrent/i, 3],
-    ["wall clock in minutes, not raw seconds", "verify_fix_loop wall clock", 60],
+    ["wall clock in minutes, not raw seconds", "verify.fix_loop wall clock", 60],
     ["rate-limit retries", /rate limit retries/i, 5],
     ["the auto-escalate stuck cap", "auto-escalate stuck cap", 3],
     ["the auto-escalate delay", "auto-escalate delay", 0],
@@ -88,7 +88,7 @@ describe("Settings · policy (5d)", () => {
 
   it("names the template whose node's fix_loop matches this loop key", async () => {
     renderAt("/settings/policy");
-    const row = (await screen.findByLabelText("verify_fix_loop attempts")).closest(
+    const row = (await screen.findByLabelText("verify.fix_loop attempts")).closest(
       "[data-loop]",
     );
     expect(row).toHaveTextContent("quick-task");
@@ -103,7 +103,7 @@ describe("Settings · policy (5d)", () => {
   it("+ Add loop prompts a key and adds it with the default cap", async () => {
     vi.spyOn(window, "prompt").mockReturnValue("new_loop");
     renderAt("/settings/policy");
-    await screen.findByLabelText("verify_fix_loop attempts");
+    await screen.findByLabelText("verify.fix_loop attempts");
     await userEvent.click(screen.getByRole("button", { name: /add loop/i }));
     expect(await screen.findByLabelText("new_loop attempts")).toHaveValue(3);
   });

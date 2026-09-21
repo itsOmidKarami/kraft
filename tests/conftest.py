@@ -332,8 +332,8 @@ def item_on(request, database, run_dirs):
 def templates_dir(tmp_path) -> Path:
     """`KRAFT_TEMPLATES_DIR` for the `client` fixture: `fake_templates_dir` with
     every agent on `fixtures/fake-claude.sh`. A file that needs another shape
-    (`noop_verify=True`, planning hooks) overrides this fixture and `client`
-    picks its version up."""
+    (an edited library or chain) overrides this fixture and `client` picks its
+    version up."""
     return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
 
 

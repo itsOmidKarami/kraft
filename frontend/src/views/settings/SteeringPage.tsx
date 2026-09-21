@@ -12,7 +12,6 @@ import { PageHead, PhoneHeader, usePhone, useResource } from "./shared";
 export function SteeringPage() {
   const { value, error, reload } = useResource(() => api.getSteering());
   const { value: reposValue } = useResource(() => api.getRepos());
-  const { value: registryValue } = useResource(() => api.getRegistry());
   const [params, setParams] = useSearchParams();
   const selected = params.get("file");
   const [draft, setDraft] = useState("");
@@ -23,7 +22,6 @@ export function SteeringPage() {
   const phone = usePhone();
   const list: SteeringList = value ?? { files: [], max_bytes: 0 };
   const repos = reposValue?.repos ?? [];
-  const hooks = registryValue?.hooks ?? {};
 
   // The body is fetched per file rather than shipped with the list: the list is
   // a picker, and every body at once is the injection budget over the wire on
@@ -43,11 +41,7 @@ export function SteeringPage() {
   }, [selected]);
 
   const whoUses = (name: string) => {
-    const repoNames = repos.filter((r) => r.steering.includes(name)).map((r) => r.name);
-    const hookNames = Object.entries(hooks)
-      .filter(([, b]) => b.steering?.includes(name))
-      .map(([h]) => h);
-    const who = [...repoNames, ...hookNames];
+    const who = repos.filter((r) => r.steering.includes(name)).map((r) => r.name);
     return who.length ? who.join(", ") : "unused";
   };
 

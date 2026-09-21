@@ -92,16 +92,6 @@ describe("main.tsx import order", () => {
   });
 });
 
-describe("page stylesheet overrides", () => {
-  it("gives the plugins grid a specificity that beats .template-editor, and chains no longer sits on it", () => {
-    const chains = readFileSync(join(here, "views/settings/templates.css"), "utf-8");
-    const plugins = readFileSync(join(here, "views/settings/plugins.css"), "utf-8");
-    // W11 · D: the chains editor is one card, not a .template-editor grid.
-    expect(chains).not.toMatch(/\.template-editor/);
-    expect(plugins).toMatch(/\.template-editor\.plugins-editor\s*\{[^}]*grid-template-columns/);
-  });
-});
-
 describe("Hairline utility", () => {
   it("defines --hairline-24/--hairline-48 and exposes them as .hairline/.hairline-section", () => {
     const css = readFileSync(join(here, "styles.css"), "utf-8");

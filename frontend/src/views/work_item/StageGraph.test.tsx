@@ -17,7 +17,7 @@ const item = (over: Partial<WorkItem> = {}): WorkItem =>
 
 describe("StageGraph (W0.6: gate mark)", () => {
   it("flags the current pill whenever pending_gate is set, auto_escalate or not", () => {
-    vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));
+    vi.mocked(api.getResolvedTemplate).mockRejectedValue(new Error("nope"));
     render(<StageGraph item={item({ pending_gate: "plan_approval", status: "needs_human" })} selected={null} onSelect={() => {}} />);
     const current = document.querySelector(".stage-pill[aria-current='step']") as HTMLElement;
     expect(current.dataset.gate).toBe("true");
@@ -27,7 +27,7 @@ describe("StageGraph (W0.6: gate mark)", () => {
   });
 
   it("draws no gate mark when nothing is pending", () => {
-    vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));
+    vi.mocked(api.getResolvedTemplate).mockRejectedValue(new Error("nope"));
     render(<StageGraph item={item()} selected={null} onSelect={() => {}} />);
     expect(document.querySelector(".stage-pill-gate")).toBeNull();
   });
@@ -35,15 +35,15 @@ describe("StageGraph (W0.6: gate mark)", () => {
 
 describe("StageGraph (Kraft-1brd: trimmed-node placeholders)", () => {
   it("renders only the live nodes while the template fetch is pending or fails", async () => {
-    vi.mocked(api.getTemplate).mockRejectedValue(new Error("nope"));
+    vi.mocked(api.getResolvedTemplate).mockRejectedValue(new Error("nope"));
     render(<StageGraph item={item()} selected={null} onSelect={() => {}} />);
     expect(screen.getAllByRole("button")).toHaveLength(2);
-    await waitFor(() => expect(api.getTemplate).toHaveBeenCalledWith("default"));
+    await waitFor(() => expect(api.getResolvedTemplate).toHaveBeenCalledWith("default"));
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 
   it("shows a dimmed placeholder pill for a node the template lists but the chain trimmed", async () => {
-    vi.mocked(api.getTemplate).mockResolvedValue({
+    vi.mocked(api.getResolvedTemplate).mockResolvedValue({
       id: "default",
       nodes: [
         { id: "spec", tasks: [], gate_after: "spec_approval" },
@@ -61,12 +61,12 @@ describe("StageGraph (Kraft-1brd: trimmed-node placeholders)", () => {
   });
 
   it("falls back to the live list when the template no longer accounts for a live node", async () => {
-    vi.mocked(api.getTemplate).mockResolvedValue({
+    vi.mocked(api.getResolvedTemplate).mockResolvedValue({
       id: "default",
       nodes: [{ id: "implement", tasks: [], gate_after: null }],
     });
     render(<StageGraph item={item()} selected={null} onSelect={() => {}} />);
-    await waitFor(() => expect(api.getTemplate).toHaveBeenCalled());
+    await waitFor(() => expect(api.getResolvedTemplate).toHaveBeenCalled());
     expect(screen.queryByText("–")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });

@@ -74,8 +74,8 @@ fixture refuses to answer a `param == "bd"` request against the fake).
     lists `dist`, so it works whichever order the two are listed in
     (below).
   - `templates_dir` — `KRAFT_TEMPLATES_DIR` with every agent on the fake
-    `claude`. Override it in a file that needs a different shape
-    (`noop_verify=True`, planning hooks); `client` picks the override up
+    `claude`. Override it in a file that needs a different shape (an
+    edited library or chain); `client` picks the override up
     because it takes `templates_dir` as an argument, not because of
     argument order.
   - `dist` (`tests/api/conftest.py`) — a built SPA (`index.html` and one

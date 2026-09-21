@@ -13,7 +13,7 @@ export interface ChainNode {
   covered_by?: string | null;
   tasks: string[];
   /** Ordered groups of concurrent tasks. Always present on a materialized
-   *  chain (`templates.with_steps`); `tasks` is the same list flattened, in
+   *  chain (`store.node_view`); `tasks` is the same list flattened, in
    *  group order, and every other consumer reads that instead. */
   steps?: string[][];
   gate_after: string | null;
@@ -34,7 +34,7 @@ export interface ChainNode {
    *  human already on the way isn't preempted. `0` fires immediately. */
   auto_escalate_delay_s?: number | null;
   /** Hook points run to repair a red measurement before the fix loop retries
-   *  (templates.py `NODE_CARRYOVER_FIELDS`). */
+   *  (`store.node_view`: the node's own recovery pass). */
   on_failure?: string[] | null;
 }
 

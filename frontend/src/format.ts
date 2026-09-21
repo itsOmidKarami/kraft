@@ -296,17 +296,6 @@ export function statusWord(status: string): string {
   return STATUS_WORDS[status] ?? status;
 }
 
-/** A hook binding's plain-text summary — the Plugins list's "Adapter" column
- *  and the Chains node form's per-task line share this, so both read the
- *  same command the same way. Display formatting with no view of its own. */
-export function adapterOf(b: { kind: string; handler?: string; command?: string | string[] }) {
-  return b.kind === "builtin"
-    ? `builtin · ${b.handler}`
-    : Array.isArray(b.command)
-      ? b.command.join(" ")
-      : (b.command ?? b.kind);
-}
-
 /** `item.stop_reason`'s reasoning when the stop was a fix-loop judge
  *  (`kraft.executor.walk`'s `f"judge: {reasoning}"`, mirroring the existing
  *  `"executor crashed: ..."` prefix `CappedCard` already keys off of) --

@@ -31,19 +31,13 @@ test("settings: connect a repo", async ({ page }) => {
   await expect(page.getByRole("heading", { name })).toBeVisible();
 });
 
-test("settings: chain templates page loads and validates", async ({ page }) => {
+test("settings: chain templates page loads the chain file and resolves it", async ({ page }) => {
   await page.goto("/settings/chains");
-  await expect(page.getByText("default").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  // the graph node, not the live YAML pane, which also says "verify"
-  await page.getByRole("button", { name: /^verify\b/ }).click();
-  await expect(page.getByLabel("fix_loop")).toBeVisible();
-});
-
-test("settings: plugins page lists hooks", async ({ page }) => {
-  await page.goto("/settings/plugins");
-  await expect(page.getByRole("switch").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await page.getByText("on.test.run").click();
-  await expect(page.getByText(/used by/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "default" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await expect(page.getByText("verification", { exact: true })).toBeVisible();
+  const yaml = page.getByLabel("chain yaml");
+  await expect(yaml).toHaveValue(/id: default/);
+  await expect(page.getByText("valid", { exact: true })).toBeVisible();
 });
 
 test("settings: policy edit saves", async ({ page }) => {

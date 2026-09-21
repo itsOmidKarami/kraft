@@ -67,7 +67,7 @@ describe("Settings · steering (5c-bis, design 30)", () => {
     // A hook still naming the file is exactly when the server says no, and it
     // is the case the operator most needs to read.
     vi.spyOn(api, "deleteSteeringFile").mockRejectedValue(
-      new Error("registry.yaml: steering 'house-style' does not resolve"),
+      new Error("repos.yaml: steering 'house-style' does not resolve"),
     );
     renderAt("/settings/steering?file=house-style");
     await screen.findByLabelText("steering body");

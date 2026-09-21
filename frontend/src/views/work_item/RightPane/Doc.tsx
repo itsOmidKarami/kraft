@@ -6,7 +6,6 @@ import * as api from "../../../api";
 import { ago, cleanTitle, docBody, docTitle, runLabel } from "../../../format";
 import type { DocumentLink, WorkerSession, WorkItem } from "../../../types";
 import { ShortId } from "../../../components/ShortId";
-import { ChainReviewDiff } from "../../../components/ChainReviewDiff";
 import { Composer } from "../ActionBar/Composer";
 import { rejectTarget } from "../ActionBar/ItemCard";
 import { useActionBar } from "../ActionBar/useActionBar";
@@ -304,11 +303,7 @@ export function Doc({
       <div className="doc-modal-body">
         {error && <p className="form-error">{error}</p>}
         {!doc && !error && <p className="empty">loading…</p>}
-        {doc && item && gate === "chain_finalized" && isGateDoc ? (
-          <ChainReviewDiff item={item} content={doc.content} />
-        ) : (
-          doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>
-        )}
+        {doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>}
         {doc?.truncated && <p className="doc-modal-note">truncated — the rest is in the file</p>}
         {doc && (
           <p className="doc-modal-foot">

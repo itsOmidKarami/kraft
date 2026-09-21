@@ -615,10 +615,6 @@ def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, clien
 
 
 def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch):
-    # `noop_verify=True` leaves the registry's `on.test.run` without a
-    # `command` too, so this actually exercises "nothing to run anywhere" —
-    # the default `client` fixture's `on.test.run` is a real subprocess
-    # command, which the repo is now allowed to fall back on.
     no_fallback_templates_dir = fake_templates_dir(tmp_path, "claude")
     with _client(
         tmp_path, monkeypatch, templates_dir=no_fallback_templates_dir, default_setup=False

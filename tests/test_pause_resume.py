@@ -15,31 +15,22 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import _git, fake_templates_dir
+from support.harness import _git
 
 from kraft.config import git_read
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 #: quick-task's implementer, by its canonical path.
 _IMPLEMENT = "implementation.main.implement"
-
-
-@pytest.fixture
-def templates_dir(tmp_path):
-    """noop_verify: these tests assert on pause/resume/rebase, not on verify's
-    real `python -m pytest -q` subprocess -- pure incidental cost here."""
-    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
 
 
 # ponytail: the four "resumed item to complete" waits below run real git
 # worktree/rebase ops -- CI-load-fragile (Kraft-6dqk, Kraft-x527: passes in
 # ~7s locally, ate the full prior 120s budget twice on a loaded shared
 # runner). Bumped to 300s rather than making the wait event-driven; revisit
-# if it still times out. the `templates_dir` above passes `noop_verify=True`, so the
-# verify node itself is a no-op here -- it was a real `uv run pytest -q`
-# subprocess when Kraft-6dqk/x527 were filed, but that's no longer what
-# these waits are paying for.
+# if it still times out. The seeded library's verification builtin is an
+# inert `true` in the test library (`seed_v1_library`), so the verify node
+# is not what these waits are paying for.
 def _wait(fn, what, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

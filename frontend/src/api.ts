@@ -10,8 +10,6 @@ import type {
   LogLine,
   SessionStatus,
   SteeringList,
-  HookBinding,
-  HookRun,
   Notify,
   Policy,
   Repo,
@@ -20,9 +18,10 @@ import type {
   RepoProbe,
   NodeOverrides,
   SearchResponse,
-  TemplateNode,
+  ChainFile,
+  ChainNode,
+  ResolveResult,
   TemplateSummary,
-  TemplateValidation,
   WorkItem,
   WorkItemArtifact,
   WorkItemDiff,
@@ -289,29 +288,26 @@ export const patchRepo = (path: string, body: Partial<Repo>) =>
 export const deleteRepo = (path: string) =>
   req<void>(`/repos?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 
-export const getTemplate = (id: string) =>
-  req<{ id: string; nodes: TemplateNode[] }>(`/templates/${encodeURIComponent(id)}`);
-export const validateTemplate = (id: string, nodes: TemplateNode[]) =>
-  req<TemplateValidation>(`/templates/${encodeURIComponent(id)}/validate`, json("POST", { nodes }));
-export const putTemplate = (id: string, nodes: TemplateNode[]) =>
-  req<{ id: string; nodes: TemplateNode[] }>(
+export const getTemplate = (id: string) => req<ChainFile>(`/templates/${encodeURIComponent(id)}`);
+/** A saved chain resolved, not materialized: its nodes in `ChainNode` shape. */
+export const getResolvedTemplate = (id: string) =>
+  req<{ id: string; nodes: ChainNode[] }>(`/templates/${encodeURIComponent(id)}/resolved`);
+/** Save one chain file's text; the server refuses (422) a chain the library
+ *  does not resolve. */
+export const putTemplate = (id: string, text: string) =>
+  req<{ id: string; file: string; text: string }>(
     `/templates/${encodeURIComponent(id)}`,
-    json("PUT", { nodes }),
+    json("PUT", { text }),
   );
+/** Typed YAML into the mapping `resolveTemplate` checks. */
 export const parseTemplateYaml = (text: string) =>
-  req<{ nodes: TemplateNode[] | null; error: string | null }>(
+  req<{ chain: Record<string, unknown> | null; error: string | null }>(
     "/templates/parse",
     json("POST", { text }),
   );
-
-export const getRegistry = () => req<{ hooks: Record<string, HookBinding> }>("/registry");
-export const putRegistry = (hooks: Record<string, HookBinding>) =>
-  req<{ hooks: Record<string, HookBinding>; invalid_templates: Record<string, string> }>(
-    "/registry",
-    json("PUT", { hooks }),
-  );
-export const getHookRuns = (hook: string) =>
-  req<{ runs: HookRun[] }>(`/registry/${encodeURIComponent(hook)}/runs`);
+/** Check an unsaved chain against the installed library; writes nothing. */
+export const resolveTemplate = (chain: Record<string, unknown>) =>
+  req<ResolveResult>("/templates/resolve", json("POST", { chain }));
 
 export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));

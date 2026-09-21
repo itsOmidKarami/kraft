@@ -263,8 +263,7 @@ test("m16: Login renders on a phone and the error state fits without horizontal 
 test("Chains and Steering are editable on a phone, not an open-on-desktop notice", async ({ page }) => {
   await page.goto("/settings/chains");
   // W11 · D: one page on a phone, no template drill-down to tap through first.
-  await page.getByRole("button", { name: /^verify\b/ }).click();
-  await expect(page.getByLabel("fix_loop")).toBeVisible();
+  await expect(page.getByLabel("chain yaml")).toBeEditable();
   await expect(page.getByText(/open on desktop/i)).toBeHidden();
 
   await page.goto("/settings/steering");
