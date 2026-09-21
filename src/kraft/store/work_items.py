@@ -271,6 +271,50 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
     events.append(conn, work_item_id, "work_item_completed", {})
 
 
+#: An operator's terminal action -> (the status it ends the item in, its audit
+#: event, the ordinary event every reader of that status already knows).
+MANUAL_ENDS = {
+    "complete": ("completed", "work_item_manually_completed", "work_item_completed"),
+    "cancel": ("abandoned", "work_item_cancelled", "work_item_abandoned"),
+}
+
+
+def end_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    action: str,
+    reason: str,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """End an item by an operator's explicit `complete` or `cancel`
+    (`manual-completion-is-an-explicit-work-item-terminal-action`,
+    `manual-cancellation-is-an-explicit-work-item-terminal-action`).
+
+    One write: the running sessions are marked `paused` before the caller
+    signals them (`pause_work_item`'s ordering), the status leaves the running
+    set for good -- which is what stops the walk at its next node -- and the
+    audit event carries the reason and the node the item stood on.
+    """
+    status, audit, ordinary = MANUAL_ENDS[action]
+    now = _now()
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+    node_id = conn.execute(
+        "SELECT current_node_id FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    conn.execute(
+        "UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? WHERE id = ?",
+        (status, now, work_item_id),
+    )
+    events.append(conn, work_item_id, audit, {"reason": reason, "node_id": node_id})
+    events.append(conn, work_item_id, ordinary, {})
+
+
 def set_bead_id(conn: sqlite3.Connection, work_item_id, bead_id: str) -> None:
     """A late backfill (Kraft-dr3n): bd was down at intake, and a bead only
     exists for this item from completion time on -- record it, same as if

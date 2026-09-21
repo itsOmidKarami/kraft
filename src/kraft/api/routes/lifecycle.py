@@ -77,6 +77,12 @@ class Resume(BaseModel):
     steers: dict[str, str] = {}
 
 
+class EndWorkItem(BaseModel):
+    #: Required (`manual-*-is-an-explicit-work-item-terminal-action`): recorded
+    #: on the audit event.
+    reason: str
+
+
 class Escalate(BaseModel):
     message: str
     new_thread: bool = False
@@ -1249,6 +1255,45 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
+@api_router.post("/work-items/{wid}/complete")
+async def complete_work_item(wid: str, body: EndWorkItem, request: Request):
+    """Mark the item complete by hand, with a reason. Its beads close as on any
+    completion."""
+    row = await _end_work_item(request, wid, "complete", body.reason)
+    await executor.close_beads(request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs)
+    return deps._work_item_row(request.app.state, wid)
+
+
+@api_router.post("/work-items/{wid}/cancel")
+async def cancel_work_item(wid: str, body: EndWorkItem, request: Request):
+    """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
+    archiving reclaims it later, the same as for any ended item."""
+    await _end_work_item(request, wid, "cancel", body.reason)
+    return deps._work_item_row(request.app.state, wid)
+
+
+async def _end_work_item(request: Request, wid: str, action: str, reason: str):
+    """The terminal actions' one door: a work-item action only, it needs a
+    reason, stops whatever runs -- sessions, an escalation turn, the walk --
+    and leaves the item where no door leads back onto its chain."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    reason = reason.strip()
+    if not reason:
+        raise HTTPException(422, "reason: a terminal action needs a reason")
+    if row["status"] in ("completed", "abandoned"):
+        raise HTTPException(409, f"work item is already {row['status']}")
+    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+    ids = [s["id"] for s in sessions]
+    await st.db.write(lambda c: store.end_work_item(c, wid, action, reason, session_ids=ids))
+    for s in sessions:
+        _terminate(s["pid"])
+    # Bounded, as pause's is: the status is already terminal, so a walk that
+    # outlives the wait stops at its next node on its own.
+    await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
+    return row
 
 
 @api_router.post("/work-items/{wid}/escalate")
