@@ -39,23 +39,19 @@ def _wait(timeout="10m", initial="30s", maximum="2m") -> dict:
 
 @pytest.fixture
 def walk(database, run_dirs, monkeypatch):
-    """`await walk(fake, item)`: `executor.run` on `item` from the node and
-    step it stands on, with every forge task answered by `fake` -- the same
-    re-entry the scheduler makes. Returns the run's status."""
+    """`await walk(fake, item)`: `executor.run` on `item` from its own cursor,
+    with every forge task answered by `fake` -- the same re-entry the scheduler
+    makes. Returns the run's status."""
 
     async def go(fake, it):
         monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-        row = it.row()
-        node = row["current_node_id"]
-        if row["status"] == "waiting":
+        if it.status() == "waiting":
             await database.write(lambda c: store.mark_reentered(c, it.id))
         return await executor.run(
             database,
             run_dirs,
             work_item_id=it.id,
             registry=None,
-            start_index=store.node_index(row, node) if node else 0,
-            start_step=row["current_step"],
             # No stuck escalation: these tests are about the stop, not what
             # answers it.
             policy=policy.Policy(
@@ -503,7 +499,9 @@ async def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claime
 
 async def test_a_reentry_resumes_at_the_waiting_step(repo, scheduler, monkeypatch):
     """A node whose waiting step was its fourth must not re-run the first
-    three -- a paid agent session per tick on a node that opens the MR."""
+    three -- a paid agent session per tick on a node that opens the MR. The
+    scheduler hands the walk no position: `walk.run_once` reads the item's
+    cursor itself (tests/executor/test_entry_paths.py)."""
     seen = {}
 
     async def fake_run(*args, **kw):
@@ -517,7 +515,8 @@ async def test_a_reentry_resumes_at_the_waiting_step(repo, scheduler, monkeypatc
 
     assert await waits.tick(app) == ["w1"]
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-    assert seen["start_step"] == 3
+    assert "start_index" not in seen and "start_step" not in seen
+    assert seen["work_item_id"] == "w1"
 
 
 async def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(repo, scheduler, monkeypatch):
