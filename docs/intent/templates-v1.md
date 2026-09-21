@@ -349,6 +349,13 @@ Resuming paused work SHALL continue from its saved execution point and SHALL
 not rerun work that completed before the pause.
 enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[plain], tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[fix-loop], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[plain], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[fix-loop], tests/test_pause_resume.py::test_resume_leaves_the_position_to_the_walk, tests/test_rate_limit_retry.py::test_a_rate_limit_relaunch_leaves_the_position_to_the_walk, tests/test_waits.py::test_a_reentry_resumes_at_the_waiting_step, tests/executor/test_entry_paths.py::test_crash_resume_dispatches_a_sibling_the_crash_never_started
 
+## REQ resume-does-not-consume-a-retry-attempt
+
+Resuming a paused work item SHALL NOT spend a retry attempt: no fix-loop or
+gate reject-loop counter SHALL change because of the resume itself.
+enforced-by: tests/api/test_lifecycle.py::test_resume_does_not_consume_a_retry_attempt
+origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Task 11b fix round 1, Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
+
 ## REQ task-retry-reruns-that-task-and-later-work
 
 Retrying a task SHALL rerun that task, preserve completed sibling tasks in its
