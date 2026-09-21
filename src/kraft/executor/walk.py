@@ -538,8 +538,10 @@ async def walk_node(
     # then the step that stopped the last one, so a retry does not re-run
     # steps that already passed.
     resume_step = start_step
+    # The last fix pass's exceptions, for the cap's reason on the next cycle.
+    fix_excs: list[BaseException] = []
     while True:
-        verdict, failed, _excs = await dispatch.measure_node(
+        verdict, failed, excs = await dispatch.measure_node(
             db,
             run_dirs,
             work_item_id,
@@ -586,7 +588,7 @@ async def walk_node(
             # falls straight through to the normal fix cycle below with the
             # failure it actually is.
             _repair_tried = True
-            r_verdict, r_failed, _r_excs = await recover_node(
+            r_verdict, r_failed, r_excs = await recover_node(
                 db,
                 run_dirs,
                 work_item_id,
@@ -641,7 +643,7 @@ async def walk_node(
             # `needs_context_question` at `round`, so `round` has to move to
             # match, or those calls read the stale pre-repair rows instead of
             # the fresher re-measure this repair just produced.
-            verdict, failed, round = r_verdict, r_failed, _REPAIR_ROUND
+            verdict, failed, excs, round = r_verdict, r_failed, r_excs, _REPAIR_ROUND
 
         previous_found, fix_ran, previous_head = dispatch.last_measurement(
             db, work_item_id, node.id
@@ -878,6 +880,12 @@ async def walk_node(
         )
         if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
             reason = f"{key} exhausted after {count - 1} fix cycle(s)"
+            # What raised, measuring or fixing, is the only account of why when
+            # a task never reported (Kraft-hr0xr) -- the loopless path already
+            # says it, and the loop threw it away.
+            raised = [*excs, *fix_excs]
+            if raised:
+                reason += f" ({', '.join(repr(e) for e in raised)})"
             measured = [t.path for step in node.steps for t in step.tasks]
             await db.write(
                 lambda c, measured=measured: store.mark_sessions_capped_out(
@@ -980,7 +988,7 @@ async def walk_node(
         # The fix loop is an ordered shape of its own (`fix-loop-supports-one-
         # ordered-repair-shape`), so the repair runs through the same steps
         # walk every other group does rather than one hardcoded task.
-        fix, _fix_failed, _fix_excs = await dispatch.measure_node(
+        fix, _fix_failed, fix_excs = await dispatch.measure_node(
             db,
             run_dirs,
             work_item_id,

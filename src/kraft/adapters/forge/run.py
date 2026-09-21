@@ -956,16 +956,28 @@ async def run_task(
         # needs the root row to resolve `root_has_changes`.
         targets = [next((t for t in targets if t[2] == "root"), targets[0])]
 
+    try:
+        live_forge = resolve(backend_for(backend, repo_forge))
+    except ForgeError as exc:
+        # No forge this repo can reach: nothing was launched, so this is a
+        # configuration stop naming its cause, never a failed task a fix loop
+        # would spend cycles on (Kraft-hr0xr). Finished here, not raised, so
+        # the session row started above is not stranded (Kraft-41b, Kraft-7xt).
+        return await _builtins.finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=session_id,
+            status="config_error",
+            log=f"{hook_point} cannot run: {exc}\n",
+            reused=reused,
+        )
     log, status = "", "done"
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3).
     findings: list[dict] | None = None
     try:
-        # Inside the try: `backend_for` can raise, and an exception escaping
-        # here would skip `finish_session` and strand the session row started
-        # above (Kraft-41b, Kraft-7xt are the same wound from the other side).
-        live_forge = resolve(backend_for(backend, repo_forge))
         # Resolved once against the item's own worktree (`repo`, not whichever
         # target the loop below is on) -- a multi-repo item's submodule paths
         # are not where the agent's `on.mr.describe` artifact lives.

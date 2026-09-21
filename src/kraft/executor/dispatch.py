@@ -421,10 +421,18 @@ async def dispatch_node(
         )
 
     if isinstance(t, SubprocessTask):
+        try:
+            cmd = shlex.split(t.command)
+        except ValueError as exc:
+            # Never started, so not a failure a fix loop could repair
+            # (Kraft-hr0xr): it stops naming the command it could not read.
+            return await _config_error(
+                db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
+            )
         return await _subprocess.run_task(
             db,
             run_dirs,
-            cmd=shlex.split(t.command),
+            cmd=cmd,
             cwd=worktree,
             repo_entry=(launch.repo_entry or {}) if launch else {},
             env={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -548,33 +556,39 @@ async def dispatch_node(
         # to stop with `needs_context` instead. A steering selection the
         # snapshot cannot supply stops the same way rather than run unsteered.
         return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
-    status = await _agent.run_agent_task(
-        db,
-        run_dirs,
-        command=inv.command,
-        harness=inv.harness,
-        harnesses=harnesses,
-        model=inv.model,
-        deny_tools=inv.deny_tools,
-        effort=inv.effort,
-        allowed_tools=inv.allowed_tools,
-        permission_mode=inv.permission_mode,
-        sandbox=inv.sandbox,
-        steering_texts=inv.steering_texts,
-        artifact=t.produces,
-        method_text=inv.method_text,
-        title=work_item_row["title"],
-        task_instruction=(
-            prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
-            if note
-            else ""
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            command=inv.command,
+            harness=inv.harness,
+            harnesses=harnesses,
+            model=inv.model,
+            deny_tools=inv.deny_tools,
+            effort=inv.effort,
+            allowed_tools=inv.allowed_tools,
+            permission_mode=inv.permission_mode,
+            sandbox=inv.sandbox,
+            steering_texts=inv.steering_texts,
+            artifact=t.produces,
+            method_text=inv.method_text,
+            title=work_item_row["title"],
+            task_instruction=(
+                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                if note
+                else ""
+            )
+            + instruction,
+            repo_path=work_item_row["repo"],
+            cwd=worktree,
+            repo_entry=launch.repo_entry if launch else None,
+            **common,
         )
-        + instruction,
-        repo_path=work_item_row["repo"],
-        cwd=worktree,
-        repo_entry=launch.repo_entry if launch else None,
-        **common,
-    )
+    except _agent.LaunchRefused as exc:
+        # Refused before anything started (Kraft-hr0xr): the same stop as an
+        # unavailable harness, never a failed task for a fix loop to relaunch
+        # into the same refusal.
+        return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the

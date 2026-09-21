@@ -280,6 +280,13 @@ class HarnessUnavailable(Exception):
     (`unavailable-selected-harness-needs-human`). The message says why."""
 
 
+class LaunchRefused(ValueError):
+    """`run_agent_task` refused to start anything: the harness is unknown, or a
+    merged option names a capability it does not declare. A configuration
+    stop that names its cause, never a task failure a fix loop could repair
+    (Kraft-hr0xr). A `ValueError` still, for callers that catch that."""
+
+
 #: The profile defaults `resolve_agent_task` applies. Each is a scalar option
 #: `run_agent_task` takes; a default outside this set would be dropped without
 #: a word, so it is refused instead.
@@ -576,7 +583,9 @@ async def run_agent_task(
     try:
         h = hs.valid[harness]
     except KeyError:
-        raise ValueError(f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}") from None
+        raise LaunchRefused(
+            f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
+        ) from None
 
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -620,7 +629,7 @@ async def run_agent_task(
         if name == "autocompact":
             continue
         if not h.supports(name):
-            raise ValueError(
+            raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )

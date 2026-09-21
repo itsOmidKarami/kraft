@@ -2790,8 +2790,123 @@ def test_a_forge_task_with_no_forge_names_the_remedy_on_the_card(tmp_path, fix_l
 
     assert status == "needs_human"
     reason = _stop_reason(evts)
-    assert "open [forge]" in reason
+    # A repo with no forge is a launch refused before it starts, not a failed
+    # task: it stops as a config error and spends no fix cycle (Kraft-hr0xr).
+    assert "could not start open in node draft" in reason, reason
     assert "no forge is recorded for this repo" in reason, reason
+    assert not [e for e in evts if e["type"] == "fix_cycle_started"]
+
+
+def _cycles(evts) -> int:
+    return len([e for e in evts if e["type"] == "fix_cycle_started"])
+
+
+def test_a_refused_agent_launch_in_a_fix_loop_node_stops_naming_its_cause(tmp_path, monkeypatch):
+    """Kraft-hr0xr: `run_agent_task` refuses a launch whose merged options name a
+    capability the harness does not declare -- here a repo's `deny_tools` on a
+    provider without that capability. That refusal counted as a failed task,
+    so the fix loop spent paid cycles relaunching into the same refusal and the
+    card read "fix_loop exhausted", with the cause only in the server log."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+    agent = {"id": "work", "kind": "agent", "harness": "fake", "prompt": "Do it."}
+    chain = v1_chain(
+        [
+            {
+                "id": "impl",
+                "kind": "exec",
+                "tasks": [agent],
+                "fix_loop": {"tasks": [{**agent, "id": "repair"}]},
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, sessions, _row = asyncio.run(
+        v1_walk(
+            tmp_path,
+            chain,
+            repo=repo,
+            repo_entry={"setup_command": "", "deny_tools": ["Bash"]},
+            policy=_loop_policy(tmp_path),
+        )
+    )
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "could not start work in node impl" in reason, reason
+    assert "deny_tools" in reason, reason
+    assert _cycles(evts) == 0
+    assert [s["hook_point"] for s in sessions] == ["impl.main.work"]
+    assert sessions[0]["status"] == "config_error"
+
+
+def test_a_subprocess_command_that_cannot_be_parsed_stops_naming_its_cause(tmp_path):
+    """Kraft-hr0xr, the same invariant for a subprocess task: a command
+    `shlex` cannot split never started, so it is a config error that names
+    the command, not a failure a fix loop could repair."""
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "check", "kind": "subprocess", "command": "echo 'unclosed"}],
+                "fix_loop": {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]},
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, _sessions, _row = asyncio.run(
+        v1_walk(tmp_path, chain, repo=repo, policy=_loop_policy(tmp_path))
+    )
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "could not start check in node build" in reason, reason
+    assert "echo 'unclosed" in reason, reason
+    assert _cycles(evts) == 0
+
+
+def test_a_fix_loop_that_caps_out_on_a_raising_task_names_the_exception(tmp_path, monkeypatch):
+    """Kraft-hr0xr: the fix loop threw the measuring pass's exceptions away, so
+    a node whose task raised every cycle stopped as "exhausted after N fix
+    cycle(s)" with nothing on the card about why. The loopless path already
+    folds them into its reason; the loop's cap does too now."""
+    from kraft import policy
+
+    repo = make_repo(tmp_path)
+    real_run_task = dispatch._subprocess.run_task
+
+    async def boom(*a, cmd=None, **kw):
+        if cmd == ["false"]:
+            raise RuntimeError("the-real-cause")
+        return await real_run_task(*a, cmd=cmd, **kw)
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", boom)
+    chain = v1_chain(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "check", "kind": "subprocess", "command": "false"}],
+                "fix_loop": {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]},
+            }
+        ],
+        repo=repo,
+    )
+    path = tmp_path / "policy.yaml"
+    path.write_text("default: { attempts: 1, wall_clock_s: 3600 }\n")
+
+    status, evts, _sessions, _row = asyncio.run(
+        v1_walk(tmp_path, chain, repo=repo, policy=policy.load_policy(path))
+    )
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "exhausted" in reason, reason
+    assert "the-real-cause" in reason, reason
 
 
 def test_a_config_error_stop_carries_a_bounded_cause(tmp_path, monkeypatch):

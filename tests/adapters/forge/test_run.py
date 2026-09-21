@@ -1180,21 +1180,22 @@ def test_merge_watch_reuses_the_session_across_a_still_pending_wait(tmp_path, mo
     assert rows[0]["status"] == "waiting"
 
 
-def test_auto_with_no_recorded_forge_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
-    """The one that pins `resolve` moving inside the `try`.
-
-    Resolution can fail at runtime now. Outside the `try` that exception escapes
-    `run_task` past `finish_session`, leaving a started session row with no
-    result and no log — pause, abandon and reattach all key off that row. Inside,
-    it is an ordinary failed node with a readable line in the log.
+def test_auto_with_no_recorded_forge_stops_as_a_config_error_rather_than_escaping(
+    tmp_path, monkeypatch
+):
+    """Resolution can fail at runtime. Escaping `run_task` past
+    `finish_session` would leave a started session row with no result and no
+    log -- pause, abandon and reattach all key off that row. So it finishes the
+    row, and as `config_error`, not `failed`: nothing was launched, and a failed
+    task would send a fix loop round cycles no agent can win (Kraft-hr0xr).
     """
     fake = forge.FakeForge()
     returned, recorded = _forge_session(
         tmp_path, monkeypatch, fake, "open_mr", "s-auto", backend="auto"
     )
 
-    assert returned == "failed"
-    assert recorded == "failed", "the session row must be finished, not left running"
+    assert returned == "config_error"
+    assert recorded == "config_error", "the session row must be finished, not left running"
     log = _session_log(tmp_path, "s-auto")
     assert "repos.yaml" in log, f"the log must name the fix, got: {log!r}"
     assert not fake.opened, "no merge request may be opened with no forge resolved"
