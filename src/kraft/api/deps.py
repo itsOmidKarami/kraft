@@ -336,7 +336,10 @@ def workspace_target(
     if ws is None:
         raise HTTPException(422, f"no workspace {workspace!r} is declared in repos.yaml")
     root = next(r for r in repos if r.get("id") == ws.root)
-    if Path(root["path"]).resolve() != Path(repo).expanduser().resolve():
+    # A string comparison, never a filesystem lookup on the request's path:
+    # the stored root is git's own `--show-toplevel`, which is what every
+    # client (the intake modal, `kraft item create`) sends back.
+    if root["path"] != os.path.normpath(os.path.expanduser(repo)):
         raise HTTPException(
             422, f"workspace {workspace!r} is rooted at {root['path']}, not at {repo}"
         )
