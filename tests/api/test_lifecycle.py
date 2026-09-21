@@ -495,21 +495,19 @@ def _counter_exists(wid: str, key: str) -> bool:
         conn.close()
 
 
-@pytest.mark.parametrize("kind", ["ci_wait", "ci_infra"])
-def test_retry_clears_the_ci_counter_for_the_current_node(client, repo, kind):
-    """A `ci_wait:<node>` counter (the item re-entered a wait twice already) or
-    a `ci_infra:<node>` one (one kick short of the cap): after a retry the row
-    is gone, so the next poll starts at count 1 and an infra-red poll gets a
-    fresh budget, not an instant breach."""
+def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
+    """A `ci_infra:<node>` counter (one kick short of the cap): after a retry
+    the row is gone, so an infra-red poll gets a fresh budget, not an instant
+    breach."""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     _force_node(wid, "merge_request_feedback", "needs_human")
-    _seed_counter(wid, f"{kind}:merge_request_feedback")
+    _seed_counter(wid, "ci_infra:merge_request_feedback")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={})
 
     assert r.status_code == 200, r.text
-    assert not _counter_exists(wid, f"{kind}:merge_request_feedback")
+    assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
 
 
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):

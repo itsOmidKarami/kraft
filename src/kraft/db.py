@@ -94,9 +94,9 @@ CREATE TABLE work_items (
   -- the two writers are archive_work_item's only two callers.
   archived_at      TEXT,
   archived_by      TEXT,
-  -- GitLab pipeline pinned by the last `on.ci.poll` read, stored as
+  -- GitLab pipeline pinned by the last CI read, stored as
   -- "<head_sha>:<pipeline_id>" (Kraft-ivh1). Empty until the first poll,
-  -- cleared on retry_after_cap alongside the ci_wait/ci_infra counters.
+  -- cleared on retry_after_cap alongside the ci_infra counter.
   ci_pipeline_ref  TEXT,
   -- the step group `current_node_id` last began. 0 unless a wait or a retry
   -- resumed the node past its first group. Reset whenever the node changes.
