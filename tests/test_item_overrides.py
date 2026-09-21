@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+import pytest
 from support.harness import isolated_bd, v1_seeded_chain
 
 from kraft import events, executor, policy, store
@@ -26,23 +27,23 @@ def _mark_started(wid: str, node_id: str) -> None:
         conn.close()
 
 
+def _paused_item(client, repo) -> str:
+    """A `default`-chain item filed paused (`autostart: False`); its id."""
+    return client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+
+
 # --- point 1: per-node overrides, locked once a node has started -----------
 
 
-def test_patch_sets_a_node_override_and_the_detail_reports_it(monkeypatch, client, repo):
+def test_patch_sets_a_node_override_and_the_detail_reports_it(client, repo):
     """V1: `auto_escalate` can only confirm or suppress a gate's own declared
     reviewer, and the shipped `default` chain declares none, so the override
     this pins the mechanics with is a `model` -- any node, no declaration
     needed. The refusal itself is pinned in tests/executor/test_gates.py."""
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "title": "t",
-            "repo": str(repo),
-            "chain_template": "default",
-            "autostart": False,
-        },
-    ).json()["id"]
+    wid = _paused_item(client, repo)
 
     r = client.patch(
         f"/api/work-items/{wid}",
@@ -60,11 +61,8 @@ def test_patch_sets_a_node_override_and_the_detail_reports_it(monkeypatch, clien
     assert plan_raw.get("model") != "opus"
 
 
-def test_patch_node_overrides_merges_per_node_not_whole_object(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
+def test_patch_node_overrides_merges_per_node_not_whole_object(client, repo):
+    wid = _paused_item(client, repo)
     first = client.patch(
         f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "opus"}}}
     )
@@ -81,35 +79,39 @@ def test_patch_node_overrides_merges_per_node_not_whole_object(monkeypatch, clie
     }
 
 
-def test_patch_node_overrides_rejects_an_unknown_node(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-    r = client.patch(
-        f"/api/work-items/{wid}", json={"node_overrides": {"nope": {"auto_escalate": True}}}
-    )
-    assert r.status_code == 422
+@pytest.mark.parametrize(
+    ("overrides", "names"),
+    [
+        ({"nope": {"auto_escalate": True}}, None),
+        ({"plan": {"bogus_field": "x"}}, None),
+        ({"implementation": {"effort": "turbo"}}, "effort"),
+        ({"implementation": {"auto_escalate_stuck": "yes"}}, None),
+        ({"implementation": {"auto_escalate_delay_s": -1}}, None),
+        ({"implementation": {"attempts": 0}}, None),
+        ({"implementation": {"wall_clock_s": -1}}, None),
+    ],
+    ids=[
+        "unknown-node",
+        "unsupported-field",
+        "bad-effort",
+        "non-bool-auto-escalate-stuck",
+        "negative-auto-escalate-delay",
+        "non-positive-attempts",
+        "non-positive-wall-clock",
+    ],
+)
+def test_patch_rejects_a_bad_node_override(client, repo, overrides, names):
+    wid = _paused_item(client, repo)
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": overrides})
+    assert r.status_code == 422, r.text
+    if names:
+        assert names in r.json()["detail"]
 
 
-def test_patch_node_overrides_rejects_an_unsupported_field(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-    r = client.patch(
-        f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"bogus_field": "x"}}}
-    )
-    assert r.status_code == 422
-
-
-def test_patch_sets_a_node_model_override(monkeypatch, client, repo):
+def test_patch_sets_a_node_model_override(client, repo):
     """Kraft-df4tc point 2: model/escalate_model/effort join the per-node
     override fields, reusing the same field-level checks agent_overrides has."""
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
+    wid = _paused_item(client, repo)
     r = client.patch(
         f"/api/work-items/{wid}",
         json={"node_overrides": {"implementation": {"model": "opus", "effort": "high"}}},
@@ -119,94 +121,27 @@ def test_patch_sets_a_node_model_override(monkeypatch, client, repo):
     assert row["node_overrides"]["implementation"] == {"model": "opus", "effort": "high"}
 
 
-def test_patch_rejects_a_node_override_with_bad_effort(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"effort": "turbo"}}},
-    )
-    assert r.status_code == 422
-    assert "effort" in r.json()["detail"]
-
-
-def test_patch_sets_an_auto_escalate_stuck_node_override(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "title": "t",
-            "repo": str(repo),
-            "chain_template": "default",
-            "autostart": False,
-        },
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"auto_escalate_stuck": False}}},
-    )
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"auto_escalate_stuck": False},
+        {"auto_escalate_delay_s": 120},
+        {"attempts": 2, "wall_clock_s": 600},
+    ],
+    ids=["auto-escalate-stuck", "auto-escalate-delay", "attempts-and-wall-clock"],
+)
+def test_patch_sets_a_node_override_the_effective_chain_reads(client, repo, fields):
+    wid = _paused_item(client, repo)
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"implementation": fields}})
     assert r.status_code == 200, r.text
 
     detail = client.get(f"/api/work-items/{wid}").json()
     node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
-    assert node["auto_escalate_stuck"] is False
+    assert {k: node[k] for k in fields} == fields
 
 
-def test_patch_rejects_non_bool_auto_escalate_stuck(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "title": "t",
-            "repo": str(repo),
-            "chain_template": "default",
-            "autostart": False,
-        },
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"auto_escalate_stuck": "yes"}}},
-    )
-    assert r.status_code == 422
-
-
-def test_patch_sets_an_auto_escalate_delay_s_node_override(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"auto_escalate_delay_s": 120}}},
-    )
-    assert r.status_code == 200, r.text
-
-    detail = client.get(f"/api/work-items/{wid}").json()
-    node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
-    assert node["auto_escalate_delay_s"] == 120
-
-
-def test_patch_rejects_negative_auto_escalate_delay_s(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"auto_escalate_delay_s": -1}}},
-    )
-    assert r.status_code == 422
-
-
-def test_patch_node_overrides_409s_on_a_node_that_has_started(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
+def test_patch_node_overrides_409s_on_a_node_that_has_started(client, repo):
+    wid = _paused_item(client, repo)
     _mark_started(wid, "spec")
     r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"spec": {"model": "opus"}}})
     assert r.status_code == 409, r.text
@@ -218,56 +153,10 @@ def test_patch_node_overrides_409s_on_a_node_that_has_started(monkeypatch, clien
     assert r2.status_code == 200, r2.text
 
 
-def test_patch_sets_an_attempts_and_wall_clock_s_node_override(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"attempts": 2, "wall_clock_s": 600}}},
-    )
-    assert r.status_code == 200, r.text
-
-    detail = client.get(f"/api/work-items/{wid}").json()
-    node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "implementation")
-    assert node["attempts"] == 2
-    assert node["wall_clock_s"] == 600
-
-
-def test_patch_rejects_a_non_positive_attempts_override(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"attempts": 0}}},
-    )
-    assert r.status_code == 422
-
-
-def test_patch_rejects_a_non_positive_wall_clock_s_override(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
-
-    r = client.patch(
-        f"/api/work-items/{wid}",
-        json={"node_overrides": {"implementation": {"wall_clock_s": -1}}},
-    )
-    assert r.status_code == 422
-
-
 # --- point 2: reset to template ---------------------------------------------
 
 
-def test_patch_reset_to_template_clears_overrides_but_keeps_attachment_trim(
-    monkeypatch, client, repo
-):
+def test_patch_reset_to_template_clears_overrides_but_keeps_attachment_trim(client, repo):
     """An override layer, not a re-materialize (this MR's design): reset is
     just clearing `node_overrides`, so the attachment-trimmed
     `chain_definition` -- untouched by overrides all along -- needs no
@@ -302,11 +191,8 @@ def test_patch_reset_to_template_clears_overrides_but_keeps_attachment_trim(
     assert "spec" not in [n["id"] for n in detail["chain_definition"]["nodes"]]
 
 
-def test_patch_reset_to_template_409s_once_the_item_has_started(monkeypatch, client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
-    ).json()["id"]
+def test_patch_reset_to_template_409s_once_the_item_has_started(client, repo):
+    wid = _paused_item(client, repo)
     client.patch(
         f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"auto_escalate": True}}}
     )
@@ -318,7 +204,7 @@ def test_patch_reset_to_template_409s_once_the_item_has_started(monkeypatch, cli
 # --- point 6: intake skip_nodes / node_overrides / budget_usd --------------
 
 
-def test_intake_skip_nodes_removes_them_from_the_materialized_chain(monkeypatch, client, repo):
+def test_intake_skip_nodes_removes_them_from_the_materialized_chain(client, repo):
     r = client.post(
         "/api/work-items",
         json={
@@ -338,7 +224,7 @@ def test_intake_skip_nodes_removes_them_from_the_materialized_chain(monkeypatch,
     assert "plan" in node_ids  # a gated node may be skipped without dragging its neighbors
 
 
-def test_intake_skip_nodes_rejects_an_unknown_node(monkeypatch, client, repo):
+def test_intake_skip_nodes_rejects_an_unknown_node(client, repo):
     r = client.post(
         "/api/work-items",
         json={
@@ -351,7 +237,7 @@ def test_intake_skip_nodes_rejects_an_unknown_node(monkeypatch, client, repo):
     assert r.status_code == 422
 
 
-def test_intake_skip_nodes_rejects_a_node_a_kept_node_bounces_to(monkeypatch, client, repo):
+def test_intake_skip_nodes_rejects_a_node_a_kept_node_bounces_to(client, repo):
     """default.yaml's pre_mr_rebase has rebase_bounce_to: verify. Skipping
     verify while keeping pre_mr_rebase would leave walk.py's bounce-target
     lookup with nothing to find -- a StopIteration crash mid-run -- so intake
@@ -369,7 +255,7 @@ def test_intake_skip_nodes_rejects_a_node_a_kept_node_bounces_to(monkeypatch, cl
     assert "verify" in r.json()["detail"]
 
 
-def test_intake_skip_nodes_rejects_emptying_the_whole_chain(monkeypatch, client, repo):
+def test_intake_skip_nodes_rejects_emptying_the_whole_chain(client, repo):
     """Every node skipped at once (code-review): `materialize` would hand
     `intake` an empty chain, and `create_work_item`/`executor.run_once` both
     index `nodes[0]` unguarded -- after the bead is already filed and the run
@@ -390,7 +276,7 @@ def test_intake_skip_nodes_rejects_emptying_the_whole_chain(monkeypatch, client,
     assert "empty" in r.json()["detail"] or "no nodes" in r.json()["detail"]
 
 
-def test_intake_node_overrides_and_budget_round_trip(monkeypatch, client, repo):
+def test_intake_node_overrides_and_budget_round_trip(client, repo):
     r = client.post(
         "/api/work-items",
         json={
@@ -409,7 +295,7 @@ def test_intake_node_overrides_and_budget_round_trip(monkeypatch, client, repo):
     assert detail["budget_cap"] == {"cap_usd": 7.5, "source": "item", "spent_usd": 0.0}
 
 
-def test_intake_node_overrides_accepts_attempts_and_wall_clock_s(monkeypatch, client, repo):
+def test_intake_node_overrides_accepts_attempts_and_wall_clock_s(client, repo):
     r = client.post(
         "/api/work-items",
         json={
@@ -426,7 +312,7 @@ def test_intake_node_overrides_accepts_attempts_and_wall_clock_s(monkeypatch, cl
     assert detail["node_overrides"] == {"implementation": {"attempts": 2, "wall_clock_s": 600}}
 
 
-def test_intake_budget_usd_null_is_an_explicit_no_cap(monkeypatch, client, repo):
+def test_intake_budget_usd_null_is_an_explicit_no_cap(client, repo):
     wid = client.post(
         "/api/work-items",
         json={"title": "t", "repo": str(repo), "budget_usd": None, "autostart": False},
@@ -435,7 +321,7 @@ def test_intake_budget_usd_null_is_an_explicit_no_cap(monkeypatch, client, repo)
     assert detail["budget_cap"] == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
 
 
-def test_no_budget_usd_at_intake_defers_to_the_policy_default(monkeypatch, client, repo):
+def test_no_budget_usd_at_intake_defers_to_the_policy_default(client, repo):
     wid = client.post(
         "/api/work-items", json={"title": "t", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -613,7 +499,7 @@ def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, clie
     assert any(e["type"] == "budget_raised" and e["payload"]["budget_usd"] == 50.0 for e in evts)
 
 
-def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(monkeypatch, client, repo):
+def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):
     wid = client.post(
         "/api/work-items",
         json={
@@ -627,7 +513,7 @@ def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(monkeypatch, cl
     assert r.status_code == 409
 
 
-def test_patch_budget_usd_sets_and_clears_the_cap(monkeypatch, client, repo):
+def test_patch_budget_usd_sets_and_clears_the_cap(client, repo):
     wid = client.post(
         "/api/work-items",
         json={
