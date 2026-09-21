@@ -1043,40 +1043,28 @@ async def _record_done(
     )
 
 
-async def env_setup(
-    db,
-    run_dirs,
-    *,
-    session_id: str,
-    work_item_id: str,
-    node_id: str,
-    repo: str,
-    repo_entry: dict | None = None,
-    round: int = 0,
-    attachments: list[dict] | None = None,
-    head_sha: str | None = None,
-) -> str:
-    # `ensure_worktree` copies attachments itself now (Kraft-pqu fallout: the
-    # copy has to exist before `spec`/`plan`, which run ahead of this node in
-    # `default.yaml`). By the time this node dispatches, `executor.run`/
-    # `resume` have already called `ensure_worktree` with the same attachments,
-    # so this call is the early-return path and does no git or copy work in
-    # the ordinary case — it only does real work when a test or a future chain
-    # calls `env_setup` without that prior call having happened.
-    worktree = await ensure_worktree(
-        db,
-        run_dirs,
-        repo=repo,
-        work_item_id=work_item_id,
-        attachments=attachments,
-        repo_entry=repo_entry,
-    )
+async def prepare_runtime(worktree: Path, repo: Path, repo_entry: dict | None) -> str:
+    """Re-prepare an existing worktree and say what happened.
+
+    What the `env_setup` node used to do, minus the session bookkeeping: V1 has
+    no builtin to bind it to (`BuiltinAction` names one action, and it is not
+    this), so it is implicit runtime preparation run by `walk.run_once` right
+    after `ensure_worktree`, before the first node dispatches.
+
+    Called on every entry into the walk, not only at worktree creation, for the
+    reason `run_setup_command` was extracted in the first place: a rebase can
+    land a new lockfile and nothing else rebuilds the environment.
+
+    Raises `RuntimeError` exactly where `run_setup_command` does, so the
+    caller's own "the node that was about to dispatch could not start"
+    handling covers it.
+    """
     # No entry, nothing declared to re-run: `ensure_worktree` already refused a
     # repo without a `setup_command` when it cut this worktree.
     setup_log = (
-        await run_setup_command(worktree, Path(repo), repo_entry) if repo_entry is not None else ""
+        await run_setup_command(worktree, repo, repo_entry) if repo_entry is not None else ""
     )
-    missing = await asyncio.to_thread(_uncarried_local_files, Path(repo), worktree)
+    missing = await asyncio.to_thread(_uncarried_local_files, repo, worktree)
     report = f"worktree ready at {worktree}\n{setup_log}"
     if missing:
         # Informational, not a to-do list: on most repos this names things
@@ -1090,39 +1078,4 @@ async def env_setup(
             "most of these are irrelevant noise, worth a glance only if the "
             "build actually needs one of them:\n" + "".join(f"  {n}\n" for n in missing)
         )
-    return await _record_done(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=node_id,
-        hook_point="on.env.prepare",
-        round=round,
-        log=report,
-        head_sha=head_sha,
-    )
-
-
-async def noop(
-    db,
-    run_dirs,
-    *,
-    session_id: str,
-    work_item_id: str,
-    node_id: str,
-    hook_point: str,
-    round: int = 0,
-    head_sha: str | None = None,
-) -> str:
-    """Placeholder task for a hook with no plugin yet: records a done session, does no work."""
-    return await _record_done(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=node_id,
-        hook_point=hook_point,
-        round=round,
-        log=f"noop placeholder for {hook_point}\n",
-        head_sha=head_sha,
-    )
+    return report

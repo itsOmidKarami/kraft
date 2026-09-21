@@ -232,6 +232,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # `command` is the last worker_sessions column -- dropping it leaves
         # head_sha's own trailing comma dangling before the closing `);`.
         replace = (*replace, ("head_sha       TEXT,", "head_sha       TEXT"))
+    if version < 33:
+        drop_lines = (
+            *drop_lines,
+            "materialized_chain TEXT,",
+            "run_fork_parent  TEXT,",
+            "-- template schema V1's immutable work-item input",
+            "-- Beside `chain_definition`, not replacing it",
+            "-- the run this one forked from (Phase 5 retry forks)",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -518,6 +527,31 @@ def test_migrate_v25_to_v26_adds_archive_columns(tmp_path):
 
     cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
     assert {"archived_at", "archived_by"} <= cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migrate_v32_to_v33_adds_the_v1_columns_and_keeps_the_legacy_chain(tmp_path):
+    """Template schema V1 is additive: an existing item keeps the
+    `chain_definition` it materialized under the legacy loader and simply gains
+    two NULL columns, because a legacy chain cannot be faithfully translated
+    into a V1 one (`_MIGRATIONS[32]`)."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 32)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','default','{\"nodes\": []}',"
+        "'active','now','now')"
+    )
+    conn.commit()
+
+    db.migrate(conn)
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(work_items)").fetchall()}
+    assert {"materialized_chain", "run_fork_parent"} <= cols
+    row = conn.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+    assert row["chain_definition"] == '{"nodes": []}'
+    assert row["materialized_chain"] is None
+    assert row["run_fork_parent"] is None
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
@@ -1227,3 +1261,30 @@ def test_worker_sessions_carries_a_command(tmp_path):
     db.migrate(conn)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(worker_sessions)").fetchall()}
     assert "command" in cols
+
+
+def test_migrate_v33_to_v34_renames_stored_task_progress_events(tmp_path):
+    """Kraft-7hy7x: `task_progress` became `plan_progress`, and every reader
+    (the Timeline's grouping, the board's "Task N of M") matches the new name
+    only. An item filed before the rename keeps its progress because the stored
+    rows are renamed once, here, rather than every reader learning both."""
+    conn = db._connect(tmp_path / "orchestrator.db")
+    _build_old_db(conn, 33)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+        "status, created_at, updated_at) VALUES ('w1','t','/r','default','{}',"
+        "'active','now','now')"
+    )
+    for type_ in ("task_progress", "node_started", "task_progress"):
+        conn.execute(
+            "INSERT INTO events (work_item_id, type, payload, created_at) "
+            "VALUES ('w1', ?, '{\"task\": 1, \"total\": 3}', 'now')",
+            (type_,),
+        )
+    conn.commit()
+
+    db.migrate(conn)
+
+    types = [r[0] for r in conn.execute("SELECT type FROM events ORDER BY seq")]
+    assert types == ["plan_progress", "node_started", "plan_progress"]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION

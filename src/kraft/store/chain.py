@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 
@@ -75,24 +76,25 @@ def splice_chain(conn: sqlite3.Connection, work_item_id, chain_definition: str) 
 
 
 def set_chain_template(
-    conn: sqlite3.Connection, work_item_id, template_id: str, chain_definition: str
+    conn: sqlite3.Connection, work_item_id, template_id: str, materialized_chain: str
 ) -> None:
     """Switch a not-yet-started item onto a different chain template
     (Kraft-gwn6): the caller has already 404'd an unknown template and 409'd a
-    started item, and already recomputed `chain_definition` by calling
-    `templates.materialize` the same way `executor.intake` would have, so this
-    is just the write. Its own event type, not folded into `chain_spliced`:
-    that event means the chain-review splice path touched the row; this means
-    intake's own materialization ran again against a different template,
-    which is a different question to answer from the timeline.
+    started item, and already re-run `ResolvedChain.materialize` the same way
+    `executor.intake` would have -- attachments included, so a switch cannot
+    undo the trim the item was filed with -- so this is just the write. Its own
+    event type, not folded into `chain_spliced`: that event means the
+    chain-review splice path touched the row; this means intake's own
+    materialization ran again against a different template, which is a
+    different question to answer from the timeline.
     """
     old_template_id = conn.execute(
         "SELECT chain_template FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
     conn.execute(
-        "UPDATE work_items SET chain_template = ?, chain_definition = ?, updated_at = ? "
+        "UPDATE work_items SET chain_template = ?, materialized_chain = ?, updated_at = ? "
         "WHERE id = ?",
-        (template_id, chain_definition, _now(), work_item_id),
+        (template_id, materialized_chain, _now(), work_item_id),
     )
     events.append(
         conn, work_item_id, "chain_template_changed", {"from": old_template_id, "to": template_id}
@@ -139,14 +141,241 @@ def skip_node(
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
 
 
+def materialized_chain_of(row):
+    """`row["materialized_chain"]` as the model that wrote it, or None.
+
+    None for every row the legacy intake path wrote — and for every row written
+    before the column existed. A caller that needs V1 has to handle that, which
+    is why this returns None rather than raising: the legacy path is still live
+    until Task 5 retires it.
+
+    Imported inside the function: `kraft.templates.models` pulls in `kraft.policy`
+    and `kraft.harness`, and `kraft.store` is imported by both the API and the
+    worker, neither of which should pay for the template schema to read a row.
+    """
+    from kraft.templates.models import MaterializedChain
+
+    raw = row["materialized_chain"] if "materialized_chain" in row.keys() else None
+    return MaterializedChain.from_json(raw) if raw else None
+
+
+def chain_node_ids(row) -> tuple[str, ...]:
+    """Every node id of this item's chain, in order, whichever column holds it.
+
+    **The one reader for an ordering question**, and the reason it exists rather
+    than a guard per caller. `chain_definition` is `"{}"` on a V1 row, so
+    `json.loads(row["chain_definition"])["nodes"]` raises `KeyError` there --
+    and every caller that asks this question (`resume`, `retry`, `skip`,
+    `ci_wait`, `rate_limit_retry`) asks it *after* it has already written the
+    row's new status. The raise therefore leaves the item claimed `active` with
+    no walk behind it: it looks running and is not, which is the worst shape a
+    failure can take here.
+
+    A guard in each caller would be a larger diff than this and would leave the
+    sixth caller, written next month, broken in exactly the same way. So the
+    shape decision lives here, once.
+
+    `()` for a row with neither column populated -- a caller distinguishes "no
+    nodes" from "node not found" through `node_index`'s `default`.
+
+    **What it guarantees, precisely: no `KeyError` for any shape Kraft writes.**
+    Not "cannot raise", which earlier drafts of this docstring said and the code
+    never did. A stored `materialized_chain` that a *later* build's
+    `MaterializedChain` no longer validates raises `TemplateLibraryError` from
+    `materialized_chain_of`, and a hand-edited `chain_definition` that is not a
+    mapping of node dicts with `id` keys raises `JSONDecodeError`/`AttributeError`
+    /`KeyError`. Neither is swallowed on purpose: turning a schema mismatch into
+    `()` would make a chain silently look empty, and the callers that read this
+    after a status write are wrapped in `stops.claimed_or_stopped`, which turns a
+    propagating exception into a `needs_human` stop naming the item. Loud and
+    stopped beats quiet and empty.
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is not None:
+        return tuple(node.id for node in v1.chain.nodes)
+    raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+    legacy = json.loads(raw) if raw else {}
+    return tuple(n["id"] for n in (legacy.get("nodes") or []))
+
+
+def node_index(row, node_id, *, default=None):
+    """The position of `node_id` in this item's chain, or `default`.
+
+    Over `chain_node_ids`, so both chain shapes answer the same way and neither
+    raises a `KeyError` for a row Kraft wrote -- see there for the two inputs
+    that do raise, and why that is deliberate. `default=None` for a caller that
+    must refuse ("no current node to skip"); `default=0` for one whose honest
+    fallback is the start of the chain (a `resume` of an item that never reached
+    a node).
+    """
+    ids = chain_node_ids(row)
+    return ids.index(node_id) if node_id in ids else default
+
+
+def gate_node_index(row, gate: str, *, default=None):
+    """Where `gate` sits in this item's ordered nodes, or `default`.
+
+    Beside `node_index` because the answer differs by shape and the difference
+    is exactly one line: a V1 gate **is** a node, so its id is a node id
+    (`gate-is-an-ordered-node`); a legacy gate is a `gate_after` string on the
+    node in front of it. Callers ask "which node does this gate sit at" and
+    should not have to know which.
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is not None:
+        return node_index(row, gate, default=default)
+    raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+    nodes = (json.loads(raw) if raw else {}).get("nodes") or []
+    return next((i for i, n in enumerate(nodes) if n.get("gate_after") == gate), default)
+
+
+def chain_view(row) -> dict:
+    """The item's chain in the shape the API's `chain_definition` field and the
+    SPA's `ChainDefinition` type speak, over either column.
+
+    A V1 row's `chain_definition` is `"{}"`, and the board reads
+    `chain_definition.nodes` to draw its stage bar and to name the current node
+    -- so returning the raw column left the board blank. This projects the
+    frozen V1 snapshot into the same `{template_id, nodes: [...]}` envelope
+    instead, so the board is *correct* for a V1 item rather than merely not
+    crashing.
+
+    **A V1 gate node reports itself under `gate_after`, and that is deliberate.**
+    Eleven SPA consumers ask one of three questions of that field -- "is this
+    node a gate" (`StageGraph`, `Phone`, `MiniChain`, the gate counts), "what is
+    this gate called" (`NotStarted`'s first-gate line, `Inspector/Config`), and
+    "which node owns gate X" (`ItemCard.gateNodeId`, `ChainReviewDiff`'s
+    `tailStart`, `PolicyPage`'s reject-loop detection). Leaving it null answered
+    all three with "this chain has no gates", which is worse than the blank
+    board it replaced: `gateNodeId` returned `None` for every V1 item, so the
+    gate's document door disappeared.
+
+    Teaching eleven consumers a second rule is the mistake this whole class is
+    about, and it is not needed: for a gate node the answer to all three
+    questions *is* its own id. A V1 gate is where its own document lives
+    (`gates.gate_artifact` reads the gate's own `artifact`), so "which node owns
+    gate `spec_approval`" is `spec_approval`. `kind` carries the structural fact
+    beside it for a reader that needs to know a gate is a node rather than a
+    flag on one (`gate-is-an-ordered-node`), and `MiniChain` uses it.
+
+    The rest of the projection exists because the Config tab renders these
+    fields and blanks read as "not configured": `fix_loop` is the *cap key*
+    (`walk._loop_key`, `<node>.fix_loop`) rather than an authored loop name,
+    which is what `PolicyPage` matches against `policy.yaml`'s `loops:`, and
+    `auto_escalate` is whether the gate declares an `auto_review` task, which is
+    what `Inspector/Config`'s toggle enables itself on.
+    """
+    v1 = materialized_chain_of(row)
+    if v1 is None:
+        raw = row["chain_definition"] if "chain_definition" in row.keys() else None
+        legacy = json.loads(raw) if raw else {}
+        return {**legacy, "nodes": legacy.get("nodes") or []}
+    return {"template_id": v1.chain.id, "nodes": [_node_view(n) for n in v1.chain.nodes]}
+
+
+def _node_view(node) -> dict:
+    """One resolved V1 node in the shape the SPA's `ChainNode` speaks. See
+    `chain_view` for why a gate reports itself under `gate_after`."""
+    from kraft.templates.models import GateNode
+
+    gate = node.node if isinstance(node.node, GateNode) else None
+    # The node's *own* steps, not `node.tasks()`: the legacy `tasks`/`steps`
+    # pair is what the node runs, and `tasks()` also yields the recovery pass,
+    # the fix loop, the judge and a gate's reviewer -- which the Config tab
+    # would then render as though they were ordinary work.
+    steps = [[task.path for task in step.tasks] for step in node.steps]
+    return {
+        "id": node.id,
+        "kind": node.node.kind.value,
+        # Canonical task paths, which is what a V1 node has instead of a list of
+        # hook-point names. Empty on a gate, which declares no execution shape.
+        "tasks": [path for group in steps for path in group],
+        "steps": steps or None,
+        "gate_after": node.id if gate is not None else None,
+        "reject_to": gate.reject_to if gate is not None else None,
+        # The cap key `policy.yaml`'s `loops:` would name, not an authored loop
+        # name -- V1 has none. Mirrors `walk._loop_key`; duplicated rather than
+        # imported because `kraft.store` must not import the executor.
+        "fix_loop": f"{node.id}.fix_loop" if node.fix_loop else None,
+        "auto_escalate": node.auto_review is not None if gate is not None else None,
+        "on_failure": [task.path for step in node.on_failure for task in step.tasks] or None,
+    }
+
+
 def node_overrides_of(row) -> dict:
     """`row["node_overrides"]` decoded, `{}` when there are none."""
     raw = row["node_overrides"] if "node_overrides" in row.keys() else None
     return json.loads(raw) if raw else {}
 
 
+def effective_nodes(chain, node_overrides: dict) -> tuple:
+    """A `MaterializedChain`'s ordered nodes with `node_overrides` folded on as
+    a **typed** overlay: `tuple[ResolvedNode, ...]`.
+
+    A read-time view that writes nothing, so
+    `materialized-chain-is-immutable-work-item-input` still holds -- that
+    requirement freezes the stored snapshot, and this never touches it. The
+    blind `{**node, **override}` dict merge `effective_chain` does cannot apply
+    to a typed node at all: an unknown key would be accepted silently, and a
+    key of the wrong type would reach the runtime as one.
+
+    **One key is supported: `auto_escalate: bool`** -- the persisted, publicly
+    exposed override name (`db.py`'s `work_items.node_overrides`,
+    `set_node_overrides`, `PATCH /work-items/{id}`), which keeps its spelling
+    even though the chain field it governs is now `GateNode.auto_review`.
+    The split: the **chain declares** the reviewing task, the **override
+    permits or suppresses** it. So `false` clears `auto_review`, and `true`
+    only confirms what the gate already declares -- **a gate declaring no
+    `auto_review` cannot be switched on by an override, because an override
+    names no task.** Broadening the supported set is Task 8's
+    (`retry-overrides-are-policy-bounded`).
+
+    Every other key in a patch is ignored here rather than rejected: the same
+    `node_overrides` blob also carries `model`/`effort`/`attempts`, which
+    `dispatch_node` and `_policy.resolve_cap` read for themselves from the raw
+    dict. This function answers one question -- what the *nodes* look like.
+    """
+    from kraft.templates.models import GateNode
+
+    if not node_overrides:
+        return chain.chain.nodes
+    out = []
+    for resolved in chain.chain.nodes:
+        patch = node_overrides.get(resolved.id) or {}
+        if (
+            isinstance(resolved.node, GateNode)
+            and patch.get("auto_escalate") is False
+            and resolved.node.auto_review is not None
+        ):
+            # `model_copy`, not a re-validated `model_dump` round trip: the one
+            # supported patch sets a field to `None`, which its own annotation
+            # already permits, so there is nothing a revalidation could catch
+            # that the type does not. A second supported key would change that.
+            # Both halves: the model's field and the `ResolvedNode`'s resolved
+            # slot, so neither a reader holding the typed node nor one holding
+            # the resolved task can see a reviewer this item suppressed.
+            out.append(
+                dataclasses.replace(
+                    resolved,
+                    node=resolved.node.model_copy(update={"auto_review": None}),
+                    auto_review=None,
+                )
+            )
+        else:
+            out.append(resolved)
+    return tuple(out)
+
+
 def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
     """`chain_definition` with `node_overrides` folded over each node.
+
+    The legacy-dict sibling of `effective_nodes`, and retired with the
+    `chain_definition` column itself (Task 5). Its three remaining readers all
+    want a node field V1's schema does not have -- the Config tab's rendered
+    YAML, `effective_auto_escalate_stuck` and `effective_auto_escalate_delay_s`
+    (`auto_escalate_stuck`/`auto_escalate_delay_s` are `policy.yaml` keys in V1,
+    not node keys) -- so there is nothing here for a typed overlay to convert
+    *to*. Anything asking what a V1 node looks like calls `effective_nodes`.
 
     A read-time view, not a write: `chain_definition` stays exactly what
     `templates.materialize` produced at intake (or the last `chain_template`
@@ -163,6 +392,30 @@ def effective_chain(chain_definition: dict, node_overrides: dict) -> dict:
         for node in chain_definition["nodes"]
     ]
     return {**chain_definition, "nodes": nodes}
+
+
+def _v1_node_override(row, key: str):
+    """The per-node override value for `key` on the node the item is *currently*
+    stopped on, for a **V1** row -- or None when nothing sets it.
+
+    `auto_escalate_stuck` and `auto_escalate_delay_s` are the two keys this
+    answers, and in V1 neither is a *node* field at all: `ExecNode`/`GateNode`
+    declare neither, both live in `policy.yaml`, and the only per-node layer left
+    is the override dict itself. So this reads the override and stops -- there is
+    no node value beneath it to fall through to.
+
+    That is a deliberate narrowing of the controller's "read `effective_nodes`":
+    the overlay is typed over `ResolvedNode`, and a typed node has no field named
+    `auto_escalate_stuck` for an overlay to produce. Reading the override layer
+    directly is the whole of what "the per-node value" can mean here.
+
+    Without this, both `effective_*` helpers below returned `default` for every V1
+    row -- `chain_definition` is `"{}"`, so their `"nodes" not in` guard fired
+    first -- while `PATCH /work-items/{id}` validated the override, persisted it
+    and returned 200. The policy-level value still worked; only the per-node
+    override was silently dead.
+    """
+    return node_overrides_of(row).get(row["current_node_id"], {}).get(key)
 
 
 def effective_auto_escalate_stuck(row, default: bool) -> bool:
@@ -192,6 +445,9 @@ def effective_auto_escalate_stuck(row, default: bool) -> bool:
     fallback, just placed where it actually has to sit -- skips the call
     that would crash instead of trying to catch its result afterwards.
     """
+    if row["materialized_chain"] if "materialized_chain" in row.keys() else None:
+        value = _v1_node_override(row, "auto_escalate_stuck")
+        return default if value is None else value
     chain_definition = json.loads(row["chain_definition"])
     if "nodes" not in chain_definition:
         return default
@@ -219,6 +475,9 @@ def effective_auto_escalate_delay_s(row, default: int) -> int:
     `effective_auto_escalate_stuck`: while an item sits `awaiting_gate` or
     `needs_human`, that is still the node the gate/stop belongs to.
     """
+    if row["materialized_chain"] if "materialized_chain" in row.keys() else None:
+        value = _v1_node_override(row, "auto_escalate_delay_s")
+        return default if value is None else value
     chain_definition = json.loads(row["chain_definition"])
     if "nodes" not in chain_definition:
         return default

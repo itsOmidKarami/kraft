@@ -10,21 +10,30 @@ import json
 import os
 import sqlite3
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo, make_repo_with_submodule
+from support.harness import isolated_bd, make_repo, make_repo_with_submodule, v1_resolved
 
 from kraft import builtins as _builtins
 from kraft import db, events, executor, policy, store
 from kraft.adapters import forge
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
 
 #: A repo that deliberately needs no preparation. Most tests here are about
 #: forge dispatch, not environments.
 NO_SETUP = {"setup_command": ""}
+#: The same, on a forge. A V1 forge task always runs on `backend: auto`,
+#: which reads the forge off the repo entry; `resolve` is patched to the fake.
+ON_A_FORGE = {**NO_SETUP, "forge": "github"}
+
+
+def _forge_node(node_id: str, target: str, **task) -> dict:
+    return {
+        "id": node_id,
+        "kind": "exec",
+        "tasks": [{"id": node_id, "kind": "forge", "target": target, **task}],
+    }
 
 
 def test_fake_forge_round_trips_an_mr(tmp_path):
@@ -92,6 +101,77 @@ def test_auto_resolves_to_glab_for_a_gitlab_repo():
 
 def test_auto_resolves_to_gh_for_a_github_repo():
     assert forge.backend_for("auto", "github") == "gh"
+
+
+def test_auto_resolves_to_the_fake_forge_for_a_dev_repo():
+    """Ruling 147: `forge: fake` is the dev-only repo value `just dev` uses to
+    reach the merge-request half of a chain without a real forge."""
+    assert forge.backend_for("auto", "fake") == "fake"
+    assert isinstance(forge.resolve(forge.backend_for("auto", "fake")), forge.FakeForge)
+
+
+def test_a_repo_with_no_forge_is_told_the_remedy_v1_actually_reads():
+    """V1 dispatch always passes `backend: auto`, so a registry `backend:` pin
+    is never read -- naming it sends an operator to a file that changes
+    nothing. The remedy is the repo's own `forge`, and `fake` is for dev."""
+    with pytest.raises(forge.ForgeError) as err:
+        forge.backend_for("auto", None)
+    message = str(err.value)
+    assert "registry.yaml" not in message
+    assert "`forge: fake`" in message and "dev" in message
+
+
+def test_the_dev_fake_forge_remembers_an_mr_across_nodes(tmp_path):
+    """Ruling 147, round 3: a repo on `forge: fake` resolves afresh at every
+    forge node, so the fake must be one instance per process -- otherwise the
+    draft MR `open_mr` created is gone by the time `sync_mr` (and later
+    `mark_ready`, `merge`) look for it. Nothing is monkeypatched: each
+    `run_task` below goes through the real `backend_for`/`resolve`."""
+    repo = make_repo(tmp_path)
+    branch = f"kraft/{tmp_path.name}"
+    subprocess.run(["git", "checkout", "-qb", branch], cwd=repo, check=True)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await database.write(
+                lambda c: c.execute(
+                    "INSERT INTO work_items (id, title, repo, chain_template, "
+                    "chain_definition, status, created_at, updated_at) VALUES "
+                    "('w1','t',?,'default','{}','active','now','now')",
+                    (str(repo),),
+                )
+            )
+            statuses = []
+            for handler in ("open_mr", "sync_mr"):
+                statuses.append(
+                    await forge.run_task(
+                        database,
+                        rd,
+                        session_id=f"s-{handler}",
+                        work_item_id="w1",
+                        node_id=handler,
+                        hook_point=handler,
+                        handler=handler,
+                        backend="auto",
+                        repo_forge="fake",
+                        repo=repo,
+                        orig_repo=repo,
+                        branch=branch,
+                        title="t",
+                    )
+                )
+            return statuses
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == ["done", "done"]
+    fake = forge.resolve(forge.backend_for("auto", "fake"))
+    found = asyncio.run(fake.find_mr(repo=repo, branch=branch))
+    assert found is not None and found.state == "open"
+    assert branch in fake.bodies, "sync_mr's description never reached the MR open_mr made"
+    assert fake.opened_draft[found.number] is False
 
 
 def test_an_explicit_backend_ignores_the_repo_forge():
@@ -238,6 +318,45 @@ def test_sync_mr_marks_the_mr_ready_before_it_pushes(tmp_path, monkeypatch):
     assert (returned, recorded) == ("done", "done")
     assert order == ["mark_ready", "push"]
     assert fake.opened_draft[mr.number] is False
+
+
+def test_mark_ready_undrafts_the_merge_request(tmp_path, monkeypatch):
+    """`mr.mark_ready` is V1's publication step, split out of `sync_mr` so a
+    chain can put its final gate between describing the MR and publishing it.
+    Without a handler the seeded chain stopped here for a human every time
+    (Ruling 48's `config_error` arm), so the chain could never reach merge."""
+    fake = forge.FakeForge()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    assert fake.opened_draft[mr.number] is True
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-ready"
+    )
+
+    assert (returned, recorded) == ("done", "done")
+    assert fake.opened_draft[mr.number] is False
+
+
+def test_mark_ready_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
+    """Same shortcut `sync_mr` and `merge` take (Kraft-7itv): a merged MR's
+    source branch is usually deleted with it, so undrafting it is at best a
+    no-op and at worst a CLI error that stops the item one node from the end
+    with the work already on main."""
+
+    class Refusing(forge.FakeForge):
+        async def mark_ready(self, *, repo, branch, mr):  # pragma: no cover - must not run
+            raise AssertionError("it undrafted a merge request the forge has already merged")
+
+    fake = Refusing()
+    mr = asyncio.run(fake.open_mr(repo=tmp_path, branch="kraft/w1", title="t", body="b"))
+    asyncio.run(fake.merge(repo=tmp_path, branch="kraft/w1", mr=mr))
+
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.mark_ready"), "s-ready-merged"
+    )
+
+    assert (returned, recorded) == ("done", "done")
+    assert "nothing to mark ready" in _session_log(tmp_path, "s-ready-merged")
 
 
 def test_sync_mr_treats_an_already_merged_mr_as_done(tmp_path, monkeypatch):
@@ -1061,21 +1180,22 @@ def test_merge_watch_reuses_the_session_across_a_still_pending_wait(tmp_path, mo
     assert rows[0]["status"] == "waiting"
 
 
-def test_auto_with_no_recorded_forge_fails_the_node_rather_than_escaping(tmp_path, monkeypatch):
-    """The one that pins `resolve` moving inside the `try`.
-
-    Resolution can fail at runtime now. Outside the `try` that exception escapes
-    `run_task` past `finish_session`, leaving a started session row with no
-    result and no log — pause, abandon and reattach all key off that row. Inside,
-    it is an ordinary failed node with a readable line in the log.
+def test_auto_with_no_recorded_forge_stops_as_a_config_error_rather_than_escaping(
+    tmp_path, monkeypatch
+):
+    """Resolution can fail at runtime. Escaping `run_task` past
+    `finish_session` would leave a started session row with no result and no
+    log -- pause, abandon and reattach all key off that row. So it finishes the
+    row, and as `config_error`, not `failed`: nothing was launched, and a failed
+    task would send a fix loop round cycles no agent can win (Kraft-hr0xr).
     """
     fake = forge.FakeForge()
     returned, recorded = _forge_session(
         tmp_path, monkeypatch, fake, "open_mr", "s-auto", backend="auto"
     )
 
-    assert returned == "failed"
-    assert recorded == "failed", "the session row must be finished, not left running"
+    assert returned == "config_error"
+    assert recorded == "config_error", "the session row must be finished, not left running"
     log = _session_log(tmp_path, "s-auto")
     assert "repos.yaml" in log, f"the log must name the fix, got: {log!r}"
     assert not fake.opened, "no merge request may be opened with no forge resolved"
@@ -1105,33 +1225,21 @@ def test_a_forge_error_fails_the_node_rather_than_escaping(tmp_path, monkeypatch
     assert recorded == "failed"
 
 
-def _back_half_template() -> Template:
-    """env_setup, then the three forge nodes in chain order. The front half
-    (spec, plan, implementation) is what the e2e suite covers with a real agent;
-    what was noop until now is everything after verify."""
-    return Template(
-        id="forge-back-half",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None, "fix_loop": None},
-            {"id": "mr_checks", "tasks": ["on.ci.poll"], "gate_after": None, "fix_loop": None},
-            {"id": "merge", "tasks": ["on.merge"], "gate_after": None, "fix_loop": None},
-        ],
+def _back_half_template(**ci_task):
+    """The three forge nodes in chain order. The front half (spec, plan,
+    implementation) is what the e2e suite covers with a real agent; what was
+    noop until now is everything after verify. No `env_setup` node: V1
+    prepares the worktree before the first node."""
+    return v1_resolved(
+        [
+            _forge_node("open_mr", "mr.open_draft"),
+            _forge_node("mr_checks", "mr.ci", **ci_task),
+            _forge_node("merge", "mr.merge"),
+        ]
     )
 
 
-def _forge_registry(backend: str = "fake", **poll) -> Registry:
-    return Registry(
-        hooks={
-            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": backend},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend, **poll},
-            "on.merge": {"kind": "forge", "handler": "merge", "backend": backend},
-        }
-    )
-
-
-def _run_back_half(tmp_path, monkeypatch, fake, *, backend="fake", launch=None, **poll):
+def _run_back_half(tmp_path, monkeypatch, fake, *, launch=None, **ci_task):
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
@@ -1145,16 +1253,16 @@ def _run_back_half(tmp_path, monkeypatch, fake, *, backend="fake", launch=None, 
                 rd,
                 title="forge back half",
                 repo=str(repo),
-                template=_back_half_template(),
+                chain=_back_half_template(**ci_task),
                 bd_cwd=str(tracker),
             )
             await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_forge_registry(backend, **poll),
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=launch or executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=launch or executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
             row = database.read(
                 lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
@@ -1194,14 +1302,31 @@ def test_the_executor_forwards_the_registry_poll_keys(tmp_path, monkeypatch):
     """Task 2's whole payoff is one splat in `kraft.executor.dispatch.dispatch_node`. `ci_poll`
     itself no longer reads `poll_timeout` -- a pending pipeline is always a
     single check that hands the wait back to the scheduler (Kraft-ru98) -- but
-    the binding still has to reach `run_task` at all, which this pins."""
+    the task's `wait:` still has to reach `run_task` at all, which this pins.
+    V1: the poll keys come from the task's own `wait`, not a registry binding,
+    and are read off the adapter call rather than inferred from the status."""
     fake = forge.FakeForge(ci_states=["pending", "success"])
+    seen: list[dict] = []
+    real = forge.run_task
 
-    status = _run_back_half(tmp_path, monkeypatch, fake, poll_timeout=0)
+    async def spy(*a, **kw):
+        seen.append(kw)
+        return await real(*a, **kw)
+
+    monkeypatch.setattr("kraft.executor.dispatch._forge.run_task", spy)
+
+    status = _run_back_half(
+        tmp_path,
+        monkeypatch,
+        fake,
+        wait={"timeout": "5m", "polling": {"initial_interval": "30s"}},
+    )
 
     assert fake.opened, "the merge request should still have been opened"
     assert fake.merged == [], "a pipeline still pending must not reach the merge node"
     assert status == "waiting"
+    ci = next(kw for kw in seen if kw["handler"] == "ci_poll")
+    assert (ci["poll_timeout"], ci["poll_interval"]) == (300.0, 30.0)
 
 
 def test_the_executor_passes_the_repo_forge_to_a_forge_node(tmp_path, monkeypatch):
@@ -1214,7 +1339,7 @@ def test_the_executor_passes_the_repo_forge_to_a_forge_node(tmp_path, monkeypatc
         repo_entry={"forge": "gitlab", "setup_command": ""}, steering_dir=None
     )
 
-    _run_back_half(tmp_path, monkeypatch, fake, backend="auto", launch=launch)
+    _run_back_half(tmp_path, monkeypatch, fake, launch=launch)
 
     assert fake.opened, "open_mr did not run: the repo's forge never reached the node"
     assert fake.merged == [1], "the chain did not reach merge"
@@ -1224,8 +1349,9 @@ def test_a_forge_node_fails_when_auto_has_no_repo_entry(tmp_path, monkeypatch):
     """The other half: `launch=None` is a repo Kraft holds no entry for, and
     `auto` must fail the node rather than guess a CLI."""
     fake = forge.FakeForge(ci_states=["success"])
+    launch = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
 
-    status = _run_back_half(tmp_path, monkeypatch, fake, backend="auto")
+    status = _run_back_half(tmp_path, monkeypatch, fake, launch=launch)
 
     assert not fake.opened, "a merge request was opened with no forge resolved"
     assert status == "needs_human"
@@ -1842,19 +1968,9 @@ def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
     fake = ResolvesAfterRebase(ci_states=["success"], mergeable=False, merge_detail="conflict")
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
 
-    template = Template(
-        id="merge-no-bounce",
-        nodes=[
-            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None, "fix_loop": None},
-            # No `rebase_bounce_to` here -- the point of this test.
-            {"id": "merge", "tasks": ["on.merge"], "gate_after": None, "fix_loop": None},
-        ],
-    )
-    registry = Registry(
-        hooks={
-            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
-            "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
-        }
+    # V1 has no `rebase_bounce_to` to configure at all -- the point of this test.
+    template = v1_resolved(
+        [_forge_node("open_mr", "mr.open_draft"), _forge_node("merge", "mr.merge")]
     )
 
     async def scenario():
@@ -1866,7 +1982,7 @@ def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
                 rd,
                 title="merge without a bounce",
                 repo=str(repo),
-                template=template,
+                chain=template,
                 bd_cwd=str(tracker),
             )
             await _builtins.ensure_worktree(
@@ -1883,9 +1999,9 @@ def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
         finally:
             await database.close()
@@ -1929,7 +2045,7 @@ def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_repo_item
                 rd,
                 title="t",
                 repo=str(root),
-                template=_back_half_template(),
+                chain=_back_half_template(),
                 bd_cwd=str(tracker),
                 submodules=["repos/pkg"],
                 root_merge_policy="bump",
@@ -2048,7 +2164,7 @@ def test_run_task_opens_a_merge_request_per_repo_deepest_first(tmp_path, monkeyp
                 rd,
                 title="t",
                 repo=str(root),
-                template=_back_half_template(),
+                chain=_back_half_template(),
                 bd_cwd=str(tracker),
                 submodules=["repos/pkg"],
                 root_merge_policy="bump",
@@ -2107,7 +2223,7 @@ def test_run_task_is_unchanged_for_a_single_repo_item(tmp_path, monkeypatch):
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_back_half_template(),
+                chain=_back_half_template(),
                 bd_cwd=str(tracker),
             )
             status = await forge.run_task(
@@ -2147,7 +2263,7 @@ def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(tmp_path, m
                 rd,
                 title="t",
                 repo=str(root),
-                template=_back_half_template(),
+                chain=_back_half_template(),
                 bd_cwd=str(tracker),
                 submodules=["repos/pkg"],
                 root_merge_policy="bump_no_mr",
@@ -2211,7 +2327,7 @@ def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monk
                 rd,
                 title="six OTEL metric attributes",
                 repo=str(root),
-                template=_back_half_template(),
+                chain=_back_half_template(),
                 bd_cwd=str(tracker),
                 submodules=["repos/packages"],
                 root_merge_policy="skip",
@@ -2231,9 +2347,9 @@ def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(tmp_path, monk
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_forge_registry("fake"),
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
             repos = database.read(lambda c: store.repos_for(c, wid))
             return status, repos
@@ -2375,37 +2491,16 @@ def test_ci_poll_writes_findings_for_a_code_red_pipeline(tmp_path, monkeypatch):
     assert "test" in payload["findings"][0]["message"]
 
 
-def _ci_fixloop_template() -> Template:
+def _ci_fixloop_template():
     """`mr_checks` with both `fix_loop` and `on_failure` (Task 6/7's shape),
     isolated from open_mr/merge so this test only exercises the repair's own
-    re-measure."""
-    return Template(
-        id="ci-fixloop-waiting",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "mr_checks",
-                "tasks": ["on.ci.poll"],
-                "gate_after": None,
-                "fix_loop": "ci_fix_loop",
-                "on_failure": ["on.mr_checks.repair"],
-            },
-        ],
-    )
-
-
-def _ci_fixloop_registry(backend: str = "fake") -> Registry:
-    return Registry(
-        hooks={
-            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend},
-            # A metadata-only repair (Task 6's real on.mr_checks.repair contract) --
-            # `noop` stands in for it here since its own logic is out of scope for
-            # this test; what matters is that it "succeeds" and touches nothing
-            # `on.ci.poll` reads.
-            "on.mr_checks.repair": {"kind": "builtin", "handler": "noop"},
-        }
-    )
+    re-measure. The repair is a metadata-only stand-in (`true`): what matters
+    is that it "succeeds" and touches nothing the CI wait reads. The fix
+    loop's own task is never dispatched here."""
+    node = _forge_node("mr_checks", "mr.ci")
+    node["on_failure"] = {"tasks": [{"id": "repair", "kind": "subprocess", "command": "true"}]}
+    node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    return v1_resolved([node])
 
 
 def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monkeypatch):
@@ -2426,7 +2521,7 @@ def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monke
 
     pol_path = tmp_path / "policy.yaml"
     pol_path.write_text(
-        "loops:\n  ci_fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
+        "loops:\n  mr_checks.fix_loop: { attempts: 3, wall_clock_s: 3600 }\n"
         "default: { attempts: 3, wall_clock_s: 3600 }\n"
     )
     pol = policy.load_policy(pol_path)
@@ -2440,17 +2535,17 @@ def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monke
                 rd,
                 title="waiting on repair re-measure",
                 repo=str(repo),
-                template=_ci_fixloop_template(),
+                chain=_ci_fixloop_template(),
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_ci_fixloop_registry(),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
             assert result == "waiting"
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
@@ -2468,34 +2563,20 @@ def test_ci_fix_loop_stops_for_waiting_on_the_repairs_re_measure(tmp_path, monke
     asyncio.run(scenario())
 
 
-def _mr_checks_bounce_template() -> Template:
-    """`verify` then `mr_checks`, `mr_checks` carrying `rebase_bounce_to`
-    (Kraft-9h7v) but neither `fix_loop` nor `on_failure` -- this test is about
-    the bounce mechanism itself, not the fix loop Task 6/7 layers on top of
-    it, the same isolation `_rebase_chain_template` uses in
-    `tests/test_executor_walk.py` for `pre_mr_rebase`'s own version of this
-    bounce."""
-    return Template(
-        id="mr-checks-bounce",
-        nodes=[
-            {"id": "verify", "tasks": ["on.test.run"], "gate_after": None, "fix_loop": None},
+def _mr_checks_template():
+    """`verify` then `mr_checks`. The legacy version gave `mr_checks` a
+    `rebase_bounce_to: verify`; V1 has none (the restart span a base change
+    re-enters is Task 7's), so the confirmed-conflict bounce test is gone and
+    this one pins only the real-conflict stop."""
+    return v1_resolved(
+        [
             {
-                "id": "mr_checks",
-                "tasks": ["on.ci.poll"],
-                "gate_after": None,
-                "fix_loop": None,
-                "rebase_bounce_to": "verify",
+                "id": "verify",
+                "kind": "exec",
+                "tasks": [{"id": "suite", "kind": "subprocess", "command": "true"}],
             },
-        ],
-    )
-
-
-def _mr_checks_bounce_registry(backend: str = "fake") -> Registry:
-    return Registry(
-        hooks={
-            "on.test.run": {"kind": "subprocess", "command": [sys.executable, "-c", "exit(0)"]},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": backend},
-        }
+            _forge_node("mr_checks", "mr.ci"),
+        ]
     )
 
 
@@ -2507,101 +2588,6 @@ def _gitignore_engineering(repo):
     (repo / ".gitignore").write_text(".engineering/\n")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "gitignore .engineering"], cwd=repo, check=True)
-
-
-def test_ci_poll_rebases_and_bounces_on_a_confirmed_conflict(tmp_path, monkeypatch):
-    """A settled green pipeline the forge still reports unmergeable, with a
-    clean rebase available, must not just move `base_ref` -- it has to
-    actually land the chain back on `verify`, the same way `pre_mr_rebase`'s
-    own bounce already does
-    (`test_a_moved_base_bounces_back_to_verify_with_a_drift_note`,
-    `tests/test_executor_walk.py`)."""
-    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    _gitignore_engineering(repo)
-
-    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
-    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-
-    pol_path = tmp_path / "policy.yaml"
-    pol_path.write_text(
-        "loops:\n  rebase_bounce: { attempts: 2, wall_clock_s: 3600 }\n"
-        "default: { attempts: 3, wall_clock_s: 3600 }\n"
-        # Kraft-lpdd: this suite is about the rebase bounce's own stop, not
-        # the unrelated auto-escalate trigger that `needs_human` would
-        # otherwise also fire.
-        "auto_escalate_stuck: false\n"
-    )
-    pol = policy.load_policy(pol_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="bounce on conflict",
-                repo=str(repo),
-                template=_mr_checks_bounce_template(),
-                bd_cwd=str(tracker),
-            )
-            await _builtins.ensure_worktree(
-                database, rd, repo=str(repo), work_item_id=wid, repo_entry=NO_SETUP
-            )
-
-            # Origin moves in a way the branch does not touch, so the forced
-            # rebase this triggers is clean.
-            (repo / "moved.txt").write_text("moved on\n")
-            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-m", "moved on upstream"], cwd=repo, check=True)
-            new_head = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
-            ).stdout.strip()
-
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=_mr_checks_bounce_registry(),
-                bd_cwd=str(tracker),
-                policy=pol,
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
-            )
-            # Not "completed": the second pass through mr_checks hits the
-            # same FakeForge-reported "still unmergeable" verdict, but this
-            # time the branch is already up to date with `default`, so the
-            # forced rebase has nothing left to do (`refresh_worktree_base`'s
-            # own "already an ancestor" short-circuit returns None) and
-            # `status` stays "conflict" -- a bare node with neither `fix_loop`
-            # nor `on_failure` fails straight to needs_human at that point.
-            # That second failure is not a bug this test is pinning; it is
-            # FakeForge's `mergeable=False` being a constant rather than
-            # something a real forge would clear once the branch is current.
-            # What matters here is that the *first* pass bounced at all.
-            assert result == "needs_human"
-
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT base_ref FROM work_items WHERE id = ?", (wid,)
-                ).fetchone()
-            )
-            assert row["base_ref"] == new_head
-
-            starts = [
-                e["payload"]["node_id"]
-                for e in database.read(lambda c: events.read_after(c, 0, wid))
-                if e["type"] == "node_started"
-            ]
-            assert starts.count("verify") == 2, (
-                f"expected the confirmed conflict's forced rebase to bounce the "
-                f"chain back to verify a second time, got {starts}"
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
 
 
 def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypatch):
@@ -2641,7 +2627,7 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
                 rd,
                 title="real conflict",
                 repo=str(repo),
-                template=_mr_checks_bounce_template(),
+                chain=_mr_checks_template(),
                 bd_cwd=str(tracker),
             )
             worktree = await _builtins.ensure_worktree(
@@ -2673,10 +2659,10 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_mr_checks_bounce_registry(),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
             assert result == "needs_human"
 
@@ -2693,7 +2679,7 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
             session_row = database.read(
                 lambda c: c.execute(
                     "SELECT log_path FROM worker_sessions WHERE work_item_id = ? "
-                    "AND node_id = 'mr_checks' AND hook_point = 'on.ci.poll' "
+                    "AND node_id = 'mr_checks' AND hook_point = 'mr_checks.main.mr_checks' "
                     "ORDER BY created_at DESC LIMIT 1",
                     (wid,),
                 ).fetchone()
@@ -2726,29 +2712,13 @@ def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_pat
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
-    template = Template(
-        id="forge-back-half-watch",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None, "fix_loop": None},
-            {"id": "mr_checks", "tasks": ["on.ci.poll"], "gate_after": None, "fix_loop": None},
-            {"id": "merge", "tasks": ["on.merge"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "post_merge_watch",
-                "tasks": ["on.merge.watch"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
-        ],
-    )
-    registry = Registry(
-        hooks={
-            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-            "on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"},
-            "on.ci.poll": {"kind": "forge", "handler": "ci_poll", "backend": "fake"},
-            "on.merge": {"kind": "forge", "handler": "merge", "backend": "fake"},
-            "on.merge.watch": {"kind": "forge", "handler": "merge_watch", "backend": "fake"},
-        }
+    template = v1_resolved(
+        [
+            _forge_node("open_mr", "mr.open_draft"),
+            _forge_node("mr_checks", "mr.ci"),
+            _forge_node("merge", "mr.merge"),
+            _forge_node("post_merge_watch", "mr.post_merge_ci"),
+        ]
     )
 
     async def scenario():
@@ -2760,16 +2730,16 @@ def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_pat
                 rd,
                 title="watch after merge",
                 repo=str(repo),
-                template=template,
+                chain=template,
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
             )
             row = database.read(
                 lambda c: c.execute(
@@ -2785,7 +2755,7 @@ def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_pat
     assert result == "completed"
     assert status == "completed"
     node_order = [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"]
-    assert node_order == ["env_setup", "open_mr", "mr_checks", "merge", "post_merge_watch"]
+    assert node_order == ["open_mr", "mr_checks", "merge", "post_merge_watch"]
     assert evts[-1]["type"] == "work_item_completed"
     assert _bd_status(tracker, bead_id) == "closed"
 
@@ -2851,3 +2821,38 @@ def test_merge_watch_runs_once_for_a_multi_repo_item(tmp_path, monkeypatch):
 
     assert asyncio.run(scenario()) == "done"
     assert len(reads) == 1, reads
+
+
+def test_a_declared_but_unimplemented_forge_target_stops_for_a_human(tmp_path, monkeypatch):
+    """Ruling 48. `mr.automated_review` and `mr.external_approval` are
+    `ForgeAction` members with no handler, and the seeded V1 chain names both --
+    so `failed` told an operator their pipeline had broken and burned the node's
+    fix loop finding out. A declared-but-unimplemented action is a configuration
+    limit: `config_error`, which is terminal at every tier, so `walk_node` stops
+    for a person with the target and its owning task named.
+
+    (Retargeted from `mr.mark_ready` when Task 5a implemented that one -- the
+    assertion is about the *unimplemented* arm, so it has to name a target that
+    is still unimplemented or it stops testing anything.)
+    """
+    fake = forge.FakeForge()
+    returned, recorded = _forge_session(
+        tmp_path, monkeypatch, fake, forge.run.handler_for("mr.automated_review"), "s-unimpl"
+    )
+    assert returned == "config_error"
+    assert recorded == "config_error"
+    log = (RunDirs(tmp_path / "run").logs / "s-unimpl.log").read_text()
+    assert "mr.automated_review" in log and "Task 9" in log
+
+
+def test_every_v1_forge_target_either_maps_or_names_its_owner():
+    """The two tables must not drift: a target with neither a handler nor an
+    owner would reach the stop above with "a later task" and tell the human
+    nothing."""
+    from kraft.templates.models import ForgeAction
+
+    for action in ForgeAction:
+        assert (
+            action.value in forge.run.V1_HANDLERS
+            or action.value in forge.run._UNIMPLEMENTED_TARGETS
+        ), action

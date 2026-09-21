@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import json
+import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,9 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import Registry
+from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+
+logger = logging.getLogger(__name__)
 
 
 def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
@@ -38,61 +42,103 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     return None
 
 
-def gate_node_index(chain: dict, gate: str) -> int:
-    return next(i for i, n in enumerate(chain["nodes"]) if n.get("gate_after") == gate)
+def reject_loop_key(gate: str) -> str:
+    """The `retry_counters` key a gate's reject loop counts under.
+
+    One spelling, two writers. `apply_rejection` bumps it and
+    `api/routes/lifecycle.py`'s retry clears it, and they had the f-string each
+    -- `f"{gate}_reject_loop"` here and `f"{node.id}_reject_loop"` there. Those
+    agree only because a V1 gate's node id *is* its gate name, which is true today
+    and is exactly the kind of coincidence that stops being true quietly: a retry
+    that cleared a key nothing bumped leaves the gate re-opening onto a spent
+    counter, and every rejection after that is refused forever (Kraft-ko7j §A4).
+    `store.retry_after_cap`'s docstring names this function rather than a third
+    spelling of the same format string.
+    """
+    return f"{gate}_reject_loop"
 
 
-def gate_artifact(registry, run_dirs, row, gate: str | None) -> str | None:
+def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
+    """Where `gate` sits in the chain's ordered nodes.
+
+    A V1 gate *is* a node (`gate-is-an-ordered-node`), so its identity is that
+    node's id and there is nothing to search a task list for. Raises
+    `StopIteration` for a gate this chain does not have, exactly as the
+    `gate_after` scan it replaces did.
+    """
+    return next(i for i, n in enumerate(nodes) if isinstance(n.node, GateNode) and n.id == gate)
+
+
+def gate_artifact(run_dirs, row, gate: str | None) -> str | None:
     """The document the pending gate is a decision *about*, or None.
 
-    Derived from the binding, not stored: the gate's node names its hooks, a
-    hook with `artifact:` names a kind, and the kind plus the work item id is
-    the path (`agent.artifact_path`). Nothing here to migrate and nothing to go
-    stale when a rerun revises the same file.
+    The gate's own `artifact` field names the kind
+    (`gate-owns-gate-behaviour`), and the kind plus the work item id is the path
+    (`agent.artifact_path`). It is not stored and nothing goes stale when a
+    re-run revises the same file.
 
-    None when there is no pending gate, when none of the node's hooks produce
-    an artifact, or when the file is not on disk — the last case is an agent
-    that reported done without honouring the contract, and the gate is still
-    answerable, just without a document to read.
+    Replaces a scan of the *preceding* node's hook bindings for an `artifact:`
+    key -- a gate that had to be told what it was about by the node in front of
+    it, which is exactly the positional inference V1 deletes.
+
+    None when there is no pending gate, when the gate declares no `artifact`, or
+    when the file is not on disk -- the last case is an agent that reported done
+    without honouring the contract, and the gate is still answerable, just
+    without a document to read.
     """
     if not gate:
         return None
-    chain = json.loads(row["chain_definition"])
-    try:
-        node = chain["nodes"][gate_node_index(chain, gate)]
-    except StopIteration:
+    chain = store.materialized_chain_of(row)
+    if chain is None:
         return None
-    worktree = run_dirs.worktrees / row["id"]
-    for task in node["tasks"]:
-        kind = registry.hooks.get(task, {}).get("artifact")
-        if not kind:
-            continue
-        rel = _agent.artifact_path(kind, row["id"])
-        if (worktree / rel).is_file():
-            return rel
-    return None
+    node = next(
+        (n for n in chain.chain.nodes if isinstance(n.node, GateNode) and n.id == gate), None
+    )
+    if node is None or node.node.artifact is None:
+        return None
+    rel = _agent.artifact_path(node.node.artifact, row["id"])
+    return rel if (run_dirs.worktrees / row["id"] / rel).is_file() else None
 
 
-def reject_target(chain: dict, gate_index: int, requested: str | None) -> int:
+def preceding_exec_node(nodes: Sequence[ResolvedNode], gate_index: int) -> int | None:
+    """The index of the last execution node before `gate_index`, or None.
+
+    What a rejection re-enters at when nothing named a target: the node that
+    produced what the gate is about, so the smallest amount of work is redone
+    and the repair is *measured* rather than trusted (Kraft-rv6i). The gate node
+    itself is no longer a usable answer -- a V1 gate has no execution shape at
+    all, so re-entering there dispatches nothing and immediately re-requests the
+    same gate, a ping-pong bounded only by the reject loop's cap (Ruling 54).
+    """
+    return next(
+        (i for i in range(gate_index - 1, -1, -1) if isinstance(nodes[i].node, ExecNode)), None
+    )
+
+
+def reject_target(nodes: Sequence[ResolvedNode], gate_index: int, requested: str | None) -> int:
     """The index a rejection re-enters the chain at (Kraft-ko7j).
 
-    `requested`, else the gate node's `reject_to`, else the gate node itself.
-    A `reject_to` that `materialize` dropped — an intake attachment satisfied
-    that node's gate — falls back to the gate node rather than raising; a bad
-    `node` in the request body is the caller's error and raises `ValueError`.
+    `requested`, else the gate node's `reject_to`, else `preceding_exec_node`,
+    else the gate node itself (a gate with nothing before it: there is no work
+    to redo, so the gate simply re-opens carrying the note).
+
+    `Chain`'s validator already guarantees an authored `reject_to` names an
+    *earlier execution node*, so the only `reject_to` that can miss is one whose
+    target `trim_for_attachments` dropped -- and that one is nulled at trim
+    time, so it arrives here as no target at all rather than as a dangling name.
+
+    `requested` is the `node` field of an HTTP request body and is validated by
+    nothing, so it keeps its own bounds check and its own `ValueError`: a human
+    rejecting *forward* past the gate would otherwise skip every node in between.
     """
-    nodes = chain["nodes"]
-    name = requested or nodes[gate_index].get("reject_to")
+    gate = nodes[gate_index]
+    name = requested or (gate.node.reject_to if isinstance(gate.node, GateNode) else None)
     if not name:
-        return gate_index
-    index = next((i for i, n in enumerate(nodes) if n["id"] == name), None)
-    if index is None or index > gate_index:
-        if requested:
-            raise ValueError(
-                f"cannot reject to {name!r}: not a node of this chain at or before "
-                f"{nodes[gate_index]['id']!r}"
-            )
-        return gate_index
+        fallback = preceding_exec_node(nodes, gate_index)
+        return gate_index if fallback is None else fallback
+    index = next((i for i, n in enumerate(nodes) if n.id == name), None)
+    if index is None or index >= gate_index:
+        raise ValueError(f"cannot reject to {name!r}: not a node of this chain before {gate.id!r}")
     return index
 
 
@@ -101,7 +147,7 @@ async def apply_rejection(
     policy,
     *,
     work_item_id: str,
-    chain: dict,
+    nodes: Sequence[ResolvedNode],
     gate: str,
     note: str,
     node: str | None = None,
@@ -120,15 +166,15 @@ async def apply_rejection(
     pending and the events table untouched -- the property `kraft.api` held when
     this logic lived there.
     """
-    gate_index = gate_node_index(chain, gate)
-    target = reject_target(chain, gate_index, node)
-    key = f"{gate}_reject_loop"
+    gate_index = gate_node_index(nodes, gate)
+    target = reject_target(nodes, gate_index, node)
+    key = reject_loop_key(gate)
     cap = _policy.resolve_cap(policy, key)
     count, started_at, cap = await db.write(
         lambda c, cap=cap: store.bump_counter(c, work_item_id, key, cap)
     )
     replan = _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "ok"
-    target_id = chain["nodes"][target]["id"]
+    target_id = nodes[target].id
     await db.write(
         lambda c: store.reject_gate(
             c, work_item_id, gate, note, reopen=replan, node=target_id, by=by, verdict=verdict
@@ -140,7 +186,7 @@ async def apply_rejection(
         lambda c: store.mark_needs_human(
             c,
             work_item_id,
-            chain["nodes"][gate_index]["id"],
+            nodes[gate_index].id,
             f"{key} exhausted after {count - 1} rejection(s)",
             {"cycles": count - 1, "attempts": cap.attempts},
         )
@@ -157,12 +203,25 @@ def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     return False
 
 
-async def maybe_gate(db, work_item_id: str, node: dict) -> bool:
-    """If the node ends in a gate, request it and return True (caller stops the walk)."""
-    gate = node.get("gate_after")
-    if not gate:
+async def maybe_gate(db, work_item_id: str, node: ResolvedNode) -> bool:
+    """Whether the walk stops here because `node` is an unanswered gate
+    (`gate-node-opens-and-halts-execution`).
+
+    True opens the gate and stops the caller. False means walk on, which covers
+    both an execution node and a gate this item has *already* cleared -- a
+    resumed or re-entered walk passes over an approved gate rather than
+    re-requesting one a human has answered.
+
+    `enter_node` before the request: a gate node is where the item now is, so
+    `current_node_id` has to say so for resume and for the approve door to find
+    it.
+    """
+    if not isinstance(node.node, GateNode):
         return False
-    await db.write(lambda c: store.request_gate(c, work_item_id, node["id"], gate))
+    if gate_cleared(db, work_item_id, node.id):
+        return False
+    await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
+    await db.write(lambda c: store.request_gate(c, work_item_id, node.id, node.id))
     return True
 
 
@@ -199,13 +258,11 @@ async def review_gates(
         if gate is None or not row["auto_gate"]:
             return status
         # The item's own chain, node overrides folded in (UI v2 · 04 point 1):
-        # an `auto_escalate` override must arm/disarm review here the same way
-        # it does the Config tab's read, not just the template's own binding.
-        chain = store.effective_chain(
-            json.loads(row["chain_definition"]), store.node_overrides_of(row)
-        )
-        gate_index = gate_node_index(chain, gate)
-        node = chain["nodes"][gate_index]
+        # an `auto_escalate` override must suppress review here the same way it
+        # does the Config tab's read, not just the gate's own declaration.
+        nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+        gate_index = gate_node_index(nodes, gate)
+        node = nodes[gate_index]
         # Armed, past its delay-before-fire, and not already reviewed this
         # round (Kraft-vyk8) -- see `auto_check_due`. At the default delay of
         # 0 the elapsed half is always true, so this stays a no-op for
@@ -235,7 +292,6 @@ async def review_gates(
             work_item_id=work_item_id,
             gate=gate,
             node=node,
-            registry=registry,
             launch=launch,
         )
 
@@ -265,66 +321,90 @@ async def review_gates(
                 )
             )
             return status
-        if verdict == "approve":
-            # An approval is not just a status change: `chain_finalized` splices
-            # the reviewed nodes in, and every artifact-carrying gate indexes its
-            # document, which nothing else durably keeps. `kraft.api.routes.gates.apply_approval` is
-            # that work, reached through `on_approve` because it needs the
-            # indexer this layer has no handle on. Without the callback the
-            # effects cannot run, so the gate is left for a person rather than
-            # cleared with half of them (Kraft-zr3s).
-            if on_approve is None:
-                return status
-            chain, reason = await on_approve(row, gate)
-            if chain is None:
-                await db.write(
-                    lambda c, reason=reason, node=row["current_node_id"]: store.mark_needs_human(
-                        c, work_item_id, node, reason
-                    )
-                )
-                return "needs_human"
-            await db.write(
-                lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
-            )
-            start, steer = gate_node_index(chain, gate) + 1, None
-        else:
-            # `fixed` is a rejection that repaired something on its way out: it
-            # re-enters at the gate node so the repair is measured rather than
-            # trusted -- the Kraft-rv6i rule, applied at a gate. `reject` takes
-            # the chain's own `reject_to`. Both count against the same cap.
-            target = await apply_rejection(
-                db,
-                policy,
-                work_item_id=work_item_id,
-                chain=chain,
-                gate=gate,
-                note=note,
-                node=node["id"] if verdict == "fixed" else None,
-                by="agent",
-                verdict=verdict,
-            )
-            if target is None:
-                return "needs_human"
-            start, steer = target, note
-
-        status = await walk.run_once(
+        # Bracketed from *before* the claim to the hand-off, for the same reason
+        # `apply_approval`'s route door is: `store.approve_gate` below is an
+        # unconditional `UPDATE work_items SET status = 'active'`, and
+        # `gate_node_index(approved, gate) + 1` is a defaultless `next(...)` that
+        # raises `StopIteration` for a gate this chain does not have -- after the
+        # claim. `dev/check_claim_handoff.py` cannot see that exit (it is a
+        # propagating exception, not a `return`/`raise` statement), which is
+        # exactly why the fix is a bracket over the region rather than a stop per
+        # exit the checker happens to list.
+        async with stops.claimed_or_stopped(
             db,
-            run_dirs,
-            work_item_id=work_item_id,
-            registry=registry,
-            policy=policy,
-            launch=launch,
-            bd_cwd=bd_cwd,
-            start_index=start,
-            steer=steer,
-            # An agent's verdict is not a human's steer (Kraft-s7c04.6). Without
-            # this the re-run's prompt led with "A human has steered this run"
-            # over a note an agent wrote -- and on a `fixed` verdict, over
-            # commits the agent had just made -- which is how a review brief
-            # came to tell the human they had fixed it themselves. `steer` is
-            # None on the approve path, where `source` is never read.
-            steer_source="gate_review",
-        )
+            work_item_id,
+            row["current_node_id"],
+            reason="gate review cleared or rejected the gate but could not start a walk",
+        ):
+            if verdict == "approve":
+                # An approval is not just a status change: `chain_finalized` splices
+                # the reviewed nodes in, and every artifact-carrying gate indexes its
+                # document, which nothing else durably keeps.
+                # `kraft.api.routes.gates.apply_approval` is that work, reached
+                # through `on_approve` because it needs the
+                # indexer this layer has no handle on. Without the callback the
+                # effects cannot run, so the gate is left for a person rather than
+                # cleared with half of them (Kraft-zr3s).
+                if on_approve is None:
+                    return status
+                approved, reason = await on_approve(row, gate)
+                if approved is None:
+                    await db.write(
+                        lambda c, reason=reason, node=row["current_node_id"]: (
+                            store.mark_needs_human(c, work_item_id, node, reason)
+                        )
+                    )
+                    return "needs_human"
+                await db.write(
+                    lambda c, gate=gate: store.approve_gate(c, work_item_id, gate, by="agent")
+                )
+                start, steer = gate_node_index(approved, gate) + 1, None
+            else:
+                # `fixed` is a rejection that repaired something on its way out, so
+                # the repair is measured rather than trusted -- the Kraft-rv6i rule,
+                # applied at a gate. It re-enters at the **execution node before the
+                # gate**, not at the gate itself: a V1 gate has no execution shape,
+                # so "re-enter at the gate" would dispatch nothing and re-request
+                # the same gate (Ruling 54). `None` when the gate is first in the
+                # chain -- there is nothing to re-measure, and `reject_target`'s own
+                # fallback lands back on the gate. `reject` takes the chain's own
+                # `reject_to`. Both count against the same cap.
+                repaired = preceding_exec_node(nodes, gate_index)
+                target = await apply_rejection(
+                    db,
+                    policy,
+                    work_item_id=work_item_id,
+                    nodes=nodes,
+                    gate=gate,
+                    note=note,
+                    node=nodes[repaired].id
+                    if verdict == "fixed" and repaired is not None
+                    else None,
+                    by="agent",
+                    verdict=verdict,
+                )
+                if target is None:
+                    return "needs_human"
+                start, steer = target, note
+
+            status = await walk.run_once(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                registry=registry,
+                policy=policy,
+                launch=launch,
+                bd_cwd=bd_cwd,
+                start_index=start,
+                steer=steer,
+                # An agent's verdict is not a human's steer (Kraft-s7c04.6). Without
+                # this the re-run's prompt led with "A human has steered this run"
+                # over a note an agent wrote -- and on a `fixed` verdict, over
+                # commits the agent had just made -- which is how a review brief
+                # came to tell the human they had fixed it themselves. `steer` is
+                # None on the approve path, where `source` is never read.
+                steer_source="gate_review",
+            )
     return status
 
 
@@ -363,13 +443,17 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
     if gate is not None:
         if not row["auto_gate"]:
             return False
-        chain = store.effective_chain(
-            json.loads(row["chain_definition"]), store.node_overrides_of(row)
-        )
-        node = chain["nodes"][gate_node_index(chain, gate)]
-        if not node.get("auto_escalate"):
+        from kraft.executor import walk
+
+        nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
+        node = nodes[gate_node_index(nodes, gate)]
+        # The gate's own declared reviewing task is the whole arming condition
+        # (`gate-auto-review-is-explicit-and-bounded`): no task, no review, and
+        # no `auto_escalate: true` override can supply one.
+        if node.auto_review is None:
             return False
-        if _gate_already_reviewed(evts, gate):
+        attempts = policy.auto_review_attempts if policy else 1
+        if _gate_review_attempts(evts, gate) >= attempts:
             return False
         elapsed = _seconds_since(
             evts,
@@ -389,12 +473,33 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
     return elapsed is not None and elapsed >= delay
 
 
-def _gate_already_reviewed(evts: list, gate: str) -> bool:
-    """True iff the current `gate_requested <gate>` already had a review
-    *attempt* -- a `gate_auto_review_started`, or any
-    `gate_auto_review_skipped` for this gate regardless of `reason`
-    (`"undecided"`, `"budget"`) -- since it was requested. One review
-    attempt per `gate_requested` is the contract: every non-terminating
+def _gate_review_attempts(evts: list, gate: str) -> int:
+    """How many review *attempts* the current `gate_requested <gate>` has had
+    since it was requested.
+
+    An attempt is one `gate_auto_review_started`, **plus** one
+    `gate_auto_review_skipped` that does not immediately follow a `_started`.
+    The pairing is **structural and reads no `reason` at all**: a `_started`
+    opens an attempt, the next skip closes the one it belongs to without adding
+    to the tally, and an unpaired skip counts for itself whatever its reason
+    says. So a caller that returns without launching spends an attempt no matter
+    which reason string it writes, and `reason` is documentation for a human
+    reading the timeline rather than an input to this count.
+
+    Two superseded descriptions of this function have each sent a careful reader
+    to the wrong conclusion, so the rule above is the only one to trust and the
+    history is kept only to stop a third: it once read "any skip regardless of
+    reason", which contradicted its own body and led a reviewer to clear a real
+    re-dispatch loop as safe; it was then corrected to "any skip whose reason is
+    not `undecided`", which described the body accurately *in the same commit
+    that replaced that body* with the pairing pass, so it was false on arrival.
+    Neither claim is true now. If you change the tally rule, change **this
+    paragraph and the one above it first** -- both previous failures were a
+    leading summary left behind by a correct body.
+
+    `policy.auto_review_attempts` is the bound the caller compares this
+    against; 1, its default, is the one-attempt-per-`gate_requested` contract
+    this used to hardcode as a boolean. Every non-terminating
     outcome (an undecided verdict, a budget-breach skip, or a crash
     mid-review that `deps.guard` turns into `mark_needs_human`) must
     suppress the next tick's re-attempt the same
@@ -414,18 +519,49 @@ def _gate_already_reviewed(evts: list, gate: str) -> bool:
     `gate_auto_review_started` counts as the attempt (`gate_review.review`
     writes it before it launches anything), so nothing has to stamp a
     separate marker for the crash case.
+
+    One attempt, not two, when a review ran and came back `undecided`: that
+    writes a `gate_auto_review_started` *and* a `gate_auto_review_skipped
+    {reason: undecided}`, and counting both would halve every bound above 1. A
+    `{reason: budget}` skip is the other way round -- it is refused before
+    anything launches, so it has no `_started` of its own and has to count for
+    itself.
+
+    So the rule is **"every `_started`, plus every `_skipped` that is not the tail
+    of one"**, and it is implemented as exactly that: a chronological pass that
+    pairs an `undecided` skip with the `_started` it closes, and counts an
+    unpaired skip for itself. Approximating "not the tail of one" as "reason is
+    not `undecided`" is what it used to do, and that made correctness depend on
+    every early return picking a distinct reason string -- one that did not (the
+    non-agent `auto_review` guard in `gate_review.review`) left the tally at zero
+    and the delay poller re-arming the same dead gate every tick forever. The
+    structural pairing cannot be got wrong by a caller, so the reason is now
+    documentation rather than load-bearing.
     """
+    # Chronological, not the reverse scan the boundary search wants, because
+    # pairing a skip with the `_started` before it needs the events in order.
+    since: list[dict] = []
     for e in reversed(evts):
         if e["type"] == "gate_requested" and e["payload"].get("gate") == gate:
-            return False
+            break
         if e["type"] in _RUN_BOUNDARY:
-            return False
-        if (
-            e["type"] in ("gate_auto_review_skipped", "gate_auto_review_started")
-            and e["payload"].get("gate") == gate
+            break
+        if e["payload"].get("gate") == gate and e["type"] in (
+            "gate_auto_review_started",
+            "gate_auto_review_skipped",
         ):
-            return True
-    return False
+            since.append(e)
+    attempts = 0
+    open_started = False
+    for e in reversed(since):
+        if e["type"] == "gate_auto_review_started":
+            attempts += 1
+            open_started = True
+        elif open_started:
+            open_started = False  # the tail of the attempt already counted
+        else:
+            attempts += 1
+    return attempts
 
 
 def _seconds_since(evts: list, predicate) -> float | None:
@@ -489,7 +625,7 @@ _AUTO_ESCALATE_MESSAGE = (
 #: itself, every `escalation_message` (counted, not boundary-checked,
 #: below), and every session-lifecycle/progress event
 #: (`worker_session_created`/`_started`/`_exited`/`_paused`,
-#: `session_unknown`, `session_reattached`, `task_progress`,
+#: `session_unknown`, `session_reattached`, `plan_progress`,
 #: `budget_changed`, ...) -- is ignored by the scan rather than treated as
 #: a boundary. That distinction is load-bearing: `store.create_session`
 #: appends `worker_session_created` unconditionally for *every* dispatched
@@ -788,55 +924,100 @@ async def resume_after_escalation(
     # A failed claim means a human abandoned, paused or otherwise moved the
     # item during the minutes the escalation turn ran: the deferred request
     # is dropped rather than resurrecting a stop it is no longer on.
-    claimed = await db.write(
-        lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
-    )
-    if not claimed:
-        status = status_of(db, work_item_id)
+    # Bracketed from *before* the claim to the hand-off. There is no
+    # `task_is_live` callback -- this site awaits its walk inline rather than
+    # registering a task, so by the time the bracket's `finally` runs a successful
+    # walk has already set its own terminal status and the bracket's `active` test
+    # is false. `walk.chain_of` raises `LookupError` on a legacy row and
+    # `store.node_index` answers `None` for a node this chain does not have;
+    # both used to leave the item claimed.
+    #
+    # `handed_off=lambda: not claimed` is what keeps the dropped-self-retry return
+    # inside the bracket honest. A claim out of `needs_human` fails when the status
+    # has moved, and one thing it can have moved to is `active` -- a human resumed
+    # the item during the minutes the escalation turn ran. Without this callback the
+    # bracket would stamp `needs_human` over an item a walk owns, which is the exact
+    # opposite of what `work_item_self_retry_dropped` means. The bracket covers only
+    # the claim *this* call made; whoever else set the status owns it.
+    #
+    # It is a proxy, and worth knowing which one: `claimed` answers "did the
+    # assignment happen", not "did the UPDATE commit". An exception raised between
+    # `claim_for_run`'s commit and the binding below leaves `claimed` False and the
+    # bracket standing aside over an item this call did claim. Narrower than
+    # anything else on this path -- `db.write` commits and returns with nothing
+    # between -- and the alternative (reading the status back) is the thing this
+    # predicate exists to skip.
+    claimed = False
+    async with stops.claimed_or_stopped(
+        db,
+        work_item_id,
+        node_id,
+        reason="the escalation retry claimed this item but could not start a walk",
+        handed_off=lambda: not claimed,
+    ):
+        claimed = await db.write(
+            lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
+        )
+        if not claimed:
+            status = status_of(db, work_item_id)
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    "work_item_self_retry_dropped",
+                    {"node_id": node_id, "status": status},
+                )
+            )
+            return status
+        worktree = run_dirs.worktrees / work_item_id
+        try:
+            new_base = await _builtins.refresh_worktree_base(
+                worktree, Path(row["repo"]), store.branch_for(row)
+            )
+        except RuntimeError as exc:
+            reason = str(exc)
+            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+            return status_of(db, work_item_id)
+        if new_base:
+            await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
         await db.write(
-            lambda c: events.append(
+            lambda c: store.retry_after_cap(
                 c,
                 work_item_id,
-                "work_item_self_retry_dropped",
-                {"node_id": node_id, "status": status},
+                node_id,
+                key,
+                steer,
+                gate_key=gate_key,
+                escalated=True,
+                seeded=seeded,
             )
         )
-        return status
-    worktree = run_dirs.worktrees / work_item_id
-    try:
-        new_base = await _builtins.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
-        )
-    except RuntimeError as exc:
-        reason = str(exc)
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
-        return status_of(db, work_item_id)
-    if new_base:
-        await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
-    await db.write(
-        lambda c: store.retry_after_cap(
-            c,
-            work_item_id,
-            node_id,
-            key,
-            steer,
-            gate_key=gate_key,
-            escalated=True,
-            seeded=seeded,
-        )
-    )
-    chain = json.loads(row["chain_definition"])
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
-    return await walk.run(
-        db,
-        run_dirs,
-        work_item_id=work_item_id,
-        registry=registry,
-        bd_cwd=bd_cwd,
-        start_index=start,
-        policy=policy,
-        steer=steer,
-        steer_source="seeded" if seeded else "human",
-        launch=launch,
-        on_approve=on_approve,
-    )
+        # `store.node_index`, not `next(i for i, n in enumerate(walk.chain_of(
+        # row).chain.nodes) ...)`: that raised `LookupError` for a legacy row and
+        # `StopIteration` for an unknown node, both *after* `retry_after_cap`.
+        start = store.node_index(row, node_id)
+        if start is None:
+            # No `return` here: the status this function reports has to be read
+            # *after* the bracket has performed its stop, or the caller is told
+            # `active` about an item that is about to be `needs_human`. Falls
+            # through to the read below the `async with`.
+            logger.warning(
+                "escalation retry: %s has no node %r in its chain, not relaunching",
+                work_item_id,
+                node_id,
+            )
+        else:
+            return await walk.run(
+                db,
+                run_dirs,
+                work_item_id=work_item_id,
+                registry=registry,
+                bd_cwd=bd_cwd,
+                start_index=start,
+                policy=policy,
+                steer=steer,
+                steer_source="seeded" if seeded else "human",
+                launch=launch,
+                on_approve=on_approve,
+            )
+    return status_of(db, work_item_id)

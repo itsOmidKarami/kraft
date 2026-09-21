@@ -4,18 +4,32 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd
+from support.harness import isolated_bd, v1_resolved
 
 from kraft import db, executor
 from kraft.paths import RunDirs
-from kraft.templates import Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _quick_task() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+def _quick_task():
+    """The smallest V1 chain intake can file: one exec node, one agent task.
+
+    `intake` takes a `ResolvedChain` now, not a legacy `Template` -- it writes
+    the `materialized_chain` column, which is the executor's only input.
+    """
+    return v1_resolved(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
+                ],
+            }
+        ],
+        chain_id="quick-task",
+    )
 
 
 def _bd_status(repo, bead_id):
@@ -41,7 +55,7 @@ def test_intake_creates_bead_and_row(tmp_path):
                 rd,
                 title="make the failing test pass",
                 repo="/some/repo",
-                template=_quick_task(),
+                chain=_quick_task(),
                 bd_cwd=str(tracker),
             )
             row = database.read(
@@ -50,12 +64,11 @@ def test_intake_creates_bead_and_row(tmp_path):
             assert row["status"] == "active"
             assert row["bead_id"]
             assert row["chain_template"] == "quick-task"
-            chain = json.loads(row["chain_definition"])
-            assert [n["id"] for n in chain["nodes"]] == [
-                "env_setup",
-                "implementation",
-                "verify",
-            ]
+            # `materialized_chain`, not `chain_definition`: intake writes the
+            # V1 snapshot and leaves the legacy column at "{}".
+            assert row["chain_definition"] == "{}"
+            stored = json.loads(row["materialized_chain"])
+            assert [n["id"] for n in stored["chain"]["nodes"]] == ["implementation"]
             assert row["current_node_id"] is None
             assert _bd_status(tracker, row["bead_id"]) in ("open", "in_progress")
         finally:
@@ -76,7 +89,7 @@ def _intake_row(tmp_path, *, description=None, implements_beads=None):
                 rd,
                 title="t",
                 repo="/some/repo",
-                template=_quick_task(),
+                chain=_quick_task(),
                 bd_cwd=str(tracker),
                 description=description,
                 implements_beads=implements_beads,
@@ -120,7 +133,7 @@ def test_intake_bead_failure_still_writes_a_row(tmp_path):
                 rd,
                 title="x",
                 repo="/r",
-                template=_quick_task(),
+                chain=_quick_task(),
                 bd_cwd=str(bare),
             )
             row = database.read(
@@ -154,7 +167,7 @@ def test_intake_adopts_a_given_bead_instead_of_filing_a_new_one(tmp_path, monkey
                 rd,
                 title="adopted work",
                 repo="/some/repo",
-                template=_quick_task(),
+                chain=_quick_task(),
                 bead_id="TEST-abc",
             )
             row = database.read(
@@ -182,13 +195,45 @@ def test_attachments_reads_a_row_without_the_column():
 
 
 def test_intake_with_a_plan_attachment_drops_the_plan_node(tmp_path):
-    template = Template(
-        id="default",
-        nodes=[
-            {"id": "spec", "tasks": ["on.spec.requested"], "gate_after": "spec_approval"},
-            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
-            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+    chain = v1_resolved(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "spec",
+                        "produces": "spec",
+                    }
+                ],
+            },
+            {"id": "spec_approval", "kind": "gate", "message": "ok?", "artifact": "spec"},
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "plan",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "plan_approval", "kind": "gate", "message": "ok?", "artifact": "plan"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
+                ],
+            },
         ],
+        chain_id="default",
     )
 
     plan_doc = tmp_path / ".engineering" / "plans" / "p.md"
@@ -204,17 +249,24 @@ def test_intake_with_a_plan_attachment_drops_the_plan_node(tmp_path):
                 rd,
                 title="t",
                 repo=str(tmp_path),
-                template=template,
+                chain=chain,
                 bd_cwd=str(isolated_bd(tmp_path)),
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
             )
             row = database.read(
                 lambda c: c.execute(
-                    "SELECT chain_definition, attachments FROM work_items WHERE id = ?", (wid,)
+                    "SELECT materialized_chain, attachments FROM work_items WHERE id = ?", (wid,)
                 ).fetchone()
             )
-            chain = json.loads(row["chain_definition"])
-            assert [n["id"] for n in chain["nodes"]] == ["spec", "implementation"]
+            # The plan node *and* the gate whose `artifact` names the plan --
+            # in V1 they are two nodes, and both are redundant once the
+            # document arrives already written.
+            stored = json.loads(row["materialized_chain"])
+            assert [n["id"] for n in stored["chain"]["nodes"]] == [
+                "spec",
+                "spec_approval",
+                "implementation",
+            ]
             assert json.loads(row["attachments"])[0]["kind"] == "plan"
         finally:
             await database.close()
@@ -226,12 +278,31 @@ def test_intake_copies_an_attachment_into_kraft_storage(tmp_path):
     """Kraft-eqgn: the trim is irreversible, so the document that justifies it
     has to be Kraft's own from that moment — not a path into someone else's
     working tree that can be deleted an hour later."""
-    template = Template(
-        id="default",
-        nodes=[
-            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
-            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+    chain = v1_resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "plan",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "plan_approval", "kind": "gate", "message": "ok?", "artifact": "plan"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
+                ],
+            },
         ],
+        chain_id="default",
     )
     external = tmp_path / "elsewhere" / "p.md"
     external.parent.mkdir(parents=True)
@@ -246,7 +317,7 @@ def test_intake_copies_an_attachment_into_kraft_storage(tmp_path):
                 rd,
                 title="t",
                 repo=str(tmp_path),
-                template=template,
+                chain=chain,
                 bd_cwd=str(isolated_bd(tmp_path)),
                 attachments=[
                     {
@@ -278,12 +349,31 @@ def test_intake_copies_an_attachment_into_kraft_storage(tmp_path):
 def test_the_copy_survives_the_original_being_deleted(tmp_path):
     """The whole point, stated as the scenario that produced the bug: a document
     written in a throwaway worktree that is cleaned up before the item runs."""
-    template = Template(
-        id="default",
-        nodes=[
-            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
-            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+    chain = v1_resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "plan",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "plan_approval", "kind": "gate", "message": "ok?", "artifact": "plan"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
+                ],
+            },
         ],
+        chain_id="default",
     )
     external = tmp_path / "elsewhere" / "p.md"
     external.parent.mkdir(parents=True)
@@ -298,7 +388,7 @@ def test_the_copy_survives_the_original_being_deleted(tmp_path):
                 rd,
                 title="t",
                 repo=str(tmp_path),
-                template=template,
+                chain=chain,
                 bd_cwd=str(isolated_bd(tmp_path)),
                 attachments=[
                     {"kind": "plan", "path": ".engineering/plans/p.md", "source": str(external)}
@@ -323,12 +413,31 @@ def test_intake_refuses_an_attachment_it_cannot_copy(tmp_path):
     """The behaviour change that closes the bug: fail at the one moment the
     caller can still fix the path, instead of creating an item that looks fine
     and misbehaves half an hour later with two gates missing."""
-    template = Template(
-        id="default",
-        nodes=[
-            {"id": "plan", "tasks": ["on.plan.requested"], "gate_after": "plan_approval"},
-            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None},
+    chain = v1_resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "fake",
+                        "prompt": "plan",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {"id": "plan_approval", "kind": "gate", "message": "ok?", "artifact": "plan"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "do it"}
+                ],
+            },
         ],
+        chain_id="default",
     )
 
     async def scenario():
@@ -341,7 +450,7 @@ def test_intake_refuses_an_attachment_it_cannot_copy(tmp_path):
                     rd,
                     title="t",
                     repo=str(tmp_path),
-                    template=template,
+                    chain=chain,
                     bd_cwd=str(isolated_bd(tmp_path)),
                     attachments=[
                         {
@@ -370,3 +479,62 @@ def test_a_bare_bead_id_in_a_commit_body_is_not_a_trailer():
     """Same discipline as the description: mentioning an id promises nothing.
     Only `Fixes`/`Closes` does."""
     assert executor.entry._trailer_beads(["fix: touches Kraft-abc12 in passing"]) == []
+
+
+def _over_ceiling():
+    """A chain whose own `policy:` widens `allowed_tools` past a ceiling of
+    `[git]`, and that ceiling (Kraft-ib2af)."""
+    import dataclasses
+
+    from kraft.policy import InstancePolicy, InstancePolicyInput, TemplatePolicyOverride
+
+    chain = _quick_task()
+    chain = dataclasses.replace(
+        chain,
+        chain=chain.chain.model_copy(
+            update={"policy": TemplatePolicyOverride(allowed_tools=["git", "rm_rf"])}
+        ),
+    )
+    ceiling = InstancePolicy.from_input(
+        InstancePolicyInput.model_validate({"maxima": {"allowed_tools": ["git"]}})
+    )
+    return chain, ceiling
+
+
+def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect(tmp_path, monkeypatch):
+    """Kraft-ib2af: the refusal is a `ValueError` every intake door already
+    turns into a legible answer, and it comes before the bead is filed and the
+    attachments are copied -- a trigger filing an orphaned bead every due
+    minute was the failure."""
+    chain, ceiling = _over_ceiling()
+    filed = []
+
+    async def record(*a, **kw):
+        filed.append(a)
+        return "TEST-orphan"
+
+    monkeypatch.setattr("kraft.executor.beads.intake", record)
+    doc = tmp_path / "plan.md"
+    doc.write_text("# plan\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            with pytest.raises(ValueError, match="cannot widen the inherited safety ceiling"):
+                await executor.intake(
+                    database,
+                    rd,
+                    title="t",
+                    repo=str(tmp_path),
+                    chain=chain,
+                    effective_policy=ceiling,
+                    attachments=[{"kind": "plan", "path": "p.md", "source": str(doc)}],
+                )
+            assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []
+            assert not any(rd.attachments.iterdir())
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert filed == []

@@ -7,7 +7,7 @@ description: Use when the verify node asks for a review of the diff this work it
 
 You are the second pair of eyes on a change that has already been written and
 has already had its tests run. You are not here to re-run the tests — the
-`on.test.run` task in this same node did that, and its result is separate from
+verification task in this same node did that, and its result is separate from
 yours. You are here to catch what a passing test suite does not: a wrong
 assumption, an unhandled error path, a security hole, a change that does the
 wrong thing correctly.

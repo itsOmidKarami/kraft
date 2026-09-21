@@ -11,7 +11,6 @@ retried one are put back to work the same way.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from kraft import policy as policy_mod
@@ -53,7 +52,9 @@ async def tick(app) -> list[str]:
     st = app.state
     due = st.db.read(
         lambda c: c.execute(
-            "SELECT id, repo, current_node_id, chain_definition FROM work_items "
+            # `materialized_chain` too, for `store.node_index` -- see ci_wait.py.
+            "SELECT id, repo, current_node_id, chain_definition, materialized_chain "
+            "FROM work_items "
             "WHERE status = 'rate_limited' AND retry_at <= ?",
             (_now(),),
         ).fetchall()
@@ -67,6 +68,7 @@ async def tick(app) -> list[str]:
 
 async def _retry_one(app, row) -> bool:
     from kraft.api import deps
+    from kraft.executor import stops  # deferred, same cycle as `executor` below
 
     st = app.state
     wid = row["id"]
@@ -84,47 +86,73 @@ async def _retry_one(app, row) -> bool:
         )
         return False
 
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
-    )
-    if not claimed:
-        # Something else (a human abandoning it, most plausibly) already moved
-        # this item off `rate_limited` between the `due` SELECT and here.
-        # `retry_after_cap` no longer flips status itself -- without this
-        # check the poller would blindly claw an abandoned item back to
-        # 'active' and spawn a walk into a worktree that may already be gone.
-        logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
-        return False
-
-    await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
-    chain = json.loads(row["chain_definition"])
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
-    from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
-
-    try:
-        deps.spawn(
-            app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=RESUME_PROMPT,
-                    launch=deps.launch(st, row["repo"]),
-                ),
-            ),
+    # Bracketed from *before* the claim to the hand-off. A claim makes this item
+    # read `active`, and this poller's own `tick` SELECT filters
+    # `status = 'rate_limited'`, so an exit from here that neither spawns a walk nor
+    # moves the status again leaves the item claimed and unowned, and *no later tick
+    # will ever select it again*. The failed-claim `return False` is inside it
+    # deliberately, and is nearly inert rather than inert: the claim failed because
+    # the status left `rate_limited`, and if what it left for was `active` with no
+    # walk behind it, the bracket writes `needs_human` on the way out. Right answer
+    # for an orphan, and not nothing -- `handed_off` covers the case where a walk
+    # really does own it.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        node_id,
+        reason="the rate-limit poller claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(app, wid),
+    ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=["rate_limited"])
         )
-    except deps.AlreadyRunning:
-        logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
-        return False
-    return True
+        if not claimed:
+            # Something else (a human abandoning it, most plausibly) already moved
+            # this item off `rate_limited` between the `due` SELECT and here.
+            # `retry_after_cap` no longer flips status itself -- without this
+            # check the poller would blindly claw an abandoned item back to
+            # 'active' and spawn a walk into a worktree that may already be gone.
+            logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
+            return False
+
+        await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
+        # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
+        # `chain_definition` cannot raise, and a node that is not in this item's
+        # chain stops rather than silently relaunching it at node zero.
+        start = store.node_index(row, node_id)
+        if start is None:
+            # `return False`, not a bare `return`: this function's contract is
+            # "did I relaunch it". The bracket above turns the claim into a stop.
+            logger.warning(
+                "rate_limit_retry: %s has no node %r in its chain, not relaunching", wid, node_id
+            )
+            return False
+        from kraft import executor  # deferred: avoids a kraft.api <-> kraft.executor import cycle
+
+        try:
+            deps.spawn(
+                app,
+                wid,
+                deps.guard(
+                    st.db,
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        steer=RESUME_PROMPT,
+                        launch=deps.launch(st, row["repo"]),
+                    ),
+                ),
+            )
+        except deps.AlreadyRunning:
+            logger.warning("rate-limit retry: %s already has a live walk, skipping", wid)
+            return False
+        return True
 
 
 async def poller(app) -> None:

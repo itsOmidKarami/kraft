@@ -10,16 +10,16 @@ from kraft.adapters import agent as agent_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
-from kraft.executor import gates
+from kraft.executor import gates, stops
 from kraft.templates import (
     CHAIN_REVIEW_GATE,
-    ChainNode,
     carry_forward_node_fields,
     strip_non_proposable_carryover_fields,
     validate_nodes,
     validate_proposed_node_overrides,
     with_steps,
 )
+from kraft.templates.models import GateNode
 
 
 def _strip_front_matter(text: str) -> str:
@@ -36,6 +36,17 @@ def _strip_front_matter(text: str) -> str:
 def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]:
     """The chain_finalized gate's approval decision (Kraft-hm0, extended
     Kraft-df4tc for escalation targets and the per-node model/effort dial).
+
+    **PARKED since Template Schema V1 (Task 4b): no `src/` caller.** Every line
+    below speaks the legacy `chain_definition` node dict -- the reviewer's
+    envelope schema, `validate_nodes`, `with_steps`,
+    `carry_forward_node_fields`, `store.splice_chain`. Revising a *materialized*
+    chain in place is a different feature from revising a template-shaped one,
+    so `apply_approval` no longer calls this, and a reviewer's
+    `revised_chain_nodes` are currently ignored. Kept rather than deleted
+    because the rules it enforces (one bad field rejects the whole approval, a
+    started node's config is locked, a carried-forward `reject_to` is
+    re-validated against the revised tail) are the feature, not the plumbing.
 
     Returns `(spliced_chain, node_override_patch, None)` when the gate may
     advance -- `node_override_patch` is `{}` when the reviewer proposed no
@@ -145,6 +156,22 @@ def _splice_chain_review(st, row) -> tuple[dict | None, dict | None, str | None]
     return chain, proposals, None
 
 
+def gate_nodes(st, row) -> tuple:
+    """This item's ordered nodes, as the executor sees them: the frozen
+    `MaterializedChain`, node overrides folded on
+    (`store.effective_nodes`). One reader for every gate route, so the
+    approve door, the reject door and the walk cannot disagree about where a
+    gate sits."""
+    return store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+
+
+def _gate_or_404(nodes, gate: str):
+    node = next((n for n in nodes if isinstance(n.node, GateNode) and n.id == gate), None)
+    if node is None:
+        raise HTTPException(404, f"unknown gate {gate!r}")
+    return node
+
+
 class GateReject(BaseModel):
     note: str
     #: Where the chain re-enters. Defaults to the gate node's `reject_to`, and
@@ -152,36 +179,49 @@ class GateReject(BaseModel):
     node: str | None = None
 
 
-async def apply_approval(st, row, gate: str) -> tuple[dict | None, str | None]:
+async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
     """Everything an approval does before the chain is allowed to move, and the
-    chain it may move along -- or `(None, reason)` when it must not move at all.
+    ordered nodes it may move along -- or `(None, reason)` when it must not move
+    at all.
 
     One function, two doors: the `POST .../approve` endpoint (a human) and
     `kraft.executor.gates.review_gates` (an agent's `approve` verdict), which reaches it
     through the `on_approve` callback `_launch_approval` hands the executor.
     The same rule `apply_rejection` already enforces for the other verdict:
-    an agent's approval must have exactly the effects a person's would, or
-    `chain_review`'s revised nodes are silently discarded on the path this
-    feature makes the default (Kraft-zr3s).
+    an agent's approval must have exactly the effects a person's would.
 
-    Ingest before any splice: the artifact this approval is about belongs to
-    `row`'s chain as it stood when the gate opened, same as `_gate_artifact`
-    everywhere else it's called.
+    **The final-review gate is selected by `GateNode.chain_finalized`, never by
+    its name** (`chain-finalized-remains-a-dedicated-marker`): a chain may call
+    that gate whatever it likes, and `CHAIN_REVIEW_GATE`'s hardcoded
+    `"chain_finalized"` string was the last name-table read on this path.
+
+    What the marker still buys, and it is the difference an ordinary gate must
+    not have: **a final-review gate cannot be approved without its document.**
+    Every other gate is answerable with nothing to read (`gate_artifact`'s own
+    contract -- an agent that reported done without honouring the artifact
+    contract still leaves a decidable gate), but the whole subject of this one is
+    the review it names, so approving it with no document approves nothing.
+    Kraft-iv4y's posture: a clear 422 telling the human to `kraft item retry` the
+    node that owed the document, not a 200 that changed nothing.
+
+    **What a `chain_finalized` approval does not do yet: splice.**
+    `_splice_chain_review` rewrites the legacy `chain_definition` column from an
+    envelope of legacy node dicts (`validate_nodes`, `with_steps`,
+    `carry_forward_node_fields`), and neither the envelope schema nor
+    `store.splice_chain` has a V1 equivalent -- revising a *materialized* chain
+    in place is a different feature from revising a template-shaped one, and it
+    belongs with the chain-review skill's own V1 conversion. So the approval
+    ingests the artifact and advances, and a reviewer's `revised_chain_nodes`
+    are currently ignored. Reported as a deferral, not silently dropped.
     """
+    nodes = gate_nodes(st, row)
+    node = _gate_or_404(nodes, gate)
     await artifacts._ingest_approved_gate_artifact(st, row, gate)
-    if gate != CHAIN_REVIEW_GATE:
-        return json.loads(row["chain_definition"]), None
-    chain, node_override_patch, reason = _splice_chain_review(st, row)
-    if chain is None:
-        return None, reason
-
-    def write(c):
-        store.splice_chain(c, row["id"], json.dumps(chain))
-        if node_override_patch:
-            store.set_node_overrides(c, row["id"], node_override_patch)
-
-    await st.db.write(write)
-    return chain, None
+    if node.node.chain_finalized and executor.gate_artifact(st.run_dirs, row, gate) is None:
+        return None, (
+            f"{gate}: the final review document is missing; the node that owed it did not write one"
+        )
+    return nodes, None
 
 
 def _decided_by(request: Request) -> str:
@@ -221,9 +261,7 @@ def _decided_by(request: Request) -> str:
 async def approve_gate(wid: str, gate: str, request: Request):
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
-    if gate not in ChainNode.gate_names(chain["nodes"]):
-        raise HTTPException(404, f"unknown gate {gate!r}")
+    _gate_or_404(gate_nodes(st, row), gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     # A pending gate's status is already needs_human (never active), so the
@@ -243,8 +281,8 @@ async def approve_gate(wid: str, gate: str, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    chain, reason = await apply_approval(st, row, gate)
-    if chain is None:
+    nodes, reason = await apply_approval(st, row, gate)
+    if nodes is None:
         # Kraft-iv4y: a human hitting `approve` again after this exact failure
         # used to get a 200 back with nothing changed -- the same reason
         # logged a second time, no error, no hint that approving was never
@@ -255,31 +293,48 @@ async def approve_gate(wid: str, gate: str, request: Request):
             422, f"{reason} -- gate {gate!r} cannot be approved; run `kraft item retry` instead"
         )
 
-    await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
-    start = board._gate_node_index(chain, gate) + 1
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
+    # Bracketed from *before* the claim to the hand-off. `store.approve_gate` is
+    # an unconditional `UPDATE work_items SET status = 'active'` -- a claim like
+    # any other, which `api/deps.py`'s `task_is_live` docstring already names:
+    # "calling `store.approve_gate`/`apply_rejection` and only then discovering
+    # `spawn` refuses would leave the gate cleared and the item `active` with no
+    # walk behind it". The `_gate_node_index` below is a defaultless `next(...)`
+    # that raises `StopIteration` for a gate this chain does not have, after the
+    # claim -- verbatim the shape `stops.claimed_or_stopped` exists for, and the
+    # one `dev/check_claim_handoff.py` could not see until `CLAIMS` stopped
+    # being hand-written.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="gate approval cleared the gate but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        await st.db.write(lambda c: store.approve_gate(c, wid, gate, by=_decided_by(request)))
+        start = board._gate_node_index(nodes, gate) + 1
+        try:
+            deps.spawn(
+                request.app,
                 wid,
-                executor.run(
+                deps.guard(
                     st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        start_index=start,
+                        policy=st.policy,
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
                 ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/reject")
@@ -294,9 +349,8 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
-    if gate not in ChainNode.gate_names(chain["nodes"]):
-        raise HTTPException(404, f"unknown gate {gate!r}")
+    nodes = gate_nodes(st, row)
+    _gate_or_404(nodes, gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
     if st.invalid_policy:
@@ -308,7 +362,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
             503, f"policy config invalid, refusing work: {'; '.join(st.invalid_policy)}"
         )
     try:
-        executor.reject_target(chain, executor.gate_node_index(chain, gate), body.node)
+        executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
     except ValueError as exc:
         # Same posture as invalid_policy above: a bad target changes nothing,
         # so it must not be reached having already paused the item and killed
@@ -322,23 +376,64 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    try:
-        target = await executor.apply_rejection(
-            st.db,
-            st.policy,
-            work_item_id=wid,
-            chain=chain,
-            gate=gate,
-            note=body.note,
-            node=body.node,
-            by=_decided_by(request),
-            # A person only ever rejects; `fixed` is a gate-reviewer verdict and
-            # has no door here (Kraft-s7c04.16).
-            verdict="reject",
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if target is None:
+    # Bracketed from *before* the claim to the hand-off, the same way the approve
+    # door above is. `apply_rejection` performs an `UPDATE work_items SET status
+    # = 'active'` when the reject loop still has attempts left (`store.reject_gate`
+    # with `reopen=True`) -- a claim like any other, and the other half of the
+    # pairing `api/deps.py`'s `task_is_live` docstring has been naming all along:
+    # "calling `store.approve_gate`/`apply_rejection` and only then discovering
+    # `spawn` refuses would leave the gate cleared and the item `active` with no
+    # walk behind it". The approve half was bracketed a round before this one; the
+    # f-string SQL in `store.reject_gate` is why `dev/check_claim_handoff.py`
+    # could not see this half until its derivation learned to read a `JoinedStr`.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="gate rejection reopened the gate but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        try:
+            target = await executor.apply_rejection(
+                st.db,
+                st.policy,
+                work_item_id=wid,
+                nodes=nodes,
+                gate=gate,
+                note=body.note,
+                node=body.node,
+                by=_decided_by(request),
+                # A person only ever rejects; `fixed` is a gate-reviewer verdict and
+                # has no door here (Kraft-s7c04.16).
+                verdict="reject",
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if target is None:
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        gates.auto_escalate_stuck(
+                            "needs_human",
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            registry=st.registry,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            bd_cwd=deps.bd_cwd(),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
         try:
             deps.spawn(
                 request.app,
@@ -346,15 +441,16 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.run(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
                         registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
                         bd_cwd=deps.bd_cwd(),
+                        start_index=target,
+                        policy=st.policy,
+                        steer=body.note,
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
                 ),
@@ -362,28 +458,3 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=target,
-                    policy=st.policy,
-                    steer=body.note,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}

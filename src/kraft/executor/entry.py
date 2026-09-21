@@ -10,7 +10,9 @@ from pathlib import Path
 from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
-from kraft.templates import ATTACHMENT_GATES, Template, materialize
+from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.templates.environment import Repository, WorkItemTarget
+from kraft.templates.models import ResolvedChain
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +25,36 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
+def single_repo_target(repo: str) -> WorkItemTarget:
+    """The immutable target of an item filed against one repository.
+
+    The id is the constant `"target"`, not the repository's own configured id:
+    a single-repository item has exactly one target, nothing reads the name,
+    and a `repos.yaml` id is not available at every intake door. A *workspace*
+    target carries real member ids and is Phase 6's.
+
+    Shared with the `/work-items` route, which dry-runs the same
+    materialization before it files a bead -- two copies of this would let the
+    dry run and the real one disagree about what gets trimmed.
+    """
+    return WorkItemTarget.for_repository(Repository(id="target", path=repo))
+
+
 async def intake(
     db,
     run_dirs,
     *,
     title: str,
     repo: str,
-    template: Template,
+    #: The resolved V1 chain this item runs. Materialized here, into the
+    #: `materialized_chain` column, which is the executor's only input
+    #: (`materialized-chain-is-immutable-work-item-input`).
+    chain: ResolvedChain,
+    #: The V1 instance policy this item's tasks start from; the chain's own
+    #: `policy:` override is layered onto it by `materialize`. Defaults to the
+    #: empty policy -- an unset maximum is no bound at all -- so an internal
+    #: caller with no policy object still files a valid item.
+    effective_policy: InstancePolicy | None = None,
     description: str | None = None,
     bd_cwd: str | None = None,
     submodules: list[str] | None = None,
@@ -53,7 +78,7 @@ async def intake(
     implements_beads: list[str] | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
-    #: (default) stores `template.id`; `None` stores `None` -- the caller
+    #: (default) stores `chain.id`; `None` stores `None` -- the caller
     #: that wants that distinction (Kraft-cd47) has to say so explicitly.
     chain_template: str | None | object = _UNSET,
     #: Arms agent gate review for this item's `auto_escalate` gates
@@ -63,8 +88,8 @@ async def intake(
     #: passes the value.
     auto_gate: bool = False,
     #: Node ids to remove from the materialized chain at intake (UI v2 · 04
-    #: point 6, `templates.materialize`'s `skip_nodes`). Already validated
-    #: against the template by the caller.
+    #: point 6, `ResolvedChain.materialize`'s `skip_nodes`). Already validated
+    #: against the chain by the caller.
     skip_nodes: frozenset[str] = frozenset(),
     #: Intake-time spend cap and per-node overrides, forwarded verbatim to
     #: `store.create_work_item` (point 6). `budget_set=False` (default)
@@ -83,6 +108,34 @@ async def intake(
     # the e2e harness set it, and an operator who set it as the workaround for
     # this very bug must not silently start filing per-repo on upgrade.
     cwd = bd_cwd or repo
+    # An attachment's trim is the V1 chain's own decision -- the gate's
+    # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
+    # name table this layer looks up -- and it happens in the same drop as
+    # `skip_nodes`, so a chain the two together would empty is refused once.
+    materialized = chain.materialize(
+        target=single_repo_target(repo),
+        effective_policy=(
+            effective_policy
+            if effective_policy is not None
+            else InstancePolicy.from_input(InstancePolicyInput())
+        ),
+        # Derived from the attachments themselves, never passed in beside
+        # them: the kinds that trim the chain and the documents that justify
+        # the trim have to be the same list, and a caller holding both is a
+        # caller that can make them disagree.
+        attachment_kinds=frozenset(a["kind"] for a in attachments or []),
+        skip_nodes=skip_nodes,
+    )
+    # Everything above is pure; everything below has a side effect. A chain
+    # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
+    # here, before a bead is filed or an attachment copied -- a trigger used to
+    # file an orphaned bead on every due minute (Kraft-ib2af).
+    # Raising rather than degrading, and before the bead: `materialize` above
+    # has removed this attachment's gate from the chain permanently, and
+    # a trim whose document is not Kraft's own is a promise something outside
+    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
+    # caller can fix the path, so it is where this fails.
+    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
     # An auto-intaken bead already exists; filing a second one for the same work
     # is the duplicate this parameter prevents.
     bead_warning: str | None = None
@@ -101,16 +154,6 @@ async def intake(
             bead_warning = str(exc)
         if bead_warning:
             logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
-    # Before the trim below, and raising rather than degrading: `materialize`
-    # is about to remove this attachment's gate from the chain permanently, and
-    # a trim whose document is not Kraft's own is a promise something outside
-    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
-    # caller can fix the path, so it is where this fails.
-    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
-    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
-    chain_definition = json.dumps(
-        materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
-    )
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):
@@ -124,8 +167,12 @@ async def intake(
             title=title,
             description=description,
             repo=repo,
-            chain_template=template.id if chain_template is _UNSET else chain_template,
-            chain_definition=chain_definition,
+            chain_template=chain.id if chain_template is _UNSET else chain_template,
+            # `"{}"`, not the legacy envelope: the column is NOT NULL and Task
+            # 11 removes it. Nothing in a V1 walk reads it -- `walk.chain_of`
+            # reads `materialized_chain` and has no fallback.
+            chain_definition="{}",
+            materialized_chain=materialized.to_json(),
             # Recorded on every new row, so a bead is closed where it was filed
             # whatever KRAFT_BD_CWD says months later.
             bead_cwd=bead_cwd or cwd,

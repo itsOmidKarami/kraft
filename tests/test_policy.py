@@ -29,8 +29,10 @@ def test_policy_input_rejects_wrong_scalar_bounds_and_shapes():
 
 def test_load_shipped_policy():
     p = policy.load_policy(_SHIPPED)
-    assert "verify_fix_loop" in p.loops
-    c = p.loops["verify_fix_loop"]
+    # `ci_wait`, not `verify_fix_loop`: Ruling 57 removed the four keys that
+    # bound no live loop, and `ci_wait` is the one `resolve_cap` still names.
+    assert "ci_wait" in p.loops
+    c = p.loops["ci_wait"]
     assert isinstance(c.attempts, int) and c.attempts >= 1
     assert isinstance(c.wall_clock_s, int) and c.wall_clock_s >= 1
     assert isinstance(p.default, policy.Cap)
@@ -540,6 +542,16 @@ def test_template_policy_cannot_exceed_token_budget_ceiling(instance_policy):
         instance_policy.apply_template_override({"token_budget": 3_000_000})
 
 
+def test_token_budget_ratchets_against_the_inherited_value_not_the_maximum(instance_policy):
+    """A safety ceiling tightens against what it inherits: once a layer has
+    narrowed `token_budget` below `maxima`, a narrower layer cannot raise it
+    back, even to a value the administrator maximum would allow."""
+    narrowed = instance_policy.apply_template_override({"token_budget": 1_000_000})
+    assert narrowed.token_budget == 1_000_000
+    with pytest.raises(policy.PolicyError, match="token_budget"):
+        narrowed.apply_template_override({"token_budget": 1_500_000})
+
+
 # ── allowed_harnesses: operational-with-an-administrator-maximum, not a
 # ratchet-only safety field (docs/templates-v1-design.md lists it under both
 # `defaults:` and `maxima:`, unlike `allowed_tools`/`token_budget`) ──
@@ -653,13 +665,105 @@ def test_policy_override_rejects_unknown_fields_field_specifically():
         policy.TemplatePolicyOverride.model_validate({"not_a_real_field": 1})
 
 
-def test_policy_is_layered_from_instance_through_repository_to_work_item(instance_policy):
-    """The same override mechanism resolves at every scope, broadest to
-    narrowest (`policy-is-layered-by-execution-scope`); a repository cannot
-    hand a work item back room the instance already closed
-    (`repository-policy-cannot-relax-instance-safety`)."""
-    repository_policy = instance_policy.apply_template_override({"allowed_tools": ["git", "shell"]})
-    work_item_policy = repository_policy.apply_template_override({"allowed_tools": ["git"]})
-    assert work_item_policy.allowed_tools == ("git",)
+def test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one(instance_policy):
+    """The same override mechanism composes, broadest to narrowest
+    (`policy-is-layered-by-execution-scope`): a second override applied to the
+    result of a first cannot hand back room the first already closed. The
+    layers here are anonymous on purpose. No Repository policy layer exists yet
+    (`repository-policy-cannot-relax-instance-safety` is unpinned, Kraft-jzv1l),
+    so this test names none."""
+    outer = instance_policy.apply_template_override({"allowed_tools": ["git", "shell"]})
+    inner = outer.apply_template_override({"allowed_tools": ["git"]})
+    assert inner.allowed_tools == ("git",)
     with pytest.raises(policy.PolicyError, match="allowed_tools"):
-        repository_policy.apply_template_override({"allowed_tools": ["git", "shell", "pytest"]})
+        outer.apply_template_override({"allowed_tools": ["git", "shell", "pytest"]})
+
+
+# --- V1 `defaults:`/`maxima:` through the one policy.yaml loader (Ruling 37) ---
+
+
+def test_instance_policy_loads_defaults_and_maxima_from_yaml(tmp_path):
+    """`policy.yaml` carries V1's `defaults:`/`maxima:` sections, and the
+    *existing* loader reads them. Before this they were `extra`-ignored: an
+    administrator ceiling written in the file bound nothing."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: { attempts: 3, wall_clock_s: 60 }\n"
+        "defaults:\n"
+        "  timeout_minutes: 30\n"
+        "  allowed_harnesses: [codex_default]\n"
+        "maxima:\n"
+        "  timeout_minutes: 90\n"
+        "  token_budget: 500000\n"
+        "  allowed_tools: [git, shell]\n"
+        "  allowed_harnesses: [codex_default, claude_review]\n"
+    )
+    parsed = policy.PolicyInput.from_yaml(p)
+    assert parsed.defaults.timeout_minutes == 30
+    assert parsed.maxima.token_budget == 500000
+
+    resolved = parsed.instance_policy()
+    assert resolved.timeout_minutes == 30
+    # A ratchet-only safety field with no `defaults:` entry starts at its maximum.
+    assert resolved.token_budget == 500000
+    assert resolved.allowed_tools == ("git", "shell")
+    # Operational-with-a-maximum: widening back up to `maxima` is allowed.
+    assert resolved.apply_template_override(
+        {"allowed_harnesses": ["codex_default", "claude_review"]}
+    ).allowed_harnesses == ("codex_default", "claude_review")
+
+
+def test_policy_yaml_defaults_past_maxima_are_refused_at_load(tmp_path):
+    """The coherence rule fires where the file is read, not at first use --
+    otherwise a ceiling the administrator wrote is only discovered by the
+    dispatch that violates it."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "default: { attempts: 3, wall_clock_s: 60 }\n"
+        "defaults: { timeout_minutes: 120 }\n"
+        "maxima: { timeout_minutes: 90 }\n"
+    )
+    with pytest.raises(policy.PolicyError, match="timeout_minutes"):
+        policy.PolicyInput.from_yaml(p)
+
+
+def test_policy_yaml_has_exactly_one_loader():
+    """Ruling 18/37: one filename, one live loader. A second `from_yaml` over
+    `policy.yaml` is how two readers of one file start disagreeing -- so
+    `InstancePolicyInput` deliberately has none, and the V1 sections ride on
+    the loader that already existed."""
+    assert hasattr(policy.PolicyInput, "from_yaml")
+    assert not hasattr(policy.InstancePolicyInput, "from_yaml")
+
+
+def test_a_malformed_policy_yaml_names_its_file(tmp_path):
+    """`PolicyError`, never a raw `OSError`/`YAMLError`/`ValidationError`, and
+    it says which file -- `lifespan` catches only the former."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\ndefaults: [not, a, mapping]\n")
+    with pytest.raises(policy.PolicyError, match="policy.yaml"):
+        policy.PolicyInput.from_yaml(p)
+
+
+def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
+    """Ruling 57. A `loops:` key naming no live loop is *silently* unused --
+    `Policy.cap_for` is `self.loops.get(key, self.default)`, no error and no
+    warning -- so a stale cap in the seed looks live and binds nothing. The V1
+    fix loop's key is `walk._loop_key(node)`, which is per-node, and Task 7b
+    decides the node it hangs off; until then the seed names none."""
+    parsed = policy.PolicyInput.from_yaml(_SHIPPED)
+    assert parsed.loops == {} or set(parsed.loops) <= {"ci_wait"}, parsed.loops
+
+
+def test_a_misspelled_top_level_key_is_refused_by_name(tmp_path):
+    """Kraft-sz4dh: `maximum:` for `maxima:` used to load cleanly and bound
+    nothing. An unknown top-level key is refused, naming the key."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\nmaximum: { allowed_tools: [git] }\n")
+    with pytest.raises(policy.PolicyError, match="unknown key 'maximum'"):
+        policy.PolicyInput.from_yaml(p)
+
+
+def test_the_shipped_policy_yaml_has_no_unknown_key():
+    """The refusal above must not refuse the seed a fresh install copies."""
+    policy.PolicyInput.from_yaml(Path(__file__).resolve().parents[1] / "templates" / "policy.yaml")

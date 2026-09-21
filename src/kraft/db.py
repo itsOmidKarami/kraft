@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 34
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -101,6 +101,11 @@ CREATE TABLE work_items (
   -- the step group `current_node_id` last began. 0 unless a wait or a retry
   -- resumed the node past its first group. Reset whenever the node changes.
   current_step     INTEGER NOT NULL DEFAULT 0,
+  -- template schema V1's immutable work-item input (`MaterializedChain.to_json`).
+  -- Beside `chain_definition`, not replacing it -- see _MIGRATIONS[32].
+  materialized_chain TEXT,
+  -- the run this one forked from (Phase 5 retry forks). NULL until one does.
+  run_fork_parent  TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -682,6 +687,27 @@ FROM worker_sessions""",
     # The step group a node last began, so a CI wait and a fix-loop retry resume
     # at the group that stopped instead of at group zero.
     31: ["ALTER TABLE work_items ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0"],
+    # Template schema V1: the immutable materialized work-item input, and the
+    # run-fork lineage Phase 5 fills.
+    #
+    # Additive, beside `chain_definition`, rather than a conversion of it. A V1
+    # MaterializedChain has no `gate_after` and its gates are ordered nodes, so
+    # there is no faithful mechanical translation of a legacy row: a half-run
+    # item would resume against a chain whose node order differs from the one it
+    # started on. V1 is declared incompatible
+    # (`REQ template-v1-is-not-backward-compatible`) and the update path warns,
+    # requires acceptance and backs up. So existing rows keep their legacy column
+    # and stay readable by the legacy path until they finish or are cancelled.
+    32: [
+        "ALTER TABLE work_items ADD COLUMN materialized_chain TEXT",
+        "ALTER TABLE work_items ADD COLUMN run_fork_parent TEXT",
+    ],
+    # The agent's progress event was renamed `task_progress` -> `plan_progress`
+    # (it reports a plan task, and V1 made "task" a chain-task word). Every
+    # reader -- the Timeline's grouping, the board's "Task N of M" -- matches
+    # the new name only, so stored rows are renamed once here rather than each
+    # reader learning both (Kraft-7hy7x).
+    33: ["UPDATE events SET type = 'plan_progress' WHERE type = 'task_progress'"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

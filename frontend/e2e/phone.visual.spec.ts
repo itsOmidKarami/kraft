@@ -68,7 +68,9 @@ test("the gate, its reject textarea and the diff viewer all fit a phone", async 
   expect(noteFontPx).toBeGreaterThanOrEqual(16);
 
   // Touch targets on the actions under it.
-  const rejectBtn = page.getByRole("button", { name: /Reject and re-plan/ });
+  // "Reject and send back" under V1: the gate node authors `reject_to: spec`
+  // and the composer's submit label names the target it sends back to.
+  const rejectBtn = page.getByRole("button", { name: /Reject and send back/ });
   const box = await rejectBtn.boundingBox();
   expect(box!.height).toBeGreaterThanOrEqual(44);
 

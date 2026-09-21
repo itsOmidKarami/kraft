@@ -176,7 +176,7 @@ export function Timeline({
       );
     }
     const e = en.event;
-    const label = e.type === "task_progress" ? taskRunLabel(e, en.last) : en.label;
+    const label = e.type === "plan_progress" ? taskRunLabel(e, en.last) : en.label;
     return (
       <button
         key={`e${e.seq}`}

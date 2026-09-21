@@ -17,7 +17,7 @@ import {
 /**
  * Right pane · Timeline (UI v2 · 05, 15; W13 · D): the event stream of what the
  * Timeline list selected -- a session, a round, one event -- or the whole
- * scoped node when nothing is. A session is one row, a run of task_progress is
+ * scoped node when nothing is. A session is one row, a run of plan_progress is
  * one row, a gap over two minutes is a `waiting` hairline; `all | gates |
  * tasks` narrows the rows as before.
  */
@@ -57,7 +57,7 @@ export function streamRows(events: KraftEvent[], sessions: WorkerSession[] = [])
   let tasks: Extract<StreamRow, { kind: "tasks" }> | null = null;
   for (const e of asc) {
     const sid = sessionOf(e);
-    if (e.type !== "task_progress") tasks = null;
+    if (e.type !== "plan_progress") tasks = null;
     if (sid && SESSION_TYPES.has(e.type)) {
       let run = runs.get(sid);
       if (!run) {
@@ -74,7 +74,7 @@ export function streamRows(events: KraftEvent[], sessions: WorkerSession[] = [])
       }
       continue;
     }
-    if (e.type === "task_progress") {
+    if (e.type === "plan_progress") {
       if (tasks) {
         tasks.last = e;
         tasks.end = e.created_at;
@@ -137,7 +137,7 @@ function scopeOf(
     const mine =
       nr && r
         ? roundEvents(nr.events, r)
-        : own.filter((e) => sessionOf(e) === sel.id || (e.type === "task_progress" && e.created_at >= from && (!to || e.created_at <= to)));
+        : own.filter((e) => sessionOf(e) === sel.id || (e.type === "plan_progress" && e.created_at >= from && (!to || e.created_at <= to)));
     const bits = [
       s?.hook_point ?? "session",
       s?.hook_point === "escalation"
@@ -369,7 +369,7 @@ export function Events({
             key={`${r.kind}:${r.at}:${i}`}
             className="stream-row"
             data-kind={r.kind}
-            data-type={"event" in r ? r.event.type : r.kind === "session" ? "worker_session" : r.kind === "tasks" ? "task_progress" : undefined}
+            data-type={"event" in r ? r.event.type : r.kind === "session" ? "worker_session" : r.kind === "tasks" ? "plan_progress" : undefined}
             {...(r.kind === "session" && {
               "data-srow": r.run.id,
               "data-selected": r.run.id === selectedSession,

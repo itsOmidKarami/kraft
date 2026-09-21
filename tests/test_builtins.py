@@ -9,6 +9,7 @@ from support.harness import (
     make_repo,
     make_repo_with_engineering,
     make_repo_with_submodule,
+    v1_resolved,
 )
 
 from kraft import builtins as kraft_builtins
@@ -21,7 +22,27 @@ from kraft.paths import RunDirs
 NO_SETUP = {"setup_command": ""}
 
 
-def test_env_setup_creates_worktree_and_branch(tmp_path):
+async def _prepare(database, rd, repo, *, repo_entry=None, attachments=None, work_item_id="w1"):
+    """What `walk.run_once` does before the first node dispatches.
+
+    `env_setup` was a node task until Template Schema V1 deleted it (there is no
+    `BuiltinAction` for it, so no V1 chain can name one): its two halves are
+    `ensure_worktree` and `prepare_runtime` now, called in that order, and these
+    tests drive the pair the way the walk does. Returns the preparation report.
+    """
+    entry = NO_SETUP if repo_entry is None else repo_entry
+    worktree = await kraft_builtins.ensure_worktree(
+        database,
+        rd,
+        repo=str(repo),
+        work_item_id=work_item_id,
+        attachments=attachments,
+        repo_entry=entry,
+    )
+    return await kraft_builtins.prepare_runtime(worktree, Path(repo), entry)
+
+
+def test_worktree_preparation_creates_the_worktree_and_branch(tmp_path):
     repo = make_repo(tmp_path)
 
     async def scenario():
@@ -39,16 +60,8 @@ def test_env_setup_creates_worktree_and_branch(tmp_path):
                     chain_definition="{}",
                 )
             )
-            status = await kraft_builtins.env_setup(
-                database,
-                rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
-                repo_entry=NO_SETUP,
-            )
-            assert status == "done"
+            report = await _prepare(database, rd, repo)
+            assert "worktree ready" in report
             worktree = rd.worktrees / "w1"
             assert (worktree / "calc.py").is_file()
             row = database.read(
@@ -64,20 +77,21 @@ def test_env_setup_creates_worktree_and_branch(tmp_path):
                 check=True,
             ).stdout
             assert branch in branches
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT hook_point, status FROM worker_sessions WHERE id='s1'"
-                ).fetchone()
+            # No session row stands in for the deleted node: preparation is
+            # runtime work the walk does, not a task a chain dispatches.
+            assert (
+                database.read(
+                    lambda c: c.execute("SELECT COUNT(*) FROM worker_sessions").fetchone()[0]
+                )
+                == 0
             )
-            assert row["hook_point"] == "on.env.prepare"
-            assert row["status"] == "done"
         finally:
             await database.close()
 
     asyncio.run(scenario())
 
 
-def test_env_setup_copies_an_uncommitted_attachment_into_the_worktree(tmp_path):
+def test_worktree_preparation_copies_an_uncommitted_attachment(tmp_path):
     repo = make_repo(tmp_path)
     plan = repo / ".engineering" / "plans" / "p.md"
     plan.parent.mkdir(parents=True)
@@ -98,17 +112,13 @@ def test_env_setup_copies_an_uncommitted_attachment_into_the_worktree(tmp_path):
                     chain_definition="{}",
                 )
             )
-            status = await kraft_builtins.env_setup(
+            report = await _prepare(
                 database,
                 rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
+                repo,
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
-                repo_entry=NO_SETUP,
             )
-            assert status == "done"
+            assert "worktree ready" in report
             copied = rd.worktrees / "w1" / ".engineering" / "plans" / "p.md"
             assert copied.read_text() == "# the plan\n"
         finally:
@@ -118,10 +128,9 @@ def test_env_setup_copies_an_uncommitted_attachment_into_the_worktree(tmp_path):
 
 
 def test_ensure_worktree_alone_copies_attachments_before_any_node_runs(tmp_path):
-    """`default.yaml` runs `spec` and `plan` before `env_setup`, so `plan`'s
-    attached-spec fallback only works if the copy happened at
-    `ensure_worktree` time, not `env_setup` time. Prove it without going
-    through `env_setup` at all."""
+    """The chain's first node can be an agent task, so `plan`'s attached-spec
+    fallback only works if the copy happened at `ensure_worktree` time. Prove it
+    without going through the walk's own preparation at all."""
     repo = make_repo(tmp_path)
     spec = repo / ".engineering" / "specs" / "s.md"
     spec.parent.mkdir(parents=True)
@@ -400,7 +409,7 @@ def test_an_attached_document_is_committed_in_the_worktree(tmp_path):
     asyncio.run(scenario())
 
 
-def test_env_setup_leaves_a_committed_attachment_alone(tmp_path):
+def test_worktree_preparation_leaves_a_committed_attachment_alone(tmp_path):
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# committed\n"})
     (repo / ".engineering" / "plans" / "p.md").write_text("# dirty working tree\n")
 
@@ -419,15 +428,11 @@ def test_env_setup_leaves_a_committed_attachment_alone(tmp_path):
                     chain_definition="{}",
                 )
             )
-            await kraft_builtins.env_setup(
+            await _prepare(
                 database,
                 rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
+                repo,
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
-                repo_entry=NO_SETUP,
             )
             copied = rd.worktrees / "w1" / ".engineering" / "plans" / "p.md"
             # git brought the committed version; the copy must not clobber it
@@ -438,7 +443,7 @@ def test_env_setup_leaves_a_committed_attachment_alone(tmp_path):
     asyncio.run(scenario())
 
 
-def test_env_setup_does_not_write_through_a_symlinked_attachment(tmp_path):
+def test_worktree_preparation_does_not_write_through_a_symlinked_attachment(tmp_path):
     """HEAD (what the fresh worktree is checked out from) can hold a symlink
     at the attachment path that the browser-supplied path never showed:
     validation only ever looked at the repo's working tree. A dangling
@@ -470,17 +475,13 @@ def test_env_setup_does_not_write_through_a_symlinked_attachment(tmp_path):
                     chain_definition="{}",
                 )
             )
-            status = await kraft_builtins.env_setup(
+            report = await _prepare(
                 database,
                 rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
+                repo,
                 attachments=[{"kind": "plan", "path": ".engineering/plans/p.md"}],
-                repo_entry=NO_SETUP,
             )
-            assert status == "done"
+            assert "worktree ready" in report
             assert not outside.exists()
         finally:
             await database.close()
@@ -488,46 +489,12 @@ def test_env_setup_does_not_write_through_a_symlinked_attachment(tmp_path):
     asyncio.run(scenario())
 
 
-def test_noop_creates_done_session_with_log(tmp_path):
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id="w1",
-                    bead_id="B",
-                    title="t",
-                    repo="/r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            status = await kraft_builtins.noop(
-                database,
-                rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="spec",
-                hook_point="on.spec.requested",
-            )
-            assert status == "done"
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT hook_point, status, log_path FROM worker_sessions WHERE id='s1'"
-                ).fetchone()
-            )
-            assert row["hook_point"] == "on.spec.requested"
-            assert row["status"] == "done"
-            assert Path(row["log_path"]).is_file()
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+# `builtins.noop` lived here. V1 has no name indirection for a hook to be bound
+# to, so there is nothing for an inert placeholder task to be: a test that needs
+# one uses a `subprocess` task running `true`.
 
 
-def test_env_setup_stamps_base_ref(tmp_path):
+def test_worktree_preparation_stamps_base_ref(tmp_path):
     repo = make_repo(tmp_path)
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
@@ -548,15 +515,7 @@ def test_env_setup_stamps_base_ref(tmp_path):
                     chain_definition="{}",
                 )
             )
-            await kraft_builtins.env_setup(
-                database,
-                rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
-                repo_entry=NO_SETUP,
-            )
+            await _prepare(database, rd, repo)
             row = database.read(
                 lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
             )
@@ -567,7 +526,7 @@ def test_env_setup_stamps_base_ref(tmp_path):
     asyncio.run(scenario())
 
 
-def test_env_setup_does_not_restamp_on_reentry(tmp_path):
+def test_worktree_preparation_does_not_restamp_on_reentry(tmp_path):
     repo = make_repo(tmp_path)
 
     async def scenario():
@@ -585,29 +544,12 @@ def test_env_setup_does_not_restamp_on_reentry(tmp_path):
                     chain_definition="{}",
                 )
             )
-            await kraft_builtins.env_setup(
-                database,
-                rd,
-                session_id="s1",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
-                repo_entry=NO_SETUP,
-            )
+            await _prepare(database, rd, repo)
             await database.write(lambda c: store.set_base_ref(c, "w1", "PINNED"))
             # second call: `ensure_worktree` returns early (the worktree already
-            # exists) and re-pins nothing; `env_setup` still writes its own
-            # session row and reports done.
-            status = await kraft_builtins.env_setup(
-                database,
-                rd,
-                session_id="s2",
-                work_item_id="w1",
-                node_id="env_setup",
-                repo=str(repo),
-                repo_entry=NO_SETUP,
-            )
-            assert status == "done"
+            # exists) and re-pins nothing; preparation still re-runs and reports.
+            report = await _prepare(database, rd, repo)
+            assert "worktree ready" in report
             row = database.read(
                 lambda c: c.execute("SELECT base_ref FROM work_items WHERE id='w1'").fetchone()
             )
@@ -1163,7 +1105,6 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
     from kraft import executor
     from kraft.api.routes import lifecycle
     from kraft.executor import dispatch
-    from kraft.templates import Registry, Template
 
     repo = make_repo(tmp_path)
     tracker = isolated_bd(tmp_path)
@@ -1184,14 +1125,16 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
                 rd,
                 title="Teach probe_repo about worktrees",
                 repo=str(repo),
-                template=Template(
-                    id="one-forge-node",
-                    nodes=[{"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None}],
+                chain=v1_resolved(
+                    [
+                        {
+                            "id": "open_mr",
+                            "kind": "exec",
+                            "tasks": [{"id": "open", "kind": "forge", "target": "mr.open_draft"}],
+                        }
+                    ]
                 ),
                 bd_cwd=str(tracker),
-            )
-            registry = Registry(
-                hooks={"on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"}}
             )
             launch = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
             # one node, no gate: the chain completes and closes its own bead in
@@ -1200,7 +1143,7 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 launch=launch,
             )
@@ -1825,7 +1768,7 @@ def test_carry_local_files_refuses_a_directory_entry_missing_its_trailing_slash(
     `.venv` in `local_files` passes validation and reaches here. It is not a
     file, so it always fails `src.is_file()` -- the same branch a genuinely
     absent source takes. Without this, a typo like this is carried nowhere,
-    refused nowhere, and never shows up in `env_setup`'s report either
+    refused nowhere, and never shows up in the preparation report either
     (`_uncarried_local_files`'s `"/" not in n` filter drops the `--directory`
     listing's `.venv/` entry) -- zero feedback for a plausible mistake."""
     repo = make_repo(tmp_path)
@@ -1983,9 +1926,9 @@ def test_mr_rebase_reports_done_when_it_moved_nothing(tmp_path):
     asyncio.run(scenario())
 
 
-def test_env_setup_reruns_the_setup_command_on_a_second_dispatch(tmp_path):
-    """`on.env.prepare` is a step after the rebase because a rebase can land a
-    new lockfile (Kraft-zlsuk); that only helps if each dispatch runs setup."""
+def test_worktree_preparation_reruns_the_setup_command_on_every_entry(tmp_path):
+    """A rebase can land a new lockfile (Kraft-zlsuk), so preparation re-runs on
+    every entry into the walk rather than only at worktree creation."""
     repo = make_repo(tmp_path)
     marker = tmp_path / "setup-runs"
     entry = {**NO_SETUP, "setup_command": f"echo run >> {marker}"}
@@ -1999,16 +1942,8 @@ def test_env_setup_reruns_the_setup_command_on_a_second_dispatch(tmp_path):
                 database, rd, repo=str(repo), work_item_id="w1", repo_entry=entry
             )
             before = marker.read_text().count("run")
-            for n, sid in enumerate(("s1", "s2"), start=1):
-                await kraft_builtins.env_setup(
-                    database,
-                    rd,
-                    session_id=sid,
-                    work_item_id="w1",
-                    node_id="implementation",
-                    repo=str(repo),
-                    repo_entry=entry,
-                )
+            for n in (1, 2):
+                await kraft_builtins.prepare_runtime(rd.worktrees / "w1", Path(repo), entry)
                 assert marker.read_text().count("run") == before + n
         finally:
             await database.close()

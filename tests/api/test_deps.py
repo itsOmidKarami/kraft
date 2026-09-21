@@ -184,3 +184,31 @@ def test_cancel_on_an_absent_or_already_done_task_is_a_noop():
         await deps.cancel(app, "w1")  # already done -- must not raise
 
     asyncio.run(scenario())
+
+
+def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
+    """Kraft-vhcop: a chain's `skill:` is checked when the chain resolves, so
+    the app's library must know the operator's overlay -- or a method only the
+    operator ships makes every chain selecting it unresolvable."""
+    import yaml
+
+    templates = tmp_path / "templates"
+    (templates / "chains").mkdir(parents=True)
+    task = {"kind": "agent", "harness": "codex_default", "prompt": "p", "skill": "house"}
+    (templates / "library.yaml").write_text(yaml.safe_dump({"tasks": {"t": task}}))
+    (templates / "chains" / "default.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "default",
+                "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "a", "extends": "t"}]}],
+            }
+        )
+    )
+    skills = tmp_path / "skills"
+    (skills / "house").mkdir(parents=True)
+    (skills / "house" / "SKILL.md").write_text("ours")
+
+    library, errors = deps.load_library(templates, skills)
+
+    assert errors == []
+    assert library.lint() == []

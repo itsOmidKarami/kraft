@@ -27,15 +27,28 @@ that you found nothing wrong with it.
 
 ## What each gate is asking
 
-- **spec_approval** — does the spec solve the problem in the brief, and is it
-  a design a person would recognise as theirs? A spec that solves a *different*
-  problem, however well, is a reject.
-- **plan_approval** — do the plan's steps produce the spec's design? Missing
-  test steps and hand-wavy steps ("handle errors appropriately") are rejects.
-- **chain_finalized** — does the revised chain fit the plan's real size?
-- **human_review_approval** — this one is a diff about to be merged. The bar
-  for approving it is the highest of any gate; when in doubt at all, hand it to
-  a person.
+A gate's **id is whatever its chain calls it**, so do not match on names. The
+prompt tells you the gate id and the document it is about; the document's *kind*
+is what tells you which question below is yours. (These used to be keyed on four
+fixed names — `spec_approval`, `plan_approval`, `chain_finalized`,
+`human_review_approval` — which a custom chain never had and which left the
+seeded chain's own draft-merge-request gate undescribed.)
+
+- **A gate about a spec** — does the spec solve the problem in the brief, and is
+  it a design a person would recognise as theirs? A spec that solves a
+  *different* problem, however well, is a reject.
+- **A gate about a plan** — do the plan's steps produce the spec's design?
+  Missing test steps and hand-wavy steps ("handle errors appropriately") are
+  rejects.
+- **A gate about a review brief or work-item summary** — the chain's final
+  review. Does the finished work match what was approved, and does its size match
+  the plan's? This is the one gate whose own document must exist; without it
+  there is nothing to finalize.
+- **A gate with no document at all** — a checkpoint before something
+  irreversible starts (opening a merge request, for instance). Read the worktree
+  and the diff, and judge whether the work is ready for that step.
+- **A gate about a diff that is about to be merged** — the highest bar of any
+  gate. When in doubt at all, hand it to a person.
 
 ## Reporting
 

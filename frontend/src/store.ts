@@ -200,7 +200,7 @@ export const useStore = create<State>((set, get) => ({
         // server-side — patched here from what the event already carries
         // when there is a prior list to carry forward, and backfilled by the
         // queued hydrate otherwise (first report of a fresh run).
-        case "task_progress":
+        case "plan_progress":
           return {
             ...base,
             ...patchItem(s, id, (w) => ({

@@ -23,8 +23,12 @@ from pydantic.dataclasses import dataclass as model
 from kraft.findings import SEVERITIES
 
 
-class PolicyError(Exception):
-    pass
+class PolicyError(ValueError):
+    """Bad policy: an unreadable `policy.yaml`, or an override past a ceiling.
+
+    A `ValueError`, so every intake door's existing `except ValueError` answers
+    a chain `policy:` over the instance maxima as the refusal it is (a 422, a
+    skipped trigger), not an unhandled 500 (Kraft-ib2af)."""
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
@@ -100,7 +104,12 @@ class ArchiveInput(BaseModel):
 
 
 class PolicyInput(BaseModel):
-    """Static policy.yaml schema; runtime conversion remains in ``load_policy``."""
+    """Static policy.yaml schema; runtime conversion remains in ``load_policy``.
+
+    `extra="forbid"`: a misspelled section (`maximum:` for `maxima:`) is refused
+    by name rather than loading cleanly and bounding nothing (Kraft-sz4dh)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     loops: dict[str, Cap] = Field(default_factory=dict)
     default: Cap
@@ -113,7 +122,32 @@ class PolicyInput(BaseModel):
     auto_escalate_stuck: StrictBool = True
     auto_escalate_stuck_cap: PositiveInt = DEFAULT_AUTO_ESCALATE_STUCK_CAP
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = 0
+    auto_review_attempts: PositiveInt = 1
     forge_cli_timeout_s: Annotated[StrictFloat | StrictInt, Field(gt=0)] = 120
+    #: V1's `defaults:`/`maxima:` sections, read by the *same* loader rather
+    #: than a second one. `policy.yaml` is one file, and one filename with two
+    #: live loaders is how two readers of it start disagreeing (Ruling 18/37):
+    #: `InstancePolicyInput.from_yaml` deliberately does not exist. Forward
+    #: references, because the V1 models are defined further down this module
+    #: beside the override engine they belong to -- `model_rebuild()` at the
+    #: bottom of the file resolves them.
+    defaults: PolicyDefaultsInput = Field(default_factory=lambda: PolicyDefaultsInput())
+    maxima: PolicyMaximaInput = Field(default_factory=lambda: PolicyMaximaInput())
+
+    @model_validator(mode="after")
+    def _v1_defaults_are_within_v1_maxima(self) -> PolicyInput:
+        """The same coherence rule `InstancePolicyInput` enforces, applied
+        where the file is actually read -- so a `defaults:` entry past a
+        `maxima:` ceiling is refused at load rather than at first use."""
+        InstancePolicyInput(defaults=self.defaults, maxima=self.maxima)
+        return self
+
+    def instance_policy(self) -> InstancePolicy:
+        """This file's V1 instance policy: the resolved starting point every
+        later `apply_template_override` layers onto."""
+        return InstancePolicy.from_input(
+            InstancePolicyInput(defaults=self.defaults, maxima=self.maxima)
+        )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> PolicyInput:
@@ -197,12 +231,34 @@ class Policy:
     #: `Cap.attempts` but counted over `escalation_message` events tagged
     #: `{"auto": true}` rather than a `retry_counters` row.
     auto_escalate_stuck_cap: int = DEFAULT_AUTO_ESCALATE_STUCK_CAP
-    #: Seconds to wait after the triggering event (`gate_requested` for
-    #: `auto_escalate`, `work_item_needs_human` for `auto_escalate_stuck`)
-    #: before either mechanism fires, so a human about to look at the item
-    #: anyway isn't preempted by the agent (Kraft-vyk8). 0, the default, is
-    #: today's immediate-fire behaviour, unchanged.
+    #: Seconds to wait after the triggering event before either delayed
+    #: mechanism fires, so a human about to look at the item anyway isn't
+    #: preempted by the agent (Kraft-vyk8). 0, the default, is today's
+    #: immediate-fire behaviour, unchanged.
+    #:
+    #: **One field, two mechanisms, two owners.** `auto_escalate_delay.py` is a
+    #: single poller and this is the only delay either half reads, so read the
+    #: name as "the delay before an unattended agent acts", not as belonging to
+    #: the `auto_escalate*` family alone:
+    #:
+    #: * **gate auto-review** -- triggered by `gate_requested`, armed by a
+    #:   gate's own `GateNode.auto_review` task and bounded by
+    #:   `auto_review_attempts`. Owned by `gate-auto-review-is-explicit-and-
+    #:   bounded` (Task 4b).
+    #: * **stuck escalation** -- triggered by `work_item_needs_human`, armed by
+    #:   `auto_escalate_stuck` and bounded by `auto_escalate_stuck_cap`. Owned
+    #:   by `stuck-escalation-is-an-exec-node-control` (Task 7), which is the
+    #:   task that may move or rename its half. Nothing in V1's chain schema
+    #:   spells `auto_escalate` any more, so the name no longer says which.
+    #:
+    #: Deliberately not renamed: operators have it set in their `policy.yaml`.
     auto_escalate_delay_s: int = 0
+    #: How many auto-review attempts one `gate_requested` may get before the
+    #: gate is left for a human (`gate-auto-review-is-explicit-and-bounded`).
+    #: Counted over `gate_auto_review_started`/`_skipped` events since the
+    #: request, by `gates._gate_already_reviewed`. 1 -- the default -- is the
+    #: one-attempt-per-request contract this bound replaces a hardcode with.
+    auto_review_attempts: int = 1
     #: Seconds one forge CLI call (`gh`/`glab`/`git`) may run before it is killed
     #: and raised as a `ForgeError`. Bounds a single invocation, not a pipeline
     #: wait -- that is `loops.ci_wait`.
@@ -231,6 +287,7 @@ class Policy:
             auto_escalate_stuck=parsed.auto_escalate_stuck,
             auto_escalate_stuck_cap=parsed.auto_escalate_stuck_cap,
             auto_escalate_delay_s=parsed.auto_escalate_delay_s,
+            auto_review_attempts=parsed.auto_review_attempts,
             forge_cli_timeout_s=float(parsed.forge_cli_timeout_s),
         )
 
@@ -263,6 +320,9 @@ def _field_error(name: str, exc: ValidationError) -> PolicyError:
             f"{name}: unknown severity {err['input']!r}; expected one of {SEVERITIES}"
         )
     key = ".".join(str(p) for p in err["loc"] if p != "args")
+    if err["type"] == "extra_forbidden" and len(err["loc"]) == 1:
+        known = sorted(PolicyInput.model_fields)
+        return PolicyError(f"{name}: unknown key {key!r}; expected one of {known}")
     return PolicyError(f"{name}: '{key}': {err['msg']}")
 
 
@@ -399,10 +459,12 @@ class PolicyDefaultsInput(BaseModel):
 
 
 class PolicyMaximaInput(BaseModel):
-    """`policy.yaml`'s `maxima:` -- the administrator ceiling nothing
-    downstream may exceed. `timeout_minutes`/`max_attempts` here are optional
-    administrator maxima on the operational fields of the same name; the
-    design doc's example omits them because most installs never set one."""
+    """`policy.yaml`'s `maxima:` -- the administrator ceiling no policy
+    override may exceed. Checked at load and at materialization only: nothing
+    reads it when a task launches yet (Kraft-q55aw). `timeout_minutes`/
+    `max_attempts` here are optional administrator maxima on the operational
+    fields of the same name; the design doc's example omits them because most
+    installs never set one."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
@@ -565,3 +627,10 @@ class InstancePolicy:
             updates[field_name] = tuple(value)
 
         return dataclasses.replace(self, **updates)
+
+
+# `PolicyInput.defaults`/`.maxima` are forward references to the V1 models
+# above, which are defined after it: one loader for `policy.yaml` (Ruling 37)
+# means the legacy schema has to carry the V1 sections, and the V1 models sit
+# with the override engine that reads them.
+PolicyInput.model_rebuild()

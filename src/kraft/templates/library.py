@@ -18,13 +18,15 @@ author has to correct (`template-resolution-preserves-source-context`).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
+from kraft import skill as _skill
+from kraft.policy import InstancePolicy, PolicyError
 from kraft.templates.models import (
     JUDGE_SEGMENT,
     MAIN_STEP,
@@ -34,6 +36,7 @@ from kraft.templates.models import (
     ResolvedChain,
     SteeringProfile,
     TaskKind,
+    first_error,
 )
 
 LIBRARY_FILE = "library.yaml"
@@ -47,6 +50,19 @@ _UNION_TAGS = frozenset({*TaskKind, *NodeKind})
 
 class TemplateLibraryError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class TemplateIssue:
+    """One thing wrong with an authored library, named where an author can find
+    it (`template-resolution-preserves-source-context`)."""
+
+    file: Path
+    chain: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.chain}: {self.message}"
 
 
 class Namespace(StrEnum):
@@ -140,16 +156,21 @@ class TemplateLibrary:
         components: Mapping[Namespace, Mapping[str, RawComponent]],
         chains: Mapping[str, RawComponent],
         steering: Mapping[str, SteeringProfile],
+        skills_dir: Path | None = None,
     ) -> None:
         self._components = components
         self._chains = chains
         self.steering = steering
+        #: Where an operator may overlay a method file (`kraft.skill`); `None`
+        #: means the bundled methods only.
+        self.skills_dir = skills_dir
 
     @classmethod
-    def from_yaml_dir(cls, path: str | Path) -> TemplateLibrary:
+    def from_yaml_dir(cls, path: str | Path, *, skills_dir: Path | None = None) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
-        `TemplateLibraryError` naming the file."""
+        `TemplateLibraryError` naming the file. `skills_dir` is the method
+        overlay a task's `skill:` resolves against, beside the bundled ones."""
         root = Path(path)
         library_path = root / LIBRARY_FILE
         if not library_path.is_file():
@@ -170,7 +191,7 @@ class TemplateLibrary:
             try:
                 steering[name] = SteeringProfile.model_validate(body)
             except ValidationError as exc:
-                raise TemplateLibraryError(f"{source}: {_first(exc)}") from exc
+                raise TemplateLibraryError(f"{source}: {first_error(exc)}") from exc
 
         chains: dict[str, RawComponent] = {}
         for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
@@ -187,7 +208,7 @@ class TemplateLibrary:
             chains[id] = RawComponent(
                 {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
             )
-        return cls(components, chains, steering)
+        return cls(components, chains, steering, skills_dir)
 
     @property
     def chain_ids(self) -> tuple[str, ...]:
@@ -203,6 +224,30 @@ class TemplateLibrary:
         """Which namespace declares `name`, for the cross-namespace `extends`
         error that says what the author actually referenced."""
         return next((ns for ns in _EXTENDABLE if name in self._components[ns]), None)
+
+    def lint(self, instance_policy: InstancePolicy | None = None) -> list[TemplateIssue]:
+        """Every chain in this library that does not resolve, rather than the
+        first (`template-lint-reports-library-validity`).
+
+        Given the `instance_policy`, a chain whose own `policy:` that policy
+        refuses -- past a `maxima:` ceiling -- is an issue too, rather than a
+        refusal the first intake on it finds (Kraft-ib2af).
+
+        Over the library already in memory: no file is read and none is written,
+        so an edit landing mid-lint cannot be reported against configuration the
+        caller never loaded. Parse errors are `from_yaml_dir`'s -- a library that
+        cannot be parsed has no instance to lint, and the caller turns that one
+        raise into its own issue.
+        """
+        issues = []
+        for id, raw in self._chains.items():
+            try:
+                resolved = self.resolve_chain(id)
+                if instance_policy is not None and resolved.chain.policy is not None:
+                    instance_policy.apply_template_override(resolved.chain.policy)
+            except (TemplateLibraryError, PolicyError) as exc:
+                issues.append(TemplateIssue(file=raw.source.file, chain=id, message=str(exc)))
+        return issues
 
     def resolve_chain(self, id: str) -> ResolvedChain:
         """Expand one chain's `extends` references, validate the result into a
@@ -221,19 +266,56 @@ class TemplateLibrary:
             raise TemplateLibraryError(resolution.explain(exc)) from exc
         resolved = ResolvedChain.from_chain(chain)
         for node in resolved.nodes:
+            # A node whose own tasks do not agree on what the node produces
+            # cannot be trimmed unambiguously when an attachment arrives. Two
+            # shapes, one rule: some tasks declaring `produces` and some not, and
+            # two tasks declaring *different* kinds. `> 1` covers both; the
+            # earlier `> 1 and None in produces` missed `{spec, plan}`, where an
+            # attached spec leaves the node -- and so the plan half of it -- in
+            # place, which is the same ambiguity from the other side:
+            # the node-level rule
+            # (`MaterializedChain`'s `trim_for_attachments`) would keep it and
+            # re-author the attached document, and dropping the one producing
+            # task instead is not available -- `Step.tasks` has `min_length=1`,
+            # so an emptied step is invalid. Refused here, at load, which is
+            # what makes the trim a clean node-level decision (Ruling 35).
+            produces = node.produces()
+            if len(produces) > 1:
+                raise TemplateLibraryError(
+                    f"{resolution.at(node.id)}: node {node.id!r} does not agree on what it "
+                    f"produces ({sorted(k or '(none)' for k in produces)}); a node either "
+                    f"wholly produces one kind or declares none"
+                )
             for task in node.tasks():
                 for name in task.task.steering:
                     if name not in self.steering:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects no steering profile {name!r}"
                         )
-        return resolved
-
-
-def _first(exc: ValidationError) -> str:
-    error = exc.errors()[0]
-    location = PATH_SEPARATOR.join(str(part) for part in error["loc"])
-    return f"{location}: {error['msg']}" if location else error["msg"]
+                # A skill that names no method is refused here, where lint and
+                # intake see it, never discovered by an agent at launch
+                # (Kraft-vhcop). Another plugin's skill cannot be looked up
+                # from here; `skill.UNAVAILABLE` has the agent stop on it.
+                selected = getattr(task.task, "skill", None)
+                if selected is not None:
+                    try:
+                        _skill.validate(self.skills_dir, selected, where=task.path)
+                    except _skill.SkillError as exc:
+                        raise TemplateLibraryError(
+                            f"{resolution.at(task.path)}: selects skill {selected!r}, "
+                            f"which resolves to no method: {exc}"
+                        ) from exc
+        # The text, not the names: `materialize` freezes it into the item's
+        # snapshot, so a later edit to `library.yaml` cannot reach a running item.
+        return replace(
+            resolved,
+            steering={
+                name: self.steering[name].instructions
+                for node in resolved.nodes
+                for task in node.tasks()
+                for name in task.task.steering
+            },
+        )
 
 
 @dataclass(frozen=True)

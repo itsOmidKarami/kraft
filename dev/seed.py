@@ -103,6 +103,13 @@ def pause_mid_flight(client: httpx.Client, wid: str, timeout: float = 30.0) -> s
     return state(client, wid)
 
 
+def settle_order(created: list) -> list:
+    """Paused items first: one can only be paused while its KRAFT_SLOW agent is
+    still asleep, and `pause_mid_flight` waits on that running session itself.
+    Settled after the others, it waited behind their settle timeouts instead."""
+    return sorted(created, key=lambda item: item[2] != "paused")
+
+
 def main() -> int:
     build_repo()
     # `just dev` builds the repo before the server starts: KRAFT_BD_CWD points at
@@ -117,9 +124,29 @@ def main() -> int:
     except httpx.HTTPError as exc:
         sys.exit(f"seed: no dev server on {BASE} ({exc}). Start one with `just dev`.")
 
-    resp = client.post("/repos", json={"path": str(REPO), "setup_command": ""})
+    # The default chain's verification refuses to guess a test command, and its
+    # merge-request half needs a forge: `fake` is the dev-only in-process one
+    # (Ruling 147). `uv run` finds this checkout's venv above `.dev/`.
+    resp = client.post(
+        "/repos",
+        json={
+            "path": str(REPO),
+            "setup_command": "",
+            "test_command": "uv run pytest -q",
+            "forge": "fake",
+        },
+    )
     if resp.status_code not in (201, 409):
         resp.raise_for_status()
+    if resp.status_code == 409:
+        # An older `.dev` connected the repo before it declared a forge and a test
+        # command; keeping that entry leaves the default chain unable to verify or
+        # open a merge request, and the rows below read BAD with no hint why.
+        entry = next(
+            (r for r in client.get("/repos").json()["repos"] if r["path"] == str(REPO)), {}
+        )
+        if entry.get("forge") != "fake" or not entry.get("test_command"):
+            print("seed: the dev repo predates forge: fake -- run `just dev-reset` first")
 
     created = []
     for title, template, want in ITEMS:
@@ -133,7 +160,7 @@ def main() -> int:
         created.append((wid, title, want))
 
     rows, ok = [], True
-    for wid, title, want in created:
+    for wid, title, want in settle_order(created):
         got = pause_mid_flight(client, wid) if want == "paused" else settle(client, wid, want)
         ok &= got == want
         rows.append((wid[:8], title, want, got))

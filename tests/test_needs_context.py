@@ -15,20 +15,29 @@ from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
-from support.harness import fake_registry, fake_templates_dir, isolated_bd, make_repo
+from support.harness import (
+    fake_templates_dir,
+    isolated_bd,
+    make_repo,
+    v1_fix_loop_node,
+    v1_named_chain,
+    v1_seeded_chain,
+)
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
-def _quick_task() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
+
+
+def _quick_task(tmp_path):
+    """The shipped gateless `quick-task`, its agent task on the fake agent."""
+    return v1_named_chain(tmp_path / "templates", agent_command=_FAKE)
 
 
 def _events(database, wid):
@@ -43,8 +52,8 @@ def _reason(database, wid) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Plain branch (`if not key:`) — on.implementation.start as a non-loop node,
-# exactly as it ships in both default.yaml and quick-task.yaml.
+# Plain branch (`loop is None`) — the implementer as a non-loop node, exactly
+# as it ships in quick-task.
 # ---------------------------------------------------------------------------
 
 
@@ -58,17 +67,16 @@ def test_needs_context_stops_the_item_with_the_question_in_the_reason(tmp_path, 
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="needs a decision",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker)
             )
             assert result == "needs_human"
             row = database.read(
@@ -93,34 +101,20 @@ def test_needs_context_stops_the_item_with_the_question_in_the_reason(tmp_path, 
 # ---------------------------------------------------------------------------
 
 
-def _fixloop_template() -> Template:
-    return Template(
-        id="fixloop-nc",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "verify",
-                "tasks": ["on.test.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
+def _fixloop_template(tmp_path):
+    """`verify`'s measuring task is an agent (the fake agent) so a *measuring*
+    task can report needs_context — pytest can't. No `env_setup` node: V1
+    prepares the worktree first."""
+    measure = {"id": "check", "kind": "agent", "harness": "fake", "prompt": "Check it."}
+    return v1_seeded_chain(
+        tmp_path / "templates", [v1_fix_loop_node("verify", measure)], agent_command=_FAKE
     )
-
-
-def _agent_measuring_registry() -> Registry:
-    """`on.test.run` becomes an agent task (the fake agent) so a *measuring*
-    task can report needs_context — pytest, the real on.test.run, can't."""
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    hooks = dict(base.hooks)
-    hooks["on.test.run"] = {"kind": "agent", "command": f"{sys.executable} {_FAKE_AGENT}"}
-    return Registry(hooks=hooks)
 
 
 def _make_policy(tmp_path, *, attempts=3, wall_clock_s=3600) -> policy.Policy:
     p = tmp_path / "policy.yaml"
     p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
+        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
         # Kraft-lpdd: this suite is about needs_context detection, not the
         # unrelated auto-escalate trigger a real cap breach would otherwise
@@ -140,14 +134,13 @@ def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(tmp_path, 
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = _agent_measuring_registry()
             pol = _make_policy(tmp_path)
             wid = await executor.intake(
                 database,
                 rd,
                 title="needs a decision",
                 repo=str(repo),
-                template=_fixloop_template(),
+                chain=_fixloop_template(tmp_path),
                 bd_cwd=str(tracker),
             )
 
@@ -156,13 +149,13 @@ def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(tmp_path, 
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
             )
             assert result == "needs_human"
             assert _reason(database, wid) == "needs_context: which branch is the target?"
-            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            assert database.read(lambda c: store.read_counter(c, wid, "verify.fix_loop")) is None
 
             # A human answers via the same mechanism /resume uses (set + take the
             # steer, relaunch from the current node) and the agent still can't
@@ -177,14 +170,14 @@ def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(tmp_path, 
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                start_index=1,  # "verify"
+                start_index=0,  # "verify"
                 steer=steer,
             )
             assert result2 == "needs_human"
-            assert database.read(lambda c: store.read_counter(c, wid, "verify_fix_loop")) is None
+            assert database.read(lambda c: store.read_counter(c, wid, "verify.fix_loop")) is None
         finally:
             await database.close()
 
@@ -208,14 +201,13 @@ def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(tmp_path, monkey
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = _agent_measuring_registry()
             pol = _make_policy(tmp_path, attempts=1)
             wid = await executor.intake(
                 database,
                 rd,
                 title="needs a decision",
                 repo=str(repo),
-                template=_fixloop_template(),
+                chain=_fixloop_template(tmp_path),
                 bd_cwd=str(tracker),
             )
 
@@ -224,7 +216,7 @@ def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(tmp_path, monkey
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
             )
@@ -246,10 +238,10 @@ def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(tmp_path, monkey
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                start_index=1,  # "verify"
+                start_index=0,  # "verify"
                 steer=steer,
             )
             # A first-match scan would see the stale round-0 needs_context row
@@ -283,17 +275,16 @@ def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="needs a decision",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
+                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker)
             )
             assert result == "needs_human"
             assert _reason(database, wid) == "needs_context: which database should this target?"
@@ -310,9 +301,9 @@ def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                start_index=1,  # "implementation"
+                start_index=0,  # "implementation"
                 steer=steer,
             )
             assert result2 == "completed"
@@ -429,7 +420,8 @@ def test_steer_still_409s_on_a_running_item(tmp_path, monkeypatch):
                 (
                     s
                     for s in client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
-                    if s["hook_point"] == "on.implementation.start" and s["status"] == "running"
+                    if s["hook_point"] == "implementation.main.implement"
+                    and s["status"] == "running"
                 ),
                 None,
             ),
@@ -454,15 +446,38 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
     `verify`, where its real pytest run genuinely fails on calc.py's untouched
     bug. C1 (Kraft-s7c04.8) briefly moved the second stop to `implementation`
     by running `on.test.run` there directly; reverted 2026-09-16, so this is
-    back to its original two-node sequence."""
+    back to its original two-node sequence.
+
+    quick-task's shape with a real suite at `verify`: the seeded fixture turns
+    the changed-test-scope builtin into `true`, which could never fail."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "noop")  # leaves calc.py's bug in place throughout
     repo = make_repo(tmp_path)
-    with _client(tmp_path, monkeypatch) as client:
+    templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    (templates / "chains" / "quick-task-pytest.yaml").write_text(
+        "id: quick-task-pytest\n"
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - id: implement\n"
+        "        extends: implementer\n"
+        "  - id: verify\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - id: suite\n"
+        "        kind: subprocess\n"
+        f"        command: {sys.executable} -m pytest -q\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
         wid = client.post(
             "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+            json={
+                "repo": str(repo),
+                "title": "needs a decision",
+                "chain_template": "quick-task-pytest",
+            },
         ).json()["id"]
         _wait_for_status(client, wid, "needs_human")
         assert client.get(f"/api/work-items/{wid}").json()["current_node_id"] == "implementation"
@@ -503,9 +518,13 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
     needs_context stop still reads as live: the question keeps rendering (hiding
     the gate card, which for `human_review_approval` is the only approve
     affordance) and /steer + /resume answer a stop that is long over — /resume
-    re-walking the gated node."""
+    re-walking the gated node.
+
+    V1's default chain runs its own spec and plan agents (the legacy fixture
+    bound both hooks to a noop), so the question is switched on only once
+    they are through: the node under test is `implementation`, and the gate
+    after it is `local_review`."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which database should this target?")
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
@@ -513,9 +532,11 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
             "/api/work-items",
             json={"repo": str(repo), "title": "needs a decision", "chain_template": "default"},
         ).json()["id"]
-        for gate in ("spec_approval", "plan_approval", "chain_finalized"):
-            _await_gate(client, wid, gate)
-            _approve_retrying(client, wid, gate)
+        _await_gate(client, wid, "spec_approval")
+        _approve_retrying(client, wid, "spec_approval")
+        _await_gate(client, wid, "plan_approval")
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
+        _approve_retrying(client, wid, "plan_approval")
 
         # implementation asks its question and stops.
         _wait(
@@ -528,20 +549,19 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(tmp_
         assert item["needs_context_question"] == "which database should this target?"
         assert item["current_node_id"] == "implementation"
 
-        # answered — the chain runs on to the last gate.
+        # answered — the chain runs on to the next gate.
         monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
         assert (
             client.post(f"/api/work-items/{wid}/resume", json={"steer": "the fork"}).status_code
             == 200
         )
-        _await_gate(client, wid, "human_review_approval")
+        _await_gate(client, wid, "local_review")
 
         item = client.get(f"/api/work-items/{wid}").json()
-        assert item["pending_gate"] == "human_review_approval"
+        assert item["pending_gate"] == "local_review"
         assert item["needs_context_question"] is None
         assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
         assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
-        _approve_retrying(client, wid, "human_review_approval")
 
 
 def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(tmp_path, monkeypatch):

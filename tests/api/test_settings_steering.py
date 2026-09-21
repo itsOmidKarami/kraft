@@ -18,6 +18,7 @@ from kraft import intake as intake_mod
 from kraft.worker import steering as steering_mod
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -38,11 +39,16 @@ def _steering_dir(templates_dir):
 
 
 def _files_excluding_fixture(body: dict) -> list[dict]:
-    """`fake_templates_dir` seeds `never-signal-processes-you-didnt-start.md`
-    itself -- `on.chain.review_ready`'s shipped binding names it, so a config
-    load would 422 without it. It is not this test's concern, so drop it
-    before asserting on what the test itself wrote."""
-    return [f for f in body["files"] if f["name"] != "never-signal-processes-you-didnt-start"]
+    """`fake_templates_dir` seeds steering files of its own: the legacy
+    `never-signal-processes-you-didnt-start.md`, and -- because dispatch still
+    resolves a task's `steering:` names to files (`seed_v1_library`'s known
+    gap) -- one file per profile the seeded `library.yaml` declares inline.
+    None of them is this test's concern, so drop them before asserting on
+    what the test itself wrote."""
+    seeded = {"never-signal-processes-you-didnt-start"} | set(
+        yaml.safe_load((_REPO_ROOT / "templates" / "library.yaml").read_text())["steering"]
+    )
+    return [f for f in body["files"] if f["name"] not in seeded]
 
 
 def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):

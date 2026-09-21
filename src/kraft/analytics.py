@@ -51,6 +51,37 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
+def _node_roles(row) -> tuple[set[str], set[str]]:
+    """This item's (merge nodes, fix-loop nodes), by what each node does and
+    never by its name (Kraft-hicln): a V1 row's `chain_definition` is `"{}"`
+    and no seeded V1 node is called `verify`.
+
+    V1 reads the materialized chain: a merge node runs a forge task targeting
+    `mr.merge`, a fix-loop node declares a `fix_loop`. A legacy row, filed
+    before V1 and still in the database, keeps the legacy reading of the same
+    two facts: an `on.merge` task, a `fix_loop` key.
+    """
+    from kraft.store.chain import materialized_chain_of
+    from kraft.templates.models import ForgeAction, ForgeTask
+
+    chain = materialized_chain_of(row)
+    if chain is not None:
+        merge = {
+            n.id
+            for n in chain.chain.nodes
+            if any(
+                isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_MERGE
+                for t in n.tasks()
+            )
+        }
+        return merge, {n.id for n in chain.chain.nodes if n.fix_loop}
+    nodes = json.loads(row["chain_definition"] or "{}").get("nodes", [])
+    return (
+        {n["id"] for n in nodes if "on.merge" in (n.get("tasks") or [])},
+        {n["id"] for n in nodes if n.get("fix_loop")},
+    )
+
+
 def _week_start(ts: str) -> str | None:
     """The Monday of `ts`'s week, as a date string."""
     d = _parse(ts)
@@ -261,8 +292,8 @@ def compute(
         args.append(template)
 
     items = conn.execute(
-        f"SELECT id, repo, chain_template, status, chain_definition, created_at, updated_at "
-        f"FROM work_items WHERE {' AND '.join(where)}",
+        f"SELECT id, repo, chain_template, status, chain_definition, materialized_chain, "
+        f"created_at, updated_at FROM work_items WHERE {' AND '.join(where)}",
         args,
     ).fetchall()
     ids = [r["id"] for r in items]
@@ -395,11 +426,24 @@ def compute(
 
     for node_id, seen in node_rounds.items():
         by_node[node_id]["rounds"] = len(seen)
-    verify_rounds = node_rounds.get("verify")
-    if verify_rounds:
-        verify_items = {wid for wid, _ in verify_rounds}
-        totals["fix_cycles"] = round(len(verify_rounds) / len(verify_items), 1)
-        totals["fix_cycles_capped"] = len(node_capped_items.get("verify", ()))
+    roles = {r["id"]: _node_roles(r) for r in items}
+    loop_rounds = {
+        (wid, node_id, rnd)
+        for node_id, seen in node_rounds.items()
+        for wid, rnd in seen
+        if node_id in roles[wid][1]
+    }
+    if loop_rounds:
+        loop_items = {wid for wid, _, _ in loop_rounds}
+        totals["fix_cycles"] = round(len(loop_rounds) / len(loop_items), 1)
+        totals["fix_cycles_capped"] = len(
+            {
+                wid
+                for node_id, wids in node_capped_items.items()
+                for wid in wids
+                if node_id in roles[wid][1]
+            }
+        )
     for node in by_node.values():
         node["avg_ms"] = node["wall_ms"] // node["runs"] if node["runs"] else 0
     # an item's rounds is the deepest single node's loop count, summed over items
@@ -416,14 +460,7 @@ def compute(
         rr["cycles"] = round(sum(rl) / len(rl), 1) if rl else 0.0
 
     # ── events: merges and human wait ────────────────────────────────────────
-    merge_nodes = {
-        r["id"]: {
-            n["id"]
-            for n in json.loads(r["chain_definition"]).get("nodes", [])
-            if "on.merge" in (n.get("tasks") or [])
-        }
-        for r in items
-    }
+    merge_nodes = {wid: merge for wid, (merge, _) in roles.items()}
     events = conn.execute(
         f"SELECT work_item_id, type, payload, created_at FROM events "
         f"WHERE work_item_id IN ({holes}) ORDER BY seq",

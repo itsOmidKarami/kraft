@@ -7,7 +7,6 @@ indexer has caught up.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import time
@@ -17,9 +16,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_named_chain
 
-from kraft import api, templates
+from kraft import api
 from kraft.api.routes import board
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,26 +26,30 @@ _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 def _templates(tmp_path: Path) -> Path:
-    """fake_templates_dir, with the spec hook bound to the fake agent and a
-    one-node template that stops at spec_approval."""
+    """fake_templates_dir, plus a V1 `spec-only` chain: the shipped spec author
+    (on the fake agent, which honours its `produces: spec` contract) and the
+    gate that is about its document.
+
+    Was a legacy `spec-only.yaml` beside the legacy chains, which the V1 intake
+    door cannot resolve -- POST /work-items answered 422, and every fixture
+    below failed on `KeyError: 'id'` reading the item id out of the error."""
     d = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    registry = yaml.safe_load((d / "registry.yaml").read_text())
-    registry["hooks"]["on.spec.requested"] = {
-        "kind": "agent",
-        "command": str(_FAKE_CLAUDE),
-        "artifact": "spec",
-    }
-    (d / "registry.yaml").write_text(yaml.safe_dump(registry))
-    (d / "spec-only.yaml").write_text(
+    (d / "chains" / "spec-only.yaml").write_text(
         yaml.safe_dump(
             {
                 "id": "spec-only",
                 "nodes": [
                     {
                         "id": "spec",
-                        "tasks": ["on.spec.requested"],
-                        "gate_after": "spec_approval",
-                    }
+                        "kind": "exec",
+                        "tasks": [{"id": "author", "extends": "spec_author"}],
+                    },
+                    {
+                        "id": "spec_approval",
+                        "kind": "gate",
+                        "artifact": "spec",
+                        "reject_to": "spec",
+                    },
                 ],
             }
         )
@@ -323,21 +326,22 @@ def test_approving_a_gate_with_no_artifact_ingests_nothing(client, item_at_spec_
 
 
 def test_the_review_gate_still_resolves_its_brief(tmp_path):
-    """§5. Splitting `on.mr.sync` onto its own node must not move the gate off
-    the node that carries the review brief: `_gate_artifact` scans the gate
-    node's own tasks, so a gate on a sync-only node would resolve nothing and
-    the human would be asked to approve a merge request with no document."""
-    reg = templates.load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    chain = templates.materialize(
-        templates.load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+    """§5. The shipped `default` chain's final review gate must resolve the
+    review brief, or the human is asked to approve a merge request with no
+    document. V1: the gate names its own `artifact` (`gate-owns-gate-
+    behaviour`); nothing scans the node in front of it any more."""
+    from kraft.executor.entry import single_repo_target
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+
+    chain = v1_named_chain(tmp_path / "templates", "default").materialize(
+        target=single_repo_target(str(tmp_path)),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
     )
-    brief = tmp_path / "w1" / ".engineering" / "review_briefs" / "w1.md"
+    brief = tmp_path / "wt" / "w1" / ".engineering" / "review_briefs" / "w1.md"
     brief.parent.mkdir(parents=True)
     brief.write_text("---\ntitle: The brief\n---\n\nbody\n")
 
-    st = SimpleNamespace(run_dirs=SimpleNamespace(worktrees=tmp_path), registry=reg)
-    row = {"id": "w1", "chain_definition": json.dumps(chain)}
+    st = SimpleNamespace(run_dirs=SimpleNamespace(worktrees=tmp_path / "wt"))
+    row = {"id": "w1", "chain_definition": "{}", "materialized_chain": chain.to_json()}
 
-    assert (
-        board._gate_artifact(st, row, "human_review_approval") == ".engineering/review_briefs/w1.md"
-    )
+    assert board._gate_artifact(st, row, "chain_review") == ".engineering/review_briefs/w1.md"

@@ -41,6 +41,10 @@ dev = [
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.6",
     "pytest-cov>=6",
+    # Test tooling, not a product dependency: without it a hung test produces a
+    # progress bar, orphan pids and no test name. That cost two CI runs and an
+    # hour of counting progress characters to find one nested test run.
+    "pytest-timeout>=2.3",
 ]
 docs = ["mkdocs-material>=9"]
 
@@ -66,6 +70,14 @@ kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins/kraft-lite/tests"]
+# A per-test ceiling, so a hang fails with a name and a traceback instead of
+# stalling the job. Generous on purpose -- the slowest honest tests here drive a
+# real uvicorn or a real `bd` -- so anything that trips this is wedged, not slow.
+# `thread` method, not `signal`: most of this suite runs inside `asyncio.run`,
+# and a SIGALRM raised into an event loop is swallowed by whatever `await` is
+# current. A thread-based timeout dumps every stack and kills the process.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "e2e: end-to-end tests needing a real claude binary (Chunk C)",
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",

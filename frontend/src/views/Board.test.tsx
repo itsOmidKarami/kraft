@@ -210,6 +210,27 @@ describe("Board", () => {
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
   });
 
+  // The New work item dialog omits `chain_template` when `default` is chosen
+  // (Kraft-cd47), so a board holding one explicit template and one default
+  // item mixes a real id with a null. Sorting those keys with
+  // `localeCompare` threw on the null and blanked the whole board. It throws
+  // when the null is the *receiver*, so it fired only when `sort` passed the
+  // null key as a comparison's first argument -- which is why a full board
+  // survived it and a small one did not. This test does not reproduce that
+  // pairing directly; it pins the guard, and reverting `tplOf` reddens it.
+  it("counts an item with no explicit template as `default` instead of blanking the board", async () => {
+    setItems(
+      wi({ id: "w0", repo: "/repo-a", status: "active", chain_template: null as never }),
+      wi({ id: "w1", repo: "/repo-a", status: "active", chain_template: "quick-task" }),
+    );
+    renderBoard();
+    expect(screen.getAllByTestId("board-card")).toHaveLength(2);
+    expect(within(filters()).getByRole("button", { name: /^default/ })).toHaveTextContent("1");
+    // And the chip filters to that item rather than to nothing.
+    await userEvent.click(within(filters()).getByRole("button", { name: /^default/ }));
+    expect(screen.getAllByTestId("board-card")).toHaveLength(1);
+  });
+
   it("caps the Done group at five until 'show all' is clicked", async () => {
     setItems(
       ...Array.from({ length: 7 }, (_, n) =>
@@ -272,7 +293,7 @@ describe("Board", () => {
     ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
     ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
     ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
-    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /Task 3\/6 · wire the store$/, null],
+    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!Task )3 of 6 · wire the store$/, null],
     ["rate limited", { status: "rate_limited", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
   ])("%s: the meta line ends in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
     setItems(wi({ id: "w9", ...over }));
@@ -437,13 +458,16 @@ describe("Board", () => {
     expect(screen.getByText(/retry/i)).toBeInTheDocument();
   });
 
-  it("Task N/M · title renders in the meta line when progress is set", () => {
+  it("N of M · title renders in the meta line when progress is set, with no bare task noun", () => {
     setItems(
       wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
     );
     renderBoard();
-    expect(screen.getByText("Task 3/6")).toBeInTheDocument();
+    expect(screen.getByText("3 of 6")).toBeInTheDocument();
     expect(screen.getByText("wire the store")).toBeInTheDocument();
+    expect(screen.queryByText(/\btask \d/i)).toBeNull();
+    // The ellipsized meta line's tooltip carries the same words.
+    expect(document.querySelector(".board-row-meta")?.getAttribute("title")).toMatch(/(?<!Task )3 of 6 · wire the store$/);
   });
 
   it("plain click toggles the peek param; ⌘-click navigates instead", async () => {

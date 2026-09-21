@@ -1,0 +1,171 @@
+# library.yaml
+steering:
+  project-standards:
+    instructions: |
+      Keep changes focused. Run the relevant checks before finishing.
+
+tasks:
+  spec_author:
+    kind: agent
+    harness: codex_default
+    prompt: Produce the work item's specification.
+    produces: spec
+    skill: kraft:spec
+    steering: [project-standards]
+
+  plan_author:
+    kind: agent
+    harness: codex_default
+    prompt: Produce an executable implementation plan from the approved spec.
+    produces: plan
+    skill: kraft:plan
+
+  implementer:
+    kind: agent
+    harness: codex_default
+    model: gpt-5.6-terra
+    effort: high
+    prompt: Implement the approved plan.
+
+  verify_changed_scopes:
+    kind: builtin
+    ref: kraft.verify_changed_test_scopes
+    scope: each_repository
+    execution: sequential
+
+  repair_mr_feedback:
+    kind: agent
+    harness: codex_default
+    model: gpt-5.6-terra
+    effort: high
+    prompt: Resolve the current CI failures and actionable merge-request feedback.
+
+  strict_judge:
+    kind: agent
+    harness: claude_review
+    effort: high
+    prompt: Decide whether another repair attempt is justified.
+
+  open_draft_mr:
+    kind: forge
+    target: mr.open_draft
+    scope: each_repository
+
+  sync_draft_mr:
+    kind: forge
+    target: mr.sync
+    scope: each_repository
+
+  await_mr_ci:
+    kind: forge
+    target: mr.ci
+    scope: each_repository
+    wait:
+      timeout: 90m
+      polling:
+        initial_interval: 30s
+        max_interval: 5m
+
+  await_automated_review:
+    kind: forge
+    target: mr.automated_review
+    scope: each_repository
+    wait:
+      timeout: 30m
+      polling:
+        initial_interval: 30s
+        max_interval: 5m
+
+  write_summary:
+    kind: agent
+    harness: claude_review
+    prompt: Write the work-item summary and review brief.
+    produces: review_brief
+    skill: kraft:review-brief
+
+  mark_mr_ready:
+    kind: forge
+    target: mr.mark_ready
+    scope: each_repository
+
+  await_external_approval:
+    kind: forge
+    target: mr.external_approval
+    scope: each_repository
+    wait:
+      timeout: 7d
+      polling:
+        initial_interval: 5m
+        max_interval: 1h
+
+  merge_mr:
+    kind: forge
+    target: mr.merge
+    scope: each_repository
+
+  await_post_merge_ci:
+    kind: forge
+    target: mr.post_merge_ci
+    scope: each_repository
+    wait:
+      timeout: 90m
+      polling:
+        initial_interval: 30s
+        max_interval: 5m
+
+nodes:
+  implementation:
+    kind: exec
+    steps:
+      - id: implementation
+        tasks:
+          - id: implement
+            extends: implementer
+      - id: verification
+        tasks:
+          - id: test_changed_scopes
+            extends: verify_changed_scopes
+    fix_loop:
+      tasks:
+        - id: repair
+          extends: repair_mr_feedback
+      judge:
+        id: judge
+        extends: strict_judge
+      max_attempts: 2
+
+  post_draft_feedback:
+    kind: exec
+    steps:
+      - id: ci
+        tasks:
+          - id: await_ci
+            extends: await_mr_ci
+      - id: automated_review
+        tasks:
+          - id: await_review
+            extends: await_automated_review
+    on_failure:
+      steps:
+        - id: repair
+          tasks:
+            - id: repair_feedback
+              extends: repair_mr_feedback
+        - id: sync
+          tasks:
+            - id: sync_mr
+              extends: sync_draft_mr
+    fix_loop:
+      steps:
+        - id: repair
+          tasks:
+            - id: repair
+              extends: repair_mr_feedback
+        - id: sync
+          tasks:
+            - id: sync
+              extends: sync_draft_mr
+      judge:
+        id: judge
+        extends: strict_judge
+      max_attempts: 3

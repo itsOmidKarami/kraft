@@ -12,26 +12,24 @@ backward-compatibility guarantee and stays unedited -- the same reason
 
 import asyncio
 import json
+import shlex
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 from support.store_fixtures import mk_item, open_db
 
 from kraft import db, events, executor, policy
 from kraft.executor import dispatch, prompts, walk
 from kraft.findings import Finding
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE_REVIEWER = Path(__file__).parent / "support" / "fake_reviewer.py"
 
 
-def _default_template() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
 
 
 # --------------------------------------------------------------------------
@@ -82,56 +80,49 @@ def test_the_security_reviewer_is_a_review_hook_too():
 # --------------------------------------------------------------------------
 
 
-def _dispatch_review(tmp_path, monkeypatch, *, seed_events=(), hook="on.review.local.run"):
-    """Dispatch one review hook and return the prompt it was launched with."""
+def _dispatch_brief(tmp_path, monkeypatch, *, seed_events=()):
+    """Dispatch one agent task that produces the review brief -- what the
+    deferred-findings note keys on (`AgentTask.produces`) -- and return the
+    prompt it was launched with."""
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     prompt_log = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
+    brief = {
+        "id": "write_summary",
+        "kind": "agent",
+        "harness": "fake",
+        "prompt": "Write the work-item summary and review brief.",
+        "produces": "review_brief",
+    }
+    chain = v1_seeded_chain(
+        tmp_path / "templates",
+        [{"id": "human_review", "kind": "exec", "tasks": [brief]}],
+        agent_command=_FAKE,
+    )
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            base = fake_registry(sys.executable, _FAKE_AGENT)
-            # Point whichever hook is under test at the fake agent, keeping the
-            # rest of its shipped binding -- `artifact: review_brief` in
-            # particular, which is what the deferred-findings note keys on.
-            command = base.hooks["on.review.local.run"]["command"]
-            # From the SHIPPED registry, not the fake one: `fake_registry`
-            # rebinds several hooks to noop and drops their `artifact` key with
-            # them, and `artifact: review_brief` is what the deferred-findings
-            # note keys on.
-            shipped = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-            binding = {**shipped.hooks.get(hook, {}), "kind": "agent", "command": command}
-            registry = Registry(hooks={**base.hooks, hook: binding})
             wid = await executor.intake(
-                database,
-                rd,
-                title="t",
-                repo=str(repo),
-                template=_default_template(),
-                bd_cwd=str(tracker),
+                database, rd, title="t", repo=str(repo), chain=chain, bd_cwd=str(tracker)
             )
             for etype, payload in seed_events:
                 await database.write(lambda c, e=etype, p=payload: events.append(c, wid, e, p))
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
             )
-            chain = json.loads(row["chain_definition"])
-            node = next(n for n in chain["nodes"] if n["id"] == "verify")
+            node = chain.nodes[0]
             await dispatch.dispatch_node(
                 database,
                 rd,
-                hook,
+                node.steps[0].tasks[0],
                 node,
                 row,
-                registry,
                 repo,
-                launch=executor.LaunchContext(
-                    repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
-                ),
+                launch=executor.LaunchContext(repo_entry=None, steering_dir=None),
             )
         finally:
             await database.close()
@@ -154,76 +145,28 @@ def _measured(node_id="verify", **finding):
     )
 
 
-def test_a_review_dispatch_after_a_measured_round_carries_the_findings_forward(
-    tmp_path, monkeypatch
-):
-    """Kraft-s7c04.1, found independently by six of seven post-mortem agents.
-    On 6c712ea8 findings went 3 -> 2 -> 3 -> 4, all new fingerprints, never
-    converging -- the loop exited only because round 3 happened to grade
-    everything minor."""
-    prompt = _dispatch_review(tmp_path, monkeypatch, seed_events=[_measured()])
-    assert "Swallows the OSError" in prompt
-    assert "The last review of this node reported" in prompt
-
-
-def test_a_first_review_carries_nothing(tmp_path, monkeypatch):
-    prompt = _dispatch_review(tmp_path, monkeypatch)
-    assert "The last review of this node reported" not in prompt
-
-
-def test_another_nodes_findings_are_not_carried(tmp_path, monkeypatch):
-    prompt = _dispatch_review(tmp_path, monkeypatch, seed_events=[_measured(node_id="mr_checks")])
-    assert "Swallows the OSError" not in prompt
-
-
-def test_a_non_review_hook_gets_no_carried_findings(tmp_path, monkeypatch):
-    """REVIEW_HOOKS only -- everything else is working *in* the diff rather
-    than judging it."""
-    prompt = _dispatch_review(
-        tmp_path, monkeypatch, seed_events=[_measured()], hook="on.implementation.start"
-    )
-    assert "The last review of this node reported" not in prompt
-
-
 # --------------------------------------------------------------------------
 # a reworded repeat is recognised end to end (Kraft-s7c04.2)
 # --------------------------------------------------------------------------
 
 
-def _loop_template() -> Template:
-    """env_setup builds the worktree; `review` is the fix-loop node under test."""
-    return Template(
-        id="memory",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "review",
-                "tasks": ["on.review.local.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
-    )
-
-
-def _loop_registry():
-    """`on.review.local.run` becomes the scripted reviewer; everything else stands."""
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    return Registry(
-        hooks={
-            **base.hooks,
-            "on.review.local.run": {
-                "kind": "subprocess",
-                "command": [sys.executable, str(_FAKE_REVIEWER)],
-            },
-        }
+def _loop_chain(tmp_path):
+    """`review` is the fix-loop node under test, measured by the scripted
+    reviewer. No `env_setup` node: V1 prepares the worktree first."""
+    reviewer = {
+        "id": "review",
+        "kind": "subprocess",
+        "command": shlex.join([sys.executable, str(_FAKE_REVIEWER)]),
+    }
+    return v1_seeded_chain(
+        tmp_path / "templates", [v1_fix_loop_node("review", reviewer)], agent_command=_FAKE
     )
 
 
 def _loop_policy(tmp_path, *, attempts=3) -> policy.Policy:
     p = tmp_path / "policy.yaml"
     p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        f"loops:\n  review.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         "auto_escalate_stuck: false\n"
     )
@@ -248,14 +191,14 @@ def _run_loop(tmp_path, monkeypatch, entries, *, attempts=3):
                 rd,
                 title="review me",
                 repo=str(repo),
-                template=_loop_template(),
+                chain=_loop_chain(tmp_path),
                 bd_cwd=str(tracker),
             )
             out["result"] = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=_loop_registry(),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=_loop_policy(tmp_path, attempts=attempts),
             )
@@ -579,7 +522,7 @@ def test_the_fix_round_is_unaffected_by_the_method_note(tmp_path, monkeypatch):
     which keeps absolute precedence over Task 2's skill-based selection. It
     must carry neither `prompts.METHOD_NOTE` nor the reference-style
     attachment wording -- both are for a hook with its own skill, and the fix
-    round dispatches `on.implementation.start`, which has none."""
+    round dispatches the fix loop's own agent task, which has none."""
     log = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(log))
     _run_loop(
@@ -649,25 +592,24 @@ def test_a_review_brief_dispatch_is_handed_the_sub_threshold_findings(tmp_path, 
     the agent no way to know them. On 6c712ea8 four real minor defects, a
     spec-phasing violation and an empty sweep board among them, never reached
     the brief; a human later hand-filed three different ones as cb5fa680."""
-    prompt = _dispatch_review(
+    prompt = _dispatch_brief(
         tmp_path,
         monkeypatch,
         seed_events=[("findings_measured", {"node_id": "verify", "findings": [_minor()]})],
-        hook="on.human_review.requested",
     )
     assert "naming nit" in prompt
     assert "the fix loop did not act on them" in prompt
 
 
 def test_an_item_with_no_deferred_findings_gets_no_note(tmp_path, monkeypatch):
-    prompt = _dispatch_review(tmp_path, monkeypatch, hook="on.human_review.requested")
+    prompt = _dispatch_brief(tmp_path, monkeypatch)
     assert "the fix loop did not act on them" not in prompt
 
 
 def test_a_finding_that_burned_a_cycle_is_not_deferred(tmp_path, monkeypatch):
     """Deferred means "never entered the loop". An `important` finding did
     enter it, and the brief must not describe it as quietly dropped."""
-    prompt = _dispatch_review(
+    prompt = _dispatch_brief(
         tmp_path,
         monkeypatch,
         seed_events=[
@@ -676,7 +618,6 @@ def test_a_finding_that_burned_a_cycle_is_not_deferred(tmp_path, monkeypatch):
                 {"node_id": "verify", "findings": [_minor("a real defect", "important")]},
             )
         ],
-        hook="on.human_review.requested",
     )
     assert "a real defect" not in prompt
 
@@ -734,83 +675,3 @@ def test_both_notes_are_empty_without_a_previous_session():
 # a repeat reviewer is handed the fix cycle and its own last session
 # (Kraft-qzkux)
 # --------------------------------------------------------------------------
-
-
-def _review_instruction(tmp_path, monkeypatch, sessions):
-    """Run a one-node review chain whose reviewer is a fake agent, after
-    seeding `sessions` -- `(hook, status, result_path)` rows on that node --
-    and return what the agent was launched with."""
-    from test_review_package import _review_template
-
-    fake_agent = Path(__file__).parent / "support" / "fake_agent.py"
-    argv_log = tmp_path / "argv.jsonl"
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    base = fake_registry(sys.executable, fake_agent)
-    registry = Registry(
-        hooks={**base.hooks, "on.review.local.run": base.hooks["on.implementation.start"]}
-    )
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                template=_review_template(),
-                bd_cwd=str(tracker),
-            )
-            for i, (hook, status, result) in enumerate(sessions):
-                await database.write(
-                    lambda c, i=i, hook=hook, status=status, result=result: c.execute(
-                        "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, "
-                        "log_path, result_path, status, created_at, head_sha) "
-                        "VALUES (?, ?, 'review', ?, '/l', ?, ?, ?, 'deadbeef')",
-                        (f"seed{i}", wid, hook, result, status, f"2026-01-01T00:00:0{i}"),
-                    )
-                )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return " ".join(a for ln in argv_log.read_text().splitlines() for a in json.loads(ln))
-
-
-def test_round_zero_review_gets_neither_continuity_note(tmp_path, monkeypatch):
-    """A work item's first and most important review is unchanged: no previous
-    session exists, so both notes are empty."""
-    instruction = _review_instruction(tmp_path, monkeypatch, sessions=[])
-    assert "Your own last review" not in instruction
-    assert "one fix cycle's work" not in instruction
-
-
-def test_a_repeat_review_is_handed_both_sessions(tmp_path, monkeypatch):
-    instruction = _review_instruction(
-        tmp_path,
-        monkeypatch,
-        sessions=[
-            ("on.review.local.run", "done", "/run/results/rev.json"),
-            ("on.implementation.start", "done", "/run/results/fix.json"),
-        ],
-    )
-    assert "/run/results/rev.json" in instruction
-    assert "/run/results/fix.json" in instruction
-
-
-def test_a_crashed_previous_review_yields_no_note(tmp_path, monkeypatch):
-    """`_REVIEWED_STATUS` excludes it: a session that died may never have
-    written the file the note would point at."""
-    instruction = _review_instruction(
-        tmp_path,
-        monkeypatch,
-        sessions=[("on.review.local.run", "failed", "/run/results/dead.json")],
-    )
-    assert "/run/results/dead.json" not in instruction

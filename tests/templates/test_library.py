@@ -352,6 +352,58 @@ def test_an_unknown_steering_reference_is_rejected(tmp_path):
         write(tmp_path, library, chain).resolve_chain("default")
 
 
+@pytest.mark.parametrize("name", ["kraft:no-such-method", "no-such-method"])
+def test_a_skill_that_resolves_to_nothing_is_a_lint_error(tmp_path, name):
+    """Kraft-vhcop: a selected skill that names no method is refused when the
+    chain resolves -- lint, intake -- not discovered by an agent at launch or
+    silently replaced by an instruction to load a plugin nobody ships."""
+    library = {"tasks": {"base": agent_task(skill=name)}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    lib = write(tmp_path, library, chain)
+    with pytest.raises(TemplateLibraryError, match=f"n.main.t.*{name}"):
+        lib.resolve_chain("default")
+    assert [i.chain for i in lib.lint()] == ["default"]
+
+
+def test_a_skill_the_operator_overlay_provides_resolves(tmp_path):
+    """The overlay is a real source: a method only the operator ships is not a
+    lint error."""
+    skills = tmp_path / "skills"
+    (skills / "house-method").mkdir(parents=True)
+    (skills / "house-method" / "SKILL.md").write_text("ours")
+    library = {"tasks": {"base": agent_task(skill="kraft:house-method")}}
+    chain = {
+        "id": "default",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+    }
+    write(tmp_path / "templates", library, chain)
+    lib = TemplateLibrary.from_yaml_dir(tmp_path / "templates", skills_dir=skills)
+    assert lib.lint() == []
+
+
+def test_every_seeded_skill_reaches_the_agent_as_its_bundled_method():
+    """Kraft-vhcop: the seed named `kraft:spec`, `kraft:plan` and
+    `kraft:review-brief`, none of which resolved, so the bundled methods never
+    reached an agent. Every seeded skill must read as its shipped method."""
+    from kraft import skill
+
+    seed = Path(__file__).resolve().parents[2] / "templates"
+    lib = TemplateLibrary.from_yaml_dir(seed)
+    seen = set()
+    for cid in lib.chain_ids:
+        for node in lib.resolve_chain(cid).nodes:
+            for t in node.tasks():
+                if isinstance(t.task, AgentTask) and t.task.skill is not None:
+                    name = t.task.skill.removeprefix("kraft:")
+                    bundled = (skill.BUNDLED / name / "SKILL.md").read_text()
+                    assert skill.read(None, t.task.skill) == bundled, t.path
+                    seen.add(t.task.skill)
+    assert {"kraft:spec", "kraft:plan", "kraft:review-brief"} <= seen
+
+
 def test_a_malformed_template_file_is_a_configuration_error(tmp_path):
     (tmp_path / "chains").mkdir()
     (tmp_path / "library.yaml").write_text("tasks: [not, a, mapping]\n")
@@ -362,3 +414,80 @@ def test_a_malformed_template_file_is_a_configuration_error(tmp_path):
 def test_a_missing_template_directory_is_a_configuration_error(tmp_path):
     with pytest.raises(TemplateLibraryError, match="library.yaml"):
         TemplateLibrary.from_yaml_dir(tmp_path / "absent")
+
+
+def test_lint_refuses_a_node_mixing_tasks_with_and_without_produces(tmp_path):
+    """Ruling 35's first edge. `trim_for_attachments` is a *node*-level rule and
+    `produces` is task-level, so a node holding one spec-producing task plus
+    another task survives an attached spec and writes the spec again. Closed in
+    validation instead of at runtime: a node either wholly produces a kind or
+    declares none, and the trim is then unambiguous.
+
+    Dropping the single producing task and rebuilding the step is not the
+    alternative -- `Step.tasks` has `min_length=1`, so an emptied step is
+    invalid.
+    """
+    library = {
+        "tasks": {
+            "author": agent_task(produces="spec"),
+            "other": agent_task(),
+        }
+    }
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "author"}, {"id": "b", "extends": "other"}],
+            }
+        ],
+    }
+    library_obj = write(tmp_path, library, chain)
+    with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
+        library_obj.resolve_chain("default")
+    # `lint()` is the reporting door onto the same check, and it names the file
+    # and chain rather than raising at the first one.
+    assert [i.chain for i in library_obj.lint()] == ["default"]
+
+
+def test_lint_allows_a_node_whose_every_task_produces_the_same_kind(tmp_path):
+    library = {"tasks": {"author": agent_task(produces="spec")}}
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "author"}, {"id": "b", "extends": "author"}],
+            }
+        ],
+    }
+    assert write(tmp_path, library, chain).lint() == []
+
+
+def test_the_design_chain_has_no_node_mixing_produces(design):
+    """The rule above would be a trap if the shipped chain broke it."""
+    assert design.lint() == []
+
+
+def test_lint_refuses_a_node_whose_tasks_produce_two_different_kinds(tmp_path):
+    """The other half of the same ambiguity. A node producing both a spec and a
+    plan is not trimmed by an attached spec (the rule is "all of its tasks produce
+    this kind"), so the spec is written again -- and trimming it *would* throw the
+    plan away. `produces` has to agree across a node either way, so the rule is
+    `len(produces) > 1`, not `> 1 and None in produces`.
+    """
+    library = {"tasks": {"spec": agent_task(produces="spec"), "plan": agent_task(produces="plan")}}
+    chain = {
+        "id": "default",
+        "nodes": [
+            {
+                "id": "design",
+                "kind": "exec",
+                "tasks": [{"id": "a", "extends": "spec"}, {"id": "b", "extends": "plan"}],
+            }
+        ],
+    }
+    with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
+        write(tmp_path, library, chain).resolve_chain("default")

@@ -36,6 +36,13 @@ def _bundle(monkeypatch, tmp_path) -> Path:
     # in the bundle so seed_home is proven to strip it, not just to never have
     # been given one.
     (bundled / "notify.yaml").write_text("url: https://hook.invalid/t0ken\n")
+    # The V1 library and its chains/ subdirectory. Here because the installed
+    # layout is V1 and `seed_home` is the only thing that puts it in a home --
+    # a bundle with no subdirectory could not catch a seed that stopped
+    # recursing.
+    (bundled / "library.yaml").write_text("tasks: {}\n")
+    (bundled / "chains").mkdir()
+    (bundled / "chains" / "default.yaml").write_text("id: default\n")
     monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
     return bundled
 
@@ -50,6 +57,20 @@ def test_seed_home_copies_the_bundle_once(monkeypatch, tmp_path):
     assert not (home / "access.yaml").exists()
     # per-machine, usually holds a bearer token in the URL: never shipped either
     assert not (home / "notify.yaml").exists()
+
+
+def test_seed_home_installs_the_v1_library_and_its_chains(monkeypatch, tmp_path):
+    """Phase 2's exit criterion is that the *installed* layout is V1, and this is
+    the only seam where that happens: `seed_home` is what puts a home's templates
+    there. `tests/templates/test_materialization.py` asserts the packaged
+    `templates/` tree is V1, which cannot fail if seeding itself breaks -- in
+    particular if it stopped recursing into `chains/`."""
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+
+    assert cli.seed_home(home) is True
+    assert (home / "library.yaml").read_text() == "tasks: {}\n"
+    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
 
 
 def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):

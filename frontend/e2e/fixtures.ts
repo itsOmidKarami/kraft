@@ -15,17 +15,16 @@ export { expect, test } from "@playwright/test";
 export async function connectRepo(page: Page, path: string): Promise<void> {
   // `enabled: true` explicitly -- the server's own default (`enabled` unset)
   // is disabled without a `test_command`, and a disabled repo's chip is
-  // un-clickable in the New work item dialog. An explicit `true` still works
-  // with no `test_command` set as long as the registry's own `on.test.run`
-  // binding covers it (`_refuse_enable_without_test_command`), which the e2e
-  // fixture templates always provide.
+  // un-clickable in the New work item dialog. Enabling needs the repo's own
+  // test command (`_refuse_enable_without_test_command`, Kraft-vd1ed); `true`
+  // is enough, since the e2e seed neuters the verify builtin anyway.
   //
   // `setup_command: ""` explicitly -- the sample repo carries none of the
   // markers `probe_repo` recognizes (no lockfile, no pyproject.toml), so the
   // connect endpoint would otherwise leave it undeclared, and every dispatch
   // that needs a worktree raises "no setup_command declared" (Kraft-kji8w).
   const res = await page.request.post("/api/repos", {
-    data: { path, enabled: true, setup_command: "" },
+    data: { path, enabled: true, setup_command: "", test_command: "true" },
   });
   if (!res.ok() && res.status() !== 409) {
     throw new Error(`connectRepo(${path}) failed: ${res.status()} ${await res.text()}`);

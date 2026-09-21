@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_library
 
 from kraft import config, db, policy, store
 from kraft import intake as intake_mod
@@ -64,6 +64,7 @@ async def _stub(
             run_dirs=rd,
             registry=registry,
             templates=load_templates(templates_dir, registry),
+            library=v1_library(templates_dir),
             templates_dir=templates_dir,
             skills_dir=tmp_path / "skills",
             policy=policy.Policy(
@@ -73,6 +74,7 @@ async def _stub(
                 max_concurrent=max_concurrent,
             ),
             invalid_policy=[],
+            instance_policy=policy.InstancePolicy.from_input(policy.InstancePolicyInput()),
             intake={**config.INTAKE_DEFAULT, "enabled": True, **intake_overrides},
             tasks={},
         )
@@ -351,17 +353,33 @@ def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch):
 
 
 def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch):
-    """Spec §5 reached by configuration: `quick-task` gates nowhere, so running
-    it unattended would take a bead to merge with no human anywhere."""
+    """Spec §5 reached by configuration: a chain that gates nowhere would take a
+    bead to merge unattended with no human anywhere."""
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
 
+    # A real, resolvable, gateless chain -- written before `_stub` builds the
+    # library out of this directory. Pointing the repo at a chain id that does
+    # not exist would make this pass on the *unknown template* branch instead,
+    # which is a different refusal and would leave the gate rule unpinned.
+    chains = tmp_path / "templates" / "chains"
+    chains.mkdir(parents=True, exist_ok=True)
+    (chains / "gateless.yaml").write_text(
+        "id: gateless\n"
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: build, kind: subprocess, command: 'true' }\n"
+    )
+
     async def body(app):
+        assert app.state.library.resolve_chain("gateless"), "the fixture chain must resolve"
         assert await intake_mod.tick(app) == []
         assert _work_items(app) == []
 
-    _run(lambda: _stub(tmp_path, repo_entry={"default_chain_template": "quick-task"}), body)
+    _run(lambda: _stub(tmp_path, repo_entry={"default_chain_template": "gateless"}), body)
 
 
 def test_skips_an_epic(tmp_path, monkeypatch):
@@ -393,13 +411,16 @@ def test_an_auto_started_item_is_left_at_its_first_gate(tmp_path, monkeypatch):
 
     async def body(app):
         (wid,) = await intake_mod.tick(app)
-        chain = app.state.db.read(
-            lambda c: c.execute(
-                "SELECT chain_definition FROM work_items WHERE id = ?", (wid,)
-            ).fetchone()[0]
+        row = app.state.db.read(
+            lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
         )
-        nodes = json.loads(chain)["nodes"]
-        assert nodes[0]["gate_after"] == "spec_approval"
+        # The V1 snapshot, not `chain_definition`: `materialized_chain` is the
+        # executor's only input, and an auto-intaken item is materialized from
+        # the library chain with nothing satisfied in advance.
+        nodes = store.materialized_chain_of(row).chain.chain.nodes
+        gates = [n.id for n in nodes if n.kind == "gate"]
+        assert gates, "the filed chain has no gate at all; §5 has nothing to stop at"
+        assert gates[0] == "spec_approval"
 
     _run(lambda: _stub(tmp_path), body)
 
@@ -558,9 +579,9 @@ def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
             "an auto-started item passed a gate with no human — spec §5"
         )
 
-        nodes = [n["id"] for n in item["chain_definition"]["nodes"]]
+        # The V1 snapshot, not `chain_definition`: the executor's only input.
+        nodes = [n["id"] for n in json.loads(item["materialized_chain"])["chain"]["nodes"]]
         gate_index = nodes.index(gates[0]["payload"]["node_id"])
-        assert gate_index == 0, "default.yaml gates at its first node; this test assumed that"
         completed = {e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"}
         assert not completed & set(nodes[gate_index + 1 :]), (
             f"the chain ran past its gate: completed {sorted(completed)}"

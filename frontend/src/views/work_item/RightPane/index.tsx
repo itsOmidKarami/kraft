@@ -55,7 +55,6 @@ export function RightPane({
         maximized={maximized}
         onToggleMaximize={onToggleMaximize}
         capLines={phone && !maximized ? 8 : undefined}
-        taskTotal={item.progress?.total}
       />
     );
   }

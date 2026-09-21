@@ -30,6 +30,40 @@ logger = logging.getLogger(__name__)
 #: stays a lint-clean default rather than a fresh call per signature.
 _EMPTY_META = mr_ops.MRMeta()
 
+#: Which internal handler each V1 `ForgeAction` runs. The vocabulary a chain
+#: author writes (`target: mr.open_draft`) is the schema's; which code path it
+#: reaches is this adapter's, so the mapping lives here rather than in the
+#: executor -- `dispatch` hands over the typed target and nothing else.
+#:
+#: Two actions have no handler yet: `mr.automated_review` and
+#: `mr.external_approval`, external waits the shared due scheduler owns
+#: (Task 9). An unmapped target falls through to `_run_one`'s last arm, which
+#: **stops the item for a human** rather than failing the node -- see there for
+#: why.
+V1_HANDLERS: dict[str, str] = {
+    "mr.open_draft": "open_mr",
+    "mr.sync": "sync_mr",
+    "mr.ci": "ci_poll",
+    "mr.mark_ready": "mark_ready",
+    "mr.merge": "merge",
+    "mr.post_merge_ci": "merge_watch",
+}
+
+
+#: Who implements each target that `V1_HANDLERS` does not map yet, named in the
+#: stop reason so the human reading it knows this is Kraft's gap and not theirs.
+_UNIMPLEMENTED_TARGETS = {
+    "mr.automated_review": "Task 9 implements it as an external wait",
+    "mr.external_approval": "Task 9 implements it as an external wait",
+}
+
+
+def handler_for(target: str) -> str:
+    """The handler name for a V1 `ForgeAction` value, or the target itself when
+    nothing maps it -- `_run_one` then reports it as unknown by the name the
+    chain actually wrote."""
+    return V1_HANDLERS.get(target, target)
+
 
 def resolve(name: str) -> Forge:
     """Named, never probed.
@@ -50,7 +84,7 @@ def resolve(name: str) -> Forge:
         case "gh":
             return GhCli()
         case "fake":
-            return FakeForge()
+            return _DEV_FAKE
         case _:
             raise ForgeError(f"unknown forge backend {name!r}; known: gh, glab, fake")
 
@@ -58,7 +92,16 @@ def resolve(name: str) -> Forge:
 #: repos.yaml's `forge` (config._FORGES) -> the CLI that talks to it. Two
 #: vocabularies on purpose: `forge` is a fact about the remote, the backend is
 #: a fact about this machine, and a self-hosted GitLab is `gitlab` with `glab`.
-_FORGE_CLI = {"gitlab": "glab", "github": "gh"}
+#: `fake` is dev-only (Ruling 147): the in-process `FakeForge`, so `just dev`
+#: reaches the merge-request half of a chain. It opens nothing anywhere.
+_FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
+
+#: The one `FakeForge` a `fake` repo gets, for the life of the process: every
+#: forge node resolves afresh, and a per-call instance forgot the draft MR
+#: `open_mr` made before `sync_mr`/`mark_ready`/`merge` could find it.
+#: ponytail: in memory only, so a server restart forgets every fake MR --
+#: persist it if a dev walk ever needs to span a restart.
+_DEV_FAKE = FakeForge()
 
 
 def backend_for(backend: str, repo_forge: str | None) -> str:
@@ -76,7 +119,8 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
         raise ForgeError(
             "backend: auto, but no forge is recorded for this repo — set "
             "`forge: gitlab` or `forge: github` on it in Settings → Repos "
-            "(or repos.yaml), or pin a `backend:` in registry.yaml"
+            "(or repos.yaml); `forge: fake` is a dev-only in-process forge "
+            "that opens nothing"
         )
     return cli
 
@@ -355,6 +399,31 @@ async def _run_one(
             # before a human is asked to read it (Kraft-c09h).
             await forge.update_mr(repo=repo, branch=branch, body=body)
             log, status = "pushed and synced the merge request description\n", "done"
+        case "mark_ready":
+            # `mr.mark_ready` in V1: publication, split out of `sync_mr`'s
+            # push-and-describe so a chain can put its final human gate between
+            # the two. Not an external wait -- both `gh` and `glab` undraft in
+            # one call -- so it needs no scheduler and no persisted condition.
+            #
+            # Idempotent on both CLIs (their own docs: marking a ready MR ready
+            # is a no-op), which is what makes a re-entered walk safe here. An
+            # MR already merged has nothing left to publish: same shortcut
+            # `sync_mr` and `merge` take, for the same reason -- its source
+            # branch is usually deleted with the merge, and the node's stated
+            # end state is already true.
+            existing = await forge.find_mr(repo=repo, branch=branch)
+            if existing is not None and existing.state == "merged":
+                return (
+                    f"already merged (!{existing.number}); nothing to mark ready\n",
+                    "done",
+                    findings,
+                )
+            await forge.mark_ready(
+                repo=repo,
+                branch=branch,
+                mr=MR(number=existing.number if existing else 0, url=""),
+            )
+            log, status = "marked the merge request ready for review\n", "done"
         case "merge":
             # "Someone merged it first" and "the merge was refused" were
             # indistinguishable while this only ever shelled out: both
@@ -714,7 +783,23 @@ async def _run_one(
                     log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
-            log, status = f"unknown forge handler {handler!r}\n", "failed"
+            # A declared-but-unimplemented action is a *configuration limit*,
+            # not a bug in this run: the seeded V1 chain names all three of the
+            # unmapped targets (see `V1_HANDLERS`), so `failed` told an operator
+            # their pipeline had broken when in fact Kraft had not built that
+            # step yet -- and burned the node's fix loop finding out. Same
+            # posture as `unavailable-selected-harness-needs-human`: name the
+            # target, name the task that implements it, and stop for a person
+            # (Ruling 48). `config_error` is terminal at every tier
+            # (`executor.context.SCOPE`), so `walk_node` turns it straight into
+            # `needs_human` with this reason instead of a retry.
+            owner = _UNIMPLEMENTED_TARGETS.get(handler, "a later task")
+            log = (
+                f"forge target {handler!r} is declared by this chain but Kraft does not "
+                f"implement it yet ({owner}). Nothing is wrong with the merge request; "
+                f"this node cannot run until that lands.\n"
+            )
+            status = "config_error"
     return log, status, findings
 
 
@@ -871,16 +956,28 @@ async def run_task(
         # needs the root row to resolve `root_has_changes`.
         targets = [next((t for t in targets if t[2] == "root"), targets[0])]
 
+    try:
+        live_forge = resolve(backend_for(backend, repo_forge))
+    except ForgeError as exc:
+        # No forge this repo can reach: nothing was launched, so this is a
+        # configuration stop naming its cause, never a failed task a fix loop
+        # would spend cycles on (Kraft-hr0xr). Finished here, not raised, so
+        # the session row started above is not stranded (Kraft-41b, Kraft-7xt).
+        return await _builtins.finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=session_id,
+            status="config_error",
+            log=f"{hook_point} cannot run: {exc}\n",
+            reused=reused,
+        )
     log, status = "", "done"
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3).
     findings: list[dict] | None = None
     try:
-        # Inside the try: `backend_for` can raise, and an exception escaping
-        # here would skip `finish_session` and strand the session row started
-        # above (Kraft-41b, Kraft-7xt are the same wound from the other side).
-        live_forge = resolve(backend_for(backend, repo_forge))
         # Resolved once against the item's own worktree (`repo`, not whichever
         # target the loop below is on) -- a multi-repo item's submodule paths
         # are not where the agent's `on.mr.describe` artifact lives.

@@ -204,11 +204,11 @@ describe("WorkItemDetail (item page)", () => {
     expect(within(pane).getByRole("button", { name: /^Approve$/ })).toBeInTheDocument();
   });
 
-  it("renders a task_progress event as a task row and filters to it", async () => {
+  it("renders a plan_progress event as a task row and filters to it", async () => {
     const user = userEvent.setup();
     renderDetailWithEvents([
       {
-        seq: 2, work_item_id: "w1", type: "task_progress", created_at: "2026-01-01T00:01:00Z",
+        seq: 2, work_item_id: "w1", type: "plan_progress", created_at: "2026-01-01T00:01:00Z",
         payload: { node_id: "verify", task: 3, total: 6, title: "open_mr refuses a dirty worktree" },
       },
       {
@@ -219,11 +219,11 @@ describe("WorkItemDetail (item page)", () => {
     await user.click(screen.getByRole("tab", { name: /timeline/i }));
     // Nothing selected: the right pane streams the node (W13 · D.4); a task run is one row.
     const pane = screen.getByTestId("right-pane-events");
-    expect(within(pane).getByText("Task 3 of 6")).toBeInTheDocument();
+    expect(within(pane).getByText("3 of 6")).toBeInTheDocument();
     expect(pane.querySelector('.stream-row[data-kind="session"]')).not.toBeNull();
     expect(pane.textContent).not.toContain("worker_session_started");
     await user.click(within(pane).getByRole("button", { name: "gates" }));
-    expect(within(pane).queryByText("Task 3 of 6")).toBeNull();
+    expect(within(pane).queryByText("3 of 6")).toBeNull();
   });
 
   const tev = (seq: number, type: string, node: string): KraftEvent =>
@@ -616,7 +616,14 @@ describe("WorkItemDetail (item page)", () => {
     renderDetailWithProgress();
     expect(document.querySelector(".hero-task-seg")).toBeNull();
     expect(await screen.findByTestId("task-bar")).toBeTruthy();
-    expect(screen.getByText("Task 3 of 6")).toBeTruthy();
+    expect(screen.getByText("3 of 6")).toBeTruthy();
+  });
+
+  it("the maximized strip names progress as `3 of 6 · title`, never a bare task noun", () => {
+    renderDetailWithProgress("#node=verify&max=1");
+    const strip = document.querySelector(".item-max-node") as HTMLElement;
+    expect(strip.textContent).toMatch(/ · 3 of 6 · wire the thing$/);
+    expect(strip.textContent).not.toMatch(/\btask\b/i);
   });
 
   it("puts the task fraction on the current stage pill", () => {

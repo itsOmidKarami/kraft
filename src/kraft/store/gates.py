@@ -4,6 +4,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.store import chain
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
@@ -15,11 +16,27 @@ def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
 
 
 def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "human") -> None:
+    """Clear the gate and set the item running again.
+
+    Also closes the gate node's own `node_started`/`node_completed` pair. A V1
+    gate *is* a node (`gate-is-an-ordered-node`) and `gates.maybe_gate` enters
+    it, but nothing ever completed it: the walk resumes at the node *after* the
+    gate, so the board rendered an approved gate as a node still running,
+    forever (4a's Concern 4). The gate's node id and its name are the same
+    string in V1, which is why one argument answers both.
+
+    Written here rather than at each approval door so the human's `POST
+    .../approve` and `review_gates`' `approve` verdict cannot drift -- the one
+    rule the two doors have to keep. A rejection is deliberately *not* a
+    completion: the gate reopens, and `gate_rejected` already says so.
+    `complete_node` is idempotent, so re-approving writes one event.
+    """
     conn.execute(
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by})
+    chain.complete_node(conn, work_item_id, gate)
 
 
 def reject_gate(

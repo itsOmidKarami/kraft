@@ -5,6 +5,7 @@ worktree-head fields on GET."""
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import sqlite3
 import subprocess
@@ -278,8 +279,8 @@ def test_patch_switches_chain_template_before_the_chain_starts(tmp_path, monkeyp
             },
         ).json()["id"]
         before = client.get(f"/api/work-items/{wid}").json()
+        # V1 quick-task: `env_setup` is implicit preparation, not a node.
         assert [n["id"] for n in before["chain_definition"]["nodes"]] == [
-            "env_setup",
             "implementation",
             "verify",
         ]
@@ -290,17 +291,22 @@ def test_patch_switches_chain_template_before_the_chain_starts(tmp_path, monkeyp
 
         after = client.get(f"/api/work-items/{wid}").json()
         assert after["chain_template"] == "default"
+        # The V1 `default` chain: every gate is a node of its own.
         assert [n["id"] for n in after["chain_definition"]["nodes"]] == [
             "spec",
+            "spec_approval",
             "plan",
-            "chain_review",
+            "plan_approval",
             "implementation",
-            "verify",
-            "open_mr",
-            "mr_checks",
-            "human_review",
+            "local_review",
+            "draft_merge_request",
+            "merge_request_feedback",
+            "work_item_summary",
+            "chain_review",
+            "mark_ready",
+            "external_approval",
             "merge",
-            "post_merge_watch",
+            "post_merge_ci",
         ]
 
         evs = client.get(f"/api/work-items/{wid}/events").json()
@@ -354,11 +360,18 @@ def test_patch_switching_chain_template_preserves_attachment_gate_trim(tmp_path,
     spec_approval out of its chain (Kraft-dgh); switching template must not
     force it to reattach to get that trim back."""
     templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    (templates_dir / "custom.yaml").write_text(
+    (templates_dir / "chains" / "custom.yaml").write_text(
         "id: custom\n"
         "nodes:\n"
-        "  - { id: spec, tasks: [on.spec.requested], gate_after: spec_approval }\n"
-        "  - { id: verify, tasks: [on.test.run], gate_after: null }\n"
+        "  - id: spec\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: author, kind: agent, harness: fake, prompt: spec, produces: spec }\n"
+        "  - { id: spec_approval, kind: gate, message: approve, artifact: spec }\n"
+        "  - id: verify\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: run, kind: agent, harness: fake, prompt: verify }\n"
     )
     client = _client(tmp_path, monkeypatch, templates_dir=templates_dir)
     with client:
@@ -378,13 +391,16 @@ def test_patch_switching_chain_template_preserves_attachment_gate_trim(tmp_path,
             },
         ).json()["id"]
         before = client.get(f"/api/work-items/{wid}").json()
-        assert "spec" not in [n["id"] for n in before["chain_definition"]["nodes"]]
+        filed = [n["id"] for n in json.loads(before["materialized_chain"])["chain"]["nodes"]]
+        assert "spec" not in filed and "spec_approval" not in filed
 
         r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "custom"})
         assert r.status_code == 200, r.text
 
         after = client.get(f"/api/work-items/{wid}").json()
-        assert [n["id"] for n in after["chain_definition"]["nodes"]] == ["verify"]
+        assert [n["id"] for n in json.loads(after["materialized_chain"])["chain"]["nodes"]] == [
+            "verify"
+        ]
 
 
 def test_patch_sets_agent_overrides_and_records_an_event(tmp_path, monkeypatch):
@@ -539,9 +555,9 @@ def test_post_materializes_chain(tmp_path, monkeypatch):
         )
         assert r.status_code == 201, r.text
         body = r.json()
-        assert body["current_node_id"] == "env_setup"
+        # V1 quick-task: `env_setup` is implicit preparation, not a node.
+        assert body["current_node_id"] == "implementation"
         assert [n["id"] for n in body["chain_definition"]["nodes"]] == [
-            "env_setup",
             "implementation",
             "verify",
         ]
@@ -625,7 +641,12 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, 
             {k: v for k, v in a.items() if k != "source"} for a in item["attachments"]
         ] == expected
         assert Path(item["attachments"][0]["source"]).is_relative_to(stored_dir)
-        assert "plan_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
+        # The gate whose `artifact` is the plan, and the node that would have
+        # written it, are both gone from the frozen snapshot -- V1 declares the
+        # trim on both ends instead of looking a kind up in a gate-name table.
+        nodes = json.loads(item["materialized_chain"])["chain"]["nodes"]
+        assert "plan_approval" not in [n["id"] for n in nodes]
+        assert "plan" not in [n["id"] for n in nodes]
         listed = next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
         assert [
             {k: v for k, v in a.items() if k != "source"} for a in listed["attachments"]
@@ -635,7 +656,8 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(tmp_path, 
 def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkeypatch):
     """The trimmed node must be absent from the run, not merely from the
     chain_definition the UI reads (see the _trims_the_chain_and_reports_it
-    test above for that check)."""
+    test above for that check). V1 trims the plan node and its gate together,
+    so the node after the spec gate is `implementation`."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -649,10 +671,12 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(tmp_path, monkey
         ).json()["id"]
         _await_gate(client, wid, "spec_approval")
         client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
-        events = _poll_events(client, wid, "node_started", count=2)
+        # spec, then spec_approval (a V1 gate is a node that starts too), then
+        # whatever follows the gate.
+        events = _poll_events(client, wid, "node_started", count=3)
         started = [e["payload"]["node_id"] for e in events if e["type"] == "node_started"]
         assert "plan" not in started
-        assert "chain_review" in started
+        assert started[2] == "implementation"
 
 
 def test_intake_rejects_a_traversing_attachment_path(tmp_path, monkeypatch):
@@ -914,3 +938,68 @@ def test_trigger_refuses_with_503_when_policy_is_invalid(tmp_path, monkeypatch):
         r = client.post("/api/triggers", json={"title": "t", "repo": str(repo)})
         assert r.status_code == 503
         assert "policy config invalid" in r.json()["detail"]
+
+
+def _policy_chains(tmp_path):
+    """Three chains over one fake task, and an instance ceiling of
+    `allowed_tools: [git, shell, editor]` (Kraft-ib2af, Kraft-yaq99)."""
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    node = (
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: run, kind: agent, harness: fake, prompt: go }\n"
+    )
+    chains = {
+        "a": "policy: { allowed_tools: [git], timeout_minutes: 5 }\n",
+        "b": "policy: { allowed_tools: [git, shell] }\n",
+        "c": "",
+        "wide": "policy: { allowed_tools: [git, rm_rf] }\n",
+    }
+    for id, policy in chains.items():
+        (templates_dir / "chains" / f"{id}.yaml").write_text(f"id: {id}\n{policy}{node}")
+    with (templates_dir / "policy.yaml").open("a") as f:
+        f.write("maxima:\n  allowed_tools: [git, shell, editor]\n")
+    return templates_dir
+
+
+def _snapshot_policy(client, wid):
+    return json.loads(client.get(f"/api/work-items/{wid}").json()["materialized_chain"])["policy"]
+
+
+def test_a_chain_policy_past_the_ceiling_is_a_422_at_intake_not_a_500(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, templates_dir=_policy_chains(tmp_path))
+    with client:
+        repo = make_repo(tmp_path)
+        r = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "wide", "autostart": False},
+        )
+        assert r.status_code == 422, r.text
+        assert "rm_rf" in r.json()["detail"]
+
+
+def test_switching_template_applies_only_the_new_chains_policy(tmp_path, monkeypatch):
+    """Kraft-yaq99: the switch re-materializes from the instance policy, so the
+    old chain's override does not stack under the new one's -- and a switch
+    that is legal from the instance policy is not refused by the old chain's."""
+    client = _client(tmp_path, monkeypatch, templates_dir=_policy_chains(tmp_path))
+    with client:
+        repo = make_repo(tmp_path)
+        wid = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "a", "autostart": False},
+        ).json()["id"]
+        assert _snapshot_policy(client, wid)["allowed_tools"] == ["git"]
+
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "c"})
+        assert r.status_code == 200, r.text
+        on_c = _snapshot_policy(client, wid)
+        assert on_c["allowed_tools"] == ["git", "shell", "editor"]
+        assert on_c["timeout_minutes"] is None
+
+        client.patch(f"/api/work-items/{wid}", json={"chain_template": "a"})
+        r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "b"})
+        assert r.status_code == 200, r.text
+        assert _snapshot_policy(client, wid)["allowed_tools"] == ["git", "shell"]

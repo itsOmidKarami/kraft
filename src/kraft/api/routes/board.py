@@ -49,12 +49,16 @@ def _needs_context_stop(st, wid: str) -> bool:
     return reason is not None and reason.startswith("needs_context:")
 
 
-def _gate_node_index(chain: dict, gate: str) -> int:
-    return executor.gate_node_index(chain, gate)
+def _gate_node_index(nodes, gate: str) -> int:
+    return executor.gate_node_index(nodes, gate)
 
 
 def _gate_artifact(st, row, gate: str | None) -> str | None:
-    return executor.gate_artifact(st.registry, st.run_dirs, row, gate)
+    """The document the pending gate decides, from the gate's own `artifact`
+    field. `st.registry` is gone from the call: the artifact kind used to be
+    scanned out of the *preceding* node's hook bindings, and a V1 gate declares
+    it itself (`gate-owns-gate-behaviour`)."""
+    return executor.gate_artifact(st.run_dirs, row, gate)
 
 
 @api_router.get("/work-items")
@@ -99,7 +103,10 @@ async def list_work_items(request: Request):
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
-            "chain_definition": json.loads(r["chain_definition"]),
+            # `store.chain_view`, not the raw column: a V1 row's
+            # `chain_definition` is `"{}"`, and the board draws its stage bar
+            # and names the current node from `chain_definition.nodes`.
+            "chain_definition": store.chain_view(r),
             "current_node_id": r["current_node_id"],
             "bead_id": r["bead_id"],
             "created_at": r["created_at"],
@@ -285,7 +292,9 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
-    chain = json.loads(row["chain_definition"])
+    # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
+    # merely not crashing. `steerable` below reads the frozen snapshot directly.
+    chain = store.chain_view(row)
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
@@ -315,7 +324,7 @@ async def get_work_item(wid: str, request: Request):
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
-        # Where the implementer is in its plan ("Task 3 of 6"), or None off the
+        # Where the implementer is in its plan ("3 of 6 · title"), or None off the
         # implementation node or for a plan with no `## Task N` headings.
         "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
         # empty on a single-repo item; the detail's repos panel is multi-repo only
@@ -354,11 +363,7 @@ async def get_work_item(wid: str, request: Request):
         # 409 on. Fails open (True) when the node isn't in its own chain --
         # an unmapped edge case is not a reason to hide a control that may
         # still work.
-        "steerable": (
-            lifecycle._steer_reachable(chain["nodes"], row["current_node_id"], st.registry)
-            if any(n["id"] == row["current_node_id"] for n in chain["nodes"])
-            else True
-        ),
+        "steerable": lifecycle.steer_reachable(row, st.registry),
     }
 
 

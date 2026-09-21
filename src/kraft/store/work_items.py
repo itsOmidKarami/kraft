@@ -75,6 +75,12 @@ def create_work_item(
     #: The bead's own priority at pickup time (P0-P4), carried the same way --
     #: Kraft's own row has no priority column, the bead does.
     bead_priority: int | None = None,
+    #: `MaterializedChain.to_json()` — the immutable V1 input for this item.
+    #: Defaulted so the legacy intake path is unchanged; NULL means this item
+    #: runs off `chain_definition` (template schema V1, phase 2).
+    materialized_chain: str | None = None,
+    #: The run this item forked from. Phase 5 fills it; reserved here.
+    run_fork_parent: str | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -93,8 +99,9 @@ def create_work_item(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
-        "auto_gate, budget_set, budget_usd, node_overrides) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "auto_gate, budget_set, budget_usd, node_overrides, "
+        "materialized_chain, run_fork_parent) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -116,6 +123,8 @@ def create_work_item(
             1 if budget_set else 0,
             budget_usd,
             json.dumps(node_overrides) if node_overrides else None,
+            materialized_chain,
+            run_fork_parent,
         ),
     )
     payload = {"title": title, "repo": repo, "chain_template": chain_template}

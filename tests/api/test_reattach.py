@@ -29,7 +29,7 @@ def _poll(client, wid, want, timeout=30, pred=None):
 
 
 def _impl(e):
-    return e["payload"].get("hook_point") == "on.implementation.start"
+    return e["payload"].get("hook_point") == "implementation.main.implement"
 
 
 @pytest.mark.slow

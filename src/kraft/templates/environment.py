@@ -16,18 +16,20 @@ has a typed target to build into and freeze.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     StrictBool,
     StrictStr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -316,3 +318,148 @@ class HarnessProfile:
         than substituting another profile -- that decision is Phase 6's, this
         method only reports the fact)."""
         return self.enabled
+
+
+# ── The two V1 files these types are read from ───────────────────────────────
+#
+# `from_yaml` may do boundary I/O; `from_input` stays pure. Each translates a
+# read or parse failure into this module's own error type, so a caller catches
+# one exception per configuration file rather than `OSError`/`YAMLError`/
+# `ValidationError` from three layers down.
+
+
+def _first_error(exc: ValidationError) -> str:
+    """A pydantic failure as one line naming the field that failed. Its own
+    three lines rather than an import: `templates.models.first_error` joins
+    with `PATH_SEPARATOR`, which is that module's, and this module cannot
+    import it (`models` imports *this* one -- the cycle the header names)."""
+    error = exc.errors()[0]
+    location = ".".join(str(part) for part in error["loc"])
+    return f"{location}: {error['msg']}" if location else error["msg"]
+
+
+def _read_mapping(path: Path, section: str) -> dict[str, object]:
+    """One top-level mapping section of `path`, or `{}` when it is absent.
+
+    An absent section is not an error -- a `repos.yaml` with repositories and
+    no workspaces is the ordinary single-repository install -- but a section
+    present and not a mapping is, because the keys are the identifiers
+    everything else references.
+    """
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise TemplateEnvironmentError(f"{path}: expected a mapping at the top level")
+    raw = data.get(section)
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise TemplateEnvironmentError(
+            f"{path}: {section!r} must be a mapping keyed by id, not "
+            f"{type(raw).__name__} -- V1 keys each entry by the id the rest of "
+            f"the configuration references it as"
+        )
+    return raw
+
+
+@dataclass(frozen=True)
+class RepositoryTable:
+    """One `repos.yaml`: the repositories on this instance and the workspaces
+    assembled from them (`repositories-workspaces-and-areas-are-distinct`)."""
+
+    repositories: dict[str, Repository]
+    workspaces: dict[str, Workspace]
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> RepositoryTable:
+        """Read `repositories:` and `workspaces:` from `path`.
+
+        **An existing install's `repos.yaml` is not in this shape and this
+        loader will not read it.** Seeding only ever *creates* -- `seed_home`
+        returns early when `templates/` exists (`cli/admin.py`), so a home
+        written before V1 keeps its legacy list under `repos:` and comes back
+        from here empty rather than wrong. Converting such a home is Task 11's
+        `major-update-*` work, deliberately not this loader's: a reader that
+        silently accepted both shapes is how the two start disagreeing.
+        """
+        path = Path(path)
+        repositories: dict[str, Repository] = {}
+        for id, body in _read_mapping(path, "repositories").items():
+            try:
+                repositories[id] = Repository.model_validate({"id": id, **(body or {})})
+            except ValidationError as exc:
+                raise TemplateEnvironmentError(
+                    f"{path}: repositories.{id}: {_first_error(exc)}"
+                ) from exc
+
+        workspaces: dict[str, Workspace] = {}
+        for id, body in _read_mapping(path, "workspaces").items():
+            try:
+                workspace = Workspace.model_validate({"id": id, **(body or {})})
+            except ValidationError as exc:
+                raise TemplateEnvironmentError(
+                    f"{path}: workspaces.{id}: {_first_error(exc)}"
+                ) from exc
+            # Both ends of every reference, at load: a workspace mounting a
+            # repository this file does not declare assembles an empty checkout
+            # at run time, hours after the typo, and nothing before this point
+            # would have said so.
+            if workspace.root not in repositories:
+                raise TemplateEnvironmentError(
+                    f"{path}: workspaces.{id}: root {workspace.root!r} is not a declared repository"
+                )
+            for name, member in workspace.members.items():
+                if member.repository not in repositories:
+                    raise TemplateEnvironmentError(
+                        f"{path}: workspaces.{id}.members.{name}: "
+                        f"{member.repository!r} is not a declared repository"
+                    )
+            workspaces[id] = workspace
+        return cls(repositories=repositories, workspaces=workspaces)
+
+
+@dataclass(frozen=True)
+class HarnessProfileTable:
+    """One `harnesses.yaml`: the configured provider instances an agent task's
+    `harness:` selects from (`harness-profile-has-safe-instance-
+    configuration`)."""
+
+    profiles: dict[str, HarnessProfile]
+
+    @classmethod
+    def from_yaml(
+        cls, path: str | Path, *, harnesses: Mapping[str, Harness]
+    ) -> HarnessProfileTable:
+        """Read `harnesses:` from `path` and validate each profile against the
+        provider it names.
+
+        `harnesses` is the code-owned capability declaration
+        (`kraft.harness.load(...).valid`), so a profile's `defaults:` are
+        checked against what the provider actually accepts rather than against
+        a second copy of that list kept here
+        (`provider-declares-harness-capabilities`).
+        """
+        path = Path(path)
+        profiles: dict[str, HarnessProfile] = {}
+        for id, body in _read_mapping(path, "harnesses").items():
+            try:
+                parsed = HarnessProfileInput.model_validate(body or {})
+            except ValidationError as exc:
+                raise TemplateEnvironmentError(
+                    f"{path}: harnesses.{id}: {_first_error(exc)}"
+                ) from exc
+            harness = harnesses.get(parsed.provider)
+            if harness is None:
+                raise TemplateEnvironmentError(
+                    f"{path}: harnesses.{id}: provider {parsed.provider!r} is not an "
+                    f"installed harness; known: {sorted(harnesses)}"
+                )
+            try:
+                profiles[id] = HarnessProfile.from_input(id, parsed, harness=harness)
+            except TemplateEnvironmentError as exc:
+                raise TemplateEnvironmentError(f"{path}: {exc}") from exc
+        return cls(profiles=profiles)

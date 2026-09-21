@@ -7,16 +7,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from support.harness import isolated_bd
+from support.harness import isolated_bd, v1_library
 
 from kraft import db, policy, triggers
 from kraft.paths import RunDirs
-from kraft.templates import Template, TemplateSet
-
-_TEMPLATES = TemplateSet(
-    valid={"default": Template(id="default", nodes=[{"id": "n1", "tasks": ["on.env.prepare"]}])},
-    invalid={},
-)
 
 
 @dataclass
@@ -31,7 +25,9 @@ async def _stub(tmp_path, *, policy_obj) -> _Stub:
         state=SimpleNamespace(
             db=database,
             run_dirs=rd,
-            templates=_TEMPLATES,
+            # The seeded V1 library: `triggers.tick` resolves a trigger's
+            # chain through it (`deps.resolve_chain`), never a template set.
+            library=v1_library(tmp_path / "templates"),
             policy=policy_obj,
             trigger_last_fired={},
             tasks={},
@@ -105,3 +101,39 @@ def test_tick_is_a_noop_with_no_policy(tmp_path):
         assert await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC)) == []
 
     _run(lambda: _stub(tmp_path, policy_obj=None), body)
+
+
+def test_a_trigger_whose_chain_exceeds_the_ceiling_is_skipped_not_the_whole_tick(
+    tmp_path, monkeypatch
+):
+    """Kraft-ib2af: one trigger refused at intake is logged and skipped; the
+    triggers after it in the same tick still file."""
+    from kraft import executor
+
+    repo = isolated_bd(tmp_path)
+    pol = policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        triggers=[
+            policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="refused"),
+            policy.Trigger(cron="30 14 * * *", repo=str(repo), chain="default", title="filed"),
+        ],
+    )
+    real_intake = executor.intake
+
+    async def intake(*a, **kw):
+        if kw["title"] == "refused":
+            raise policy.PolicyError("'allowed_tools' cannot widen the inherited safety ceiling")
+        return await real_intake(*a, **kw)
+
+    monkeypatch.setattr(triggers.executor, "intake", intake)
+
+    async def body(app):
+        filed = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
+        assert len(filed) == 1
+        titles = app.state.db.read(
+            lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items")]
+        )
+        assert titles == ["filed"]
+
+    _run(lambda: _stub(tmp_path, policy_obj=pol), body)

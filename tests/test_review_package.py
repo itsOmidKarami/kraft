@@ -5,19 +5,12 @@ the same change, so `review.read_change` backs both `GET /work-items/{wid}/diff`
 and the package a review agent is handed by path.
 """
 
-import asyncio
-import json
 import subprocess
-import sys
-from dataclasses import asdict
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import make_repo
 
-from kraft import config, db, events, executor, review
-from kraft.findings import Finding
-from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
+from kraft import config, review
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
@@ -128,109 +121,6 @@ def test_write_package_returns_none_when_git_fails(tmp_path):
     assert list(results.iterdir()) == []
 
 
-def _review_template() -> Template:
-    return Template(
-        id="review-only",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "review",
-                "tasks": ["on.review.local.run"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
-        ],
-    )
-
-
-def test_a_review_agent_is_handed_the_package_by_path(tmp_path, monkeypatch):
-    """The path reaches the agent as $KRAFT_REVIEW_PACKAGE and the diff never
-    passes through the prompt."""
-    argv_log = tmp_path / "argv.jsonl"
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    registry = Registry(
-        hooks={**base.hooks, "on.review.local.run": base.hooks["on.implementation.start"]}
-    )
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                template=_review_template(),
-                bd_cwd=str(tracker),
-            )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-            return rd
-        finally:
-            await database.close()
-
-    rd = asyncio.run(scenario())
-
-    packages = sorted(rd.results.glob("*.review.md"))
-    assert len(packages) == 1, f"expected one review package, got {packages}"
-
-    # by path, never by content: the diff must not be inside the prompt
-    argv = [json.loads(ln) for ln in argv_log.read_text().splitlines()]
-    joined = " ".join(a for line in argv for a in line)
-    assert "$KRAFT_REVIEW_PACKAGE" in joined
-    assert packages[0].read_text() not in joined
-
-
-def test_a_non_review_hook_gets_no_package(tmp_path, monkeypatch):
-    """Everything else is working *in* the diff, not judging it."""
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    registry = fake_registry(sys.executable, _FAKE_AGENT)
-
-    template = Template(
-        id="impl-only",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "implementation",
-                "tasks": ["on.implementation.start"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
-        ],
-    )
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="build me",
-                repo=str(repo),
-                template=template,
-                bd_cwd=str(tracker),
-            )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-            return rd
-        finally:
-            await database.close()
-
-    rd = asyncio.run(scenario())
-    assert list(rd.results.glob("*.review.md")) == []
-
-
 def test_read_change_with_head_excludes_uncommitted_work(tmp_path):
     """Kraft-nceo. `base..HEAD` is what earlier nodes committed; the working
     tree is what the current node is doing. One range showed them as one
@@ -337,90 +227,3 @@ def test_write_package_still_spans_base_to_working_tree(tmp_path):
     body = path.read_text()
     assert "landed paperwork" in body
     assert "in flight code" in body
-
-
-def _dispatch_subprocess_review(tmp_path, binding, previous=()):
-    """Run a review-only chain whose review hook is a subprocess that dumps
-    its environment; returns that environment."""
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    out = tmp_path / "env.json"
-    dump = f"import os, json; json.dump(dict(os.environ), open({str(out)!r}, 'w'))"
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    registry = Registry(
-        hooks={
-            **base.hooks,
-            "on.review.local.run": {**binding, "command": [sys.executable, "-c", dump]},
-        }
-    )
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                template=_review_template(),
-                bd_cwd=str(tracker),
-            )
-            if previous:
-                await database.write(
-                    lambda c: (
-                        events.append(
-                            c,
-                            wid,
-                            "findings_measured",
-                            {
-                                "node_id": "review",
-                                "cycle": 0,
-                                "findings": [asdict(f) for f in previous],
-                                "fingerprints": [],
-                                "noop_hooks": [],
-                            },
-                        ),
-                        c.commit(),
-                    )
-                )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return json.loads(out.read_text())
-
-
-def test_a_subprocess_review_hook_is_given_the_package_by_env(tmp_path):
-    """A review hook bound to a CLI ran blind (Kraft-t3bny)."""
-    env = _dispatch_subprocess_review(
-        tmp_path,
-        {
-            "kind": "subprocess",
-            "inputs": {"review_package": {"channel": "env", "name": "KRAFT_REVIEW_PACKAGE"}},
-        },
-    )
-    assert Path(env["KRAFT_REVIEW_PACKAGE"]).is_file()
-
-
-def test_a_subprocess_hook_that_does_not_declare_it_gets_no_package(tmp_path):
-    env = _dispatch_subprocess_review(tmp_path, {"kind": "subprocess"})
-    assert "KRAFT_REVIEW_PACKAGE" not in env
-
-
-def test_carried_findings_reach_a_cli_reviewer_as_json(tmp_path):
-    """Same data the prose block renders, in its native shape."""
-    env = _dispatch_subprocess_review(
-        tmp_path,
-        {
-            "kind": "subprocess",
-            "inputs": {"carried_findings": {"channel": "env", "name": "KRAFT_CARRIED_FINDINGS"}},
-        },
-        previous=[Finding("major", "leaks a handle", "a.py", 12, "code-review")],
-    )
-    payload = json.loads(Path(env["KRAFT_CARRIED_FINDINGS"]).read_text())
-    assert payload[0]["message"] == "leaks a handle"
-    assert payload[0]["severity"] == "major"

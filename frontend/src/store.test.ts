@@ -159,10 +159,10 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.fixCycle).toBe(2);
   });
 
-  it("task_progress sets the hero task bar's progress", () => {
+  it("plan_progress sets the hero task bar's progress", () => {
     useStore
       .getState()
-      .applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 3, total: 6, title: "wire the thing" } }));
+      .applyEvent(ev({ type: "plan_progress", payload: { node_id: "env_setup", task: 3, total: 6, title: "wire the thing" } }));
     expect(useStore.getState().workItems.w1.progress).toEqual({
       current: 3,
       total: 6,
@@ -171,7 +171,7 @@ describe("applyEvent", () => {
     });
   });
 
-  it("task_progress recomputes an existing plan list's states", () => {
+  it("plan_progress recomputes an existing plan list's states", () => {
     useStore.setState((s) => ({
       workItems: {
         ...s.workItems,
@@ -190,7 +190,7 @@ describe("applyEvent", () => {
         },
       },
     }));
-    useStore.getState().applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
+    useStore.getState().applyEvent(ev({ type: "plan_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
     expect(useStore.getState().workItems.w1.progress?.tasks?.map((t) => t.state)).toEqual([
       "done",
       "current",

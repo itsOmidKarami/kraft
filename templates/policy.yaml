@@ -1,22 +1,34 @@
 # Cap defaults for loop-bounded work. Every number here is a placeholder
 # Tune against real runs.
 loops:
-  verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
-  ci_fix_loop:       { attempts: 3, wall_clock_s: 3600 }
   # Replaces ci_poll's old poll_timeout (30 minutes, Kraft-ru98): a pipeline
   # that has not settled after this many re-entries or this long, whichever
-  # comes first, stops the item for a human instead of waiting forever.
+  # comes first, stops the item for a human instead of waiting forever. Read
+  # by `ci_wait.py` through `resolve_cap(policy, "ci_wait")`, so this is a
+  # real key and not a per-node one.
   ci_wait:           { attempts: 60, wall_clock_s: 1800 }
-  # Guards against a fast-moving default branch bouncing open_mr <->
-  # verify forever: a clean verify pass doesn't spend a fix cycle of its own
-  # (Kraft-4bgg), so without this cap nothing else would ever stop it.
-  rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
-  # A conflict-resolving agent dispatched by /resume, /retry, or
-  # any node whose rebase conflicts (Kraft-s7c04.23). New installs only --
-  # templates/ is seeded once and never overwritten, so an existing install falls back to
-  # `default:` below with the same numbers; the code does not depend on
-  # this key being present.
-  rebase_conflict:   { attempts: 3, wall_clock_s: 3600 }
+  #
+  # Nothing else is named here on purpose (Ruling 57/88). A `loops:` key that
+  # names no live loop is *silently* unused -- `Policy.cap_for` is
+  # `self.loops.get(key, self.default)`, no error and no warning -- so a stale
+  # cap ships looking live and binding nothing, and the next reader assumes it
+  # works. Four such keys were dropped when this file went V1:
+  #
+  #   verify_fix_loop, ci_fix_loop   a fix loop's cap key is now
+  #                                  `walk._loop_key(node)` -- the node's own
+  #                                  canonical path, e.g.
+  #                                  `implementation.fix_loop` -- so a flat
+  #                                  name binds nothing.
+  #   rebase_bounce, rebase_conflict dead outright: Task 4a deleted
+  #                                  `walk.bounce` and
+  #                                  `walk.resolve_rebase_conflict`.
+  #
+  # The per-node fix-loop caps are deliberately NOT written back yet: Task 7b
+  # splits `implementation` into `implementation` + `verification` and moves
+  # the fix loop onto the latter, which changes the key from
+  # `implementation.fix_loop` to `verification.fix_loop`. Writing it now
+  # guarantees rework and risks a dead cap nobody notices, so 7b owns it.
+  # Until then every fix loop falls back to `default:` below.
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 # Which finding severities burn a fix cycle. Minor findings are recorded and
@@ -58,3 +70,34 @@ archive:
 #     chain: default              # a chain_template id from templates/
 #     title: "Nightly dependency check"
 #     description: "Filed by the 9am weekday trigger"
+
+# ── Template Schema V1: operational defaults and administrator maxima ─────────
+#
+# `defaults:` are inheritable starting points with no safety meaning of their
+# own; a repository, work item, chain, node, step or task may move them in
+# either direction. `maxima:` bounds those overrides — a safety field listed
+# only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can
+# only ever be narrowed. Read by the same loader as everything above:
+# `policy.yaml` has one reader.
+#
+# NOT ENFORCED AT RUNTIME YET (Kraft-q55aw). Today these values are checked in
+# exactly two places: here, when the file loads (a `defaults:` entry past a
+# `maxima:` ceiling is refused), and at intake, where a chain's own `policy:`
+# past a ceiling is refused. Nothing reads them when an agent launches: an
+# agent is not restricted to `allowed_tools`, `allowed_harnesses` does not
+# stop any profile launching, and `token_budget`, `timeout_minutes` and
+# `max_attempts` bound no run. Do not rely on them as a safety control yet.
+#
+# Everything is commented out, because an uncommented value here is a real
+# ceiling. An unset maximum is no bound at all, which is what a fresh install
+# should ship with — Kraft must not silently cap an operator who never chose a
+# number.
+# defaults:
+#   timeout_minutes: 60
+#   max_attempts: 3
+#   allowed_harnesses: [codex_default, claude_review]
+# maxima:
+#   timeout_minutes: 180
+#   token_budget: 2000000
+#   allowed_tools: [git, shell, editor]
+#   allowed_harnesses: [codex_default, claude_review]

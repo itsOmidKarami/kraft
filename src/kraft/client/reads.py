@@ -109,7 +109,7 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         # what an attached spec/plan trimmed, and the trim itself — an agent
         # confirming a handoff landed needs to see both (Kraft-82gz).
         "attachments",
-        # where the implementer is in its plan, "Task 3 of 6" (None off that node)
+        # where the implementer is in its plan, "3 of 6 · title" (None off that node)
         "progress",
     )
     return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}

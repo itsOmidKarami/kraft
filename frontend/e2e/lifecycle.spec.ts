@@ -35,12 +35,16 @@ test("gate: reject offers a way forward", async ({ page }) => {
   await expect(page.getByText(/approve the spec to continue/i)).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByRole("button", { name: /^Reject$/ }).first().click();
   await page.getByLabel("composer message").fill("the spec misses the error path");
-  await page.getByRole("button", { name: /Reject and re-plan/ }).click();
-  // "Reject and re-plan" claims the producer node re-runs with the note. Either
-  // a new spec session starts, or the gate comes back — anything else strands
-  // the work item with no control at all.
-  // the spec node re-runs with the note and asks for its gate again — the item
-  // must never be left with no control at all
+  // "Reject and send back", not "Reject and re-plan": the composer's label is
+  // `rejectTarget(item, gate)`-dependent, and a V1 gate node authors an
+  // explicit `reject_to` (`chains/default.yaml`: `spec_approval` sends back to
+  // `spec`) where the legacy chain's `spec` node carried none and the reject
+  // just re-ran the current node. The label naming the target is the V1
+  // behaviour, so this asserts it rather than accepting either word.
+  await page.getByRole("button", { name: /Reject and send back/ }).click();
+  // The reject sends the item back to `spec`, which re-runs with the note and
+  // asks for its gate again — the item must never be left with no control at
+  // all.
   await expect(page.locator(".item-card-title")).toContainText(/approve the spec/i, {
     timeout: scaledTimeout(60_000),
   });

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -305,8 +307,355 @@ def fake_templates_dir(
         )
     )
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
+    seed_v1_library(d, agent_command=agent_command)
     return d
+
+
+def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) -> Path:
+    """Put the shipped V1 layout -- `library.yaml` plus `chains/*.yaml` -- into
+    `templates_dir`, beside whatever legacy files are already there.
+
+    Beside, not instead: 5b owns converting the 60 callers that still read
+    `registry.yaml` and the legacy chain files, so both layouts have to load
+    out of one directory until then. They do not collide -- the V1 loader reads
+    only `library.yaml` and `chains/`, and `load_templates` reads neither.
+
+    The *shipped* seed, copied rather than hand-written, so a fixture cannot
+    drift from the chain an operator actually gets.
+    """
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    library = (_REPO_ROOT / "templates" / "library.yaml").read_text()
+    shipped_profiles = yaml.safe_load((_REPO_ROOT / "templates" / "harnesses.yaml").read_text())
+    if agent_command is None:
+        write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
+    else:
+        # The library keeps its real `harness:` ids -- `codex_default`,
+        # `claude_review` -- and only the *profiles* they name change: each is
+        # put on the overlaid `fake` provider, which launches `agent_command`,
+        # its `executable:` dropped so the provider's own command stands. The
+        # shipped `defaults:` stay, so they reach the launch as they would in
+        # production. `fake` and `claude` are profiles too, for the hand-built
+        # chains that name them. Nothing rewrites a task's `harness:` any more:
+        # that rewrite is how the suite ran a library the product never ships
+        # (Task 5e).
+        profiles = {
+            id: {k: v for k, v in body.items() if k != "executable"} | {"provider": "fake"}
+            for id, body in shipped_profiles["harnesses"].items()
+        }
+        profiles |= {"fake": {"provider": "fake"}, "claude": {"provider": "claude"}}
+        # And the `kraft.verify_changed_test_scopes` builtin becomes an inert
+        # `true`. This is the same protection `noop_verify` gives the legacy
+        # `on.test.run` binding, and it is not optional here: that builtin runs
+        # **the connected repo's own `test_command`**, and several tests in this
+        # suite connect a repo declaring `pytest` or `just test`. A V1 chain
+        # reaching it in a unit test runs this suite inside itself --
+        # `builtins.run_setup_command`/`_subprocess.run_task` have no timeout,
+        # so the nested run finishes the whole suite before the outer one
+        # continues. A test that means to exercise the real builtin builds its
+        # own chain (tests/executor/test_dispatch.py) and is untouched by this.
+        parsed = yaml.safe_load(library)
+        for task in parsed.get("tasks", {}).values():
+            if task.get("kind") == "builtin":
+                task.clear()
+                task.update({"kind": "subprocess", "command": "true"})
+        library = yaml.safe_dump(parsed, sort_keys=False)
+        # `$KRAFT_HOME/templates/harnesses`, which is what
+        # `paths.default_harnesses_dir()` reads -- *not* `templates_dir`, which
+        # is `KRAFT_TEMPLATES_DIR` and a different directory under pytest
+        # (`conftest._isolated_kraft_home` pins `KRAFT_HOME` to its own path).
+        # Writing it beside the library instead meant every V1 walk driven
+        # through `support.api._client` stopped at "harness 'fake' is not
+        # available", which reads as a chain defect and is a fixture one.
+        home = os.environ.get("KRAFT_HOME")
+        harnesses = (Path(home) / "templates" if home else templates_dir) / "harnesses"
+        harnesses.mkdir(parents=True, exist_ok=True)
+        # `fake` is the *bundled* `claude` declaration under another id with its
+        # `command:` swapped -- the fake agents stand in for `claude`, and speak
+        # its stream-json, so a task on `fake` must read their usage envelope and
+        # rate-limit events exactly the way a real `claude` launch is read. A
+        # minimal declaration without `structured_log`/`rate_limit_signal` turned
+        # every rate limit into a plain failure and every cost into zero.
+        bundled = (_REPO_ROOT / "src" / "kraft" / "harnesses" / "claude.yaml").read_text()
+        command = f"command: {json.dumps(shlex.split(agent_command))}"
+        (harnesses / "fake.yaml").write_text(
+            bundled.replace("id: claude", "id: fake").replace("command: [claude]", command)
+        )
+        # And `claude` itself, because `escalate.dispatch` selects that harness by
+        # name -- escalation is not a chain node, so nothing declares a harness
+        # for it (see `escalate._ESCALATION_HARNESS`). Without this overlay every
+        # test that reaches an escalation launched the real `claude` binary:
+        # cheap only by accident, because `conftest._isolated_kraft_home` empties
+        # `HOME` and CI has no API key, and a real agent turn on a developer
+        # machine that does. `conftest._no_real_agent_binary` now refuses it, but
+        # a refusal is not a fix -- the fix is that there is nothing left to
+        # refuse.
+        #
+        # The *bundled* declaration with its `command:` swapped, not
+        # `_FAKE_HARNESS`: escalation asks for `autocompact`, `permission_mode`
+        # and `deny_tools`, which the minimal fake does not declare, and
+        # `run_agent_task` raises on a capability a harness has not declared.
+        # Swapping one line is what `escalate` naming a harness instead of a
+        # command made possible.
+        (harnesses / "claude.yaml").write_text(bundled.replace("command: [claude]", command))
+        # Beside the library, and where dispatch reads it when no
+        # `KRAFT_TEMPLATES_DIR` is set (`agent.harness_profile`) -- the same
+        # two-directory split as the harness files above.
+        write_harness_profiles(templates_dir, profiles)
+        if home:
+            write_harness_profiles(Path(home) / "templates", profiles)
+    (templates_dir / "library.yaml").write_text(library)
+    chains = templates_dir / "chains"
+    chains.mkdir(exist_ok=True)
+    for chain in sorted((_REPO_ROOT / "templates" / "chains").glob("*.yaml")):
+        shutil.copy(chain, chains / chain.name)
+    return templates_dir
+
+
+def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
+    """Merge `profiles` (id -> `harnesses.yaml` body) into
+    `templates_dir/harnesses.yaml`, keeping any profile already there that
+    `profiles` does not name -- two fixtures seeding one home must not undo
+    each other."""
+    path = Path(templates_dir) / "harnesses.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    merged = {**(existing.get("harnesses") or {}), **profiles}
+    path.write_text(yaml.safe_dump({"harnesses": merged}, sort_keys=False))
+
+
+def v1_library(templates_dir: Path, *, agent_command: str = "true"):
+    """The `TemplateLibrary` for `templates_dir`, seeding the V1 layout first
+    if it is not already there.
+
+    **The seed it writes is always a neutered one.** `seed_v1_library` only
+    puts the library's harness profiles on the `fake` provider and neuters the
+    `kraft.verify_changed_test_scopes` builtin when it is given an
+    `agent_command`; seeded without one, `codex_default` is the shipped profile
+    and the builtin is real, so a test that dispatched it would launch the
+    operator's `codex` and run this suite inside itself. Nothing was
+    walking such a chain when this defaulted to `None`, but `v1_named_chain`
+    below is about to be the door ~156 call sites go through, and a helper that
+    many callers adopt has to be safe by default rather than safe by accident.
+
+    `true` rather than a real fake agent: it makes an agent task launchable and
+    harmless. A caller whose assertions are *about* the agent seeds the
+    directory itself first -- `fake_templates_dir` does, and this only seeds a
+    directory that has no `library.yaml` yet, so passing one through is
+    unchanged.
+    """
+    from kraft.templates.library import TemplateLibrary
+
+    if not (Path(templates_dir) / "library.yaml").is_file():
+        seed_v1_library(Path(templates_dir), agent_command=agent_command)
+    return TemplateLibrary.from_yaml_dir(templates_dir)
+
+
+def v1_named_chain(
+    templates_dir: Path, chain_id: str = "quick-task", *, agent_command: str = "true"
+):
+    """The `ResolvedChain` for one *shipped* chain, resolved out of
+    `templates_dir` (seeded if it is not already).
+
+    `executor.entry.intake` takes a `ResolvedChain`, and the legacy callers it
+    replaces named a template by string -- overwhelmingly `"quick-task"`, which
+    is why that is the default. Deliberately resolved from the test's own
+    templates directory rather than the packaged one: the dir `v1_library` seeds
+    has every harness profile on the `fake` provider and the
+    `verify_changed_test_scopes` builtin neutered, where a chain resolved from
+    the packaged tree would launch a real agent and run this suite inside
+    itself.
+
+    `agent_command` is what every agent task launches, and is only read when
+    `templates_dir` is not seeded yet (see `v1_library`): a caller whose
+    assertions are about the agent's work passes the fake agent here.
+    """
+    return v1_library(templates_dir, agent_command=agent_command).resolve_chain(chain_id)
+
+
+def v1_seeded_chain(templates_dir: Path, nodes: list[dict], *, agent_command: str, chain_id="t"):
+    """`nodes` (authored V1 node mappings) as a `ResolvedChain`, after seeding
+    `templates_dir` so the `fake` harness an agent task names launches
+    `agent_command` (see `seed_v1_library`)."""
+    seed_v1_library(Path(templates_dir), agent_command=agent_command)
+    return v1_resolved(nodes, chain_id=chain_id)
+
+
+def v1_fix_loop_node(node_id: str, measure: dict, *, judge: bool = True) -> dict:
+    """The legacy `verify_fix_loop` shape as one V1 node: `measure` is the
+    node's task, the fix loop's one task is an agent on the `fake` harness
+    (legacy: `on.implementation.start`), and -- unless `judge=False` -- an
+    agent judge on the same harness (legacy: `on.fix_loop.judge`). Its loop
+    key is `f"{node_id}.fix_loop"` (`walk._loop_key`)."""
+    fix_loop: dict = {
+        "tasks": [{"id": "fix", "kind": "agent", "harness": "fake", "prompt": "Fix it."}]
+    }
+    if judge:
+        fix_loop["judge"] = {
+            "id": "judge",
+            "kind": "agent",
+            "harness": "fake",
+            "prompt": "Decide whether another repair attempt is justified.",
+        }
+    return {"id": node_id, "kind": "exec", "tasks": [measure], "fix_loop": fix_loop}
 
 
 def e2e_templates_dir(tmp_path: Path) -> Path:
     return fake_templates_dir(tmp_path, "claude --model claude-haiku-4-5-20251001")
+
+
+# --- Template Schema V1 -------------------------------------------------------
+#
+# A V1 work item's whole input is its `materialized_chain` column, so a test
+# that drives the executor builds one directly: `intake.py` does not write the
+# column yet (Task 5), and there is deliberately no legacy fallback to walk.
+
+
+def v1_resolved(nodes: list[dict], *, chain_id: str = "t", steering: dict[str, str] | None = None):
+    """A `ResolvedChain` over `nodes` (authored V1 node mappings) -- what
+    `executor.intake` takes, and what `v1_chain` materializes. `steering` is
+    the profile text a library would have resolved (`ResolvedChain.steering`)."""
+    from kraft.templates.models import Chain, ResolvedChain
+
+    return ResolvedChain.from_chain(
+        Chain.model_validate({"id": chain_id, "nodes": nodes}), steering=steering
+    )
+
+
+def v1_chain(
+    nodes: list[dict], *, repo: Path | str, chain_id: str = "t", steering: dict | None = None
+):
+    """A `MaterializedChain` over `nodes` (authored V1 node mappings), bound to
+    a single-repository target on `repo`."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+
+    return v1_resolved(nodes, chain_id=chain_id, steering=steering).materialize(
+        target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+    )
+
+
+def v1_item(database, chain, *, repo: Path | str, wid: str = "w1", title: str = "t", **kwargs):
+    """Insert a work item whose only chain is `chain`. Returns the awaitable
+    `database.write` gives back, so callers `await` it like `mk_item`."""
+    from kraft import store
+
+    return database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title=title,
+            repo=str(repo),
+            chain_template=chain.chain.id,
+            # Not `""`: the column is NOT NULL and Task 5 removes it. Nothing
+            # in a V1 *walk* reads it -- true of the executor only.
+            # `progress.py` is called from the API layer, not the executor,
+            # and reads `materialized_chain` for the board's "Task N of M".
+            chain_definition="{}",
+            materialized_chain=chain.to_json(),
+            **kwargs,
+        )
+    )
+
+
+#: A harness definition for the fake agent: the same shape `src/kraft/harnesses/
+#: claude.yaml` declares (so `fixtures/fake_agent.py` sees the flags it already
+#: parses), with `command` pointed at the fake and `usage` read from the result
+#: file so no envelope has to be faked.
+_FAKE_HARNESS = """
+id: fake
+kind: cli
+command: {command}
+capabilities:
+  prompt:          {{ cli: ["-p", "{{value}}"] }}
+  context:         {{ channel: system_prompt, cli: ["--append-system-prompt", "{{value}}"] }}
+  model:           {{ cli: ["--model", "{{value}}"] }}
+  effort:          {{ cli: ["--effort", "{{value}}"] }}
+  resume:          {{ cli: ["--resume", "{{value}}"] }}
+  usage:           {{ source: result_file }}
+"""
+
+
+def fake_harness_home(tmp_path: Path, command: list[str], *, harness_id: str = "fake") -> Path:
+    """A `$KRAFT_HOME` whose `templates/harnesses/` overlays one harness that
+    launches `command`. Set `KRAFT_HOME` to the returned path and an agent task
+    selecting `harness_id` runs the fake instead of a real CLI."""
+    home = tmp_path / "kraft-home"
+    directory = home / "templates" / "harnesses"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{harness_id}.yaml").write_text(
+        _FAKE_HARNESS.format(command=json.dumps([str(c) for c in command])).replace(
+            "id: fake", f"id: {harness_id}"
+        )
+    )
+    # A task selects a *profile*, so the harness needs one of the same id.
+    write_harness_profiles(home / "templates", {harness_id: {"provider": harness_id}})
+    return home
+
+
+async def v1_walk(
+    tmp_path: Path,
+    chain,
+    *,
+    repo: Path | str,
+    repo_entry: dict | None = None,
+    policy=None,
+    wid: str = "w1",
+    title: str = "t",
+    steer: str | None = None,
+    run_dirs=None,
+    start_index: int = 0,
+    start_step: int = 0,
+    **item_kwargs,
+):
+    """File `chain` as one work item and walk it once.
+
+    Returns `(status, events, sessions, row)` -- the readbacks nearly every
+    assertion about a walk needs, as plain dicts, with the database already
+    closed. A caller that needs more reads the run directory itself.
+    """
+    from kraft import db as _db
+    from kraft import events as _events
+    from kraft import executor
+    from kraft.executor.context import LaunchContext
+    from kraft.paths import RunDirs
+
+    rd = run_dirs or RunDirs(tmp_path / "run").ensure()
+    database = await _db.Database.open(rd.db)
+    try:
+        await v1_item(database, chain, repo=repo, wid=wid, title=title, **item_kwargs)
+        status = await executor.run_once(
+            database,
+            rd,
+            work_item_id=wid,
+            registry=None,
+            policy=policy,
+            steer=steer,
+            start_index=start_index,
+            start_step=start_step,
+            # `setup_command: ""` is the repo declaring it needs no preparation;
+            # a repo entry without one refuses to cut a worktree at all.
+            launch=LaunchContext(
+                repo_entry={"setup_command": ""} if repo_entry is None else repo_entry,
+                steering_dir=None,
+            ),
+        )
+        evts = [dict(e) for e in database.read(lambda c: _events.read_after(c, 0, wid))]
+        sessions = [
+            dict(r)
+            for r in database.read(
+                lambda c: c.execute(
+                    "SELECT * FROM worker_sessions WHERE work_item_id = ? ORDER BY created_at",
+                    (wid,),
+                ).fetchall()
+            )
+        ]
+        row = dict(
+            database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+        )
+        return status, evts, sessions, row
+    finally:
+        await database.close()

@@ -36,7 +36,8 @@ but the availability of such a helper SHALL NOT be required for the update.
 The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
-enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both
+enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
+origin: templates/library.yaml -- Task 3's four pins are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. Task 5a added a fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` and it is **removed again**: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -55,18 +56,32 @@ enforced-by: tests/templates/test_models.py::test_task_kind_selects_the_concrete
 An agent task MAY select one skill as its primary method. A task SHALL NOT
 select more than one skill; composable additional guidance SHALL be expressed
 through steering profiles.
+enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering
+origin: src/kraft/templates/models.py §AgentTask -- the single-skill half is the type (`skill: StrictStr | None`, so a list is a validation error and no runtime check exists to test); the pinned test covers the other half, that composable additional guidance arrives through steering profiles rather than a second skill.
 
 ## REQ agent-task-contract-precedes-skill-and-steering
 
 The system SHALL provide an agent task's Kraft-owned output and lifecycle
 contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
+enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file
+
+## REQ every-agent-launch-carries-kraft-safety-rules
+
+Every agent launch -- a chain task, a gate auto-review, an escalation turn --
+SHALL carry Kraft's own safety rules as part of its contract, including the rule
+never to signal a process the agent did not start. The rules SHALL NOT depend
+on a task selecting them, and no task, chain, steering profile or repository
+configuration SHALL be able to remove them.
+enforced-by: tests/executor/test_dispatch.py::test_every_seeded_agent_task_launches_with_the_never_signal_rule, tests/executor/test_dispatch.py::test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule, tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_never_signal_rule, tests/test_escalate.py::test_an_escalation_launch_carries_the_never_signal_rule
+origin: src/kraft/adapters/agent.py §SAFETY_RULES -- Kraft-5x93b: the legacy registry's `defaults: {agent: {steering: [never-signal-processes-you-didnt-start]}}` gave every agent the rule born of Kraft-f8u3 (a worker SIGKILLed the daemon); V1 has no registry default, so the rule became contract text appended by `build_context`, the one builder every launch path uses.
 
 ## REQ selected-skill-must-be-available
 
 When an agent task selects a skill that its execution environment cannot load,
 the task SHALL stop for human action and SHALL NOT substitute a different
 method.
+enforced-by: tests/executor/test_dispatch.py::test_an_unloadable_selected_skill_stops_for_a_human
 
 ## REQ provider-profile-and-agent-task-are-distinct
 
@@ -79,32 +94,36 @@ enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider
 An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
-origin: docs/intent/templates-v1.md -- deliberately unpinned. Phase 1 implemented none of these six mechanics -- it only consumes the pre-existing `kraft.harness` declaration from a harness profile. tests/test_harnesses.py covers invocation and resume for today's V0 dispatcher, which is not this requirement's sentence; context delivery, skill loading and normalized results have no V1 test at all. The pin lands with the executor phase that owns them.
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_a_typed_agent_task_reports_the_providers_own_normalized_result, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options
+origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose own typed task arrives with the escalation controls (Task 7/8 of the template-schema-v1 plan); the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
 
 ## REQ provider-declares-harness-capabilities
 
 An agent-runtime provider SHALL declare the capabilities and runtime-option
 schema it supports. Harness profiles and templates SHALL only select from that
 provider-declared surface.
-enforced-by: tests/test_harnesses.py::test_harness_profile_rejects_an_option_the_provider_does_not_declare, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
+enforced-by: tests/test_harnesses.py::test_harness_profile_rejects_an_option_the_provider_does_not_declare, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/templates/test_environment.py::test_a_profile_default_the_provider_does_not_declare_is_refused
+origin: src/kraft/templates/environment.py -- `HarnessProfileTable.from_yaml` is the file boundary, so the check now fires when `harnesses.yaml` is read rather than only when a profile is constructed in code.
 
 ## REQ harness-profile-has-safe-instance-configuration
 
 A harness profile MAY configure an enabled runtime instance, executable or
 connection choice, and default runtime options. It SHALL NOT require template
 authors to configure provider command syntax or result parsing.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_reports_unavailable_when_disabled, tests/templates/test_environment.py::test_harness_profiles_load_against_their_provider_declarations, tests/templates/test_environment.py::test_a_profile_whose_provider_is_not_its_harness_id_is_refused, tests/templates/test_environment.py::test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library, tests/executor/test_dispatch.py::test_the_seeded_library_dispatches_through_its_real_harness_profiles[codex_default], tests/executor/test_dispatch.py::test_the_seeded_library_dispatches_through_its_real_harness_profiles[claude_review]
+origin: src/kraft/templates/environment.py -- a profile names a provider and its defaults; it carries no command syntax or result parsing, and an unknown provider is refused at load rather than becoming an arbitrary command fragment. Reached at runtime through `adapters/agent.py` §harness_profile, which every V1 agent launch (`resolve_agent_task`: chain dispatch and gate auto-review) resolves a task's `harness:` through; the dispatch test drives the seeded library's own `codex_default` and `claude_review` with only their `executable:` pointed at a fake.
 
 ## REQ agent-task-selects-capability-compatible-runtime-options
 
 An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults
 
 ## REQ unavailable-selected-harness-needs-human
 
 When a selected harness profile is unavailable at runtime, the task SHALL stop
 for human action and SHALL NOT silently select a different harness.
+enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[absent], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[disabled], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unknown-provider], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[no-file], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unapplied-default], tests/skills/test_gate_review.py::test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing
 
 ## REQ agent-roles-use-ordinary-agent-task-runtime-configuration
 
@@ -134,23 +153,27 @@ enforced-by: tests/templates/test_models.py::test_builtin_task_accepts_a_code_ow
 Verification of repository test scopes SHALL be an explicitly configured
 typed built-in task and SHALL NOT depend on a node name or another implicit
 template convention.
+enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_changed_test_scopes_run_under_a_node_not_named_verify
 
 ## REQ changed-test-scope-verification-selects-safely
 
 The changed-test-scope task SHALL run every scope selected by changed paths.
 When the changed paths are empty or do not match a configured scope, it SHALL
 run every configured scope.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_select_scopes_on_the_first_round_uses_the_whole_branch_diff
 
 ## REQ changed-test-scope-verification-is-sequential-by-default
 
 The changed-test-scope task SHALL run selected scopes sequentially by default.
 It MAY run scopes in bounded parallelism only when its configuration explicitly
 requests it.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_sequentially_unless_configured_parallel
 
 ## REQ changed-test-scope-verification-aggregates-results
 
 The changed-test-scope task SHALL await all selected scope results and report
 one aggregate task result.
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_report_one_aggregate_result
 
 ## REQ exec-node-orders-concurrent-task-groups
 
@@ -181,14 +204,14 @@ origin: docs/templates-v1-design.md "Resolution and execution" -- a fix loop's j
 
 A human gate SHALL be represented by an ordered node with `kind: gate`; an
 execution node SHALL NOT define `gate_after`.
-enforced-by: tests/templates/test_models.py::test_node_kind_selects_gate_model, tests/templates/test_models.py::test_exec_node_cannot_define_gate_after, tests/templates/test_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes
+enforced-by: tests/templates/test_models.py::test_node_kind_selects_gate_model, tests/templates/test_models.py::test_exec_node_cannot_define_gate_after, tests/templates/test_library.py::test_the_design_chain_keeps_gates_as_ordered_nodes, tests/executor/test_gates.py::test_gate_node_halts_until_approved, tests/executor/test_gates.py::test_a_gate_with_arbitrary_id_works_without_a_name_table
 
 ## REQ gate-owns-gate-behaviour
 
 A gate node SHALL own gate-specific configuration, including its message,
 timeout, reject target, auto-escalation, review artifact reference, and any
 dedicated marker such as `chain_finalized`.
-enforced-by: tests/templates/test_models.py::test_gate_node_owns_gate_configuration, tests/templates/test_models.py::test_exec_node_cannot_define_gate_only_fields
+enforced-by: tests/templates/test_models.py::test_gate_node_owns_gate_configuration, tests/templates/test_models.py::test_exec_node_cannot_define_gate_only_fields, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names, tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to
 
 ## REQ resolved-chain-identifiers-are-unique
 
@@ -248,16 +271,18 @@ enforced-by: tests/templates/test_library.py::test_an_inheritance_error_names_th
 
 The system SHALL distinguish the authored template library, a reusable fully
 resolved chain, and a per-work-item materialized chain snapshot.
+enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is_reusable_across_work_items, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target
 
 ## REQ materialized-chain-is-immutable-work-item-input
 
 A materialized chain SHALL contain effective policy values and intake-specific
 decisions for one work item and SHALL NOT change as that item executes.
+enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot, tests/executor/test_dispatch.py::test_editing_the_library_after_intake_does_not_change_a_running_items_steering, tests/executor/test_dispatch.py::test_a_snapshot_without_frozen_steering_stops_for_a_human
 
 ## REQ steer-can-address-paused-agent-tasks-individually
 
 An operator MAY provide distinct steering instructions to selected paused agent
-tasks. A steer SHALL not target a non-agent task.
+tasks. A steer SHALL NOT target a non-agent task.
 
 ## REQ steer-defaults-to-all-paused-agent-tasks
 
@@ -357,43 +382,64 @@ of resuming its prior one.
 
 The executor SHALL run an execution node's task group or ordered steps and,
 when they complete successfully, advance to the following ordered node.
+enforced-by: tests/executor/test_walk.py::test_steps_are_ordered_while_tasks_inside_a_step_are_concurrent, tests/executor/test_walk.py::test_the_worktree_and_setup_command_are_prepared_without_an_env_node, tests/executor/test_walk.py::test_an_exec_node_that_completes_advances_to_the_next_exec_node
 
 ## REQ gate-node-opens-and-halts-execution
 
 When the executor reaches a gate node, it SHALL open that gate and SHALL NOT
 start the following node until the gate is approved.
+enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved
 
 ## REQ gate-approval-advances-to-next-node
 
 When a gate is approved, the executor SHALL advance to the node after that
 gate in the materialized chain.
+enforced-by: tests/executor/test_gates.py::test_gate_approval_advances_to_the_node_after_the_gate, tests/executor/test_gates.py::test_a_walk_re_entered_at_an_approved_gate_passes_over_it, tests/executor/test_gates.py::test_a_resume_at_an_approved_gate_continues_past_it
 
 ## REQ gate-rejection-follows-gate-reject-target
 
 When a gate is rejected, the executor SHALL apply that gate node's own
 `reject_to` behaviour.
+enforced-by: tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to, tests/executor/test_gates.py::test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate, tests/executor/test_gates.py::test_a_rejection_cannot_be_aimed_forward_past_the_gate, tests/executor/test_gates.py::test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate
+origin: src/kraft/executor/gates.py §reject_target -- a gate with no `reject_to` re-enters at the nearest preceding *execution* node, not at the gate itself. A V1 gate has no execution shape, so the old fallback dispatched nothing and re-requested the same gate, a ping-pong bounded only by the reject loop's cap; re-running the node that produced what the gate is about is what makes the Kraft-rv6i "measure the repair rather than trust it" rule hold at a gate. A gate with nothing before it falls back to itself, which is the one case where there is no work to re-measure.
 
 ## REQ gate-control-does-not-generate-review-work
 
 A gate node SHALL be a decision control point and SHALL NOT generate its own
 review artifact. A preceding execution node SHALL generate any artifact a gate
 uses.
+enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names
 
 ## REQ chain-finalized-remains-a-dedicated-marker
 
 A gate with the dedicated `chain_finalized` marker SHALL retain Kraft's
 chain-review behaviour; other gate nodes SHALL have ordinary pause and
 approval behaviour.
+enforced-by: tests/executor/test_gates.py::test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review, tests/executor/test_gates.py::test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour, tests/templates/test_models.py::test_an_attachment_never_trims_the_chain_finalized_gate
+origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in is **not** restored: `_splice_chain_review` rewrites the legacy `chain_definition` from an envelope of legacy node dicts, and revising a *materialized* chain in place is a different feature that lands with the chain-review skill's own V1 conversion. That half of the marker's behaviour is unpinned and parked at the function.
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 
-A gate node MAY declare an automated review task. The system SHALL run it only
-with work-item opt-in and within its effective delay and attempt limits.
+A gate node MAY declare an automated review task that reports a verdict on the
+gate's decision. The system SHALL run it only with work-item opt-in and within
+its effective delay and attempt limits. Such a task SHALL report a verdict for
+the system to apply and SHALL NOT itself approve or reject the gate.
+
+This is distinct from two neighbouring behaviours it is easy to conflate.
+`gate-control-does-not-generate-review-work` forbids a gate *producing the
+artifact* it shows, which a verdict-reporting reviewer does not do — it reads an
+artifact an earlier execution node produced.
+`automated-review-is-an-explicit-optional-task` is a chain-level task that waits
+on the *forge's* merge-request review, which is a different subject entirely.
+enforced-by: tests/executor/test_gates.py::test_auto_review_runs_only_with_work_item_opt_in, tests/executor/test_gates.py::test_auto_review_waits_out_its_effective_delay, tests/executor/test_gates.py::test_auto_review_stops_at_its_effective_attempt_limit, tests/executor/test_gates.py::test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate, tests/executor/test_gates.py::test_a_node_override_permits_or_suppresses_the_declared_auto_review, tests/executor/test_gates.py::test_an_override_cannot_switch_on_a_gate_that_declares_no_auto_review, tests/executor/test_gates.py::test_a_gate_cannot_declare_a_reviewer_that_cannot_report_a_verdict, tests/executor/test_gates.py::test_an_unpaired_skip_counts_as_its_own_attempt, tests/executor/test_gates.py::test_an_override_that_cannot_do_anything_is_refused_at_the_door
+origin: src/kraft/templates/models.py §GateNode -- "declare" is one field, `auto_review: AnyTask | None`, not a boolean plus a name: a bare `auto_escalate: true` could only mean "Kraft's own default reviewer", which is the name indirection V1 deletes. "Effective" is policy vocabulary and stays policy-owned -- the delay is `policy.auto_escalate_delay_s` folded through `store.effective_auto_escalate_delay_s`, the attempt bound is `policy.auto_review_attempts` -- so neither is duplicated onto the node. The per-item override keeps its persisted, publicly exposed key name `auto_escalate` (`db.py`'s `work_items.node_overrides`, `set_node_overrides`) and can only *suppress*: it names no task, so it cannot arm a gate that declares none. "SHALL NOT itself approve or reject" is enforced by dispatching the reviewer as a worker (`run_agent_task`'s `identify_as_worker` default, which sets `KRAFT_WORK_ITEM_ID` and therefore `client.context._forbid_self_action`); the pinned test asserts nothing overrides that default rather than re-testing the client guard.
 
 ## REQ attachment-behaviour-is-explicit-gate-configuration
 
 Spec and plan attachment behaviour SHALL be configured explicitly on their
 gate nodes and SHALL NOT be inferred from a preceding execution node.
+enforced-by: tests/templates/test_models.py::test_an_attachment_drops_the_gate_that_decides_it_and_its_producing_node, tests/templates/test_models.py::test_an_attachment_does_not_drop_a_gate_no_attachment_kind_names, tests/templates/test_library.py::test_lint_refuses_a_node_mixing_tasks_with_and_without_produces, tests/templates/test_library.py::test_lint_refuses_a_node_whose_tasks_produce_two_different_kinds
+origin: src/kraft/templates/models.py §trim_for_attachments -- both ends are declared: the gate's own `artifact:` and the producing node's tasks' `produces:`. The kind-to-gate-*name* table this replaces (`templates.ATTACHMENT_GATES`) is deleted. The producing node is dropped as well as the gate, which legacy got for free by having them be one node. Intake reaches it through `ResolvedChain.materialize(attachment_kinds=...)` (`api/routes/work_items.py`, `executor/entry.py`), which is the path the model pins exercise; `trim_for_attachments` is a wrapper with no `src/` caller.
 
 ## REQ task-recovery-retries-only-the-task
 
@@ -531,8 +577,8 @@ base, the system SHALL apply that node's `on_base_changed` restart behaviour.
 The effective task policy SHALL resolve from instance policy through repository,
 work-item, chain, node, step, and task policy overrides, from broadest scope
 to narrowest scope.
-enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
-origin: docs/templates-v1-design.md "Policy" -- chain/node/step/task layers land once those types exist (Phase 2+); this pins the mechanism through the scopes typed so far.
+enforced-by: tests/test_policy.py::test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one
+origin: docs/templates-v1-design.md "Policy" -- the chain/node/step/task layers are Task 8's, deliberately not added earlier because nothing consumes them until `retry-overrides-are-policy-bounded`; this pins the mechanism through the scopes typed so far.
 
 ## REQ policy-has-defaults-and-administrator-maxima
 
@@ -547,32 +593,45 @@ enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_too
 
 Template policy overrides SHALL only tighten inherited safety ceilings,
 including budgets, allowed tools, permissions, and repository access.
-enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling
+
+The split between a safety ceiling and an operational value is a rule, not the
+membership of these examples. A **safety ceiling** may only tighten, against the
+inherited value: `allowed_tools` and `token_budget`. An **operational value** may
+move in either direction, bounded by an explicitly configured administrator
+maximum rather than by the inherited value: timeouts, retry and wait timing, and
+`allowed_harnesses`. A field absent from `maxima:` is unbounded.
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling, tests/test_policy.py::test_token_budget_ratchets_against_the_inherited_value_not_the_maximum
 
 ## REQ repository-policy-cannot-relax-instance-safety
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-enforced-by: tests/test_policy.py::test_policy_is_layered_from_instance_through_repository_to_work_item
+origin: src/kraft/templates/environment.py -- NOT ENFORCED YET. `Repository` has no `policy:` field, and nothing applies a repository-scoped override: `apply_template_override`'s only `src/` caller is the chain policy in `templates/models.py`. The layer (where `sandbox`/`deny_tools` belong) is built with the template schema's runtime policy enforcement, tracked as Kraft-jzv1l; pin it at materialization when the layer exists.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
-enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent
+enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent, tests/templates/test_environment.py::test_repository_table_loads_repositories_and_workspaces
+origin: src/kraft/templates/environment.py -- `repos.yaml` keeps the three in separate sections (`repositories:` keyed by id, `workspaces:` beside it, `areas:` only inside a repository), so the distinction holds at the file boundary and not only in the types.
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/templates/test_environment.py::test_a_workspace_mounting_an_unknown_repository_is_refused_at_load, tests/templates/test_environment.py::test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load
+origin: src/kraft/templates/environment.py -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
 
 ## REQ work-item-target-selection-is-immutable
+
+This requirement governs **selection at intake**; the run-time immutability of
+what was selected is `work-item-target-is-typed-and-immutable`.
 
 A work item MAY target one repository, selected members of a workspace, or a
 workspace root and its members. The selected targets and root-pointer policy
 SHALL be captured when the work item is materialized.
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target
 
 ## REQ workspace-root-pointer-update-is-explicit
 
@@ -634,6 +693,7 @@ A work item SHALL select either one repository or a workspace target. A
 workspace target MAY select member repositories and its root repository. The
 selected targets, mount paths, base revisions, effective repository and area
 policy, and root-pointer policy SHALL remain unchanged for that work item.
+enforced-by: tests/templates/test_materialization.py::test_the_target_selection_survives_serialization, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes
 
 ## REQ selected-repositories-get-corresponding-branches
 
@@ -692,7 +752,7 @@ review settlement, external approval, merge completion, and post-merge CI.
 ## REQ automated-review-is-an-explicit-optional-task
 
 A chain MAY declare a task that waits for automated merge-request review. When
-no such task is declared, the system SHALL not expect automated review for that
+no such task is declared, the system SHALL NOT expect automated review for that
 chain.
 
 ## REQ automated-review-task-uses-ordinary-task-results
@@ -742,7 +802,7 @@ merge so root CI can run.
 ## REQ root-source-merge-request-readiness-waits-for-child-merges
 
 When a workspace work item changes root source and child repositories, the
-system SHALL not mark the root merge request ready until the child merge
+system SHALL NOT mark the root merge request ready until the child merge
 requests have merged and the root contains their final pointer revisions.
 
 ## REQ blocked-child-merge-leaves-parent-unchanged
@@ -790,6 +850,7 @@ template library in isolation, without writing either input to disk.
 A resolved-template response SHALL represent inheritance and component
 expansion only; attachment-driven gate satisfaction and other per-work-item
 materialization SHALL remain separate.
+enforced-by: tests/templates/test_materialization.py::test_resolution_is_expansion_only_and_repeatable
 
 ## REQ template-cli-exposes-lint-and-resolved-output
 

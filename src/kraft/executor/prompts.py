@@ -8,7 +8,7 @@ from kraft import progress as _progress
 from kraft import review as _review
 from kraft.adapters import agent as _agent
 from kraft.config import git_read
-from kraft.templates import Registry
+from kraft.templates.models import AgentTask, ResolvedTask
 
 FIX_PROMPT = (
     "The checks in node {node_id} failed for this work item. Fix the code so they "
@@ -95,7 +95,13 @@ def seeded_findings_note(found: list[_findings.Finding]) -> str:
 
 
 def task_failure_note(task: str, status: str, session=None) -> str:
-    """What a binding-level repair is told about the task it repairs: which
+    """**Parked, not live.** The task-level repair layer it fed was a per-task
+    `on_failure` in `registry.yaml`; V1 declares `on_failure` on the node only,
+    so `dispatch.measure_node` no longer has a per-task repair to narrate. Task 7
+    of the template-schema-v1 plan owns the recovery controls and decides whether
+    a task-scoped layer comes back (`task-recovery-retries-only-the-task`).
+
+    What a binding-level repair is told about the task it repairs: which
     task, how it ended, and where its own output is. Without it the repair
     starts blind -- `on.ci.repair` reported that the `on.ci.poll` diagnosis
     was absent from its prompt and from the item's events."""
@@ -249,12 +255,12 @@ _SOURCE_PROMPTS = {"seeded": _SEEDED_PROMPT, "gate_review": _GATE_REVIEW_PROMPT}
 
 
 def steer_prefix(
-    binding: dict, work_item_row, worktree, note: str, *, source: str = "human"
+    artifact_kind: str | None, work_item_row, worktree, note: str, *, source: str = "human"
 ) -> str:
     """What a steered agent launch leads with.
 
     Keys on the artifact being on disk rather than on which gate was rejected,
-    so it covers the spec gate and any future `artifact:` binding for free.
+    so it covers the spec gate and any future `produces:` task for free.
 
     Anything but `"human"` gets neither template that claims a person as the
     author, and no revision framing either -- those notes are about findings or
@@ -263,7 +269,6 @@ def steer_prefix(
     template = _SOURCE_PROMPTS.get(source)
     if template is not None:
         return template.format(note=note)
-    artifact_kind = binding.get("artifact")
     rel = _agent.artifact_path(artifact_kind, work_item_row["id"]) if artifact_kind else None
     if rel and (Path(worktree) / rel).is_file():
         return _REVISE_PROMPT.format(path=rel, steer=note)
@@ -342,7 +347,7 @@ def attachment_note(attachments: list[dict], *, method_is_own: bool = False) -> 
 
 
 # How the implementer reports where it is in the plan, so the board can say
-# "Task 3 of 6" instead of leaving a human to read the log. The commit tag is
+# "3 of 6 · title" instead of leaving a human to read the log. The commit tag is
 # the fallback Kraft reads when a report was never made.
 _PROGRESS_NOTE = (
     "\n\nThis plan has {total} tasks. When you start task K, run "
@@ -351,10 +356,17 @@ _PROGRESS_NOTE = (
 )
 
 
-def progress_note(task_hook: str, work_item_row, worktree) -> str:
-    """Only on the implementation hook, and only for a plan with `## Task N`
-    headings to count."""
-    if task_hook != _progress.IMPLEMENTATION_HOOK:
+def progress_note(task: AgentTask, work_item_row, worktree) -> str:
+    """Only for the task doing the work from the brief, and only for a plan with
+    `## Task N` headings to count.
+
+    "The task doing the work" is an agent task with no `skill:` of its own: a
+    task that selects a skill states its own method (write a spec, judge a
+    change), and only the one working from the brief walks a plan. V1 has no
+    hook name to key this on, and keying it on a node id was already wrong
+    (Kraft-s7c04.45).
+    """
+    if task.skill is not None:
         return ""
     tasks = _progress.tasks_for(work_item_row, Path(worktree))
     return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
@@ -379,13 +391,13 @@ _SCOPE_NOTE = (
 )
 
 
-def scope_note(task_hook: str, repo_entry: dict | None) -> str:
-    """The repo's path->command test mapping, on the implementation hook only.
-
-    Keyed on the hook, like `progress_note`, never on a node id: a chain whose
-    implementing node is called `build` must still get this (Kraft-s7c04.45).
+def scope_note(task: AgentTask, repo_entry: dict | None) -> str:
+    """The repo's path->command test mapping, for the task working from the
+    brief only -- the same "no skill of its own" rule `progress_note` applies,
+    and never a node id: a chain whose implementing node is called `build` must
+    still get this (Kraft-s7c04.45).
     """
-    if task_hook != _progress.IMPLEMENTATION_HOOK:
+    if task.skill is not None:
         return ""
     repo = repo_entry or {}
     scopes = repo.get("test_scopes")
@@ -397,7 +409,17 @@ def scope_note(task_hook: str, repo_entry: dict | None) -> str:
     return _SCOPE_NOTE.format(rows=rows)
 
 
-#: The hooks whose job is to judge a change rather than make one. They are the
+#: PARKED under Template Schema V1, with everything keyed on it: `review_package`,
+#: `_last_review_session`, `carried_findings_note`, `previous_review_note` and
+#: `fix_attempt_note` have no `src/` caller any more. A V1 task is identified by
+#: its canonical path, not by a hook name, and no task field says "this one
+#: reviews the change" -- so there is nothing left to key the delivery on. Task 7
+#: of the template-schema-v1 plan adds an explicit `AgentTask` input declaration
+#: and rewires them; they are kept intact for that, and `findings.
+#: resolve_identity` records what their absence costs meanwhile. Nothing below
+#: this line describes behaviour that currently happens.
+#:
+#: The hooks whose job is to judge a change rather than make one. They were the
 #: only ones handed a review package and the previous round's findings:
 #: everything else is working *in* the diff.
 #:
@@ -435,6 +457,12 @@ def carried_findings_note(previous: list[_findings.Finding]) -> str:
 
     "" when there is no previous round, so a work item's first and most
     important review is byte-identical to what it is today.
+
+    **Parked, not live.** No `src/` caller under Template Schema V1: delivering the change
+    under review, and the previous round's findings, was keyed on three hook *names*
+    (`REVIEW_HOOKS`) and V1 has no name to key on. Task 7 of the template-schema-v1 plan
+    rebuilds this on an explicit `AgentTask` input declaration, which is why these are kept
+    rather than deleted. Do not read them as describing what runs today.
     """
     if not previous:
         return ""
@@ -489,10 +517,12 @@ def _session_note(row, template: str, summary_template: str) -> str:
 
 
 def previous_review_note(row) -> str:
+    """**Parked: see `REVIEW_HOOKS`.**"""
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
 
 
 def fix_attempt_note(row) -> str:
+    """**Parked: see `REVIEW_HOOKS`.**"""
     return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
 
 
@@ -504,6 +534,7 @@ _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
     """The previous *completed* session on this hook, or None (Kraft-s7c04.1).
+    **Parked: see `REVIEW_HOOKS`.**
 
     Its `head_sha` is the head that session was dispatched at.
 
@@ -543,7 +574,8 @@ def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row |
 def review_package(
     db, run_dirs, work_item_id: str, worktree, task_hook: str, session_id: str
 ) -> str | None:
-    """The change under review, written out for a reviewer, or None.
+    """The change under review, written out for a reviewer, or None. **Parked:
+    see `REVIEW_HOOKS`.**
 
     None on every non-review hook, on an item with no `base_ref` (pre-migration
     items and any template with no env_setup node), and on a git failure -- a
@@ -597,82 +629,22 @@ def previous_attempt_note(previous_fix) -> str:
     return note
 
 
-def named_with_kind(hook: str, registry: Registry) -> str:
-    """`hook`, with its binding's `kind` alongside for a failure reason
-    (Kraft-5m7t) -- `[forge]`/`[builtin]`/`[subprocess]` reads as "no agent
-    here to steer" without a human having to open registry.yaml to check."""
-    kind = registry.hooks.get(hook, {}).get("kind")
-    return f"{hook} [{kind}]" if kind else hook
+def named_with_kind(task: ResolvedTask) -> str:
+    """A task as a failure reason names it: its own local id, with its kind
+    alongside (Kraft-5m7t) -- `[forge]`/`[builtin]`/`[subprocess]` reads as "no
+    agent here to steer" without a human having to go and look the task up.
+
+    The local id, not the canonical path: the reason already names the node, and
+    an operator-facing string should read as a name rather than an address
+    (`kraft.templates.models` owns the path; this is the label)."""
+    return f"{task.task.id} [{task.task.kind.value}]"
 
 
-#: Fields chain-review is shown per hook point in its tail, read-only
-#: (2026-09-13 chain-review design, points 2-3): the cost/capability dial it
-#: may propose through `proposed_node_overrides`, plus the permission-
-#: surface fields it may only flag. `kind` first, always, so a builtin/
-#: subprocess/forge hook's line reads as "nothing here to override" rather
-#: than a confusing empty dict.
-_CHAIN_REVIEW_CONTEXT_FIELDS = (
-    "kind",
-    "model",
-    "escalate_model",
-    "effort",
-    "permission_mode",
-    "allowed_tools",
-    "deny_tools",
-    "command",
-    "skill",
-    "backend",
-    # A forge hook's own "what runs here" (Kraft-43kw added a second one:
-    # `on.merge` and `on.merge.watch` are both `{kind: forge, backend: auto}`
-    # without it). Same read-only class as `command`/`skill` for an agent hook.
-    "handler",
-)
-
-
-def chain_review_context(
-    tail_nodes: list[dict], registry: Registry, preceding_ids: tuple[str, ...] = ()
-) -> str:
-    """The resolved `registry.yaml` binding for every hook point named in
-    `tail_nodes` -- the not-yet-executed nodes chain-review may revise --
-    appended to `on.chain.review_ready`'s own instruction. Read-only context:
-    lets the reviewer name a real `flags` concern or a real
-    `proposed_node_overrides` value instead of guessing, from inside a
-    worktree that carries no copy of `registry.yaml` itself. The tail's current
-    shape is sent alongside the bindings; a node with more than one group is
-    shown as `steps`, because that is the key the reviewer must use to keep it.
-
-    `preceding_ids` names the already-run nodes, listed so a backward
-    escalation target can be spelled correctly.
-
-    "" when the tail names no hooks and nothing has run yet, so an empty tail
-    costs nothing in the prompt.
-    """
-    lines = []
-    if tail_nodes:
-        lines.append("\n\nThe tail you are revising, as it stands:")
-        for n in tail_nodes:
-            groups = n.get("steps") or [n.get("tasks") or []]
-            if len(groups) > 1:
-                shape = "steps: " + " -> ".join("[" + ", ".join(g) + "]" for g in groups)
-            else:
-                shape = "tasks: [" + ", ".join(groups[0]) + "]"
-            lines.append(f"- {n['id']}: {shape}")
-    hooks = sorted({t for n in tail_nodes for t in n.get("tasks", [])})
-    if hooks:
-        lines.append("\n\nResolved hook bindings for the current tail (context only):")
-        for hook in hooks:
-            binding = registry.hooks.get(hook, {})
-            shown = {k: binding[k] for k in _CHAIN_REVIEW_CONTEXT_FIELDS if k in binding}
-            lines.append(f"- {hook}: {shown}")
-    # The ids themselves, not their bindings: a backward `reject_to`/
-    # `rebase_bounce_to` may name an already-run node, and the reviewer has no
-    # other way to learn what those are called (Kraft-df4tc).
-    if preceding_ids:
-        lines.append(
-            "\n\nNodes already run (valid backward reject_to/rebase_bounce_to "
-            "targets, alongside the nodes of your own tail): " + ", ".join(preceding_ids)
-        )
-    return "\n".join(lines)
+# `chain_review_context` lived here: the resolved `registry.yaml` binding for
+# every hook in a chain-review tail. V1 has no registry to describe and no node
+# dictionaries to render, and the tail-revision flow it fed is Task 4b's to
+# redefine on gate nodes, so it is deleted rather than ported to a shape nothing
+# yet consumes.
 
 
 #: What the review brief is told about findings that never entered the fix loop

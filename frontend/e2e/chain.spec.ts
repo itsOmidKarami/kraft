@@ -55,8 +55,14 @@ test("create a work item and watch it complete", async ({ page }) => {
   const viewer = page.getByTestId("right-pane-doc");
   await expect(viewer).toBeVisible();
   // W13 · B.4: a session summary's pane header opens with what wrote it -- its
-  // hook and run (`on.implementation.start · attempt 1 · just now`)
-  await expect(viewer.locator(".doc-eyebrow")).toHaveText(/^on\.[\w.]+ · (attempt|round|turn) \d+ · /);
+  // hook and run. Under Template Schema V1 a session's `hook_point` is the
+  // task's canonical path (`dispatch.py`: `hook_point=task.path`), not a
+  // legacy hook name, so this reads `implementation.main.implement` where it
+  // used to read `on.implementation.start`. `main` is the step the chain's
+  // `tasks:` shorthand normalizes to.
+  await expect(viewer.locator(".doc-eyebrow")).toHaveText(
+    /^implementation\.main\.implement · (attempt|round|turn) \d+ · /,
+  );
 
   // Back on the Board, this item has moved into the Done group — the redesigned
   // board conveys status by grouping, not by a per-row badge. Scoped by id: the

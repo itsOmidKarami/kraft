@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
 from kraft import skill as _skill
 from kraft.adapters import subprocess as _subprocess
+from kraft.paths import default_templates_dir
+from kraft.templates.environment import (
+    HarnessProfile,
+    HarnessProfileTable,
+    TemplateEnvironmentError,
+)
+from kraft.templates.models import AgentTask
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
@@ -62,6 +70,27 @@ _CTX = (
     "not reach the merge request. If `git add` refuses one of those paths, "
     "that is git working as intended — do not `git add -f` it or otherwise "
     "force it in."
+)
+
+#: Kraft's own safety rules, part of the contract every agent launch carries
+#: (`every-agent-launch-carries-kraft-safety-rules`). Not steering: nothing a
+#: task, chain, repo or operator writes can select it away. A worker once
+#: SIGKILLed the Kraft daemon it was running under (Kraft-f8u3); the legacy
+#: registry answered with a default steering on every agent hook, and V1 has no
+#: such default (Kraft-5x93b), so the rule lives here instead.
+SAFETY_RULES = (
+    "\n\nNever signal a process you did not start. If something is already "
+    "listening on a port you need, it is not a stale leftover to clear -- it "
+    "might be the Kraft daemon serving other work right now. Check "
+    "$KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before "
+    "touching anything you find on a port: if the pid or the port matches, it "
+    "is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill` "
+    "would take down orchestration for every other work item on this install, "
+    "including this one. Ask any server you start yourself for an ephemeral "
+    "port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the "
+    "daemon's. If a task genuinely needs the daemon's own port, that is a "
+    "question for a human, not something to resolve by killing what is "
+    "already there."
 )
 
 #: Asked only of a harness whose `usage` capability says `result_file` -- the
@@ -148,6 +177,13 @@ def resolve_invocation(
     #: validated by `validate_agent_overrides`. `None` or `{}` both mean "no
     #: override", so a caller does not have to special-case an unset column.
     item_override: dict | None = None,
+    #: A harness profile's `defaults:` (`resolve_agent_task`): the lowest rung,
+    #: filling only what the item, the binding and the repo all left unset.
+    profile_defaults: dict | None = None,
+    #: A V1 task's own steering, already resolved to text from its item's
+    #: snapshot (`resolve_agent_task`). Injected after the repo's, where a
+    #: binding's `steering:` file names would go.
+    steering_texts: tuple[str, ...] = (),
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
     launch.
@@ -157,6 +193,7 @@ def resolve_invocation(
     """
     repo = repo_entry or {}
     io = item_override or {}
+    pd = profile_defaults or {}
     deny: list[str] = []
     for name in (*repo.get("deny_tools", ()), *binding.get("deny_tools", ())):
         if name not in deny:
@@ -173,7 +210,7 @@ def resolve_invocation(
     # repo first, then hook: the wider context before the narrower one, and
     # fixed rather than merged cleverly — a reader debugging a prompt has to
     # be able to predict what the agent saw.
-    steering_texts = _steering.read(steering_dir, names) if names else ()
+    steering_texts = (_steering.read(steering_dir, names) if names else ()) + steering_texts
     if steering_texts:
         # `steering.validate` (config load) checked repos.yaml's names and the
         # hook's names as two separate lists, each against the budget on its
@@ -206,7 +243,10 @@ def resolve_invocation(
         harness=binding.get("harness", "claude"),
         # `escalate` is the fix loop asking for a capability bump, not naming a
         # model: an unset `escalate_model` falls through to the ordinary chain.
-        model=(eff_escalate_model if escalate else None) or eff_model or repo.get("default_model"),
+        model=(eff_escalate_model if escalate else None)
+        or eff_model
+        or repo.get("default_model")
+        or pd.get("model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
         method_text=method_text,
@@ -217,14 +257,134 @@ def resolve_invocation(
         # Deliberately no `escalate_effort`: `escalate_model` is already the fix
         # loop's capability bump, and two bump knobs is one too many. The
         # item's own override, when set, wins over the binding's either way.
-        effort=io.get("effort") if io.get("effort") is not None else binding.get("effort"),
+        effort=next(
+            (
+                v
+                for v in (io.get("effort"), binding.get("effort"), pd.get("effort"))
+                if v is not None
+            ),
+            None,
+        ),
         # Hook-level only, like `effort` and unlike `deny_tools`. Unioning a
         # repo allowlist with a hook's would *widen* the narrower one, which is
         # the opposite of what an allowlist is for; a deny list only ever
         # narrows, which is why that one unions.
         allowed_tools=tuple(binding.get("allowed_tools", ())),
-        permission_mode=binding.get("permission_mode"),
+        permission_mode=binding.get("permission_mode") or pd.get("permission_mode"),
         sandbox=_sandbox.resolve(binding, repo),
+    )
+
+
+class HarnessUnavailable(Exception):
+    """A task's `harness:` names no enabled profile this instance can launch
+    (`unavailable-selected-harness-needs-human`). The message says why."""
+
+
+class LaunchRefused(ValueError):
+    """`run_agent_task` refused to start anything: the harness is unknown, or a
+    merged option names a capability it does not declare. A configuration
+    stop that names its cause, never a task failure a fix loop could repair
+    (Kraft-hr0xr). A `ValueError` still, for callers that catch that."""
+
+
+#: The profile defaults `resolve_agent_task` applies. Each is a scalar option
+#: `run_agent_task` takes; a default outside this set would be dropped without
+#: a word, so it is refused instead.
+_PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
+
+
+def harness_profile(profile_id: str, harnesses: _harness.HarnessSet) -> HarnessProfile:
+    """The enabled `harnesses.yaml` profile `profile_id` names, or
+    `HarnessUnavailable`.
+
+    Read from the same templates directory the app loads the library from
+    (`KRAFT_TEMPLATES_DIR`, else `$KRAFT_HOME/templates`) and on every call,
+    like `kraft.harness.load(None)`: an edit to the file reaches the next
+    launch. Never a fallback onto a provider of the same name -- a task selects
+    a profile, and a missing one stops for a human.
+    """
+    path = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "harnesses.yaml"
+    try:
+        profiles = HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid).profiles
+    except TemplateEnvironmentError as exc:
+        raise HarnessUnavailable(str(exc)) from exc
+    profile = profiles.get(profile_id)
+    if profile is None:
+        raise HarnessUnavailable(f"{path} defines no such profile; known are {sorted(profiles)}")
+    if not profile.is_available():
+        raise HarnessUnavailable(f"profile {profile_id!r} is disabled in {path}")
+    unapplied = sorted(set(profile.defaults) - set(_PROFILE_DEFAULTS))
+    if unapplied:
+        raise HarnessUnavailable(
+            f"profile {profile_id!r} sets defaults {unapplied}, which Kraft does not "
+            f"apply; only {list(_PROFILE_DEFAULTS)} are"
+        )
+    return profile
+
+
+def resolve_agent_task(
+    task: AgentTask,
+    repo_entry: dict | None,
+    steering_dir: Path | None,
+    *,
+    skills_dir: Path | None = None,
+    escalate: bool = False,
+    item_override: dict | None = None,
+    harnesses: _harness.HarnessSet | None = None,
+    steering: dict[str, str] | None = None,
+) -> Invocation:
+    """One V1 `AgentTask`'s launch.
+
+    The typed entry point to `resolve_invocation`'s precedence rules, so the
+    executor hands over a model and never a hook dictionary. The dict is built
+    here, inside the adapter, and only from fields the task actually sets: an
+    absent `model`/`effort`/`skill` must stay absent so the repo's own default
+    and the item's override still win where `resolve_invocation` says they do.
+
+    `task.harness` is a *profile* id (`harness_profile`): the launch runs the
+    profile's provider, from its `executable` when it sets one, and its
+    `defaults` fill whatever nothing else chose -- they are the lowest rung,
+    under the item's override, the task's own field and the repo's
+    `default_model`. Raises `HarnessUnavailable`.
+
+    `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
+    and the only place a task's `steering:` names are read from -- never
+    `library.yaml`, never `steering_dir` (which still serves `repos.yaml`'s own
+    steering names). `None` is a snapshot stored before steering was frozen:
+    a task selecting steering then raises `SteeringError` rather than run
+    unsteered or on today's text. The profile is looked up after it, so a
+    harness problem still reports as one.
+    """
+    if task.steering and steering is None:
+        raise _steering.SteeringError(
+            f"selects steering {list(task.steering)!r}, but this work item was materialized "
+            "before steering was frozen into its snapshot, so there is no intake-time text "
+            "to run it with. Re-file the item, or switch its chain template before it starts."
+        )
+    missing = [n for n in task.steering if n not in (steering or {})]
+    if missing:
+        raise _steering.SteeringError(
+            f"selects steering {missing!r}, which this work item's snapshot does not carry"
+        )
+    profile = harness_profile(
+        task.harness, harnesses if harnesses is not None else _harness.load(None)
+    )
+    return resolve_invocation(
+        {
+            "kind": "agent",
+            "harness": profile.provider,
+            **({"command": profile.executable} if profile.executable else {}),
+            **({"skill": task.skill} if task.skill is not None else {}),
+            **({"model": task.model} if task.model is not None else {}),
+            **({"effort": task.effort} if task.effort is not None else {}),
+        },
+        repo_entry,
+        steering_dir,
+        skills_dir=skills_dir,
+        escalate=escalate,
+        item_override=item_override,
+        profile_defaults=profile.defaults,
+        steering_texts=tuple(steering[n] for n in task.steering) if task.steering else (),
     )
 
 
@@ -290,6 +450,12 @@ def build_context(
     hook_point: str,
     session_id: str,
     artifact: str | None = None,
+    #: PARKED under Template Schema V1: nothing passes this. A V1 chain has no
+    #: way to say "this task reviews the change" (the `inputs:` channel went
+    #: with the hook registry), so `executor.prompts.review_package` has no
+    #: caller -- see its own `REVIEW_HOOKS` note. Task 7 of the
+    #: template-schema-v1 plan rewires it through an `AgentTask` input
+    #: declaration; the parameter and the paragraph below stay for that.
     review_package: str | None = None,
     method_text: str | None = None,
     steering_texts: tuple[str, ...] = (),
@@ -344,6 +510,10 @@ def build_context(
             "read with the git command that header names -- use it when you "
             "need to judge the change as a whole.\n"
         )
+    # Unconditional, and here because every agent launch -- chain dispatch,
+    # gate auto-review, escalation -- builds its context through this function
+    # and `run_agent_task` is `harness.build_argv`'s only caller.
+    ctx += SAFETY_RULES
     if method_text:
         # After the contract, before steering: the agent reads what it must
         # produce, then how to produce it, then the house rules that apply to
@@ -387,6 +557,7 @@ async def run_agent_task(
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
+    #: PARKED: see `build_context`'s own note on this parameter.
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,
@@ -412,7 +583,9 @@ async def run_agent_task(
     try:
         h = hs.valid[harness]
     except KeyError:
-        raise ValueError(f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}") from None
+        raise LaunchRefused(
+            f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
+        ) from None
 
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
@@ -456,7 +629,7 @@ async def run_agent_task(
         if name == "autocompact":
             continue
         if not h.supports(name):
-            raise ValueError(
+            raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )

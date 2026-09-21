@@ -66,7 +66,7 @@ function deferredSummary(item: WorkItem): string {
 /** The node whose `gate_after` is this gate -- where the gate's document and
  *  its findings link should land, which is not necessarily the item's
  *  *current* node. */
-function gateNodeId(item: WorkItem, gate: string): string | null {
+export function gateNodeId(item: WorkItem, gate: string): string | null {
   return item.chain_definition?.nodes.find((n) => n.gate_after === gate)?.id ?? null;
 }
 

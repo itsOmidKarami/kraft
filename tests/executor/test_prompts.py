@@ -1,5 +1,13 @@
 from kraft.executor import prompts
 from kraft.findings import Finding, JobRef
+from kraft.templates.models import AgentTask
+
+
+def _task(skill: str | None = None) -> AgentTask:
+    """An agent task; `skill` set means it states its own method."""
+    return AgentTask.model_validate(
+        {"id": "t", "kind": "agent", "harness": "claude", "prompt": "p", "skill": skill}
+    )
 
 
 def test_attachment_note_keeps_the_imperative_for_the_implementer():
@@ -45,26 +53,28 @@ _SCOPES = {
 
 
 def test_scope_note_lists_every_scope_command_for_the_implementer():
-    out = prompts.scope_note("on.implementation.start", _SCOPES)
+    out = prompts.scope_note(_task(), _SCOPES)
     for cmd in ("just test-ui", "just e2e-ci", "just ci-test"):
         assert cmd in out
     assert "frontend/**" in out
 
 
 def test_scope_note_is_empty_for_any_other_hook():
-    for hook in ("on.mr.describe", "on.review.local.run", "on.test.run"):
-        assert prompts.scope_note(hook, _SCOPES) == ""
+    """V1 keys this on the task stating a method of its own (a `skill:`), not
+    on a hook name: every task with a skill is "any other hook" now."""
+    for skill in ("kraft:mr-description", "kraft:code-review", "kraft:spec"):
+        assert prompts.scope_note(_task(skill), _SCOPES) == ""
 
 
 def test_scope_note_is_empty_with_no_scopes_configured():
-    assert prompts.scope_note("on.implementation.start", {}) == ""
-    assert prompts.scope_note("on.implementation.start", None) == ""
+    assert prompts.scope_note(_task(), {}) == ""
+    assert prompts.scope_note(_task(), None) == ""
 
 
 def test_scope_note_handles_a_legacy_bare_test_command():
     # config.load_repos wraps a bare test_command into a ["**"] scope, but a
     # LaunchContext built by hand may not have been through that.
-    out = prompts.scope_note("on.implementation.start", {"test_command": "just test"})
+    out = prompts.scope_note(_task(), {"test_command": "just test"})
     assert "just test" in out
 
 

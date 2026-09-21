@@ -64,17 +64,14 @@ dynamically.
 
 ```yaml
 loops:
-  verify_fix_loop:   { attempts: 3, wall_clock_s: 3600 }
-  ci_fix_loop:       { attempts: 3, wall_clock_s: 3600 }
   ci_wait:           { attempts: 60, wall_clock_s: 1800 }
-  rebase_bounce:     { attempts: 2, wall_clock_s: 3600 }
-  rebase_conflict:   { attempts: 3, wall_clock_s: 3600 }
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 max_concurrent: 3
 auto_escalate_stuck: true
 auto_escalate_stuck_cap: 3
 auto_escalate_delay_s: 0
+auto_review_attempts: 1
 forge_cli_timeout_s: 120
 
 findings:
@@ -94,21 +91,76 @@ triggers:
     repo: /path/to/repo
     chain: default
     title: "Nightly dependency check"
+
+# Template Schema V1: operational defaults and administrator maxima.
+defaults:
+  timeout_minutes: 60
+  max_attempts: 3
+  allowed_harnesses: [codex_default, claude_review]
+maxima:
+  timeout_minutes: 180
+  token_budget: 2000000
+  allowed_tools: [git, shell, editor]
+  allowed_harnesses: [codex_default, claude_review]
 ```
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for a named fix loop, referenced by a node's `fix_loop`. `default` covers anything not named explicitly. `rebase_conflict` bounds the conflict-resolving agent `/resume`, `/retry`, or any node's rebase can dispatch. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`implementation.fix_loop`), not by a flat name. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names only `ci_wait`, which is real. |
 | `max_concurrent` | How many work items may be `active` at once, across every repo, however they were started (`resume`, `retry`, or auto-intake). Moved here from `intake.yaml` — that file's copy is now a legacy fallback `load_policy` reads only when this key is absent. |
 | `auto_escalate_stuck` | Whether a `needs_human` stop for a reason *other than* a pending gate (e.g. a stuck fix loop) auto-dispatches an escalation turn. Independent of a node's own `auto_escalate` (gate review) — different mechanism, different trigger. Defaults on. |
 | `auto_escalate_stuck_cap` | Attempts one `needs_human` run may be auto-escalated by `auto_escalate_stuck` before leaving it for a human — the stuck-escalation equivalent of a fix loop's `attempts`. |
 | `auto_escalate_delay_s` | Seconds to wait after the triggering event before `auto_escalate` or `auto_escalate_stuck` fires, so a human already about to look isn't preempted by the agent. `0` (the default) fires immediately. |
+| `auto_review_attempts` | How many automated-review attempts one pending gate may spend before it is left to a human. An attempt is counted whether the reviewer returned a verdict or was refused before it launched, so every non-terminating outcome suppresses the next poll. `1` (the default) is the one-attempt-per-gate behaviour this replaced a hardcoded boolean with. |
 | `forge_cli_timeout_s` | Seconds one forge CLI call (`gh`, `glab`, `git`) may run before it is killed and reported as a forge error. Bounds a single call, not a pipeline wait (that is `loops.ci_wait`). Default `120`. Read at startup. |
 | `findings.loop_severities` | Which review-finding severities burn a fix cycle. Anything below that bar is recorded and shown at the human-review gate instead of silently discarded. |
 | `budget.work_item_usd` / `budget.daily_usd` | Spend caps in dollars, both off by default (`null`). A cap refuses to *start* the next agent task — it cannot interrupt one already running, since cost is only known when a session exits, so overshoot is bounded by one task's cost. |
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
+| `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain, node, step or task may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. **Not read at runtime yet** (Kraft-q55aw): they are recorded in each item's materialized chain, and nothing applies them to a run. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read, and a chain `policy:` past one is refused at intake. **Not enforced at runtime yet** (Kraft-q55aw): nothing reads these when an agent launches, so `allowed_tools` restricts no agent, `allowed_harnesses` stops no profile, and `token_budget`, `timeout_minutes` and `max_attempts` bound no run. Do not rely on them as a safety control yet. |
+
+## `harnesses.yaml` — harness profiles
+
+A harness *profile* is a configured instance of an agent-runtime provider: which
+executable to run, and what runtime options to start from. It is never provider
+command syntax or result parsing — the provider package
+(`src/kraft/harnesses/<provider>.yaml`) declares the capability surface, and a
+profile selects only from it. A `defaults` key the provider does not declare, or
+a value it does not accept, is refused when the file is read.
+
+Every agent task's `harness:` names a profile here, never a provider directly,
+and the file is read again at each agent launch, so an edit reaches the next
+one without a restart. A task whose profile is missing or disabled, or whose
+`harnesses.yaml` cannot be read, stops for a human with the reason in its
+session log; Kraft never falls back to another profile or to a provider of the
+same name.
+
+```yaml
+harnesses:
+  codex_default:
+    provider: codex
+    enabled: true
+    executable: codex
+    defaults:
+      effort: medium
+
+  claude_review:
+    provider: claude
+    enabled: true
+    executable: claude
+    defaults:
+      model: sonnet
+```
+
+| Key | Means |
+|---|---|
+| `<profile id>` | The name a V1 task's `harness:` selects. Lowercase, digits, `_` and `-`. |
+| `provider` | The harness this profile configures. Must be an installed harness id (`claude`, `codex`, `gemini`) — the provider id *is* the harness id. |
+| `enabled` | `false` takes the profile out of service. A task selecting a disabled profile stops for a human; Kraft never substitutes another. Defaults `true`. |
+| `executable` | The command to launch, when it differs from the provider's own default. It replaces the executable only: the provider's own subcommand (`codex exec`) is kept after it. |
+| `defaults` | Runtime options every task using this profile starts from: `model`, `effort` and `permission_mode`. Checked against what the provider declares it accepts. They are the lowest rung: a work item's own override, the task's own field and the repo's `default_model` all win over them. Any other key stops the task for a human rather than being ignored. |
 
 ## `repos.yaml` — connected repos
 
@@ -135,7 +187,7 @@ repos:
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `managed` | `true` | Keeps a human-connected repo out of Settings' "Detected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
-| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
+| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
 | `default_model` | `null` | Overrides the agent model for every hook on this repo, where set. |
 | `test_command` | `null` (falls back to the registry's `on.test.run`) | The command CI actually runs for this repo — lets `verify`'s local test run and CI's differ deliberately, rather than drift apart by accident. |

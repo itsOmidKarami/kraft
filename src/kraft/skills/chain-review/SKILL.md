@@ -69,10 +69,23 @@ inside `rationale`.
 (`flags` may be an empty list or omitted entirely — that means "nothing to
 flag," not an error.)
 
-`revised_chain_nodes` is the **complete** not-yet-executed tail, not a diff and
-not a patch. The orchestrator splices it in wholesale on approval. If you are
-changing one node, the other tail nodes still appear, unchanged, in your output
-— omitting a node deletes it.
+`revised_chain_nodes` is **parked and currently ignored — do not compute one.**
+Send `revised_chain_nodes: []`.
+
+Template Schema V1 made a work item's chain a frozen, typed `MaterializedChain`,
+and the consumer that used to splice a revised tail into the legacy
+`chain_definition` column speaks the legacy node shape end to end. Revising a
+*materialized* chain in place is a different feature, and a later task restores
+it. Until then an approval ingests the review document and advances, so a tail
+you compute here is dropped silently — which means computing one costs the run
+real tokens and buys nothing.
+
+Everything else in this skill still applies: read the plan against the chain,
+`flags` what looks wrong, and say it in `rationale`. A concern you can only
+express as a node change goes in `rationale` as prose for the human at the gate.
+The node shape below, and the `reject_to`/`proposed_node_overrides` rules with
+it, describe the parked format and are kept so the feature can come back — none
+of it describes what happens today.
 
 Every node you write is exactly:
 

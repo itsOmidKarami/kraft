@@ -249,6 +249,24 @@ def session_status(db, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
+#: Which harness an escalation turn runs on.
+#:
+#: Escalation is not a chain node: it has no `AgentTask`, so nothing in a
+#: template declares a harness for it the way every other V1 agent launch does.
+#: **Decided (Omid, fix round 3): leave it named here.** Giving it a real home
+#: needs the harness-*profile* mechanism wired first -- Ruling 104's work, still
+#: unwired, which is why `templates/harnesses.yaml` loads and validates while
+#: `executor/dispatch.py` resolves a task's `harness:` against installed harness
+#: *ids* and the seeded chain cannot dispatch an agent task at all. Inventing a
+#: `policy.yaml` key or a reserved library task now means revising it then, and
+#: an honest marker is worth more than a config surface we would take back.
+#:
+#: A constant rather than a literal so the next reader finds one place, and so a
+#: test fixture can see what to overlay (`tests/support/harness.seed_v1_library`
+#: writes a `claude` harness pointed at the fake agent for exactly this reason).
+_ESCALATION_HARNESS = "claude"
+
+
 async def dispatch(
     db,
     run_dirs,
@@ -335,8 +353,20 @@ async def dispatch(
     # there is no hook. Its own `escalate:` kwarg (left at the `False` default)
     # is the fix loop's unrelated "buy a stronger model" bump -- same word,
     # different feature; not to be confused with this module.
+    #
+    # `harness:`, **not** `command: "claude"`. Same shape Task 4b removed from
+    # `gate_review.py`, and removed here for the same reason: a hardcoded
+    # `command` bypasses the harness declaration entirely, so an operator who
+    # overlays `~/.kraft/templates/harnesses/claude.yaml` is ignored and a test
+    # fixture cannot substitute a fake. `run_agent_task` falls through to the
+    # harness's own declared command when `command` is empty
+    # (`adapters/agent.py`'s `command=command or None`), which is what every
+    # other V1 agent launch already does.
     inv = _agent.resolve_invocation(
-        {"command": "claude"}, launch.repo_entry, launch.steering_dir, skills_dir=launch.skills_dir
+        {"harness": _ESCALATION_HARNESS},
+        launch.repo_entry,
+        launch.steering_dir,
+        skills_dir=launch.skills_dir,
     )
     status = await _agent.run_agent_task(
         db,

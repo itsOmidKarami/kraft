@@ -469,6 +469,19 @@ path plus the colliding local identifier -- that is where the check happens and
 it is sufficient to locate the collision, so no global path registry is built
 to name "both paths".
 
+**"Task" stays overloaded on purpose -- that is not a defect.** A *chain task*
+is the V1 execution unit addressed by the canonical path above: a `BuiltinTask`,
+`AgentTask`, `SubprocessTask`, or `ForgeTask` at a step's position in a node,
+or in one of a node's dedicated positions (`judge`, `escalation`,
+`auto_review`). A *plan task* is a `## Task N` heading in an implementation plan, addressed by
+ordinal (`kraft.progress.parse_tasks`) rather than by path. Kraft does not own
+the `## Task N` heading format or the `Task 7:` commit-subject convention that
+names it; it only reads them. The two vocabularies meet at one boundary: the
+`plan_progress` event (`POST /api/work-items/{id}/progress`) reports a *plan*
+task's ordinal, never a chain task's path, and is named for that -- it used to
+be called `task_progress`, which read as a chain-task event once V1 made chain
+tasks operator-addressable and per-task events real.
+
 Materialization binds a resolved chain to a work item, applying effective
 policy, intake attachments, and an immutable target:
 

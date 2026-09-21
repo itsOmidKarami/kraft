@@ -192,6 +192,9 @@ def test_node_kind_selects_gate_model():
 
 
 def test_gate_node_owns_gate_configuration():
+    """`auto_escalate: true` became `auto_review: <task>` (Task 4b): a bare
+    boolean could only mean "Kraft's own default reviewer", which is the name
+    indirection V1 exists to delete. The gate declares the task itself."""
     gate = tm.GateNode.model_validate(
         {
             "id": "chain_review",
@@ -200,13 +203,154 @@ def test_gate_node_owns_gate_configuration():
             "message": "Review the complete work item.",
             "artifact": "review_brief",
             "reject_to": "implementation",
-            "auto_escalate": True,
+            "auto_review": agent("reviewer", skill="kraft:gate-review"),
             "timeout": "2d",
         }
     )
     assert gate.chain_finalized is True
     assert gate.artifact == "review_brief"
     assert gate.timeout.total_seconds() == 2 * 24 * 3600
+    assert isinstance(gate.auto_review, tm.AgentTask)
+    assert gate.auto_review.skill == "kraft:gate-review"
+
+
+def test_a_gate_cannot_be_armed_with_a_bare_boolean():
+    """The field is a task or nothing. `auto_escalate` survives only as the
+    per-item *override* key (`store.effective_nodes`), never as a chain field."""
+    with pytest.raises(ValidationError, match="auto_escalate"):
+        tm.GateNode.model_validate({"id": "g", "kind": "gate", "auto_escalate": True})
+
+
+def test_a_gates_reviewing_task_resolves_to_its_own_canonical_path():
+    resolved = tm.ResolvedChain.from_chain(
+        tm.Chain.model_validate(
+            {
+                "nodes": [
+                    {"id": "g", "kind": "gate", "auto_review": agent("reviewer")},
+                ]
+            }
+        )
+    )
+    assert resolved.nodes[0].auto_review.path == "g.auto_review"
+    assert resolved.task_paths == ("g.auto_review",)
+
+
+# -- attachment trimming (attachment-behaviour-is-explicit-gate-configuration,
+# chain-finalized-remains-a-dedicated-marker) --
+
+
+def _attachment_chain(**gate_extra) -> tm.ResolvedChain:
+    """spec author + its gate, plan author + its gate, then a final-review gate
+    whose own artifact kind is `spec` -- the string-match edge Ruling 35 names."""
+    return tm.ResolvedChain.from_chain(
+        tm.Chain.model_validate(
+            {
+                "id": "t",
+                "nodes": [
+                    exec_node("spec", tasks=[agent("author", produces="spec")]),
+                    {
+                        "id": "spec_approval",
+                        "kind": "gate",
+                        "artifact": "spec",
+                        "reject_to": "spec",
+                    },
+                    exec_node("plan", tasks=[agent("author", produces="plan")]),
+                    {
+                        "id": "plan_approval",
+                        "kind": "gate",
+                        "artifact": "plan",
+                        "reject_to": "plan",
+                    },
+                    exec_node("build", tasks=[agent("code")]),
+                    # `reject_to: spec` on a surviving gate is the orphan case:
+                    # a `spec` attachment drops `spec` and this gate stays.
+                    {
+                        "id": "done",
+                        "kind": "gate",
+                        "chain_finalized": True,
+                        "artifact": "spec",
+                        "reject_to": "spec",
+                        **gate_extra,
+                    },
+                ],
+            }
+        )
+    )
+
+
+def _ids(chain: tm.ResolvedChain) -> list[str]:
+    return [n.id for n in chain.nodes]
+
+
+def _materialized(chain: tm.ResolvedChain, kinds: frozenset[str]) -> tm.ResolvedChain:
+    """`chain` as intake freezes it for an item arriving with `kinds` attached:
+    the production path, `materialize(attachment_kinds=...)`, not the
+    `trim_for_attachments` wrapper nothing in `src/` calls."""
+    return chain.materialize(
+        WorkItemTarget.for_repository(Repository(id="r", path="/r")),
+        InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        attachment_kinds=kinds,
+    ).chain
+
+
+def test_an_attachment_drops_the_gate_that_decides_it_and_its_producing_node():
+    trimmed = _materialized(_attachment_chain(), frozenset({"spec"}))
+    assert "spec_approval" not in _ids(trimmed)
+    # The producing node too: legacy got this for free because the author and
+    # its gate were one node. In V1 they are two, so without it the attached
+    # spec is handed straight back to a spec author to write again.
+    assert "spec" not in _ids(trimmed)
+
+
+def test_an_attachment_does_not_drop_a_gate_no_attachment_kind_names():
+    trimmed = _materialized(_attachment_chain(), frozenset({"spec"}))
+    assert ["plan", "plan_approval", "build", "done"] == _ids(trimmed)
+
+
+def test_an_attachment_never_trims_the_chain_finalized_gate():
+    """The rule is a string match, and `done` here names `artifact: spec`. A
+    chain that lost its only `chain_finalized` marker to an attachment would
+    violate `chain-finalized-remains-a-dedicated-marker`."""
+    trimmed = _attachment_chain().trim_for_attachments(frozenset({"spec"}))
+    done = next(n for n in trimmed.nodes if n.id == "done")
+    assert done.node.chain_finalized is True
+
+
+def test_a_trim_that_orphans_a_reject_target_clears_it_rather_than_dangling():
+    """A dangling `reject_to` would make the stored snapshot fail to re-validate
+    as a `Chain` when it is read back; `gates.reject_target` then falls back the
+    same way it does for a gate that declared no target at all."""
+    trimmed = _attachment_chain().trim_for_attachments(frozenset({"spec"}))
+    done = next(n for n in trimmed.nodes if n.id == "done")
+    assert done.node.reject_to is None
+    # And the stored snapshot still re-validates as a `Chain` on read-back,
+    # which a dangling name would fail.
+    assert tm.MaterializedChain.from_json(
+        trimmed.materialize(
+            WorkItemTarget.for_repository(Repository(id="r", path="/r")),
+            InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        ).to_json()
+    )
+
+
+def test_dropping_nodes_keeps_the_frozen_steering():
+    """A skip or an attachment drop re-resolves the chain; the steering frozen
+    at resolution has to survive it, or every surviving task that selects
+    steering stops with "materialized before steering was frozen"."""
+    steering = {"careful": "Go slowly."}
+    chain = tm.ResolvedChain.from_chain(_attachment_chain().chain, steering=steering)
+    assert _materialized(chain, frozenset({"spec"})).steering == steering
+    assert chain.without_nodes({"build"}).steering == steering
+
+
+def test_a_trim_leaving_no_nodes_is_refused():
+    chain = tm.ResolvedChain.from_chain(
+        tm.Chain.model_validate(
+            {"id": "t", "nodes": [exec_node("spec", tasks=[agent("a", produces="spec")])]}
+        )
+    )
+    with pytest.raises(ValueError, match="no nodes"):
+        chain.trim_for_attachments(frozenset({"spec"}))
 
 
 def test_exec_node_cannot_define_gate_after():
@@ -549,3 +693,91 @@ def test_agent_task_selects_a_harness_profile_by_id():
     task = tm.AgentTask.model_validate(agent("review", harness=profile.id))
     assert task.harness == profile.id == "claude_review"
     assert "provider" not in tm.AgentTask.model_fields
+
+
+def _resolved(nodes: list[dict]) -> tm.ResolvedChain:
+    return tm.ResolvedChain.from_chain(tm.Chain.model_validate({"id": "c", "nodes": nodes}))
+
+
+def test_a_skip_and_an_attachment_trim_are_one_drop_not_two():
+    """Two sequential trims can each leave a chain non-empty while their union
+    empties it, and `run_once`/`create_work_item` both index `nodes[0]`
+    unguarded -- by which point the bead is filed and the run spawned. One
+    drop, one refusal."""
+    resolved = _resolved(
+        [
+            {
+                "id": "plan",
+                "kind": "exec",
+                "tasks": [
+                    {
+                        "id": "author",
+                        "kind": "agent",
+                        "harness": "h",
+                        "prompt": "p",
+                        "produces": "plan",
+                    }
+                ],
+            },
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+        ]
+    )
+    target = WorkItemTarget.for_repository(Repository(id="target", path="/r"))
+    policy = InstancePolicy.from_input(InstancePolicyInput())
+
+    # Either alone leaves one node standing.
+    assert [
+        n.id
+        for n in resolved.materialize(
+            target, policy, attachment_kinds=frozenset({"plan"})
+        ).chain.nodes
+    ] == ["implementation"]
+    assert [
+        n.id
+        for n in resolved.materialize(
+            target, policy, skip_nodes=frozenset({"implementation"})
+        ).chain.nodes
+    ] == ["plan"]
+
+    with pytest.raises(ValueError, match="no nodes"):
+        resolved.materialize(
+            target,
+            policy,
+            attachment_kinds=frozenset({"plan"}),
+            skip_nodes=frozenset({"implementation"}),
+        )
+
+
+def test_a_skip_that_orphans_a_reject_target_clears_it_rather_than_dangling():
+    """Same rule the attachment trim gets, because both go through
+    `without_nodes`: a dangling `reject_to` stops the stored snapshot
+    re-validating as a `Chain` when it is read back."""
+    resolved = _resolved(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "write", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "spec_approval", "kind": "gate", "reject_to": "spec"},
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+        ]
+    )
+    kept = resolved.without_nodes({"spec"})
+    gate = next(n for n in kept.chain.nodes if n.id == "spec_approval")
+    assert gate.reject_to is None
+    # And it still round-trips: that is the failure a dangling target causes.
+    tm.MaterializedChain.from_json(
+        kept.materialize(
+            WorkItemTarget.for_repository(Repository(id="target", path="/r")),
+            InstancePolicy.from_input(InstancePolicyInput()),
+        ).to_json()
+    )

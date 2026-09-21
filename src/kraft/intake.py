@@ -19,6 +19,7 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads
+from kraft.templates.models import GateNode
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +113,17 @@ async def _start(app, repo: dict, row: dict) -> str | None:
     from kraft.api import deps
 
     st = app.state
-    template = st.templates.valid.get(repo.get("default_chain_template") or "default")
-    if template is None:
+    if st.library is None:
+        # Distinguished from "no such chain": a library that did not parse makes
+        # every chain unresolvable, and logging the chain id here is the same
+        # misleading answer the API's 503 replaced.
+        logger.warning(
+            "auto-intake: the template library is invalid (%s), skipping",
+            "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+        )
+        return None
+    chain = deps.resolve_chain(st, repo.get("default_chain_template") or "default")
+    if chain is None:
         logger.warning("auto-intake: %s has no valid chain template, skipping", repo["path"])
         return None
     # Spec §5 is "an auto-started item passes no gate automatically". A template
@@ -121,12 +131,14 @@ async def _start(app, repo: dict, row: dict) -> str | None:
     # letter of the rule and the opposite of its point: it would run to merge
     # unattended. A human can still start such a chain by hand — they are the
     # judgement the gates exist to invoke.
-    if not any(n.get("gate_after") for n in template.nodes):
+    # A gate is a node whose kind says so (`gate-is-an-ordered-node`), not a
+    # `gate_after` name hung off the node in front of it.
+    if not any(isinstance(n, GateNode) for n in chain.chain.nodes):
         logger.warning(
             "auto-intake: %s uses %r, which has no gate — refusing to start it "
             "unattended; a person can start it from the board",
             repo["path"],
-            template.id,
+            chain.id,
         )
         return None
     try:
@@ -136,7 +148,8 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             title=row["title"],
             description=row.get("description"),
             repo=repo["path"],
-            template=template,
+            chain=chain,
+            effective_policy=st.instance_policy,
             bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the

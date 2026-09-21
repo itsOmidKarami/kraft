@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, write_harness_profiles
 
 from kraft import db, skill, store
 from kraft.adapters import agent
@@ -500,14 +501,17 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
     """
     seen = _capture_cmd(monkeypatch)
     _run(command="claude", task_instruction="do the thing")
-    ctx = agent._CTX.format(
-        title="t",
-        task_instruction="do the thing",
-        repo_path="/repo",
-        work_item_id="w1",
-        node_id="implementation",
-        hook_point="on.implementation.start",
-        session_id="s1",
+    ctx = (
+        agent._CTX.format(
+            title="t",
+            task_instruction="do the thing",
+            repo_path="/repo",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point="on.implementation.start",
+            session_id="s1",
+        )
+        + agent.SAFETY_RULES
     )
     assert seen["cmd"] == [
         *shlex.split("claude"),
@@ -696,14 +700,17 @@ def test_no_steering_leaves_the_system_prompt_byte_identical(monkeypatch):
     """Regression guard: this sub-project's central compatibility claim."""
     seen = _capture_cmd(monkeypatch)
     _run(steering_texts=())
-    ctx = agent._CTX.format(
-        title="t",
-        task_instruction="do the thing",
-        repo_path="/repo",
-        work_item_id="w1",
-        node_id="implementation",
-        hook_point="on.implementation.start",
-        session_id="s1",
+    ctx = (
+        agent._CTX.format(
+            title="t",
+            task_instruction="do the thing",
+            repo_path="/repo",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point="on.implementation.start",
+            session_id="s1",
+        )
+        + agent.SAFETY_RULES
     )
     assert _system_prompt(seen["cmd"]) == ctx
 
@@ -1329,3 +1336,133 @@ def test_run_agent_task_still_builds_todays_claude_command_line(tmp_path, monkey
     assert "--append-system-prompt" in argv
     assert argv[argv.index("--disallowed-tools") + 1] == "Monitor"
     assert argv[argv.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
+
+
+# --- Template Schema V1: the provider owns the runtime mechanics --------------
+
+
+def _v1_agent_task(**fields):
+    from kraft.templates.models import AgentTask
+
+    return AgentTask.model_validate({"kind": "agent", **fields})
+
+
+def _claude_profile():
+    """A profile `claude` on the provider of that name, for a task selecting it."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+    )
+
+
+def test_a_task_overrides_its_harness_profiles_defaults():
+    """`agent-task-selects-capability-compatible-runtime-options`: a profile's
+    `defaults:` are the lowest rung. The task's own field beats them, the
+    repo's `default_model` beats them, the item's override beats all three --
+    and what nothing overrides still arrives from the profile, on the
+    profile's provider and executable."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates",
+        {
+            "review": {
+                "provider": "claude",
+                "executable": "/opt/claude-wrapper",
+                "defaults": {"model": "sonnet", "effort": "medium", "permission_mode": "plan"},
+            }
+        },
+    )
+    task = _v1_agent_task(id="t", harness="review", prompt="p", effort="high")
+
+    inv = agent.resolve_agent_task(task, None, None)
+    assert (inv.harness, inv.command) == ("claude", "/opt/claude-wrapper")
+    assert (inv.model, inv.effort, inv.permission_mode) == ("sonnet", "high", "plan")
+
+    repo = {"default_model": "haiku"}
+    assert agent.resolve_agent_task(task, repo, None).model == "haiku"
+    item = {"model": "opus", "effort": "low"}
+    overridden = agent.resolve_agent_task(task, repo, None, item_override=item)
+    assert (overridden.model, overridden.effort) == ("opus", "low")
+
+
+def test_a_typed_agent_task_resolves_through_provider_declared_options(tmp_path):
+    """`provider-owns-runtime-mechanics` (invocation, runtime options, skill
+    loading): the task selects a harness profile and options by name, and the
+    provider's own declaration is what turns them into a command line. An
+    option the provider does not declare is refused, not emitted flagless."""
+    from kraft import harness as _harness
+
+    skills = tmp_path / "skills"
+    (skills / "house-method").mkdir(parents=True)
+    (skills / "house-method" / "SKILL.md").write_text("THE-METHOD\n")
+    task = _v1_agent_task(
+        id="write",
+        harness="claude",
+        prompt="Produce the specification.",
+        skill="house-method",
+        model="opus",
+        effort="high",
+    )
+
+    _claude_profile()
+    inv = agent.resolve_agent_task(task, None, None, skills_dir=skills)
+
+    assert (inv.harness, inv.model, inv.effort) == ("claude", "opus", "high")
+    assert inv.method_text == "THE-METHOD\n"
+    h = _harness.load(None).valid["claude"]
+    argv = _harness.build_argv(
+        h, command=None, prompt="p", context="c", options={"model": inv.model, "effort": inv.effort}
+    )
+    # The provider spells them; Kraft only names them.
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert argv[argv.index("--effort") + 1] == "high"
+    # A provider that declares neither gets neither, rather than a bare value.
+    bare = _harness.parse(
+        {
+            "id": "plain",
+            "kind": "cli",
+            "command": ["plain"],
+            "capabilities": {
+                "prompt": {"cli": ["-p", "{value}"]},
+                "context": {"channel": "prompt"},
+                "usage": {"source": "result_file"},
+            },
+        },
+        where="test",
+    )
+    assert "--model" not in _harness.build_argv(
+        bare, command=None, prompt="p", context="c", options={"model": "opus"}
+    )
+
+
+def test_the_provider_spells_session_resumption_for_an_agent_task(tmp_path):
+    """`provider-owns-runtime-mechanics` (session resumption): resuming a
+    provider's own agent session is the provider's spelling of `resume`, and a
+    provider that declares no `resume` capability silently starts fresh rather
+    than being handed a flag it does not understand. Not process reattachment,
+    which is `kraft.worker.reattach`'s unrelated concern."""
+    from kraft import harness as _harness
+
+    task = _v1_agent_task(id="turn", harness="claude", prompt="carry on")
+    _claude_profile()
+    inv = agent.resolve_agent_task(task, None, None)
+    h = _harness.load(None).valid[inv.harness]
+
+    resumed = _harness.build_argv(h, command=None, prompt="p", context="c", resume="sess-1")
+    assert resumed[resumed.index("--resume") + 1] == "sess-1"
+    assert "--resume" not in _harness.build_argv(h, command=None, prompt="p", context="c")
+
+    no_resume = _harness.parse(
+        {
+            "id": "oneshot",
+            "kind": "cli",
+            "command": ["oneshot"],
+            "capabilities": {
+                "prompt": {"cli": ["-p", "{value}"]},
+                "context": {"channel": "prompt"},
+                "usage": {"source": "result_file"},
+            },
+        },
+        where="test",
+    )
+    assert "--resume" not in _harness.build_argv(
+        no_resume, command=None, prompt="p", context="c", resume="sess-1"
+    )

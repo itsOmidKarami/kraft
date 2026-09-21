@@ -2,6 +2,11 @@ import type { RepoRow } from "./settings";
 
 export interface ChainNode {
   id: string;
+  /** `exec` or `gate` on a Template Schema V1 chain, absent on a legacy one.
+   *  A V1 gate *is* a node of its own rather than a `gate_after` string on the
+   *  node in front of it, so this is how the two are told apart -- never by
+   *  faking `gate_after` onto the gate node. */
+  kind?: "exec" | "gate";
   tasks: string[];
   /** Ordered groups of concurrent tasks. Always present on a materialized
    *  chain (`templates.with_steps`); `tasks` is the same list flattened, in
@@ -42,9 +47,9 @@ export type NodeOverrides = Record<
   }
 >;
 
-/** Where the implementer is in its plan (Kraft-qqz8): "Task 3 of 6", derived
+/** Where the implementer is in its plan (Kraft-qqz8): "3 of 6 · title", derived
  *  server-side from the plan's `## Task N` headings, the latest
- *  `task_progress` report and the highest task a commit subject names
+ *  `plan_progress` report and the highest task a commit subject names
  *  (`progress.combine`). `null`/absent off the implementation node or for a
  *  plan with no headings. The list endpoint (`_board_progress`) sends it too,
  *  without `tasks`, for the board row's "Task 3/6" line. */
@@ -66,6 +71,9 @@ export interface BudgetCap {
 
 export interface ChainDefinition {
   template_id: string;
+  /** Always sent by the server (`store.chain_view` fills it for either chain
+   *  shape), but read through a `?? []` at every use: the field was `{}` on a
+   *  V1 row for one release, and a blank board is the failure mode. */
   nodes: ChainNode[];
 }
 

@@ -15,6 +15,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
+#: What a test that never built a `LaunchContext` gets instead of "nothing
+#: declared". `setup_command: ""` is "deliberately nothing to prepare"; the two
+#: empty test fields are the same statement about verification, and they are
+#: here rather than inline so the three call sites below cannot drift apart.
+_INERT_REPO_ENTRY = {"setup_command": "", "test_command": None, "test_scopes": None}
+
+
 @pytest.fixture(autouse=True)
 def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     """`setup_command` has no default (Kraft-kji8w): `ensure_worktree` now
@@ -26,17 +33,87 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
     handful in test_builtins.py that exist to prove the undeclared case
     raises) is untouched: this fixture never sees that call, because `{}` is
     not `None`.
+
+    **Two paths, not one.** `ensure_worktree` was the only one when this fixture
+    was written; Task 4a moved `run_setup_command` into `walk.run_once`'s own
+    preparation block as `prepare_runtime`. Both shell out with no timeout, so
+    keep them saying the same thing from one place.
+
+    The third path -- V1's `kraft.verify_changed_test_scopes` builtin, which
+    runs the connected repo's *own* `test_command` -- is deliberately **not**
+    defaulted here. There is nothing to key it on: its `repo_entry` is
+    `launch.repo_entry or {}`, never `None`, and a test calling
+    `dispatch._select_scopes` directly passes a bare `{"test_scopes": [...]}`
+    that this fixture cannot tell from a real one without breaking it. It is
+    handled where the command comes from instead:
+    `tests/support/harness.seed_v1_library` rewrites that builtin out of the
+    fixture library, so a V1 chain in a unit test never carries it.
     """
     import kraft.builtins as builtins_mod
 
     real_ensure_worktree = builtins_mod.ensure_worktree
+    real_prepare_runtime = builtins_mod.prepare_runtime
 
     async def _ensure_worktree_with_default(*args, repo_entry=None, **kwargs):
         if repo_entry is None:
-            repo_entry = {"setup_command": ""}
+            repo_entry = dict(_INERT_REPO_ENTRY)
         return await real_ensure_worktree(*args, repo_entry=repo_entry, **kwargs)
 
+    async def _prepare_runtime_with_default(worktree, repo, repo_entry=None, **kwargs):
+        # `prepare_runtime` already no-ops on a bare `None` rather than raising,
+        # so this only keeps the two entry points saying the same thing.
+        if repo_entry is None:
+            repo_entry = dict(_INERT_REPO_ENTRY)
+        return await real_prepare_runtime(worktree, repo, repo_entry, **kwargs)
+
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
+    monkeypatch.setattr(builtins_mod, "prepare_runtime", _prepare_runtime_with_default)
+
+
+#: Agent CLIs this suite must never actually launch. Kraft-jxu39: the only reason
+#: a stray real launch has been cheap so far is that `_isolated_kraft_home`
+#: redirects `HOME` to an empty temp dir and this machine has no
+#: `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary resolves and
+#: exits in milliseconds. On a developer machine with a key set the same call is
+#: a real agent turn: network, tokens, tens of seconds.
+_REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
+
+
+@pytest.fixture(autouse=True)
+def _no_real_agent_binary(request, monkeypatch):
+    """Fail loudly rather than spend tokens: a test that reaches a real agent CLI
+    gets an `AssertionError` naming itself and the command.
+
+    At `adapters.subprocess.run_task`, where the argv is final -- not at
+    `resolve_invocation`, because the whole class of defect here is a *resolved*
+    launch whose command nobody expected. The check is on the command's basename
+    only, so every fixture agent (`fixtures/fake-claude.sh`,
+    `tests/support/fake_agent.py`, `sys.executable`) passes untouched, and so
+    does every non-agent subprocess a node runs (`pytest`, `just`, `git`).
+
+    `real_executor` is the opt-out, the same marker `_no_agent_launch` already
+    uses in `tests/test_intake_poller.py` -- and even then this only lets the
+    launch through; `KRAFT_E2E` still gates the tests that mean to reach a real
+    agent.
+    """
+    if "real_executor" in request.keywords or "e2e" in request.keywords:
+        return
+
+    import kraft.adapters.subprocess as sp_mod
+
+    real_run_task = sp_mod.run_task
+
+    async def guarded(*args, cmd=None, **kwargs):
+        first = (cmd[0] if isinstance(cmd, list | tuple) and cmd else cmd) or ""
+        if Path(str(first)).name in _REAL_AGENT_BINARIES:
+            raise AssertionError(
+                f"{request.node.nodeid} tried to launch the real agent binary {first!r} "
+                f"(argv {list(cmd)!r}). Point it at a fixture agent, or mark the test "
+                f"`real_executor` if it genuinely means to."
+            )
+        return await real_run_task(*args, cmd=cmd, **kwargs)
+
+    monkeypatch.setattr(sp_mod, "run_task", guarded)
 
 
 @pytest.fixture(autouse=True)

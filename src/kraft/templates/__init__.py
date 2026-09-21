@@ -41,6 +41,16 @@ _VALID_KINDS = {"builtin", "agent", "subprocess", "forge"}
 CONFIG_FILES = frozenset(
     {
         "registry.yaml",
+        # The V1 reusable-component library (`kraft.templates.library`). It has
+        # no top-level `id`, so a loader that scanned it would report the
+        # shipped library as a malformed chain template. Its chains live in
+        # `chains/`, which this glob does not descend into.
+        "library.yaml",
+        # The V1 harness-profile table (`environment.HarnessProfileTable`).
+        # Same reason as `library.yaml`: no top-level `id`, so a loader that
+        # scanned it would report the shipped file as a malformed chain
+        # template and put a fresh install into degraded health.
+        "harnesses.yaml",
         "policy.yaml",
         "repos.yaml",
         "access.yaml",
@@ -376,7 +386,12 @@ VALID_INPUTS = {
 
 
 def with_inputs(binding: dict, task_hook: str) -> dict:
-    """The binding's resolved input table.
+    """The binding's resolved input table. **PARKED: no `src/` caller since
+    Template Schema V1 stopped the executor reading hook bindings at all**
+    (`TEST_HOOK` with it). Kept, with `_INPUT_CHANNELS` and its validation, for
+    Task 7 of the template-schema-v1 plan, which declares a task's inputs on the
+    `AgentTask` instead of on a hook name -- see `executor.prompts.REVIEW_HOOKS`
+    for what is inert meanwhile.
 
     An explicit `inputs:` is authoritative: exactly what is declared, nothing
     implied. Absent, today's hardcoded rules are reproduced, because
@@ -399,10 +414,12 @@ def carry_forward_node_fields(old_nodes: list[dict], new_nodes: list[dict]) -> l
     return ChainNode.carry_forward_fields(old_nodes, new_nodes)
 
 
-#: What an intake attachment stands in for (Kraft-dgh). Keyed on the gate rather
-#: than the node id: gate names are a validated closed vocabulary, node ids are
-#: free text a custom template chooses.
-ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}
+# `ATTACHMENT_GATES = {"spec": "spec_approval", "plan": "plan_approval"}` lived
+# here: a hardcoded attachment-kind-to-gate-*name* table, which is exactly what
+# `attachment-behaviour-is-explicit-gate-configuration` forbids. Deleted in
+# Template Schema V1. What an attachment stands in for is declared by the chain
+# now -- the gate's own `artifact:` and the producing node's tasks' `produces:`
+# -- and applied by `ResolvedChain.trim_for_attachments`.
 #: An `artifact:` value becomes a path segment (`.engineering/<kind>s/<id>.md`),
 #: so it is a bare lowercase identifier — not a path, not a pattern.
 _ARTIFACT_KIND = re.compile(r"[a-z][a-z0-9_-]*")

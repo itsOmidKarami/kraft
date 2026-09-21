@@ -23,6 +23,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
 from kraft.templates import Registry
+from kraft.templates.models import AgentTask
 from kraft.worker import sandbox as _sandbox
 
 logger = logging.getLogger(__name__)
@@ -252,16 +253,34 @@ async def _guarded_resume_adopted_escalation(
             logger.exception("could not mark %s needs_human after resume crash", work_item_id)
 
 
-def _is_agent_hook(registry: Registry | None, hook_point: str) -> bool:
-    """Whether this hook is `kind: agent`, defaulting to yes when unknown.
+def _is_agent_hook(db, registry: Registry | None, row) -> bool:
+    """Whether this session is an agent's, defaulting to yes when unknown.
+
+    A V1 item answers off its own frozen chain: `hook_point` is the task's
+    canonical path, which no legacy registry hook matches -- reading the
+    registry made every V1 subprocess and builtin session an "agent" and
+    recorded a green adopted run as failed (Kraft-hwrks, b5afe84c). A legacy
+    item still answers off the registry.
 
     Only `_adopted_status` asks, and its unknown-hook direction has to be the
     conservative one: calling an agent a subprocess would let its exit code
     override the `require_result_file` contract.
     """
+    item = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(item) if item is not None else None
+    if snapshot is not None:
+        task = next(
+            (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
+            None,
+        )
+        return task is None or isinstance(task.task, AgentTask)
     if registry is None:
         return True
-    return registry.hooks.get(hook_point, {}).get("kind", "agent") == "agent"
+    return registry.hooks.get(row["hook_point"], {}).get("kind", "agent") == "agent"
 
 
 def _adopted_status(result_path, *, is_agent: bool) -> str:
@@ -336,7 +355,7 @@ async def _adopt(
         session_id,
         log_path,
         result_path,
-        _adopted_status(result_path, is_agent=_is_agent_hook(registry, row["hook_point"])),
+        _adopted_status(result_path, is_agent=_is_agent_hook(db, registry, row)),
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
@@ -537,11 +556,11 @@ async def reattach(
                 lambda c, sid=sid, reason=reason: store.session_unknown(c, sid, reason=reason)
             )
             await db.write(
-                lambda c, r=r: store.mark_needs_human(
+                lambda c, r=r, reason=reason: store.mark_needs_human(
                     c,
                     r["work_item_id"],
                     r["node_id"],
-                    "reattach: running session, PID identity unconfirmed, no result",
+                    f"reattach: running session, PID identity unconfirmed, no result ({reason})",
                 )
             )
             summary.unknown.append(sid)
