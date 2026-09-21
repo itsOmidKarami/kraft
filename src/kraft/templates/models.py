@@ -868,6 +868,14 @@ class ResolvedChain:
         policy = effective_policy
         if self.chain.policy is not None:
             policy = policy.apply_template_override(self.chain.policy)
+        self.check_scopes(policy)
+        return policy
+
+    def check_scopes(self, policy: InstancePolicy) -> None:
+        """Raise `PolicyError`, naming the scope, unless every node, step and
+        task scope resolves on top of `policy` -- the chain's own policy,
+        already layered -- and every agent task's harness and every fix loop's
+        `max_attempts` is within it."""
         for node in self.nodes:
             _scoped(node.id, policy, node.scopes)
             loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
@@ -891,7 +899,6 @@ class ResolvedChain:
                             f"allowed_harnesses {sorted(allowed)!r}",
                             field="allowed_harnesses",
                         )
-        return policy
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
         """This chain without the nodes an attachment of each kind in `kinds`
