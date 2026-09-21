@@ -104,7 +104,12 @@ class ArchiveInput(BaseModel):
 
 
 class PolicyInput(BaseModel):
-    """Static policy.yaml schema; runtime conversion remains in ``load_policy``."""
+    """Static policy.yaml schema; runtime conversion remains in ``load_policy``.
+
+    `extra="forbid"`: a misspelled section (`maximum:` for `maxima:`) is refused
+    by name rather than loading cleanly and bounding nothing (Kraft-sz4dh)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     loops: dict[str, Cap] = Field(default_factory=dict)
     default: Cap
@@ -315,6 +320,9 @@ def _field_error(name: str, exc: ValidationError) -> PolicyError:
             f"{name}: unknown severity {err['input']!r}; expected one of {SEVERITIES}"
         )
     key = ".".join(str(p) for p in err["loc"] if p != "args")
+    if err["type"] == "extra_forbidden" and len(err["loc"]) == 1:
+        known = sorted(PolicyInput.model_fields)
+        return PolicyError(f"{name}: unknown key {key!r}; expected one of {known}")
     return PolicyError(f"{name}: '{key}': {err['msg']}")
 
 

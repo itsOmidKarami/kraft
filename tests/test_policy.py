@@ -741,3 +741,17 @@ def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
     decides the node it hangs off; until then the seed names none."""
     parsed = policy.PolicyInput.from_yaml(_SHIPPED)
     assert parsed.loops == {} or set(parsed.loops) <= {"ci_wait"}, parsed.loops
+
+
+def test_a_misspelled_top_level_key_is_refused_by_name(tmp_path):
+    """Kraft-sz4dh: `maximum:` for `maxima:` used to load cleanly and bound
+    nothing. An unknown top-level key is refused, naming the key."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\nmaximum: { allowed_tools: [git] }\n")
+    with pytest.raises(policy.PolicyError, match="unknown key 'maximum'"):
+        policy.PolicyInput.from_yaml(p)
+
+
+def test_the_shipped_policy_yaml_has_no_unknown_key():
+    """The refusal above must not refuse the seed a fresh install copies."""
+    policy.PolicyInput.from_yaml(Path(__file__).resolve().parents[1] / "templates" / "policy.yaml")
