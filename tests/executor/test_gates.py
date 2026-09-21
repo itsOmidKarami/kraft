@@ -1214,7 +1214,9 @@ def _fake_state(database, run_dirs):
 
 def test_gate_node_halts_until_approved(tmp_path):
     """The walk stops *at* the gate: the node after it does not start, and the
-    gate opens under its own node id with no name table anywhere."""
+    gate opens under its own node id with no name table anywhere. Reaching the
+    gate launches nothing of its own: the only session is the one the preceding
+    execution node ran (`gate-control-does-not-generate-review-work`)."""
     repo = make_repo(tmp_path)
     chain = _spec_gate_chain(repo)
 

@@ -160,7 +160,7 @@ enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_ow
 The changed-test-scope task SHALL run every scope selected by changed paths.
 When the changed paths are empty or do not match a configured scope, it SHALL
 run every configured scope.
-enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches
+enforced-by: tests/executor/test_dispatch.py::test_changed_test_scopes_run_all_scopes_when_nothing_matches, tests/executor/test_dispatch.py::test_select_scopes_on_the_first_round_uses_the_whole_branch_diff
 
 ## REQ changed-test-scope-verification-is-sequential-by-default
 
@@ -408,7 +408,7 @@ origin: src/kraft/executor/gates.py §reject_target -- a gate with no `reject_to
 A gate node SHALL be a decision control point and SHALL NOT generate its own
 review artifact. A preceding execution node SHALL generate any artifact a gate
 uses.
-enforced-by: tests/executor/test_gates.py::test_a_gate_generates_no_artifact_of_its_own, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names
+enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved, tests/executor/test_gates.py::test_a_gate_shows_the_artifact_its_own_field_names
 
 ## REQ chain-finalized-remains-a-dedicated-marker
 
@@ -600,7 +600,7 @@ inherited value: `allowed_tools` and `token_budget`. An **operational value** ma
 move in either direction, bounded by an explicitly configured administrator
 maximum rather than by the inherited value: timeouts, retry and wait timing, and
 `allowed_harnesses`. A field absent from `maxima:` is unbounded.
-enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling, tests/test_policy.py::test_token_budget_ratchets_against_the_inherited_value_not_the_maximum
 
 ## REQ repository-policy-cannot-relax-instance-safety
 

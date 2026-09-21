@@ -542,6 +542,16 @@ def test_template_policy_cannot_exceed_token_budget_ceiling(instance_policy):
         instance_policy.apply_template_override({"token_budget": 3_000_000})
 
 
+def test_token_budget_ratchets_against_the_inherited_value_not_the_maximum(instance_policy):
+    """A safety ceiling tightens against what it inherits: once a layer has
+    narrowed `token_budget` below `maxima`, a narrower layer cannot raise it
+    back, even to a value the administrator maximum would allow."""
+    narrowed = instance_policy.apply_template_override({"token_budget": 1_000_000})
+    assert narrowed.token_budget == 1_000_000
+    with pytest.raises(policy.PolicyError, match="token_budget"):
+        narrowed.apply_template_override({"token_budget": 1_500_000})
+
+
 # ── allowed_harnesses: operational-with-an-administrator-maximum, not a
 # ratchet-only safety field (docs/templates-v1-design.md lists it under both
 # `defaults:` and `maxima:`, unlike `allowed_tools`/`token_budget`) ──
