@@ -631,6 +631,29 @@ async def test_steerable_is_answered_off_the_v1_snapshot(item_on, repo, node, st
     assert lifecycle.steer_reachable(it.row()) is steerable
 
 
+def test_a_legacy_row_is_never_steerable():
+    """Kraft-z07kv. A row the legacy loader filed has no materialized chain,
+    and no V1 walk can run it (`walk.chain_of` raises), so nothing on it will
+    ever read a steer -- even at a node whose legacy chain named an agent hook.
+    Offering the steer box there takes text that is then dropped."""
+    import json
+
+    from kraft.api.routes import lifecycle
+
+    legacy = {
+        "nodes": [
+            {"id": "implementation", "tasks": ["on.implementation.start"], "gate_after": None}
+        ]
+    }
+    row = {
+        "current_node_id": "implementation",
+        "materialized_chain": None,
+        "run_chain": None,
+        "chain_definition": json.dumps(legacy),
+    }
+    assert lifecycle.steer_reachable(row) is False
+
+
 def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
     """H1's other half. `chain_definition` is `"{}"` on a V1 row, and the board
     draws its stage bar and names the current node from
