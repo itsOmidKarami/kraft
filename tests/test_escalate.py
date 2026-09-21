@@ -707,3 +707,45 @@ async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, d
         launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
     )
     assert agent_mod.SAFETY_RULES in launched["argv"]
+
+
+@pytest.mark.parametrize("new_thread", [False, True], ids=["resumed", "fresh"])
+async def test_a_resumed_escalation_keeps_its_original_runtime(
+    monkeypatch, database, run_dirs, new_thread
+):
+    """`resumed-escalation-preserves-original-runtime`: the escalation profile
+    changed between two turns. A turn that resumes the thread runs on the
+    thread's original harness and options; only a new thread takes the new
+    ones (`manual-escalation-may-start-fresh`)."""
+    launches = []
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        launches.append(kw)
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(
+            json.dumps({"type": "system", "subtype": "init", "session_id": "cli-1"}) + "\n"
+        )
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+    resolve = escalate._agent.resolve_agent_task
+    model = {"now": "opus"}
+
+    def profile_says(*args, **kwargs):
+        return resolve(*args, **kwargs)._replace(model=model["now"], effort="high")
+
+    monkeypatch.setattr("kraft.escalate._agent.resolve_agent_task", profile_says)
+    await _seed_needs_human(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    await escalate.dispatch(database, run_dirs, work_item_id="w1", message="1", launch=launch)
+    model["now"] = "sonnet"
+
+    await escalate.dispatch(
+        database, run_dirs, work_item_id="w1", message="2", launch=launch, new_thread=new_thread
+    )
+
+    first, second = launches
+    assert second["resume_session_id"] == (None if new_thread else "cli-1")
+    assert (second["model"], second["effort"]) == ("sonnet" if new_thread else "opus", "high")
+    assert second["harness"] == first["harness"]
