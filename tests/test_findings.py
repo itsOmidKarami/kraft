@@ -2,6 +2,8 @@ import dataclasses
 import json
 import uuid
 
+import pytest
+
 from kraft.findings import (
     BlindJob,
     Finding,
@@ -40,21 +42,30 @@ def test_parse_reads_a_finding(tmp_path):
     assert (f.severity, f.file, f.line, f.source_plugin) == ("important", "a.py", 12, "ponytail")
 
 
-def test_parse_missing_key_yields_nothing(tmp_path):
-    assert parse(_write(tmp_path, {"status": "done"})) == []
-
-
-def test_parse_non_list_findings_yields_nothing(tmp_path):
-    assert parse(_write(tmp_path, {"findings": "nope"})) == []
-
-
-def test_parse_missing_file_is_not_an_error(tmp_path):
-    assert parse(tmp_path / "absent.json") == []
-
-
-def test_parse_broken_json_is_not_an_error(tmp_path):
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"status": "done"}',
+        b'{"findings": "nope"}',
+        None,
+        b"{not json",
+        b"\xff\xfe\x00binary",
+        b"[1, 2, 3]",
+    ],
+    ids=[
+        "missing-key",
+        "non-list-findings",
+        "missing-file",
+        "broken-json",
+        "non-utf8",
+        "top-level-list",
+    ],
+)
+def test_parse_an_unusable_result_file_yields_nothing(tmp_path, raw):
+    """No findings, never an error: a result file with nothing usable in it."""
     p = tmp_path / "r.json"
-    p.write_text("{not json")
+    if raw is not None:
+        p.write_bytes(raw)
     assert parse(p) == []
 
 
@@ -248,18 +259,6 @@ def test_fingerprint_differs_when_the_traced_error_changes_and_matches_when_it_d
     )
     assert before.fingerprint == after_same_error.fingerprint  # nothing moved
     assert before.fingerprint != after_different_error.fingerprint  # the fix changed the error
-
-
-def test_parse_non_utf8_bytes_is_not_an_error(tmp_path):
-    p = tmp_path / "r.json"
-    p.write_bytes(b"\xff\xfe\x00binary")
-    assert parse(p) == []
-
-
-def test_parse_top_level_list_yields_nothing(tmp_path):
-    p = tmp_path / "r.json"
-    p.write_text(json.dumps([1, 2, 3]))
-    assert parse(p) == []
 
 
 def test_from_payload_normal_round_trip(tmp_path):
