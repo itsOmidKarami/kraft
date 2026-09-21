@@ -64,14 +64,14 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
         (
             "work-items",
             {"title": "x", "repo": "/tmp", "chain_template": "nope"},
-            "unknown or invalid template",
+            "no chain 'nope'",
         ),
         ("work-items", {"title": "x"}, None),
         ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
             "triggers",
             {"title": "t", "repo": "REPO", "chain_template": "nope"},
-            "unknown or invalid template",
+            "no chain 'nope'",
         ),
         ("triggers", {"title": "t", "repo": "/no/such/dir"}, "repo path does not exist"),
     ],

@@ -262,9 +262,9 @@ async def reload_templates_endpoint(request: Request):
     exactly as it would have started."""
     st = request.app.state
     deps._reload_templates(st)
-    invalid = {LIBRARY_FILE: "; ".join(st.invalid_library)} if st.invalid_library else {}
-    valid = sorted(st.library.chain_ids) if st.library is not None else []
-    return {"valid": valid, "invalid_templates": invalid}
+    ids = st.library.chain_ids if st.library is not None else ()
+    valid = sorted(id for id in ids if id not in st.invalid_chains)
+    return {"valid": valid, "invalid_templates": deps.invalid_templates(st)}
 
 
 class PolicyBody(BaseModel):
@@ -330,6 +330,7 @@ async def put_policy(body: PolicyBody, request: Request):
     st.policy = policy_obj
     st.instance_policy = parsed.instance_policy()
     st.invalid_policy = []
+    deps.lint_loaded(st)
     return data
 
 

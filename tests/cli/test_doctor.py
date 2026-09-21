@@ -285,6 +285,7 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     assert _by_name(rows, "templates")["ok"] is False
     chains = _by_name(rows, "chain_templates")
     assert chains["ok"] is True and chains["skipped"] is True
+    assert _by_name(rows, "chains")["skipped"] is True
 
 
 def _chains(root: Path) -> Path:
@@ -597,3 +598,25 @@ def test_an_unstamped_home_is_told_everything_rather_than_erroring(tmp_path, mon
     row = doctor._capabilities_check()
     assert row["ok"] is True
     assert "thing" in row["detail"]
+
+
+def test_a_chain_that_does_not_resolve_fails_doctor_by_name(tmp_path, monkeypatch):
+    """Kraft-n1zp9: a chain whose `extends` names nothing parses, so the library
+    loads, and `_resolved_chains` used to drop it without a word. The `chains`
+    row is the same lint pass `admin templates lint` runs, and fails naming the
+    chain and the resolver's message -- with or without a server."""
+    live = _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    (live / "chains" / "broken.yaml").write_text(
+        yaml.safe_dump({"id": "broken", "nodes": [{"id": "n", "extends": "no_such_node"}]})
+    )
+    row = _by_name(doctor._config_checks(), "chains")
+    assert row["ok"] is False
+    assert "broken" in row["detail"] and "no_such_node" in row["detail"]
+    # The healthy chain beside it is not blamed.
+    assert "c:" not in row["detail"]
+
+
+def test_the_chains_row_passes_when_every_chain_resolves(tmp_path, monkeypatch):
+    _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    row = _by_name(doctor._config_checks(), "chains")
+    assert row["ok"] is True and "1 chain" in row["detail"]

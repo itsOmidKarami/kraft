@@ -693,3 +693,17 @@ def test_client_refuses_a_mismatched_run_dir(app, monkeypatch):
     monkeypatch.setattr(client.transport, "_get", wrong_instance)
     with pytest.raises(ValueError, match="different instance"):
         asyncio.run(client.health())
+
+
+def test_reload_exits_1_on_a_chain_that_does_not_resolve(app, capsys):
+    """Kraft-n1zp9: the library parses, one chain does not resolve -- reload
+    used to print "reloaded 2 template(s)" and exit 0."""
+    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    (templates_dir / "chains" / "broken.yaml").write_text(
+        "id: broken\nnodes:\n  - {id: n, extends: no_such_node}\n"
+    )
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "reload"])
+    assert caught.value.code == 1
+    out = capsys.readouterr().out
+    assert "invalid: chain broken" in out and "no_such_node" in out
