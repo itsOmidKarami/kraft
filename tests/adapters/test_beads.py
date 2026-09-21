@@ -123,10 +123,14 @@ def test_search_finds_a_closed_bead(tmp_path, monkeypatch):
         await beads.complete(bead_id, cwd=str(repo))
         hits = await beads.search("caulk the transom", cwd=str(repo))
         assert [(h["id"], h["status"]) for h in hits] == [(bead_id, "closed")]
+        return bead_id
 
-    asyncio.run(scenario())
+    bead_id = asyncio.run(scenario())
     (search,) = [a for a in argvs if a[:2] == ["bd", "search"]]
-    assert search[search.index("--status") + 1] == "all"
+    assert " --status all" in " ".join(search), (
+        f"beads.search ran {search!r}: without `--status all`, a bd that searches open "
+        f"beads by default leaves the closed bead {bead_id} out of the strip (Kraft-evm)"
+    )
 
 
 @pytest.mark.beads_adapter
