@@ -935,12 +935,21 @@ async def run_task(
     # (`work-item-target-selection-is-immutable`).
     item = db.read(
         lambda c: c.execute(
-            "SELECT materialized_chain FROM work_items WHERE id = ?", (work_item_id,)
+            "SELECT materialized_chain, root_merge_policy FROM work_items WHERE id = ?",
+            (work_item_id,),
         ).fetchone()
     )
     snapshot = store.materialized_chain_of(item) if item is not None else None
     workspace = snapshot is not None and snapshot.target.kind == "workspace"
-    root_policy = snapshot.target.root_pointer_policy if workspace else RootPointerPolicy.IGNORE
+    if workspace:
+        root_policy = snapshot.target.root_pointer_policy
+    else:
+        # Kraft-zvqwl: an item filed before workspaces keeps the pointer
+        # policy it was filed with, in its column: legacy `bump`/`bump_no_mr`
+        # bump, `skip` (or none) leaves the root alone.
+        legacy = item["root_merge_policy"] if item is not None else None
+        bumps = legacy in ("bump", "bump_no_mr")
+        root_policy = RootPointerPolicy.BUMP if bumps else RootPointerPolicy.IGNORE
     if multi:
         root_repo = next(t for _, t, role in targets if role == "root")
         mounts = {r["submodule_path"] for r in rows if r["role"] == "submodule"}

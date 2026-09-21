@@ -432,6 +432,33 @@ async def test_a_workspace_item_assembles_its_selected_members_each_on_the_items
     ]
 
 
+async def test_an_item_filed_before_workspaces_keeps_its_submodules_on_a_new_worktree(
+    tmp_path, database, run_dirs
+):
+    """Kraft-zvqwl: an item keeps the checkout shape it was born with. Before
+    Task 10 every item was materialized with a single-repository target and
+    kept its submodules in the `work_items.submodules` column; a worktree
+    rebuilt after the upgrade (a retry, a rejected gate re-entering) must still
+    assemble them, each on the item's branch."""
+    root, _sub = make_repo_with_submodule(tmp_path)
+    await wtree.make_item(
+        database,
+        root,
+        materialized_chain=v1_chain(_ONE_NODE, repo=root).to_json(),
+        submodules=["repos/pkg"],
+        root_merge_policy="bump",
+    )
+
+    worktree = await wtree.ensure(database, run_dirs, root)
+
+    assert (worktree / "repos" / "pkg" / ".git").exists(), "the legacy submodule is initialized"
+    assert git_read(worktree / "repos" / "pkg", "branch", "--show-current") == wtree.branch(
+        database
+    )
+    repos = database.read(lambda c: store.repos_for(c, "w1"))
+    assert [r["role"] for r in repos] == ["submodule", "root"]
+
+
 async def test_a_single_repository_item_initializes_no_submodule(tmp_path, database, run_dirs):
     """Membership is the target's, never `.gitmodules`': a root filed as a
     plain repository gets no member checked out and no repository rows."""

@@ -33,7 +33,15 @@ def _policy(**override) -> InstancePolicy:
 
 
 async def _workspace_item(
-    database, run_dirs, tmp_path, tasks, *, pointer="ignore", second=False, **materialize
+    database,
+    run_dirs,
+    tmp_path,
+    tasks,
+    *,
+    pointer="ignore",
+    second=False,
+    legacy=False,
+    **materialize,
 ):
     """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
     `repos/pkg2` when `second`), filed as a workspace item selecting them under
@@ -49,11 +57,14 @@ async def _workspace_item(
     chain = v1_chain(
         [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
-        target=workspace_target(mounts, root_pointer_policy=pointer),
+        target=None if legacy else workspace_target(mounts, root_pointer_policy=pointer),
     )
     if materialize:
         chain = chain.chain.materialize(target=chain.target, **materialize)
-    await wtree.make_item(database, root, materialized_chain=chain.to_json())
+    # `legacy`: the shape every item filed before Task 10 has -- a
+    # single-repository target, its submodules and pointer policy in columns.
+    columns = {"submodules": list(mounts.values()), "root_merge_policy": pointer} if legacy else {}
+    await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     worktree = await wtree.ensure(database, run_dirs, root)
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     return row, chain.chain.nodes[0], worktree
@@ -292,13 +303,13 @@ class _LandingForge(forge.FakeForge):
 
 
 async def _publishable(
-    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, second=False
+    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, second=False, legacy=False
 ):
     """A workspace item whose root and member each have an origin that takes a
     push (the member's is its source repository), the member carrying a
     commit. Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await _workspace_item(
-        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, second=second
+        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, second=second, legacy=legacy
     )
     root = Path(row["repo"])
     members = ["pkg", "pkg2"] if second else ["pkg"]
@@ -339,14 +350,22 @@ def _repos(database, row) -> dict[str, str]:
     return {r["role"]: r["state"] for r in database.read(lambda c: store.repos_for(c, row["id"]))}
 
 
+@pytest.mark.parametrize(
+    ("legacy", "pointer"),
+    [(False, "bump"), (True, "bump"), (True, "bump_no_mr")],
+    ids=["workspace", "filed-before-workspaces", "filed-before-workspaces-bump-no-mr"],
+)
 async def test_child_merge_precedes_workspace_pointer_update(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, legacy, pointer
 ):
     """`child-merge-precedes-parent-pointer-update`, and a requested bump of a
     pointer-only root goes straight to the root's default branch
     (`workspace-pointer-bump-prefers-direct-push`): after the member has
-    merged, naming the member's merged revision."""
-    row, worktree, origin = await _publishable(database, run_dirs, tmp_path, pointer="bump")
+    merged, naming the member's merged revision. An item filed before
+    workspaces keeps the pointer policy it was filed with (Kraft-zvqwl)."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer=pointer, legacy=legacy
+    )
     fake = _LandingForge()
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr") == "done"
 
@@ -358,11 +377,19 @@ async def test_child_merge_precedes_workspace_pointer_update(
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
 
 
+@pytest.mark.parametrize(
+    ("legacy", "pointer"),
+    [(False, "ignore"), (True, "skip")],
+    ids=["workspace", "filed-before-workspaces-skip"],
+)
 async def test_the_default_root_pointer_policy_leaves_the_root_unchanged(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, legacy, pointer
 ):
-    """`workspace-root-pointer-update-defaults-to-ignore`."""
-    row, worktree, origin = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
+    """`workspace-root-pointer-update-defaults-to-ignore`; a legacy `skip` is
+    the same decision."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer=pointer, legacy=legacy
+    )
     before = _git_out(origin, "rev-parse", "main")
     fake = _LandingForge()
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")

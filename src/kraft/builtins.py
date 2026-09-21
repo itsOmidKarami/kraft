@@ -476,7 +476,8 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT base_ref, branch, id, materialized_chain FROM work_items WHERE id = ?",
+            "SELECT base_ref, branch, id, materialized_chain, submodules "
+            "FROM work_items WHERE id = ?",
             (work_item_id,),
         ).fetchone()
     )
@@ -557,6 +558,20 @@ async def ensure_worktree(
     # lists or the agent later touches.
     snapshot = store.materialized_chain_of(row) if row is not None else None
     mounts = [m.path for m in snapshot.target.mounts.values()] if snapshot is not None else []
+    if (
+        row is not None
+        and row["submodules"]
+        and (snapshot is None or snapshot.target.kind == "repository")
+    ):
+        # Kraft-zvqwl: an item keeps the checkout shape it was born with. One
+        # filed before workspaces has a single-repository target and its
+        # submodules in this column; a worktree rebuilt for it after the
+        # upgrade (a retry, a rejected gate re-entering) assembles them still.
+        # A V1 repository target never writes the column.
+        mounts = json.loads(row["submodules"])
+        logger.info(
+            "%s: filed before workspaces; assembling its submodules %s", work_item_id, mounts
+        )
     if mounts:
         await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, mounts)
     return worktree
