@@ -727,6 +727,19 @@ class ResolvedNode:
             if dedicated is not None:
                 yield dedicated
 
+    @property
+    def covered_by(self) -> str | None:
+        """The attachment kind that makes this node redundant, if one does:
+        the kind a gate's `artifact` decides, or the one kind every one of an
+        execution node's own tasks produces. Both halves read side by side, so
+        the intake preview (`store.chain.node_view`) and materialization
+        (`trim_for_attachments`) cannot disagree about which nodes an
+        attachment drops. A `chain_finalized` gate is never covered."""
+        if isinstance(self.node, GateNode):
+            return None if self.node.chain_finalized else self.node.artifact
+        produces = self.produces()
+        return next(iter(produces)) if len(produces) == 1 else None
+
     def produces(self) -> frozenset[str | None]:
         """What this node's *own* steps declare they produce -- `None` as a
         member for every task declaring nothing, and for a task kind that has
@@ -746,12 +759,8 @@ class ResolvedNode:
 
 def _redundant_given(node: ResolvedNode, kinds: frozenset[str]) -> bool:
     """Whether an attachment of one of `kinds` makes `node` redundant --
-    the whole of `trim_for_attachments`' rule, in one predicate so that both
-    halves (the deciding gate, the producing node) are read side by side."""
-    if isinstance(node.node, GateNode):
-        return not node.node.chain_finalized and node.node.artifact in kinds
-    produces = node.produces()
-    return len(produces) == 1 and next(iter(produces)) in kinds
+    the whole of `trim_for_attachments`' rule."""
+    return node.covered_by is not None and node.covered_by in kinds
 
 
 @dataclass(frozen=True)

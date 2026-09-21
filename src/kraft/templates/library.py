@@ -17,7 +17,7 @@ author has to correct (`template-resolution-preserves-source-context`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
@@ -41,6 +41,19 @@ from kraft.templates.models import (
 
 LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
+#: Every pre-V1 home was seeded with one, and V1 has no reader for it.
+LEGACY_REGISTRY = "registry.yaml"
+
+
+def is_pre_v1(path: str | Path) -> bool:
+    """Whether the template directory at `path` holds the legacy, pre-V1
+    configuration: a hook registry and no V1 `library.yaml`. Such a home is not
+    converted (`template-v1-is-not-backward-compatible`); `kraft admin update`
+    backs it up and replaces it once the operator accepts
+    (`major-update-requires-explicit-acceptance`)."""
+    root = Path(path)
+    return (root / LEGACY_REGISTRY).is_file() and not (root / LIBRARY_FILE).is_file()
+
 
 #: Discriminator tags pydantic inserts into a tagged-union error location. They
 #: are not authored structure, so they are dropped before a location is matched
@@ -58,11 +71,25 @@ class TemplateIssue:
     it (`template-resolution-preserves-source-context`)."""
 
     file: Path
-    chain: str
+    #: `None` for an issue in `library.yaml` itself, which no one chain owns.
+    chain: str | None
     message: str
 
     def __str__(self) -> str:
-        return f"{self.chain}: {self.message}"
+        return f"{self.chain or self.file}: {self.message}"
+
+
+@dataclass(frozen=True)
+class LintReport:
+    """`TemplateLibrary.lint_dir`'s answer: the chains that resolve, and every
+    issue with the rest."""
+
+    chains: tuple[str, ...]
+    issues: tuple[TemplateIssue, ...]
+
+    @property
+    def valid(self) -> bool:
+        return not self.issues
 
 
 class Namespace(StrEnum):
@@ -147,6 +174,13 @@ def _section(path: Path, data: Mapping[str, object], namespace: Namespace) -> Ma
     return section
 
 
+def _chain_id(chain_path: Path, body: Mapping[str, object]) -> str:
+    id = body.get("id") or chain_path.stem
+    if not isinstance(id, str):
+        raise TemplateLibraryError(f"{chain_path}: 'id' must be a string")
+    return id
+
+
 class TemplateLibrary:
     """One template directory's authored configuration: reusable components,
     named steering profiles, and the selectable chains."""
@@ -159,24 +193,64 @@ class TemplateLibrary:
         skills_dir: Path | None = None,
     ) -> None:
         self._components = components
-        self._chains = chains
+        self._chains = dict(chains)
         self.steering = steering
         #: Where an operator may overlay a method file (`kraft.skill`); `None`
         #: means the bundled methods only.
         self.skills_dir = skills_dir
 
     @classmethod
-    def from_yaml_dir(cls, path: str | Path, *, skills_dir: Path | None = None) -> TemplateLibrary:
+    def from_yaml_dir(
+        cls,
+        path: str | Path,
+        *,
+        skills_dir: Path | None = None,
+        issues: list[TemplateIssue] | None = None,
+    ) -> TemplateLibrary:
         """Read `library.yaml` and every `chains/*.yaml` under `path`. The only
         boundary I/O here; a read or parse failure becomes a
         `TemplateLibraryError` naming the file. `skills_dir` is the method
-        overlay a task's `skill:` resolves against, beside the bundled ones."""
+        overlay a task's `skill:` resolves against, beside the bundled ones.
+
+        Given `issues`, a chain file that cannot be read or claims a taken id is
+        recorded there and left out instead, so lint can report every bad file
+        rather than the first (`template-lint-reports-library-validity`). A bad
+        `library.yaml` still raises: there is nothing to resolve a chain against.
+        """
         root = Path(path)
         library_path = root / LIBRARY_FILE
+        if is_pre_v1(root):
+            raise TemplateLibraryError(
+                f"{root} holds a pre-V1 template configuration, which this Kraft does not "
+                "run; `kraft admin update` backs it up and installs the V1 configuration"
+            )
         if not library_path.is_file():
             raise TemplateLibraryError(f"{library_path}: no {LIBRARY_FILE} to read")
-        library = _read(library_path)
+        library = cls.from_mappings(
+            _read(library_path), (), library_path=library_path, skills_dir=skills_dir
+        )
+        for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
+            try:
+                library._add_chain(chain_path, _read(chain_path))
+            except TemplateLibraryError as exc:
+                if issues is None:
+                    raise
+                issues.append(TemplateIssue(chain_path, chain_path.stem, str(exc)))
+        return library
 
+    @classmethod
+    def from_mappings(
+        cls,
+        library: Mapping[str, object],
+        chains: Iterable[tuple[Path, Mapping[str, object]]],
+        *,
+        library_path: Path,
+        skills_dir: Path | None = None,
+    ) -> TemplateLibrary:
+        """A library from already-parsed mappings: `library` is `library.yaml`'s
+        content and each chain is paired with the file it is named after --
+        real for `from_yaml_dir`, nominal for an unsaved library, which is
+        resolved without ever being written (`POST /templates/resolve`)."""
         components = {
             namespace: {
                 name: RawComponent(body, ComponentSource(library_path, namespace, name))
@@ -193,22 +267,34 @@ class TemplateLibrary:
             except ValidationError as exc:
                 raise TemplateLibraryError(f"{source}: {first_error(exc)}") from exc
 
-        chains: dict[str, RawComponent] = {}
-        for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
-            body = _read(chain_path)
-            id = body.get("id") or chain_path.stem
-            if not isinstance(id, str):
-                raise TemplateLibraryError(f"{chain_path}: 'id' must be a string")
-            if id in chains:
-                # One selectable chain per file: two files claiming one id would
-                # otherwise make the loser's chain vanish from `chain_ids`.
-                raise TemplateLibraryError(
-                    f"{chain_path}: chain id {id!r} is already declared by {chains[id].source.file}"
-                )
-            chains[id] = RawComponent(
-                {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
+        built = cls(components, {}, steering, skills_dir)
+        for chain_path, body in chains:
+            built._add_chain(chain_path, body)
+        return built
+
+    def with_chain(
+        self, chain_path: Path, body: Mapping[str, object]
+    ) -> tuple[TemplateLibrary, str]:
+        """This library plus one unsaved chain, and the chain's id. A chain of
+        the same id is shadowed, which is how a saved chain's edit is checked
+        before it is saved. `self` is not changed."""
+        candidate = TemplateLibrary(self._components, self._chains, self.steering, self.skills_dir)
+        candidate._chains.pop(_chain_id(chain_path, body), None)
+        return candidate, candidate._add_chain(chain_path, body)
+
+    def _add_chain(self, chain_path: Path, body: Mapping[str, object]) -> str:
+        id = _chain_id(chain_path, body)
+        if id in self._chains:
+            # One selectable chain per file: two files claiming one id would
+            # otherwise make the loser's chain vanish from `chain_ids`.
+            claimed = self._chains[id].source.file
+            raise TemplateLibraryError(
+                f"{chain_path}: chain id {id!r} is already declared by {claimed}"
             )
-        return cls(components, chains, steering, skills_dir)
+        self._chains[id] = RawComponent(
+            {**body, "id": id}, ComponentSource(chain_path, Namespace.NODES, id)
+        )
+        return id
 
     @property
     def chain_ids(self) -> tuple[str, ...]:
@@ -224,6 +310,32 @@ class TemplateLibrary:
         """Which namespace declares `name`, for the cross-namespace `extends`
         error that says what the author actually referenced."""
         return next((ns for ns in _EXTENDABLE if name in self._components[ns]), None)
+
+    @classmethod
+    def lint_dir(
+        cls,
+        path: str | Path,
+        *,
+        skills_dir: Path | None = None,
+        instance_policy: InstancePolicy | None = None,
+    ) -> LintReport:
+        """Everything wrong with the template directory at `path` -- every
+        chain file that does not parse and every chain that does not resolve,
+        or the one `library.yaml` failure that leaves nothing to resolve
+        against (`template-lint-reports-library-validity`). Reads; never writes."""
+        root = Path(path)
+        issues: list[TemplateIssue] = []
+        try:
+            library = cls.from_yaml_dir(root, skills_dir=skills_dir, issues=issues)
+        except TemplateLibraryError as exc:
+            return LintReport(
+                chains=(), issues=(TemplateIssue(root / LIBRARY_FILE, None, str(exc)),)
+            )
+        issues += library.lint(instance_policy)
+        failed = {issue.chain for issue in issues}
+        return LintReport(
+            chains=tuple(id for id in library.chain_ids if id not in failed), issues=tuple(issues)
+        )
 
     def lint(self, instance_policy: InstancePolicy | None = None) -> list[TemplateIssue]:
         """Every chain in this library that does not resolve, rather than the
