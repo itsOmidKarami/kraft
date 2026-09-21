@@ -30,3 +30,34 @@ def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
     _git(repo, "commit", "-m", "no ambient identity")  # must not exit 128
     log = Path.read_text(repo / ".git" / "HEAD")
     assert log  # the commit landed; a 128 exit would have raised in _git first
+
+
+def test_the_beads_fake_answers_consistently_with_its_own_state(fake_beads):
+    """The autouse fake (tests/support/fake_beads.py) must answer search/ready/
+    blocked_by from what was filed and closed, per workspace, the way the e2e
+    contract tests in tests/adapters/test_beads.py pin the real bd doing."""
+    import asyncio
+
+    import pytest
+
+    from kraft.adapters import beads
+
+    if fake_beads is None:
+        pytest.skip("KRAFT_TEST_REAL_BD=1: no fake installed to check")
+
+    async def scenario():
+        a = await beads.intake("the blocker", cwd="/ws")
+        b = await beads.intake("the blocked", description="brief", cwd="/ws")
+        assert a != b
+        fake_beads.block(b, a, cwd="/ws")
+        assert await beads.blocked_by([b], cwd="/ws") == [a]
+        assert [r["id"] for r in await beads.ready(cwd="/ws")] == [a]
+        assert await beads.ready(cwd="/other") == []
+        await beads.complete(a, cwd="/ws")
+        assert await beads.blocked_by([b], cwd="/ws") == []
+        assert [(r["id"], r["description"]) for r in await beads.ready(cwd="/ws")] == [(b, "brief")]
+        assert [(h["id"], h["status"]) for h in await beads.search("blocker", cwd="/ws")] == [
+            (a, "closed")
+        ]
+
+    asyncio.run(scenario())

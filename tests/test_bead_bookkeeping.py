@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import make_repo, v1_named_chain
 
 from kraft import db, executor
@@ -51,6 +52,7 @@ def _bd_create(repo, title) -> str:
     return json.loads(out[out.index("{") :])["id"]
 
 
+@pytest.mark.e2e("bd")
 def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
     """Kraft-p8q1: the sub-beads a work item states via `implements_beads` close
     with it, not just the tracking bead. Passed explicitly: the description is
@@ -103,6 +105,7 @@ def test_completion_closes_every_sub_bead_the_item_states(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(tmp_path, monkeypatch):
     """Kraft-dr3n: bd being unavailable at intake time is a degrade, not a
     permanent hole -- an item that completes still ends up with a closed

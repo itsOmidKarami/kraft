@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from support.harness import isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, events, executor, policy, store
@@ -155,6 +156,7 @@ def _walk_default_chain_approving_every_gate(tmp_path, launch):
     return asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_node(
     tmp_path, monkeypatch
 ):
@@ -179,6 +181,7 @@ def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_
     assert fake.opened, "the draft merge request was never opened"
 
 
+@pytest.mark.e2e("bd")
 def test_a_repo_on_the_fake_forge_walks_the_default_chain_to_the_same_stop(tmp_path):
     """Ruling 147: `forge: fake` on a repo is how `just dev` reaches the merge-
     request half of the default chain. Nothing is monkeypatched here -- the real

@@ -16,6 +16,11 @@ from support.harness import fake_templates_dir, isolated_bd
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
+#: Poll interval for the wait helpers below. Each keeps its own overall
+#: timeout; only the granularity is short, since a 0.2s sleep was ~1/3 of
+#: test_gates.py's wall time spent waiting on work already done (Kraft-qmhfc).
+_POLL = 0.02
+
 
 def _client(tmp_path, monkeypatch, *, templates_dir=None, peer=("127.0.0.1", 54321)):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
@@ -56,7 +61,7 @@ def _poll_events(client, wid, want, timeout=30, count=1):
         seen = client.get(f"/api/work-items/{wid}/events").json()
         if sum(e["type"] == want for e in seen) >= count:
             return seen
-        time.sleep(0.2)
+        time.sleep(_POLL)
     raise AssertionError(f"{want} x{count} not seen; got {[e['type'] for e in seen]}")
 
 
@@ -75,7 +80,7 @@ def _poll_node_started(client, wid, node_id, timeout=30):
         seen = client.get(f"/api/work-items/{wid}/events").json()
         if any(e["type"] == "node_started" and e["payload"]["node_id"] == node_id for e in seen):
             return seen
-        time.sleep(0.2)
+        time.sleep(_POLL)
     raise AssertionError(f"node_started for {node_id!r} not seen; got {[e['type'] for e in seen]}")
 
 
@@ -87,7 +92,7 @@ def _await_gate(client, wid, gate, timeout=30):
         item = client.get(f"/api/work-items/{wid}").json()
         if item.get("pending_gate") == gate:
             return item
-        time.sleep(0.2)
+        time.sleep(_POLL)
     raise AssertionError(f"{gate} never became pending; item={item.get('pending_gate')!r}")
 
 
@@ -98,7 +103,7 @@ def _wait_for_status(client, wid, status, timeout=30):
         body = client.get(f"/api/work-items/{wid}").json()
         if body["status"] == status:
             return body
-        time.sleep(0.15)
+        time.sleep(_POLL)
     raise AssertionError(f"status never became {status!r}; last body={body}")
 
 
@@ -118,7 +123,7 @@ def _approve_gate(client, wid, gate, timeout=30):
         r = client.post(f"/api/work-items/{wid}/gates/{gate}/approve")
         if r.status_code != 409:
             return r
-        time.sleep(0.2)
+        time.sleep(_POLL)
     raise AssertionError(f"{gate} still 409 after {timeout}s: {r.text if r else '(no attempt)'}")
 
 

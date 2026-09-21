@@ -98,6 +98,7 @@ def _argv_lines(path: Path) -> list[list[str]]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
 
+@pytest.mark.e2e("bd")
 def test_run_happy_path_completes_and_closes_bead(tmp_path, monkeypatch):
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     tracker = isolated_bd(tmp_path)
@@ -210,6 +211,7 @@ def test_done_with_concerns_advances_the_chain(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_run_verify_failure_stops_at_verify(tmp_path, monkeypatch):
     """C1 (Kraft-s7c04.8) had `implementation` run this same `on.test.run`
     gate directly after its own agent task, so this assertion moved to stop
@@ -930,6 +932,7 @@ def test_run_once_threads_local_files_from_the_launch_context(tmp_path, monkeypa
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_run_closes_an_auto_intaken_bead_in_its_own_workspace(tmp_path, monkeypatch):
     """Auto-intake adopts a bead that already lives in its repo's own `.beads`
     workspace, not the instance-wide tracker `bd_cwd` points at. Closing it in
@@ -1411,6 +1414,7 @@ def test_pausing_between_nodes_stops_the_walk_before_the_next_one_starts(tmp_pat
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, monkeypatch):
     """Kraft-tsfpk: a work item whose bead is `blocked_by` something must
     never create a worktree or start a session."""
@@ -1483,6 +1487,7 @@ def test_a_blocked_bead_pauses_the_walk_before_any_worktree_is_made(tmp_path, mo
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
     """The 'cheap refusal' the bead asks for: a resume of a still-blocked item
     costs one `bd blocked` call and re-pauses -- no worker_sessions row."""
@@ -1546,6 +1551,7 @@ def test_resuming_a_still_blocked_item_re_pauses_cheaply(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatch):
     """The motivating case plan-review finding 1 named: a manually created
     item's own tracking bead is always edge-free (fresh from `entry.intake`),
@@ -1614,6 +1620,7 @@ def test_a_blocked_sub_bead_the_item_states_pauses_the_walk(tmp_path, monkeypatc
     asyncio.run(scenario())
 
 
+@pytest.mark.e2e("bd")
 def test_a_bead_blocked_only_by_its_own_bundlemate_dispatches(tmp_path, monkeypatch):
     """A work item bundling two beads with a `blocks` edge between them (the
     Kraft-5fx.2..5fx.12 shape) must not read as blocked by a bead it is

@@ -79,7 +79,8 @@ testpaths = ["tests", "plugins/kraft-lite/tests"]
 timeout = 120
 timeout_method = "thread"
 markers = [
-    "e2e: end-to-end tests needing a real claude binary (Chunk C)",
+    "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
+    "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",
     "slow: subprocess servers, real uvicorn, multi-second sleeps -- included in the main CI test job, just kept separable for local runs",
     "real_executor: opts a test out of a suite-level executor stub; it drives the real executor and real subprocesses",
 ]

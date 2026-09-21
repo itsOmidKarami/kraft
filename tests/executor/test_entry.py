@@ -43,6 +43,7 @@ def _bd_status(repo, bead_id):
     return json.loads(out)[0]["status"]
 
 
+@pytest.mark.e2e("bd")
 def test_intake_creates_bead_and_row(tmp_path):
     tracker = isolated_bd(tmp_path)
 
@@ -117,6 +118,7 @@ def test_implements_beads_is_taken_from_the_argument(tmp_path):
     assert json.loads(row["implements_beads"]) == ["Kraft-abc12"]
 
 
+@pytest.mark.e2e("bd")
 def test_intake_bead_failure_still_writes_a_row(tmp_path):
     """Kraft-7gy: a bd failure degrades intake, it does not fail it — the row is
     written with bead_id NULL rather than raising. See tests/test_bd_workspace.py

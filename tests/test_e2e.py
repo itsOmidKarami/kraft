@@ -6,7 +6,7 @@ import pytest
 from support.harness import e2e_templates_dir, isolated_bd, make_repo
 from support.server import running_server
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.e2e("claude", "bd")
 
 
 def _poll(client, wid, want, timeout=180):
