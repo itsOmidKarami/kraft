@@ -315,6 +315,28 @@ async def database(run_dirs):
 
 
 @pytest.fixture
+def item_on(request, database, run_dirs):
+    """`await item_on(chain, node, ...)`: a V1 work item in `database`, on
+    `chain`, standing at `node` -- `support.harness.item_on` with the
+    database, run dirs and (unless `repo=` is given) the `repo` fixture
+    filled in. Returns a `support.harness.Item`:
+
+        async def test_x(item_on, run_dirs, database):
+            it = await item_on(v1_named_chain(run_dirs.base / "t"), "implementation")
+            await it.session("s1", "implementation.main.implement", "done")
+            ...
+            assert it.status() == "completed"
+            assert [e["payload"] for e in it.events("node_completed")] == [...]
+    """
+
+    async def factory(chain, node=None, *, repo=None, **kwargs):
+        repo = repo if repo is not None else request.getfixturevalue("repo")
+        return await harness.item_on(database, run_dirs, chain, node, repo=repo, **kwargs)
+
+    return factory
+
+
+@pytest.fixture
 def templates_dir(tmp_path) -> Path:
     """`KRAFT_TEMPLATES_DIR` for the `client` fixture: `fake_templates_dir` with
     every agent on `fixtures/fake-claude.sh`. A file that needs another shape
