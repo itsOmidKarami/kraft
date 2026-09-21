@@ -676,4 +676,10 @@ def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
 
 def test_the_shipped_policy_yaml_has_no_unknown_key():
     """The refusal above must not refuse the seed a fresh install copies."""
-    policy.PolicyInput.from_yaml(Path(__file__).resolve().parents[1] / "templates" / "policy.yaml")
+    parsed = policy.PolicyInput.from_yaml(
+        Path(__file__).resolve().parents[1] / "templates" / "policy.yaml"
+    )
+    # A real field off the shipped file, not just "it parsed": extra="forbid"
+    # would have raised on an unknown key, but a bare no-raise wouldn't prove
+    # the loader actually read the file's contents rather than a stub.
+    assert parsed.default.attempts == 3

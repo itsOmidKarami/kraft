@@ -27,6 +27,11 @@ just fix        # autofix
 change-tracking; a raw invocation skips it and runs the full ~14 minute suite.
 A Claude Code hook blocks it for agent sessions.
 
+See [`docs/testing.md`](docs/testing.md) for the shape a test should take: the
+two tiers, the shared fixtures, and the mutate-then-confirm-it-fails procedure
+that is the only thing that actually proves a test pins something.
+`just check-tests` enforces what of that can be checked mechanically.
+
 Requirements: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 20+, git.
 `claude` is only needed for real agent runs, not for `just dev` or the tests.
 

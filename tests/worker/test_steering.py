@@ -77,6 +77,9 @@ def test_validate_accepts_a_total_exactly_at_the_budget(tmp_path):
     body = "x" * (steering.MAX_BYTES - steering._OVERHEAD)
     d = _dir(tmp_path, {"a": body})
     steering.validate(d, ["a"], where="x")
+    # validate() returns nothing on success; read() is what proves the file
+    # `validate` just accepted is actually the one at the boundary.
+    assert steering.read(d, ["a"]) == (body,)
 
 
 def test_read_reports_a_file_deleted_after_validation_as_a_steering_error(tmp_path):

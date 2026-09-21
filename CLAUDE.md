@@ -20,6 +20,12 @@ test` (add `-k pattern` or a path to target specific tests; use
 `--no-testmon` for a full run). Calling pytest raw skips testmon's
 change-tracking and burns the full ~14min suite.
 
+**Testing guideline:** see `docs/testing.md`. Two tiers (unmarked unit,
+mocked at the adapter seam; `@pytest.mark.e2e("<cli>")` for a real CLI's
+contract) and one rule for every pin: mutate the code it covers and confirm
+that same test fails, or it isn't proof of anything. `just check-tests`
+enforces what can be checked mechanically.
+
 ## Running Kraft
 
 Two ways, and neither is `python -m kraft` by hand.

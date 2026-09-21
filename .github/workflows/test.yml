@@ -45,6 +45,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run python dev/check_docs_coverage.py
+      - run: uv run python dev/check_tests.py
 
   test:
     runs-on: ubuntu-latest

@@ -127,6 +127,12 @@ test *ARGS:
 intent:
     uv run python -m kraft.intent
 
+# Check the test suite against docs/testing.md's mechanical rules: e2e markers
+# name a CLI, no unit test reaches a real bd/claude/gh/glab, the per-file line
+# budget, every test has an expectation.
+check-tests:
+    uv run python dev/check_tests.py
+
 # Regenerate the Lite plugin's chain artifact from the YAML templates.
 lite-build:
     uv run python dev/build_lite_chain.py

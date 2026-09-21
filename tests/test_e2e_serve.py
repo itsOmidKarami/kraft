@@ -56,7 +56,14 @@ def _free_port() -> int:
 
 
 def test_a_free_port_is_accepted(serve):
-    serve.ensure_port_free(_free_port())
+    port = _free_port()
+    serve.ensure_port_free(port)
+    # If this were still held (or ensure_port_free bound it itself and left
+    # it), our own bind below would raise -- proving "accepted" means the
+    # port is actually still free, not just that nothing crashed.
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", port))
+        assert s.getsockname()[1] == port
 
 
 def test_an_occupied_port_is_refused(serve, taken_port):
@@ -82,6 +89,10 @@ def test_checking_a_port_twice_does_not_leak_the_probe_socket(serve):
     port = _free_port()
     serve.ensure_port_free(port)
     serve.ensure_port_free(port)
+    # A leaked probe from either call would make this bind fail.
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", port))
+        assert s.getsockname()[1] == port
 
 
 @pytest.fixture

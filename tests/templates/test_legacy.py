@@ -264,10 +264,22 @@ def test_shipped_registry_binds_the_describe_hook():
 
 def test_shipped_default_chain_validates():
     # `templates.validate_nodes` is what the server runs on load; a node the
-    # shipped chain names must survive it.
+    # shipped chain names must survive it. It returns error strings rather
+    # than raising -- an empty list is the only thing "survives" can mean.
+    # It also wants bare dicts, the shape `load_templates` itself feeds it
+    # (`__init__.py`'s own loader does `node.model_dump(exclude_unset=True)`
+    # before calling it) -- a `ChainNode` fails its `isinstance(n, dict)`
+    # gate even though `.get()` works, so this must convert the same way, or
+    # every node "fails" on shape before its real content is even looked at.
     reg = templates.load_registry(TEMPLATES_DIR / "registry.yaml")
-    nodes = templates.load_templates(TEMPLATES_DIR, reg).valid["default"].nodes
-    templates.validate_nodes(nodes, reg)
+    loaded = templates.load_templates(TEMPLATES_DIR, reg)
+    # load_templates runs this exact validate_nodes call itself before ever
+    # admitting a template to `.valid` -- so a broken default chain fails
+    # *here*, by name, rather than as a bare KeyError three lines down.
+    assert "default" in loaded.valid, loaded.invalid.get("default", loaded.invalid)
+    nodes = loaded.valid["default"].nodes
+    dumped = [n.model_dump(exclude_unset=True) for n in nodes]
+    assert templates.validate_nodes(dumped, reg) == []
 
 
 # ── validate_nodes: the splice-tier validator (Kraft-unk) ──────────────────
