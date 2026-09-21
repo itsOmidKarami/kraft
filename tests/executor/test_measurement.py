@@ -75,13 +75,15 @@ async def _measure(it, **kwargs):
         # task that reported nothing Kraft understands.
         ("infra", "failed", ["a"]),
         ("unknown", "failed", ["a"]),
-        ("capped_out", "failed", ["a"]),
         ("no-such-status", "failed", ["a"]),
+        # An external wait that ran out (`external-wait-timeout-needs-human`):
+        # a stop naming the task, never a failure for a fix loop.
+        ("capped_out", "capped_out", ["a"]),
         # Not a failure: the later steps must not run against a base the first
         # step just moved, and nothing reaches `failed` to open a fix loop.
         (BASE_MOVED, BASE_MOVED, []),
     ],
-    ids=["failed", "infra", "unknown", "capped_out", "no-such-status", "base-moved"],
+    ids=["failed", "infra", "unknown", "no-such-status", "capped_out", "base-moved"],
 )
 async def test_a_step_that_does_not_pass_stops_the_node(
     item_on, fake_dispatch, status_of_a, verdict, failed

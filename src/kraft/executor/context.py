@@ -21,12 +21,18 @@ RATE_LIMITED = "rate_limited"
 #: a missing binary.
 CONFIG_ERROR = "config_error"
 
-#: The node is waiting on something outside Kraft — today, a pipeline that has
-#: not settled. Returned by `adapters/forge`'s `ci_poll` instead of sleeping the
-#: whole `poll_timeout` in-process (Kraft-ru98). Ranked with `RATE_LIMITED`: a
-#: pipeline that has not finished is not evidence about the code either. Below
+#: The node is waiting on something outside Kraft: a forge task's external
+#: wait observed its condition still pending (`kraft.waits`), instead of
+#: sleeping in-process (Kraft-ru98). Ranked with `RATE_LIMITED`: a condition
+#: that has not settled is not evidence about the code either. Below
 #: `"paused"`, which is always a human's own instruction.
 WAITING = "waiting"
+
+#: An external wait reached its timeout still pending
+#: (`external-wait-timeout-needs-human`). The session status a loop cap
+#: already uses for "this ran out" -- not `failed`, because nothing about the
+#: code failed, so no recovery or fix cycle may spend on it.
+WAIT_TIMED_OUT = "capped_out"
 
 #: Statuses that let the chain advance. `done_with_concerns` is deliberately
 #: here: the agent finished the work — its doubts are information for the human
@@ -83,6 +89,7 @@ SCOPE: dict[str, str] = {
     RATE_LIMITED: "stop",
     CONFIG_ERROR: "stop",
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
+    WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

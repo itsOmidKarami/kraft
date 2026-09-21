@@ -627,6 +627,17 @@ async def _repo_checks() -> list[dict]:
                     ' (use "" if this repo deliberately needs no preparation)',
                 )
             )
+        unrecognised = config.unrecognised_repo_keys(repo)
+        if unrecognised:
+            # Loaded, with a warning nobody may be reading: a key that binds
+            # nothing is exactly what a typo looks like (Kraft-4hn34).
+            checks.append(
+                _check(
+                    f"keys {repo.get('name') or repo['path']}",
+                    False,
+                    f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
+                )
+            )
         if auto:
             checks.append(_forge_check(repo))
     return checks or [_check("repos", True, "none connected")]

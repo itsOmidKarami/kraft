@@ -7,7 +7,7 @@ see the sibling modules for the actual routes:
 - `routes/*` -- one module per resource, each decorating `api_router` below
 
 Nothing outside this package imports anything from here except `app` --
-`kraft.intake`, `kraft.ci_wait`, and `kraft.rate_limit_retry` import
+`kraft.intake`, `kraft.waits`, and `kraft.rate_limit_retry` import
 `kraft.api.deps` directly instead (see that module's docstring).
 """
 

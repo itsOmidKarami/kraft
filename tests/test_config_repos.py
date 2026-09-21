@@ -347,3 +347,46 @@ def test_a_broken_config_file_raises_rather_than_reading_as_empty(tmp_path):
     with pytest.raises(config.ConfigError):
         config.load_repos(bad)
     assert config.load_repos(tmp_path / "missing.yaml") == []
+
+
+# --- unrecognised keys (Kraft-4hn34) --------------------------------------------
+
+
+def _entry(tmp_path, **extra):
+    path = tmp_path / "repos.yaml"
+    path.write_text(yaml.safe_dump({"repos": [{"path": "/r", "setup_command": "", **extra}]}))
+    return path
+
+
+def test_an_unrecognised_key_loads_with_a_warning_naming_it_and_the_repo(tmp_path, caplog):
+    """Refusing every unknown key would break installs carrying retired ones,
+    but none may pass silently: an operator reading the log learns it binds
+    nothing."""
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        (entry,) = config.load_repos(_entry(tmp_path, legacy_widget=1), validate_steering=False)
+
+    assert entry["path"] == "/r"
+    assert any("legacy_widget" in r.message and "/r" in r.message for r in caplog.records)
+
+
+def test_the_keys_kraft_itself_writes_are_not_unrecognised(tmp_path, caplog):
+    """`name`, `enabled` and `default_chain_template` are written on connect
+    and read elsewhere; they are no operator's typo."""
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        config.load_repos(
+            _entry(tmp_path, name="r", enabled=True, default_chain_template="default"),
+            validate_steering=False,
+        )
+
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "typo, meant",
+    [("automated_reviews", "automated_review"), ("setup_comand", "setup_command")],
+)
+def test_a_key_one_typo_from_a_field_is_refused_naming_the_field(tmp_path, typo, meant):
+    """`automated_reviews:` would otherwise read as "no reviewer configured" --
+    the one outcome Ruling 171 records as a deliberate choice."""
+    with pytest.raises(config.ConfigError, match=f"did you mean '{meant}'"):
+        config.load_repos(_entry(tmp_path, **{typo: {}}), validate_steering=False)

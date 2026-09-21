@@ -63,8 +63,7 @@ dynamically.
 ## `policy.yaml` — caps, budget, archiving
 
 ```yaml
-loops:
-  ci_wait:           { attempts: 60, wall_clock_s: 1800 }
+loops: {}
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 max_concurrent: 3
@@ -106,20 +105,20 @@ maxima:
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`verification.fix_loop`), not by a flat name, and a `max_attempts` on the loop itself wins over this key's `attempts`. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names only `ci_wait`, which is real. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`verification.fix_loop`), not by a flat name, and a `max_attempts` on the loop itself wins over this key's `attempts`. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names none. An external wait (a pipeline, an automated review, an approval, a merge landing) is not a loop: its timeout and polling are its task's own `wait:`, bounded by `maxima.wait_timeout_minutes`. |
 | `max_concurrent` | How many work items may be `active` at once, across every repo, however they were started (`resume`, `retry`, or auto-intake). Moved here from `intake.yaml` — that file's copy is now a legacy fallback `load_policy` reads only when this key is absent. |
 | `auto_escalate_stuck` | Whether a `needs_human` stop for a reason *other than* a pending gate (e.g. a stuck fix loop) auto-dispatches an escalation turn. Independent of a node's own `auto_escalate` (gate review) — different mechanism, different trigger. Defaults on. |
 | `auto_escalate_stuck_cap` | Attempts one `needs_human` run may be auto-escalated by `auto_escalate_stuck` before leaving it for a human — the stuck-escalation equivalent of a fix loop's `attempts`. |
 | `auto_escalate_delay_s` | Seconds to wait after the triggering event before `auto_escalate` or `auto_escalate_stuck` fires, so a human already about to look isn't preempted by the agent. `0` (the default) fires immediately. |
 | `auto_review_attempts` | How many automated-review attempts one pending gate may spend before it is left to a human. An attempt is counted whether the reviewer returned a verdict or was refused before it launched, so every non-terminating outcome suppresses the next poll. `1` (the default) is the one-attempt-per-gate behaviour this replaced a hardcoded boolean with. |
-| `forge_cli_timeout_s` | Seconds one forge CLI call (`gh`, `glab`, `git`) may run before it is killed and reported as a forge error. Bounds a single call, not a pipeline wait (that is `loops.ci_wait`). Default `120`. Read at startup. |
+| `forge_cli_timeout_s` | Seconds one forge CLI call (`gh`, `glab`, `git`) may run before it is killed and reported as a forge error. Bounds a single call, not a wait (that is the task's own `wait:`). Default `120`. Read at startup. |
 | `findings.loop_severities` | Which review-finding severities burn a fix cycle. Anything below that bar is recorded and shown at the human-review gate instead of silently discarded. |
 | `budget.work_item_usd` / `budget.daily_usd` | Spend caps in dollars, both off by default (`null`). A cap refuses to *start* the next agent task — it cannot interrupt one already running, since cost is only known when a session exits, so overshoot is bounded by one task's cost. |
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
 | `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain or execution node may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. |
-| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools` — and `wait_timeout_minutes`, the longest any external wait's `wait: timeout` may be (a longer one is refused when the item is filed; a wait with no timeout of its own gets 90 minutes or this, whichever is shorter). A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
 
 **How V1 policy resolves and what it does.** A work item's policy is frozen
 when it is filed, layered broadest first: `defaults`/`maxima` here, the
@@ -199,6 +198,8 @@ repos:
     sandbox: null
     policy:
       allowed_tools: [Read, Edit, Bash]
+    automated_review:
+      bot: coderabbitai     # or `check: <name>` -- exactly one of the two
 ```
 
 | Field | Default | Means |
@@ -221,6 +222,9 @@ repos:
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent hook on this repo, layered under the registry's own defaults. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `token_budget`, `allowed_harnesses`, `timeout_minutes`, `max_attempts`, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
+| `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for, named exactly one way. `bot: <login>` settles when that forge login has reviewed the merge request's current head: on GitHub, changes requested or any inline comment is actionable (one finding per comment) and anything else is clean; on GitLab, the bot's unresolved discussions are actionable and its approval is clean. `check: <name>` settles when that check run or commit status on the head completes: success is clean, failure is actionable with its output as the finding. Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for a person rather than spending a repair. A dismissed GitHub review doesn't count. Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet. On GitLab an approval isn't tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push. |
+
+No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed. The exceptions are `name`, `enabled` and `default_chain_template`, which Kraft writes itself.
 
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any connected repo still

@@ -101,11 +101,12 @@ async def test_the_back_half_walks_to_merge_only_on_a_green_pipeline(
     assert all("worktrees" in str(cwd) for cwd in fake.cwds), fake.cwds
 
 
-async def test_the_executor_forwards_the_task_s_poll_keys(walk, item_on, monkeypatch):
-    """`ci_poll` no longer reads `poll_timeout` itself -- a pending pipeline is
-    a single check that hands the wait back to the scheduler (Kraft-ru98) --
-    but the task's `wait:` still has to reach `run_task` at all. Read off the
-    adapter call rather than inferred from the status."""
+async def test_the_executor_hands_the_task_s_resolved_wait_to_the_forge(walk, item_on, monkeypatch):
+    """A task's `wait:` reaches `run_task` resolved (`ForgeTask.wait_bounds`):
+    the authored timeout and initial interval, and the default maximum it
+    left unsaid. Read off the adapter call rather than inferred."""
+    from kraft.templates.models import WaitBounds
+
     fake = forge.FakeForge(ci_states=["pending", "success"])
     seen: list[dict] = []
     real = forge.run_task
@@ -121,7 +122,9 @@ async def test_the_executor_forwards_the_task_s_poll_keys(walk, item_on, monkeyp
 
     assert fake.opened and fake.merged == [], "a pipeline still pending must not reach merge"
     ci = next(kw for kw in seen if kw["handler"] == "ci_poll")
-    assert (ci["poll_timeout"], ci["poll_interval"]) == (300.0, 30.0)
+    assert ci["wait"] == WaitBounds.from_seconds(timeout=300, initial=30, maximum=300)
+    opened = next(kw for kw in seen if kw["handler"] == "open_mr")
+    assert opened["wait"] is None, "opening a draft is not a wait"
 
 
 async def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(

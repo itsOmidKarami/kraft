@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import session_wall_ms
+from kraft.store._common import session_wall_ms, wait_timed_out_sessions
 
 
 def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
@@ -25,11 +25,12 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     the row carries the same two stamps `session_exited` would have used.
     """
     rows = conn.execute(
-        "SELECT node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status, "
+        "SELECT id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status, "
         "started_at, created_at, exited_at "
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
     ).fetchall()
+    timed_out = wait_timed_out_sessions(conn, [work_item_id])
     by_node: dict[str, dict] = {}
     rounds: dict[str, set[int]] = {}
     for r in rows:
@@ -44,6 +45,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "sessions": 0,
                 "rounds": 0,
                 "capped_out": 0,
+                "wait_timed_out": 0,
                 "cost_complete": True,
             },
         )
@@ -59,7 +61,10 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         # (Kraft-s7c04.18, .47). The stamps are on the row either way.
         node["wall_ms"] += session_wall_ms(r) or 0
         node["sessions"] += 1
-        node["capped_out"] += 1 if r["status"] == "capped_out" else 0
+        # A wait that ran out is not a loop that ran out (Kraft-uwbc8).
+        waited_out = r["id"] in timed_out
+        node["wait_timed_out"] += 1 if waited_out else 0
+        node["capped_out"] += 1 if r["status"] == "capped_out" and not waited_out else 0
         rounds.setdefault(r["node_id"], set()).add(r["round"] or 0)
     for node_id, seen in rounds.items():
         by_node[node_id]["rounds"] = len(seen)
@@ -67,7 +72,15 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     nodes = list(by_node.values())
     total = {
         k: sum(n[k] for n in nodes)
-        for k in ("tokens_in", "tokens_out", "cost_usd", "wall_ms", "sessions", "capped_out")
+        for k in (
+            "tokens_in",
+            "tokens_out",
+            "cost_usd",
+            "wall_ms",
+            "sessions",
+            "capped_out",
+            "wait_timed_out",
+        )
     }
     # An item's rounds is the deepest a single node had to loop, not the sum:
     # summing would read as "this item retried nine times" for nine clean nodes.

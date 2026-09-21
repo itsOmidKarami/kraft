@@ -119,6 +119,21 @@ def test_doctor_reports_a_connected_repo_with_no_setup_command(app, tmp_path):
     assert "setup_command" in row["detail"]
 
 
+def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path):
+    """Kraft-4hn34: a key that binds nothing is a failing check, naming it."""
+    repo = make_repo(tmp_path, name="stale")
+    asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["repos"][0]["legacy_widget"] = 1
+    path.write_text(yaml.safe_dump(data))
+
+    row = next(r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("keys "))
+
+    assert not row["ok"]
+    assert "legacy_widget" in row["detail"]
+
+
 def _bind_auto_forge(tmp_path):
     """Put a `backend: auto` forge hook in the registry the server loaded.
 

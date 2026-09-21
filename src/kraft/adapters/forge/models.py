@@ -14,12 +14,34 @@ if TYPE_CHECKING:
     # already makes every annotation below lazy, so this is type-checking
     # only.
     from kraft.adapters.forge.mr import MRMeta
+    from kraft.automated_review import AutomatedReview
 
 CIState = Literal["pending", "success", "failed"]
 
 
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
+
+
+ApprovalState = Literal["pending", "approved"]
+
+
+@dataclass(frozen=True)
+class ReviewResult:
+    """One read of the automated review, in the only vocabulary a template
+    sees (`automated-review-task-uses-ordinary-task-results`). Which bot,
+    which check, which webhook produced it is the backend's business
+    (`automated-review-implementation-is-not-template-configuration`)."""
+
+    state: Literal["pending", "clean", "actionable", "error"]
+    #: One entry per piece of actionable feedback; what the node's recovery
+    #: and fix loop are handed as findings.
+    findings: tuple[str, ...] = ()
+    #: What the reviewer said, for the log a human reads.
+    detail: str = ""
+    #: False when the repository names no reviewer: settled clean because no
+    #: review is expected, which is recorded as such rather than as a pass.
+    configured: bool = True
 
 
 @dataclass(frozen=True)
@@ -110,6 +132,10 @@ class Forge(Protocol):
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
+    async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+    ) -> ReviewResult: ...
 
 
 @dataclass
@@ -118,7 +144,11 @@ class FakeForge:
 
     `ci_states` is consumed one call at a time so a test can script
     pending-then-green without sleeping or polling; the last state repeats
-    forever, so a test that only cares about the end state passes one.
+    forever, so a test that only cares about the end state passes one. Every
+    other wait's script -- `review_results`, `approval_states`,
+    `branch_ci_states` -- works the same way, and `merge_delay` holds a
+    requested merge open for that many reads: so every external wait can be
+    walked pending-then-settled.
     """
 
     ci_states: list[CIState] = field(default_factory=lambda: ["success"])
@@ -182,6 +212,24 @@ class FakeForge:
     #: Body each `open_mr` call was given, alongside `bodies` (which only
     #: `update_mr`/`sync_mr` write to).
     opened_bodies: dict[int, str] = field(default_factory=dict)
+    #: `automated_review`'s answers, consumed like `ci_states`. A bare state
+    #: string is shorthand for a `ReviewResult` with nothing else to say.
+    review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
+    #: `approval_state`'s answers, consumed like `ci_states`.
+    approval_states: list[ApprovalState] = field(default_factory=lambda: ["approved"])
+    #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
+    #: shares `ci_states` with the merge request's pipeline.
+    branch_ci_states: list[CIState] | None = None
+    #: How many `find_mr` reads after `merge` still find the merge request
+    #: open -- a forge that merges when its checks pass rather than at once.
+    merge_delay: int = 0
+    #: Merges requested but not landed yet: number -> reads left.
+    _landing: dict[int, int] = field(default_factory=dict)
+
+    @staticmethod
+    def _next(script: list):
+        """The script's next answer; its last repeats forever."""
+        return script.pop(0) if len(script) > 1 else script[0]
 
     async def open_mr(
         self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
@@ -240,12 +288,34 @@ class FakeForge:
         (Kraft-tsfpk). `head_sha` is accepted only so the fake's signature
         matches the real backends' -- the fake's own sha guard is exercised
         through `ci_shas` regardless of which method a test calls."""
-        return await self.ci_status(
+        status = await self.ci_status(
             repo=repo,
             mr=MR(number=0, url="http://fake.forge/branch"),
             branch=branch,
             pipeline_id=pipeline_id,
         )
+        if self.branch_ci_states is None:
+            return status
+        state = self._next(self.branch_ci_states)
+        return CIStatus(
+            state=state,
+            url=status.url,
+            jobs=(f"fake-job: {state}",),
+            sha=status.sha,
+            failed_jobs=status.failed_jobs,
+            pipeline_ref=status.pipeline_ref,
+        )
+
+    async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState:
+        return self._next(self.approval_states)
+
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None = None
+    ) -> ReviewResult:
+        # The script answers whether or not a reviewer is configured: a dev
+        # instance and a test both script the review they want to walk.
+        result = self._next(self.review_results)
+        return ReviewResult(result) if isinstance(result, str) else result
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         self.retried.append(ci.url)
@@ -266,7 +336,10 @@ class FakeForge:
             number = max(candidates, default=0)
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
-        self.merged.append(number)
+        if self.merge_delay:
+            self._landing[number] = self.merge_delay
+        else:
+            self.merged.append(number)
 
     def _matches(self, number: int, repo: Path) -> bool:
         """A number opened before `_opened_repo` existed (an older test's
@@ -276,6 +349,12 @@ class FakeForge:
         return recorded is None or recorded == str(repo)
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
+        for number, reads_left in list(self._landing.items()):
+            if reads_left:
+                self._landing[number] -= 1
+            else:
+                del self._landing[number]
+                self.merged.append(number)
         numbers = [n for n, b in self.opened.items() if b == branch and self._matches(n, repo)]
         if not numbers:
             return None

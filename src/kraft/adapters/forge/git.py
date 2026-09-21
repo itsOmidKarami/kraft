@@ -14,7 +14,7 @@ from kraft.worker import sandbox
 
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
-#: in `poll_ci` reaches into that thread.
+#: outside that thread reaches into it.
 CLI_TIMEOUT_S = 120.0
 
 

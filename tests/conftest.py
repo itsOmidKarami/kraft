@@ -472,3 +472,35 @@ async def stub_app(database, run_dirs):
     yield make
     for app in apps:
         await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+
+
+@pytest.fixture
+def wait_clock(monkeypatch):
+    """The clock an external wait reads (`kraft.waits._now`), frozen at
+    `wait_clock.start` until a test moves it -- so a wait's backoff and
+    timeout are asserted to the second instead of raced against:
+
+        async def test_x(wait_clock, ...):
+            ...                                  # a wait observes at t=0
+            wait_clock.advance(30)               # 30s later
+            assert row["retry_at"] == wait_clock.at(60)
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from kraft import waits
+
+    class Clock:
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        def __init__(self):
+            self.now = self.start
+
+        def at(self, seconds: float) -> str:
+            return (self.start + timedelta(seconds=seconds)).isoformat()
+
+        def advance(self, seconds: float) -> None:
+            self.now += timedelta(seconds=seconds)
+
+    clock = Clock()
+    monkeypatch.setattr(waits, "_now", lambda: clock.now.isoformat())
+    return clock

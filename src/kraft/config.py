@@ -34,6 +34,7 @@ from pydantic import (
     model_validator,
 )
 
+from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride
 from kraft.store.repos import RootMergePolicy
 from kraft.worker import sandbox as _sandbox
@@ -188,6 +189,9 @@ class RepoEntry(BaseModel):
     #: (Ruling 105) and are folded into it by `repository_override`; V1's
     #: `Repository` has only this block.
     policy: TemplatePolicyOverride | None = None
+    #: The automated reviewer `mr.automated_review` waits for (Ruling 171);
+    #: the same type as V1's `Repository.automated_review`.
+    automated_review: AutomatedReview | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -246,6 +250,24 @@ class RepoEntry(BaseModel):
         return v
 
     @model_validator(mode="after")
+    def _no_unrecognised_key_passes_silently(self) -> RepoEntry:
+        """`extra="allow"` keeps keys Kraft writes but does not type, and a
+        retired key an older install still carries. None may pass silently
+        (Kraft-4hn34): a key one typo away from a real field is refused,
+        naming the field -- `automated_reviews:` would otherwise read as "no
+        reviewer configured" -- and any other is a warning naming it."""
+        for key in unrecognised_repo_keys(self.model_extra or {}):
+            meant = _near_miss(key)
+            if meant is not None:
+                raise ValueError(
+                    f"repos.yaml: {self.path}: unknown key {key!r}: did you mean {meant!r}?"
+                )
+            logger.warning(
+                "repos.yaml: %s: unrecognised key %r binds nothing; remove it", self.path, key
+            )
+        return self
+
+    @model_validator(mode="after")
     def _steering_exists(self, info: ValidationInfo) -> RepoEntry:
         # The context carries `steering_dir` only when the caller wants steering
         # checked (`load_repos(validate_steering=True)`).
@@ -256,6 +278,38 @@ class RepoEntry(BaseModel):
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self
+
+
+#: Keys a `repos.yaml` entry carries that `RepoEntry` does not type but Kraft
+#: itself writes on connect and reads elsewhere (`api/routes/repos.py`,
+#: `intake.py`, `cli/repo.py`). Every other untyped key is unrecognised.
+_UNTYPED_KEYS = frozenset({"name", "enabled", "default_chain_template"})
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance; the stdlib has only similarity ratios."""
+    row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, cb in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (ca != cb))
+    return row[-1]
+
+
+def unrecognised_repo_keys(entry: dict) -> list[str]:
+    """The keys of one `repos.yaml` entry that nothing in Kraft reads
+    (Kraft-4hn34). The loader warns about each one and `kraft admin doctor`
+    fails on them; one definition serves both."""
+    known = set(RepoEntry.model_fields) | _UNTYPED_KEYS
+    return sorted(k for k in entry if k not in known)
+
+
+def _near_miss(key: str) -> str | None:
+    """The field `key` is most likely a typo of: within edit distance 2."""
+    distance, field = min(
+        (_edit_distance(key, f), f) for f in (*RepoEntry.model_fields, *_UNTYPED_KEYS)
+    )
+    return field if distance <= 2 else None
 
 
 def repository_override(entry: dict) -> TemplatePolicyOverride | None:

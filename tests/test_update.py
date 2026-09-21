@@ -447,7 +447,6 @@ def test_a_major_update_keeps_the_policy_values_v1_still_has(legacy_home, capsys
     assert policy["max_concurrent"] == 7
     assert policy["findings"] == {"loop_severities": ["critical"]}
     assert policy["default"] == {"attempts": 4, "wall_clock_s": 1800}
-    assert policy["loops"]["ci_wait"] == {"attempts": 90, "wall_clock_s": 2700}
     PolicyInput.from_yaml(legacy_home / "policy.yaml")
 
 
@@ -463,7 +462,9 @@ def test_a_major_update_reports_each_policy_key_it_drops(legacy_home, capsys):
     # A key V1 has, with a value it refuses: dropped too, the seed's kept.
     assert "archive = {'after_days': -1}" in output
     assert policy["archive"] == {"after_days": 30}
-    assert "loops.ci_wait" not in output
+    # Task 9 retired `loops.ci_wait`: a wait's timeout is its task's own now.
+    assert "ci_wait" not in policy["loops"]
+    assert "loops.ci_wait" in output and "'attempts': 90" in output
 
 
 @pytest.mark.parametrize("next_step", ["start", "update"])

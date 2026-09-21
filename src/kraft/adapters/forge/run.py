@@ -9,19 +9,21 @@ import re
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import events, store
+from kraft import events, store, waits
 from kraft.adapters import beads
 from kraft.adapters.forge import ci, git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.ci import (
-    DEFAULT_POLL_INTERVAL,
-    DEFAULT_POLL_TIMEOUT,
-    MERGE_VERIFY_INTERVAL,
-    MERGE_VERIFY_TIMEOUT,
-)
 from kraft.adapters.forge.gh import GhCli
 from kraft.adapters.forge.glab import GlabCli
-from kraft.adapters.forge.models import MR, FailedJob, FakeForge, Forge, ForgeError
+from kraft.adapters.forge.models import (
+    MR,
+    FailedJob,
+    FakeForge,
+    Forge,
+    ForgeError,
+)
+from kraft.automated_review import AutomatedReview
+from kraft.templates.models import DEFAULT_WAIT, WaitBounds
 
 logger = logging.getLogger(__name__)
 
@@ -34,34 +36,43 @@ _EMPTY_META = mr_ops.MRMeta()
 #: author writes (`target: mr.open_draft`) is the schema's; which code path it
 #: reaches is this adapter's, so the mapping lives here rather than in the
 #: executor -- `dispatch` hands over the typed target and nothing else.
-#:
-#: Two actions have no handler yet: `mr.automated_review` and
-#: `mr.external_approval`, external waits the shared due scheduler owns
-#: (Task 9). An unmapped target falls through to `_run_one`'s last arm, which
-#: **stops the item for a human** rather than failing the node -- see there for
-#: why.
 V1_HANDLERS: dict[str, str] = {
     "mr.open_draft": "open_mr",
     "mr.sync": "sync_mr",
     "mr.ci": "ci_poll",
+    "mr.automated_review": "automated_review",
     "mr.mark_ready": "mark_ready",
+    "mr.external_approval": "external_approval",
     "mr.merge": "merge",
     "mr.post_merge_ci": "merge_watch",
 }
 
+#: The handlers that are external waits (`ForgeAction.waits`): each makes one
+#: observation per dispatch, recorded by `kraft.waits.observe`, and never
+#: sleeps in-process. Handler -> (its target, the condition it observes).
+_WAITS: dict[str, tuple[str, str]] = {
+    "ci_poll": ("mr.ci", "ci"),
+    "automated_review": ("mr.automated_review", "automated_review"),
+    "external_approval": ("mr.external_approval", "external_approval"),
+    "merge": ("mr.merge", "merge"),
+    "merge_watch": ("mr.post_merge_ci", "post_merge_ci"),
+}
 
-#: Who implements each target that `V1_HANDLERS` does not map yet, named in the
-#: stop reason so the human reading it knows this is Kraft's gap and not theirs.
-_UNIMPLEMENTED_TARGETS = {
-    "mr.automated_review": "Task 9 implements it as an external wait",
-    "mr.external_approval": "Task 9 implements it as an external wait",
+#: `_run_one`'s statuses for a pending observation, each naming what is still
+#: awaited (`None`: the handler's own condition). Internal only, like
+#: "rebased": `run_task` records the condition and reports plain `waiting`.
+_PENDING: dict[str, str | None] = {
+    "waiting": None,
+    "ci_pending": "ci",
+    "approval_pending": "external_approval",
+    "merge_pending": "merge",
 }
 
 
 def handler_for(target: str) -> str:
     """The handler name for a V1 `ForgeAction` value, or the target itself when
-    nothing maps it -- `_run_one` then reports it as unknown by the name the
-    chain actually wrote."""
+    nothing maps it -- `_run_one` then stops on it by the name the chain
+    actually wrote."""
     return V1_HANDLERS.get(target, target)
 
 
@@ -167,12 +178,9 @@ async def _run_one(
     node_id: str,
     handler: str,
     hook_point: str,
-    poll_timeout: float,
-    poll_interval: float,
-    merge_timeout: float,
-    merge_interval: float,
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
+    automated_review: AutomatedReview | None = None,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -262,10 +270,9 @@ async def _run_one(
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
             # One check, not a wait. A pipeline that has not settled hands the
-            # wait back to the scheduler as a row state (Kraft-ru98); the
-            # coroutine that used to sit here for up to poll_timeout held an
-            # intake slot and could not be cancelled. `merge`'s own gate still
-            # calls `wait_for_ci` -- that one is Kraft-7jja.
+            # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
+            # coroutine that sat here held an intake slot and could not be
+            # cancelled.
             head_sha = await git._head_sha(repo)
             # Pin to the pipeline the last poll of this same head already
             # saw, instead of re-resolving "latest on branch" every re-entry
@@ -367,6 +374,73 @@ async def _run_one(
                     }
                     for j in ci_status.failed_jobs
                 ]
+        case "automated_review":
+            # One read. Which reviewer, which webhook or check, is the
+            # backend's (`automated-review-implementation-is-not-template-
+            # configuration`); what comes back is only pending, clean,
+            # actionable or error (`automated-review-task-uses-ordinary-task-
+            # results`).
+            review = await forge.automated_review(
+                repo=repo, branch=branch, reviewer=automated_review
+            )
+            if not review.configured:
+                # The repository names no reviewer, so none is expected: the
+                # wait settles, and the record says why rather than reading as
+                # a clean review (Ruling 171).
+                await db.write(
+                    lambda c: events.append(
+                        c,
+                        work_item_id,
+                        "automated_review_not_configured",
+                        {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
+                    )
+                )
+            log = f"automated review {review.state}" + (
+                f": {review.detail}\n" if review.detail else "\n"
+            )
+            log += "".join(f"  {f}\n" for f in review.findings)
+            if review.state == "pending":
+                status = "waiting"
+            elif review.state == "clean":
+                status = "done"
+            elif review.state == "actionable":
+                # Actionable feedback is a failed task *with findings*, which is
+                # what enters the node's recovery and fix loop
+                # (`post-draft-feedback-uses-node-recovery-controls`).
+                status = "failed"
+                findings = [
+                    {
+                        "severity": "important",
+                        "message": f,
+                        "source_plugin": "mr.automated_review",
+                    }
+                    for f in review.findings
+                ]
+            else:
+                # The reviewer itself errored. That says nothing about the
+                # code, so it must not spend a repair or a fix cycle (Ruling
+                # 170, Kraft-sm2r2, 7a's "only a genuine repair outcome spends
+                # an attempt"): the same stop as a pipeline broken by the
+                # forge's own infrastructure, under its own named cause.
+                reason = f"the automated reviewer errored on {hook_point}: " + (
+                    review.detail or "no detail given"
+                )
+                await db.write(
+                    lambda c, r=reason: events.append(
+                        c,
+                        work_item_id,
+                        "automated_review_errored",
+                        {"node_id": node_id, "reason": r},
+                    )
+                )
+                status = "infra_stop"
+        case "external_approval":
+            # A missing approval is an ordinary pending state, never a failure
+            # (`missing-external-approval-is-normal-pending-state`).
+            if await forge.approval_state(repo=repo, branch=branch) == "pending":
+                log, status = "waiting for the merge request's required approval\n", "waiting"
+            else:
+                log, status = "the merge request is approved\n", "done"
         case "sync_mr":
             # An MR merged outside Kraft -- a human merging by hand and
             # skipping `human_review` -- usually has its source branch
@@ -431,39 +505,54 @@ async def _run_one(
             # node with the work already on main (Kraft-xron). Auto-merge
             # reaching the branch first is an ordinary event, and this
             # node's stated end state is already true.
+            #
+            # Every wait in here is one observation handed back to the
+            # scheduler, never a sleep (Kraft-7jja): the pipeline a late push
+            # re-armed, a missing approval, and the merge landing.
             existing = await forge.find_mr(repo=repo, branch=branch)
+            # Whether this wait already asked for the merge: its last
+            # observation was of the merge landing.
+            wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+            requested = (
+                wait is not None and wait.last is not None and (wait.last["condition"] == "merge")
+            )
             if existing is not None and existing.state == "merged":
                 log = f"already merged (!{existing.number}); nothing to do\n"
                 status = "done"
-            elif existing is not None and existing.state == "open":
+            elif (existing is None or existing.state != "open") and requested:
+                gone = existing.state if existing else "gone"
+                log = f"the merge request is {gone}, not merged; nothing landed\n"
+                status = "failed"
+            elif existing is None or existing.state != "open":
+                raise ForgeError(
+                    f"no open merge request for {branch!r}"
+                    + (f": !{existing.number} is {existing.state}" if existing else "")
+                )
+            elif requested:
+                # This wait already asked for the merge; it is only reading
+                # whether it has landed. Asking again would merge twice on a
+                # forge that queues merges.
+                log = f"!{existing.number} is still open; waiting for the merge to land\n"
+                status = "merge_pending"
+            else:
                 # The same push ci_poll makes, for the same reason: a
                 # commit made after the last sync is local only, and
                 # `_assert_pushed` inside forge.merge refuses a head origin
-                # has never seen — three failed nodes, and a retry of
-                # `merge` alone never re-runs mr_sync to clear it
-                # (Kraft-bxj8). Below the already-merged check: a branch
-                # already in main needs nothing pushed to it.
+                # has never seen (Kraft-bxj8).
                 await forge.push(repo=repo, branch=branch)
-                # `mr_sync`'s push, right after the human_review gate that
-                # ran after mr_checks last validated CI, can land a commit
-                # -- verify's fixes, mr_checks' own findings -- on a head
-                # mr_checks never watched. On a project that requires a
-                # green pipeline before merge, that push re-arms the
-                # requirement for a pipeline nothing here has seen finish
-                # (Kraft-266b). Wait it out the same way ci_poll does, with
-                # the same budget, before handing forge.merge() a head
-                # nothing has validated (Kraft-x10m).
-                ci_log, gate_status = await ci.wait_for_ci(
-                    forge, repo=repo, branch=branch, timeout=poll_timeout, interval=poll_interval
+                # A push after the last CI read -- the review brief, anything a
+                # human committed while reviewing -- re-arms a required
+                # pipeline for a head nothing has seen finish (Kraft-266b,
+                # Kraft-x10m). Read it before handing forge.merge() that head.
+                head_sha = await git._head_sha(repo)
+                ci_status = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+                log, gate_status = await ci.render_ci(
+                    ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
                 )
                 rebased = False
-                unresolved_conflict = gate_status == "conflict"
                 if gate_status == "conflict":
-                    # mr_sync's push, or a rebase since mr_checks last
-                    # looked, can turn up a conflict only merge ever sees
-                    # -- give it the same rebase-and-bounce mr_checks
-                    # already has (draft-MR workflow spec) rather than
-                    # failing a conflict a rebase might dissolve.
+                    # A conflict only merge ever sees gets the same rebase
+                    # mr_checks has (draft-MR workflow spec).
                     rebase_log, gate_status = await _rebase_conflict_away(
                         db,
                         forge,
@@ -472,111 +561,70 @@ async def _run_one(
                         branch=branch,
                         work_item_id=work_item_id,
                     )
-                    ci_log += rebase_log
+                    log += rebase_log
                     rebased = gate_status == "done"
-                    unresolved_conflict = not rebased
                     if rebased and not has_rebase_bounce:
-                        # No `rebase_bounce_to` on *this* node's own
-                        # chain_definition -- an installed
-                        # templates/default.yaml seeded before the field
-                        # existed, or a chain_definition frozen before this
-                        # node grew it. Nothing will bounce the walk back to
-                        # verify to re-run tests over the rebased diff, so
-                        # the "done, not merged" shortcut below would leave
-                        # the branch unmerged while `post_merge_watch` and
-                        # `mark_completed`/`close_beads` still run as if it
-                        # had landed (code-review). Re-check CI on the
-                        # rebased head instead -- the one guarantee this
-                        # node can still make on its own -- and fall through
-                        # to the ordinary gate below to merge only if it's
-                        # actually green.
-                        recheck_log, gate_status = await ci.wait_for_ci(
-                            forge,
-                            repo=repo,
-                            branch=branch,
-                            timeout=poll_timeout,
-                            interval=poll_interval,
+                        # Nothing will re-verify the rebased head, so this
+                        # node reads its pipeline again itself and merges only
+                        # if it is green (code-review).
+                        head_sha = await git._head_sha(repo)
+                        ci_status = await forge.ci_status(
+                            repo=repo, mr=MR(number=0, url=""), branch=branch
                         )
-                        ci_log += recheck_log
+                        recheck_log, gate_status = await ci.render_ci(
+                            ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
+                        )
+                        log += recheck_log
                         rebased = False
-                        unresolved_conflict = gate_status == "conflict"
                 if rebased:
                     # Rebased the conflict away, not merged: this node's
-                    # `rebase_bounce_to: verify` (templates/default.yaml)
-                    # is what acts on the moved base_ref next, re-running
-                    # tests over the rebased diff before anything is ever
-                    # merged -- the same guarantee a rebase at mr_checks
-                    # already gets. "rebased", not "done" -- `run_task`'s
-                    # multi-repo loop must not count this target as merged
-                    # (code-review); it normalizes back to "done" itself
-                    # once it knows no later target got skipped over a
-                    # rebase that only looked like a landing.
-                    log, status = ci_log, "rebased"
-                elif unresolved_conflict:
-                    # Thread the real status through rather than collapsing
-                    # to a bare "failed" (draft-MR workflow spec): a real
-                    # conflict a rebase couldn't dissolve either, same
-                    # status `ci_poll` already reports for the identical
-                    # case -- both read the same by `dispatch`'s failure
-                    # handling, but "conflict" names the actual problem.
-                    log, status = ci_log, "conflict"
+                    # `on_base_changed` restart re-verifies the rebased head
+                    # before anything is merged. "rebased", not "done" --
+                    # `run_task`'s multi-repo loop must not count this target
+                    # as merged (code-review); it normalizes it itself.
+                    status = "rebased"
+                elif gate_status == "waiting":
+                    status = "ci_pending"
+                elif gate_status == "conflict":
+                    status = "conflict"
                 elif gate_status != "done":
-                    log, status = ci_log, "failed"
+                    status = "failed"
+                elif ci_status.block_reason == "not_approved":
+                    # An approval rule the pipeline cannot see: an ordinary
+                    # pending state, here as at `external_approval`
+                    # (`missing-external-approval-is-normal-pending-state`).
+                    log += (
+                        "waiting for the merge request's required approval: "
+                        f"{ci_status.merge_detail}\n"
+                    )
+                    status = "approval_pending"
                 else:
-                    # An approval rule the pipeline can't see for itself:
-                    # `mergeable` reads this as undecided (mr_checks must
-                    # not fail on it pre-gate, since it's an ordinary state
-                    # before human_review even runs), so it survives
-                    # unnoticed all the way here. One more read, now that
-                    # CI is confirmed green and conflict-free, catches it
-                    # before forge.merge() does, with a message a human
-                    # reads at a glance instead of the CLI's own refusal
-                    # text (draft-MR workflow spec).
-                    fresh = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-                    if fresh.block_reason == "not_approved":
-                        log = (
-                            "merge request needs approval before it can land: "
-                            f"{fresh.merge_detail}\n"
-                        )
-                        status = "failed"
-                        return log, status, findings
-                    # A genuine refusal -- unmet approval rules this read
-                    # didn't catch, or anything else -- still raises inside
-                    # forge.merge and still fails the node.
+                    # A genuine refusal still raises inside forge.merge and
+                    # fails the node.
                     await forge.merge(repo=repo, branch=branch, mr=MR(number=0, url=""))
                     # And a refusal the CLI reported as success does not get
-                    # through either. This node's stated end state is "this
-                    # branch is in main", so it is read off the forge rather
-                    # than inferred from an exit code (Kraft-79x3).
-                    landed = await ci.poll_merged(
-                        forge,
-                        repo=repo,
-                        branch=branch,
-                        timeout=merge_timeout,
-                        interval=merge_interval,
-                    )
+                    # through either: `glab mr merge` exits 0 for "merge when
+                    # checks pass" and merges nothing (Kraft-79x3). The landing
+                    # is read off the forge, now and at every later
+                    # observation.
+                    landed = await forge.find_mr(repo=repo, branch=branch)
                     state = landed.state if landed is not None else "gone"
                     if state == "merged":
-                        log, status = f"merged !{landed.number}\n", "done"
+                        log += f"merged !{landed.number}\n"
+                        status = "done"
                     elif state == "open":
-                        log = (
-                            f"!{landed.number} is still open {merge_timeout:g}s after the "
-                            "merge command returned: nothing has landed on main. The forge "
-                            "may have scheduled an auto-merge for when its checks pass — "
-                            f"look at {landed.url}\n"
+                        log += (
+                            f"!{landed.number} is still open after the merge command returned; "
+                            "the forge may merge it when its checks pass -- waiting for it "
+                            "to land\n"
                         )
-                        status = "failed"
+                        status = "merge_pending"
                     else:
-                        log = f"the merge request is {state}, not merged; nothing landed\n"
+                        log += f"the merge request is {state}, not merged; nothing landed\n"
                         status = "failed"
-            else:
-                raise ForgeError(
-                    f"no open merge request for {branch!r}"
-                    + (f": !{existing.number} is {existing.state}" if existing else "")
-                )
         case "merge_watch":
             # Local imports, same as `ci_poll`'s own "infra" branch a few
-            # cases up -- both counters this case bumps need them.
+            # cases up -- the infra counter below needs them.
             from kraft import policy as _policy
             from kraft.store import _now as _now
 
@@ -634,7 +682,7 @@ async def _run_one(
                     # Same counter, same key format, as `ci_poll`'s own
                     # `ci_infra:<node_id>` (plan-review finding 3, first half):
                     # `retry_infra_once` only starts the job again, it does not
-                    # settle it, so an unbounded number of *separate* `ci_wait`
+                    # settle it, so an unbounded number of *separate* scheduler
                     # re-entries could each see "infra" again and kick
                     # `retry_jobs` again forever against a persistently broken
                     # runner. `node_id` already namespaces this from `mr_checks`'
@@ -677,47 +725,6 @@ async def _run_one(
                         # resolve one either (judge finding, rounds 0/2/3).
                         branch_only=True,
                     )
-                if status == "waiting":
-                    # A separate, tighter budget for a pipeline that never
-                    # settles at all (plan-review finding 3, second half):
-                    # `ci_wait.py`'s poller applies one shared cap
-                    # (`policy.yaml`'s `ci_wait`, 1800s/60 attempts) to *every*
-                    # node parked in "waiting", with no notion of which handler
-                    # is behind it. Left alone, a target-branch pipeline slower
-                    # than that would turn into `needs_human` after this item's
-                    # own work is already merged, and -- since `post_merge_watch`
-                    # is now this chain's terminal node -- its tracking bead
-                    # would never close either. `_POST_MERGE_WAIT_CAP`/
-                    # `_POST_MERGE_WAIT_WALL_CLOCK_S` are plain module constants
-                    # in `ci.py`, not a policy.yaml key, same as the infra cap
-                    # above -- `_run_one` has no `policy` object to resolve one
-                    # from -- and deliberately smaller than `ci_wait`'s shared
-                    # default so this always resolves first.
-                    count, started_at, cap = await db.write(
-                        lambda c: store.bump_counter(
-                            c,
-                            work_item_id,
-                            f"post_merge_wait:{node_id}",
-                            _policy.Cap(
-                                attempts=ci._POST_MERGE_WAIT_CAP,
-                                wall_clock_s=ci._POST_MERGE_WAIT_WALL_CLOCK_S,
-                            ),
-                        )
-                    )
-                    if (
-                        _policy.check(count=count, started_at=started_at, cap=cap, now=_now())
-                        == "breached"
-                    ):
-                        # Not a human page: the merge already succeeded and
-                        # nothing here is this item's own defect. A pipeline
-                        # that never finishes reporting anything is a fact about
-                        # the target branch's CI, not about this item -- log it
-                        # and let the chain complete rather than block on it.
-                        log += (
-                            f"gave up watching {default}'s pipeline after "
-                            f"{count - 1} re-entry(ies): it never settled\n"
-                        )
-                        status = "done"
                 if status in ("infra", "failed", "conflict"):
                     # Settled red after at most one infra kick: nothing here is
                     # this item's own code to fix loop over (Kraft-43kw). File
@@ -783,21 +790,15 @@ async def _run_one(
                     log += f"filed {follow_up or '(no bead filed)'}, paused {len(broken)} item(s)\n"
                     status = "done"
         case _:
-            # A declared-but-unimplemented action is a *configuration limit*,
-            # not a bug in this run: the seeded V1 chain names all three of the
-            # unmapped targets (see `V1_HANDLERS`), so `failed` told an operator
-            # their pipeline had broken when in fact Kraft had not built that
-            # step yet -- and burned the node's fix loop finding out. Same
-            # posture as `unavailable-selected-harness-needs-human`: name the
-            # target, name the task that implements it, and stop for a person
-            # (Ruling 48). `config_error` is terminal at every tier
-            # (`executor.context.SCOPE`), so `walk_node` turns it straight into
+            # A target with no handler is a configuration limit, not a bug in
+            # this run: name it and stop for a person (Ruling 48). Every V1
+            # `ForgeAction` maps to one (`V1_HANDLERS`), so only a name that
+            # never passed the schema reaches this. `config_error` is terminal
+            # at every tier, so `walk_node` turns it straight into
             # `needs_human` with this reason instead of a retry.
-            owner = _UNIMPLEMENTED_TARGETS.get(handler, "a later task")
             log = (
-                f"forge target {handler!r} is declared by this chain but Kraft does not "
-                f"implement it yet ({owner}). Nothing is wrong with the merge request; "
-                f"this node cannot run until that lands.\n"
+                f"forge target {handler!r} has no handler in Kraft. Nothing is wrong with "
+                "the merge request; this node cannot run.\n"
             )
             status = "config_error"
     return log, status, findings
@@ -873,13 +874,12 @@ async def run_task(
     branch: str,
     title: str,
     round: int = 0,
-    poll_timeout: float = DEFAULT_POLL_TIMEOUT,
-    poll_interval: float = DEFAULT_POLL_INTERVAL,
-    #: The merge node's read-back, not the pipeline poll: separate names
-    #: because they answer different questions and are tuned differently.
-    #: Keyword arguments only so tests can run them at zero; no registry key.
-    merge_timeout: float = MERGE_VERIFY_TIMEOUT,
-    merge_interval: float = MERGE_VERIFY_INTERVAL,
+    #: A wait handler's resolved bounds (`ForgeTask.wait_bounds`). None -- a
+    #: caller with no task, a test -- runs under `DEFAULT_WAIT`.
+    wait: WaitBounds | None = None,
+    #: The repository's `automated_review:` (Ruling 171); None names no
+    #: reviewer. Read only by `mr.automated_review`.
+    automated_review: AutomatedReview | None = None,
     head_sha: str | None = None,
     #: Whether this node's own `chain_definition` entry carries
     #: `rebase_bounce_to` -- see `_run_one`'s docstring. Defaults to False,
@@ -894,11 +894,15 @@ async def run_task(
 
     Records a session the way a builtin does rather than the way the subprocess
     adapter does: the work happens in this process, so there is no child to
-    supervise and no log fd to hand over. The row still has to exist for the
-    whole run, not just at the end -- `ci_poll` can sit in `poll_ci` for up to
-    `poll_timeout` (30 minutes by default), and pause/abandon/reattach all key
-    off `worker_sessions`. Recording nothing until the node finished silently
-    broke all three for the length of that wait (Kraft-41b, Kraft-7xt).
+    supervise and no log fd to hand over. The row exists from the start, not
+    just at the end: pause/abandon/reattach all key off `worker_sessions`, and
+    recording nothing until a node finished broke all three (Kraft-41b,
+    Kraft-7xt).
+
+    A wait handler (`_WAITS`) makes one observation and records it
+    (`kraft.waits.observe`): a pending one reports `waiting` and reuses its
+    session on the next dispatch, one past its deadline reports `capped_out`
+    -- a stop for a person, never a code failure.
     """
     actual_session_id, log_path, result_path = await _builtins.start_session(
         db,
@@ -912,7 +916,7 @@ async def run_task(
         # A pipeline still pending is the same wait episode, not a new
         # attempt (Kraft-ivh1) -- every other handler keeps minting a fresh
         # row every dispatch.
-        reuse_if_waiting=(handler in ("ci_poll", "merge_watch")),
+        reuse_if_waiting=handler in _WAITS,
     )
     reused = actual_session_id != session_id
     session_id = actual_session_id
@@ -973,6 +977,8 @@ async def run_task(
             reused=reused,
         )
     log, status = "", "done"
+    #: Why the observation could not be made at all, when it could not.
+    unobserved: str | None = None
     # Findings only ever reach `finish_session` for a single-target run: a
     # submodule's own CI is not this item's `mr_checks` node, and findings
     # from it would double-count against the wrong job (Kraft-cbr §3).
@@ -996,12 +1002,9 @@ async def run_task(
                 node_id=node_id,
                 handler=handler,
                 hook_point=hook_point,
-                poll_timeout=poll_timeout,
-                poll_interval=poll_interval,
-                merge_timeout=merge_timeout,
-                merge_interval=merge_interval,
                 meta=meta,
                 has_rebase_bounce=has_rebase_bounce,
+                automated_review=automated_review,
             )
             if not multi:
                 findings = one_findings
@@ -1018,7 +1021,7 @@ async def run_task(
                     "merge": (
                         "merged"
                         if one_status == "done"
-                        else ("failed" if one_status != "rebased" else None)
+                        else ("failed" if one_status not in ("rebased", *_PENDING) else None)
                     ),
                 }.get(handler)
                 if new_state:
@@ -1086,7 +1089,21 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        unobserved = str(exc)
 
+    if handler in _WAITS:
+        status, log = await _observed(
+            db,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            task=hook_point,
+            handler=handler,
+            bounds=wait or DEFAULT_WAIT,
+            status=status,
+            log=log,
+            unobserved=unobserved,
+            session_id=session_id,
+        )
     return await _builtins.finish_session(
         db,
         log_path,
@@ -1097,3 +1114,56 @@ async def run_task(
         findings=findings,
         reused=reused,
     )
+
+
+async def _observed(
+    db,
+    *,
+    work_item_id: str,
+    node_id: str,
+    task: str,
+    handler: str,
+    bounds: WaitBounds,
+    status: str,
+    log: str,
+    unobserved: str | None,
+    session_id: str,
+) -> tuple[str, str]:
+    """Record one wait observation; return the session's status and log.
+
+    A pending status becomes plain `waiting`, and one past the deadline
+    `capped_out`: the wait ran out, which is neither done nor a failure
+    (`external-wait-timeout-needs-human`). An observation that could not be
+    made at all (`unobserved`, the forge's error) ends the wait as an `error`
+    and keeps its status -- a failure stays a failure."""
+    kind, own = _WAITS[handler]
+    if unobserved is not None:
+        state, condition, result = "error", own, unobserved
+    elif status in _PENDING:
+        state, condition, result = "pending", _PENDING[status] or own, "pending"
+    else:
+        # Settled on whatever it was waiting for -- the last pending
+        # observation's condition, or the handler's own on a first look.
+        wait = db.read(lambda c: waits.open_wait(c, work_item_id, task))
+        condition = wait.last["condition"] if wait is not None and wait.last else own
+        state, result = "settled", status
+    outcome = await db.write(
+        lambda c: waits.observe(
+            c,
+            work_item_id,
+            node_id=node_id,
+            task=task,
+            kind=kind,
+            bounds=bounds,
+            condition=condition,
+            state=state,
+            result=result,
+            session_id=session_id,
+        )
+    )
+    if outcome == "timed_out":
+        return "capped_out", log + (
+            f"timed out: still waiting for {condition} at the wait's deadline; "
+            "nothing about the code failed\n"
+        )
+    return ("waiting" if state == "pending" else status), log

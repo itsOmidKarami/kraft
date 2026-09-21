@@ -143,7 +143,9 @@ stops the chain the moment it finishes; the work item's status becomes
 
 Every retry loop is bounded. `policy.yaml`'s `loops:` map names each loop's
 `attempts` and `wall_clock_s` ceiling — `verify_fix_loop`, `ci_fix_loop`,
-`ci_wait`, `rebase_bounce`, `rebase_conflict`. A top-level `default:` key,
+`rebase_bounce`, `rebase_conflict`. An external wait — CI, an automated review,
+an approval, a merge landing — is bounded by its task's own `wait: timeout`
+instead, and running out stops for a person. A top-level `default:` key,
 sibling to `loops:` rather than inside it, covers any `fix_loop` name not
 listed there. Hitting either bound stops the chain and escalates to a person
 with the full trace, rather than looping forever on a defect the agent can't

@@ -3,7 +3,7 @@
 Renamed public at this split (Kraft api.py -> kraft/api package): `guard`,
 `bd_cwd`, `spawn`, `launch`, `repos_path` used to be `_guard`, `_bd_cwd`,
 `_spawn`, `_launch`, `_repos_path` on `kraft.api` — `kraft.intake`,
-`kraft.ci_wait`, and `kraft.rate_limit_retry` import them lazily by name, so a
+`kraft.waits`, and `kraft.rate_limit_retry` import them lazily by name, so a
 star re-export (which skips underscore names) would otherwise have stranded
 them.
 """
@@ -39,7 +39,7 @@ CANCEL_TIMEOUT = 5.0
 
 class AlreadyRunning(RuntimeError):
     """A live executor task already holds this key. Not `HTTPException`:
-    three of `spawn`'s callers are pollers, not routes, and making `ci_wait`
+    three of `spawn`'s callers are pollers, not routes, and making `waits`
     import FastAPI to catch its own race is backwards. Routes translate this
     into a 409; pollers catch it and log-and-skip, because a poller finding
     an item already running is a normal race, not a poller crash."""

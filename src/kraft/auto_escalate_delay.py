@@ -10,7 +10,7 @@ module existed. This poller is the backstop for a delay greater than 0: the
 item that inline call left alone because the delay hadn't elapsed yet has
 nothing else watching it once that call returns, so something has to
 re-check it once the delay passes. Same fixed-interval shape as
-`rate_limit_retry.poller`/`ci_wait.poller`.
+`rate_limit_retry.poller`/`waits.poller`.
 
 Always on, like those two: a delay is a per-node config an operator opts
 into, but once they have, nothing except this poller ever revisits an item
@@ -28,7 +28,7 @@ from kraft.executor import gates
 
 logger = logging.getLogger(__name__)
 
-#: Same fixed cadence `rate_limit_retry`/`ci_wait` use -- no per-operator
+#: Same fixed cadence `rate_limit_retry`/`waits` use -- no per-operator
 #: tuning knob for this either.
 _INTERVAL_S = 30
 

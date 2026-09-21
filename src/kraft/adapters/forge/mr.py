@@ -9,7 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from kraft.adapters.forge.models import ForgeError, MRRef
+from kraft.adapters.forge.models import (
+    MR,
+    ApprovalState,
+    ForgeError,
+    MRRef,
+    ReviewResult,
+)
+from kraft.automated_review import AutomatedReview
 from kraft.index.ingest import split_front_matter
 from kraft.worker.worktree_read import read_worktree_file
 
@@ -294,3 +301,37 @@ def parse_json(raw: str, what: str):
         return json.loads(raw)
     except ValueError as exc:
         raise ForgeError(f"{what} did not return JSON: {raw[:200]!r}") from exc
+
+
+class CliWaits:
+    """The two external-wait reads `gh` and `glab` answer the same way. A
+    mixin rather than a function because `FakeForge` answers both from a
+    script instead, and every backend is asked through the one `Forge`
+    method."""
+
+    async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState:
+        """Pending while an approval rule is unmet. Both CLIs already name
+        that `block_reason == "not_approved"` (`classify_block_reason`), so
+        this reads that one answer rather than parsing the fields again."""
+        ci = await self.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
+        return "pending" if ci.block_reason == "not_approved" else "approved"
+
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+    ) -> ReviewResult:
+        """The repository's named reviewer, read off the merge request's
+        current head (Ruling 171). No reviewer named: nothing is asked, and
+        the review settles clean as not configured."""
+        if reviewer is None:
+            return ReviewResult(
+                "clean", detail="no automated reviewer configured", configured=False
+            )
+        if reviewer.bot is not None:
+            return await self._bot_review(repo, reviewer.bot)
+        return await self._check_review(repo, reviewer.check)
+
+
+def same_login(a: str, b: str) -> bool:
+    """A forge login, as a repository names it and as the forge reports it:
+    GitHub reports an app as `name[bot]`, and case never matters."""
+    return a.lower().removesuffix("[bot]") == b.lower().removesuffix("[bot]")

@@ -52,7 +52,7 @@ async def tick(app) -> list[str]:
     st = app.state
     due = st.db.read(
         lambda c: c.execute(
-            # `materialized_chain` too, for `store.node_index` -- see ci_wait.py.
+            # `materialized_chain` too, for `store.node_index` -- see waits.py.
             "SELECT id, repo, current_node_id, chain_definition, materialized_chain "
             "FROM work_items "
             "WHERE status = 'rate_limited' AND retry_at <= ?",
@@ -116,7 +116,7 @@ async def _retry_one(app, row) -> bool:
             return False
 
         await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
-        # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
+        # Same as `waits`': over `store.node_index` so a V1 row's `"{}"`
         # `chain_definition` cannot raise, and a node that is not in this item's
         # chain stops rather than silently relaunching it at node zero.
         if store.node_index(row, node_id) is None:

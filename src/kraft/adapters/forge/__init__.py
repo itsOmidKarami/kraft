@@ -12,12 +12,6 @@ is real work with no consumer until something runs without a CLI available
 from __future__ import annotations
 
 from kraft.adapters.forge.ci import *  # noqa: F403
-
-# Not part of any submodule's public surface, but read directly off this
-# package by callers outside it (`executor/stops.py`'s own backoff cap must
-# track `ci.py`'s) -- a plain `import *` does not carry an underscored name,
-# so it is re-exported by hand to keep that access working unchanged.
-from kraft.adapters.forge.ci import _MAX_POLL_INTERVAL  # noqa: F401
 from kraft.adapters.forge.gh import *  # noqa: F403
 from kraft.adapters.forge.git import *  # noqa: F403
 from kraft.adapters.forge.glab import *  # noqa: F403
