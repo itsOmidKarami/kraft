@@ -14,7 +14,7 @@ from support.harness import isolated_bd
 from kraft import builtins as _builtins
 from kraft.adapters import beads, forge
 
-from .conftest import back_half
+from .nodes import back_half
 
 
 class _NoMrForge(forge.FakeForge):

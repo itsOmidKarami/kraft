@@ -10,7 +10,7 @@ import pytest
 
 from kraft.adapters import forge
 
-from .conftest import FAIL
+from .nodes import FAIL
 from .outputs import (
     GLAB_CI_SUCCESS,
     GLAB_MR_LIST_MERGED,

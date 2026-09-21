@@ -15,7 +15,7 @@ from kraft import builtins as _builtins
 from kraft import events, executor, policy, store
 from kraft.adapters import forge
 
-from .conftest import back_half, forge_node
+from .nodes import back_half, forge_node
 
 #: A repo that needs no preparation, on a forge. A V1 forge task always runs on
 #: `backend: auto`, which reads the forge off the repo entry.

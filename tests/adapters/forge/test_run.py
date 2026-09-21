@@ -13,7 +13,7 @@ import pytest
 from kraft.adapters import forge
 
 from . import outputs
-from .conftest import back_half
+from .nodes import back_half
 
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
 
