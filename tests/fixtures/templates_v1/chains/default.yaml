@@ -29,9 +29,19 @@ nodes:
   - id: implementation
     extends: implementation
 
+  - id: verification
+    extends: verification
+
+  - id: work_brief
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_work_brief
+
   - id: local_review
     kind: gate
     message: Approve creating a draft merge request.
+    artifact: work_brief
     reject_to: implementation
 
   - id: draft_merge_request
@@ -42,6 +52,8 @@ nodes:
 
   - id: merge_request_feedback
     extends: post_draft_feedback
+    on_base_changed:
+      restart_from: verification
 
   - id: work_item_summary
     kind: exec

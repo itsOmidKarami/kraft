@@ -193,12 +193,37 @@ tasks:
     scope: each_repository
     execution: sequential
 
+  code_review:
+    kind: agent
+    harness: claude_review
+    prompt: Review this work item's change for defects its passing tests do not catch.
+    skill: kraft:code-review
+    inputs: [review_package]
+
+  repair_verification:
+    kind: agent
+    harness: codex_default
+    model: gpt-5.6-terra
+    effort: high
+    prompt: Fix the failing tests and the review findings this node's verification reported.
+
   repair_mr_feedback:
     kind: agent
     harness: codex_default
     model: gpt-5.6-terra
     effort: high
     prompt: Resolve the current CI failures and actionable merge-request feedback.
+
+  repair_mr_checks:
+    kind: agent
+    harness: codex_default
+    model: gpt-5.6-terra
+    effort: high
+    prompt: >-
+      Repair what fails the merge request's checks from outside the code, such
+      as a missing or wrong label. A code failure is the fix loop's, which runs
+      after you.
+    skill: kraft:mr-checks-repair
 
   strict_judge:
     kind: agent
@@ -237,6 +262,13 @@ tasks:
       polling:
         initial_interval: 30s
         max_interval: 5m
+
+  write_work_brief:
+    kind: agent
+    harness: claude_review
+    prompt: Write the work brief a human reads before approving the draft merge request.
+    produces: work_brief
+    skill: kraft:work-brief
 
   write_summary:
     kind: agent
@@ -278,19 +310,25 @@ tasks:
 nodes:
   implementation:
     kind: exec
+    tasks:
+      - id: implement
+        extends: implementer
+
+  verification:
+    kind: exec
     steps:
-      - id: implementation
-        tasks:
-          - id: implement
-            extends: implementer
-      - id: verification
+      - id: tests
         tasks:
           - id: test_changed_scopes
             extends: verify_changed_scopes
+      - id: review
+        tasks:
+          - id: code_review
+            extends: code_review
     fix_loop:
       tasks:
         - id: repair
-          extends: repair_mr_feedback
+          extends: repair_verification
       judge:
         id: judge
         extends: strict_judge
@@ -312,8 +350,7 @@ nodes:
         - id: repair
           tasks:
             - id: repair_feedback
-              extends: repair_mr_feedback
-              skill: kraft:mr-checks-repair
+              extends: repair_mr_checks
         - id: sync
           tasks:
             - id: sync_mr
@@ -376,9 +413,19 @@ nodes:
   - id: implementation
     extends: implementation
 
+  - id: verification
+    extends: verification
+
+  - id: work_brief
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_work_brief
+
   - id: local_review
     kind: gate
     message: Approve creating a draft merge request.
+    artifact: work_brief
     reject_to: implementation
 
   - id: draft_merge_request
@@ -389,6 +436,8 @@ nodes:
 
   - id: merge_request_feedback
     extends: post_draft_feedback
+    on_base_changed:
+      restart_from: verification
 
   - id: work_item_summary
     kind: exec
@@ -428,6 +477,17 @@ nodes:
         extends: await_post_merge_ci
 ```
 
+`implementation` runs the implementing agent once and has no fix loop.
+`verification` runs the changed test scopes and then, in a later step, the
+in-loop code review -- so the review runs only on green tests, because a step
+group stops at its first failure. Its fix loop repairs either and re-measures
+the node from its first step, so a failure re-runs the tests and the review,
+never the implementer. `work_brief` writes the document `local_review` shows:
+what was asked, what changed, what was verified and reviewed, what is
+unresolved, and that approving opens the draft merge request and starts CI.
+`merge_request_feedback` declares `on_base_changed.restart_from:
+verification`, so a rebase there re-tests and re-reviews the rebased head.
+
 The optional `local_review` gate is omitted by chains that should create a
 draft immediately after local verification. This example also includes an
 automated-review task; a repository without an expected automated reviewer
@@ -442,11 +502,12 @@ library node, but never a task, step, or chain. Resolved identifiers preserve
 the authored local names but use complete canonical execution paths for
 addressing:
 
-- `implementation.verification.test_changed_scopes`
+- `verification.tests.test_changed_scopes`
+- `verification.review.code_review`
 - `spec.main.author`
 - `merge_request_feedback.on_failure.repair.repair_feedback`
 - `merge_request_feedback.fix_loop.repair.repair`
-- `implementation.fix_loop.main.repair`
+- `verification.fix_loop.main.repair`
 - `merge_request_feedback.fix_loop.judge`
 
 This makes every ordinary, recovery, and fix-loop step or task unambiguous in

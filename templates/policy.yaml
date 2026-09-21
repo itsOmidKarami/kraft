@@ -17,18 +17,21 @@ loops:
   #   verify_fix_loop, ci_fix_loop   a fix loop's cap key is now
   #                                  `walk._loop_key(node)` -- the node's own
   #                                  canonical path, e.g.
-  #                                  `implementation.fix_loop` -- so a flat
+  #                                  `verification.fix_loop` -- so a flat
   #                                  name binds nothing.
   #   rebase_bounce, rebase_conflict dead outright: Task 4a deleted
   #                                  `walk.bounce` and
   #                                  `walk.resolve_rebase_conflict`.
   #
-  # The per-node fix-loop caps are deliberately NOT written back yet: Task 7b
-  # splits `implementation` into `implementation` + `verification` and moves
-  # the fix loop onto the latter, which changes the key from
-  # `implementation.fix_loop` to `verification.fix_loop`. Writing it now
-  # guarantees rework and risks a dead cap nobody notices, so 7b owns it.
-  # Until then every fix loop falls back to `default:` below.
+  # The default chain's two fix loops need no key here either.
+  # `verification.fix_loop` (legacy `verify_fix_loop`, which was
+  # attempts: 3, wall_clock_s: 3600) takes its attempts from its own
+  # `max_attempts: 2` in library.yaml, which wins over this file, and its wall
+  # clock from `default:` below, which is legacy's 3600.
+  # `merge_request_feedback.fix_loop` is the same, with `max_attempts: 3`.
+  # Name one of those keys only to change its wall clock; its attempts stay
+  # the chain's. `merge_request_feedback.on_base_changed` counts the restarts
+  # a rebase there triggers, and `default:` bounds it at three.
 default:             { attempts: 3, wall_clock_s: 3600 }
 
 # Which finding severities burn a fix cycle. Minor findings are recorded and
