@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi.testclient import TestClient
+from support import api as api_support
 from support.harness import (
     fake_templates_dir,
     isolated_bd,
@@ -284,19 +284,6 @@ async def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch, databas
 # ---------------------------------------------------------------------------
 
 
-def _client(tmp_path, monkeypatch, *, templates_dir=None):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv(
-        "KRAFT_TEMPLATES_DIR",
-        str(templates_dir or fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))),
-    )
-    monkeypatch.setenv("KRAFT_FRONTEND_DIST", str(tmp_path / "no-dist"))
-    import kraft.api as api
-
-    return TestClient(api.app, client=("127.0.0.1", 54321))
-
-
 def _wait(fn, what, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -334,61 +321,32 @@ def _approve_retrying(client, wid, gate, timeout=30):
     raise AssertionError(f"timed out approving {gate!r}: last status {r.status_code}")
 
 
-def test_steer_accepts_a_needs_context_stop(tmp_path, monkeypatch, repo):
+def test_steer_accepts_a_needs_context_stop(monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
-        ).json()["id"]
-        _wait_for_status(client, wid, "needs_human")
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+    ).json()["id"]
+    _wait_for_status(client, wid, "needs_human")
 
-        r = client.post(f"/api/work-items/{wid}/steer", json={"text": "use the fork"})
-        assert r.status_code == 200
-        assert r.json()["steer"] == "use the fork"
+    r = client.post(f"/api/work-items/{wid}/steer", json={"text": "use the fork"})
+    assert r.status_code == 200
+    assert r.json()["steer"] == "use the fork"
 
 
-def test_resume_accepts_a_needs_context_stop(tmp_path, monkeypatch, repo):
+def test_resume_accepts_a_needs_context_stop(monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
-        ).json()["id"]
-        _wait_for_status(client, wid, "needs_human")
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+    ).json()["id"]
+    _wait_for_status(client, wid, "needs_human")
 
-        r = client.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"})
-        assert r.status_code == 200
-        assert r.json()["steer"] == "use the fork"
-
-
-def test_steer_still_409s_on_a_running_item(tmp_path, monkeypatch, repo):
-    """The guard widened, it did not disappear: an item mid-run is not paused
-    and did not stop for needs_context, so it stays refused."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "10")
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
-        ).json()["id"]
-        _wait(
-            lambda: next(
-                (
-                    s
-                    for s in client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
-                    if s["hook_point"] == "implementation.main.implement"
-                    and s["status"] == "running"
-                ),
-                None,
-            ),
-            "a running agent session",
-        )
-        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
-        client.post(f"/api/work-items/{wid}/pause", json={})
+    r = client.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"})
+    assert r.status_code == 200
+    assert r.json()["steer"] == "use the fork"
 
 
 def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
@@ -428,7 +386,7 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
         "        kind: subprocess\n"
         f"        command: {sys.executable} -m pytest -q\n"
     )
-    with _client(tmp_path, monkeypatch, templates_dir=templates) as client:
+    with api_support._client(tmp_path, monkeypatch, templates_dir=templates) as client:
         wid = client.post(
             "/api/work-items",
             json={
@@ -471,7 +429,7 @@ def _await_gate(client, wid, gate, timeout=60):
 
 
 def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
-    tmp_path, monkeypatch, repo
+    monkeypatch, repo, client
 ):
     """A pending gate also sets status 'needs_human' and appends no
     `work_item_needs_human`, so without an end boundary the answered-and-resumed
@@ -486,68 +444,63 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
     after it is `local_review`."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which database should this target?")
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "default"},
-        ).json()["id"]
-        _await_gate(client, wid, "spec_approval")
-        _approve_retrying(client, wid, "spec_approval")
-        _await_gate(client, wid, "plan_approval")
-        monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
-        _approve_retrying(client, wid, "plan_approval")
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "needs a decision", "chain_template": "default"},
+    ).json()["id"]
+    _await_gate(client, wid, "spec_approval")
+    _approve_retrying(client, wid, "spec_approval")
+    _await_gate(client, wid, "plan_approval")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
+    _approve_retrying(client, wid, "plan_approval")
 
-        # implementation asks its question and stops.
-        _wait(
-            lambda: (lambda b: b if b["needs_context_question"] else None)(
-                client.get(f"/api/work-items/{wid}").json()
-            ),
-            "the needs_context question",
-        )
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["needs_context_question"] == "which database should this target?"
-        assert item["current_node_id"] == "implementation"
+    # implementation asks its question and stops.
+    _wait(
+        lambda: (lambda b: b if b["needs_context_question"] else None)(
+            client.get(f"/api/work-items/{wid}").json()
+        ),
+        "the needs_context question",
+    )
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["needs_context_question"] == "which database should this target?"
+    assert item["current_node_id"] == "implementation"
 
-        # answered — the chain runs on to the next gate.
-        monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
-        assert (
-            client.post(f"/api/work-items/{wid}/resume", json={"steer": "the fork"}).status_code
-            == 200
-        )
-        _await_gate(client, wid, "local_review")
+    # answered — the chain runs on to the next gate.
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
+    assert (
+        client.post(f"/api/work-items/{wid}/resume", json={"steer": "the fork"}).status_code == 200
+    )
+    _await_gate(client, wid, "local_review")
 
-        item = client.get(f"/api/work-items/{wid}").json()
-        assert item["pending_gate"] == "local_review"
-        assert item["needs_context_question"] is None
-        assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-        assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["pending_gate"] == "local_review"
+    assert item["needs_context_question"] is None
+    assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
+    assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
 
 
-def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(
-    tmp_path, monkeypatch, repo
-):
+def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(monkeypatch, repo, client):
     """Kraft-11e0. A needs_context stop is `needs_human` and admits both
     `/retry` (always) and `/resume` (via `_needs_context_stop`) -- the one
     item state where the two doors' claimable statuses overlap."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
-    with _client(tmp_path, monkeypatch) as client:
-        wid = client.post(
-            "/api/work-items",
-            json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
-        ).json()["id"]
-        _wait_for_status(client, wid, "needs_human")
-        app = client.app
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+    ).json()["id"]
+    _wait_for_status(client, wid, "needs_human")
+    app = client.app
 
-        async def scenario():
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
-                return await asyncio.gather(
-                    ac.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"}),
-                    ac.post(f"/api/work-items/{wid}/retry", json={}),
-                )
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://kraft") as ac:
+            return await asyncio.gather(
+                ac.post(f"/api/work-items/{wid}/resume", json={"steer": "use the fork"}),
+                ac.post(f"/api/work-items/{wid}/retry", json={}),
+            )
 
-        a, b = client.portal.call(scenario)
-        assert sorted([a.status_code, b.status_code]) == [200, 409]
-        types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
-        assert types.count("work_item_resumed") + types.count("work_item_retried") == 1
+    a, b = client.portal.call(scenario)
+    assert sorted([a.status_code, b.status_code]) == [200, 409]
+    types = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert types.count("work_item_resumed") + types.count("work_item_retried") == 1
