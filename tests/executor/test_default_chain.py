@@ -135,8 +135,10 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
 
     Both sides of `walk.RESTART_REOPENS_APPROVED_GATES`, the one decision point
     for a gate inside the restart span: an approved `local_review` is passed
-    through (the default), or reopened."""
-    monkeypatch.setattr(walk, "RESTART_REOPENS_APPROVED_GATES", reopens)
+    through (the shipped default, so that case leaves the flag alone), or
+    reopened."""
+    if reopens:
+        monkeypatch.setattr(walk, "RESTART_REOPENS_APPROVED_GATES", True)
     it = await item_on(default_chain, "merge_request_feedback")
     await _approved(it, "local_review")
     script.effects = {"await_ci": _moves_base_once(it)}
