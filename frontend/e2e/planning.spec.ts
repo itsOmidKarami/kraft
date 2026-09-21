@@ -1,8 +1,8 @@
 import { createItem, expect, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
-// The planning hooks: on.spec.requested and on.plan.requested write and commit
-// a document (fixtures/fake-claude.sh honours the `artifact:` contract), and
+// The planning tasks: spec.main.author and plan.main.author write and commit a
+// document (fixtures/fake-claude.sh honours the `produces:` contract), and
 // the SPA offers it at the gate. Covers create -> spec_approval -> "Review
 // spec" -> Documents tab -> reject -> send back -> approve -> plan_approval ->
 // "Review plan" -> Documents tab. UI v2 · 06/07 replaced the old
