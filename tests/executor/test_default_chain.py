@@ -33,7 +33,6 @@ def _walk(it, chain, node: str):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         start_index=[n.id for n in chain.nodes].index(node),
         policy=POLICY,
         launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),

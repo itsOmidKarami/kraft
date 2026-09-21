@@ -172,7 +172,10 @@ def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(
         ["verification.review.code_review"],
     ]
     review = verification.steps[1].tasks[0].task
-    assert (review.skill, review.inputs) == ("kraft:code-review", [AgentInput.REVIEW_PACKAGE])
+    assert (review.skill, review.inputs) == (
+        "kraft:code-review",
+        [AgentInput.REVIEW_PACKAGE, AgentInput.CARRIED_FINDINGS, AgentInput.PREVIOUS_REVIEW],
+    )
     assert verification.node.fix_loop.max_attempts == 2
     assert verification.judge.task.inputs == [AgentInput.REVIEW_PACKAGE]
     # The pre-draft gate shows the document the node before it produces.

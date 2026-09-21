@@ -90,45 +90,26 @@ fake-claude session
 EOF
 fi
 
-# A hook with `artifact:` in the registry is contractually required to write and
-# commit a document. Honour it for the two planning hooks, so the gate, the
-# artifact endpoint and the indexer all see the real inputs.
+# A task that `produces:` a document is contractually required to write and
+# commit it. Honour that, so the gate, the artifact endpoint and the indexer all
+# see the real inputs.
 hook="$(field 'Hook point')"
 item="$(field 'Work item')"
 
-# chain_review's own decision (ready_for_approval/error) lives inside its
-# artifact envelope below, not in this outer per-task result -- a test's
-# KRAFT_FAKE_CLAUDE_STATUS knob is for the node under test (e.g.
-# `implementation` asking a needs_context question), not every node the fake
-# happens to run before it. Forcing this node's own report to "done" keeps
-# that knob from starving chain_finalized of the gate it needs to reach.
-if [ "$hook" = "on.chain.review_ready" ]; then
-  status="done"
-fi
-
-case "$hook" in
-  on.spec.requested) kind="spec" ;;
-  on.plan.requested) kind="plan" ;;
-  *) kind="" ;;
-esac
-# V1 has no fixed hook names: a task's hook point is its canonical path
-# (`spec.main.author`), and what it must write is declared by `produces:` and
-# spelled out in the instruction the adapter built. So when the hook name says
-# nothing, read the artifact contract line itself -- "Write your <kind> to
+# A task's hook point is its canonical path (`spec.main.author`), and what it
+# must write is declared by `produces:` and spelled out in the instruction the
+# adapter built. So read the artifact contract line itself -- "Write your <kind> to
 # <path>" -- which is the same thing a real agent does, and the only signal
 # that survives a chain author renaming the node. Not a path substring: an
 # attached spec puts `.engineering/specs/` into the *plan* author's context
 # too, and that read wrote the plan author a spec.
-if [ -z "$kind" ]; then
-  kind="$(printf '%s\n' "$ctx" | sed -n 's/.*Write your \([a-z_]*\) to .*/\1/p' | head -1)"
-fi
+kind="$(printf '%s\n' "$ctx" | sed -n 's/.*Write your \([a-z_]*\) to .*/\1/p' | head -1)"
 # Only on a status that advances the chain (executor._ADVANCING), mirroring
 # tests/support/fake_agent.py. A real worker that reports needs_context or a
 # failure has written nothing, and `agent._resolve_status` holds only a claim of
 # success to the artifact -- a fake that writes it regardless is the reason the
 # needs_context downgrade bug in MR !58 passed every needs_context test.
-# `$status` is already resolved here, including the on.chain.review_ready
-# override above, so this is a guard and not a reordering.
+# `$status` is already resolved here, so this is a guard and not a reordering.
 write_artifact=""
 case "$status" in
   done|done_with_concerns) write_artifact=1 ;;
@@ -151,44 +132,6 @@ EOF
   git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
   git -c user.name=fake -c user.email=fake@kraft \
       commit -q -m "fake ${kind}" -- ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
-fi
-
-# chain_review's artifact is a `{status, revised_chain_nodes, rationale}`
-# envelope (skills/chain-review/SKILL.md), not free prose -- the orchestrator
-# splices `revised_chain_nodes` into `chain_definition` at chain_finalized
-# approval (Kraft-hm0). The fake default is the honest "no change" answer:
-# read the item's own chain back out of the run's db and echo its unexecuted
-# tail unchanged, so a caller that never touches chain review still walks the
-# rest of the chain exactly as before this hook grew teeth.
-if [ "$hook" = "on.chain.review_ready" ] && [ -n "$item" ] && [ -n "${KRAFT_RUN_DIR:-}" ]; then
-  mkdir -p .engineering/chain_reviews
-  python3 - "$item" "${KRAFT_RUN_DIR}/orchestrator.db" \
-      > ".engineering/chain_reviews/${item}.md" <<'PY'
-import json
-import sqlite3
-import sys
-
-item, db_path = sys.argv[1], sys.argv[2]
-conn = sqlite3.connect(db_path)
-row = conn.execute(
-    "SELECT chain_definition, current_node_id FROM work_items WHERE id = ?", (item,)
-).fetchone()
-chain = json.loads(row[0])
-nodes = chain["nodes"]
-idx = next((i for i, n in enumerate(nodes) if n["id"] == row[1]), len(nodes) - 1)
-tail = nodes[idx + 1 :]
-envelope = {"status": "ready_for_approval", "revised_chain_nodes": tail, "rationale": "no change"}
-print("---")
-print(f"work_item_ids: [{item}]")
-print("kind: chain_reviews")
-print("title: fake chain review")
-print("---")
-print()
-print(json.dumps(envelope))
-PY
-  git add ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
-  git -c user.name=fake -c user.email=fake@kraft \
-      commit -q -m "fake chain_review" -- ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
 fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then

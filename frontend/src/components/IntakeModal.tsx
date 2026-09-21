@@ -29,21 +29,11 @@ const POINTER_POLICIES = [
   { id: "bump", label: "Bump · update the root's pointers" },
 ] as const;
 
-// The gate each kind satisfies documents why picking one skips a chain phase;
-// the server is the one that actually trims the chain.
+// The document kinds an item can start from. Which nodes one covers is the
+// chain's own declaration (`covered_by`); the server is the one that trims.
 const KINDS = [
-  {
-    kind: "spec" as const,
-    docKind: "specs",
-    gate: "spec_approval",
-    label: "spec",
-  },
-  {
-    kind: "plan" as const,
-    docKind: "plans",
-    gate: "plan_approval",
-    label: "plan",
-  },
+  { kind: "spec" as const, docKind: "specs", label: "spec" },
+  { kind: "plan" as const, docKind: "plans", label: "plan" },
 ];
 
 export function IntakeModal({ onClose }: { onClose: () => void }) {
@@ -165,23 +155,12 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       path: attachPath[kind].trim(),
     }),
   );
-  // §8: attaching a kind is the statement that its gate is satisfied, so the
-  // node carrying that gate_after drops out of the chain — same rule as
-  // `templates.materialize` on the server, applied here only to preview it.
-  const satisfiedGates = new Set(
-    KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(
-      ({ gate }) => gate,
-    ),
-  );
+  // A node says which attachment drops it: `covered_by`, the server's own
+  // `ResolvedNode.covered_by` -- the gate that decides the document and the
+  // node that would write it (Kraft-ene04).
   const attachedKinds = new Set<unknown>(attachments.map((a) => a.kind));
-  // A V1 node (it has a `kind`) says which attachment drops it: `covered_by`,
-  // the server's own `ResolvedNode.covered_by` -- the gate that decides the
-  // document and the node that would write it (Kraft-ene04). A legacy node
-  // only has the gate name it carries.
   const coveredByAttachment = (n: TemplateSummary["nodes"][number]) =>
-    n.kind
-      ? attachedKinds.has(n.covered_by)
-      : n.gate_after != null && satisfiedGates.has(n.gate_after);
+    attachedKinds.has(n.covered_by);
   const selectedNodes =
     templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
   const autoEscalateOverrides: NodeOverrides = autoEscalate
@@ -270,7 +249,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const runCount = selectedNodes.length - skipped.size - satisfiedGates.size;
+  const runCount = selectedNodes.filter(
+    (n) => !skipped.has(n.id) && !coveredByAttachment(n),
+  ).length;
 
   // Once attached (found via search or typed by hand and blurred), the
   // field becomes a chip -- one control does both jobs, not a search box
@@ -394,7 +375,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 Start from existing{" "}
                 <span className="field-hint">· skips the phase it covers</span>
               </label>
-              {KINDS.map(({ kind, label, gate }) => (
+              {KINDS.map(({ kind, label }) => (
                 <div key={kind} className="attachment-row">
                   {attachPath[kind] ? (
                     <>
@@ -415,7 +396,12 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                         </button>
                       </span>
                       <p className="field-hint">
-                        {label} attached → {gate} satisfied
+                        {label} attached →{" "}
+                        {selectedNodes
+                          .filter((n) => n.covered_by === kind)
+                          .map((n) => n.id)
+                          .join(", ") || "nothing in this chain"}{" "}
+                        skipped
                       </p>
                     </>
                   ) : (

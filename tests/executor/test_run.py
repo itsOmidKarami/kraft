@@ -24,7 +24,7 @@ async def test_run_walks_then_reviews_gates_then_escalates_a_stop(monkeypatch):
     monkeypatch.setattr(gates, "review_gates", review_gates)
     monkeypatch.setattr(gates, "auto_escalate_stuck", auto_escalate_stuck)
 
-    status = await walk.run(None, None, work_item_id="w1", registry=None)
+    status = await walk.run(None, None, work_item_id="w1")
 
     assert status == "after-escalation"
     assert calls == [

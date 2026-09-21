@@ -175,14 +175,12 @@ def main() -> int:
         },
     )
     tracker = isolated_bd(tmp)
-    # fixtures/fake-claude.sh, not tests/support/fake_agent.py: the planning
-    # hooks (on.spec.requested/on.plan.requested) carry an `artifact:` contract
-    # (write + commit a document into the worktree), and only fake-claude.sh
-    # honours it. Same binary also does fake_agent.py's calc.py `fix` trick, so
-    # one command covers on.implementation.start too.
-    templates = fake_templates_dir(
-        tmp, str(REPO / "fixtures" / "fake-claude.sh"), planning_hooks=True
-    )
+    # fixtures/fake-claude.sh, not tests/support/fake_agent.py: the spec and
+    # plan tasks carry a `produces:` contract (write + commit a document into
+    # the worktree), and only fake-claude.sh honours it. Same binary also does
+    # fake_agent.py's calc.py `fix` trick, so one command covers the
+    # implementer too.
+    templates = fake_templates_dir(tmp, str(REPO / "fixtures" / "fake-claude.sh"))
 
     env = {
         **os.environ,

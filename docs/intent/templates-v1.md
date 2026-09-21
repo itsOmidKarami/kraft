@@ -9,7 +9,7 @@ unpinned until the migration supplies their implementation tests.
 The system SHALL accept only the V1 template schema and SHALL NOT preserve
 compatibility with legacy hook bindings or `gate_after` chains.
 enforced-by: tests/api/test_templates_inspection.py::test_a_legacy_gate_after_chain_does_not_resolve, tests/api/test_templates_inspection.py::test_a_legacy_home_starts_degraded_and_names_the_update_command
-origin: src/kraft/templates/library.py §is_pre_v1 -- Task 11a: a legacy chain does not resolve and a pre-V1 home is refused, never converted. The legacy loader itself (`registry.yaml`, `load_templates`, the legacy `GET /templates`) still runs beside V1 until Task 11b deletes it.
+origin: src/kraft/templates/library.py §is_pre_v1 -- Task 11a: a legacy chain does not resolve and a pre-V1 home is refused, never converted. Task 11b deleted the legacy loader itself (`registry.yaml`, `load_templates`, the registry routes and the legacy `GET /templates`); `is_pre_v1` is how an old home is still recognised.
 
 ## REQ major-update-replaces-incompatible-template-config
 
@@ -53,6 +53,8 @@ origin: templates/library.yaml -- Task 3's four pins are the whole sentence ("on
 The system SHALL NOT use `registry.yaml` as a source of agent, subprocess,
 forge, or built-in task configuration; those definitions SHALL live in typed
 templates.
+enforced-by: tests/api/test_templates_inspection.py::test_a_registry_beside_the_library_configures_no_task, tests/templates/test_materialization.py::test_task_configuration_resolves_from_the_library_alone, tests/templates/test_materialization.py::test_the_seed_ships_no_legacy_configuration
+origin: src/kraft/templates/__init__.py -- Task 11b deleted the registry loader, its routes and the seed's `registry.yaml`: a daemon with a `registry.yaml` beside its library neither loads nor reports it, and a fresh home is seeded without one.
 
 ## REQ task-kinds-are-discriminated
 
@@ -161,13 +163,15 @@ origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inp
 A reviewing agent task SHALL be shown the findings its previous round
 reported, each with its stable identity, so that it can report a reworded
 repeat as the same finding.
-origin: src/kraft/executor/prompts.py §carried_findings_note -- parked under V1: no `AgentTask` declaration asks for it yet, so no dispatch delivers it, and `findings.resolve_identity` records what its absence costs (Kraft-y406q). Unenforced until an input declaration and a consumer exist.
+enforced-by: tests/executor/test_agent_inputs.py::test_carried_findings_reach_only_a_task_that_declares_them[declared], tests/executor/test_agent_inputs.py::test_carried_findings_reach_only_a_task_that_declares_them[undeclared], tests/executor/test_agent_inputs.py::test_a_first_review_is_handed_no_history, tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method
+origin: src/kraft/templates/models.py §AgentInput -- Task 11b: declared as `inputs: [carried_findings]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.carried_findings_note` -- the node's last measurement, under the tags `walk` then trusts in `findings.resolve_identity`. The seeded in-loop code review declares it.
 
 ## REQ continuity-note-is-delivered-to-a-resumed-reviewer
 
 A reviewing agent task on its second or later session SHALL be pointed at its
 own previous session's result and summary.
-origin: src/kraft/executor/prompts.py §previous_review_note -- parked under V1 with `carried_findings_note`, for the same reason (Kraft-y406q). Unenforced until an input declaration and a consumer exist.
+enforced-by: tests/executor/test_agent_inputs.py::test_a_resumed_reviewer_is_pointed_at_its_own_last_session[declared], tests/executor/test_agent_inputs.py::test_a_resumed_reviewer_is_pointed_at_its_own_last_session[undeclared], tests/executor/test_agent_inputs.py::test_a_first_review_is_handed_no_history, tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method
+origin: src/kraft/templates/models.py §AgentInput -- Task 11b: declared as `inputs: [previous_review]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.previous_review_note` from the task's own last completed session (`prompts.last_review_session`). The seeded in-loop code review declares it.
 
 ## REQ resumed-escalation-preserves-original-runtime
 
@@ -337,13 +341,20 @@ enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resu
 
 An operator MAY pause a work item. The system SHALL NOT expose pause as a
 task, step, or node control.
-enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_only
+enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_only, tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task
 
 ## REQ resume-preserves-completed-work
 
 Resuming paused work SHALL continue from its saved execution point and SHALL
 not rerun work that completed before the pause.
 enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[plain], tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[fix-loop], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[plain], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[fix-loop], tests/test_pause_resume.py::test_resume_leaves_the_position_to_the_walk, tests/test_rate_limit_retry.py::test_a_rate_limit_relaunch_leaves_the_position_to_the_walk, tests/test_waits.py::test_a_reentry_resumes_at_the_waiting_step, tests/executor/test_entry_paths.py::test_crash_resume_dispatches_a_sibling_the_crash_never_started
+
+## REQ resume-does-not-consume-a-retry-attempt
+
+Resuming a paused work item SHALL NOT spend a retry attempt: no fix-loop or
+gate reject-loop counter SHALL change because of the resume itself.
+enforced-by: tests/api/test_lifecycle.py::test_resume_does_not_consume_a_retry_attempt
+origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Task 11b fix round 1, Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
 
 ## REQ task-retry-reruns-that-task-and-later-work
 
@@ -442,20 +453,37 @@ enforced-by: tests/executor/test_walk.py::test_steps_are_ordered_while_tasks_ins
 
 When the executor reaches a gate node, it SHALL open that gate and SHALL NOT
 start the following node until the gate is approved.
-enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved
+enforced-by: tests/executor/test_gates.py::test_gate_node_halts_until_approved, tests/test_gates.py::test_walk_stops_at_first_gate
 
 ## REQ gate-approval-advances-to-next-node
 
 When a gate is approved, the executor SHALL advance to the node after that
 gate in the materialized chain.
-enforced-by: tests/executor/test_gates.py::test_gate_approval_advances_to_the_node_after_the_gate, tests/executor/test_gates.py::test_a_walk_re_entered_at_an_approved_gate_passes_over_it, tests/executor/test_gates.py::test_a_resume_at_an_approved_gate_continues_past_it
+enforced-by: tests/executor/test_gates.py::test_gate_approval_advances_to_the_node_after_the_gate, tests/executor/test_gates.py::test_a_walk_re_entered_at_an_approved_gate_passes_over_it, tests/executor/test_gates.py::test_a_resume_at_an_approved_gate_continues_past_it, tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve
 
 ## REQ gate-rejection-follows-gate-reject-target
 
 When a gate is rejected, the executor SHALL apply that gate node's own
 `reject_to` behaviour.
-enforced-by: tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to, tests/executor/test_gates.py::test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate, tests/executor/test_gates.py::test_a_rejection_cannot_be_aimed_forward_past_the_gate, tests/executor/test_gates.py::test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate
+enforced-by: tests/executor/test_gates.py::test_gate_rejection_follows_its_own_reject_to, tests/executor/test_gates.py::test_a_rejection_with_no_reject_to_re_enters_the_execution_node_before_the_gate, tests/executor/test_gates.py::test_a_rejection_cannot_be_aimed_forward_past_the_gate, tests/executor/test_gates.py::test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate, tests/api/test_gates.py::test_rejecting_the_final_gate_re_enters_at_implementation, tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0], tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve
 origin: src/kraft/executor/gates.py §reject_target -- a gate with no `reject_to` re-enters at the nearest preceding *execution* node, not at the gate itself. A V1 gate has no execution shape, so the old fallback dispatched nothing and re-requested the same gate, a ping-pong bounded only by the reject loop's cap; re-running the node that produced what the gate is about is what makes the Kraft-rv6i "measure the repair rather than trust it" rule hold at a gate. A gate with nothing before it falls back to itself, which is the one case where there is no work to re-measure.
+
+## REQ gate-decision-is-recorded-with-its-note
+
+When a gate is approved or rejected, the system SHALL record a `gate_approved`
+or `gate_rejected` event naming the gate. A rejection SHALL carry the
+reviewer's note: one without a note SHALL be refused and SHALL leave the gate
+open, and the note SHALL reach the node the rejection re-enters.
+enforced-by: tests/api/test_gates.py::test_a_gate_approval_is_recorded_naming_its_gate, tests/api/test_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer, tests/test_gates.py::test_reject_records_the_note_and_reopen_flips_the_row, tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0]
+origin: src/kraft/api/routes/gates.py §reject_gate -- carried from the retired legacy gate spec (`docs/intent/gates.md`, deleted in Task 11b; Ruling 139a): its approve, reject-note and note-as-steer requirements describe behaviour V1 kept, in legacy vocabulary.
+
+## REQ gate-rejection-is-bounded-by-its-reject-loop
+
+Each rejection of a gate SHALL count against that gate's own reject loop. At
+the loop's cap the system SHALL stop the work item for a human, naming the
+loop, rather than re-run the rejected work.
+enforced-by: tests/api/test_gates.py::test_gate_reject_is_bounded_by_its_reject_loop, tests/skills/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop
+origin: src/kraft/executor/gates.py §reject_loop_key -- carried from the retired legacy gate spec's per-gate-name reject-loop requirements (Task 11b): V1 keys the loop by the gate node's own id, for every gate.
 
 ## REQ gate-control-does-not-generate-review-work
 
@@ -470,7 +498,7 @@ A gate with the dedicated `chain_finalized` marker SHALL retain Kraft's
 chain-review behaviour; other gate nodes SHALL have ordinary pause and
 approval behaviour.
 enforced-by: tests/executor/test_gates.py::test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review, tests/executor/test_gates.py::test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour, tests/templates/test_models.py::test_an_attachment_never_trims_the_chain_finalized_gate
-origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in is **not** restored: `_splice_chain_review` rewrites the legacy `chain_definition` from an envelope of legacy node dicts, and revising a *materialized* chain in place is a different feature that lands with the chain-review skill's own V1 conversion. That half of the marker's behaviour is unpinned and parked at the function.
+origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in is **not** part of V1: the parked legacy splice was deleted in Task 11b, and revising a *materialized* chain in place has no V1 requirement or schema yet (Kraft-x2hdr).
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 

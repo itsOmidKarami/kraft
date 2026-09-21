@@ -27,7 +27,6 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
-from kraft.templates import load_registry, load_templates
 from kraft.worker import reattach, sandbox
 from kraft.ws import Broadcaster
 
@@ -71,8 +70,6 @@ async def lifespan(app: FastAPI):
     # Where an operator may override a bundled method file. Absent on almost
     # every install; `kraft.skill` falls back to the packaged copy.
     app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
-    registry = load_registry(templates_dir / "registry.yaml", skills_dir=app.state.skills_dir)
-    templates = load_templates(templates_dir, registry)
     library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
 
     # Config the Settings screens edit. Read once here and re-read on every save,
@@ -121,7 +118,6 @@ async def lifespan(app: FastAPI):
     summary, adopted = await reattach.reattach(
         database,
         run_dirs,
-        registry,
         policy=policy_obj,
         launch_factory=lambda repo: deps.launch(app.state, repo),
         bd_cwd=deps.bd_cwd(),
@@ -149,7 +145,6 @@ async def lifespan(app: FastAPI):
                     database,
                     run_dirs,
                     work_item_id=wid,
-                    registry=registry,
                     adopted=adopted,
                     bd_cwd=deps.bd_cwd(),
                     policy=policy_obj,
@@ -161,8 +156,6 @@ async def lifespan(app: FastAPI):
 
     app.state.db = database
     app.state.run_dirs = run_dirs
-    app.state.registry = registry
-    app.state.templates = templates
     app.state.library = library
     app.state.invalid_library = invalid_library
     app.state.policy = policy_obj

@@ -564,7 +564,7 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
                 bd_cwd=str(tracker),
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=None, bd_cwd=str(tracker), policy=pol
+                database, rd, work_item_id=wid, bd_cwd=str(tracker), policy=pol
             )
             assert first == "needs_human"
             events_after_first = database.read(lambda c: events.read_after(c, 0, wid))
@@ -580,7 +580,6 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
                 database,
                 rd,
                 work_item_id=wid,
-                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
                 start_index=0,

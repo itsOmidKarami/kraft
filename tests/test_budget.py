@@ -123,7 +123,6 @@ async def _run(database, rd, tracker, wid, pol):
         database,
         rd,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )

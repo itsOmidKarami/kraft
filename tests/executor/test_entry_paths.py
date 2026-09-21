@@ -83,7 +83,7 @@ async def test_a_walk_given_no_position_starts_at_the_items_cursor(
     it = await _at_second_step(item_on, chain)
 
     result = await executor.run_once(
-        database, run_dirs, work_item_id=it.id, registry=None, policy=_policy(), launch=LAUNCH
+        database, run_dirs, work_item_id=it.id, policy=_policy(), launch=LAUNCH
     )
 
     assert result == "completed"
@@ -162,7 +162,6 @@ async def _crash_resume(database, run_dirs, it):
         database,
         run_dirs,
         work_item_id=it.id,
-        registry=None,
         adopted={},
         policy=_policy(),
         launch=LAUNCH,

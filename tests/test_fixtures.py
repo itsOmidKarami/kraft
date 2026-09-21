@@ -127,7 +127,10 @@ def test_a_needs_context_report_writes_no_artifact(tmp_path):
     The session summary is still written: a stopped worker is told to write one,
     and `run_agent_task` reads it back the same way.
     """
-    ctx = "Work item: w1\nNode: spec\nHook point: on.spec.requested\nWorker session: s9\n"
+    ctx = (
+        "Work item: w1\nNode: spec\nHook point: spec.main.author\nWorker session: s9\n"
+        "Write your spec to .engineering/specs/w1.md, relative to the repo root.\n"
+    )
     proc = _run(
         tmp_path,
         {
@@ -147,7 +150,10 @@ def test_the_skip_knob_suppresses_the_artifact_on_a_done_report(tmp_path):
     """The positive control and the knob in one test: `done` writes the plan,
     and `KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT=1` suppresses it for a test that wants
     the empty-gate failure on purpose (the same knob `fake_agent.py` has)."""
-    ctx = "Work item: w2\nNode: plan\nHook point: on.plan.requested\nWorker session: s7\n"
+    ctx = (
+        "Work item: w2\nNode: plan\nHook point: plan.main.author\nWorker session: s7\n"
+        "Write your plan to .engineering/plans/w2.md, relative to the repo root.\n"
+    )
     artifact = tmp_path / ".engineering" / "plans" / "w2.md"
 
     proc = _run(tmp_path, {"KRAFT_FAKE_CLAUDE": "noop"}, ctx=ctx)

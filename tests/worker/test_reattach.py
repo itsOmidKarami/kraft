@@ -17,10 +17,7 @@ import pytest
 from support.harness import fake_docker_bin
 
 from kraft import events, store
-from kraft.templates import Registry
 from kraft.worker import reattach
-
-_REG = Registry(hooks={})
 
 #: An agent node, then a subprocess node: the two kinds `_adopted_status`
 #: tells apart.
@@ -144,7 +141,7 @@ async def test_a_pending_session_becomes_unknown_and_needs_human(
     await database.write(lambda c: store.enter_node(c, "w1", node))
     await item.session("s1", path, node=node)  # stays 'pending', pid NULL
 
-    summary, adopted = await reattach.reattach(database, run_dirs, _REG)
+    summary, adopted = await reattach.reattach(database, run_dirs)
 
     assert (adopted, summary.unknown) == ({}, ["s1"])
     assert "w1" not in summary.resumed_work_items
@@ -159,7 +156,7 @@ async def test_unconfirmed_identity_records_which_check_failed(item, database, r
     unknown, and the reason is on the event and on the card."""
     await item.session("s1", IMPLEMENT, running=DEAD)
 
-    summary, _ = await reattach.reattach(database, run_dirs, _REG, grace_retry_delay_s=0)
+    summary, _ = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
 
     assert summary.unknown == ["s1"]
     assert item.status() == "needs_human"
@@ -202,7 +199,7 @@ async def test_a_young_ambiguous_session_gets_one_retry(
                     "UPDATE worker_sessions SET started_at = '2020-01-01T00:00:00+00:00'"
                 )
             )
-        summary, adopted = await reattach.reattach(database, run_dirs, _REG, grace_retry_delay_s=0)
+        summary, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
         await asyncio.gather(*adopted.values(), return_exceptions=True)
 
     assert getattr(summary, expected) == ["s1"]
@@ -227,7 +224,7 @@ async def test_many_young_sessions_share_one_grace_sleep(item, database, run_dir
     for n in range(5):
         await item.session(f"s{n}", IMPLEMENT, running=(90000 + n, 123.0))
 
-    summary, _ = await reattach.reattach(database, run_dirs, _REG, grace_retry_delay_s=0.01)
+    summary, _ = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0.01)
 
     assert sorted(summary.unknown) == ["s0", "s1", "s2", "s3", "s4"]
     assert sleeps == [0.01], f"expected one shared grace sleep, got {len(sleeps)}"
@@ -244,7 +241,7 @@ async def test_running_dead_pid_resolves_from_result_file(item, database, run_di
 
     # grace_retry_delay_s=0: a fresh (young) session, but this is the ordinary
     # resolve-from-file path, not Kraft-s7c04.51's retry.
-    summary, adopted = await reattach.reattach(database, run_dirs, _REG, grace_retry_delay_s=0)
+    summary, adopted = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
 
     assert (adopted, summary.resolved_from_file) == ({}, ["s1"])
     (row,) = item.sessions()
@@ -269,7 +266,7 @@ async def test_resolved_from_file_carries_concerns_question_and_usage(item, data
     (run_dirs.logs / "s1.log").write_text(_ENVELOPE + "\n")
     await item.session("s1", IMPLEMENT, running=DEAD)
 
-    summary, _ = await reattach.reattach(database, run_dirs, _REG)
+    summary, _ = await reattach.reattach(database, run_dirs)
 
     assert summary.resolved_from_file == ["s1"]
     assert _usage(item) == ("claude-opus-5", 400, 20, 1.25)
@@ -295,7 +292,7 @@ async def test_live_pid_matching_identity_is_adopted(item, database, run_dirs):
     with _sleeper() as (proc, pst):
         await item.session("s1", IMPLEMENT, running=(proc.pid, pst))
 
-        summary, adopted = await reattach.reattach(database, run_dirs, _REG)
+        summary, adopted = await reattach.reattach(database, run_dirs)
 
         assert summary.adopted == ["s1"] and set(adopted) == {"s1"}
         assert item.events("session_reattached")
@@ -319,7 +316,7 @@ async def test_a_crashed_adopt_marks_the_work_item_needs_human(
     monkeypatch.setattr(reattach, "_adopt", _boom)
     await item.session("s1", IMPLEMENT, running=(os.getpid(), psutil.Process().create_time()))
 
-    summary, adopted = await reattach.reattach(database, run_dirs, _REG)
+    summary, adopted = await reattach.reattach(database, run_dirs)
     await asyncio.gather(*adopted.values(), return_exceptions=True)
 
     assert summary.adopted == ["s1"]
@@ -335,7 +332,7 @@ async def test_an_adopted_session_records_its_usage(item, database, run_dirs):
     (run_dirs.logs / "s1.log").write_text(_ENVELOPE + "\n")
     with _sleeper() as (proc, pst):
         await item.session("s1", IMPLEMENT, running=(proc.pid, pst))
-        summary, adopted = await reattach.reattach(database, run_dirs, _REG)
+        summary, adopted = await reattach.reattach(database, run_dirs)
         await adopted["s1"]
 
     assert summary.adopted == ["s1"]
@@ -394,7 +391,7 @@ async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
                     break
                 await asyncio.sleep(0.1)
             grandchild = int(pidfile.read_text().strip())
-            summary, adopted = await reattach.reattach(database, run_dirs, _REG)
+            summary, adopted = await reattach.reattach(database, run_dirs)
             await adopted["s1"]
         assert summary.adopted == ["s1"]
         os.kill(grandchild, 0)  # still alive: no ProcessLookupError
@@ -469,14 +466,14 @@ async def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn
         with _held_open() as (proc, pst):
             await database.write(lambda c: store.session_running(c, "esc1", proc.pid, pst))
             summary, adopted = await reattach.reattach(
-                database, run_dirs, _REG, launch_factory=lambda repo: None
+                database, run_dirs, launch_factory=lambda repo: None
             )
             proc.stdin.close()
             await adopted["esc1"]
     else:
         await database.write(lambda c: store.session_running(c, "esc1", *DEAD))
         summary, adopted = await reattach.reattach(
-            database, run_dirs, _REG, launch_factory=lambda repo: None
+            database, run_dirs, launch_factory=lambda repo: None
         )
         await adopted["esc1"]
 
@@ -508,7 +505,7 @@ async def test_reattach_kills_the_container_of_a_session_it_does_not_adopt(
     _result(run_dirs, "s1")
     await item.session("s1", IMPLEMENT, running=DEAD)
 
-    summary, _ = await reattach.reattach(database, run_dirs, _REG)
+    summary, _ = await reattach.reattach(database, run_dirs)
 
     assert summary.resolved_from_file == ["s1"]
     assert docker_rm.read_text().split() == ["kraft-s1"]
@@ -523,7 +520,7 @@ async def test_an_adopted_session_kills_its_container_when_it_ends(
     _result(run_dirs, "s1")
     with _held_open() as (proc, pst):
         await item.session("s1", IMPLEMENT, running=(proc.pid, pst))
-        _, adopted = await reattach.reattach(database, run_dirs, _REG)
+        _, adopted = await reattach.reattach(database, run_dirs)
         assert not docker_rm.exists(), "still running: nothing to tear down yet"
         proc.stdin.close()
         await adopted["s1"]
@@ -599,6 +596,6 @@ async def test_an_adopted_v1_session_s_kind_decides_its_exit(
     proc = subprocess.Popen(["true"])
     proc.wait()
 
-    await reattach._adopt(database, "s1", proc.pid, poll_s=0.01, registry=_REG)
+    await reattach._adopt(database, "s1", proc.pid, poll_s=0.01)
 
     assert it.sessions()[0]["status"] == expected

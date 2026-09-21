@@ -211,9 +211,17 @@ class AgentInput(StrEnum):
     * `review_package` -- the change under review written out to a file, its
       path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then
       from a task's second session on only what changed since its previous
-      one (`review-package-is-delivered-to-a-task-that-declares-it`)."""
+      one (`review-package-is-delivered-to-a-task-that-declares-it`).
+    * `carried_findings` -- the findings the node's last measurement reported,
+      each with its stable tag, so a reworded repeat can be reported as the
+      same finding (`carried-findings-are-delivered-to-a-reviewing-task`).
+    * `previous_review` -- the task's own previous completed session's result
+      file and summary, by path
+      (`continuity-note-is-delivered-to-a-resumed-reviewer`)."""
 
     REVIEW_PACKAGE = "review_package"
+    CARRIED_FINDINGS = "carried_findings"
+    PREVIOUS_REVIEW = "previous_review"
 
 
 class TaskScope(StrEnum):

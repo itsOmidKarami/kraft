@@ -556,7 +556,6 @@ async def test_the_worktree_and_the_forge_agree_on_the_branch(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=launch,
     )

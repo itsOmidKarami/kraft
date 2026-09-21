@@ -91,7 +91,7 @@ State lives in `$KRAFT_HOME` (default `~/.kraft`):
 | | |
 |---|---|
 | `~/.kraft/run/` | `orchestrator.db`, `index.db`, `logs/`, `results/`, `worktrees/` |
-| `~/.kraft/templates/` | the YAML the Settings screens edit — chain templates, `registry.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
+| `~/.kraft/templates/` | the YAML the Settings screens edit — `library.yaml`, `chains/`, `harnesses.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
 
 `templates/` is seeded from the packaged defaults on first run and never overwritten
 after, so an upgrade cannot clobber an edited policy. It is a plain directory of
@@ -227,16 +227,16 @@ trigger-specific. See "Remote access" above for reaching this from off-machine.
 
 ## Without the orchestrator
 
-`plugins/kraft-lite/` runs the same chain inside a single agent session — same
-node list, same gates, same caps, no service. It is the attended half of Kraft:
-one chain, in front of you, resumable across sessions but not outliving your
-terminal. Chain and policy come from `templates/`, rendered by `just lite-build`.
+`plugins/kraft-lite/` runs a chain inside a single agent session — gates, fix
+loops and caps, no service. It is the attended half of Kraft: one chain, in front
+of you, resumable across sessions but not outliving your terminal. Its chain,
+`plugins/kraft-lite/chains/default.json`, is its own: it keeps the pre-V1 node
+shape Kraft's templates had when it was last rendered from them, and Kraft's
+Template Schema V1 does not feed it.
 
 That directory is published as a standalone repo, so it
 must stay self-contained: no import above `plugins/kraft-lite/`, no dependency
-beyond the standard library. `dev/build_lite_chain.py` and
-`tests/kraft_lite_artifact_test.py` are the two pieces that deliberately live
-outside it, because they are the seam between the two repos.
+beyond the standard library.
 
 See [`plugins/kraft-lite/README.md`](plugins/kraft-lite/README.md).
 
@@ -393,7 +393,7 @@ Everything is `just` — run `just` for the full list.
 ```
 src/kraft/        orchestrator: api, executor, policy, store, adapters/, index/
 frontend/         React SPA (vite)
-templates/        default chain templates + registry/policy — the install seed
+templates/        the V1 library, chains, harness profiles and policy — the install seed
 dev/seed.py       dev-instance seeder
 fixtures/         fake agent + the PATH shim just dev uses
 docs/intent/      intended behaviour as pinned requirements, each tied to a test

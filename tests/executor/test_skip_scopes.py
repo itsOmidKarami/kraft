@@ -60,7 +60,7 @@ async def test_skip_task_does_not_skip_sibling(item_on, database, run_dirs, held
     started, release = held
     it = await item_on(CHAIN, worktree=True)
     walk = asyncio.create_task(
-        executor.run_once(database, run_dirs, work_item_id=it.id, registry=None, launch=LAUNCH)
+        executor.run_once(database, run_dirs, work_item_id=it.id, launch=LAUNCH)
     )
     await _both_running(started)
 
@@ -84,7 +84,7 @@ async def test_a_skipped_step_is_not_dispatched_when_the_walk_reaches_it(
     it = await item_on(CHAIN, worktree=True)
     await database.write(lambda c: store.skip_scope(c, it.id, "n.then", None))
     walk = asyncio.create_task(
-        executor.run_once(database, run_dirs, work_item_id=it.id, registry=None, launch=LAUNCH)
+        executor.run_once(database, run_dirs, work_item_id=it.id, launch=LAUNCH)
     )
     await _both_running(started)
     for path in ("n.pair.a", "n.pair.b"):

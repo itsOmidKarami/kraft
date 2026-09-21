@@ -51,7 +51,6 @@ async def _walk_from(node, item_on, tmp_path, monkeypatch):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         start_index=start,
         policy=_policy.Policy(loops={}, default=_policy.Cap(9, 3600), auto_escalate_delay_s=0),
         launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),

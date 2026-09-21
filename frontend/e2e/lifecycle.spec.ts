@@ -8,11 +8,9 @@ import { scaledTimeout } from "../e2e-timing";
 test("pause, steer and resume from the detail screen", async ({ page }) => {
   // The fake agent finishes in milliseconds, so there is nothing to pause
   // unless it is slowed down first. KRAFT_SLOW in the title does that
-  // (fixtures/fake-claude.sh) without swapping the hook's registry entry to
-  // `kind: subprocess`: that swap used to work here, but it also makes the
-  // node stop looking agent-kind for as long as it's in effect, which now
-  // flips `item.steerable` false and hides the steer box this test needs
-  // visible (PausedCard, Kraft-bz9b's last unwired caller).
+  // (fixtures/fake-claude.sh) while the task stays an agent task, which keeps
+  // `item.steerable` true and the steer box this test needs visible
+  // (PausedCard, Kraft-bz9b's last unwired caller).
   const id = await createItem(page, "ui pause steer KRAFT_SLOW", "quick-task");
   // Pause while the slowed implementation agent is actually running. A pause
   // that lands between nodes finds no session to stop and, today, lets the walk

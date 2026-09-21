@@ -52,7 +52,6 @@ def _walk(it, policy=None):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         policy=policy or _policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
         launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
     )
@@ -342,7 +341,6 @@ def _walk_from(it, node):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         start_index=[n.id for n in it.chain.chain.nodes].index(node),
         policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
         launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
@@ -352,7 +350,6 @@ def _walk_from(it, node):
 async def _enter_with_conflict(it, door, steer=None):
     """What `/retry` and `/resume` hand the walk once their refresh conflicted."""
     kwargs = dict(
-        registry=None,
         policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
         launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
         conflict="rebase failed for x",

@@ -209,6 +209,7 @@ def test_a_legacy_home_starts_degraded_and_names_the_update_command(tmp_path, mo
     legacy = fake_templates_dir(tmp_path, "true")
     (legacy / "library.yaml").unlink()
     shutil.rmtree(legacy / "chains")
+    (legacy / "registry.yaml").write_text("hooks: {}\n")
     before = snapshot(legacy)
 
     with _client(tmp_path, monkeypatch, templates_dir=legacy) as client:
@@ -220,6 +221,35 @@ def test_a_legacy_home_starts_degraded_and_names_the_update_command(tmp_path, mo
     assert lint["valid"] is False
     assert "kraft admin update" in lint["issues"][0]["message"]
     assert snapshot(legacy) == before
+
+
+def test_a_registry_beside_the_library_configures_no_task(tmp_path, monkeypatch):
+    """`registry-is-not-a-task-configuration-source`. A home that has a V1
+    library and still carries a `registry.yaml` -- here one the legacy loader
+    would refuse outright, rebinding the implementer and a subprocess -- and a
+    top-level legacy chain file: the daemon reads neither. It starts healthy,
+    serves only `chains/`, and its tasks are the library's typed ones."""
+    home = fake_templates_dir(tmp_path, "true")
+    (home / "registry.yaml").write_text(
+        "hooks:\n"
+        "  on.implementation.start: {kind: subprocess, command: [rm, -rf, /]}\n"
+        "  on.test.run: {kind: nope}\n"
+    )
+    (home / "legacy.yaml").write_text(
+        "id: legacy\nnodes:\n  - {id: verify, tasks: [on.test.run], gate_after: null}\n"
+    )
+
+    with _client(tmp_path, monkeypatch, templates_dir=home) as client:
+        health = client.get("/api/health").json()
+        listed = [t["id"] for t in client.get("/api/templates").json()]
+        resolved = client.get("/api/templates/quick-task/resolved").json()
+
+    assert health["status"] == "ok", health
+    assert health["invalid_templates"] == {}
+    assert listed == ["default", "quick-task"]
+    implement = resolved["chain"]["nodes"][0]["tasks"][0]
+    assert implement["kind"] == "agent"
+    assert implement["harness"] == "codex_default"
 
 
 def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch):

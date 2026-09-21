@@ -120,7 +120,7 @@ async def test_a_gate_already_reopened_is_not_reopened_twice(item_on, database):
 async def test_a_retry_clears_loop_counters_across_its_span_only(item_on, database):
     it = await item_on(CHAIN, "c", status="needs_human")
     cap = policy.Cap(3, 3600)
-    keys = ("a.fix_loop", "g1_reject_loop", "b.fix_loop", "g2_reject_loop", "ci_wait:c")
+    keys = ("a.fix_loop", "g1_reject_loop", "b.fix_loop", "g2_reject_loop", "ci_infra:c")
     for key in keys:
         await database.write(lambda c, k=key: store.bump_counter(c, it.id, k, cap))
 

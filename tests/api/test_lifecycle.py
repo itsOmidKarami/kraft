@@ -495,21 +495,19 @@ def _counter_exists(wid: str, key: str) -> bool:
         conn.close()
 
 
-@pytest.mark.parametrize("kind", ["ci_wait", "ci_infra"])
-def test_retry_clears_the_ci_counter_for_the_current_node(client, repo, kind):
-    """A `ci_wait:<node>` counter (the item re-entered a wait twice already) or
-    a `ci_infra:<node>` one (one kick short of the cap): after a retry the row
-    is gone, so the next poll starts at count 1 and an infra-red poll gets a
-    fresh budget, not an instant breach."""
+def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
+    """A `ci_infra:<node>` counter (one kick short of the cap): after a retry
+    the row is gone, so an infra-red poll gets a fresh budget, not an instant
+    breach."""
     wid = _post_default(client, repo)
     _poll_events(client, wid, "gate_requested")
     _force_node(wid, "merge_request_feedback", "needs_human")
-    _seed_counter(wid, f"{kind}:merge_request_feedback")
+    _seed_counter(wid, "ci_infra:merge_request_feedback")
 
     r = client.post(f"/api/work-items/{wid}/retry", json={})
 
     assert r.status_code == 200, r.text
-    assert not _counter_exists(wid, f"{kind}:merge_request_feedback")
+    assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
 
 
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
@@ -613,3 +611,44 @@ def test_resume_of_an_item_that_never_reached_a_node_starts_at_the_chain_head(cl
     evts = _poll_events(client, wid, "node_started")
     first = next(e for e in evts if e["type"] == "node_started")
     assert first["payload"]["node_id"] == "spec"
+
+
+def _counter(wid: str, key: str) -> int | None:
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        row = conn.execute(
+            "SELECT count FROM retry_counters WHERE work_item_id = ? AND key = ?", (wid, key)
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def test_resume_does_not_consume_a_retry_attempt(client, repo, monkeypatch):
+    """`resume-does-not-consume-a-retry-attempt`: a human pausing and resuming
+    is an interruption, not a failure, so the resume itself spends nothing --
+    not the paused node's fix-loop attempts, and not a gate's reject loop.
+    The walk the resume hands off to is held back, so what is measured is the
+    resume alone."""
+    from kraft.api import deps
+
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "verification", "paused")
+    _seed_counter(wid, "verification.fix_loop", count=2)
+    _seed_counter(wid, "spec_approval_reject_loop", count=1)
+    handed: list[str] = []
+
+    def held(app, item, coro):
+        deps.discard(coro)
+        handed.append(item)
+        # Stands in for the live walk the claim bracket checks for.
+        app.state.tasks[item] = asyncio.get_event_loop().create_future()
+
+    monkeypatch.setattr(deps, "spawn", held)
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+
+    assert r.status_code == 200, r.text
+    assert handed == [wid]
+    assert _counter(wid, "verification.fix_loop") == 2
+    assert _counter(wid, "spec_approval_reject_loop") == 1

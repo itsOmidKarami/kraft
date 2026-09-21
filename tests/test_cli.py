@@ -28,7 +28,7 @@ def test_kraft_home_defaults_under_the_user(monkeypatch):
 def _bundle(monkeypatch, tmp_path) -> Path:
     bundled = tmp_path / "_bundled" / "templates"
     bundled.mkdir(parents=True)
-    (bundled / "registry.yaml").write_text("hooks: {}\n")
+    (bundled / "policy.yaml").write_text("loops: {}\n")
     (bundled / "access.yaml").write_text("bind: 0.0.0.0\n")
     # A local checkout should never have a live notify.yaml here, but nothing
     # stops `just install`'s `cp -R templates ...` from copying one if one
@@ -52,7 +52,7 @@ def test_seed_home_copies_the_bundle_once(monkeypatch, tmp_path):
     home = tmp_path / "home" / "templates"
 
     assert cli.seed_home(home) is True
-    assert (home / "registry.yaml").read_text() == "hooks: {}\n"
+    assert (home / "policy.yaml").read_text() == "loops: {}\n"
     # per-machine, holds a password hash: never shipped in the bundle
     assert not (home / "access.yaml").exists()
     # per-machine, usually holds a bearer token in the URL: never shipped either
@@ -77,15 +77,15 @@ def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
-    (home / "registry.yaml").write_text("hooks: {mine: 1}\n")
+    (home / "policy.yaml").write_text("loops: {mine: 1}\n")
 
     assert cli.seed_home(home) is False
-    assert (home / "registry.yaml").read_text() == "hooks: {mine: 1}\n"
+    assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
 
 
 def test_seed_home_says_so_when_there_is_nothing_to_seed_with(monkeypatch, tmp_path):
     """A build that skipped `just install` ships no _bundled/. The server would
-    die on a bare FileNotFoundError for registry.yaml; say what is wrong instead."""
+    die on a bare FileNotFoundError for library.yaml; say what is wrong instead."""
     import pytest
 
     monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "missing")
@@ -112,7 +112,7 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "rename", real_rename)
     assert cli.seed_home(home) is True
-    assert (home / "registry.yaml").exists()
+    assert (home / "policy.yaml").exists()
 
 
 def test_seeding_records_the_version_it_seeded_from(monkeypatch, tmp_path):

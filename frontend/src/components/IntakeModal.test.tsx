@@ -461,9 +461,7 @@ describe("IntakeModal", () => {
     await userEvent.click(
       await screen.findByRole("option", { name: /submodule-pointers/ }),
     );
-    expect(
-      screen.getByText(/spec attached → spec_approval satisfied/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/spec attached →/)).toBeInTheDocument();
   });
 
   it("searches the chosen repo's artifacts and submits the picked plan", async () => {
@@ -512,44 +510,6 @@ describe("IntakeModal", () => {
         }),
       ),
     );
-  });
-
-  it("shows a chain preview with the nodes an attachment removes struck through", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      {
-        id: "default",
-        gates: 2,
-        nodes: [
-          {
-            id: "spec",
-            tasks: ["on.spec.requested"],
-            gate_after: "spec_approval",
-          },
-          {
-            id: "plan",
-            tasks: ["on.plan.requested"],
-            gate_after: "plan_approval",
-          },
-          {
-            id: "implementation",
-            tasks: ["on.implementation.start"],
-            gate_after: null,
-          },
-        ],
-      },
-    ]);
-    renderModal();
-
-    await fillBasics();
-    await userEvent.type(
-      screen.getByLabelText("spec"),
-      ".engineering/specs/x.md{Enter}",
-    );
-
-    const struckSpec = await screen.findByText("spec", { selector: "s" });
-    expect(struckSpec).toBeInTheDocument();
-    expect(screen.getByText("plan").tagName).not.toBe("S");
-    expect(screen.getByText("implementation").tagName).not.toBe("S");
   });
 
   // Kraft-ene04. A V1 chain has no `gate_after`: its gate is a node of its

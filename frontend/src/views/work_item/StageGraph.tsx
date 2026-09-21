@@ -13,13 +13,13 @@ import type { ChainNode, KraftEvent, WorkerSession, WorkItem } from "../../types
  * Trimmed-node placeholders (21's dimmed `spec` with a `–` glyph, Kraft-1brd):
  * a node an attachment satisfied at intake never enters `chain_definition`,
  * so it needs the *template*'s own node list to know it existed at all.
- * `GET /templates/{id}` (`api.getTemplate`) already returns that shape, keyed
- * by `chain_template` -- fetched here rather than carried on the detail
- * payload since it is only needed for this rare state.
+ * `GET /templates/{id}/resolved` (`api.getResolvedTemplate`) returns that
+ * list, keyed by `chain_template` -- fetched here rather than carried on the
+ * detail payload since it is only needed for this rare state.
  */
 
-/** A node the template lists that the live chain never got — its gate was
- *  already satisfied by an attachment at intake (`templates.materialize`). */
+/** A node the template lists that the live chain never got — an attachment
+ *  covered it at intake (`ResolvedChain.materialize`). */
 type TrimmedNode = { id: string; trimmed: true };
 
 function useFullNodeList(item: WorkItem, liveNodes: ChainNode[]): (ChainNode | TrimmedNode)[] {
@@ -29,7 +29,7 @@ function useFullNodeList(item: WorkItem, liveNodes: ChainNode[]): (ChainNode | T
     let cancelled = false;
     setTemplateIds(null);
     api
-      .getTemplate(item.chain_template)
+      .getResolvedTemplate(item.chain_template)
       .then((t) => {
         if (!cancelled) setTemplateIds(t.nodes.map((n) => n.id));
       })

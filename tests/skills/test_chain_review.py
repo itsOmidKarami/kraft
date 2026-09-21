@@ -1,22 +1,18 @@
-"""The chain-review skill tells a headless agent which gate names and hook
-points are legal. Those two sets live in code (`templates.GATE_NAMES`) and in
-config (`templates/registry.yaml`). If they drift apart, the skill teaches the
-agent to emit a chain the validator rejects — and nothing else would catch it.
+"""The chain-review skill: what it tells a headless agent about the chain
+tail it reviews. Its revised-tail format is parked under Template Schema V1
+(the skill says so); these pin the text that describes it, so the feature can
+come back without relearning the bugs behind each line.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
-from kraft.templates import load_registry
-
 SKILL = (
     Path(__file__).resolve().parents[2] / "src" / "kraft" / "skills" / "chain-review" / "SKILL.md"
 )
-REGISTRY = Path(__file__).resolve().parents[2] / "templates" / "registry.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -33,13 +29,6 @@ def test_the_skill_exists_and_has_frontmatter(text):
 
 def test_it_limits_gate_names_to_the_supplied_chain(text):
     assert "already present in the supplied chain" in text
-
-
-def test_every_hook_point_it_cites_is_registered(text):
-    cited = set(re.findall(r"`(on\.[\w.]+)`", text))
-    assert cited, "skill cites no hook points"
-    known = set(load_registry(REGISTRY).hooks)
-    assert cited <= known, f"skill cites unregistered hooks: {sorted(cited - known)}"
 
 
 def test_it_documents_carried_over_fields(text):

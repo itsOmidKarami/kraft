@@ -41,7 +41,7 @@ _KNOWN_KINDS = {"docker"}
 #: Kraft's own vars, plus whichever auth var this install's `claude` CLI
 #: actually uses, forwarded bare (`-e NAME`, no value) so docker copies each
 #: from its own process env -- never written as a literal value into
-#: registry.yaml or repos.yaml. A var absent from that env is simply not set
+#: repos.yaml. A var absent from that env is simply not set
 #: in the container; `docker run -e NAME` for an unset NAME is not an error.
 #: `CLAUDE_CODE_OAUTH_TOKEN` is what a subscription install's headless
 #: `claude -p` authenticates with (`claude setup-token`) -- the interactive

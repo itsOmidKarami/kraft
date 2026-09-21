@@ -43,7 +43,6 @@ async def test_fix_loop_succeeds_first_cycle(tmp_path, monkeypatch, database, ru
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -82,7 +81,6 @@ async def test_fix_loop_cap_breach(tmp_path, monkeypatch, database, run_dirs, re
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -130,7 +128,6 @@ async def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -200,7 +197,6 @@ async def test_resume_mid_fix_loop_reenters_and_continues_budget(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         adopted={},
         bd_cwd=str(tracker),
         policy=pol,
@@ -241,7 +237,6 @@ async def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch, database, run_d
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -277,7 +272,6 @@ async def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(
             database,
             run_dirs,
             work_item_id=wid,
-            registry=None,
             bd_cwd=str(tracker),
             policy=pol,
         )
@@ -296,7 +290,6 @@ async def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
         start_index=0,

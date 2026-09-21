@@ -4,7 +4,6 @@ from kraft import policy as _policy
 from kraft import store
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
-from kraft.templates import Registry
 from kraft.templates.models import ExecNode, ResolvedNode
 
 
@@ -133,7 +132,6 @@ async def resume_once(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     adopted: dict,
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
@@ -162,7 +160,6 @@ async def resume_once(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         policy=policy,
@@ -175,7 +172,6 @@ async def resume(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     adopted: dict,
     bd_cwd: str | None = None,
     policy: _policy.Policy | None = None,
@@ -186,7 +182,6 @@ async def resume(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         adopted=adopted,
         bd_cwd=bd_cwd,
         policy=policy,
@@ -197,7 +192,6 @@ async def resume(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -208,7 +202,6 @@ async def resume(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,

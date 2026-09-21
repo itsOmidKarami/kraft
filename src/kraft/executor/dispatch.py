@@ -115,7 +115,7 @@ def _last_own_round_head(
     ran at, if every scope in that dispatch finished `done` -- otherwise
     `None` (C7 review fix, Kraft-s7c04.14).
 
-    `prompts._last_review_session` is the wrong source for this: it is keyed
+    `prompts.last_review_session` is the wrong source for this: it is keyed
     on `(work_item_id, hook_point)` alone, not `node_id`, and takes the
     latest `done` row regardless of its siblings. For a while (C1,
     Kraft-s7c04.8, reverted 2026-09-16) `on.test.run` was dispatched by both
@@ -640,6 +640,19 @@ async def dispatch_node(
         instruction += prompts.deferred_findings_note(
             deferred_findings(db, work_item_row["id"], loop_severities)
         )
+    # A reviewing task's continuity, delivered only when it declares it
+    # (`AgentTask.inputs`): what the node's last measurement found, tagged so a
+    # repeat keeps its identity (the tags `walk` then trusts, and no others --
+    # `findings.resolve_identity`), and where its own last review wrote. Only on
+    # its own pass: a fix loop's or recovery's override is a new job.
+    if instruction_override is None:
+        if AgentInput.CARRIED_FINDINGS in t.inputs:
+            carried, _, _ = last_measurement(db, work_item_row["id"], node.id)
+            instruction += prompts.carried_findings_note(carried or [])
+        if AgentInput.PREVIOUS_REVIEW in t.inputs:
+            instruction += prompts.previous_review_note(
+                prompts.last_review_session(db, work_item_row["id"], task.path)
+            )
     item_override = (
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )
@@ -1278,8 +1291,15 @@ def collect_findings(
                 found.extend(replace(f, jobs=(job,)) for f in parsed)
             elif row["status"] in _FAILING_STATUSES:
                 task = tasks[hook].task
-                command = row["command"] or (
-                    task.command if isinstance(task, SubprocessTask) else None
+                # An agent's recorded command is its whole argv, prompt and all:
+                # nothing to re-run, and a prompt that carries last round's
+                # findings (`inputs: [carried_findings]`) would fold into this
+                # finding and grow it every round.
+                command = (
+                    None
+                    if isinstance(task, AgentTask)
+                    else row["command"]
+                    or (task.command if isinstance(task, SubprocessTask) else None)
                 )
                 blind_jobs.append(
                     _findings.BlindJob(
@@ -1406,9 +1426,8 @@ def last_measurement(
     The whole findings, not their fingerprints: the caller derives the tags it
     used to get, and the messages and severities are what `walk._carry_severity`
     floors a repeat's rating against (Kraft-s7c04.3) -- and what
-    `prompts.carried_findings_note` handed the next reviewer (Kraft-s7c04.1)
-    until V1 left that function with no caller (see
-    `findings.resolve_identity`).
+    `prompts.carried_findings_note` hands the next reviewer that declares
+    `inputs: [carried_findings]` (Kraft-s7c04.1).
     Returning both would make this the second reader of `findings_measured` in
     this module, which `unresolved_findings_steer`'s docstring forbids for good
     reason -- three readers of one event is three things to keep in step.
@@ -1459,17 +1478,9 @@ def last_measurement(
     return None, False, None
 
 
-#: The fix loop's judge hook (2026-09-12-verify-fix-loop-judge-design):
-#: dispatched directly by `kraft.executor.walk.walk_node`, the same way
-#: `on.implementation.start` is -- not from a node's own `tasks` list, so it
-#: never contaminates `collect_findings`/`needs_context_question`'s per-task
-#: reads, and every node with a `fix_loop` gets it unconditionally (spec
-#: decision 4: no new policy field).
-JUDGE_HOOK = "on.fix_loop.judge"
-
 #: The escalation hook's own `hook_point`. Not a node task and not dispatched
 #: from a `tasks` list -- `escalate.dispatch` writes it directly -- so, like
-#: `JUDGE_HOOK`, its session rows sit in the same `(node, round)` scan that
+#: the node's judge, its session rows sit in the same `(node, round)` scan that
 #: `needs_context_question` reads and must be skipped there. Named rather than
 #: spelled out at each site because `reattach` compares against it too.
 ESCALATION_HOOK = "escalation"

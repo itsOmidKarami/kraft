@@ -1,6 +1,7 @@
 """Opening a merge request, reading its CI, merging it.
 
-One `Forge` shape, several backends, chosen by name in `registry.yaml`. A
+One `Forge` shape, several backends, chosen per repo from the `forge` its
+`repos.yaml` entry records (`run.backend_for`). A
 direct-API backend is deliberately absent: `glab` and `gh` already hold their
 credentials in the OS keyring, and a backend that talked to the REST API itself
 would make Kraft responsible for a token — where it is read from, and that it

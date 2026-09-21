@@ -779,7 +779,7 @@ async def mr_rebase(
     themselves -- one behavior, this call site doesn't need its own copy of
     that catch.
 
-    When the node declares `rebase_bounce_to` and the rebase moved the base,
+    When the node declares `on_base_changed` and the rebase moved the base,
     that is reported (`BASE_MOVED`) rather than swallowed, so the node stops
     before its later steps run against a base nobody re-verified.
     """

@@ -13,7 +13,6 @@ import yaml
 from support.harness import make_repo
 
 from kraft import auth, capabilities, cli, client, doctor, harness
-from kraft.templates import Registry
 
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
@@ -43,7 +42,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "access.yaml",
         "pidfile",
         "mcp token",
-        "agent: claude",
+        "agent: codex_default",
         "mcp server",
         "shell completion",
         "bd",
@@ -152,25 +151,11 @@ def test_doctor_passes_a_repo_entry_carrying_a_retired_key(app, tmp_path, retire
     assert any(r["name"].startswith("repo ") and r["ok"] for r in checks)
 
 
-def _bind_auto_forge(tmp_path):
-    """Put a `backend: auto` forge hook in the registry the server loaded.
-
-    `conftest.app` points KRAFT_TEMPLATES_DIR at `fake_templates_dir`, whose
-    back half is all `builtin: noop` — so without this the forge check is
-    correctly silent and neither test below would exercise anything.
-    """
-    path = tmp_path / "templates" / "registry.yaml"
-    data = yaml.safe_load(path.read_text())
-    data["hooks"]["on.mr.open"] = {"kind": "forge", "handler": "open_mr", "backend": "auto"}
-    path.write_text(yaml.safe_dump(data))
-
-
-def test_doctor_fails_when_an_auto_hook_has_no_forge_recorded(app, tmp_path):
+def test_doctor_fails_when_a_forge_task_has_no_forge_recorded(app, tmp_path):
     """make_repo never adds an origin, so `probe_repo` records forge: None —
     the state every pre-forge repos.yaml entry is already in."""
     repo = make_repo(tmp_path, name="noforge")
     asyncio.run(client.ensure_repo(str(repo)))
-    _bind_auto_forge(tmp_path)
 
     row = _by_name(asyncio.run(doctor.run_checks()), "forge noforge")
 
@@ -186,7 +171,6 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
         check=True,
     )
     asyncio.run(client.ensure_repo(str(repo)))
-    _bind_auto_forge(tmp_path)
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
     glab = stub_dir / "glab"
@@ -212,7 +196,6 @@ def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):
     data = yaml.safe_load(path.read_text())
     next(r for r in data["repos"] if r["name"] == "devforge")["forge"] = "fake"
     path.write_text(yaml.safe_dump(data))
-    _bind_auto_forge(tmp_path)
 
     row = _by_name(asyncio.run(doctor.run_checks()), "forge devforge")
 
@@ -221,12 +204,14 @@ def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):
     assert "nothing" in row["detail"]
 
 
-def test_no_forge_check_when_nothing_is_bound_to_auto(app, tmp_path):
-    """The check is about a binding the operator actually has: a registry with
-    no `auto` forge hook must not grow a row per repo telling them to fix
-    something they are not using."""
+def test_no_forge_check_when_no_chain_runs_a_forge_task(app, tmp_path):
+    """The check is about forge work the operator's chains actually do: a
+    library whose chains run no forge task must not grow a row per repo telling
+    them to fix something they are not using. `quick-task` runs none."""
     repo = make_repo(tmp_path, name="quiet")
     asyncio.run(client.ensure_repo(str(repo)))
+    assert "forge quiet" in _names(asyncio.run(doctor.run_checks()))
+    (tmp_path / "templates" / "chains" / "default.yaml").unlink()
 
     names = _names(asyncio.run(doctor.run_checks()))
 
@@ -287,51 +272,6 @@ def test_doctor_json_is_the_check_list(app, tmp_path, capsys):
     assert code == (1 if any(not row["ok"] for row in rows) else 0)
 
 
-def test_hooks_check_names_a_hook_left_on_noop(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "registry.yaml").write_text(
-        "hooks:\n"
-        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
-    )
-    live = tmp_path / "templates"
-    live.mkdir()
-    (live / "registry.yaml").write_text(
-        "hooks:\n  on.spec.requested: { kind: builtin, handler: noop }\n"
-    )
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
-    assert check["ok"] is True  # an operator's choice, not a failure
-    assert "on.spec.requested" in check["detail"]
-
-
-def test_hooks_check_names_a_hook_missing_from_the_live_registry(tmp_path, monkeypatch):
-    """The shape a registry seeded before a hook point existed takes: the key is
-    not on the placeholder, it is not there at all. `live.get(h)` returns None,
-    which is not a noop, so this case used to exempt itself from the very check
-    written for it (Kraft-zmb)."""
-    bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "registry.yaml").write_text(
-        "hooks:\n"
-        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
-    )
-    live = tmp_path / "templates"
-    live.mkdir()
-    (live / "registry.yaml").write_text(
-        "hooks:\n  on.env.prepare: { kind: builtin, handler: env_setup }\n"
-    )
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
-    assert check["ok"] is True
-    assert "on.spec.requested" in check["detail"]
-    assert "missing entirely" in check["detail"]
-
-
 def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeypatch):
     """CI has no `$KRAFT_HOME/templates`, and `_config_checks` returns early
     there. Every row it can emit must still emit, or a caller reading the run by
@@ -343,157 +283,39 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
 
     rows = asyncio.run(doctor.run_checks())
     assert _by_name(rows, "templates")["ok"] is False
-    hooks = _by_name(rows, "hooks")
-    assert hooks["ok"] is True and hooks["skipped"] is True
+    chains = _by_name(rows, "chain_templates")
+    assert chains["ok"] is True and chains["skipped"] is True
 
 
-def test_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
-    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
-    check = _by_name(asyncio.run(doctor.run_checks()), "hooks")
-    assert check["skipped"] is True
-
-
-def test_dead_hooks_check_names_a_hook_noop_in_both_registries(tmp_path, monkeypatch):
-    """`on.review.mr.run`'s actual shape: noop in the *shipped* registry too, so
-    `_hooks_check`'s `real` set never contains it and it can never be reported
-    there (spec "Why the existing doctor check cannot catch C6"). This is the
-    check that has to catch it instead.
-    """
-    bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "registry.yaml").write_text(
-        "hooks:\n"
-        "  on.review.mr.run: { kind: builtin, handler: noop }\n"
-        "  on.spec.requested: { kind: agent, command: claude, skill: spec, artifact: spec }\n"
-    )
-    (bundled / "templates" / "default.yaml").write_text(
-        "id: default\n"
-        "nodes:\n"
-        "  - id: mr_checks\n"
-        "    tasks: [on.review.mr.run]\n"
-        "  - id: spec\n"
-        "    tasks: [on.spec.requested]\n"
-    )
-    live = tmp_path / "templates"
-    live.mkdir()
-    # Live is unchanged from shipped for `on.review.mr.run` (dead by design) but
-    # has drifted to noop for `on.spec.requested` too -- `_hooks_check`'s own
-    # question, and this check must not also claim it.
-    (live / "registry.yaml").write_text(
-        "hooks:\n"
-        "  on.review.mr.run: { kind: builtin, handler: noop }\n"
-        "  on.spec.requested: { kind: builtin, handler: noop }\n"
-    )
-    (live / "default.yaml").write_text(
-        "id: default\n"
-        "nodes:\n"
-        "  - id: mr_checks\n"
-        "    tasks: [on.review.mr.run]\n"
-        "  - id: spec\n"
-        "    tasks: [on.spec.requested]\n"
-    )
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
-
-    rows = asyncio.run(doctor.run_checks())
-    dead = _by_name(rows, "dead_hooks")
-    assert dead["ok"] is True  # operator's own chain, not a doctor failure
-    assert "on.review.mr.run" in dead["detail"]
-    assert "on.spec.requested" not in dead["detail"]
-    # A noop core hook is a plugin extension point by design: information, not
-    # an instruction to implement or remove it.
-    assert "unless a plugin binds it" in dead["detail"]
-    assert "drop it" not in dead["detail"]
-
-    hooks = _by_name(rows, "hooks")
-    assert "on.spec.requested" in hooks["detail"]
-    assert "on.review.mr.run" not in hooks["detail"]
-
-
-def test_dead_hooks_check_ignores_a_noop_hook_no_chain_dispatches(tmp_path, monkeypatch):
-    bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "registry.yaml").write_text(
-        "hooks:\n  on.review.security.run: { kind: builtin, handler: noop }\n"
-    )
-    (bundled / "templates" / "default.yaml").write_text(
-        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
-    )
-    live = tmp_path / "templates"
-    live.mkdir()
-    (live / "registry.yaml").write_text(
-        "hooks:\n  on.review.security.run: { kind: builtin, handler: noop }\n"
-    )
-    (live / "default.yaml").write_text(
-        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
-    )
-    monkeypatch.setattr(doctor, "BUNDLED", bundled)
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
-
-    check = _by_name(asyncio.run(doctor.run_checks()), "dead_hooks")
-    assert check["ok"] is True
-    assert "on.review.security.run" not in check["detail"]
-
-
-def test_dead_hooks_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
-    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
-    check = _by_name(asyncio.run(doctor.run_checks()), "dead_hooks")
-    assert check["skipped"] is True
-
-
-def test_hooks_check_and_dead_hooks_check_are_disjoint_by_construction():
-    """The two checks select on opposite conditions of the *shipped* binding:
-    `_hooks_check` only ever selects a hook that is real (not noop) in shipped;
-    `_dead_hooks_check` only ever selects one that is noop in shipped. Proven
-    against the predicates themselves, over every combination of shipped/live
-    state, rather than against one sample registry -- a "don't double-report"
-    test over two independently-defined predicates is unsatisfiable by
-    construction unless checked this way.
-    """
-    for shipped_is_noop in (True, False):
-        for live_state in ("noop", "absent", "real"):
-            shipped_is_real = not shipped_is_noop
-            live_is_noop = live_state == "noop"
-            live_is_absent = live_state == "absent"
-            hooks_check_selects = shipped_is_real and (live_is_noop or live_is_absent)
-            dead_hooks_check_selects = shipped_is_noop and live_is_noop
-            assert not (hooks_check_selects and dead_hooks_check_selects)
+def _chains(root: Path) -> Path:
+    d = root / "chains"
+    d.mkdir(parents=True)
+    return d
 
 
 def test_chain_templates_check_names_a_node_missing_from_the_live_copy(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "default.yaml").write_text(
-        "id: default\n"
-        "nodes:\n"
-        "  - id: spec\n"
-        "    tasks: [on.spec.requested]\n"
-        "  - id: chain_review\n"
-        "    tasks: [on.chain.review_ready]\n"
+    (_chains(bundled / "templates") / "default.yaml").write_text(
+        "id: default\nnodes:\n  - {id: spec, extends: spec}\n  - {id: review, extends: review}\n"
     )
     live = tmp_path / "templates"
-    live.mkdir()
-    (live / "default.yaml").write_text(
-        "id: default\nnodes:\n  - id: spec\n    tasks: [on.spec.requested]\n"
-    )
+    (_chains(live) / "default.yaml").write_text("id: default\nnodes:\n  - {id: spec}\n")
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
 
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
-    assert check["ok"] is True  # an operator's own template, not a failure
-    assert "chain_review" in check["detail"]
+    assert check["ok"] is True  # an operator's own chain, not a failure
+    assert "review" in check["detail"]
     assert "default.yaml" in check["detail"]
 
 
 def test_chain_templates_check_names_a_template_missing_entirely(tmp_path, monkeypatch):
     bundled = tmp_path / "bundled"
-    (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "quick-task.yaml").write_text(
-        "id: quick-task\nnodes:\n  - id: implementation\n    tasks: [on.implementation.start]\n"
+    (_chains(bundled / "templates") / "quick-task.yaml").write_text(
+        "id: quick-task\nnodes:\n  - {id: implementation}\n"
     )
     live = tmp_path / "templates"
-    live.mkdir()
-    # live has no quick-task.yaml at all
+    _chains(live)  # live has no quick-task.yaml at all
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
 
@@ -502,10 +324,25 @@ def test_chain_templates_check_names_a_template_missing_entirely(tmp_path, monke
     assert "quick-task.yaml missing entirely" in check["detail"]
 
 
-def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkeypatch):
+def test_chain_templates_check_reads_only_chains(tmp_path, monkeypatch):
+    """A top-level file -- `library.yaml`, whose `nodes:` is a mapping, or a
+    legacy chain left beside it -- is not a chain the V1 loader reads."""
     bundled = tmp_path / "bundled"
     (bundled / "templates").mkdir(parents=True)
-    (bundled / "templates" / "intake.yaml").write_text("enabled: false\ninterval_s: 300\n")
+    (bundled / "templates" / "legacy.yaml").write_text("id: legacy\nnodes:\n  - {id: x}\n")
+    live = tmp_path / "templates"
+    live.mkdir()
+    monkeypatch.setattr(doctor, "BUNDLED", bundled)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+
+    check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
+    assert check["ok"] is True
+    assert check["skipped"] is True  # no chains/ in the bundle, nothing to diff
+
+
+def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkeypatch):
+    bundled = tmp_path / "bundled"
+    (_chains(bundled / "templates") / "notes.yaml").write_text("enabled: false\n")
     live = tmp_path / "templates"
     live.mkdir()
     monkeypatch.setattr(doctor, "BUNDLED", bundled)
@@ -516,7 +353,7 @@ def test_chain_templates_check_ignores_files_with_no_nodes_list(tmp_path, monkey
     assert check["skipped"] is True  # no chain templates found at all, nothing to diff
 
 
-def test_chain_templates_check_is_skipped_without_a_bundled_registry(tmp_path, monkeypatch):
+def test_chain_templates_check_is_skipped_without_a_bundle(tmp_path, monkeypatch):
     monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
     check = _by_name(asyncio.run(doctor.run_checks()), "chain_templates")
     assert check["skipped"] is True
@@ -644,45 +481,81 @@ def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
     assert "kraft admin init" in check["detail"]
 
 
-# ── _agent_checks: per-harness, not a single hardcoded claude check ─────────
+# ── _agent_checks: per selected harness profile, not a hardcoded claude ─────
 
 
-def _reg(**agents) -> Registry:
-    return Registry(hooks={hook: {"kind": "agent", "harness": hid} for hook, hid in agents.items()})
+def _live(tmp_path, monkeypatch, profiles: dict[str, str], selected: list[str]) -> Path:
+    """A live templates dir whose one chain runs one agent task per profile in
+    `selected`, and whose `harnesses.yaml` declares `profiles` (id -> provider)."""
+    live = tmp_path / "templates"
+    tasks = {
+        f"t{i}": {"kind": "agent", "harness": p, "prompt": "p"} for i, p in enumerate(selected)
+    }
+    (live / "chains").mkdir(parents=True)
+    (live / "library.yaml").write_text(yaml.safe_dump({"tasks": tasks}))
+    nodes = [
+        {"id": f"n{i}", "kind": "exec", "tasks": [{"id": "t", "extends": t}]}
+        for i, t in enumerate(tasks)
+    ]
+    (live / "chains" / "c.yaml").write_text(yaml.safe_dump({"id": "c", "nodes": nodes}))
+    harnesses = {pid: {"provider": provider} for pid, provider in profiles.items()}
+    (live / "harnesses.yaml").write_text(yaml.safe_dump({"harnesses": harnesses}))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(live))
+    return live
 
 
-def test_doctor_checks_every_referenced_harness():
+def test_doctor_checks_every_selected_profile(tmp_path, monkeypatch):
     """doctor.py used to hardcode `claude` and which() it once. A chain with a
-    codex node must be told about codex, not reassured about claude."""
-    rows = doctor._agent_checks(
-        _reg(**{"on.spec.requested": "claude", "on.implementation.start": "codex"}),
-        harness.load(None),
+    codex task must be told about codex, not reassured about claude."""
+    _live(tmp_path, monkeypatch, {"a": "claude", "b": "codex"}, ["a", "b"])
+    rows = doctor._agent_checks()
+    assert {r["name"] for r in rows} == {"agent: a", "agent: b"}
+
+
+def test_doctor_does_not_check_a_profile_nothing_selects(tmp_path, monkeypatch):
+    """A declared profile no chain selects is not degraded by its executable
+    being absent from PATH."""
+    _live(tmp_path, monkeypatch, {"a": "claude", "idle": "gemini"}, ["a"])
+    rows = doctor._agent_checks()
+    assert not any(r["name"] == "agent: idle" for r in rows)
+
+
+def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
+    """A profile that names its `executable:` launches that, not the
+    provider's default command, so that is what has to be on PATH."""
+    live = _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    (live / "harnesses.yaml").write_text(
+        yaml.safe_dump({"harnesses": {"a": {"provider": "claude", "executable": "my-claude"}}})
     )
-    assert {r["name"] for r in rows} == {"agent: claude", "agent: codex"}
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    row = _by_name(doctor._agent_checks(), "agent: a")
+    assert not row["ok"]
+    assert "my-claude" in row["detail"]
 
 
-def test_doctor_does_not_check_a_harness_nothing_references():
-    """gemini.yaml ships, but a registry that never names it is not degraded
-    by gemini being absent from PATH."""
-    rows = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), harness.load(None))
-    assert not any(r["name"] == "agent: gemini" for r in rows)
+def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
+    _live(tmp_path, monkeypatch, {}, ["ghost"])
+    row = _by_name(doctor._agent_checks(), "agent: ghost")
+    assert not row["ok"]
+    assert "harnesses.yaml" in row["detail"]
 
 
-def test_a_quarantined_harness_file_is_reported():
+def test_a_quarantined_harness_file_is_reported(tmp_path, monkeypatch):
+    _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
     hs = harness.HarnessSet(
         valid=harness.load(None).valid,
         invalid={"broken": "broken.yaml: unknown kind 'nope'"},
     )
-    rows = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), hs)
-    row = next(r for r in rows if r["name"] == "harness: broken")
+    monkeypatch.setattr(doctor.harness, "load", lambda _dir: hs)
+    row = _by_name(doctor._agent_checks(), "harness: broken")
     assert not row["ok"]
     assert "unknown kind" in row["detail"]
 
 
 def test_the_dev_fake_still_passes_loudly(monkeypatch, tmp_path):
-    """The existing `_agent_check` behaviour that must survive: a fixtures
-    symlink reads as OK *and says so*, because a dev instance looking like it
-    works is spending no tokens on purpose."""
+    """A fixtures symlink reads as OK *and says so*, because a dev instance
+    looking like it works is spending no tokens on purpose."""
+    _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
     fixtures = tmp_path / "fixtures" / "bin"
     fixtures.mkdir(parents=True)
     real = tmp_path / "fixtures" / "fake-claude.sh"
@@ -690,32 +563,37 @@ def test_the_dev_fake_still_passes_loudly(monkeypatch, tmp_path):
     real.chmod(0o755)
     (fixtures / "claude").symlink_to(real)
     monkeypatch.setenv("PATH", str(fixtures))
-    row = doctor._agent_checks(_reg(**{"on.spec.requested": "claude"}), harness.load(None))[0]
+    row = _by_name(doctor._agent_checks(), "agent: a")
     assert row["ok"]
     assert "spends no tokens" in row["detail"]
 
 
+#: `capabilities.MANIFEST` is empty since V1, so the row is checked against a stand-in.
+_MANIFEST = (capabilities.Capability(version="1.0.0", name="thing", what="does it", how="add it"),)
+
+
 def test_capabilities_row_names_what_the_install_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
     (tmp_path / ".seeded-version").write_text("0.1.0\n")
     row = doctor._capabilities_check()
     assert row["ok"] is True, "not upgrading is a choice, not a failure"
     assert "0.1.0" in row["detail"]
-    for c in capabilities.MANIFEST:
-        assert c.name in row["detail"]
-        assert c.how in row["detail"]
+    assert "thing" in row["detail"] and "add it" in row["detail"]
 
 
 def test_capabilities_row_is_quiet_when_the_stamp_is_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
-    (tmp_path / ".seeded-version").write_text(capabilities.MANIFEST[-1].version + "\n")
+    (tmp_path / ".seeded-version").write_text("1.0.0\n")
     row = doctor._capabilities_check()
     assert row["ok"] is True
     assert "up to date" in row["detail"]
 
 
 def test_an_unstamped_home_is_told_everything_rather_than_erroring(tmp_path, monkeypatch):
+    monkeypatch.setattr(capabilities, "MANIFEST", _MANIFEST)
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
     row = doctor._capabilities_check()
     assert row["ok"] is True
-    assert capabilities.MANIFEST[0].name in row["detail"]
+    assert "thing" in row["detail"]

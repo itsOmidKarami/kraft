@@ -7,10 +7,8 @@ import pytest
 from kraft import auth as auth_mod
 
 
-def _broken_template(tdir):
-    (tdir / "broken.yaml").write_text(
-        "id: broken\nnodes:\n  - {id: x, tasks: [on.nope], gate_after: null}\n"
-    )
+def _broken_library(tdir):
+    (tdir / "library.yaml").write_text("tasks: [unclosed\n")
 
 
 def _invalid_policy(tdir):
@@ -22,9 +20,9 @@ def _invalid_policy(tdir):
     [
         pytest.param(
             "invalid_templates",
-            "broken",
-            marks=pytest.mark.api_client(edit_templates=_broken_template),
-            id="a-bad-hook-template",
+            "library.yaml",
+            marks=pytest.mark.api_client(edit_templates=_broken_library),
+            id="an-unreadable-library",
         ),
         pytest.param(
             "invalid_policy",

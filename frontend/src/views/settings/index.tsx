@@ -4,7 +4,6 @@ import { AccessPage } from "./AccessPage";
 import { AppearancePage } from "./AppearancePage";
 import { IntakePage } from "./IntakePage";
 import { NotifyPage } from "./NotifyPage";
-import { PluginsPage } from "./PluginsPage";
 import { PolicyPage } from "./PolicyPage";
 import { ReposPage } from "./ReposPage";
 import "./settings.css";
@@ -13,7 +12,7 @@ import { TemplatesPage } from "./TemplatesPage";
 
 /* ── shell ────────────────────────────────────────────────────────────────── */
 
-/** The Settings index (m10; W7.9 on desktop too): the nine sections with a
+/** The Settings index (m10; W7.9 on desktop too): the eight sections with a
  *  line each, so the "Settings" crumb names a page, not a redirect to Repos. */
 function SettingsIndex() {
   return (
@@ -42,6 +41,8 @@ export function Settings() {
       <Routes>
         <Route index element={<SettingsIndex />} />
         <Route path="templates" element={<Navigate to="/settings/chains" replace />} />
+        {/* The hook-binding editor went with the registry it edited (Template Schema V1). */}
+        <Route path="plugins" element={<Navigate to="/settings/chains" replace />} />
         {SETTINGS_NAV.map((n) => (
           <Route
             key={n.to}
@@ -50,7 +51,6 @@ export function Settings() {
               {
                 repos: <ReposPage />,
                 chains: <TemplatesPage />,
-                plugins: <PluginsPage />,
                 policy: <PolicyPage />,
                 steering: <SteeringPage />,
                 intake: <IntakePage />,

@@ -121,7 +121,7 @@ same pull request, not as a follow-up:
 | Source | Docs page |
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/cli.md` |
-| A `registry.yaml` / `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/config.py`, `policy.py`) | `docsite/configuration.md` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/configuration.md` |
 | A chain template's node fields, or a new default chain | `docsite/concepts.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/harnesses.md` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/agent-integration.md` |

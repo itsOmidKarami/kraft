@@ -51,7 +51,6 @@ async def test_walk_stops_at_first_gate(tmp_path, database, run_dirs, repo):
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
     )
@@ -85,7 +84,6 @@ async def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path, databa
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
     )
@@ -150,7 +148,6 @@ async def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         launch=_launch(tmp_path),
     )

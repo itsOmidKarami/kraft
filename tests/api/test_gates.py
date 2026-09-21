@@ -1,4 +1,4 @@
-"""Gate approve/reject, chain-review splice, and the reject loop."""
+"""Gate approve/reject and the reject loop."""
 
 from __future__ import annotations
 
@@ -313,6 +313,10 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(client, repo):
     assert (
         client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={}).status_code == 422
     )
+    # Refused, not half-applied: the gate is still the one waiting, unrejected.
+    assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "spec_approval"
+    events_so_far = client.get(f"/api/work-items/{wid}/events").json()
+    assert not [e for e in events_so_far if e["type"] == "gate_rejected"]
 
     r = client.post(f"/api/work-items/{wid}/gates/spec_approval/reject", json={"note": "too vague"})
     assert r.status_code == 200, r.text
@@ -333,6 +337,50 @@ def test_gate_reject_requires_note_and_re_runs_the_producer(client, repo):
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["pending_gate"] == "spec_approval"
     assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+
+
+def test_a_gate_approval_is_recorded_naming_its_gate(client, repo):
+    """Carried from the legacy gate spec (`approve-emits-gate-approved`,
+    Ruling 139a): an approval is an event of its own, naming the gate it
+    decided and who decided it -- the timeline, notifications and analytics
+    all read it."""
+    wid = _post_default(client, repo)
+    _await_gate(client, wid, "spec_approval")
+
+    assert client.post(f"/api/work-items/{wid}/gates/spec_approval/approve").status_code == 200
+
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    [approved] = [e for e in evts if e["type"] == "gate_approved"]
+    assert approved["payload"]["gate"] == "spec_approval"
+    assert approved["payload"]["by"] == "human"
+
+
+def _reject_loop_rows(wid: str) -> list[tuple[str, int]]:
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        return conn.execute(
+            "SELECT key, count FROM retry_counters WHERE work_item_id = ? "
+            "AND key LIKE '%reject_loop'",
+            (wid,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+@_reject_cap(escalate=False)
+def test_a_retry_clears_the_reject_loop_its_rejections_counted_on(client, repo):
+    """Kraft-rmpzj (Ruling 67): the key a rejection counts on and the key a
+    retry clears are one key. Two spellings that agree only by coincidence let
+    a retry clear a key nothing bumped -- and every later rejection is then
+    refused at the old, spent cap."""
+    wid = _post_default(client, repo)
+    _reject_past_the_cap(client, wid)
+    counted = _reject_loop_rows(wid)
+    assert [key for key, _ in counted] == ["spec_approval_reject_loop"]
+
+    assert client.post(f"/api/work-items/{wid}/retry", json={}).status_code == 200
+
+    assert _reject_loop_rows(wid) == []
 
 
 @_reject_cap(escalate=False)
@@ -704,13 +752,3 @@ def test_the_mcp_transport_announces_itself_and_the_bare_cli_does_not(monkeypatc
 
     monkeypatch.setenv("KRAFT_CLIENT", "mcp")
     assert transport.http().headers["X-Kraft-Client"] == "mcp"
-
-
-def test_carry_forward_keeps_steps_for_unchanged_tasks():
-    from kraft.templates import carry_forward_node_fields, with_steps
-
-    old = [{"id": "impl", "steps": [["a"], ["b"]], "tasks": ["a", "b"]}]
-    same = with_steps(carry_forward_node_fields(old, [{"id": "impl", "tasks": ["a", "b"]}])[0])
-    assert same["steps"] == [["a"], ["b"]]
-    changed = with_steps(carry_forward_node_fields(old, [{"id": "impl", "tasks": ["b", "a"]}])[0])
-    assert changed["steps"] == [["b", "a"]]

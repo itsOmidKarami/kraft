@@ -444,14 +444,23 @@ async def test_ci_poll_settles_the_node_from_the_pipeline(run_forge, fake_kw, ex
 
 
 async def test_ci_poll_writes_findings_for_a_code_red_pipeline(run_forge, run_dirs):
-    """`on.ci.poll` going code-red feeds the fix-loop plumbing the same way
-    any other measuring task does: one finding per failed job, result_path
-    populated (Kraft-cbr §3)."""
-    await run_forge(forge.FakeForge(ci_states=["failed"], ci_failed_jobs=RED), "ci_poll", "s-f")
+    """A CI wait going code-red feeds the fix-loop plumbing the same way any
+    other measuring task does: one finding per failed job, result_path
+    populated (Kraft-cbr §3), each finding sourced to the task that measured
+    it by its canonical path."""
+    await run_forge(
+        forge.FakeForge(ci_states=["failed"], ci_failed_jobs=RED),
+        "ci_poll",
+        "s-f",
+        hook_point="merge_request_feedback.ci.await_ci",
+    )
 
     payload = json.loads((run_dirs.results / "s-f.json").read_text())
     assert payload["findings"]
     assert "test" in payload["findings"][0]["message"]
+    assert {f["source_plugin"] for f in payload["findings"]} == {
+        "merge_request_feedback.ci.await_ci"
+    }
 
 
 @pytest.mark.parametrize(

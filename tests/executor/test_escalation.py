@@ -38,7 +38,6 @@ def _escalate(it, status="needs_human", *, launch=LAUNCH, **policy_kwargs):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        registry=None,
         policy=_pol(**policy_kwargs),
         launch=launch,
     )
@@ -334,7 +333,7 @@ async def test_resume_after_escalation_drops_a_self_retry_on_a_moved_item(
     )
 
     status = await gates_module.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
     )
 
     assert status == moved_to
@@ -363,7 +362,7 @@ async def test_resume_after_escalation_threads_the_seeded_flag_onto_retry_after_
     )
 
     status = await gates_module.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
     )
 
     assert status == "completed"
@@ -393,7 +392,7 @@ async def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(i
     )
 
     status = await gates_module.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
     )
 
     assert it.status() == "needs_human", "left claimed 'active' with no walk behind it"
@@ -422,7 +421,7 @@ async def test_a_self_retry_forks_at_the_path_it_asked_for(
     )
 
     await gates_module.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
     )
 
     assert it.events("run_forked")[-1]["payload"]["path"] == path
@@ -449,7 +448,7 @@ async def test_a_self_retry_applies_the_override_it_carried(item_on, run_dirs, n
     )
 
     await gates_module.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
     )
 
     [fork] = it.database.read(lambda c: store.run_forks(c, it.id))

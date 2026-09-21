@@ -283,7 +283,7 @@ def parse(data: object, *, where: str, path: Path | None = None) -> Harness:
 def load(harnesses_dir: Path | None) -> HarnessSet:
     """Every harness, overlay-first then bundled, by bare name.
 
-    Per-file validity, like `templates.load_templates`: one malformed harness
+    Per-file validity: one malformed harness
     is quarantined by name with its reason and the rest still load. An
     unusable harness nobody references is not an outage.
     """
@@ -340,8 +340,8 @@ def build_argv(
 
     Order is `capabilities:` declaration order, after the command prefix --
     the file reads as the command line it builds. A capability the harness
-    does not declare is *skipped*, never emitted flagless: `load_registry`
-    already rejected the binding, and a second line of defence here is what
+    does not declare is *skipped*, never emitted flagless: loading the task or
+    profile already refused it, and a second line of defence here is what
     makes the old `agent.py:473` bare-positional bug unrepresentable.
     """
     opts = dict(options or {})

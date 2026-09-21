@@ -1,5 +1,0 @@
-id: quick-task
-nodes:
-  - { id: env_setup,      tasks: [on.env.prepare],         gate_after: null }
-  - { id: implementation, tasks: [on.implementation.start], gate_after: null }
-  - { id: verify,         tasks: [on.test.run],            gate_after: null }

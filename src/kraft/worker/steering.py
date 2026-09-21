@@ -9,9 +9,9 @@ reads or writes a steering file inside a target repository, which is why a name
 containing a path separator is rejected outright.
 
 `validate` and `read` are separate because the text must never be written back
-into `registry.yaml` or `repos.yaml`: those dicts round-trip through
-`GET /registry` and the Settings screens, so resolving into them would inline the
-bodies into the operator's config and delete the names.
+into `repos.yaml`: its dicts round-trip through `GET /repos` and the Settings
+screens, so resolving into them would inline the bodies into the operator's
+config and delete the names.
 """
 
 from __future__ import annotations

@@ -72,9 +72,7 @@ async def test_needs_context_stops_the_item_with_the_question_in_the_reason(
         chain=_quick_task(tmp_path),
         bd_cwd=str(tracker),
     )
-    result = await executor.run(
-        database, run_dirs, work_item_id=wid, registry=None, bd_cwd=str(tracker)
-    )
+    result = await executor.run(database, run_dirs, work_item_id=wid, bd_cwd=str(tracker))
     assert result == "needs_human"
     row = database.read(
         lambda c: c.execute(
@@ -126,7 +124,6 @@ async def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -145,7 +142,6 @@ async def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
         start_index=0,  # "verify"
@@ -184,7 +180,6 @@ async def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -204,7 +199,6 @@ async def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
         start_index=0,  # "verify"
@@ -240,9 +234,7 @@ async def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch, databas
         chain=_quick_task(tmp_path),
         bd_cwd=str(tracker),
     )
-    result = await executor.run(
-        database, run_dirs, work_item_id=wid, registry=None, bd_cwd=str(tracker)
-    )
+    result = await executor.run(database, run_dirs, work_item_id=wid, bd_cwd=str(tracker))
     assert result == "needs_human"
     assert _reason(database, wid) == "needs_context: which database should this target?"
 
@@ -256,7 +248,6 @@ async def test_the_answer_reaches_the_next_launch(tmp_path, monkeypatch, databas
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         start_index=0,  # "implementation"
         steer=steer,

@@ -51,7 +51,6 @@ def walk(database, run_dirs, monkeypatch):
             database,
             run_dirs,
             work_item_id=it.id,
-            registry=None,
             # No stuck escalation: these tests are about the stop, not what
             # answers it.
             policy=policy.Policy(
@@ -80,7 +79,6 @@ def scheduler(stub_app, tmp_path, monkeypatch):
             lambda st, repo: executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
         )
         return stub_app(
-            registry=None,
             templates_dir=tmp_path / "templates",
             skills_dir=tmp_path / "skills",
             policy=None,
@@ -324,7 +322,6 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
         it.run_dirs,
         work_item_id=it.id,
         target=ChainPath.parse(store.materialized_chain_of(it.row()), "ci"),
-        registry=None,
         launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
     )
 
@@ -422,7 +419,6 @@ async def test_the_repository_s_named_reviewer_reaches_the_review_task(
         database,
         run_dirs,
         work_item_id=it.id,
-        registry=None,
         launch=executor.LaunchContext(repo_entry=entry, steering_dir=None),
     )
 

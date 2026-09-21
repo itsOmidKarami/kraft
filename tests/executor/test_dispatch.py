@@ -710,7 +710,6 @@ async def _dispatch_seeded(
         database,
         run_dirs,
         work_item_id="w1",
-        registry=None,
         start_index=start,
         launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=templates / "steering"),
     )
@@ -897,34 +896,3 @@ async def test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_s
 
     assert await _dispatch_one(it) == "done"
     assert agent_mod.SAFETY_RULES in launched["work.do.write"]
-
-
-# -- `templates.with_inputs`: parked, no `src/` caller (templates/__init__.py) ------
-
-
-@pytest.mark.parametrize(
-    ("binding", "hook", "expected"),
-    [
-        # Kraft-ouoqx: repo test scopes must not replace a reviewer's command.
-        ({"kind": "subprocess", "command": ["my-reviewer"]}, "on.review.local.run", {}),
-        (
-            {"kind": "subprocess", "command": ["uv", "run", "pytest", "-q"]},
-            "TEST_HOOK",
-            {"test_scopes": {"channel": "argv"}},
-        ),
-        # An explicit inputs table is authoritative.
-        ({"kind": "subprocess", "command": ["x"], "inputs": {}}, "TEST_HOOK", {}),
-        ({"kind": "agent", "harness": "claude"}, "on.review.local.run", {}),
-    ],
-    ids=[
-        "a-non-test-hook-runs-its-own-command",
-        "the-test-hook-takes-repo-scopes",
-        "an-explicit-inputs-table-wins",
-        "an-agent-hook-takes-none",
-    ],
-)
-def test_with_inputs_resolves_a_bindings_inputs(binding, hook, expected):
-    from kraft import templates
-
-    hook = templates.TEST_HOOK if hook == "TEST_HOOK" else hook
-    assert templates.with_inputs(binding, hook) == expected

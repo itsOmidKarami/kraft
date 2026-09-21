@@ -73,12 +73,10 @@ LINE_BUDGET = 800
 #: ceiling). A file that isn't here has never earned an exception: it is
 #: held to LINE_BUDGET from the day it's added.
 LINE_BUDGET_ALLOWLIST: dict[str, int] = {
-    "tests/support/harness.py": 837,
     "tests/adapters/test_agent.py": 856,
     "tests/executor/test_gates.py": 903,
-    "tests/executor/test_dispatch.py": 930,
+    "tests/executor/test_dispatch.py": 898,
     "tests/executor/test_walk.py": 1287,
-    "tests/templates/test_legacy.py": 2412,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size

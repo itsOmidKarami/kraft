@@ -182,13 +182,7 @@ def test_the_seeded_library_has_no_lint_errors():
 def test_task_configuration_resolves_from_the_library_alone(tmp_path):
     """The seeded chain's tasks carry their own typed configuration, so a
     directory holding only `library.yaml` and `chains/` resolves every one of
-    them -- there is no `registry.yaml` for a hook name to be looked up in.
-
-    Deliberately not pinned to `registry-is-not-a-task-configuration-source`.
-    That requirement says the *system* shall not use `registry.yaml` as a task
-    configuration source, and it still does: the legacy loader is live and the
-    file is still seeded. This proves only that a V1 library needs no registry.
-    Task 5 pins the requirement, once `registry.yaml` leaves the seed."""
+    them -- there is no `registry.yaml` for a hook name to be looked up in."""
     (tmp_path / CHAINS_DIR).mkdir()
     (tmp_path / LIBRARY_FILE).write_text((SEEDED / LIBRARY_FILE).read_text())
     (tmp_path / CHAINS_DIR / "default.yaml").write_text(
@@ -207,6 +201,19 @@ def test_task_configuration_resolves_from_the_library_alone(tmp_path):
     # An agent task names its harness profile itself, which is the field a
     # registry hook binding used to hold.
     assert all(t.harness for t in tasks if isinstance(t, AgentTask))
+
+
+def test_the_seed_ships_no_legacy_configuration():
+    """A fresh home seeds only V1: no hook registry, and no chain outside
+    `chains/` -- the two files the legacy loader read."""
+    assert not (SEEDED / "registry.yaml").exists()
+    legacy_chains = [
+        p.name
+        for p in SEEDED.glob("*.yaml")
+        if isinstance(data := yaml.safe_load(p.read_text()), dict)
+        and isinstance(data.get("nodes"), list)
+    ]
+    assert legacy_chains == []
 
 
 # ── the design document's YAML is the seed ──

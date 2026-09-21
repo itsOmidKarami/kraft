@@ -59,7 +59,6 @@ def test_completion_closes_every_sub_bead_the_item_states(bd, tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=None,
             )
             assert result == "completed"
             assert bd.status(sub_a, cwd=tracker) == "closed"
@@ -105,7 +104,6 @@ async def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
     )
     assert result == "completed"
     row = database.read(

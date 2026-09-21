@@ -23,6 +23,15 @@ pytestmark = pytest.mark.api_client(default_setup=False)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _name_in_repos_yaml(tmp_path, client, templates_dir, name: str) -> None:
+    """Connect a repo whose `repos.yaml` entry names steering file `name`."""
+    repo = make_repo(tmp_path)
+    assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
+    repos = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    repos["repos"][0]["steering"] = [name]
+    config.write_yaml(templates_dir / "repos.yaml", repos)
+
+
 def _steering_dir(templates_dir):
     d = templates_dir / "steering"
     d.mkdir(parents=True, exist_ok=True)
@@ -73,30 +82,18 @@ def test_steering_get_404s_on_a_file_that_is_not_there(client):
     assert client.get("/api/steering/nope").status_code == 404
 
 
-def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(client, templates_dir):
+def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(
+    tmp_path, client, templates_dir
+):
     """Names resolve at config-load time, so an oversized body breaks a launch
     nowhere near this screen — the save has to fail here instead."""
     (_steering_dir(templates_dir) / "big.md").write_text("small\n")
-    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
-    registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
-    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/api/registry", json={"hooks": registry["hooks"]})
+    _name_in_repos_yaml(tmp_path, client, templates_dir, "big")
 
     resp = client.put("/api/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)})
     assert resp.status_code == 422
     # the file on disk is the one that still loads, not the one that was refused
     assert (templates_dir / "steering" / "big.md").read_text() == "small\n"
-
-
-def test_deleting_a_steering_file_a_hook_still_names_is_refused(client, templates_dir):
-    (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
-    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
-    registry["hooks"]["on.implementation.start"]["steering"] = ["house-style"]
-    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/api/registry", json={"hooks": registry["hooks"]})
-
-    assert client.delete("/api/steering/house-style").status_code == 422
-    assert (templates_dir / "steering" / "house-style.md").is_file()
 
 
 def test_deleting_a_steering_file_nothing_names_succeeds(client, templates_dir):
@@ -178,22 +175,19 @@ def test_an_unexpected_validation_error_leaves_the_steering_file_untouched(
 
     from kraft.api.routes import settings as settings_mod
 
-    monkeypatch.setattr(settings_mod, "load_registry", boom)
+    monkeypatch.setattr(settings_mod.config_mod, "load_repos", boom)
     with pytest.raises(RuntimeError):
         client.put("/api/steering/house-style", json={"body": "REPLACED\n"})
     assert (templates_dir / "steering" / "house-style.md").read_text() == "prefer stdlib\n"
 
 
-def test_a_refused_steering_save_never_writes_the_real_file(client, templates_dir):
+def test_a_refused_steering_save_never_writes_the_real_file(tmp_path, client, templates_dir):
     """Not "writes it and puts it back" — never writes it. Asserted by watching
     the path itself rather than its final contents, which a rollback also
     satisfies."""
     steering = _steering_dir(templates_dir)
     (steering / "big.md").write_text("small\n")
-    registry = yaml.safe_load((templates_dir / "registry.yaml").read_text())
-    registry["hooks"]["on.implementation.start"]["steering"] = ["big"]
-    (templates_dir / "registry.yaml").write_text(yaml.safe_dump(registry))
-    client.put("/api/registry", json={"hooks": registry["hooks"]})
+    _name_in_repos_yaml(tmp_path, client, templates_dir, "big")
 
     target = steering / "big.md"
     before = target.stat().st_mtime_ns
@@ -304,8 +298,8 @@ def test_a_stray_unreadable_entry_does_not_break_an_unrelated_save(client, templ
 
 
 def test_a_delete_referenced_only_by_repos_yaml_is_refused(tmp_path, client, templates_dir):
-    """The registry is one of two files that name steering; `repos.yaml` is the
-    other, and only the registry leg was covered."""
+    """`repos.yaml` is what names a steering file, so a delete it still
+    depends on is refused -- and allowed once nothing names it."""
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
     repo = make_repo(tmp_path)
     assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201

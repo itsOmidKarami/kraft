@@ -300,6 +300,10 @@ class TemplateLibrary:
     def chain_ids(self) -> tuple[str, ...]:
         return tuple(self._chains)
 
+    def chain_file(self, id: str) -> Path:
+        """The file chain `id` was read from -- what an edit of it rewrites."""
+        return self._chains[id].source.file
+
     def component_names(self, namespace: str | Namespace) -> tuple[str, ...]:
         return tuple(self._components[Namespace(namespace)])
 

@@ -423,14 +423,10 @@ def scope_note(task: AgentTask, repo_entry: dict | None) -> str:
     return _SCOPE_NOTE.format(rows=rows)
 
 
-#: PARKED under Template Schema V1: `_last_review_session`'s other readers,
-#: `carried_findings_note`, `previous_review_note` and `fix_attempt_note`, have
-#: no `src/` caller. `review_package` is live again, delivered to an agent task
-#: that declares `inputs: [review_package]` (`AgentTask.inputs`, Ruling 47);
-#: carried findings and the continuity note have no declaration yet, and
-#: `findings.resolve_identity` records what their absence costs
-#: (`carried-findings-are-delivered-to-a-reviewing-task`,
-#: `continuity-note-is-delivered-to-a-resumed-reviewer`, both unenforced).
+#: Delivered to an agent task that declares them (`AgentTask.inputs`):
+#: `review_package`, `carried_findings` (`carried_findings_note`) and
+#: `previous_review` (`previous_review_note`). `fix_attempt_note` is still
+#: PARKED: no input declares it.
 
 
 #: What the reviewer said last round, handed back to it (Kraft-s7c04.1). The
@@ -456,17 +452,12 @@ _CARRIED_FINDINGS = (
 
 
 def carried_findings_note(previous: list[_findings.Finding]) -> str:
-    """The previous round's findings, for the reviewer about to measure again.
+    """The previous round's findings, for the reviewer about to measure again,
+    delivered to a task declaring `inputs: [carried_findings]`
+    (`carried-findings-are-delivered-to-a-reviewing-task`).
 
     "" when there is no previous round, so a work item's first and most
-    important review is byte-identical to what it is today.
-
-    **Parked, not live.** No `src/` caller under Template Schema V1: delivering the
-    previous round's findings was keyed on legacy hook *names*, and V1 has no name to key
-    on. The change under review came back as a declared `AgentTask` input
-    (`inputs: [review_package]`); this has no declaration yet
-    (`carried-findings-are-delivered-to-a-reviewing-task`, unenforced), which is why it is
-    kept rather than deleted. Do not read it as describing what runs today.
+    important review carries nothing extra.
     """
     if not previous:
         return ""
@@ -521,12 +512,14 @@ def _session_note(row, template: str, summary_template: str) -> str:
 
 
 def previous_review_note(row) -> str:
-    """**Parked: see `carried_findings_note`.**"""
+    """The task's own last completed session, by path, for a task declaring
+    `inputs: [previous_review]`; "" on its first session
+    (`continuity-note-is-delivered-to-a-resumed-reviewer`)."""
     return _session_note(row, _PREVIOUS_REVIEW, _PREVIOUS_REVIEW_SUMMARY)
 
 
 def fix_attempt_note(row) -> str:
-    """**Parked: see `carried_findings_note`.**"""
+    """**Parked:** no `AgentTask` input declares it, so nothing delivers it."""
     return _session_note(row, _FIX_ATTEMPT, _FIX_ATTEMPT_SUMMARY)
 
 
@@ -536,7 +529,7 @@ def fix_attempt_note(row) -> str:
 _REVIEWED_STATUS = ("done", "done_with_concerns")
 
 
-def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
+def last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row | None:
     """The previous *completed* session on this hook, or None (Kraft-s7c04.1):
     where `review_package`'s range starts from a task's second session on.
 
@@ -610,7 +603,7 @@ def review_package(
     )
     if row is None or not row["base_ref"]:
         return None
-    previous = _last_review_session(db, work_item_id, task_hook)
+    previous = last_review_session(db, work_item_id, task_hook)
     since = previous["head_sha"] if previous else None
     if since and git_read(worktree, "rev-parse", "--verify", f"{since}^{{commit}}") is None:
         since = None

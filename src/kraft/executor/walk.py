@@ -27,7 +27,6 @@ from kraft.executor.context import (
     Steer,
 )
 from kraft.store import _now as _now
-from kraft.templates import Registry
 from kraft.templates.models import (
     ExecNode,
     ForgeTask,
@@ -1054,10 +1053,9 @@ async def _walk_node_once(
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
         # defects onto one identity and fire the stuck detector on a fiction
-        # (Kraft-s7c04.2). Under V1 nothing shows a reviewer its previous
-        # findings at all -- see `findings.resolve_identity`, which says what
-        # that costs and why the call stays: as it stands this strips nothing
-        # because no `same_as` can arrive.
+        # (Kraft-s7c04.2). A reviewer is shown the tags of this node's last
+        # measurement when its task declares `inputs: [carried_findings]`
+        # (`dispatch.dispatch_node`), which is exactly `previous_found`.
         found = _findings.resolve_identity(
             found, known={f.fingerprint for f in previous_found or []}
         )
@@ -1550,7 +1548,6 @@ async def run_once(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
     start_index: int | None = None,
     start_step: int | None = None,
@@ -1814,7 +1811,6 @@ async def run(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
     start_index: int | None = None,
     start_step: int | None = None,
@@ -1830,7 +1826,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         start_step=start_step,
@@ -1846,7 +1841,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -1857,7 +1851,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -23,7 +22,6 @@ from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
-from kraft.templates import Registry
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
@@ -351,76 +349,32 @@ async def report_progress(wid: str, body: Progress, request: Request):
     return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}
 
 
-def _node_has_agent_task(node: dict, registry: Registry) -> bool:
-    """Whether this node's own dispatch could ever consume a Steer note.
-
-    `Steer.take()` (executor.py) is read only from the agent-kind branch of
-    `_dispatch`. A node whose own tasks are all subprocess/forge/builtin, and
-    which has no `fix_loop` (a fix cycle always falls back to the agent-kind
-    `on.implementation.start`), has nothing on it that will ever read one.
-    """
-    if node.get("fix_loop"):
-        return True
-    hooks = [*node.get("tasks", []), *(node.get("on_failure") or [])]
-    return any(registry.hooks.get(h, {}).get("kind") == "agent" for h in hooks)
-
-
-def steer_reachable(row, registry: Registry, node_id: str | None = None) -> bool:
+def steer_reachable(row, node_id: str | None = None) -> bool:
     """Whether a Steer note given at `node_id` -- this item's current node by
     default -- could reach any agent task from there to the end of its chain.
 
-    One entry point over both chain shapes, so the `GET /work-items/{id}`
-    field the UI hides a control on and the 409 the steer route raises cannot
-    disagree. A V1 row answers off its frozen snapshot; a legacy row answers
-    off `chain_definition` through `_steer_reachable` below. Fails open
-    (`True`) when the current node is not in its own chain, or when there is no
-    current node at all -- an unmapped edge is not a reason to hide a control
-    that may still work.
+    One entry point, so the `GET /work-items/{id}` field the UI hides a
+    control on and the 409 the steer route raises cannot disagree. Answers off
+    the item's frozen snapshot. Fails open (`True`) when the current node is
+    not in its own chain, or when there is no current node at all -- an
+    unmapped edge is not a reason to hide a control that may still work. A row
+    with no snapshot was filed by the legacy loader and no V1 walk can run it,
+    so nothing on it can ever read a note.
     """
     start_id = node_id if node_id is not None else row["current_node_id"]
     if start_id is None:
         return True
     v1 = store.materialized_chain_of(row)
-    if v1 is not None:
-        reached = False
-        for node in v1.chain.nodes:
-            reached = reached or node.id == start_id
-            if reached and any(isinstance(t.task, AgentTask) for t in node.tasks()):
-                return True
-        # Only "not reachable" when the node was actually found: an id that is
-        # in no node of this chain takes the fail-open path.
-        return not reached
-    chain = json.loads(row["chain_definition"] or "{}")
-    nodes = chain.get("nodes")
-    if not nodes or not any(n["id"] == start_id for n in nodes):
-        return True
-    return _steer_reachable(nodes, start_id, registry)
-
-
-def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bool:
-    """Whether a Steer note given at `start_id` could reach *any* agent task
-    from there to the end of the chain.
-
-    `run()` threads one `Steer` object through every node from `start_index`
-    on (`carried`, executor.py `run`) -- it is consumed by whichever agent-kind
-    dispatch runs first, not necessarily the one it was given on. `open_mr`
-    (forge-kind, no fix_loop) has nothing of its own, but `human_review` right
-    after it does; a note given while stopped at `open_mr` still reaches that
-    agent if `open_mr` and `mr_checks` succeed on retry. Checking only the
-    current node (Kraft-bz9b's first pass) refused that as dead on arrival.
-
-    Not a guarantee of delivery -- if `start_id` fails again, the walk never
-    reaches the later node and the note is dropped same as before -- only
-    that it is not *structurally* impossible, which is what the API can 409
-    on and the UI can hide a control for.
-    """
+    if v1 is None:
+        return False
     reached = False
-    for n in nodes:
-        if n["id"] == start_id:
-            reached = True
-        if reached and _node_has_agent_task(n, registry):
+    for node in v1.chain.nodes:
+        reached = reached or node.id == start_id
+        if reached and any(isinstance(t.task, AgentTask) for t in node.tasks()):
             return True
-    return False
+    # Only "not reachable" when the node was actually found: an id that is
+    # in no node of this chain takes the fail-open path.
+    return not reached
 
 
 @api_router.post("/work-items/{wid}/steer")
@@ -465,7 +419,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
         found = row["current_node_id"] in store.chain_node_ids(row)
-        if found and not steer_reachable(row, st.registry):
+        if found and not steer_reachable(row):
             raise HTTPException(
                 409,
                 f"node {row['current_node_id']!r} has no agent task downstream to steer; "
@@ -551,7 +505,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                             st.db,
                             st.run_dirs,
                             work_item_id=wid,
-                            registry=st.registry,
                             policy=st.policy,
                             launch=deps.launch(st, row["repo"]),
                             bd_cwd=deps.bd_cwd(),
@@ -590,7 +543,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         # No position: the walk resumes at the item's own
                         # cursor, so work that completed before the pause is
@@ -696,7 +648,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 409, f"all {limit} slots are busy; pause something or raise max_concurrent"
             )
         precheck_steer = (body.steer or "").strip() or None
-        if precheck_steer is not None and not steer_reachable(row, st.registry, node_id):
+        if precheck_steer is not None and not steer_reachable(row, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -727,7 +679,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # `gates.auto_escalate_stuck` perform it once its `await` on this
         # session's run actually returns (Kraft code-review finding).
         steer = (body.steer or "").strip() or None
-        if steer is not None and not steer_reachable(row, st.registry, node_id):
+        if steer is not None and not steer_reachable(row, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -765,7 +717,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     limit = st.policy.max_concurrent if st.policy else 1
 
     steer = (body.steer or "").strip() or None
-    if steer is not None and not steer_reachable(row, st.registry, node_id):
+    if steer is not None and not steer_reachable(row, node_id):
         # Explicit only: the seeded-findings and last-rejection fallbacks
         # below are Kraft's own carry-forward, not something the caller just
         # typed and needs told.
@@ -854,7 +806,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                             st.db,
                             st.run_dirs,
                             work_item_id=wid,
-                            registry=st.registry,
                             policy=st.policy,
                             launch=deps.launch(st, row["repo"]),
                             bd_cwd=deps.bd_cwd(),
@@ -890,7 +841,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                         work_item_id=wid,
                         target=target,
                         override=override,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         policy=st.policy,
                         steer=steer,
@@ -1113,7 +1063,6 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                             st.db,
                             st.run_dirs,
                             work_item_id=wid,
-                            registry=st.registry,
                             bd_cwd=deps.bd_cwd(),
                             start_index=node_index + 1,
                             policy=st.policy,
@@ -1199,7 +1148,6 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
                         policy=st.policy,
                         launch=deps.launch(st, row["repo"]),
@@ -1310,7 +1258,6 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
             st.run_dirs,
             work_item_id=wid,
             cursor=cursor,
-            registry=st.registry,
             policy=st.policy,
             launch=deps.launch(st, row["repo"]),
             bd_cwd=deps.bd_cwd(),

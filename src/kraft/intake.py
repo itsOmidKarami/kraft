@@ -173,7 +173,6 @@ async def _start(app, repo: dict, row: dict) -> str | None:
                     st.db,
                     st.run_dirs,
                     work_item_id=wid,
-                    registry=st.registry,
                     bd_cwd=deps.bd_cwd(),
                     policy=st.policy,
                     launch=deps.launch(st, repo["path"]),

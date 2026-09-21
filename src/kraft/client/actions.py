@@ -407,6 +407,6 @@ async def set_node_overrides(
 
 
 async def reload_templates() -> dict:
-    """Reread every chain template and the hook registry from disk into the
-    running server, no restart."""
+    """Reread the template library from disk into the running server, no
+    restart."""
     return await transport._act("/templates/reload")

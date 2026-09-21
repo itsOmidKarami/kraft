@@ -181,12 +181,6 @@ def main() -> int:
         # a plan entry (per invocation) overrides them when present. Default
         # stays "done" so every test that sets neither is unaffected.
         status = entry.get("status") or os.environ.get("KRAFT_FAKE_AGENT_STATUS", "done")
-        # chain_review's own decision lives inside its artifact envelope, not
-        # this outer per-task result -- a global KRAFT_FAKE_AGENT_STATUS aimed
-        # at the node under test must not also starve chain_finalized of the
-        # gate it needs (same reasoning as fixtures/fake-claude.sh).
-        if fields.get("Hook point") == "on.chain.review_ready":
-            status = "done"
         result = {"status": status}
         concerns = entry.get("concerns") or os.environ.get("KRAFT_FAKE_AGENT_CONCERNS")
         if concerns:

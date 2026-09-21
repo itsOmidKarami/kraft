@@ -18,7 +18,6 @@ def _resume(database, run_dirs, it, *, repo_entry=NO_SETUP, **kwargs):
         database,
         run_dirs,
         work_item_id=it.id,
-        registry=None,
         adopted={},
         launch=executor.LaunchContext(repo_entry=repo_entry, steering_dir=None),
         **kwargs,

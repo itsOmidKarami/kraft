@@ -13,7 +13,6 @@ from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import scope_policy
 from kraft.store import _now as _now
-from kraft.templates import Registry
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 
 logger = logging.getLogger(__name__)
@@ -43,20 +42,8 @@ def pending_gate(db, work_item_id: str, evts: list | None = None) -> str | None:
     return None
 
 
-def reject_loop_key(gate: str) -> str:
-    """The `retry_counters` key a gate's reject loop counts under.
-
-    One spelling, two writers. `apply_rejection` bumps it and
-    `api/routes/lifecycle.py`'s retry clears it, and they had the f-string each
-    -- `f"{gate}_reject_loop"` here and `f"{node.id}_reject_loop"` there. Those
-    agree only because a V1 gate's node id *is* its gate name, which is true today
-    and is exactly the kind of coincidence that stops being true quietly: a retry
-    that cleared a key nothing bumped leaves the gate re-opening onto a spent
-    counter, and every rejection after that is refused forever (Kraft-ko7j §A4).
-    `store.retry_after_cap`'s docstring names this function rather than a third
-    spelling of the same format string.
-    """
-    return f"{gate}_reject_loop"
+#: The one definition lives in the store, which both of its sites can import.
+reject_loop_key = store.reject_loop_key
 
 
 def gate_node_index(nodes: Sequence[ResolvedNode], gate: str) -> int:
@@ -236,7 +223,6 @@ async def review_gates(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -402,7 +388,6 @@ async def review_gates(
                 db,
                 run_dirs,
                 work_item_id=work_item_id,
-                registry=registry,
                 policy=policy,
                 launch=launch,
                 bd_cwd=bd_cwd,
@@ -768,7 +753,6 @@ async def auto_escalate_stuck(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -888,7 +872,6 @@ async def auto_escalate_stuck(
         run_dirs,
         work_item_id=work_item_id,
         cursor=cursor,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -902,7 +885,6 @@ async def resume_after_escalation(
     *,
     work_item_id: str,
     cursor: int,
-    registry: Registry,
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     bd_cwd: str | None = None,
@@ -1036,7 +1018,6 @@ async def resume_after_escalation(
                 # The override the route validated when the agent asked,
                 # applied as a direct `/retry` would (Kraft-vvj32).
                 override=override_from_record(carried) if carried else None,
-                registry=registry,
                 steer=steer,
                 seeded=seeded,
                 escalated=True,

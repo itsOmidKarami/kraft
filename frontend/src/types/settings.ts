@@ -1,3 +1,5 @@
+import type { ChainNode } from "./work_item";
+
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
 export interface TestScope {
@@ -54,58 +56,36 @@ export interface RepoProbe {
   project: string | null;
 }
 
-export interface TemplateNode {
-  id: string;
-  tasks: string[];
-  /** Ordered groups; `tasks` is the same list flattened (`templates.with_steps`). */
-  steps?: string[][];
-  gate_after: string | null;
-  fix_loop?: string | null;
-  on_failure?: string[];
-  reject_to?: string | null;
-  auto_escalate?: boolean;
-  auto_escalate_stuck?: boolean;
-  auto_escalate_delay_s?: number;
-  /** Any node key the form doesn't render (e.g. `rebase_bounce_to` on
-   *  `open_mr` in `default.yaml`) still round-trips: the serializer
-   *  writes every own-key of a node object, known or not, so editing one
-   *  node never silently drops a key this form doesn't know about. */
-  [key: string]: unknown;
-}
-
+/** One saved chain as `GET /templates` lists it: its resolved nodes in the
+ *  board's `ChainNode` shape (`store.node_view`), or the error that stops it
+ *  resolving. */
 export interface TemplateSummary {
   id: string;
-  nodes: TemplateNode[];
+  nodes: ChainNode[];
   gates: number;
+  /** Absent or null when the chain resolves. */
+  error?: string | null;
 }
 
-export interface TemplateValidation {
+/** One chain file as its author wrote it (`GET /templates/{id}`). */
+export interface ChainFile {
   id: string;
-  valid: boolean;
-  error: string | null;
-  /** Every node task that is not in the registry, named by node. */
-  unresolved: { node: string; task: string }[];
+  file: string;
+  text: string;
+  chain: Record<string, unknown>;
 }
 
-export interface HookBinding {
-  kind: "builtin" | "agent" | "subprocess" | "forge";
-  handler?: string;
-  command?: string | string[];
-  interactive?: boolean;
-  timeout?: number;
-  repos?: Record<string, { enabled: boolean; command?: string | string[] | null }>;
-  /** Agent kind only. Steering files' "who uses it" (Steering page) reads
-   *  this to name a hook the same way it names a repo. */
-  steering?: string[];
+/** A problem `GET /templates/lint` or `POST /templates/resolve` reports. */
+export interface TemplateIssue {
+  file: string;
+  chain: string | null;
+  message: string;
 }
 
-export interface HookRun {
-  work_item_id: string;
-  node_id: string;
-  round: number;
-  status: string;
-  wall_ms: number | null;
-  created_at: string;
+/** `POST /templates/resolve`: every chain that resolved, and every issue. */
+export interface ResolveResult {
+  chains: { id: string; nodes: ChainNode[] }[];
+  issues: TemplateIssue[];
 }
 
 export interface SteeringFile {

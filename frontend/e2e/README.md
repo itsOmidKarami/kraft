@@ -11,7 +11,7 @@ helpers — `REPO`, `REPO_NAME`, `connectRepo`, `createItem` — live in
 | `chain.spec.ts` | create a `quick-task` item against a sample repo with a failing test, watch it reach `work_item_completed`, open the linked session summary |
 | `planning.spec.ts` | a `default`-chain item reaching `spec_approval`, "Review spec" → Documents tab, rejecting the gate (re-runs the spec node, returns to the same gate), approving into `plan_approval`, and "Review plan" |
 | `lifecycle.spec.ts` | pause / steer / resume a running agent, and a deep link answered by the SPA fallback |
-| `regression.spec.ts` | every Settings page's write path (repos, templates, plugins, policy, steering, access, notify, appearance) |
+| `regression.spec.ts` | every Settings page's write path (repos, chains, policy, steering, access, notify, appearance) |
 | `search.spec.ts` | Ctrl-K → a real index hit → the document viewer; the advanced kind filter |
 | `board-responsive.spec.ts` | the peek overlays the board without moving a row |
 | `phone.visual.spec.ts` | the phone contract at 390x844: no sideways scroll, 44px touch targets, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), a **real** diff wrapping. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so this is the only place the media queries are real |
@@ -57,7 +57,7 @@ Env it sets for the child `python -m kraft`:
 | --- | --- |
 | `KRAFT_PORT` | ephemeral by default; pin one explicitly via `KRAFT_PORT` |
 | `KRAFT_RUN_DIR` | `<tmp>/run` |
-| `KRAFT_TEMPLATES_DIR` | fake templates dir (quick-task + default + registry + policy) |
+| `KRAFT_TEMPLATES_DIR` | fake templates dir (the V1 library, its chains, harness profiles and policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |

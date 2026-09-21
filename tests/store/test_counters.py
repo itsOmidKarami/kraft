@@ -91,40 +91,24 @@ async def test_done_with_concerns_is_not_capped_out_by_a_sibling_breach(database
 
 async def test_clear_loop_counters_deletes_key_and_ci_counters_leaves_gate(database):
     """.25: `clear_loop_counters` is the piece `retry_after_cap` extracts --
-    it must clear `key`, `ci_wait:<node_id>` and `ci_infra:<node_id>`, and
-    leave any gate-reject counter alone (that is `.22`'s question, not this
-    one's -- spec §2)."""
-    keys = ("verify_fix_loop", "ci_wait:verify", "ci_infra:verify", "spec_approval_reject_loop")
+    it must clear `key` and `ci_infra:<node_id>`, and leave any gate-reject
+    counter alone (that is `.22`'s question, not this one's -- spec §2)."""
+    keys = ("verify.fix_loop", "ci_infra:verify", "spec_approval_reject_loop")
     for key in keys:
         await _bump(database, key)
-    await database.write(lambda c: store.clear_loop_counters(c, "w1", "verify", "verify_fix_loop"))
-    assert [_counter(database, key) for key in keys[:3]] == [None] * 3
+    await database.write(lambda c: store.clear_loop_counters(c, "w1", "verify", "verify.fix_loop"))
+    assert [_counter(database, key) for key in keys[:2]] == [None] * 2
     assert _counter(database, "spec_approval_reject_loop") is not None, (
         "clear_loop_counters must not touch a gate-reject counter"
     )
 
 
 async def test_clear_loop_counters_with_no_key_still_clears_ci_counters(database):
-    """A node with no fix_loop (`key=None`) still has ci_wait/ci_infra rows
-    that a bounce must clear."""
-    await _bump(database, "ci_wait:mr_checks")
+    """A node with no fix_loop (`key=None`) still has a ci_infra row that a
+    restart must clear."""
+    await _bump(database, "ci_infra:mr_checks")
     await database.write(lambda c: store.clear_loop_counters(c, "w1", "mr_checks", None))
-    assert _counter(database, "ci_wait:mr_checks") is None
-
-
-async def test_retry_after_cap_clears_the_gate_reject_counter_too(database):
-    """Kraft-ko7j §A4: without this the cap becomes a dead end one step out —
-    the counter is spent, the gate re-opens after every retry, and every
-    rejection after that is refused forever."""
-    await _bump(database, "spec_approval_reject_loop", attempts=1)
-    await _bump(database, "verify_fix_loop", attempts=1)
-    await database.write(
-        lambda c: store.retry_after_cap(
-            c, "w1", "spec", "verify_fix_loop", None, gate_key="spec_approval_reject_loop"
-        )
-    )
-    assert _counter(database, "verify_fix_loop") is None
-    assert _counter(database, "spec_approval_reject_loop") is None
+    assert _counter(database, "ci_infra:mr_checks") is None
 
 
 async def test_retry_after_cap_clears_ci_pipeline_ref(database):

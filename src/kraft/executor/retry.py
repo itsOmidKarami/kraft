@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from kraft import policy as _policy
 from kraft import store
-from kraft.executor import gates, walk
+from kraft.executor import walk
 from kraft.executor.context import LaunchContext, OnApprove
-from kraft.templates import Registry
 from kraft.templates.forks import ChainPath
 from kraft.templates.models import GateNode
 from kraft.templates.retry import RetryOverride
@@ -18,7 +17,6 @@ async def retry(
     *,
     work_item_id: str,
     target: ChainPath | None,
-    registry: Registry,
     override: RetryOverride | None = None,
     steer: str | None = None,
     seeded: bool = False,
@@ -50,7 +48,6 @@ async def retry(
     node = target.node if target is not None else walk.chain_of(row).chain.nodes[0]
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
-    gate_key = gates.reject_loop_key(node.id) if is_gate else None
 
     def _record(c):
         store.retry_after_cap(
@@ -59,7 +56,6 @@ async def retry(
             node.id,
             key,
             steer,
-            gate_key=gate_key,
             escalated=escalated,
             seeded=seeded,
         )
@@ -71,7 +67,6 @@ async def retry(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         start_step=start_step,

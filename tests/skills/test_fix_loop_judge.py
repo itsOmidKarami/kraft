@@ -502,7 +502,6 @@ async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
     )
@@ -518,7 +517,6 @@ async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
         database,
         run_dirs,
         work_item_id=wid,
-        registry=None,
         bd_cwd=str(tracker),
         policy=pol,
         start_index=0,

@@ -66,17 +66,32 @@ def clear_loop_counters(
     """Delete the loop clocks a fresh pass over `node_id` must not inherit.
 
     `key` is the node's `fix_loop`, None for a node without one. The
-    `ci_wait:`/`ci_infra:` keys and the node's stuck-escalation bound
+    `ci_infra:` key and the node's stuck-escalation bound
     (`walk._escalation_key`) are built from `node_id` here rather than threaded
-    in, the same way `retry_after_cap` already does -- see its docstring for
-    why that duplication with `ci_wait.py` is contained rather than spread.
+    in, the same way `retry_after_cap` already does. (No `ci_wait:` key: a
+    wait's clock is its `external_wait_started` event since Task 9.)
     """
-    for counter in (key, f"ci_wait:{node_id}", f"ci_infra:{node_id}", f"{node_id}.escalation"):
+    for counter in (key, f"ci_infra:{node_id}", f"{node_id}.escalation"):
         if counter is not None:
             conn.execute(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                 (work_item_id, counter),
             )
+
+
+def reject_loop_key(gate: str) -> str:
+    """The `retry_counters` key a gate's reject loop counts under.
+
+    One definition for its two sites: `executor.gates.apply_rejection` bumps
+    it, and a retry's run fork (`store.forks.fork_run`) clears it for every
+    gate it reopens. Hand-spelled in each they agreed only because a V1 gate's
+    node id *is* its gate name -- a coincidence that stops being true quietly,
+    and a retry that cleared a key nothing bumped leaves the gate re-opening
+    onto a spent counter, every rejection after it refused forever (Kraft-ko7j
+    §A4, Ruling 67). Here, not in the executor, because the store must not
+    import the executor.
+    """
+    return f"{gate}_reject_loop"
 
 
 def retry_after_cap(
@@ -86,7 +101,6 @@ def retry_after_cap(
     key: str | None,
     steer,
     *,
-    gate_key: str | None = None,
     escalated: bool = False,
     seeded: bool = False,
 ):
@@ -101,29 +115,18 @@ def retry_after_cap(
     the item still has to be put back to work. A plain task failure strands an
     item exactly as hard as a breached cap does (Kraft-bzwi).
 
-    `gate_key` is `executor.gates.reject_loop_key(<gate>)` -- the key
-    `apply_rejection` bumps -- for the node when the node *is* a gate. Named as
-    that function rather than spelled out again here: a third copy of the format
-    string is a third thing to keep equal to the other two.
+    A gate's reject loop is not cleared here: every retry forks its run, and
+    `store.forks.fork_run` clears the reject loop of each gate it reopens --
+    the human's override of that cap (Kraft-ko7j §A4) -- under
+    `reject_loop_key`, the key `apply_rejection` bumps.
 
-    Retry is the human's override of the reject cap too (Kraft-ko7j §A4):
-    without clearing it, the retried node re-opens its gate onto a spent
-    counter and every rejection after that is refused forever.
-
-    Also clears `ci_wait:<node_id>` and `ci_infra:<node_id>` unconditionally,
-    built here from `node_id` rather than threaded in by the caller. A node
-    can have been parked mid-poll, or mid-infra-retry (the persisted
-    `ci_infra:<node_id>` counter Task 4 added), regardless of whether it has
-    a fix loop at all, and a retry is the human's explicit "give this a fresh
-    budget" for both of those too (Kraft-cs4s) -- not just for `key`, which is
-    None for a node with no fix loop.
-
-    Duplicates `ci_wait.py`'s private `_key()` format string (`f"ci_wait:
-    {node_id}"`) and Task 4's `ci_infra:{node_id}` format, the same way
-    `templates._FORGE_BACKENDS`/`adapters.forge.resolve` already duplicate
-    each other's backend name list, with the same "edit both together"
-    comment -- the duplication is contained to this one function and
-    `ci_wait.py`, not spread to every caller that wants a retry.
+    Also clears `ci_infra:<node_id>` unconditionally, built here from
+    `node_id` rather than threaded in by the caller. A node can have been
+    parked mid-infra-retry (the persisted `ci_infra:<node_id>` counter
+    `adapters/forge/run.py` bumps), regardless of whether it has a fix loop at
+    all, and a retry is the human's explicit "give this a fresh budget" for
+    that too (Kraft-cs4s) -- not just for `key`, which is None for a node with
+    no fix loop. The format string is `run.py`'s; edit both together.
 
     `escalated` is True only for a retry `gates.auto_escalate_stuck` performed
     on the escalated agent's own behalf, after its escalation session exited.
@@ -145,11 +148,6 @@ def retry_after_cap(
     (Kraft-11e0), so this only clears counters and narrates the retry.
     """
     clear_loop_counters(conn, work_item_id, node_id, key)
-    if gate_key is not None:
-        conn.execute(
-            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-            (work_item_id, gate_key),
-        )
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
     # "give this a fresh budget" for every node's base-change restarts
     # (`walk._restart_for_base_change`) that it already is for every other
@@ -160,7 +158,7 @@ def retry_after_cap(
         (work_item_id, "%.on_base_changed"),
     )
     # A stale pinned pipeline must not survive a manual retry any more than
-    # the exhausted ci_wait/ci_infra counters above do (Kraft-ivh1).
+    # the exhausted ci_infra counter above does (Kraft-ivh1).
     conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))
     events.append(
         conn,
@@ -193,8 +191,8 @@ def mark_sessions_capped_out(
     # is not license to overwrite its status or lose its concerns text. Scoped
     # to the node's measuring hook points so the fix task's own session
     # (on.implementation.start) is not mislabelled as a capped-out measurement.
-    # 'waiting' is left alone too (Kraft-ivh1): an on.ci.poll session still
-    # waiting on a pipeline has its own separate cap (ci_wait:<node_id>) --
+    # 'waiting' is left alone too (Kraft-ivh1): a forge session still waiting
+    # on a pipeline is bounded by its own wait timeout --
     # this sweep is the node's *fix-cycle* cap, and breaching that is not
     # license to steal a still-legitimately-waiting session out from under
     # the cap that already governs it.
