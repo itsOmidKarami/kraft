@@ -66,8 +66,10 @@ def _bd_stub_dir() -> Path:
     return _bd_stub
 
 
-def child_env(run_dir: Path, templates_dir: Path, bd_cwd: Path, port: int, env: dict | None):
-    """The environment a `python -m kraft` child starts with.
+def child_env(env: dict | None = None) -> dict:
+    """The environment a `python -m kraft` child starts with: this process's
+    own, with `env` on top. Every test that spawns Kraft goes through here
+    (tests/test_suite_config.py checks).
 
     The in-process beads fake (tests/conftest.py) cannot reach a child
     process, so a unit test's child finds the loud stub `bd` first on PATH
@@ -75,14 +77,7 @@ def child_env(run_dir: Path, templates_dir: Path, bd_cwd: Path, port: int, env: 
     already degrades on. `harness.REAL_BD` says which tier this is -- the
     conftest turns it off for every test the fake covers, and leaves it on
     for `e2e("bd")` tests, whose child gets the real bd."""
-    child = {
-        **os.environ,
-        "KRAFT_RUN_DIR": str(run_dir),
-        "KRAFT_TEMPLATES_DIR": str(templates_dir),
-        "KRAFT_BD_CWD": str(bd_cwd),
-        "KRAFT_PORT": str(port),
-        **(env or {}),
-    }
+    child = {**os.environ, **(env or {})}
     if not harness.REAL_BD:
         child["PATH"] = os.pathsep.join([str(_bd_stub_dir()), child.get("PATH", "")])
     return child
@@ -100,7 +95,15 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | Non
     proc = subprocess.Popen(
         [sys.executable, "-m", "kraft"],
         cwd=_REPO_ROOT,
-        env=child_env(run_dir, templates_dir, bd_cwd, port, env),
+        env=child_env(
+            {
+                "KRAFT_RUN_DIR": str(run_dir),
+                "KRAFT_TEMPLATES_DIR": str(templates_dir),
+                "KRAFT_BD_CWD": str(bd_cwd),
+                "KRAFT_PORT": str(port),
+                **(env or {}),
+            }
+        ),
     )
     base = f"http://127.0.0.1:{port}"
     client = httpx.Client(base_url=base, timeout=10.0)

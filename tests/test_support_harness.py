@@ -61,7 +61,7 @@ def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, mon
     the real binary; an `e2e("bd")` test's child keeps the real one."""
     from support import server
 
-    env = server.child_env(tmp_path, tmp_path, tmp_path, 1, None)
+    env = server.child_env()
     stub = shutil.which("bd", path=env["PATH"])
     assert stub == str(server._bd_stub_dir() / "bd")
     refused = subprocess.run([stub, "create"], capture_output=True, text=True, env=env)
@@ -69,7 +69,7 @@ def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, mon
     assert server.BD_STUB_MESSAGE in refused.stderr
 
     monkeypatch.setattr(harness, "REAL_BD", True)
-    real_env = server.child_env(tmp_path, tmp_path, tmp_path, 1, None)
+    real_env = server.child_env()
     assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
 
 

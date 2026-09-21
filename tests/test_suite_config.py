@@ -3,6 +3,7 @@ does what it claims, checked by running a throwaway suite under it."""
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from pathlib import Path
 
@@ -57,3 +58,36 @@ def test_an_async_test_in_either_tree_keeps_its_plain_id(pytester):
     result = pytester.runpytest_inprocess("--collect-only", "-q", "-p", "no:cacheprovider")
     ids = sorted(line for line in result.outlines if "::" in line)
     assert ids == ["plugins/kraft-lite/tests/test_b.py::test_x", "tests/test_a.py::test_x"]
+
+
+def _spawns_kraft(call) -> bool:
+    """`[..., "-m", "kraft", ...]` as the call's first argument."""
+    if not call.args or not isinstance(call.args[0], ast.List):
+        return False
+    words = [e.value for e in call.args[0].elts if isinstance(e, ast.Constant)]
+    return any(words[i : i + 2] == ["-m", "kraft"] for i in range(len(words)))
+
+
+def _env_is_child_env(call) -> bool:
+    env = next((k.value for k in call.keywords if k.arg == "env"), None)
+    func = getattr(env, "func", None)
+    return getattr(func, "id", getattr(func, "attr", None)) == "child_env"
+
+
+def test_every_kraft_child_process_gets_its_env_from_child_env():
+    """A `python -m kraft` child runs outside the in-process beads fake, so its
+    environment has to come from `support.server.child_env`, which puts the
+    loud `bd` stub first on PATH (Kraft-vrcw3). A spawn that builds its own env
+    would reach the real bd from the unit tier."""
+    offenders = []
+    for path in sorted([*(_ROOT / "tests").rglob("*.py"), *(_ROOT / "plugins").rglob("test*.py")]):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and _spawns_kraft(node) and not _env_is_child_env(node):
+                offenders.append(f"{path.relative_to(_ROOT)}:{node.lineno}")
+    assert offenders == []
+    # and the scan does find the spawns it is guarding
+    assert any(
+        _spawns_kraft(n)
+        for n in ast.walk(ast.parse((_ROOT / "tests" / "cli" / "test_admin.py").read_text()))
+        if isinstance(n, ast.Call)
+    )

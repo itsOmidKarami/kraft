@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from support.server import child_env
 
 from kraft import mcp
 
@@ -90,7 +90,6 @@ def test_every_tool_has_a_description_an_agent_can_act_on():
 @pytest.mark.slow
 def test_kraft_mcp_starts_over_real_stdio(tmp_path):
     """`kraft mcp` answers an MCP initialize on stdin/stdout as a real process."""
-    env = {**os.environ, "KRAFT_HOME": str(tmp_path / "home")}
     request = (
         json.dumps(
             {
@@ -112,7 +111,7 @@ def test_kraft_mcp_starts_over_real_stdio(tmp_path):
         capture_output=True,
         text=True,
         timeout=60,
-        env=env,
+        env=child_env({"KRAFT_HOME": str(tmp_path / "home")}),
         cwd=Path(__file__).resolve().parents[1],
     )
     assert '"serverInfo"' in proc.stdout, proc.stderr
