@@ -208,26 +208,20 @@ def test_open_no_symlinks_refuses_an_ancestor_directory_swapped_for_a_symlink(tm
         _open_no_symlinks(root, ".engineering/specs/x.md")
 
 
-def test_read_worktree_file_refuses_a_dot_ref_instead_of_raising(tmp_path):
-    """A `rel` of "." makes `Path(rel).parts` empty, so `open_no_symlinks`'s
-    `parts[-1]` used to raise `IndexError` instead of returning a refusal --
-    exactly the kind of agent-supplied path `read_worktree_file` must never
-    raise on (spec §5: a stray exception here strands the session row)."""
+@pytest.mark.parametrize(
+    ("rel", "reason"),
+    [(".", "unreadable"), ("a\x00b", "absent")],
+    ids=["a-dot-ref", "a-nul-byte-ref"],
+)
+def test_read_worktree_file_refuses_a_bad_ref_instead_of_raising(tmp_path, rel, reason):
+    """Agent-supplied paths `read_worktree_file` must never raise on (spec §5: a
+    stray exception here strands the session row). A `rel` of "." makes
+    `Path(rel).parts` empty, so `open_no_symlinks`'s `parts[-1]` used to raise
+    `IndexError`; a NUL byte makes `resolve()` raise `ValueError`, not
+    `OSError`."""
     from kraft.worker.worktree_read import read_worktree_file
 
-    result, reason = read_worktree_file(tmp_path, ".", max_bytes=1024)
-    assert result is None
-    assert reason == "unreadable"
-
-
-def test_read_worktree_file_refuses_a_nul_byte_ref_instead_of_raising(tmp_path):
-    """A NUL byte in `rel` makes `resolve()` raise `ValueError`, not
-    `OSError` -- also just an unreadable agent-supplied path."""
-    from kraft.worker.worktree_read import read_worktree_file
-
-    result, reason = read_worktree_file(tmp_path, "a\x00b", max_bytes=1024)
-    assert result is None
-    assert reason == "absent"
+    assert read_worktree_file(tmp_path, rel, max_bytes=1024) == (None, reason)
 
 
 def test_artifact_over_the_cap_truncates_without_500ing_on_a_split_codepoint(
