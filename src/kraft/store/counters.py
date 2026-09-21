@@ -36,14 +36,7 @@ def bump_counter(
         "UPDATE retry_counters SET count = ?, updated_at = ? WHERE work_item_id = ? AND key = ?",
         (new_count, now, work_item_id, key),
     )
-    # `escalate_after` comes from the freshly-resolved cap, not the row: it is a
-    # routing hint for the next launch, not a limit the item was admitted under,
-    # so there is nothing to hold steady across an edited policy.yaml.
-    return (
-        new_count,
-        row["started_at"],
-        Cap(row["cap_attempts"], row["cap_wall_s"], escalate_after=cap.escalate_after),
-    )
+    return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
 
 
 def refund_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:

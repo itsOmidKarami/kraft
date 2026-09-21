@@ -40,14 +40,14 @@ DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 
 
-@model(frozen=True)
+@model(frozen=True, config=ConfigDict(extra="forbid"))
 class Cap:
+    """One loop's bound. Unknown keys are refused: a cap field that binds
+    nothing reads as a limit and limits nothing (`escalate_after`, retired with
+    the legacy hook model, was one)."""
+
     attempts: PositiveInt
     wall_clock_s: PositiveInt
-    #: Fix cycles past this one launch on the hook's `escalate_model` instead of
-    #: its `model` (sub-project G spec 6). `None` is "never escalate", which is
-    #: the behaviour of every policy.yaml written before this existed.
-    escalate_after: PositiveInt | None = None
 
 
 @dataclass(frozen=True)
