@@ -199,6 +199,9 @@ repositories:
       test_scopes:
         - paths: [src/**, tests/**]
           command: just test
+    policy:
+      allowed_harnesses: [codex_default, claude_review]
+      deny_tools: [WebFetch]
 workspaces:
   product:
     root: product_root
@@ -222,6 +225,12 @@ def test_repository_table_loads_repositories_and_workspaces(tmp_path):
     assert api.worktree.environment.pass_through == ["NPM_TOKEN"]
     assert api.verification.test_scopes[0].command == "just test"
     assert table.repositories["product_root"].default_chain == "default"
+    # The design document's repository `policy:` block: the repository layer
+    # (`repository-policy-cannot-relax-instance-safety`), Ruling 105's
+    # `deny_tools` included.
+    assert api.policy.allowed_harnesses == ["codex_default", "claude_review"]
+    assert api.policy.deny_tools == ["WebFetch"]
+    assert table.repositories["product_root"].policy is None
 
     workspace = table.workspaces["product"]
     assert workspace.root == "product_root"

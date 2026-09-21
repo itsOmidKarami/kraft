@@ -29,10 +29,12 @@ from pydantic import (
     Field,
     ValidationError,
     ValidationInfo,
+    field_serializer,
     field_validator,
     model_validator,
 )
 
+from kraft.policy import SandboxPolicy, TemplatePolicyOverride
 from kraft.store.repos import RootMergePolicy
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
@@ -179,6 +181,13 @@ class RepoEntry(BaseModel):
     steering: list[str] = []
     default_root_merge_policy: RootMergePolicy = "bump"
     sandbox: Any = None
+    #: The repository policy layer (`repository-policy-cannot-relax-instance-
+    #: safety`): applied after the instance policy and before everything a
+    #: work item or chain adds, and allowed only to tighten what it inherits.
+    #: The entry's own `deny_tools` and `sandbox` above belong to the same layer
+    #: (Ruling 105) and are folded into it by `repository_override`; V1's
+    #: `Repository` has only this block.
+    policy: TemplatePolicyOverride | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -210,6 +219,22 @@ class RepoEntry(BaseModel):
                 raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
         return v
 
+    @field_serializer("policy")
+    def _policy_as_written(self, v: TemplatePolicyOverride | None) -> dict | None:
+        """Only the fields the operator set: Settings re-saves what
+        `load_repos` returns, and a block of `null`s is not what they wrote."""
+        return v.model_dump(exclude_none=True) if v is not None else None
+
+    @model_validator(mode="after")
+    def _one_sandbox(self) -> RepoEntry:
+        """Two sandboxes for one repository cannot both hold; which one
+        silently won would be a guess."""
+        if self.sandbox and self.policy is not None and self.policy.sandbox is not None:
+            raise ValueError(
+                f"repos.yaml: {self.path}: set 'sandbox' or 'policy.sandbox', not both"
+            )
+        return self
+
     @field_validator("sandbox")
     @classmethod
     def _valid_sandbox(cls, v: Any) -> Any:
@@ -231,6 +256,22 @@ class RepoEntry(BaseModel):
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self
+
+
+def repository_override(entry: dict) -> TemplatePolicyOverride | None:
+    """One loaded `repos.yaml` entry's repository policy layer, or None when it
+    restricts nothing: its `policy:` block with the entry's own `deny_tools`
+    and `sandbox` folded in (Ruling 105), so everything downstream reads one
+    policy rather than a policy and two stray keys."""
+    block = dict(entry.get("policy") or {})
+    deny = [*(block.get("deny_tools") or ()), *(entry.get("deny_tools") or ())]
+    if deny:
+        block["deny_tools"] = list(dict.fromkeys(deny))
+    sandbox = entry.get("sandbox")
+    if sandbox:
+        # `load_repos` validated its shape; only `kind` and `image` are read.
+        block["sandbox"] = SandboxPolicy(kind=sandbox["kind"], image=sandbox["image"])
+    return TemplatePolicyOverride.model_validate(block) if block else None
 
 
 def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:

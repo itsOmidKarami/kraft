@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 
 from kraft import config as config_mod
 from kraft import executor, harness, store
+from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import load_registry, load_templates
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
@@ -297,6 +298,39 @@ def _connected(repos: list[dict], path: str) -> dict | None:
         return entry
     resolved = str(Path(path).expanduser().resolve())
     return next((r for r in repos if r["path"] == resolved), None)
+
+
+def item_policy(st, repo: str) -> InstancePolicy:
+    """The policy a work item filed in `repo` starts from: the instance policy
+    with that repository's layer on top (`config.repository_override`), which
+    may only tighten it (`repository-policy-cannot-relax-instance-safety`).
+    Every intake door materializes from this, so the layer is frozen into every
+    item filed in the repository.
+
+    Unlike `launch`, this raises: a `repos.yaml` that cannot be read has
+    restrictions nobody can see, and filing an item without them is exactly
+    the relaxation the layer exists to prevent. A `PolicyError`, so each door
+    answers it the way it answers a chain policy past a ceiling."""
+    base = getattr(st, "instance_policy", None) or InstancePolicy.from_input(InstancePolicyInput())
+    try:
+        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+    except config_mod.ConfigError as exc:
+        raise PolicyError(f"cannot read the repository policy layer: {exc}") from exc
+    entry = _connected(repos, repo)
+    override = config_mod.repository_override(entry) if entry is not None else None
+    if override is None:
+        return base
+    try:
+        return base.apply_template_override(override)
+    except PolicyError as exc:
+        raise PolicyError(f"repos.yaml: {entry['path']}: {exc}", field=exc.field) from exc
+
+
+def item_policy_or_422(st, repo: str) -> InstancePolicy:
+    try:
+        return item_policy(st, repo)
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def _on_approve(st) -> executor.OnApprove:

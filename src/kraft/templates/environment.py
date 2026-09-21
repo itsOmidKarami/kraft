@@ -35,6 +35,7 @@ from pydantic import (
 )
 
 from kraft.harness import Harness
+from kraft.policy import TemplatePolicyOverride
 
 #: One identifier rule for both sides of every reference: the harness-profile
 #: id an `AgentTask.harness` names, the repository id a workspace member
@@ -154,6 +155,13 @@ class Repository(BaseModel):
     verification: Verification = Field(default_factory=Verification)
     steering: list[Identifier] = Field(default_factory=list)
     areas: dict[Identifier, Area] = Field(default_factory=dict)
+    #: The repository policy layer: after the instance policy, before the
+    #: work item's, and only ever tightening what it inherits
+    #: (`repository-policy-cannot-relax-instance-safety`). Where the legacy
+    #: entry's `deny_tools` and `sandbox` live in V1 (Ruling 105). Today's
+    #: daemon still reads the legacy `repos:` list, whose `RepoEntry.policy`
+    #: is this same type (`config.repository_override`).
+    policy: TemplatePolicyOverride | None = None
 
 
 class WorkspaceMember(BaseModel):
