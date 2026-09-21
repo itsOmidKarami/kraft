@@ -5,22 +5,40 @@ run()/resume() already returned."""
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from support.harness import fake_registry, make_repo
+from support.harness import make_repo, v1_chain, v1_item
 
 from kraft import auto_escalate_delay, db, policy, store
 from kraft.paths import RunDirs
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
-_GATE_CHAIN = (
-    '{"template_id": "t", "nodes": ['
-    '{"id": "a", "tasks": [], "gate_after": "g", "auto_escalate": true}]}'
-)
+
+def _gate_chain(repo):
+    """`a` (exec) -> `g` (a gate that declares its own reviewer)."""
+    return v1_chain(
+        [
+            {
+                "id": "a",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "g",
+                "kind": "gate",
+                "auto_review": {
+                    "id": "reviewer",
+                    "kind": "agent",
+                    "harness": "claude",
+                    "prompt": "Review it.",
+                },
+            },
+        ],
+        repo=repo,
+    )
 
 
 @dataclass
@@ -31,12 +49,11 @@ class _Stub:
 async def _stub(tmp_path, *, policy_obj=None) -> _Stub:
     rd = RunDirs(tmp_path / "run").ensure()
     database = await db.Database.open(rd.db)
-    registry = fake_registry(sys.executable, _FAKE_AGENT)
     return _Stub(
         state=SimpleNamespace(
             db=database,
             run_dirs=rd,
-            registry=registry,
+            registry=None,
             templates_dir=tmp_path / "templates",
             skills_dir=tmp_path / "skills",
             policy=policy_obj
@@ -59,20 +76,10 @@ def _run(build, body):
 
 
 async def _seed_awaiting_gate(app, repo, *, wid="w1", auto_gate=True) -> None:
-    await app.state.db.write(
-        lambda c: store.create_work_item(
-            c,
-            id=wid,
-            bead_id=None,
-            title="t",
-            repo=repo,
-            chain_template="t",
-            chain_definition=_GATE_CHAIN,
-            auto_gate=auto_gate,
-        )
-    )
-    await app.state.db.write(lambda c: store.enter_node(c, wid, "a"))
-    await app.state.db.write(lambda c: store.request_gate(c, wid, "a", "g"))
+    await v1_item(app.state.db, _gate_chain(repo), repo=repo, wid=wid, auto_gate=auto_gate)
+    # A V1 gate is its own node, and the walk stands on it.
+    await app.state.db.write(lambda c: store.enter_node(c, wid, "g"))
+    await app.state.db.write(lambda c: store.request_gate(c, wid, "g", "g"))
 
 
 def test_tick_leaves_an_awaiting_gate_item_alone_before_its_delay_elapses(tmp_path, monkeypatch):
