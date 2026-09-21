@@ -37,13 +37,17 @@ describe("styles.css cascade order", () => {
   // `display: flex` outranks `.desktop-only { display: none }`, so the phone
   // block has to hide it again with the same selector, later in the file.
   it("re-hides the document pane's editor controls inside the phone block", () => {
-    const css = readFileSync(join(here, "styles.css"), "utf-8");
+    const css = readFileSync(join(here, "styles.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
     const rule = ".doc-modal-actions > .desktop-only {";
     const base = css.indexOf(`${rule} display: flex`);
     const phone = css.indexOf(`${rule} display: none; }`);
     expect(base).toBeGreaterThan(-1);
     expect(phone).toBeGreaterThan(base);
-    expect(css.lastIndexOf("@media (max-width: 767px) {", phone)).toBeGreaterThan(base);
+    // The innermost @media still open at `phone` must be the phone query.
+    const media = css.lastIndexOf("@media", phone);
+    expect(css.slice(media, css.indexOf("{", media)).trim()).toBe("@media (max-width: 767px)");
+    const between = css.slice(media, phone);
+    expect(between.split("{").length - between.split("}").length).toBe(1);
   });
 });
 
