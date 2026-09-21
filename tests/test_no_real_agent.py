@@ -94,3 +94,33 @@ def test_the_fixture_gives_escalation_a_fake_claude_so_the_guard_has_nothing_to_
     # for raises "declares no <name> capability".
     bundled = yaml.safe_load((harness.BUNDLED / "claude.yaml").read_text())
     assert set(declared["capabilities"]) == set(bundled["capabilities"])
+
+
+@pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
+def test_the_guard_fails_a_test_that_walks_into_a_real_agent(tmp_path, monkeypatch, fix_loop):
+    """Kraft-cpotk: inside a walk, `measure_node` gathers its tasks with
+    `return_exceptions=True`, and turned the guard's `AssertionError` into an
+    ordinary failed task and then a `needs_human` stop -- so a test expecting a
+    stop passed a real-agent regression. The guard has to reach the test."""
+    from support.harness import fake_harness_home, make_repo, v1_chain, v1_walk
+
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["claude"])))
+    agent = {"id": "work", "kind": "agent", "harness": "fake", "prompt": "do it"}
+    node = {"id": "impl", "kind": "exec", "tasks": [agent]}
+    if fix_loop:
+        node = {
+            **node,
+            "tasks": [{"id": "check", "kind": "subprocess", "command": "false"}],
+            "fix_loop": {"tasks": [agent]},
+        }
+    chain = v1_chain([node], repo=repo)
+    policy = None
+    if fix_loop:
+        from kraft import policy as _policy
+
+        (tmp_path / "policy.yaml").write_text("default: { attempts: 2, wall_clock_s: 3600 }\n")
+        policy = _policy.load_policy(tmp_path / "policy.yaml")
+
+    with pytest.raises(AssertionError, match="real agent binary 'claude'"):
+        asyncio.run(v1_walk(tmp_path, chain, repo=repo, policy=policy))

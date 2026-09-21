@@ -719,6 +719,15 @@ async def measure_node(
             # resumes at that step rather than past it.
             await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
         results = await asyncio.gather(*(_measure(t) for t in step.tasks), return_exceptions=True)
+        # An `AssertionError` is Kraft's own broken invariant (and, under
+        # pytest, the real-agent guard), never evidence about the code a task
+        # measured -- so it is not a failed task for a fix loop to spend paid
+        # cycles on. It propagates, once every co-task has settled: the daemon's
+        # `deps` crash handler stops the item naming it, and a test fails
+        # (Kraft-cpotk).
+        for r in results:
+            if isinstance(r, AssertionError):
+                raise r
         outcomes.extend(zip(step.tasks, results, strict=True))
         # Anything but a clean pass stops the node: a later step exists
         # precisely because it must not run against an unsettled earlier one.
