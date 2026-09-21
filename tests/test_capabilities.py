@@ -40,9 +40,12 @@ def test_steps_is_advertised_to_installs_that_predate_it():
 
 
 def test_the_inputs_capability_is_announced():
+    """Announced as inert under V1: no task declares inputs, and an operator
+    who configures the old key is told it buys nothing, rather than told how."""
     entry = next((c for c in capabilities.MANIFEST if c.name == "inputs"), None)
     assert entry is not None
-    assert "inputs:" in entry.how
+    assert "INERT" in entry.what
+    assert entry.how.startswith("nothing to adopt")
 
 
 def test_the_rebase_chain_shape_is_announced():

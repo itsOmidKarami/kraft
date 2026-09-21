@@ -98,11 +98,22 @@ def test_every_node_field_is_declared_or_named_in_the_interface(path: str) -> No
     )
 
 
+#: Fields a node type may carry beyond `ChainNodeIn`, per interface. The
+#: board's `ChainNode` is what `store.chain_view` projects a V1 materialized
+#: chain into, and that projection adds `kind` -- how a V1 gate node is told
+#: apart from an execution node (`gate-is-an-ordered-node`). The Settings
+#: editor's `TemplateNode` still edits the legacy template shape, so nothing.
+PROJECTED: dict[str, frozenset[str]] = {
+    "frontend/src/types/work_item.ts": frozenset({"kind"}),
+    "frontend/src/types/settings.ts": frozenset(),
+}
+
+
 @pytest.mark.parametrize("path", sorted(INTERFACES))
 def test_the_interface_declares_no_field_the_model_dropped(path: str) -> None:
     name, what = INTERFACES[path]
     keys = set(re.findall(r"^\s{2}(\w+)\??:", _interface_body(path, name), re.M))
-    surplus = sorted(keys - set(FIELDS))
+    surplus = sorted(keys - set(FIELDS) - PROJECTED[path])
     assert not surplus, (
         f"{path}'s `{name}` ({what}) declares {surplus}, which ChainNodeIn "
         "does not have. Remove them, or add them to the model."
