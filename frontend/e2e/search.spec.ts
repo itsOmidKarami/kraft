@@ -5,10 +5,10 @@ import { expect, test } from "./fixtures";
 // See e2e/README.md.
 
 /**
- * The Ctrl-K handler is attached in a `useEffect`, so it does not exist until
- * React has hydrated. `page.goto` resolves on load, well before that — pressing
- * the chord straight away is a race that loses. Wait for a rendered control
- * first; that is the app telling us it is mounted.
+ * `page.goto` resolves on load, before React has mounted. The Ctrl-K listener
+ * is attached in a layout effect, in the same commit as the header, so a
+ * visible Search button means the chord is live (App.test.tsx pins that).
+ * Escape handling is vitest's: App.test.tsx.
  */
 async function openWithShortcut(page: import("@playwright/test").Page) {
   await page.goto("/");
@@ -58,26 +58,4 @@ test("the advanced kind filter narrows results", async ({ page }) => {
 
   await overlay.getByLabel("kind", { exact: true }).fill("plans");
   await expect(resultTitled(page, "UI plan")).toBeVisible();
-});
-
-test("Escape closes the overlay", async ({ page }) => {
-  await openWithShortcut(page);
-  await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Search" })).toBeHidden();
-});
-
-test("Escape in the document viewer closes only the viewer", async ({ page }) => {
-  await openWithShortcut(page);
-  const overlay = page.getByRole("dialog", { name: "Search" });
-  await overlay.getByRole("searchbox").fill("reconnect backoff");
-  await resultTitled(page, "WS transport design").click();
-
-  const viewer = page.getByRole("dialog", { name: "document" });
-  await expect(viewer).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  // The viewer stops the event so App's window-level handler never sees it.
-  await expect(viewer).toBeHidden();
-  await expect(overlay).toBeVisible();
 });

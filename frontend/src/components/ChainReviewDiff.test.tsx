@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ChainReviewDiff } from "./ChainReviewDiff";
+import { item } from "../testFixtures";
 import type { WorkItem } from "../types/work_item";
 
-const baseItem = {
-  id: "w1",
+const baseItem = item({
   chain_definition: {
     template_id: "default",
     nodes: [
@@ -12,7 +12,7 @@ const baseItem = {
       { id: "verify", tasks: ["on.test.run"], gate_after: null, on_failure: ["on.repair"] },
     ],
   },
-} as unknown as WorkItem;
+});
 
 describe("ChainReviewDiff", () => {
   it("renders a diff for a real revision, with on_failure carried forward", () => {

@@ -5,23 +5,15 @@ import { describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { WorkItem } from "../../types";
 import { ArchivedView } from "./Archived";
+import { item } from "../../testFixtures";
 
 const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({
-    id: over.id ?? "w1",
-    title: over.title ?? "Item",
-    repo: over.repo ?? "/repo-a",
-    status: over.status ?? "completed",
-    chain_template: "quick-task",
-    chain_definition: { template_id: "quick-task", nodes: [] },
-    current_node_id: null,
-    bead_id: null,
-    created_at: "t",
-    updated_at: "t",
-    archived_at: over.archived_at ?? "2026-01-01T00:00:00Z",
-    archived_by: over.archived_by ?? "you",
+  item({
+    title: "Item", repo: "/repo-a", status: "completed", chain_template: "quick-task",
+    chain_definition: { template_id: "quick-task", nodes: [] }, current_node_id: null, bead_id: null,
+    archived_at: "2026-01-01T00:00:00Z", archived_by: "you",
     ...over,
-  }) as WorkItem;
+  });
 
 describe("ArchivedView", () => {
   it("lists archived items with ENDED AS and ARCHIVED columns", async () => {

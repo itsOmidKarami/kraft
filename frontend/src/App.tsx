@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import * as api from "./api";
 import { AppNav } from "./components/AppNav";
@@ -25,7 +25,11 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   const [bind, setBind] = useState<string | undefined>();
   const [sessionExpiryDays, setSessionExpiryDays] = useState<number | undefined>();
 
-  useEffect(() => {
+  // A layout effect, not a passive one: passive effects flush in a later
+  // scheduler task, so there was a window where the header was on screen and
+  // Ctrl-K did nothing (Kraft-utvg3, Kraft-ica3). Layout effects run in the
+  // same commit that puts the DOM up.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();

@@ -7,49 +7,16 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { useStore } from "../../store";
-import type { ChainNode, WorkItem, WorkerSession } from "../../types";
+import type { WorkItem, WorkerSession } from "../../types";
 import { WorkItemDetail } from ".";
+import { PhoneComposer } from "./PhoneComposer";
+import { detailItem, session as baseSession, setPhoneWidth } from "../../testFixtures";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Forces `usePhone()` to `true` for the life of a test, the same
- *  `matchMedia` stub `theme.test.ts` uses. */
-function mockPhone() {
-  const mql: Partial<MediaQueryList> = {
-    matches: true,
-    media: "(max-width: 767px)",
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  };
-  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
-}
-
-const NODES: ChainNode[] = [
-  { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
-  { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
-  { id: "verify", tasks: ["on.test.run"], gate_after: null },
-];
-
-const item = (over: Partial<WorkItem> = {}): WorkItem =>
-  ({
-    id: "wi_01HX3K9", title: "T", repo: "/r", status: "active", chain_template: "default",
-    chain_definition: { template_id: "default", nodes: NODES },
-    current_node_id: "verify", bead_id: "B", created_at: "t", updated_at: "t",
-    completedNodes: ["spec", "plan"],
-    node_overrides: {},
-    node_overrides_count: 0,
-    effective_chain: { template_id: "default", nodes: NODES },
-    budget_cap: { cap_usd: 10, source: "policy", spent_usd: 1 },
-    ...over,
-  }) as WorkItem;
-
+const item = (over: Partial<WorkItem> = {}): WorkItem => detailItem({ id: "wi_01HX3K9", ...over });
 const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
-  ({
-    id: "s1", work_item_id: "wi_01HX3K9", node_id: "verify", hook_point: "on.test.run",
-    status: "running", attempt: 1, round: 0, created_at: "t", started_at: "t", exited_at: null,
-    tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, model: null, head_sha: null,
-    ...over,
-  }) as WorkerSession;
+  baseSession({ work_item_id: "wi_01HX3K9", thread: undefined, ...over });
 
 const setup = (over: Partial<WorkItem> = {}, sessions: WorkerSession[] = []) =>
   useStore.setState({
@@ -59,7 +26,7 @@ const setup = (over: Partial<WorkItem> = {}, sessions: WorkerSession[] = []) =>
   } as never);
 
 beforeEach(() => {
-  mockPhone();
+  setPhoneWidth();
   setup();
   vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
   vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "wi_01HX3K9", documents: [] });
@@ -71,7 +38,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 const renderDetail = (hash = "") =>
@@ -170,10 +136,23 @@ describe("WorkItemDetail on a phone (m04)", () => {
 
   it("wraps the item card's button row on a phone, its buttons sharing each line (W11 rule 10)", () => {
     // jsdom has no viewport to render a `@media` rule from; pin the source
-    // instead, the way styles.order.test.ts does.
+    // instead, the way css.contract.test.ts does.
     const css = readFileSync(join(here, "work_item.css"), "utf-8");
     expect(css).toMatch(/\.item-card-actions\s*\{[^}]*flex-wrap:\s*wrap/);
     const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
     expect(phone).toMatch(/\.item-card-actions\s*>\s*\.btn\s*\{[^}]*flex:\s*1/);
+  });
+});
+
+describe("PhoneComposer", () => {
+  it("renders Cancel, the title and the context line", () => {
+    render(
+      <PhoneComposer title="Steer" context="w1 · verify" onCancel={() => {}}>
+        <p>body</p>
+      </PhoneComposer>,
+    );
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+    expect(screen.getByText("Steer")).toBeInTheDocument();
+    expect(screen.getByText("w1 · verify")).toBeInTheDocument();
   });
 });

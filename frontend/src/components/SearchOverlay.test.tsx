@@ -6,6 +6,8 @@ import * as api from "../api";
 import { useStore } from "../store";
 import type { WorkItem } from "../types";
 import { SearchOverlay } from "./SearchOverlay";
+import { SearchView } from "../views/Search";
+import { item } from "../testFixtures";
 
 const hit = {
   id: "d1",
@@ -20,19 +22,7 @@ const hit = {
 };
 
 const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({
-    id: over.id ?? "w1",
-    title: over.title ?? "Item",
-    repo: over.repo ?? "/r",
-    status: over.status ?? "active",
-    chain_template: "quick-task",
-    chain_definition: { template_id: "quick-task", nodes: [] },
-    current_node_id: null,
-    bead_id: null,
-    created_at: "t",
-    updated_at: "t",
-    ...over,
-  }) as WorkItem;
+  item({ title: "Item", chain_template: "quick-task", chain_definition: { template_id: "quick-task", nodes: [] }, current_node_id: null, bead_id: null, ...over });
 
 const renderOverlay = (props: Partial<Parameters<typeof SearchOverlay>[0]> = {}) =>
   render(
@@ -192,5 +182,18 @@ describe("SearchOverlay", () => {
     const sections = document.querySelectorAll(".search-section");
     const labels = [...sections].map((s) => s.querySelector(".section-label")?.textContent);
     expect(labels).toEqual(["Actions", "Documents", "Go to"]);
+  });
+});
+
+describe("SearchView", () => {
+  it("mounts SearchOverlay embedded, with no dialog role", () => {
+    vi.spyOn(api, "search").mockResolvedValue({ query: "", mode: "hybrid", results: [] });
+    render(
+      <MemoryRouter>
+        <SearchView />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("searchbox")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

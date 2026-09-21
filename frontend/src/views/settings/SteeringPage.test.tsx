@@ -1,20 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import { renderAt, repo, setupSettingsMocks } from "./testing";
-
-function setPhoneWidth(matches: boolean) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockImplementation((query: string) => ({
-      matches,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  );
-}
+import { setPhoneWidth } from "../../testFixtures";
 
 beforeEach(() => {
   setupSettingsMocks();
@@ -110,7 +99,6 @@ describe("Settings · steering (5c-bis, design 30)", () => {
 
 describe("phone", () => {
   beforeEach(() => setPhoneWidth(true));
-  afterEach(() => vi.unstubAllGlobals());
 
   it("the body is editable on phone, not the open-on-desktop notice", async () => {
     renderAt("/settings/steering?file=house-style");

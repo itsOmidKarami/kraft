@@ -3,23 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
 import type { TemplateNode } from "../../types";
 import { reparseSerializedNodes, serializeFragment, serializeNodes } from "./TemplatesPage";
 import { renderAt, setupSettingsMocks } from "./testing";
-
-function setPhoneWidth(matches: boolean) {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockImplementation((query: string) => ({
-      matches,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  );
-}
+import { setPhoneWidth } from "../../testFixtures";
 
 const DEFAULT_NODES: TemplateNode[] = [
   { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
@@ -313,7 +302,6 @@ describe("Settings · chains editor (W11 · D)", () => {
 
 describe("Settings · chains phone (W11 · D.6)", () => {
   beforeEach(() => setPhoneWidth(true));
-  afterEach(() => vi.unstubAllGlobals());
 
   it("phone: one page -- a full-width template select, the pill strip and the card, no dropdown menu", async () => {
     renderAt("/settings/chains");

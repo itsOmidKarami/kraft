@@ -1,4 +1,4 @@
-import { connectRepo, expect, test } from "./fixtures";
+import { createItem, expect, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // The planning hooks: on.spec.requested and on.plan.requested write and commit
@@ -17,23 +17,6 @@ import { scaledTimeout } from "../e2e-timing";
 // controls (the tab switch, a document rendering in the right pane), not
 // the specific artifact's body, which depends on indexing this test's
 // environment cannot force.
-const REPO = process.env.KRAFT_E2E_REPO!;
-const REPO_NAME = REPO.split("/").pop()!;
-
-async function createItem(page: any, title: string, template: string) {
-  await connectRepo(page, REPO);
-  await page.goto("/");
-  await page.getByRole("button", { name: /new work item/i }).click();
-  const modal = page.getByRole("dialog", { name: "New work item" });
-  await modal.getByLabel("repo").selectOption({ label: REPO_NAME });
-  await modal.getByLabel("title").fill(title);
-  await modal
-    .getByRole("radiogroup", { name: "template" })
-    .getByRole("radio", { name: new RegExp(`^${template}\\b`) })
-    .click();
-  await modal.getByRole("button", { name: /create and start/i }).click();
-  await expect(page.locator(".detail h2")).toHaveText(title);
-}
 
 // The gate's own artifact is only indexed once it merges back to the connected
 // repo, and Documents.tsx deliberately shows nothing rather than some unrelated
