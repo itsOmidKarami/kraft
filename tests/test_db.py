@@ -72,7 +72,7 @@ def test_migrate_is_idempotent(tmp_path):
     table_count = conn2.execute(
         "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     ).fetchone()[0]
-    assert table_count == 6  # + auth_sessions (v6), work_item_repos (v18)
+    assert table_count == 7  # + auth_sessions (v6), work_item_repos (v18), run_forks (v35)
 
 
 def test_migrate_rejects_newer_db(tmp_path):
@@ -123,6 +123,7 @@ INVALID SQL STATEMENT;
             "events",
             "worker_sessions",
             "auth_sessions",
+            "run_forks",
             "retry_counters",
             "work_item_repos",
         }

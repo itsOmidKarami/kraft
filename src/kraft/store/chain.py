@@ -49,11 +49,15 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # Idempotent: resume can re-enter an already-completed node (a reconciled
     # non-fix node, or a fix_loop node re-measured after a crash in the
     # complete_node -> enter_node window) and must not emit a second
-    # node_completed. See Kraft-gbt / Kraft-126.
+    # node_completed. See Kraft-gbt / Kraft-126. Within one run fork only: a
+    # retry reruns completed work (`retry-can-target-completed-work`), and the
+    # rerun's completion is its own.
     done = conn.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'node_completed' "
-        "AND json_extract(payload, '$.node_id') = ? LIMIT 1",
-        (work_item_id, node_id),
+        "AND json_extract(payload, '$.node_id') = ? AND seq > ("
+        "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
+        ") LIMIT 1",
+        (work_item_id, node_id, work_item_id),
     ).fetchone()
     if done:
         return
@@ -155,7 +159,13 @@ def materialized_chain_of(row):
     """
     from kraft.templates.models import MaterializedChain
 
-    raw = row["materialized_chain"] if "materialized_chain" in row.keys() else None
+    keys = row.keys()
+    # The run fork's copy first (`RunFork.materialized_chain`): after a retry
+    # that is the chain the item runs, and the intake snapshot is its oldest
+    # ancestor's.
+    raw = (row["run_chain"] if "run_chain" in keys else None) or (
+        row["materialized_chain"] if "materialized_chain" in keys else None
+    )
     return MaterializedChain.from_json(raw) if raw else None
 
 

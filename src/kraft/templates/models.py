@@ -277,6 +277,9 @@ class TaskBase(BaseModel):
     #: The task scope's own policy, applied last
     #: (`policy-is-layered-by-execution-scope`). Its recovery plan inherits it.
     policy: TaskPolicyOverride | None = None
+    #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
+    #: component unless it says `false` here.
+    skippable: StrictBool = True
 
 
 class BuiltinTask(TaskBase):
@@ -332,6 +335,9 @@ class Step(BaseModel):
     #: Applied between the node's policy and each task's; its recovery plan
     #: inherits it.
     policy: TaskPolicyOverride | None = None
+    #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
+    #: component unless it says `false` here.
+    skippable: StrictBool = True
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -535,6 +541,9 @@ class ExecNode(ExecutionShape):
     #: its conflict handler -- and only here may `max_attempts`/
     #: `timeout_minutes` appear, because they bound this node's fix loop.
     policy: TemplatePolicyOverride | None = None
+    #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
+    #: component unless it says `false` here.
+    skippable: StrictBool = True
 
     @model_validator(mode="after")
     def _escalation_identifier(self) -> Self:
@@ -586,6 +595,9 @@ class GateNode(BaseModel):
     #: The gate scope's policy, inherited by `auto_review`. A task's fields
     #: only: a gate has no fix loop for `max_attempts` to bound.
     policy: TaskPolicyOverride | None = None
+    #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
+    #: component unless it says `false` here.
+    skippable: StrictBool = True
 
     @model_validator(mode="after")
     def _no_handler(self) -> Self:
@@ -993,10 +1005,10 @@ class MaterializedChain:
     target: WorkItemTarget
     policy: InstancePolicy
 
-    # Fork lineage is deliberately NOT a field here. `work_items.run_fork_parent`
-    # is the one place a fork's parent is recorded: a field as well would be a
-    # second source of truth that nothing keeps equal to the column, and the
-    # column is the one a query can reach.
+    # Fork lineage is deliberately NOT a field here. `RunFork.parent`
+    # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
+    # parent is recorded: a field as well would be a second source of truth
+    # that nothing keeps equal to the fork's own row.
 
     @property
     def task_paths(self) -> tuple[str, ...]:

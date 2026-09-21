@@ -310,25 +310,7 @@ async def test_a_row_with_no_materialized_chain_reads_as_none(database):
     Task 5 has not converted yet."""
     row = await _stopped_on(database, "n", chain={"nodes": []})
     assert store.materialized_chain_of(row) is None
-    assert row["run_fork_parent"] is None
-
-
-async def test_the_run_fork_parent_column_is_written_at_intake(database):
-    """Reserved for Phase 5's retry forks: a fork records the run it came from
-    without a second migration."""
-    await database.write(
-        lambda c: store.create_work_item(
-            c,
-            id="w2",
-            bead_id=None,
-            title="t",
-            repo="/r",
-            chain_template="default",
-            chain_definition="{}",
-            run_fork_parent="w1",
-        )
-    )
-    assert _item(database, "run_fork_parent", "w2")[0] == "w1"
+    assert row["run_chain"] is None
 
 
 def _v1(node_id):
