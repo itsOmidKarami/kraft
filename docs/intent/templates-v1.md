@@ -717,7 +717,7 @@ enforced-by: tests/templates/test_materialization.py::test_the_target_selection_
 
 A workspace SHALL declare a default policy for submodule-pointer updates. A
 work item MAY choose an allowed pointer-update policy for its selected target.
-enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-workspace-default], tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-item-chooses], frontend/src/components/IntakeModal.test.tsx::sends the workspace with its picked members and the workspace's root pointer policy by default
+enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-workspace-default], tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy[the-item-chooses], frontend/src/components/IntakeModal.test.tsx::sends the workspace with its picked members and the workspace's root pointer policy by default: bump, frontend/src/components/IntakeModal.test.tsx::sends the workspace with its picked members and the workspace's root pointer policy by default: ignore
 
 ## REQ workspace-root-pointer-update-defaults-to-ignore
 
