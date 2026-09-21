@@ -81,6 +81,35 @@ def test_reload_broken_registry_is_a_kraft_message(app, monkeypatch, capsys):
     assert "422" in capsys.readouterr().err
 
 
+def test_admin_templates_lint_of_a_clean_library_exits_0(app, capsys):
+    cli.main(["admin", "templates", "lint"])
+    assert "no errors" in capsys.readouterr().out
+
+
+def test_admin_templates_lint_prints_each_error_and_exits_1(app, capsys):
+    chains = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "chains"
+    (chains / "garbled.yaml").write_text("nodes: [unclosed\n")
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "templates", "lint"])
+    assert caught.value.code == 1
+    assert "garbled: " in capsys.readouterr().out
+
+
+def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
+    cli.main(["admin", "templates", "show", "default", "--resolved"])
+    printed = yaml.safe_load(capsys.readouterr().out)
+    assert printed["id"] == "default"
+    # Expanded out of library.yaml, which the chain file only names.
+    assert printed["nodes"][0]["tasks"][0]["skill"] == "kraft:spec"
+
+
+def test_admin_templates_show_of_an_unknown_chain_exits_1(app, capsys):
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "templates", "show", "nope", "--resolved"])
+    assert caught.value.code == 1
+    assert "404" in capsys.readouterr().err
+
+
 def test_health_exit_code_follows_status(app, monkeypatch, capsys):
     async def degraded():
         return {

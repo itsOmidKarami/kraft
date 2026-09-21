@@ -20,6 +20,7 @@ from pathlib import Path
 
 import httpx
 import uvicorn
+import yaml
 
 from kraft import client, config, render
 from kraft.cli import common
@@ -683,6 +684,31 @@ def _cmd_reload(ns: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _render_lint(report: dict) -> str:
+    if report["valid"]:
+        return f"{len(report['chains'])} chain(s), no errors"
+    return "\n".join(
+        f"{issue['chain'] or issue['file']}: {issue['message']}" for issue in report["issues"]
+    )
+
+
+def _cmd_templates_lint(ns: argparse.Namespace) -> None:
+    report = asyncio.run(client.lint_templates())
+    common.emit(report, _render_lint, ns.json)
+    if not report["valid"]:
+        # exit 1 so `kraft admin templates lint && ...` works; the errors are on stdout
+        raise SystemExit(1)
+
+
+def _cmd_templates_show(ns: argparse.Namespace) -> None:
+    if ns.resolved:
+        payload = asyncio.run(client.resolved_template(ns.template_id))
+        common.emit(payload, lambda p: yaml.safe_dump(p["chain"], sort_keys=False), ns.json)
+    else:
+        payload = asyncio.run(client.template(ns.template_id))
+        common.emit(payload, lambda p: yaml.safe_dump(p, sort_keys=False), ns.json)
+
+
 def _cmd_mcp(ns: argparse.Namespace) -> None:
     from kraft.mcp import serve_stdio
 
@@ -784,6 +810,23 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
         "reload", parents=[common], help="reread templates and registry from disk, no restart"
     )
     reload_p.set_defaults(func=_cmd_reload)
+
+    templates_p = subs.add_parser("templates", help="inspect the chain template library")
+    template_verbs = templates_p.add_subparsers(dest="templates_verb", required=True)
+    lint_p = template_verbs.add_parser(
+        "lint",
+        parents=[common],
+        help="check every chain in the installed library; exit 1 on any error",
+    )
+    lint_p.set_defaults(func=_cmd_templates_lint)
+    show_p = template_verbs.add_parser("show", parents=[common], help="print one chain template")
+    show_p.add_argument("template_id", metavar="ID")
+    show_p.add_argument(
+        "--resolved",
+        action="store_true",
+        help="with its library components expanded, as a work item would get it",
+    )
+    show_p.set_defaults(func=_cmd_templates_show)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"
