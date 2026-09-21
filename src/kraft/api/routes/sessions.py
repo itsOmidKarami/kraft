@@ -11,9 +11,12 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
-from kraft import events
+from kraft import events, store
 from kraft import logs as logs_mod
-from kraft.api import api_router, perimeter
+from kraft.adapters import agent as _agent
+from kraft.api import api_router, deps, perimeter
+from kraft.executor.dispatch import ESCALATION_HOOK
+from kraft.templates.models import AgentTask
 
 
 def _session_row(st, sid: str):
@@ -80,16 +83,52 @@ class PermissionAsk(BaseModel):
     tool_use_id: str | None = None
 
 
+def _resolved_allowed_tools(st, row) -> tuple[str, ...]:
+    """The `allowed_tools` this session's own launch resolved, or raise naming
+    why it cannot be known.
+
+    From the V1 task at the session's canonical path, through the same
+    `resolve_agent_task` the launch passed to `--allowedTools` -- never the
+    legacy registry keyed by hook name, which no V1 path matches (Kraft-hwrks).
+    The escalation turn is not a chain task: it launches on a minimal binding
+    with no allowlist (`escalate.dispatch`).
+    """
+    if row["hook_point"] == ESCALATION_HOOK:
+        return ()
+    item = st.db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(item) if item is not None else None
+    if snapshot is None:
+        raise LookupError("its work item has no materialized chain")
+    task = next(
+        (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
+        None,
+    )
+    if task is None or not isinstance(task.task, AgentTask):
+        raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
+    launch = deps.launch(st, item["repo"])
+    return _agent.resolve_agent_task(
+        task.task,
+        launch.repo_entry,
+        launch.steering_dir,
+        skills_dir=launch.skills_dir,
+        steering=snapshot.chain.steering,
+    ).allowed_tools
+
+
 @api_router.post("/worker-sessions/{sid}/permission")
 async def permission_request(sid: str, body: PermissionAsk, request: Request):
-    """Answer a worker's permission prompt from its node's grant (Kraft-oor).
+    """Answer a worker's permission prompt from its task's grant (Kraft-oor).
 
-    The policy is the hook binding's `allowed_tools` (Kraft-3tw), resolved
-    session -> hook_point -> binding. A binding that declares none allows
-    everything: `--permission-mode auto` already resolves these asks silently
-    today, and a default that denied would turn an observability change into a
-    behaviour change on every node at once. A binding that *does* declare an
-    allowlist is taken at its word.
+    The policy is the `allowed_tools` the session's launch resolved
+    (`_resolved_allowed_tools`). A task that declares none allows everything:
+    `--permission-mode auto` already resolves these asks silently, and an unset
+    `maxima.allowed_tools` bounds nothing. A task that *does* declare an
+    allowlist is taken at its word. A grant that cannot be resolved at all --
+    the task or its profile gone -- is denied: not knowing is not a grant.
 
     Every decision appends an event. That is the whole point -- it is the only
     way the orchestrator ever learns what a worker decided it was allowed to do.
@@ -102,16 +141,21 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     )
     if row is None:
         raise HTTPException(404, "unknown session")
-    allowed = st.registry.hooks.get(row["hook_point"], {}).get("allowed_tools") or []
-    if not allowed:
-        decision, reason = "allow", f"{row['node_id']} declares no allowed_tools"
-    elif body.tool_name in allowed:
-        decision, reason = "allow", f"{body.tool_name} is in {row['node_id']}'s allowed_tools"
+    task = row["hook_point"]
+    try:
+        allowed = _resolved_allowed_tools(st, row)
+    except Exception as exc:  # noqa: BLE001 -- fail closed on any resolution failure
+        decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
-        decision, reason = (
-            "deny",
-            f"{body.tool_name} is not in {row['node_id']}'s allowed_tools ({', '.join(allowed)})",
-        )
+        if not allowed:
+            decision, reason = "allow", f"{task} declares no allowed_tools"
+        elif body.tool_name in allowed:
+            decision, reason = "allow", f"{body.tool_name} is in {task}'s allowed_tools"
+        else:
+            decision, reason = (
+                "deny",
+                f"{body.tool_name} is not in {task}'s allowed_tools ({', '.join(allowed)})",
+            )
     await st.db.write(
         lambda c: events.append(
             c,
