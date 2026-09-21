@@ -60,9 +60,13 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 @pytest.mark.parametrize(
     ("route", "body", "detail"),
     [
-        ("work-items", {"title": "x", "repo": "/tmp", "chain_template": "nope"}, None),
+        (
+            "work-items",
+            {"title": "x", "repo": "/tmp", "chain_template": "nope"},
+            "unknown or invalid template",
+        ),
         ("work-items", {"title": "x"}, None),
-        ("work-items", {"title": "x", "repo": "/no/such/dir"}, None),
+        ("work-items", {"title": "x", "repo": "/no/such/dir"}, "repo path does not exist"),
         (
             "triggers",
             {"title": "t", "repo": "REPO", "chain_template": "nope"},

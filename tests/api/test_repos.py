@@ -183,11 +183,11 @@ def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, valu
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "unchanged"),
-    [("steering", ["does-not-exist"], []), ("local_files", ["*.pyc"], [])],
+    ("field", "value"),
+    [("steering", ["does-not-exist"]), ("local_files", ["*.pyc"])],
     ids=["a-missing-steering-name", "a-glob-in-local-files"],
 )
-def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value, unchanged):
+def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value):
     """Write-side validation must reject exactly what the read side would
     later choke on, so a bad PATCH from the UI cannot brick every later
     GET /repos."""
@@ -197,7 +197,7 @@ def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, valu
     assert 400 <= r.status_code < 500, r.text
     assert (templates_dir / "repos.yaml").read_text() == before
     (entry,) = client.get("/api/repos").json()["repos"]
-    assert entry[field] == unchanged
+    assert entry[field] == []
 
 
 @pytest.mark.parametrize("model, payload", [(RepoBody, {"path": "/r"}), (RepoPatch, {})])
