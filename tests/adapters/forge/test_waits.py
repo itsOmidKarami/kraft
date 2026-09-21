@@ -176,15 +176,15 @@ async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_aga
             self.requests += 1
             await super().merge(repo=repo, branch=branch, mr=mr)
 
-    fake = await _opened(Counting(merge_delay=1), tmp_path)
+    fake = await _opened(Counting(merge_delay=2), tmp_path)
 
-    first = await run_forge(fake, "merge", "m1")
-    second = await run_forge(fake, "merge", "m2")
+    results = [(await run_forge(fake, "merge", f"m{i}"))[0] for i in range(3)]
 
-    assert (first[0], second[0]) == ("waiting", "done")
+    assert results == ["waiting", "waiting", "done"]
     assert fake.requests == 1
     assert _trail(run_forge) == [
         ("external_wait_started", None, None),
+        ("external_wait_observed", "pending", "merge"),
         ("external_wait_observed", "pending", "merge"),
         ("external_wait_observed", "settled", "merge"),
         ("external_wait_ended", "settled", None),
