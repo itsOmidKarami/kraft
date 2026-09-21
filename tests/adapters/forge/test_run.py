@@ -17,7 +17,7 @@ from support.harness import isolated_bd, make_repo, make_repo_with_submodule, v1
 
 from kraft import builtins as _builtins
 from kraft import db, events, executor, policy, store
-from kraft.adapters import forge
+from kraft.adapters import beads, forge
 from kraft.paths import RunDirs
 
 #: A repo that deliberately needs no preparation. Most tests here are about
@@ -805,7 +805,6 @@ def test_merge_watch_green_path_never_reads_through_the_merged_away_mr(tmp_path,
     assert asyncio.run(scenario()) == "done"
 
 
-@pytest.mark.e2e("bd")
 def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
     tmp_path, monkeypatch
 ):
@@ -896,13 +895,8 @@ def test_merge_watch_files_a_follow_up_bead_and_pauses_items_on_the_broken_sha(
     assert "paused_by_broken_base" in w2_events
     assert w3_status == "active"
 
-    bd_show = subprocess.run(
-        ["bd", "search", "post-merge", "--json", "--status", "all"],
-        cwd=tracker,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert "post-merge pipeline broke" in bd_show
+    filed = asyncio.run(beads.search("post-merge", cwd=str(tracker)))
+    assert any("post-merge pipeline broke" in b["title"] for b in filed), filed
 
 
 def test_merge_watch_pins_to_the_pipeline_it_last_saw(tmp_path, monkeypatch):
@@ -2693,19 +2687,7 @@ def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(tmp_path, monkeypat
     asyncio.run(scenario())
 
 
-def _bd_status(repo, bead_id):
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return json.loads(out)[0]["status"]
-
-
-@pytest.mark.e2e("bd")
-def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_path, monkeypatch):
+def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(bd, tmp_path, monkeypatch):
     """Kraft-43kw: open_mr -> mr_checks -> merge -> post_merge_watch, driven
     through a real `executor.run` walk. `work_item_completed` and the bead
     close must land after `post_merge_watch`'s own `node_completed`, not
@@ -2759,7 +2741,7 @@ def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(tmp_pat
     node_order = [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"]
     assert node_order == ["open_mr", "mr_checks", "merge", "post_merge_watch"]
     assert evts[-1]["type"] == "work_item_completed"
-    assert _bd_status(tracker, bead_id) == "closed"
+    assert bd.status(bead_id, cwd=tracker) == "closed"
 
 
 def test_merge_watch_runs_once_for_a_multi_repo_item(tmp_path, monkeypatch):

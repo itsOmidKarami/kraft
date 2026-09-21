@@ -11,13 +11,12 @@ suite, which is why none of this was caught.
 from __future__ import annotations
 
 import asyncio
-import json
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from support.fake_beads import ON_FAKE_AND_REAL_BD
 from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_named_chain
 
 from kraft import db, executor
@@ -42,18 +41,6 @@ def _row(database, wid, columns="*"):
     )
 
 
-def _bd_ids(repo: Path) -> list[str]:
-    """Every bead id in `repo`'s workspace, via bd itself."""
-    out = subprocess.run(
-        ["bd", "list", "--json", "--status", "all"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return [r["id"] for r in json.loads(out[out.index("[") :])]
-
-
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """The app with KRAFT_BD_CWD *deleted* — the installed-daemon default, and
@@ -68,8 +55,8 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
-@pytest.mark.e2e("bd")
-def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
+@ON_FAKE_AND_REAL_BD
+def test_intake_files_the_bead_in_the_work_items_repo(tier, bd, tmp_path, monkeypatch):
     """Kraft-ibwj: with no KRAFT_BD_CWD, the bead goes to the item's repo, not
     to whatever directory the server process happens to be sitting in."""
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
@@ -88,7 +75,7 @@ def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
             )
             row = _row(database, wid, "bead_id, bead_cwd")
             assert row["bead_id"]
-            assert row["bead_id"] in _bd_ids(repo)
+            assert row["bead_id"] in bd.ids(cwd=repo)
             assert row["bead_cwd"] == str(repo)
         finally:
             await database.close()
@@ -96,8 +83,7 @@ def test_intake_files_the_bead_in_the_work_items_repo(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
-def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
+def test_kraft_bd_cwd_still_overrides_the_repo(bd, tmp_path, monkeypatch):
     """The repo is the *default*, not the winner. An operator who set
     KRAFT_BD_CWD as the workaround for Kraft-ibwj must not silently start
     filing into per-repo trackers on upgrade."""
@@ -118,8 +104,8 @@ def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
                 bd_cwd=str(tracker),
             )
             row = _row(database, wid, "bead_id, bead_cwd")
-            assert row["bead_id"] in _bd_ids(tracker)
-            assert row["bead_id"] not in _bd_ids(repo)
+            assert row["bead_id"] in bd.ids(cwd=tracker)
+            assert row["bead_id"] not in bd.ids(cwd=repo)
             assert row["bead_cwd"] == str(tracker)
         finally:
             await database.close()
@@ -127,7 +113,6 @@ def test_kraft_bd_cwd_still_overrides_the_repo(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-@pytest.mark.e2e("bd")
 def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path):
     """The Kraft-ibwj repro, inverted: this must not be a 502. bd's own words
     reach the caller, and the timeline records why there is no bead."""
@@ -164,7 +149,6 @@ def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
     assert client.get(f"/api/work-items/{resp.json()['id']}").json()["bead_id"] is None
 
 
-@pytest.mark.e2e("bd")
 def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, caplog):
     """Without the `if row["bead_id"]` guard, `bd close None` raises TypeError
     inside the except and gets logged as a bead close failure that never

@@ -101,10 +101,22 @@ def test_intake_error_carries_bd_stderr(tmp_path, monkeypatch):
 
 
 @pytest.mark.e2e("bd")
-def test_search_finds_a_closed_bead(tmp_path):
+def test_search_finds_a_closed_bead(tmp_path, monkeypatch):
     """Kraft-evm: a completed work item closes its bead, and that is exactly the
-    work the search strip has to be able to find."""
+    work the search strip has to be able to find.
+
+    Kraft-uqpan: bd 1.3.0 searches closed beads by default, so the result alone
+    no longer pins the `--status all` Kraft passes for the bd versions that do
+    not (CI runs 1.2.2). The argv of the real call is pinned as well."""
     repo = isolated_bd(tmp_path)
+    real_run = subprocess.run
+    argvs: list[list[str]] = []
+
+    def recording_run(argv, *args, **kwargs):
+        argvs.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(beads.subprocess, "run", recording_run)
 
     async def scenario():
         bead_id = await beads.intake("caulk the transom", cwd=str(repo))
@@ -113,6 +125,8 @@ def test_search_finds_a_closed_bead(tmp_path):
         assert [(h["id"], h["status"]) for h in hits] == [(bead_id, "closed")]
 
     asyncio.run(scenario())
+    (search,) = [a for a in argvs if a[:2] == ["bd", "search"]]
+    assert search[search.index("--status") + 1] == "all"
 
 
 @pytest.mark.beads_adapter

@@ -9,7 +9,7 @@ import httpx
 import pytest
 from support import api as api_support
 from support import harness
-from support.fake_beads import FakeBeads
+from support.fake_beads import Bd, FakeBeads
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
 from kraft import client as kraft_client
@@ -217,6 +217,15 @@ def fake_beads(request, monkeypatch):
         f"({reached!r}) with the fake installed: fake the new function in "
         f"tests/support/fake_beads.py, or mark the test e2e('bd')."
     )
+
+
+@pytest.fixture
+def bd(fake_beads) -> Bd:
+    """Bead state to assert on -- `bd.status(id, cwd=...)`, `bd.ids(cwd=...)`,
+    `bd.block(id, blocker, cwd=...)`, `bd.init(path)` -- answered by the fake
+    in the unit tier and by the real CLI under `e2e("bd")`, so one test body
+    serves both (`support.fake_beads.ON_FAKE_AND_REAL_BD`)."""
+    return Bd(fake_beads)
 
 
 @pytest.fixture(autouse=True)

@@ -21,8 +21,12 @@ unit test cannot pass on a bead bd would never have filed.
 from __future__ import annotations
 
 import itertools
+import json
 import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 class FakeBeads:
@@ -100,3 +104,57 @@ class FakeBeads:
     def block(self, bead_id: str, blocker_id: str, *, cwd: str | None = None) -> None:
         """`bd dep add bead_id blocker_id --type blocks`."""
         self._ws(cwd)[bead_id]["blocked_by"].append(blocker_id)
+
+
+#: Parametrize a test over both tiers: `fake` runs in the unit tier against
+#: the in-memory fake, `bd` runs the same body against the real CLI in the
+#: e2e job. For the one real test each bd behaviour Kraft relies on keeps.
+ON_FAKE_AND_REAL_BD = pytest.mark.parametrize(
+    "tier", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))]
+)
+
+
+class Bd:
+    """Bead state a test asserts on, read the same way on either tier: from
+    the in-memory fake when one is installed, from the real `bd` CLI when
+    not (`e2e("bd")`, or `KRAFT_TEST_REAL_BD=1`). The `bd` fixture
+    (tests/conftest.py) hands one out. Filing and searching beads is not
+    here: call `kraft.adapters.beads` itself, which is the fake or the real
+    adapter to match."""
+
+    def __init__(self, fake: FakeBeads | None) -> None:
+        self.fake = fake
+
+    def _cli(self, cwd, *args: str) -> str:
+        return subprocess.run(
+            ["bd", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ).stdout
+
+    def init(self, path: Path) -> Path:
+        """Make `path` a beads workspace (`bd init`)."""
+        if self.fake is not None:
+            (Path(path) / ".beads").mkdir()
+        else:
+            self._cli(path, "init", "--prefix", "TEST")
+        return path
+
+    def status(self, bead_id: str, *, cwd) -> str:
+        """`bd show`'s status for a bead in `cwd`'s workspace (KeyError, or
+        CalledProcessError, when it is not there)."""
+        if self.fake is not None:
+            return self.fake._ws(str(cwd))[bead_id]["status"]
+        return json.loads(self._cli(cwd, "show", bead_id, "--json"))[0]["status"]
+
+    def ids(self, *, cwd) -> list[str]:
+        """Every bead id in `cwd`'s workspace, closed ones included."""
+        if self.fake is not None:
+            return list(self.fake._ws(str(cwd)))
+        out = self._cli(cwd, "list", "--json", "--status", "all")
+        return [r["id"] for r in json.loads(out[out.index("[") :])]
+
+    def block(self, bead_id: str, blocker_id: str, *, cwd) -> None:
+        """`bd dep add bead_id blocker_id --type blocks`."""
+        if self.fake is not None:
+            self.fake.block(bead_id, blocker_id, cwd=str(cwd))
+        else:
+            self._cli(cwd, "dep", "add", bead_id, blocker_id, "--type", "blocks")

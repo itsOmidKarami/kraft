@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import sys
 import time
 import uuid
@@ -20,6 +19,7 @@ from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_libra
 
 from kraft import config, db, policy, store
 from kraft import intake as intake_mod
+from kraft.adapters import beads
 from kraft.paths import RunDirs
 from kraft.templates import load_registry, load_templates
 
@@ -499,8 +499,7 @@ def _poll_for(client, wid, event_type, timeout=30):
 
 
 @pytest.mark.real_executor
-@pytest.mark.e2e("bd")
-def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
+def test_an_auto_started_item_stops_at_its_first_gate(bd, tmp_path, monkeypatch):
     """The line auto-intake must not cross (spec §5).
 
     Kraft's whole differentiation is bounded autonomy with a human at the gates.
@@ -510,24 +509,14 @@ def test_an_auto_started_item_stops_at_its_first_gate(tmp_path, monkeypatch):
 
     Deliberately a level above `test_an_auto_started_item_is_left_at_its_first_gate`:
     that one asserts the *stored chain* kept its gates, against a stubbed executor.
-    This one runs the real executor over a real `bd ready` through a `TestClient`
+    This one runs the real executor over `bd ready` through a `TestClient`
     and asserts the item actually stopped.
     """
     # The repo has to be both a source tree and a beads workspace: `make_repo`
-    # gives no `.beads` (so real `bd ready` would answer `[]` and this test would
+    # gives no `.beads` (so `bd ready` would answer `[]` and this test would
     # pass having started nothing), and `isolated_bd` gives no source.
-    repo = make_repo(tmp_path)
-    subprocess.run(
-        ["bd", "init", "--prefix", "TEST"], cwd=repo, capture_output=True, text=True, check=True
-    )
-    bead_id = subprocess.run(
-        ["bd", "create", "pick this up unattended", "-p", "3", "--silent"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert bead_id, "bd create printed no id"
+    repo = bd.init(make_repo(tmp_path))
+    bead_id = asyncio.run(beads.intake("pick this up unattended", cwd=str(repo)))
 
     # `fake_templates_dir` writes no repos.yaml and no intake.yaml, and `lifespan`
     # reads both at startup — so they are written before the client is entered.
