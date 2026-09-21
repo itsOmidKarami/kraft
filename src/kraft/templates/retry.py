@@ -145,7 +145,12 @@ def validate_retry_override(
         path=path,
         task_config=task_config,
         policy=shape.model_validate(effective) if effective else None,
-        chain=MaterializedChain(chain=resolved, target=chain.target, policy=chain.policy),
+        chain=MaterializedChain(
+            chain=resolved,
+            target=chain.target,
+            policy=chain.policy,
+            repository_policies=chain.repository_policies,
+        ),
     )
 
 
