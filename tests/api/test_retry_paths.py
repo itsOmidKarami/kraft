@@ -229,3 +229,65 @@ def test_a_refresh_conflict_at_the_door_is_handed_to_the_walk(client, repo, monk
     assert client.post(f"/api/work-items/{wid}/{door}", json={}).status_code == 200
     _wait_for(lambda: "conflict" in seen)
     assert seen["conflict"] == "rebase failed for x"
+
+
+def _escalation_running(wid, sid="s-esc"):
+    """A live escalation session: a retry sent with its id is the escalation
+    agent retrying its own item, and is deferred rather than run."""
+    import os
+    import sqlite3
+    from pathlib import Path
+
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    try:
+        conn.execute(
+            "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
+            "result_path, status, created_at) VALUES (?, ?, 'verification', 'escalation', "
+            "'x', 'x', 'running', datetime('now'))",
+            (sid, wid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"x-kraft-session-id": sid}
+
+
+def _self_retry_requests(client, wid):
+    return [
+        e["payload"]
+        for e in client.get(f"/api/work-items/{wid}/events").json()
+        if e["type"] == "work_item_self_retry_requested"
+    ]
+
+
+def test_a_deferred_self_retry_carries_the_validated_override(client, repo, walked):
+    """Kraft-vvj32: the escalation agent's own `/retry` is deferred until its
+    turn ends, and the override it asked for rides the deferral as validated
+    -- the fork's copy of the chain included -- not dropped."""
+    wid = _stopped_at(client, repo, "verification")
+    path = "verification.review.code_review"
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={"path": path, "task_config": {"effort": "low"}},
+        headers=_escalation_running(wid),
+    )
+
+    assert r.status_code == 200, r.text
+    [request] = _self_retry_requests(client, wid)
+    assert request["override"]["task_config"] == {"effort": "low"}
+    assert request["override"]["path"] == path
+    assert '"effort":"low"' in request["override"]["chain"]
+
+
+def test_a_deferred_self_retry_refuses_an_override_out_of_bounds(client, repo, walked):
+    wid = _stopped_at(client, repo, "verification")
+
+    r = client.post(
+        f"/api/work-items/{wid}/retry",
+        json={"path": "verification.review.code_review", "task_config": {"kind": "subprocess"}},
+        headers=_escalation_running(wid),
+    )
+
+    assert r.status_code == 422, r.text
+    assert _self_retry_requests(client, wid) == []

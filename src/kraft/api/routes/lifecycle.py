@@ -24,7 +24,7 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
 from kraft.templates import Registry
-from kraft.templates.forks import ChainPath, PathError
+from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
@@ -79,6 +79,11 @@ class EndWorkItem(BaseModel):
     #: Required (`manual-*-is-an-explicit-work-item-terminal-action`): recorded
     #: on the audit event.
     reason: str
+
+
+class CompleteWorkItem(EndWorkItem):
+    #: Close the item's beads as a walked completion would. Off by default.
+    close_beads: bool = False
 
 
 class Escalate(BaseModel):
@@ -746,6 +751,8 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                     "node_id": node_id,
                     "path": target.path if target is not None else None,
                     "restart": body.restart,
+                    # Validated above, carried as validated (Kraft-vvj32).
+                    "override": override_record(override) if override is not None else None,
                     "key": key,
                     "gate_key": gate_key,
                     "steer": steer,
@@ -1206,11 +1213,15 @@ async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPa
 
 
 @api_router.post("/work-items/{wid}/complete")
-async def complete_work_item(wid: str, body: EndWorkItem, request: Request):
-    """Mark the item complete by hand, with a reason. Its beads close as on any
-    completion."""
+async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request):
+    """Mark the item complete by hand, with a reason. Its beads stay open
+    unless `close_beads` says otherwise (Ruling 167): work completed by hand
+    may have landed somewhere else, or not at all."""
     row = await _end_work_item(request, wid, "complete", body.reason)
-    await executor.close_beads(request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs)
+    if body.close_beads:
+        await executor.close_beads(
+            request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs
+        )
     return deps._work_item_row(request.app.state, wid)
 
 

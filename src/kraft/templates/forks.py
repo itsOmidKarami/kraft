@@ -163,15 +163,7 @@ class RunFork(BaseModel):
             after_seq=after_seq,
             materialized_chain=copied.to_json(),
             override=(
-                {
-                    "path": override.path,
-                    "task_config": override.task_config,
-                    "policy": (
-                        override.policy.model_dump(mode="json", exclude_none=True)
-                        if override.policy is not None
-                        else None
-                    ),
-                }
+                {k: v for k, v in override_record(override).items() if k != "chain"}
                 if override is not None
                 else None
             ),
@@ -226,3 +218,33 @@ class RunFork(BaseModel):
             materialized_chain=row["materialized_chain"],
             override=json.loads(row["override"]) if row["override"] else None,
         )
+
+
+def override_record(override: RetryOverride) -> dict:
+    """A validated override as JSON: what it changed, and the fork's copy of
+    the chain it was validated into. What a deferred retry carries, so the door
+    that finally forks applies exactly what was validated (Kraft-vvj32)."""
+    return {
+        "path": override.path,
+        "task_config": override.task_config,
+        "policy": (
+            override.policy.model_dump(mode="json", exclude_none=True)
+            if override.policy is not None
+            else None
+        ),
+        "chain": override.chain.to_json(),
+    }
+
+
+def override_from_record(record: dict) -> RetryOverride:
+    """`override_record` read back. Not validated again: it was, when the retry
+    was asked for, against the chain it carries."""
+    from kraft.policy import TaskPolicyOverride, TemplatePolicyOverride
+
+    shape = TemplatePolicyOverride if PATH_SEPARATOR not in record["path"] else TaskPolicyOverride
+    return RetryOverride(
+        path=record["path"],
+        task_config=record["task_config"],
+        policy=shape.model_validate(record["policy"]) if record["policy"] else None,
+        chain=MaterializedChain.from_json(record["chain"]),
+    )

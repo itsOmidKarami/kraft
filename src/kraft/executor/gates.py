@@ -932,7 +932,7 @@ async def resume_after_escalation(
     """
     from kraft.executor import walk  # local: walk imports this module
     from kraft.executor.retry import retry  # local: it imports this module
-    from kraft.templates.forks import ChainPath, PathError
+    from kraft.templates.forks import ChainPath, PathError, override_from_record
 
     new_evts = db.read(lambda c: events.read_after(c, cursor, work_item_id))
     request_evt = next((e for e in new_evts if e["type"] == "work_item_self_retry_requested"), None)
@@ -1027,11 +1027,15 @@ async def resume_after_escalation(
                     node_id,
                 )
         if target is not None or payload.get("restart"):
+            carried = payload.get("override")
             return await retry(
                 db,
                 run_dirs,
                 work_item_id=work_item_id,
                 target=target,
+                # The override the route validated when the agent asked,
+                # applied as a direct `/retry` would (Kraft-vvj32).
+                override=override_from_record(carried) if carried else None,
                 registry=registry,
                 steer=steer,
                 seeded=seeded,
