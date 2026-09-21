@@ -608,11 +608,11 @@ def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_pa
     db.migrate(conn)
     _v1_item(conn, "w1", seed.resolve_chain("default"), created=_at(2))
     _v1_item(conn, "w2", custom, created=_at(2))
-    # w1: the seed's fix-loop nodes are `implementation` and
+    # w1: the seed's fix-loop nodes are `verification` and
     # `merge_request_feedback`; `spec` has none and must not count.
     _session(conn, "s1", "w1", "spec")
-    _session(conn, "s2", "w1", "implementation", round=0)
-    _session(conn, "s3", "w1", "implementation", round=1)
+    _session(conn, "s2", "w1", "verification", round=0)
+    _session(conn, "s3", "w1", "verification", round=1)
     _session(conn, "s4", "w1", "merge_request_feedback", round=0, status="capped_out")
     _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
     # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
