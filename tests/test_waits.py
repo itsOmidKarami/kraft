@@ -330,6 +330,23 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
     assert starts == [wait_clock.at(60), wait_clock.at(3660)]
 
 
+@pytest.mark.parametrize("restart", ["work_item_retried", "run_forked", "base_change_restart"])
+async def test_each_restart_on_its_own_ends_an_open_wait(walk, item_on, restart):
+    """Every member of `waits._RESTARTS` ends an open wait alone. A `/retry`
+    writes `work_item_retried` and `run_forked` together, so a walk through it
+    cannot tell whether `run_forked` is honoured (final review 2 D): a fork
+    written by any other path must still start a fresh wait."""
+    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m"))])
+    assert await walk(forge.FakeForge(ci_states=["pending"]), it) == "waiting"
+    [started] = it.events("external_wait_started")
+    task = started["payload"]["task"]
+    assert it.database.read(lambda c: waits.open_wait(c, it.id, task)) is not None
+
+    await it.database.write(lambda c: events.append(c, it.id, restart, {}))
+
+    assert it.database.read(lambda c: waits.open_wait(c, it.id, task)) is None
+
+
 # --- automated review feedback enters the node's controls ----------------------
 
 
