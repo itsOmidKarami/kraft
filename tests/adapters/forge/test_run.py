@@ -426,6 +426,13 @@ async def test_merge_reads_the_mr_state_off_the_cli(
             "conflict",
             "not mergeable: conflict",
         ),
+        # No merge_detail at all: render_ci must still call the conflict, and
+        # fall back to naming it "unknown" rather than staying silent.
+        (
+            {"ci_states": ["success"], "mergeable": False},
+            "conflict",
+            "not mergeable: unknown",
+        ),
         # `mergeable is None` is not `False`: an unapproved MR with a green
         # pipeline is exactly what this node hands to the gate.
         (
@@ -434,7 +441,14 @@ async def test_merge_reads_the_mr_state_off_the_cli(
             "success",
         ),
     ],
-    ids=["green", "red", "pending", "unmergeable", "undecided-merge-state"],
+    ids=[
+        "green",
+        "red",
+        "pending",
+        "unmergeable",
+        "unmergeable-without-detail",
+        "undecided-merge-state",
+    ],
 )
 async def test_ci_poll_settles_the_node_from_the_pipeline(run_forge, fake_kw, expected, phrase):
     assert await run_forge(forge.FakeForge(**fake_kw), "ci_poll", "e1", poll_interval=0) == (
