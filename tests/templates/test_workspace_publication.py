@@ -8,6 +8,7 @@ under is the question."""
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from pathlib import Path
 
@@ -259,9 +260,13 @@ class _LandingForge(forge.FakeForge):
         self.order: list[tuple] = []
         self.refuse = refuse
 
+    async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
+        status = await super().ci_status(repo=repo, mr=mr, branch=branch, pipeline_id=pipeline_id)
+        if Path(repo).name != self.refuse:
+            return status
+        return dataclasses.replace(status, block_reason="not_approved", merge_detail="1 approval")
+
     async def merge(self, *, repo, branch="", mr):
-        if Path(repo).name == self.refuse:
-            raise forge.ForgeError("merge blocked: required approvals missing")
         await super().merge(repo=repo, branch=branch, mr=mr)
         _git(repo, "push", "-q", "origin", "HEAD:main")
         self.order.append(("merge", Path(repo).name))
@@ -403,16 +408,21 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
     assert fake.order[1:] == [("merge", "pkg"), ("ready", row["id"], merged), ("merge", row["id"])]
 
 
+@pytest.mark.parametrize(
+    "root_source", [True, False], ids=["root-with-source", "pointer-only-root"]
+)
 async def test_blocked_child_merge_leaves_the_root_unchanged(
-    database, run_dirs, tmp_path, monkeypatch
+    database, run_dirs, tmp_path, monkeypatch, root_source
 ):
-    """`blocked-child-merge-leaves-parent-unchanged`: nothing of the root's
-    merges or moves, and the node fails -- the merge node has no recovery of
-    its own, so the item stops for a person."""
+    """`blocked-child-merge-leaves-parent-unchanged`: a member whose merge
+    request is blocked -- here, awaiting an approval -- fails the node, and
+    nothing of the root's moves: no readiness, no merge, no pointer bump. The
+    merge node has no recovery of its own, so the item stops for a person."""
     row, worktree, origin = await _publishable(database, run_dirs, tmp_path, pointer="bump")
-    (worktree / "root.txt").write_text("root source\n")
-    _git(worktree, "add", "root.txt")
-    _git(worktree, "commit", "-qm", "root source change")
+    if root_source:
+        (worktree / "root.txt").write_text("root source\n")
+        _git(worktree, "add", "root.txt")
+        _git(worktree, "commit", "-qm", "root source change")
     before = _git_out(origin, "rev-parse", "main")
     fake = _LandingForge(refuse="pkg")
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
@@ -421,4 +431,4 @@ async def test_blocked_child_merge_leaves_the_root_unchanged(
 
     assert fake.order == [] and fake.merged == []
     assert _git_out(origin, "rev-parse", "main") == before
-    assert _repos(database, row) == {"submodule": "open", "root": "open"}
+    assert _repos(database, row)["submodule"] == "failed"
