@@ -362,8 +362,16 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         home = os.environ.get("KRAFT_HOME")
         harnesses = (Path(home) / "templates" if home else templates_dir) / "harnesses"
         harnesses.mkdir(parents=True, exist_ok=True)
+        # `fake` is the *bundled* `claude` declaration under another id with its
+        # `command:` swapped -- the fake agents stand in for `claude`, and speak
+        # its stream-json, so a task on `fake` must read their usage envelope and
+        # rate-limit events exactly the way a real `claude` launch is read. A
+        # minimal declaration without `structured_log`/`rate_limit_signal` turned
+        # every rate limit into a plain failure and every cost into zero.
+        bundled = (_REPO_ROOT / "src" / "kraft" / "harnesses" / "claude.yaml").read_text()
+        command = f"command: {json.dumps(shlex.split(agent_command))}"
         (harnesses / "fake.yaml").write_text(
-            _FAKE_HARNESS.format(command=json.dumps(shlex.split(agent_command)))
+            bundled.replace("id: claude", "id: fake").replace("command: [claude]", command)
         )
         # And `claude` itself, because `escalate.dispatch` selects that harness by
         # name -- escalation is not a chain node, so nothing declares a harness
@@ -381,12 +389,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # `run_agent_task` raises on a capability a harness has not declared.
         # Swapping one line is what `escalate` naming a harness instead of a
         # command made possible.
-        bundled = (_REPO_ROOT / "src" / "kraft" / "harnesses" / "claude.yaml").read_text()
-        (harnesses / "claude.yaml").write_text(
-            bundled.replace(
-                "command: [claude]", f"command: {json.dumps(shlex.split(agent_command))}"
-            )
-        )
+        (harnesses / "claude.yaml").write_text(bundled.replace("command: [claude]", command))
         (templates_dir / "harnesses.yaml").write_text(
             yaml.safe_dump({"harnesses": {"fake": {"provider": "fake"}}})
         )
@@ -438,7 +441,9 @@ def v1_library(templates_dir: Path, *, agent_command: str = "true"):
     return TemplateLibrary.from_yaml_dir(templates_dir)
 
 
-def v1_named_chain(templates_dir: Path, chain_id: str = "quick-task"):
+def v1_named_chain(
+    templates_dir: Path, chain_id: str = "quick-task", *, agent_command: str = "true"
+):
     """The `ResolvedChain` for one *shipped* chain, resolved out of
     `templates_dir` (seeded if it is not already).
 
@@ -450,8 +455,12 @@ def v1_named_chain(templates_dir: Path, chain_id: str = "quick-task"):
     `verify_changed_test_scopes` builtin neutered, where a chain resolved from
     the packaged tree would launch a real agent and run this suite inside
     itself.
+
+    `agent_command` is what every agent task launches, and is only read when
+    `templates_dir` is not seeded yet (see `v1_library`): a caller whose
+    assertions are about the agent's work passes the fake agent here.
     """
-    return v1_library(templates_dir).resolve_chain(chain_id)
+    return v1_library(templates_dir, agent_command=agent_command).resolve_chain(chain_id)
 
 
 def e2e_templates_dir(tmp_path: Path) -> Path:
