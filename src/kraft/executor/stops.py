@@ -81,13 +81,29 @@ async def claimed_or_stopped(
                 await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, stop))
 
 
-def budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
+def budget_breach(
+    db, work_item_id: str, budget: _policy.Budget, *, token_budget: int | None = None
+) -> dict | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
 
     A breach refuses the *next* launch. It cannot stop a running agent — cost is
     only known once that agent's session has exited (`usage.read_envelope`) — so
     the overshoot is bounded by the cost of one task, not by the cap.
+
+    `token_budget` is the launching task's resolved V1 `token_budget`, checked
+    against every token this work item's sessions have spent so far, input and
+    output (a running session's are its live progress).
     """
+    if token_budget is not None:
+        spent = db.read(
+            lambda c: c.execute(
+                "SELECT COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) "
+                "FROM worker_sessions WHERE work_item_id = ?",
+                (work_item_id,),
+            ).fetchone()[0]
+        )
+        if spent >= token_budget:
+            return {"scope": "tokens", "spent_tokens": spent, "cap_tokens": token_budget}
     if budget.work_item_usd is None and budget.daily_usd is None:
         return None
     since = store.local_midnight_utc() if budget.daily_usd is not None else None
@@ -100,6 +116,12 @@ def budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:
 
 
 def budget_reason(breach: dict) -> str:
+    if breach["scope"] == "tokens":
+        return (
+            f"token budget reached: {breach['spent_tokens']} tokens spent on this work item, "
+            f"cap {breach['cap_tokens']} tokens. Nothing new was started; a running agent "
+            "was not interrupted."
+        )
     where = "this work item" if breach["scope"] == "work_item" else "today, across every work item"
     return (
         f"budget cap reached: ${breach['spent_usd']:.2f} spent on {where}, "
@@ -112,11 +134,25 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     # The fallback cannot fire in practice — sums only grow between the dispatch
     # that returned BUDGET and here — but a None would crash the escalation path
     # rather than stop the item, which is the wrong failure.
-    breach = budget_breach(db, work_item_id, budget) or {
-        "scope": "work_item",
-        "spent_usd": 0.0,
-        "cap_usd": 0.0,
-    }
+    # A token breach is the launching task's own cap, which only dispatch
+    # knew: it recorded it as `token_budget_reached` on the way out.
+    tokens = next(
+        (
+            e["payload"]
+            for e in reversed(db.read(lambda c: events.read_after(c, 0, work_item_id)))
+            if e["type"] == "token_budget_reached"
+        ),
+        None,
+    )
+    breach = (
+        budget_breach(db, work_item_id, budget)
+        or tokens
+        or {
+            "scope": "work_item",
+            "spent_usd": 0.0,
+            "cap_usd": 0.0,
+        }
+    )
     reason = budget_reason(breach)
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, None, breach))
     return "needs_human"

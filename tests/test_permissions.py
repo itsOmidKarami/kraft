@@ -45,14 +45,16 @@ def templates_dir(tmp_path, monkeypatch):
     return _templates(tmp_path, monkeypatch)
 
 
-def _seed_session(sid="s1", wid="w1", hook_point=_PATH, harness="fake"):
+def _seed_session(sid="s1", wid="w1", hook_point=_PATH, harness="fake", policy=None):
     """A V1 work item whose chain has one agent task at `_PATH`, and one
-    pending session on `hook_point`, written straight to the database."""
+    pending session on `hook_point`, written straight to the database.
+    `policy` is the node scope's own `policy:`."""
     chain = v1_chain(
         [
             {
                 "id": "implementation",
                 "kind": "exec",
+                **({"policy": policy} if policy is not None else {}),
                 "tasks": [
                     {"id": "work", "kind": "agent", "harness": harness, "prompt": "Do it."},
                     {"id": "check", "kind": "subprocess", "command": "true"},
@@ -119,7 +121,38 @@ def test_permission_request_allows_when_the_task_declares_no_allowlist(client):
         if e["type"] == "permission_decision"
     ]
     assert body == {"behavior": "allow", "updatedInput": {"command": "ls"}}
-    assert reasons == [f"{_PATH} declares no allowed_tools"]
+    assert reasons == [f"no layer of {_PATH}'s policy sets allowed_tools"]
+
+
+@pytest.mark.parametrize(
+    ("policy", "tool", "decision"),
+    [
+        ({"allowed_tools": ["Read"]}, "Read", "allow"),
+        ({"allowed_tools": ["Read"]}, "Bash", "deny"),
+        # An empty allowlist allows nothing -- it is not an absent one.
+        ({"allowed_tools": []}, "Read", "deny"),
+        # A deny list narrows whatever the allowlist permits, unbounded included.
+        ({"deny_tools": ["Bash"]}, "Bash", "deny"),
+        ({"deny_tools": ["Bash"]}, "Read", "allow"),
+        ({"allowed_tools": ["Read", "Bash"], "deny_tools": ["Bash"]}, "Bash", "deny"),
+    ],
+    ids=[
+        "allowlisted",
+        "outside-the-allowlist",
+        "empty-allowlist",
+        "denied",
+        "not-denied",
+        "denied-beats-allowlisted",
+    ],
+)
+def test_permission_request_answers_from_the_tasks_resolved_policy(client, policy, tool, decision):
+    """Kraft-v4nrd: a V1 task's tool grant is its resolved policy's -- here
+    the node scope's, which the task inherits -- not a field of its own."""
+    _seed_session(policy=policy)
+    body = _ask(client, tool).json()
+    assert body["behavior"] == decision, body
+    if decision == "deny":
+        assert _PATH in body["message"] and tool in body["message"], body
 
 
 def test_permission_request_denies_a_tool_outside_the_task_allowlist(monkeypatch, client):

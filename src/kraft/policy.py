@@ -305,21 +305,7 @@ class Policy:
         """The `Cap` for one loop `key`, `default` if unnamed, with `override`
         replacing only the fields it sets (`policy-override-rules-are-field-
         specific`: this is a sparse patch, not a merge of two `Cap`s)."""
-        cap = self.loops.get(key, self.default)
-        parsed_override = _cap_override(override)
-        if parsed_override is None:
-            return cap
-        return dataclasses.replace(
-            cap,
-            attempts=parsed_override.attempts
-            if parsed_override.attempts is not None
-            else cap.attempts,
-            wall_clock_s=(
-                parsed_override.wall_clock_s
-                if parsed_override.wall_clock_s is not None
-                else cap.wall_clock_s
-            ),
-        )
+        return with_cap_override(self.loops.get(key, self.default), override)
 
 
 def _field_error(name: str, exc: ValidationError) -> PolicyError:
@@ -404,6 +390,18 @@ def _cap_override(raw: CapOverride | dict | None) -> CapOverride | None:
     if raw is None or raw == {}:
         return None
     return raw if isinstance(raw, CapOverride) else CapOverride.model_validate(raw)
+
+
+def with_cap_override(cap: Cap, override: CapOverride | dict | None) -> Cap:
+    """`cap` with `override` replacing only the fields it sets."""
+    parsed = _cap_override(override)
+    if parsed is None:
+        return cap
+    return dataclasses.replace(
+        cap,
+        attempts=parsed.attempts if parsed.attempts is not None else cap.attempts,
+        wall_clock_s=parsed.wall_clock_s if parsed.wall_clock_s is not None else cap.wall_clock_s,
+    )
 
 
 def load_policy(path: str | Path) -> Policy:

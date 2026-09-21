@@ -484,7 +484,7 @@ async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dir
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
     monkeypatch.setattr(
         "kraft.executor.stops.budget_breach",
-        lambda db, wid, budget: {
+        lambda db, wid, budget, **_tokens: {
             "scope": "work_item",
             "spent_usd": 11.0,
             "cap_usd": 10.0,

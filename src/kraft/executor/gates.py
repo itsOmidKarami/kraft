@@ -11,6 +11,7 @@ from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
+from kraft.executor.dispatch import scope_policy
 from kraft.store import _now as _now
 from kraft.templates import Registry
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
@@ -276,10 +277,16 @@ async def review_gates(
         budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
 
         # Checked before the dispatch, not after: same posture as every other
-        # agent launch (`kraft.executor.walk.walk_node`'s BUDGET rung). Logged
-        # rather than silent -- a gate that quietly stopped being reviewed
-        # looks like a broken feature.
-        if stops.budget_breach(db, work_item_id, budget) is not None:
+        # agent launch (`kraft.executor.walk.walk_node`'s BUDGET rung), the
+        # reviewer's own `token_budget` included. Logged rather than silent --
+        # a gate that quietly stopped being reviewed looks like a broken
+        # feature.
+        tokens = (
+            scope_policy(row, node.auto_review).token_budget
+            if node.auto_review is not None
+            else None
+        )
+        if stops.budget_breach(db, work_item_id, budget, token_budget=tokens) is not None:
             await db.write(
                 lambda c, gate=gate: events.append(
                     c,
