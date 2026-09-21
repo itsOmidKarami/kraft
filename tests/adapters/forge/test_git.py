@@ -17,18 +17,15 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, make_repo_with_submodule
 
 from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
 from kraft.worker import sandbox
 
-BRANCH = "kraft/abc"
+from .outputs import GLAB_MR_VIEW
 
-GLAB_MR_VIEW = (
-    '{"iid":54,"target_branch":"main","source_branch":"kraft/abc","state":"opened",'
-    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}'
-)
+BRANCH = "kraft/abc"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -61,39 +58,27 @@ def _repo_with_origin(tmp_path: Path) -> Path:
     return repo
 
 
-def _stub_glab(tmp_path: Path, monkeypatch, stdout: str = GLAB_MR_VIEW) -> None:
-    """A `glab` on PATH that records its argv. `git` stays the real binary:
-    tmp_path is put first on PATH and holds no `git`, so the real one still
-    resolves further down."""
-    argv = tmp_path / "glab.argv"
-    p = tmp_path / "glab"
-    p.write_text(
-        f'#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> {argv}; done\n'
-        f"cat <<'STUBEOF'\n{stdout}\nSTUBEOF\nexit 0\n"
-    )
-    p.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+@pytest.fixture
+def glab(cli):
+    """A stub `glab` on PATH that answers a merge request view. `git` stays the
+    real binary: the stub directory holds no `git`."""
+    cli.stub("glab", GLAB_MR_VIEW)
+    return cli
 
 
-def _glab_argv(tmp_path: Path) -> list[str]:
-    path = tmp_path / "glab.argv"
-    return path.read_text().splitlines() if path.exists() else []
-
-
-def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, monkeypatch):
+def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
     """`git status --porcelain` from the real binary, over a worktree with a
     file the agent never `git add`ed — work item 5163dd1b's failure."""
     repo = _repo_with_origin(tmp_path)
-    _stub_glab(tmp_path, monkeypatch)
     (repo / "forgotten.py").write_text("never added\n")
 
     with pytest.raises(forge.ForgeError, match="forgotten.py"):
         asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
 
-    assert _glab_argv(tmp_path) == [], "glab ran over an uncommitted worktree"
+    assert glab.argv("glab") == [], "glab ran over an uncommitted worktree"
 
 
-def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, monkeypatch):
+def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     """The other half: `.pytest_cache/` and `.engineering/sessions/` must not
     fail a node. Real git does that exclusion, so only real git can prove it."""
     repo = _repo_with_origin(tmp_path)
@@ -103,20 +88,18 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, monkeypatch
     _git(repo, "push", "-q", "origin", BRANCH)
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
-    _stub_glab(tmp_path, monkeypatch)
 
     mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
 
     assert mr.number == 54
-    assert _glab_argv(tmp_path)[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:2] == ["mr", "create"]
 
 
-def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, monkeypatch):
+def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, glab):
     """Kraft-8iw6's symptom against the real binary: the document Kraft copied
     in is committed by Kraft's own primitive, so `assert_clean` passes and glab
     is reached instead of the node failing with "1 uncommitted path(s)"."""
     repo = _repo_with_origin(tmp_path)
-    _stub_glab(tmp_path, monkeypatch)
     doc = repo / ".engineering" / "specs" / "s.md"
     doc.parent.mkdir(parents=True)
     doc.write_text("# the attached spec\n")
@@ -126,32 +109,30 @@ def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, mon
     mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
 
     assert mr.number == 54
-    assert _glab_argv(tmp_path)[:2] == ["mr", "create"]
+    assert glab.argv("glab")[:2] == ["mr", "create"]
 
 
-def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, monkeypatch):
+def test_merge_refuses_an_unpushed_head_against_real_git(tmp_path, glab):
     """A commit made in the worktree after the last push — Kraft-bxj8's exact
     shape — and `git rev-list --count origin/BRANCH..HEAD` from real git."""
     repo = _repo_with_origin(tmp_path)
     (repo / "late.txt").write_text("committed after the push\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "late")
-    _stub_glab(tmp_path, monkeypatch, stdout="")
 
     with pytest.raises(forge.ForgeError, match="ahead of origin/kraft/abc by 1"):
         asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
 
-    assert _glab_argv(tmp_path) == [], "glab merged a head the forge has never seen"
+    assert glab.argv("glab") == [], "glab merged a head the forge has never seen"
 
 
-def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, monkeypatch):
+def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab):
     """The ordinary path: really pushed, so the guard lets the CLI run."""
     repo = _repo_with_origin(tmp_path)
-    _stub_glab(tmp_path, monkeypatch, stdout="")
 
     asyncio.run(forge.GlabCli().merge(repo=repo, branch=BRANCH, mr=forge.MR(0, "")))
 
-    assert _glab_argv(tmp_path)[:2] == ["mr", "merge"]
+    assert glab.argv("glab")[:2] == ["mr", "merge"]
 
 
 def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch):
@@ -185,8 +166,6 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     (git-lfs's) uploading the objects a push's pointers reference must still
     run. A pinned `core.hooksPath` that survives into `forge.push` would
     silently drop those uploads."""
-    from kraft.worker import sandbox
-
     repo = _repo_with_origin(tmp_path)
     hooks_dir = _git(repo, "rev-parse", "--git-path", "hooks").strip()
     marker = tmp_path / "pre-push-ran"
@@ -383,44 +362,17 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
     set on a six-submodule workspace -- it must not blind Kraft's own guard
     to a submodule commit that never left the worktree (the real failure on
     work item 9d0ab38ff3c9439b90506df0f6966660)."""
-    root = tmp_path / "root"
-    root.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
-    (root / "README.md").write_text("root\n")
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
-
-    sub = tmp_path / "sub"
-    sub.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=sub, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=sub, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=sub, check=True)
-    (sub / "f.txt").write_text("1\n")
-    subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=sub, check=True)
-
-    subprocess.run(
-        ["git", "-c", "protocol.file.allow=always", "submodule", "add", str(sub), "pkg"],
-        cwd=root,
-        check=True,
-    )
-    subprocess.run(["git", "config", "submodule.pkg.ignore", "all"], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "add submodule"], cwd=root, check=True)
-
-    # The submodule checkout has its own gitdir under root/.git/modules and
-    # does not inherit `sub`'s identity, so a runner with no global git
-    # config (CI, unlike a dev machine) hits "unable to auto-detect email
-    # address" on the commit below without this.
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root / "pkg", check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=root / "pkg", check=True)
-
-    # New commit inside the submodule, root pointer left untouched -- exactly
-    # what "do not bump the workspace submodule pointer" produces.
+    root, _ = make_repo_with_submodule(tmp_path, submodule_path="pkg")
+    _git(root, "config", "submodule.pkg.ignore", "all")
+    # The submodule checkout's gitdir lives under root/.git/modules and has no
+    # identity of its own; a runner with no global git config (CI) needs one.
+    _git(root / "pkg", "config", "user.email", "t@t")
+    _git(root / "pkg", "config", "user.name", "t")
+    # A new commit inside the submodule, root pointer left untouched -- what
+    # "do not bump the workspace submodule pointer" produces.
     (root / "pkg" / "f.txt").write_text("2\n")
-    subprocess.run(["git", "add", "-A"], cwd=root / "pkg", check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "metric change"], cwd=root / "pkg", check=True)
+    _git(root / "pkg", "add", "-A")
+    _git(root / "pkg", "commit", "-q", "-m", "metric change")
 
     with pytest.raises(forge.ForgeError, match="pkg"):
         asyncio.run(forge.assert_clean(root))

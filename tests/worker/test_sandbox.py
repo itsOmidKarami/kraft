@@ -3,50 +3,55 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from support.harness import make_repo
 
 from kraft.worker import sandbox
 
-
-def test_resolve_falls_through_to_the_binding_when_repo_sets_nothing():
-    binding = {"kind": "agent", "command": "claude", "sandbox": {"kind": "docker", "image": "x"}}
-    assert sandbox.resolve(binding, {}) == {"kind": "docker", "image": "x"}
-    assert sandbox.resolve(binding, None) == {"kind": "docker", "image": "x"}
+_X = {"kind": "docker", "image": "x"}
+_Y = {"kind": "docker", "image": "y"}
 
 
-def test_resolve_repo_overrides_wholesale_with_its_own_image():
-    binding = {"kind": "agent", "command": "claude", "sandbox": {"kind": "docker", "image": "x"}}
-    repo = {"sandbox": {"kind": "docker", "image": "y"}}
-    assert sandbox.resolve(binding, repo) == {"kind": "docker", "image": "y"}
+@pytest.mark.parametrize(
+    "binding_sandbox, repo, expected",
+    [
+        (_X, {}, _X),
+        (_X, None, _X),
+        # The repo overrides wholesale, with its own image ...
+        (_X, {"sandbox": _Y}, _Y),
+        # ... can turn off a binding that turned sandboxing on ...
+        (_X, {"sandbox": False}, None),
+        # ... and can turn it on for a binding that left it unset.
+        (None, {"sandbox": _Y}, _Y),
+        (None, {}, None),
+    ],
+    ids=[
+        "binding-when-repo-sets-nothing",
+        "binding-when-repo-is-none",
+        "repo-overrides-wholesale",
+        "repo-turns-it-off",
+        "repo-turns-it-on",
+        "neither-sets-one",
+    ],
+)
+def test_resolve(binding_sandbox, repo, expected):
+    binding = {"kind": "agent", "command": "claude"}
+    if binding_sandbox is not None:
+        binding["sandbox"] = binding_sandbox
+    assert sandbox.resolve(binding, repo) == expected
 
 
-def test_resolve_repo_can_turn_off_a_binding_that_turned_sandboxing_on():
-    binding = {"kind": "agent", "command": "claude", "sandbox": {"kind": "docker", "image": "x"}}
-    assert sandbox.resolve(binding, {"sandbox": False}) is None
-
-
-def test_resolve_repo_can_turn_on_sandboxing_a_binding_left_unset():
-    binding = {"kind": "subprocess", "command": ["pytest"]}
-    repo = {"sandbox": {"kind": "docker", "image": "y"}}
-    assert sandbox.resolve(binding, repo) == {"kind": "docker", "image": "y"}
-
-
-def test_resolve_is_none_when_neither_sets_one():
-    assert sandbox.resolve({"kind": "agent", "command": "claude"}, {}) is None
-
-
-def test_validate_rejects_a_non_mapping():
-    with pytest.raises(sandbox.SandboxError, match="mapping"):
-        sandbox.validate("docker", where="x")
-
-
-def test_validate_rejects_an_unknown_kind():
-    with pytest.raises(sandbox.SandboxError, match="podman"):
-        sandbox.validate({"kind": "podman", "image": "y"}, where="x")
-
-
-def test_validate_rejects_a_missing_image():
-    with pytest.raises(sandbox.SandboxError, match="image"):
-        sandbox.validate({"kind": "docker"}, where="x")
+@pytest.mark.parametrize(
+    "value, match",
+    [
+        ("docker", "mapping"),
+        ({"kind": "podman", "image": "y"}, "podman"),
+        ({"kind": "docker"}, "image"),
+    ],
+    ids=["not-a-mapping", "unknown-kind", "missing-image"],
+)
+def test_validate_rejects(value, match):
+    with pytest.raises(sandbox.SandboxError, match=match):
+        sandbox.validate(value, where="x")
 
 
 def test_validate_accepts_a_well_formed_sandbox():
@@ -277,23 +282,16 @@ def _repo_with_a_planted_hook(tmp_path):
     """A repo whose config points `core.hooksPath` at a hook that writes a
     marker -- what a worker plants through any of the redirect files inside
     the gitdir it must be able to write."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
+    repo = make_repo(tmp_path)
     hooks = tmp_path / "planted-hooks"
     hooks.mkdir()
     marker = tmp_path / "hook-ran"
     hook = hooks / "pre-commit"
     hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
     hook.chmod(0o755)
-    run = lambda *a: subprocess.run(  # noqa: E731
-        ["git", *a], cwd=repo, check=True, capture_output=True, text=True
-    )
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
-    run("config", "core.hooksPath", str(hooks))
+    subprocess.run(["git", "config", "core.hooksPath", str(hooks)], cwd=repo, check=True)
     (repo / "f.txt").write_text("x\n")
-    run("add", "f.txt")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, check=True, capture_output=True)
     return repo, marker
 
 
