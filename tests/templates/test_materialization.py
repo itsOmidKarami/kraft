@@ -493,9 +493,9 @@ def test_the_target_selection_survives_serialization():
 
 
 def test_the_snapshot_does_not_carry_fork_lineage():
-    """`work_items.run_fork_parent` is the only record of a fork's parent. A
-    field on the snapshot as well would be a second source of truth nothing keeps
-    equal to the column -- and the column is the one a query can reach."""
+    """`RunFork.parent` (the `run_forks` row) is the only record of a fork's
+    parent. A field on the snapshot as well would be a second source of truth
+    nothing keeps equal to the fork's own row."""
     materialized = (
         TemplateLibrary.from_yaml_dir(SEEDED)
         .resolve_chain("default")

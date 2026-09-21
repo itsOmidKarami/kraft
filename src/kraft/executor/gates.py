@@ -198,9 +198,9 @@ async def apply_rejection(
 def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     """True iff the most recent gate_* event for the item is gate_approved <gate>.
 
-    `gate_reopened` (a base-change restart, only while
-    `walk.RESTART_REOPENS_APPROVED_GATES` is on) is the newest word on a gate
-    it names, so the restarted walk requests it again."""
+    `gate_reopened` (a retry's fork, or a base-change restart after a resolved
+    conflict) is the newest word on a gate it names, so the rerun requests it
+    again."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] in ("gate_requested", "gate_approved", "gate_rejected", "gate_reopened"):
@@ -931,18 +931,15 @@ async def resume_after_escalation(
     consume.
     """
     from kraft.executor import walk  # local: walk imports this module
+    from kraft.executor.retry import retry  # local: it imports this module
+    from kraft.templates.forks import ChainPath, PathError, override_from_record
 
     new_evts = db.read(lambda c: events.read_after(c, cursor, work_item_id))
     request_evt = next((e for e in new_evts if e["type"] == "work_item_self_retry_requested"), None)
     if request_evt is None:
         return status_of(db, work_item_id)
     payload = request_evt["payload"]
-    node_id, key, gate_key, steer = (
-        payload["node_id"],
-        payload["key"],
-        payload["gate_key"],
-        payload["steer"],
-    )
+    node_id, steer = payload["node_id"], payload["steer"]
     # Absent on an event written before this field existed, or on a
     # hand-built test payload -- default False rather than KeyError either way.
     seeded = payload.get("seeded", False)
@@ -1016,44 +1013,40 @@ async def resume_after_escalation(
             return status_of(db, work_item_id)
         if new_base:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
-        await db.write(
-            lambda c: store.retry_after_cap(
-                c,
-                work_item_id,
-                node_id,
-                key,
-                steer,
-                gate_key=gate_key,
-                escalated=True,
-                seeded=seeded,
-            )
-        )
-        # `store.node_index`, not `next(i for i, n in enumerate(walk.chain_of(
-        # row).chain.nodes) ...)`: that raised `LookupError` for a legacy row and
-        # `StopIteration` for an unknown node, both *after* `retry_after_cap`.
-        start = store.node_index(row, node_id)
-        if start is None:
-            # No `return` here: the status this function reports has to be read
-            # *after* the bracket has performed its stop, or the caller is told
-            # `active` about an item that is about to be `needs_human`. Falls
-            # through to the read below the `async with`.
-            logger.warning(
-                "escalation retry: %s has no node %r in its chain, not relaunching",
-                work_item_id,
-                node_id,
-            )
-        else:
-            return await walk.run(
+        # The retry the agent asked for, by the path it asked for (a node, a
+        # step, a task, or a restart); an older request names only its node.
+        target = None
+        if not payload.get("restart"):
+            try:
+                target = ChainPath.parse(walk.chain_of(row), payload.get("path") or node_id)
+            except PathError:
+                target = None
+                logger.warning(
+                    "escalation retry: %s has no node %r in its chain, not relaunching",
+                    work_item_id,
+                    node_id,
+                )
+        if target is not None or payload.get("restart"):
+            carried = payload.get("override")
+            return await retry(
                 db,
                 run_dirs,
                 work_item_id=work_item_id,
+                target=target,
+                # The override the route validated when the agent asked,
+                # applied as a direct `/retry` would (Kraft-vvj32).
+                override=override_from_record(carried) if carried else None,
                 registry=registry,
-                bd_cwd=bd_cwd,
-                start_index=start,
-                policy=policy,
                 steer=steer,
-                steer_source="seeded" if seeded else "human",
+                seeded=seeded,
+                escalated=True,
+                bd_cwd=bd_cwd,
+                policy=policy,
                 launch=launch,
                 on_approve=on_approve,
             )
+        # No `return` on a node the chain does not have: the status this
+        # function reports has to be read *after* the bracket has performed its
+        # stop, or the caller is told `active` about an item that is about to be
+        # `needs_human`. Falls through to the read below the `async with`.
     return status_of(db, work_item_id)

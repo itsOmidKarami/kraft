@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-from kraft import builtins as _builtins
-from kraft import config as _config
 from kraft import policy as _policy
 from kraft import store
-from kraft.executor import entry, gates, walk
-from kraft.executor.context import _ADVANCING, RATE_LIMITED, WAITING, LaunchContext, OnApprove
+from kraft.executor import gates, walk
+from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
 from kraft.templates import Registry
-from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+from kraft.templates.models import ExecNode, ResolvedNode
 
 
 async def reconcile_current_node(
-    db,
-    run_dirs,
-    work_item_id,
-    node: ResolvedNode,
-    row,
-    worktree,
-    adopted,
-    *,
-    policy: _policy.Policy | None = None,
-    launch: LaunchContext | None = None,
-) -> str:
+    db, work_item_id: str, node: ResolvedNode, adopted: dict
+) -> str | None:
+    """Settle what a crash left running on the current node, and read its
+    outcome when the sessions alone can answer it.
+
+    Every session a restart adopted is awaited first, so its row says how it
+    ended. Then, for the one shape whose sessions *are* its outcome -- one
+    step, no recovery, no fix loop -- all of them advancing completes the node
+    (`"ok"`) and a latest attempt that did not stops for a human
+    (`"needs_human"`): walking it again would pay to rerun a task whose
+    failure is already known. Every other shape answers `None` and is
+    re-entered at the item's cursor, because a node that can remediate itself
+    is its own reconciliation (Kraft-rv6i), and its cursor says which steps
+    already passed (Kraft-c3dab).
+    """
     node_id = node.id
     sessions = db.read(
         lambda c: c.execute(
@@ -29,88 +31,32 @@ async def reconcile_current_node(
             (work_item_id, node_id),
         ).fetchall()
     )
-
-    # A multi-step node creates step 2's session row only after step 1 finishes,
-    # so a crash mid-step-1 leaves fewer rows than tasks; walk_node re-measures it.
-    exec_node = node.node if isinstance(node.node, ExecNode) else None
-    if (
-        (exec_node is not None and exec_node.fix_loop is not None)
-        or node.on_failure
-        or len(node.steps) > 1
-    ):
-        # A node that can remediate itself is its own reconciliation: re-entering
-        # `walk_node` re-measures it, and a failure then reaches the repair the
-        # template declared. The session-count check below would instead read
-        # the crash as "did not resolve cleanly" and stop for a human with the
-        # repair never tried (Kraft-rv6i).
-        #
-        # A fix_loop node that has run >=1 cycle keeps cycle-0's permanently-failed
-        # measuring session plus extra fix / re-measure sessions, so the
-        # len(final)==len(tasks) & all-done clean-check below is structurally
-        # unsatisfiable and would wrongly escalate on every crash-recovery. The
-        # loop is its own reconciliation: await any adopted in-flight session,
-        # then re-enter walk_node. The surviving retry_counters row continues the
-        # wall-clock budget from its original started_at (spec §2.C, §6.4, §9).
-        for s in sessions:
-            task = adopted.get(s["id"])
-            if task is not None:
-                await task
-        return (
-            "ok"
-            if await walk.walk_node(
-                db,
-                run_dirs,
-                work_item_id,
-                node,
-                row,
-                worktree,
-                policy=policy,
-                launch=launch,
-            )
-            == "ok"
-            else "needs_human"
-        )
-
-    if not sessions:
-        # crash landed between enter_node and the first create_session; safe to
-        # re-dispatch because current_node_id only advances with node_completed.
-        return (
-            "ok"
-            if await walk.walk_node(
-                db,
-                run_dirs,
-                work_item_id,
-                node,
-                row,
-                worktree,
-                policy=policy,
-                launch=launch,
-            )
-            == "ok"
-            else "needs_human"
-        )
-
     for s in sessions:
         task = adopted.get(s["id"])
         if task is not None:
             await task
-
+    exec_node = node.node if isinstance(node.node, ExecNode) else None
+    if (
+        exec_node is None
+        or exec_node.fix_loop is not None
+        or node.on_failure
+        or len(node.steps) > 1
+        or not sessions
+    ):
+        return None
     # Scoped to this node's own declared tasks, latest attempt only
     # (Kraft-s15p0) -- not every worker_sessions row this node has ever
     # accumulated across every escalation and every earlier failed attempt.
-    # See `store.latest_session_per_task`'s own docstring for the observed
-    # history this fixes.
     measured = [t.path for step in node.steps for t in step.tasks]
     final = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node_id, measured))
-    # ponytail: single-task-node resume only. A crash mid-fan-out of a multi-task
-    # node (fewer sessions than tasks, none failed) -> needs_human, no partial
-    # re-dispatch. Upgrade with per-task session reconciliation if multi-task
-    # nodes ship.
-    # Nodes declaring `on_failure` never reach here; they took the re-measuring
-    # branch above.
     if len(final) == len(measured) and all(r["status"] in _ADVANCING for r in final):
         await db.write(lambda c: store.complete_node(c, work_item_id, node_id))
         return "ok"
+    if len(final) < len(measured) and all(r["status"] in _ADVANCING for r in final):
+        # A crash between two of the step's tasks starting: the ones with no
+        # session yet were never dispatched. Walking the node dispatches them,
+        # and reuses the ones that finished (`reusable_session`).
+        return None
     # Which session, and how it ended, rides on the card -- appended, so the
     # prefix `analytics._DEFECT_SIGNATURES` matches on is unchanged.
     seen = {r["hook_point"]: r["status"] for r in final}
@@ -127,6 +73,61 @@ async def reconcile_current_node(
     return "needs_human"
 
 
+class SteerError(ValueError):
+    """A steer that cannot land, naming the one field it was refused for."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(f"{field}: {message}")
+        self.field = field
+
+
+def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str, str | None] | None:
+    """Who a resume's steer reaches, by task path.
+
+    `text` reaches every paused agent task of the node the item stands on
+    (`steer-defaults-to-all-paused-agent-tasks`); `steers` addresses paused
+    agent tasks individually and wins for the task it names
+    (`steer-can-address-paused-agent-tasks-individually`). `None` when no agent
+    task is paused there -- then `text`, if any, is the unaddressed note the
+    next agent launch takes. A path that is not a paused agent task of this
+    node is a `SteerError` naming it: a steer never targets a non-agent task.
+    """
+    from kraft.templates.forks import ChainPath, PathError
+    from kraft.templates.models import AgentTask
+
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        # A legacy row, which no walk can run: the walk says so, not this.
+        return None
+    node_id = row["current_node_id"]
+    node = next((n for n in chain.chain.nodes if n.id == node_id), None)
+    own = [t for s in node.steps for t in s.tasks] if node is not None else []
+    agents = [t.path for t in own if isinstance(t.task, AgentTask)]
+    latest = db.read(lambda c: store.latest_session_per_task(c, row["id"], node_id, agents))
+    paused = [r["hook_point"] for r in latest if r["status"] == "paused"]
+    for path in steers:
+        field = f"steers.{path}"
+        try:
+            target = ChainPath.parse(chain, path)
+        except PathError as exc:
+            raise SteerError(field, str(exc)) from None
+        if target.task is None:
+            raise SteerError(field, f"{path!r} is not a task")
+        if not isinstance(target.task.task, AgentTask):
+            raise SteerError(
+                field,
+                f"{path!r} is a {target.task.task.kind.value} task, and a steer reaches "
+                "only an agent task",
+            )
+        if path not in paused:
+            raise SteerError(field, f"{path!r} is not paused")
+    if not paused:
+        return None
+    # A paused task with no text of its own yet maps to None: a steer left
+    # earlier through `/steer` is read only once the resume has claimed the item.
+    return {p: steers.get(p, text) for p in paused}
+
+
 async def resume_once(
     db,
     run_dirs,
@@ -138,104 +139,35 @@ async def resume_once(
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
 ) -> str:
+    """Crash resume: reconcile the current node, then continue through the one
+    entry into the walk, `walk.run_once`, from the item's cursor -- or from the
+    node after the one reconciliation just completed. Its result is returned
+    as it is: a node back to waiting on CI is `waiting`, not `needs_human`, and
+    a pause stops the walk rather than being walked past (Kraft-z0hah)."""
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
     nodes = walk.chain_of(row).chain.nodes
-    cur = row["current_node_id"]
-
-    if cur is None:
-        # crash between create_work_item and the first load_chain; nothing ran.
-        # Recorded before ensure_worktree below for the same reason `run` records
-        # it first: a worktree that can never be created must not leave the item
-        # looking like it crashed before load_chain ever happened.
-        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0].id))
-        cur = nodes[0].id
-
-    # Before the first dispatch, not inside the `env_setup` node: `default.yaml`
-    # runs `spec` and `plan` first, and both need a checkout — and, for `plan`'s
-    # attached-spec fallback to have anything to find, attachments already
-    # copied in — to write into.
-    #
-    # See the matching comment in `kraft.executor.walk.run`: a git failure here
-    # is attributed to the current node rather than left to
-    # `kraft.api.deps.guard`'s bare crash handler.
-    try:
-        worktree = await _builtins.ensure_worktree(
-            db,
-            run_dirs,
-            repo=row["repo"],
-            work_item_id=work_item_id,
-            attachments=entry.attachments_of(row),
-            repo_entry=launch.repo_entry if launch else None,
-        )
-        # No `prepare_runtime` here, deliberately. A resume is a re-entry, and
-        # `walk.run_once` only prepares when a walk starts (`start_index == 0`)
-        # for the reason its own comment gives; a resumed worktree was prepared
-        # when it was cut, or by the walk that is being resumed.
-    except (RuntimeError, _config.ConfigError) as exc:
-        reason = str(exc)
-        await db.write(lambda c: store.enter_node(c, work_item_id, cur))
-        await db.write(lambda c: store.mark_needs_human(c, work_item_id, cur, reason))
-        return "needs_human"
-
-    start = next(i for i, n in enumerate(nodes) if n.id == cur)
-
-    # A gate node ran nothing, so there is nothing to reconcile: either it is
-    # still unanswered (re-request it and stop) or it was cleared before the
-    # crash and the walk continues at the node after it. `maybe_gate` answers
-    # both questions.
-    if isinstance(nodes[start].node, GateNode):
-        if await gates.maybe_gate(db, work_item_id, nodes[start]):
-            return "awaiting_gate"
-        start += 1
-        if start >= len(nodes):
-            await db.write(lambda c: store.mark_completed(c, work_item_id))
-            await entry.close_beads(db, row, bd_cwd, run_dirs)
-            return "completed"
-        # fall through: reconcile from the post-gate node instead
-
-    if (
-        await reconcile_current_node(
-            db,
-            run_dirs,
-            work_item_id,
-            nodes[start],
-            row,
-            worktree,
-            adopted,
-            policy=policy,
-            launch=launch,
-        )
-        == "needs_human"
-    ):
-        return "needs_human"
-
-    for node in nodes[start + 1 :]:
-        if await gates.maybe_gate(db, work_item_id, node):
-            return "awaiting_gate"
-        tail_result = await walk.walk_node(
-            db,
-            run_dirs,
-            work_item_id,
-            node,
-            row,
-            worktree,
-            policy=policy,
-            launch=launch,
-        )
-        if tail_result == "needs_human":
+    current = next((i for i, n in enumerate(nodes) if n.id == row["current_node_id"]), None)
+    start_index = None
+    if current is not None:
+        settled = await reconcile_current_node(db, work_item_id, nodes[current], adopted)
+        if settled == "needs_human":
             return "needs_human"
-        if tail_result == RATE_LIMITED:
-            return RATE_LIMITED
-        if tail_result == WAITING:
-            return WAITING
-
-    await db.write(lambda c: store.mark_completed(c, work_item_id))
-    await entry.close_beads(db, row, bd_cwd, run_dirs)
-    return "completed"
+        if settled == "ok":
+            start_index = current + 1
+    return await walk.run_once(
+        db,
+        run_dirs,
+        work_item_id=work_item_id,
+        registry=registry,
+        bd_cwd=bd_cwd,
+        start_index=start_index,
+        policy=policy,
+        launch=launch,
+    )
 
 
 async def resume(

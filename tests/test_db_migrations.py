@@ -138,11 +138,16 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         drop_lines = (
             *drop_lines,
             "materialized_chain TEXT,",
-            "run_fork_parent  TEXT,",
+            "run_chain        TEXT,",
             "-- template schema V1's immutable work-item input",
             "-- Beside `chain_definition`, not replacing it",
-            "-- the run this one forked from (Phase 5 retry forks)",
         )
+    elif version < 35:
+        # `_MIGRATIONS[32]` reserved `run_fork_parent`; `_MIGRATIONS[34]` drops
+        # it for `run_chain`.
+        replace = (*replace, ("run_chain        TEXT,", "run_fork_parent  TEXT,"))
+    if version < 35:
+        skip_stmts = (*skip_stmts, "run_forks")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -381,7 +386,12 @@ def test_a_fresh_schema_and_a_fully_migrated_one_agree(tmp_path):
             if not table.startswith("sqlite_")
         }
 
+    def triggers(conn):
+        return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+
     assert shape(old) == shape(fresh)
+    # What makes a run fork immutable (`db._RUN_FORK_TRIGGERS`) is not a column.
+    assert triggers(old) == triggers(fresh) == {"run_forks_immutable", "run_forks_undeletable"}
 
 
 ADDED_COLUMNS = [
@@ -408,8 +418,10 @@ ADDED_COLUMNS = [
     (30, "worker_sessions", ("command",), None),
     (31, "work_items", ("current_step",), 0),
     # template schema V1 is additive: an existing item keeps the
-    # `chain_definition` it has and gains two NULL columns (`_MIGRATIONS[32]`)
-    (32, "work_items", ("materialized_chain", "run_fork_parent"), None),
+    # `chain_definition` it has and gains a NULL column (`_MIGRATIONS[32]`)
+    (32, "work_items", ("materialized_chain",), None),
+    # the current run fork's materialization; NULL until the item's first retry
+    (34, "work_items", ("run_chain",), None),
 ]
 
 

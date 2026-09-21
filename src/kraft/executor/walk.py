@@ -17,6 +17,7 @@ from kraft.executor.context import (
     BUDGET,
     CONFIG_ERROR,
     CONFLICT,
+    CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
     WAITING,
@@ -521,9 +522,10 @@ async def _resolve_conflict(
     Believed only when the worktree now sits on origin's current tip, the
     same check the legacy resolver made: an agent reporting success without
     finishing the rebase has not resolved anything. A resolution that moved
-    the base is a base change like any other, so this answers `BASE_MOVED`
-    and `run_once` restarts the declared span
-    (`resolved-conflict-restarts-from-base-change-target`).
+    the base is a base change, so this answers `CONFLICT_RESOLVED` and
+    `run_once` restarts the declared span
+    (`resolved-conflict-restarts-from-base-change-target`), reopening the
+    span's approved gates.
     """
     old_base = dispatch._current_base_ref(db, work_item_id)
     new_base = await _builtins.upstream_head(Path(row["repo"]))
@@ -570,7 +572,7 @@ async def _resolve_conflict(
         )
         if moved and new_base != old_base:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
-            return BASE_MOVED
+            return CONFLICT_RESOLVED
         reason = (
             f"the conflict handler in node {node.id} finished without rebasing onto "
             f"{new_base or 'the upstream tip'}: {detail}"
@@ -651,10 +653,14 @@ async def walk_node(
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     start_step: int = 0,
+    preserve: frozenset[str] = frozenset(),
 ) -> str:
     """One entry into an execution node: measure it, recover, fix, and, when
     none of those can advance it, escalate -- a successful escalation reruns
-    the node from its first step, as a fresh entry."""
+    the node from its first step, as a fresh entry.
+
+    `preserve` is a task retry's completed siblings (`RunFork.preserved`),
+    kept on the entry measurement only."""
     # Derived here rather than passed in: every caller already hands us the
     # policy, so no call site can forget the cap and silently lose it. Folded
     # through the item's own cap (UI v2 · 04 point 4) -- re-read fresh from
@@ -682,6 +688,7 @@ async def walk_node(
             steer=steer,
             launch=launch,
             start_step=start_step,
+            preserve=preserve,
             # A handler runs at most once per entry into the node; a retry the
             # escalation earned is a new entry.
             spent=set(),
@@ -703,6 +710,7 @@ async def walk_node(
         if outcome != "retry":
             return outcome
         start_step = 0
+        preserve = frozenset()
 
 
 async def _walk_node_once(
@@ -720,6 +728,7 @@ async def _walk_node_once(
     launch: LaunchContext | None,
     start_step: int,
     spent: set[str],
+    preserve: frozenset[str] = frozenset(),
 ) -> str | _Stuck:
     loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
     key = _loop_key(node) if loop is not None else None
@@ -746,6 +755,7 @@ async def _walk_node_once(
             loop_severities=loop_severities,
             start_step=start_step,
             spent=spent,
+            preserve=preserve,
         )
         if verdict == BASE_MOVED:
             return await _moved_base(db, work_item_id, node)
@@ -768,8 +778,6 @@ async def _walk_node_once(
                 round=0,
                 loop_severities=loop_severities,
             )
-            if resolved == BASE_MOVED:
-                return await _moved_base(db, work_item_id, node)
             return resolved
         if verdict == "failed":
             question = dispatch.needs_context_question(db, work_item_id, node, round=0)
@@ -886,8 +894,10 @@ async def _walk_node_once(
             loop_severities=loop_severities,
             start_step=resume_step,
             spent=spent,
+            preserve=preserve,
         )
         resume_step = 0
+        preserve = frozenset()
         if verdict == BASE_MOVED:
             # Not a failure: no fix cycle is spent on code a restart is about
             # to re-measure (`base-change-is-not-an-execution-failure`).
@@ -915,8 +925,6 @@ async def _walk_node_once(
                 round=round,
                 loop_severities=loop_severities,
             )
-            if resolved == BASE_MOVED:
-                return await _moved_base(db, work_item_id, node)
             return resolved
 
         if (
@@ -924,6 +932,11 @@ async def _walk_node_once(
             and _node_handler_applies(node, failed)
             and _first_iteration
             and not _repair_tried
+            # A measuring task's question is for a human, not a repair task --
+            # the loopless branch's rule (Kraft-rv6i), here too (Kraft-tr0o9):
+            # it stops below, before any recovery is spent on it.
+            and dispatch.needs_context_question(db, work_item_id, node, round, first_iteration=True)
+            is None
         ):
             # Once per entry into this node, and only ahead of the very first
             # cycle: `recover_node` re-measures for real, so a repair that
@@ -1377,17 +1390,15 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
         )
 
 
-#: Whether a base-change restart reopens a gate inside its span that was
-#: already approved. The one decision point for it, and pending with Omid
-#: (Ruling 87, Kraft-bjw6a): until he decides, an approved gate stays approved
-#: and the restarted walk passes over it (`gates.maybe_gate`). True reopens it,
-#: so the walk stops there again. Both sides are pinned in
-#: tests/executor/test_default_chain.py.
-RESTART_REOPENS_APPROVED_GATES = False
-
-
 async def _restart_for_base_change(
-    db, work_item_id: str, nodes, index: int, restart_from: str, policy: _policy.Policy | None
+    db,
+    work_item_id: str,
+    nodes,
+    index: int,
+    restart_from: str,
+    policy: _policy.Policy | None,
+    *,
+    reopen_gates: bool,
 ) -> int | None:
     """Restart the chain at `restart_from` because node `index` moved the
     worktree base (`base-change-restarts-a-declared-chain-span`), or stop for a
@@ -1401,6 +1412,13 @@ async def _restart_for_base_change(
     (Kraft-s7c04.25). The restarts themselves are bounded by their own
     `<node>.on_base_changed` counter, which the span never clears: a base that
     moves on every pass would otherwise restart forever.
+
+    `reopen_gates` is whether a conflict was resolved to get here (Ruling 162).
+    A clean rebase -- the forge's forced rebase included, which succeeds only
+    with no textual conflict -- changes nothing a gate saw, so an approved gate
+    in the span keeps its approval and the restarted walk passes over it. A
+    resolved conflict changed code no gate saw: every approved gate in the span
+    reopens, and a human approves it again.
     """
     node = nodes[index]
     key = f"{node.id}.on_base_changed"
@@ -1417,12 +1435,12 @@ async def _restart_for_base_change(
         return None
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
-    if RESTART_REOPENS_APPROVED_GATES:
+    if reopen_gates:
         for gate in nodes[target:index]:
             if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
                 await db.write(
                     lambda c, g=gate.id: events.append(
-                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "base_change"}
+                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "conflict_resolved"}
                     )
                 )
     for n in span:
@@ -1447,6 +1465,71 @@ async def _restart_for_base_change(
     return target
 
 
+def _cursor(row, nodes) -> tuple[int, int]:
+    """Where the item stands: its current node's index and the step group that
+    node last began. An item that never reached a node stands at the start."""
+    current = row["current_node_id"]
+    if current is None:
+        return 0, 0
+    index = next((i for i, n in enumerate(nodes) if n.id == current), None)
+    if index is None:
+        raise LookupError(
+            f"work item {row['id']!r} stands on node {current!r}, which its chain does not have"
+        )
+    return index, row["current_step"]
+
+
+async def _door_conflict(
+    db,
+    run_dirs,
+    work_item_id: str,
+    nodes,
+    index: int,
+    row,
+    worktree,
+    conflict: str,
+    carried: Steer,
+    policy: _policy.Policy | None,
+    launch: LaunchContext | None,
+) -> int | str:
+    """A rebase conflict hit before the walk, handed to `nodes[index]`'s
+    `on_conflict` handler as the walk would hand a task's (Kraft-e7anb): the
+    node to restart at once it is resolved -- the declared span, its approved
+    gates reopened -- or the stop it ended in. With no handler it stops for a
+    human (`rebase-conflict-requires-explicit-handler`), and an unaddressed
+    steer goes back on the row for the attempt that follows."""
+    node = nodes[index]
+    declared = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
+    if declared is None or declared.on_conflict is None:
+        if carried and not carried.targeted:
+            text = carried.take()
+            await db.write(lambda c: store.set_steer(c, work_item_id, text))
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, conflict))
+        return "needs_human"
+    budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
+    result = await _resolve_conflict(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        [],
+        conflict,
+        steer=carried,
+        launch=launch,
+        budget=budget,
+        round=0,
+        loop_severities=policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES,
+    )
+    if result != CONFLICT_RESOLVED:
+        return result
+    target = await _restart_for_base_change(
+        db, work_item_id, nodes, index, declared.restart_from, policy, reopen_gates=True
+    )
+    return "needs_human" if target is None else target
+
+
 async def run_once(
     db,
     run_dirs,
@@ -1454,21 +1537,46 @@ async def run_once(
     work_item_id: str,
     registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
+    conflict: str | None = None,
 ) -> str:
+    """The one way into the walk.
+
+    Every door that *resumes* an item -- `/resume`, crash resume
+    (`resuming.resume`), the rate-limit and CI-wait pollers -- passes no
+    position: the walk starts at the item's own cursor, `current_node_id` and
+    the step group `current_step` last began, so work that completed before the
+    stop is not rerun (`resume-preserves-completed-work`, Kraft-c3dab). A door
+    that *moves* the item -- a retry, a skip, a gate decision -- passes
+    `start_index` (and `start_step`) to say where it moved it to.
+
+    The item's status is read before every node: a walk only runs an `active`
+    item, and every result is returned as it is, never remapped (Kraft-z0hah).
+
+    `conflict` is a rebase conflict the door itself hit refreshing the worktree
+    before the walk (`/retry`, `/resume`). It goes to the starting node's
+    `on_base_changed.on_conflict` handler exactly as a task's conflict would
+    inside the walk, and stops for a human only when there is none (Kraft-e7anb).
+    """
     # the note is good for one agent launch, whichever task gets there first
-    carried = Steer(steer, source=steer_source)
+    carried = Steer(steer, source=steer_source, to=steer_to)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
     nodes = chain_of(row).chain.nodes
+    if start_index is None:
+        start_index, cursor_step = _cursor(row, nodes)
+        start_step = cursor_step if start_step is None else start_step
+    elif start_step is None:
+        start_step = 0
     # Record the chain as loaded before touching the filesystem: this is
     # bookkeeping about the item, not about the worktree, and a work item
     # whose worktree can never be created (bad repo, git failure) must still
@@ -1572,6 +1680,18 @@ async def run_once(
 
     i = start_index
     step = start_step
+    # A task retry keeps its completed siblings (`task-retry-reruns-that-task-
+    # and-later-work`) -- read off the fork rather than passed in, so a crash
+    # resume that lands back on the retried step keeps them too.
+    fork = db.read(lambda c: store.current_fork(c, work_item_id))
+    preserve = fork.preserved if fork is not None and fork.start == (i, step) else frozenset()
+    if conflict is not None:
+        target = await _door_conflict(
+            db, run_dirs, work_item_id, nodes, i, row, worktree, conflict, carried, policy, launch
+        )
+        if isinstance(target, str):
+            return target
+        i, step, preserve = target, 0, frozenset()
     while i < len(nodes):
         # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
         # has to stop. Pausing between two nodes' dispatches leaves no live
@@ -1592,6 +1712,13 @@ async def run_once(
         if await gates.maybe_gate(db, work_item_id, node):
             await _report_if_undelivered(db, work_item_id, carried)
             return "awaiting_gate"
+        if isinstance(node.node, GateNode):
+            # Cleared: its approval already completed it (`store.approve_gate`),
+            # and entering it again would stamp a second `node_started` on a
+            # decision the item already has.
+            i += 1
+            step = 0
+            continue
         base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
         pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         result = await walk_node(
@@ -1607,8 +1734,10 @@ async def run_once(
             steer=carried,
             launch=launch,
             start_step=step,
+            preserve=preserve,
         )
         step = 0  # only the entry node resumes mid-way
+        preserve = frozenset()
         if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue
@@ -1625,9 +1754,17 @@ async def run_once(
         if result == WAITING:
             return WAITING
         new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
-        if base_change is not None and (result == BASE_MOVED or new_base != pre_base):
+        if base_change is not None and (
+            result in (BASE_MOVED, CONFLICT_RESOLVED) or new_base != pre_base
+        ):
             target = await _restart_for_base_change(
-                db, work_item_id, nodes, i, base_change.restart_from, policy
+                db,
+                work_item_id,
+                nodes,
+                i,
+                base_change.restart_from,
+                policy,
+                reopen_gates=result == CONFLICT_RESOLVED,
             )
             if target is None:
                 await _report_if_undelivered(db, work_item_id, carried)
@@ -1664,13 +1801,15 @@ async def run(
     work_item_id: str,
     registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
+    conflict: str | None = None,
 ) -> str:
     status = await run_once(
         db,
@@ -1683,7 +1822,9 @@ async def run(
         policy=policy,
         steer=steer,
         steer_source=steer_source,
+        steer_to=steer_to,
         launch=launch,
+        conflict=conflict,
     )
     status = await gates.review_gates(
         status,

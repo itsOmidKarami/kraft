@@ -398,3 +398,61 @@ async def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(i
 
     assert it.status() == "needs_human", "left claimed 'active' with no walk behind it"
     assert status == "needs_human"
+
+
+@pytest.mark.parametrize(
+    ("extra", "path"),
+    [
+        ({}, "implementation"),
+        ({"path": "implementation.main.run"}, "implementation.main.run"),
+        ({"restart": True}, None),
+    ],
+    ids=["an-older-request-names-its-node", "by-path", "restart"],
+)
+async def test_a_self_retry_forks_at_the_path_it_asked_for(
+    item_on, run_dirs, no_rebase_no_walk, extra, path
+):
+    """The escalated agent's `kraft item retry --path` is deferred with its
+    path, and consuming the request forks the run there, as `/retry` would."""
+    it = await _stuck(item_on, "stuck")
+    cursor = it.events()[-1]["seq"]
+    payload = _self_retry_event(**extra)
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", payload)
+    )
+
+    await gates_module.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+    )
+
+    assert it.events("run_forked")[-1]["payload"]["path"] == path
+    assert len(no_rebase_no_walk) == 1
+
+
+async def test_a_self_retry_applies_the_override_it_carried(item_on, run_dirs, no_rebase_no_walk):
+    """Kraft-vvj32: consuming a deferred self-retry forks with the validated
+    override the request carried, the same as a direct `/retry` would."""
+    from kraft.templates.forks import override_record
+    from kraft.templates.retry import validate_retry_override
+
+    it = await item_on(_CHAIN, "implementation", repo="/r")
+    await _stop(it, "stuck")
+    cursor = it.events()[-1]["seq"]
+    override = validate_retry_override(
+        store.materialized_chain_of(it.row()),
+        "implementation.main.run",
+        task_config={"command": "make again"},
+    )
+    payload = _self_retry_event(path="implementation.main.run", override=override_record(override))
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", payload)
+    )
+
+    await gates_module.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor, registry=None
+    )
+
+    [fork] = it.database.read(lambda c: store.run_forks(c, it.id))
+    assert fork.override["task_config"] == {"command": "make again"}
+    task = fork.chain.chain.nodes[0].steps[0].tasks[0].task
+    assert task.command == "make again"

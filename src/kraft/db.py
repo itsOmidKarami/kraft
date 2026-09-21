@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -104,8 +104,10 @@ CREATE TABLE work_items (
   -- template schema V1's immutable work-item input (`MaterializedChain.to_json`).
   -- Beside `chain_definition`, not replacing it -- see _MIGRATIONS[32].
   materialized_chain TEXT,
-  -- the run this one forked from (Phase 5 retry forks). NULL until one does.
-  run_fork_parent  TEXT,
+  -- the materialization of the run fork this item is executing
+  -- (`RunFork.materialized_chain`, copied here so every reader of the row
+  -- gets it). NULL until the first retry: the intake snapshot is the run.
+  run_chain        TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -199,7 +201,38 @@ CREATE TABLE work_item_repos (
 );
 
 CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank);
+
+-- One row per retry (`retry-creates-an-immutable-run-fork`): the run a retry
+-- forked from (`parent`, NULL for the intake run), what it retried, and its own
+-- copy of the materialization with any retry override applied. Never updated
+-- or deleted -- `_RUN_FORK_TRIGGERS` refuses both.
+CREATE TABLE run_forks (
+  id                 TEXT PRIMARY KEY,
+  work_item_id       TEXT NOT NULL REFERENCES work_items(id),
+  parent             TEXT REFERENCES run_forks(id),
+  scope              TEXT NOT NULL CHECK (scope IN ('work_item', 'node', 'step', 'task')),
+  -- the canonical path retried, NULL for a work-item restart
+  path               TEXT,
+  -- the events seq the fork starts after: everything at or before it is the
+  -- prior runs' data, kept
+  after_seq          INTEGER NOT NULL,
+  materialized_chain TEXT NOT NULL,
+  -- what the retry changed (path, task_config, policy), NULL when nothing
+  override           TEXT,
+  created_at         TEXT NOT NULL
+);
+
+CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)
 """
+
+#: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
+#: the two statements that make a fork immutable live here and run after it.
+_RUN_FORK_TRIGGERS = [
+    "CREATE TRIGGER run_forks_immutable BEFORE UPDATE ON run_forks "
+    "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
+    "CREATE TRIGGER run_forks_undeletable BEFORE DELETE ON run_forks "
+    "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
+]
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -708,6 +741,16 @@ FROM worker_sessions""",
     # the new name only, so stored rows are renamed once here rather than each
     # reader learning both (Kraft-7hy7x).
     33: ["UPDATE events SET type = 'plan_progress' WHERE type = 'task_progress'"],
+    # Run forks (`retry-creates-an-immutable-run-fork`). The fork's lineage lives
+    # on its own row, so the column reserved for it on the work item goes, and
+    # the item gains the current fork's materialization in its place.
+    34: [
+        "ALTER TABLE work_items DROP COLUMN run_fork_parent",
+        "ALTER TABLE work_items ADD COLUMN run_chain TEXT",
+        *(s.strip() for s in SCHEMA_SQL.split(";") if "CREATE TABLE run_forks" in s),
+        "CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)",
+        *_RUN_FORK_TRIGGERS,
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
@@ -768,6 +811,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         for stmt in (s.strip() for s in SCHEMA_SQL.split(";")):
             if stmt:
                 conn.execute(stmt)
+        for stmt in _RUN_FORK_TRIGGERS:
+            conn.execute(stmt)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     except BaseException:

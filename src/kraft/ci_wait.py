@@ -5,8 +5,8 @@
 the scheduler owns -- `status = 'waiting'` plus `retry_at`, set by
 `store.mark_waiting` (Kraft-ru98). This is the poller that owns that row:
 structurally the same job `rate_limit_retry.py` does for a rate limit, ticking
-on a fixed interval and relaunching through `executor.run(start_index=...)`,
-the same path a manual retry uses.
+on a fixed interval and relaunching through `executor.run` with no position,
+so the walk resumes at the item's own cursor (the waiting step group).
 
 Always on, for the same reason the rate-limit poller is: a work item parked on
 a pipeline has to be woken by something, and that something cannot be the
@@ -114,8 +114,7 @@ async def _re_enter_one(app, row) -> bool:
         # would leave the item waiting forever with nothing behind it. `None` means
         # this node is not in this item's chain at all, which is a stop, not a
         # restart at zero.
-        start = store.node_index(row, node_id)
-        if start is None:
+        if store.node_index(row, node_id) is None:
             # `return False`, not a bare `return`: this function's contract is
             # "did I re-enter it". The bracket above turns the claim into a stop.
             logger.warning("ci_wait: %s has no node %r in its chain, not re-entering", wid, node_id)
@@ -138,8 +137,8 @@ async def _re_enter_one(app, row) -> bool:
                         work_item_id=wid,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
-                        start_step=row["current_step"],
+                        # No position: the walk resumes at the item's own
+                        # cursor, the step group that is waiting.
                         policy=st.policy,
                         launch=deps.launch(st, row["repo"]),
                     ),

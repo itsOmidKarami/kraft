@@ -49,11 +49,15 @@ def complete_node(conn: sqlite3.Connection, work_item_id, node_id) -> None:
     # Idempotent: resume can re-enter an already-completed node (a reconciled
     # non-fix node, or a fix_loop node re-measured after a crash in the
     # complete_node -> enter_node window) and must not emit a second
-    # node_completed. See Kraft-gbt / Kraft-126.
+    # node_completed. See Kraft-gbt / Kraft-126. Within one run fork only: a
+    # retry reruns completed work (`retry-can-target-completed-work`), and the
+    # rerun's completion is its own.
     done = conn.execute(
         "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'node_completed' "
-        "AND json_extract(payload, '$.node_id') = ? LIMIT 1",
-        (work_item_id, node_id),
+        "AND json_extract(payload, '$.node_id') = ? AND seq > ("
+        "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
+        ") LIMIT 1",
+        (work_item_id, node_id, work_item_id),
     ).fetchone()
     if done:
         return
@@ -141,6 +145,45 @@ def skip_node(
         events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
 
 
+def skip_scope(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    path: str,
+    note: str | None,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """Skip a task or a step (`skip-stops-only-the-selected-scope`): the walk
+    counts everything under `path` as done from here on, in this run.
+
+    `session_ids` are the running sessions inside the scope, and only those:
+    marked `paused` here, before the caller signals them, the same ordering
+    `skip_node` keeps. The item's own status is untouched -- a sibling of the
+    skipped task may still be running, and the walk it belongs to goes on.
+    """
+    now = _now()
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+    events.append(conn, work_item_id, "scope_skipped", {"path": path, "note": note})
+
+
+def skipped_paths(conn: sqlite3.Connection, work_item_id: str) -> frozenset[str]:
+    """Every task or step path skipped in the current run fork. A retry's fork
+    starts with none: it reruns what it covers, a skipped task included."""
+    rows = conn.execute(
+        "SELECT json_extract(payload, '$.path') FROM events WHERE work_item_id = ? "
+        "AND type = 'scope_skipped' AND seq > ("
+        "  SELECT COALESCE(MAX(after_seq), 0) FROM run_forks WHERE work_item_id = ?"
+        ")",
+        (work_item_id, work_item_id),
+    ).fetchall()
+    return frozenset(r[0] for r in rows)
+
+
 def materialized_chain_of(row):
     """`row["materialized_chain"]` as the model that wrote it, or None.
 
@@ -155,7 +198,13 @@ def materialized_chain_of(row):
     """
     from kraft.templates.models import MaterializedChain
 
-    raw = row["materialized_chain"] if "materialized_chain" in row.keys() else None
+    keys = row.keys()
+    # The run fork's copy first (`RunFork.materialized_chain`): after a retry
+    # that is the chain the item runs, and the intake snapshot is its oldest
+    # ancestor's.
+    raw = (row["run_chain"] if "run_chain" in keys else None) or (
+        row["materialized_chain"] if "materialized_chain" in keys else None
+    )
     return MaterializedChain.from_json(raw) if raw else None
 
 

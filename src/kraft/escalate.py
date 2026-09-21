@@ -289,6 +289,36 @@ async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
     )
 
 
+#: What an escalation thread's runtime is: fixed for the life of a thread.
+_RUNTIME = ("command", "harness", "model", "effort", "permission_mode")
+
+
+async def _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime):
+    """The turn's `escalation_message`, before it launches -- a refused launch
+    included, so every turn counts toward the auto-escalation bound."""
+    payload = {
+        "session_id": session_id,
+        "message": message,
+        "auto": auto,
+        "thread": thread,
+        "turn": turn,
+    }
+    if runtime is not None:
+        payload["runtime"] = runtime
+    await db.write(lambda c: events.append(c, work_item_id, "escalation_message", payload))
+
+
+def _thread_runtime(db, work_item_id: str, thread: int) -> dict | None:
+    """The runtime escalation `thread` started on, off its first turn's
+    `escalation_message`; None for a thread that predates the record."""
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    for e in evts:
+        if e["type"] == "escalation_message" and e["payload"].get("thread") == thread:
+            runtime = e["payload"].get("runtime")
+            return {k: runtime[k] for k in _RUNTIME if k in runtime} if runtime else None
+    return None
+
+
 async def dispatch(
     db,
     run_dirs,
@@ -333,20 +363,6 @@ async def dispatch(
     turn = db.read(lambda c: store.escalation_thread_turn_count(c, work_item_id, thread)) + 1
 
     session_id = uuid.uuid4().hex
-    await db.write(
-        lambda c: events.append(
-            c,
-            work_item_id,
-            "escalation_message",
-            {
-                "session_id": session_id,
-                "message": message,
-                "auto": auto,
-                "thread": thread,
-                "turn": turn,
-            },
-        )
-    )
     worktree = run_dirs.worktrees / work_item_id
 
     resume_note = (
@@ -392,6 +408,7 @@ async def dispatch(
             skills_dir=launch.skills_dir,
         )
     except _agent.HarnessUnavailable as exc:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
         return await _refused(
             db,
             run_dirs,
@@ -400,6 +417,16 @@ async def dispatch(
             log=f"escalation selects harness {ESCALATION_TASK.harness!r}, which is not "
             f"available: {exc}\n",
         )
+    # A turn that resumes a thread runs on the runtime the thread started on
+    # (`resumed-escalation-preserves-original-runtime`): the profile may have
+    # changed since, and a resumed conversation on another model or harness is
+    # not the session it claims to be. Only a new thread takes the current
+    # profile.
+    original = _thread_runtime(db, work_item_id, thread) if resume_session_id else None
+    if original is not None:
+        inv = inv._replace(**original)
+    runtime = {k: getattr(inv, k) for k in _RUNTIME}
+    await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
     status = await _agent.run_agent_task(
         db,
         run_dirs,

@@ -48,6 +48,12 @@ BASE_MOVED = "base_moved"
 #: this for the node and `walk` hands it to that handler.
 CONFLICT = "conflict"
 
+#: The node's `on_conflict` handler resolved a rebase conflict and the base
+#: moved (`walk._resolve_conflict`). A base change like `BASE_MOVED`, with one
+#: difference `run_once` acts on: code changed that no gate in the restart span
+#: saw, so the span's approved gates reopen (Ruling 162).
+CONFLICT_RESOLVED = "conflict_resolved"
+
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
 #: forge, up to a small cap; this is what it returns once retries are
@@ -79,6 +85,7 @@ SCOPE: dict[str, str] = {
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     BASE_MOVED: "chain",  # the bounce, taken by run_once
+    CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
 }
 
 
@@ -135,9 +142,21 @@ class Steer:
     #: a say. See `exempts_judge`.
     _JUDGE_EXEMPT = ("human", "gate_review")
 
-    def __init__(self, text: str | None = None, *, source: str = "human") -> None:
+    def __init__(
+        self, text: str | None = None, *, source: str = "human", to: dict[str, str] | None = None
+    ) -> None:
         self._text = text or None
         self.source = source
+        #: A steer addressed to tasks by path (`resuming.resume_steer`): each
+        #: named task's launch takes its own text, once, and no other launch
+        #: takes any (`steer-defaults-to-all-paused-agent-tasks`,
+        #: `steer-can-address-paused-agent-tasks-individually`). `None` is the
+        #: unaddressed note the first agent launch takes.
+        self._to = dict(to) if to else None
+
+    @property
+    def targeted(self) -> bool:
+        return self._to is not None
 
     @property
     def human(self) -> bool:
@@ -164,9 +183,17 @@ class Steer:
         """
         return self.source in self._JUDGE_EXEMPT
 
-    def take(self) -> str | None:
+    def take(self, path: str | None = None) -> str | None:
+        """The note for the launch of `path`. An addressed steer answers only a
+        task it names; asked with no path, it gives up everything still
+        undelivered (what `walk._report_if_undelivered` reports)."""
+        if self._to is not None:
+            if path is not None:
+                return self._to.pop(path, None)
+            left, self._to = self._to, {}
+            return "\n".join(f"{p}: {t}" for p, t in left.items()) or None
         text, self._text = self._text, None
         return text
 
     def __bool__(self) -> bool:
-        return self._text is not None
+        return bool(self._to) if self._to is not None else self._text is not None

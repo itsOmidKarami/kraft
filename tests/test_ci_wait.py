@@ -140,7 +140,9 @@ async def test_a_ci_wait_reentry_resumes_at_the_waiting_group(
 ):
     """Re-entry recomputed start from current_node_id alone, so a node whose
     waiting step was its fourth re-ran the first three -- a paid agent session
-    per poll tick on a node that opens the MR."""
+    per poll tick on a node that opens the MR. The poller now hands the walk no
+    position at all: `walk.run_once` reads the item's cursor itself
+    (tests/executor/test_entry_paths.py)."""
     from kraft import executor
 
     seen = {}
@@ -156,7 +158,8 @@ async def test_a_ci_wait_reentry_resumes_at_the_waiting_group(
     await app.state.db.write(lambda c: store.set_current_step(c, "w1", 3))
     assert await ci_wait.tick(app) == ["w1"]
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-    assert seen["start_step"] == 3
+    assert "start_index" not in seen and "start_step" not in seen
+    assert seen["work_item_id"] == "w1"
 
 
 async def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(

@@ -90,7 +90,7 @@ browser uses:
 |---|---|
 | read | `list_work_items`, `get_work_item`, `search` |
 | write | `create_work_item`, `ensure_repo` |
-| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item` |
+| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item`, `skip_work_item`, `complete_work_item`, `cancel_work_item` |
 
 That's the everyday subset, not the full tool list — every `kraft` subcommand
 (see the [CLI reference](cli.md)) has an MCP twin.

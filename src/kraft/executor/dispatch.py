@@ -546,7 +546,7 @@ async def dispatch_node(
     # truthiness: `Steer.__bool__` is about having text left, and `take()`
     # has just emptied it.
     note_source = steer.source if steer is not None else "human"
-    note = steer.take() if steer else None
+    note = steer.take(task.path) if steer else None
     # A task with a `skill:` already states its own job, so it must not also be
     # told to implement the work item from the plan. A task without one is the
     # one doing the work from the brief, and gets the implementer's notes.
@@ -611,6 +611,25 @@ async def dispatch_node(
         # to stop with `needs_context` instead. A steering selection the
         # snapshot cannot supply stops the same way rather than run unsteered.
         return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
+    # A task an operator paused mid-turn resumes its own provider session when
+    # it can, told to carry on with any steer in hand; otherwise it restarts
+    # with its original instruction (`resumed-agent-task-preserves-its-
+    # session-when-possible`). Never on a fix loop's or a recovery's own
+    # instruction, which is a new job, not the paused one.
+    resumed = (
+        _resumable_session(db, work_item_row["id"], node, task, harnesses.valid.get(inv.harness))
+        if instruction_override is None
+        else None
+    )
+    if resumed is not None:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_row["id"],
+                "agent_session_resumed",
+                {"task": task.path, "session_id": resumed[0]},
+            )
+        )
     # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
     # the change under review, written out for this session.
     package = (
@@ -640,7 +659,8 @@ async def dispatch_node(
                 if note
                 else ""
             )
-            + instruction,
+            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction),
+            resume_session_id=resumed[1] if resumed is not None else None,
             repo_path=work_item_row["repo"],
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
@@ -694,6 +714,23 @@ async def dispatch_node(
     return status
 
 
+def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
+    """`(session id, provider session id)` of the paused session `task`
+    resumes, or None to restart it. Only a harness that can resume, only the
+    task's latest session and only if an operator paused it, never from before
+    a retry or a restart (7a's rule: a new pass never reuses a pre-retry
+    session), and only when its log names the provider's own session id."""
+    if harness is None or not harness.supports("resume"):
+        return None
+    paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
+    if paused is None:
+        return None
+    from kraft.escalate import _extract_cli_session_id  # local: escalate imports the executor
+
+    provider = _extract_cli_session_id(Path(paused["log_path"]))
+    return (paused["id"], provider) if provider else None
+
+
 async def measure_node(
     db,
     run_dirs,
@@ -711,6 +748,7 @@ async def measure_node(
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
     start_step: int = 0,
     spent: set[str] | None = None,
+    preserve: frozenset[str] = frozenset(),
 ) -> tuple[str, list[ResolvedTask], list[BaseException]]:
     """Run `steps` (the node's own, by default) and report one verdict.
 
@@ -750,7 +788,30 @@ async def measure_node(
     def _head() -> str | None:
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
+    def _skipped(task: ResolvedTask) -> bool:
+        """Under a task or step path an operator skipped in this run."""
+        if not own:
+            return False
+        skipped = db.read(lambda c: store.skipped_paths(c, work_item_id))
+        return any(task.path == p or task.path.startswith(p + ".") for p in skipped)
+
     async def _measure(task: ResolvedTask, *, retry: bool = False) -> str:
+        if _skipped(task):
+            return "done"
+        verdict = await _measure_task(task, retry=retry)
+        # Skipped while it ran: the skip stopped its session, which ends
+        # `paused`, and a skip is not a pause of the walk.
+        return "done" if verdict == "paused" and _skipped(task) else verdict
+
+    async def _measure_task(task: ResolvedTask, *, retry: bool = False) -> str:
+        if task.path in preserve and not retry:
+            # A task retry's completed sibling (`RunFork.preserved`): its latest
+            # outcome stands, whatever HEAD the retried task later moves.
+            kept = db.read(
+                lambda c: store.latest_session_per_task(c, work_item_id, node.id, [task.path])
+            )
+            if kept and kept[0]["status"] in _ADVANCING:
+                return kept[0]["status"]
         # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
         # not re-spend an agent session on a task whose session already reached
         # 'done' against the worktree as it stands right now.
@@ -1027,7 +1088,8 @@ async def run_recovery(
     found, _reported = collect_findings(db, work_item_id, node, measured_round)
     seeded = prompts.seeded_findings_note(found) if found else None
     context = f"{note}\n\n{seeded}" if seeded else note
-    if steer is not None and steer:
+    if steer is not None and steer and not steer.targeted:
+        # A steer addressed to tasks by path is theirs, never a repair's.
         # `.take()` because the incoming note is folded into the one replacing
         # it -- leaving it undelivered here would deliver it twice
         # (Kraft-s7c04.58 covers the two-hook case this single Steer cannot
@@ -1291,9 +1353,9 @@ def last_measurement(
     measurement is ever returned, so nothing older than one round can leak into
     `resolve_identity`'s `known` however long the item's history is.
 
-    Read from the event log rather than carried in a local: `kraft.executor.
-    resuming.reconcile_current_node` re-enters `kraft.executor.walk.walk_node`
-    after a crash or a resume with the counter intact, and a loop holding its
+    Read from the event log rather than carried in a local: crash resume and
+    `/resume` re-enter the node through `kraft.executor.walk.run_once` with the
+    counter intact, and a loop holding its
     history in the stack frame forgets everything it has seen — on exactly the
     path that motivates escalation.
 

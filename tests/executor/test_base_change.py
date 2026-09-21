@@ -257,3 +257,113 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
     assert await _walk(it) == "needs_human"
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"].startswith(reason)
     assert not it.events("base_change_restart")
+
+
+def _gated(**rebase_fields):
+    """`_chain` with an approvable `review` gate between `verify` and `rebase`,
+    inside the span a restart from `verify` reruns."""
+    verify, rebase, publish = _chain(**rebase_fields)
+    return [verify, {"id": "review", "kind": "gate"}, rebase, publish]
+
+
+async def _approved_review(it):
+    await it.database.write(lambda c: store.request_gate(c, it.id, "review", "review"))
+    await it.database.write(lambda c: store.approve_gate(c, it.id, "review"))
+
+
+async def test_a_resolved_conflict_reopens_the_approved_gates_in_its_span(item_on, script):
+    """Ruling 162: the `on_conflict` handler changed code no gate saw, so the
+    restart reopens the approved `review` and the walk stops there again. A
+    clean moved base keeps the approval
+    (test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head)."""
+    it = await item_on(_gated(**_with_handler()), "rebase")
+    await _approved_review(it)
+    script.plan = {"sync": ["conflict", "done"]}
+    upstream = {}
+
+    async def land_upstream(_row):
+        if not upstream:
+            upstream["sha"] = await _upstream_moves(it)
+
+    async def rebase(_row):
+        _git(it.worktree, "rebase", upstream["sha"])
+
+    script.effects = {"sync": land_upstream, "resolve": rebase}
+
+    assert await _walk_from(it, "rebase") == "awaiting_gate"
+    assert [e["payload"]["gate"] for e in it.events("gate_reopened")] == ["review"]
+    assert it.row()["current_node_id"] == "review"
+
+
+@pytest.mark.parametrize("door", ["retry", "resume"])
+async def test_a_conflict_at_the_door_goes_to_the_nodes_handler(item_on, script, door):
+    """Kraft-e7anb: a `/retry` or `/resume` refresh that conflicts is handed to
+    the node's `on_conflict` handler the way a task's conflict is inside the
+    walk -- and, resolved, reopens the span's approved gates the same way."""
+    it = await item_on(_gated(**_with_handler()), "rebase")
+    await _approved_review(it)
+    await _prepared(it)
+    sha = await _upstream_moves(it)
+
+    async def rebase(_row):
+        _git(it.worktree, "rebase", sha)
+
+    script.effects = {"resolve": rebase}
+
+    assert await _enter_with_conflict(it, door) == "awaiting_gate"
+    assert script.calls[:2] == ["resolve", "check"]
+    assert [e["payload"]["gate"] for e in it.events("gate_reopened")] == ["review"]
+
+
+async def test_a_conflict_at_the_door_with_no_handler_stops_for_a_human(item_on, script):
+    """`rebase-conflict-requires-explicit-handler`, at the door: nothing runs,
+    the stop names the conflict, and the steer the resume carried waits on the
+    row for the next attempt."""
+    it = await item_on(_gated(), "rebase")
+
+    assert await _enter_with_conflict(it, "resume", steer="mind the auth") == "needs_human"
+    assert script.calls == []
+    assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == "rebase failed for x"
+    assert it.row()["pending_steer_context"] == "mind the auth"
+
+
+async def _prepared(it):
+    """The worktree cut and its base recorded, as the walk that stopped at the
+    door left them."""
+    from kraft import builtins
+
+    await builtins.ensure_worktree(
+        it.database, it.run_dirs, repo=str(it.repo), work_item_id=it.id, repo_entry=None
+    )
+
+
+def _walk_from(it, node):
+    return executor.run_once(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        registry=None,
+        start_index=[n.id for n in it.chain.chain.nodes].index(node),
+        policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+    )
+
+
+async def _enter_with_conflict(it, door, steer=None):
+    """What `/retry` and `/resume` hand the walk once their refresh conflicted."""
+    kwargs = dict(
+        registry=None,
+        policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+        conflict="rebase failed for x",
+    )
+    if door == "retry":
+        from kraft.templates.forks import ChainPath
+
+        target = ChainPath.parse(store.materialized_chain_of(it.row()), "rebase")
+        return await executor.retry(
+            it.database, it.run_dirs, work_item_id=it.id, target=target, steer=steer, **kwargs
+        )
+    return await executor.run_once(
+        it.database, it.run_dirs, work_item_id=it.id, steer=steer, **kwargs
+    )

@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import psutil
 from fastapi import HTTPException, Request
@@ -23,17 +24,34 @@ from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
 from kraft.executor import gates, stops, walk
 from kraft.templates import Registry
+from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
+from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
 logger = logging.getLogger(__name__)
 
 
 class Retry(BaseModel):
     steer: str | None = None
+    #: What to rerun, by canonical path: `node`, `node.step` or
+    #: `node.step.task`. Absent, the node the item stopped on.
+    path: str | None = None
+    #: Rerun the whole chain from its first node instead
+    #: (`work-item-restart-reruns-the-complete-chain`).
+    restart: bool = False
+    #: Task fields to change for the retried task, and the retried scope's
+    #: policy (`retry-overrides-are-policy-bounded`), validated against the
+    #: chain and its policy bounds before anything forks.
+    task_config: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
 
 
 class Skip(BaseModel):
     note: str | None = None
+    #: What to skip, by canonical path: the node the item stands on, or a
+    #: `node.step` or `node.step.task` inside it. Absent, the current node or
+    #: pending gate.
+    path: str | None = None
 
 
 class Progress(BaseModel):
@@ -50,7 +68,22 @@ class Steer(BaseModel):
 
 
 class Resume(BaseModel):
+    #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
+    #: Individual steers for paused agent tasks, by canonical task path; each
+    #: wins over `steer` for the task it names.
+    steers: dict[str, str] = {}
+
+
+class EndWorkItem(BaseModel):
+    #: Required (`manual-*-is-an-explicit-work-item-terminal-action`): recorded
+    #: on the audit event.
+    reason: str
+
+
+class CompleteWorkItem(EndWorkItem):
+    #: Close the item's beads as a walked completion would. Off by default.
+    close_beads: bool = False
 
 
 class Escalate(BaseModel):
@@ -405,62 +438,6 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     return {"id": wid, "steer": text}
 
 
-async def _resolve_conflict_task(
-    st,
-    wid: str,
-    row,
-    node_id: str,
-    steer_text: str | None,
-    reason: str,
-) -> None:
-    """A rebase conflict at `/resume` or `/retry`: stop for a human, then let
-    auto-escalation take it if the policy arms that, run as the item's own
-    spawned task rather than awaited inline in the route (Kraft-s7c04.20: a
-    task registered under `wid` is what keeps a concurrent `/retry` out).
-
-    The rebase-conflict *resolver* this used to dispatch first
-    (`walk.resolve_rebase_conflict`, Kraft-s7c04.23) was deleted with the
-    legacy rebase layer (Task 4a), and V1 resolves a conflict only through a
-    chain's explicit handler (`rebase-conflict-requires-explicit-handler`,
-    Task 7). Calling it here raised `AttributeError` on every conflict.
-    """
-    if steer_text:
-        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
-    await gates.auto_escalate_stuck(
-        "needs_human",
-        st.db,
-        st.run_dirs,
-        work_item_id=wid,
-        registry=st.registry,
-        policy=st.policy,
-        launch=deps.launch(st, row["repo"]),
-        bd_cwd=deps.bd_cwd(),
-        on_approve=deps._on_approve(st),
-    )
-
-
-def _spawn_conflict_resolution(
-    st, request: Request, wid: str, row, node_id: str, steer_text: str | None, exc
-) -> dict:
-    """Registers `_resolve_conflict_task` as `wid`'s task and returns the
-    item's current row immediately -- the route itself does not wait on it
-    (design §4.8: "the route returns immediately either way")."""
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                _resolve_conflict_task(st, wid, row, node_id, steer_text, str(exc)),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-
-
 @api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
@@ -494,6 +471,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 f"node {row['current_node_id']!r} has no agent task downstream to steer; "
                 "this text would be dropped",
             )
+
+    individual = {p: t.strip() for p, t in body.steers.items() if t.strip()}
+    try:
+        steer_to = executor.resume_steer(st.db, row, steer_text, individual)
+    except executor.SteerError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     if deps.task_is_live(request.app, wid):
         # Checked before the claim and the rebase below: a paused/needs_human
@@ -540,17 +523,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
         worktree = st.run_dirs.worktrees / wid
+        conflict = None
         try:
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree, Path(row["repo"]), store.branch_for(row)
             )
         except builtins_mod.RebaseConflict as exc:
-            # `steer` here is already the taken local (line 414, above the
-            # rebase) -- the helper must not re-read `pending_steer_context`,
-            # which this call already emptied.
-            return _spawn_conflict_resolution(
-                st, request, wid, row, row["current_node_id"], steer, exc
-            )
+            # Handed to the walk, which gives it to the node's `on_conflict`
+            # handler as it would a task's, or stops for a human (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             # The claim already flipped this item to 'active'; a failed rebase
             # must not leave it stranded there with no walk behind it.
@@ -593,12 +574,11 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
         await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
+        # Every paused agent task gets the steer, or its own; a steer left
+        # through `/steer` stands in for the one this request did not type.
+        targets = {p: t or steer for p, t in (steer_to or {}).items()}
+        targets = {p: t for p, t in targets.items() if t} or None
 
-        # `store.node_index`, never `chain["nodes"]`: this runs *after*
-        # `resume_work_item` has already claimed the row, so a raise here leaves the
-        # item `active` with no walk behind it. `default=0` because an item that
-        # never reached a node resumes at the start of its chain.
-        start = store.node_index(row, row["current_node_id"], default=0)
         try:
             deps.spawn(
                 request.app,
@@ -612,17 +592,29 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         work_item_id=wid,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
+                        # No position: the walk resumes at the item's own
+                        # cursor, so work that completed before the pause is
+                        # not rerun (Kraft-c3dab). An item that never started
+                        # stands at the start of its chain.
                         policy=st.policy,
-                        steer=steer,
+                        # Addressed to the paused agent tasks when there are
+                        # any; otherwise the note the next agent launch takes.
+                        steer=None if targets else steer,
+                        steer_to=targets,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
+        return {
+            "id": wid,
+            "node_id": row["current_node_id"],
+            "steer": steer,
+            "steered": sorted(targets or {}),
+        }
 
 
 @api_router.post("/work-items/{wid}/open-worktree")
@@ -659,10 +651,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)
-    node_id = row["current_node_id"]
-    nodes = store.effective_nodes(walk.chain_of(row), store.node_overrides_of(row))
-    node = next((n for n in nodes if n.id == node_id), None)
-    if node is None:
+    if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
         # Cheap precondition, ahead of the steer and slot checks: claim_for_run
@@ -670,14 +659,17 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
         raise HTTPException(409, "work item is not stopped")
-    # Which counters this retry clears. Both are read off the node's *kind* and
-    # shape now, not off a `fix_loop` string or a `gate_after` name: a V1 gate
-    # is its own node, so "the gate this node has" is "this node is a gate".
+    chain = walk.chain_of(row)
+    target = _retry_target(chain, row, body)
+    override = _retry_override(chain, target, body)
+    # The node the rerun starts at: what a steer has to reach from, whose
+    # findings seed one, and which counters the retry clears (Kraft-bzwi: a
+    # node with no fix loop just has none to clear).
+    node = target.node if target is not None else chain.chain.nodes[0]
+    node_id = node.id
     is_gate = isinstance(node.node, GateNode)
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
     gate_key = gates.reject_loop_key(node.id) if is_gate else None
-    if row["status"] != "needs_human":
-        raise HTTPException(409, "work item is not stopped")
     caller_session_id = request.headers.get("x-kraft-session-id")
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
@@ -757,6 +749,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 {
                     "session_id": caller_session_id,
                     "node_id": node_id,
+                    "path": target.path if target is not None else None,
+                    "restart": body.restart,
+                    # Validated above, carried as validated (Kraft-vvj32).
+                    "override": override_record(override) if override is not None else None,
                     "key": key,
                     "gate_key": gate_key,
                     "steer": steer,
@@ -833,14 +829,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 )
             raise HTTPException(409, "work item is not stopped")
         worktree = st.run_dirs.worktrees / wid
+        conflict = None
         try:
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree, Path(row["repo"]), store.branch_for(row)
             )
         except builtins_mod.RebaseConflict as exc:
-            # `/retry` never persists `steer` ahead of the rebase the way
-            # `/resume` does -- the helper is the first thing to write it.
-            return _spawn_conflict_resolution(st, request, wid, row, node_id, steer, exc)
+            # The retry still forks; the walk hands the conflict to the
+            # starting node's `on_conflict` handler, or stops for a human
+            # (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             reason = str(exc)
             await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
@@ -879,16 +877,6 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
 
-        await st.db.write(
-            lambda c: store.retry_after_cap(
-                c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
-            )
-        )
-        # Same reason as `resume`'s: `retry_after_cap` above has already written the
-        # row, so this must not raise. `node` was resolved off the V1 nodes at the
-        # top of this handler, so a missing index here means the two disagree --
-        # 0 restarts the chain rather than stranding it claimed.
-        start = store.node_index(row, node_id, default=0)
         try:
             deps.spawn(
                 request.app,
@@ -896,24 +884,72 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    executor.run(
+                    executor.retry(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
+                        target=target,
+                        override=override,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
                         policy=st.policy,
                         steer=steer,
-                        steer_source="seeded" if seeded else "human",
+                        seeded=seeded,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+        return {
+            "id": wid,
+            "node_id": node_id,
+            "path": target.path if target is not None else None,
+            "loop": key,
+            "steer": steer,
+        }
+
+
+def _retry_target(chain, row, body: Retry) -> ChainPath | None:
+    """What a retry reruns: `body.path`, the whole chain on `restart`, or the
+    node the item stopped on. A retry reruns its target and everything after
+    it, so a target past where the item stands would skip the work between --
+    that is `skip`'s job, and refused here."""
+    if body.restart:
+        if body.path is not None:
+            raise HTTPException(422, "path: a restart reruns the whole chain; give one, not both")
+        return None
+    try:
+        target = ChainPath.parse(chain, body.path or row["current_node_id"])
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    here = store.node_index(row, row["current_node_id"])
+    if target.node_index > here:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is after the node the item stands on "
+            f"({row['current_node_id']!r}); a retry reruns work, it does not skip ahead",
+        )
+    return target
+
+
+def _retry_override(chain, target: ChainPath | None, body: Retry):
+    """The validated override, or a 422 naming the field it was refused for
+    (`retry-overrides-are-policy-bounded`). Refused before the claim, so a
+    refusal forks nothing."""
+    if not body.task_config and not body.policy:
+        return None
+    if target is None:
+        field = "task_config" if body.task_config else "policy"
+        raise HTTPException(422, f"{field}: a work-item restart carries no override")
+    try:
+        return validate_retry_override(
+            chain, target.path, task_config=body.task_config, policy=body.policy
+        )
+    except RetryOverrideError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 class RaiseBudget(BaseModel):
@@ -982,6 +1018,17 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             # already recorded skipped and no walk behind it.
             raise HTTPException(409, "a walk is already running for this work item")
 
+        target = _skip_target(row, body.path)
+        if target is not None and target.task is None and target.step is None:
+            target = None if target.node.id == _skip_node_id(st, wid, row) else target
+            if target is not None:
+                raise HTTPException(
+                    409,
+                    f"path: {body.path!r} is not the node the item stands on "
+                    f"({row['current_node_id']!r}) or its pending gate",
+                )
+        if target is not None:
+            return await _skip_within_node(st, request, wid, row, target, body.note)
         if row["status"] in ("active", "waiting"):
             # Cancel the old walk *first*, before the claim and before
             # skip_node. Cancelling afterwards left a window -- every await
@@ -1011,6 +1058,8 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         if node_index is None or node_index >= len(node_ids):
             raise HTTPException(409, "work item has no current node to skip")
         node_id = node_ids[node_index]
+        if not ChainPath.parse(walk.chain_of(row), node_id).skippable:
+            raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
 
@@ -1076,6 +1125,134 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             except deps.AlreadyRunning:
                 raise HTTPException(409, "a walk is already running for this work item") from None
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
+def _skip_node_id(st, wid: str, row) -> str | None:
+    """The node a node skip would skip: the pending gate, or the current node."""
+    return board._pending_gate(st, wid) or row["current_node_id"]
+
+
+def _skip_target(row, path: str | None) -> ChainPath | None:
+    """`path` resolved against the item's chain, refused when it names nothing
+    there or a component that does not allow skipping
+    (`task-step-and-node-are-skippable-by-default`)."""
+    if path is None:
+        return None
+    try:
+        target = ChainPath.parse(walk.chain_of(row), path)
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    if not target.skippable:
+        raise HTTPException(409, f"path: {path!r} does not allow skipping")
+    return target
+
+
+async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPath, note):
+    """Skip a task or a step of the node the item stands on
+    (`skip-stops-only-the-selected-scope`).
+
+    Only the sessions inside the scope stop; a sibling keeps running. On an
+    active item the walk that owns them goes on and counts the scope as done
+    (`dispatch.measure_node`). A stopped or paused item is walked again from its
+    cursor, where the skipped scope now counts as done.
+    """
+    if target.node.id != row["current_node_id"]:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is not inside the node the item stands on "
+            f"({row['current_node_id']!r})",
+        )
+    note = (note or "").strip() or None
+    sessions = st.db.read(lambda c: store.running_sessions_under(c, wid, target.path))
+    session_ids = [s["id"] for s in sessions]
+    if row["status"] == "active":
+        # mark first, then signal: the same race `pause_work_item` guards against.
+        await st.db.write(
+            lambda c: store.skip_scope(c, wid, target.path, note, session_ids=session_ids)
+        )
+        for s in sessions:
+            _terminate(s["pid"])
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        target.node.id,
+        reason="skip could not start a walk past the skipped scope",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(
+                c, wid, from_statuses=["waiting", "paused", "needs_human"]
+            )
+        )
+        if not claimed:
+            raise HTTPException(409, "work item status changed; try again")
+        await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
+        try:
+            deps.spawn(
+                request.app,
+                wid,
+                deps.guard(
+                    st.db,
+                    wid,
+                    executor.run(
+                        st.db,
+                        st.run_dirs,
+                        work_item_id=wid,
+                        registry=st.registry,
+                        bd_cwd=deps.bd_cwd(),
+                        policy=st.policy,
+                        launch=deps.launch(st, row["repo"]),
+                        on_approve=deps._on_approve(st),
+                    ),
+                ),
+            )
+        except deps.AlreadyRunning:
+            raise HTTPException(409, "a walk is already running for this work item") from None
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
+@api_router.post("/work-items/{wid}/complete")
+async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request):
+    """Mark the item complete by hand, with a reason. Its beads stay open
+    unless `close_beads` says otherwise (Ruling 167): work completed by hand
+    may have landed somewhere else, or not at all."""
+    row = await _end_work_item(request, wid, "complete", body.reason)
+    if body.close_beads:
+        await executor.close_beads(
+            request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs
+        )
+    return deps._work_item_row(request.app.state, wid)
+
+
+@api_router.post("/work-items/{wid}/cancel")
+async def cancel_work_item(wid: str, body: EndWorkItem, request: Request):
+    """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
+    archiving reclaims it later, the same as for any ended item."""
+    await _end_work_item(request, wid, "cancel", body.reason)
+    return deps._work_item_row(request.app.state, wid)
+
+
+async def _end_work_item(request: Request, wid: str, action: str, reason: str):
+    """The terminal actions' one door: a work-item action only, it needs a
+    reason, stops whatever runs -- sessions, an escalation turn, the walk --
+    and leaves the item where no door leads back onto its chain."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    reason = reason.strip()
+    if not reason:
+        raise HTTPException(422, "reason: a terminal action needs a reason")
+    if row["status"] in ("completed", "abandoned"):
+        raise HTTPException(409, f"work item is already {row['status']}")
+    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+    ids = [s["id"] for s in sessions]
+    await st.db.write(lambda c: store.end_work_item(c, wid, action, reason, session_ids=ids))
+    for s in sessions:
+        _terminate(s["pid"])
+    # Bounded, as pause's is: the status is already terminal, so a walk that
+    # outlives the wait stops at its next node on its own.
+    await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
+    return row
 
 
 @api_router.post("/work-items/{wid}/escalate")

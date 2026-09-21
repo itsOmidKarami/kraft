@@ -79,8 +79,6 @@ def create_work_item(
     #: Defaulted so the legacy intake path is unchanged; NULL means this item
     #: runs off `chain_definition` (template schema V1, phase 2).
     materialized_chain: str | None = None,
-    #: The run this item forked from. Phase 5 fills it; reserved here.
-    run_fork_parent: str | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -100,8 +98,8 @@ def create_work_item(
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
         "auto_gate, budget_set, budget_usd, node_overrides, "
-        "materialized_chain, run_fork_parent) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "materialized_chain) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -124,7 +122,6 @@ def create_work_item(
             budget_usd,
             json.dumps(node_overrides) if node_overrides else None,
             materialized_chain,
-            run_fork_parent,
         ),
     )
     payload = {"title": title, "repo": repo, "chain_template": chain_template}
@@ -272,6 +269,57 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_completed", {})
+
+
+#: An operator's terminal action -> (the write that ends the item, its audit
+#: event, the ordinary event every reader of that status already knows). The
+#: status is a literal in each write, not a parameter, so no reader of this
+#: module (`dev/check_claim_handoff.py`) can take it for a claim to `active`.
+MANUAL_ENDS = {
+    "complete": (
+        "UPDATE work_items SET status = 'completed', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_manually_completed",
+        "work_item_completed",
+    ),
+    "cancel": (
+        "UPDATE work_items SET status = 'abandoned', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_cancelled",
+        "work_item_abandoned",
+    ),
+}
+
+
+def end_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    action: str,
+    reason: str,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """End an item by an operator's explicit `complete` or `cancel`
+    (`manual-completion-is-an-explicit-work-item-terminal-action`,
+    `manual-cancellation-is-an-explicit-work-item-terminal-action`).
+
+    One write: the running sessions are marked `paused` before the caller
+    signals them (`pause_work_item`'s ordering), the status leaves the running
+    set for good -- which is what stops the walk at its next node -- and the
+    audit event carries the reason and the node the item stood on.
+    """
+    ending, audit, ordinary = MANUAL_ENDS[action]
+    now = _now()
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+    node_id = conn.execute(
+        "SELECT current_node_id FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    conn.execute(ending, (now, work_item_id))
+    events.append(conn, work_item_id, audit, {"reason": reason, "node_id": node_id})
+    events.append(conn, work_item_id, ordinary, {})
 
 
 def set_bead_id(conn: sqlite3.Connection, work_item_id, bead_id: str) -> None:

@@ -134,26 +134,57 @@ def build() -> MCPServer:
         return await client.report_progress(task, work_item_id)
 
     @server.tool()
-    async def resume_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
-        """Start or restart a paused Kraft work item. `steer` is carried into the
-        next attempt's prompt. This is also how a work item created by
-        create_work_item is started for the first time."""
-        return await client.resume(steer, work_item_id)
+    async def resume_work_item(
+        steer: str | None = None,
+        work_item_id: str | None = None,
+        steers: dict[str, str] | None = None,
+    ) -> dict:
+        """Start or restart a paused Kraft work item. `steer` reaches every
+        paused agent task; `steers` gives individual paused agent tasks their
+        own, keyed by canonical task path (`node.step.task`). This is also how a
+        work item created by create_work_item is started for the first time."""
+        return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
-    async def retry_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
-        """Re-run the node a stopped Kraft work item stopped on, with `steer`
-        carried into the retry's prompt. This is the only way back onto an item
-        that stopped for a human: resume only takes a paused item."""
-        return await client.retry(steer, work_item_id)
+    async def retry_work_item(
+        steer: str | None = None,
+        work_item_id: str | None = None,
+        path: str | None = None,
+        restart: bool = False,
+    ) -> dict:
+        """Rerun work on a stopped Kraft work item, with `steer` carried into the
+        retry's prompt: the node it stopped on, or `path` (canonical: `node`,
+        `node.step` or `node.step.task`) and everything after it; `restart`
+        reruns the whole chain. This is the only way back onto an item that
+        stopped for a human: resume only takes a paused item."""
+        return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
-    async def skip_work_item(note: str | None = None, work_item_id: str | None = None) -> dict:
+    async def skip_work_item(
+        note: str | None = None, work_item_id: str | None = None, path: str | None = None
+    ) -> dict:
         """Advance a Kraft work item past its current node or pending gate,
-        without running or approving it. Works while active (kills the
-        running session first), paused, or stopped for a human. Only a human
-        should decide this — ask first."""
-        return await client.skip(note, work_item_id)
+        without running or approving it -- or, with `path` (`node.step` or
+        `node.step.task` inside the current node), skip only that, stopping
+        nothing beside it. Works while active, paused, or stopped for a human.
+        Only a human should decide this — ask first."""
+        return await client.skip(note, work_item_id, path=path)
+
+    @server.tool()
+    async def complete_work_item(
+        reason: str, work_item_id: str | None = None, close_beads: bool = False
+    ) -> dict:
+        """Mark a Kraft work item complete by hand, stopping anything running.
+        The reason is required and recorded. Its beads stay open unless
+        `close_beads` is true. Only a human should decide this — ask first."""
+        return await client.complete(reason, work_item_id, close_beads=close_beads)
+
+    @server.tool()
+    async def cancel_work_item(reason: str, work_item_id: str | None = None) -> dict:
+        """Cancel a Kraft work item, stopping anything running; its worktree
+        stays. The reason is required and recorded. Only a human should decide
+        this — ask first."""
+        return await client.cancel(reason, work_item_id)
 
     @server.tool()
     async def escalate_work_item(message: str, work_item_id: str | None = None) -> dict:

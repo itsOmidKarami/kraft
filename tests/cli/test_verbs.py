@@ -321,12 +321,57 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         (
             ["item", "retry", "w1", "--steer", "try the other adapter"],
             "retry",
-            {"steer": "try the other adapter", "work_item_id": "w1"},
+            {
+                "steer": "try the other adapter",
+                "work_item_id": "w1",
+                "path": None,
+                "restart": False,
+            },
+        ),
+        (
+            ["item", "retry", "w1", "--path", "verification.review.code_review"],
+            "retry",
+            {
+                "steer": None,
+                "work_item_id": "w1",
+                "path": "verification.review.code_review",
+                "restart": False,
+            },
+        ),
+        (
+            ["item", "retry", "w1", "--restart"],
+            "retry",
+            {"steer": None, "work_item_id": "w1", "path": None, "restart": True},
         ),
         (
             ["item", "skip", "w1", "--note", "known flake"],
             "skip",
-            {"note": "known flake", "work_item_id": "w1"},
+            {"note": "known flake", "work_item_id": "w1", "path": None},
+        ),
+        (
+            ["item", "skip", "w1", "--path", "verification.review"],
+            "skip",
+            {"note": None, "work_item_id": "w1", "path": "verification.review"},
+        ),
+        (
+            ["item", "resume", "w1", "--steer", "all", "--steer-task", "a.main.b=only b"],
+            "resume",
+            {"steer": "all", "work_item_id": "w1", "steers": {"a.main.b": "only b"}},
+        ),
+        (
+            ["item", "complete", "w1", "--reason", "shipped by hand"],
+            "complete",
+            {"reason": "shipped by hand", "work_item_id": "w1", "close_beads": False},
+        ),
+        (
+            ["item", "complete", "w1", "--reason", "shipped by hand", "--close-beads"],
+            "complete",
+            {"reason": "shipped by hand", "work_item_id": "w1", "close_beads": True},
+        ),
+        (
+            ["item", "cancel", "w1", "--reason", "not needed"],
+            "cancel",
+            {"reason": "not needed", "work_item_id": "w1"},
         ),
         (
             ["item", "escalate", "w1", "--message", "please look at this"],
@@ -340,7 +385,20 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         ),
         (["item", "progress", "2", "w1"], "report_progress", {"task": 2, "work_item_id": "w1"}),
     ],
-    ids=["retry-steer", "skip-note", "escalate-message", "escalate-new-thread", "progress-task"],
+    ids=[
+        "retry-steer",
+        "retry-path",
+        "retry-restart",
+        "skip-note",
+        "skip-path",
+        "resume-steer-task",
+        "complete-reason",
+        "complete-close-beads",
+        "cancel-reason",
+        "escalate-message",
+        "escalate-new-thread",
+        "progress-task",
+    ],
 )
 def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
     """Each argument lands on the client function's own parameter, as the real
@@ -396,7 +454,17 @@ def test_reject_passes_the_node_through(app, monkeypatch, capsys):
 
 
 GROUPS = {
-    "item": ["create", "approve", "reject", "pause", "resume", "retry", "abandon"],
+    "item": [
+        "create",
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "retry",
+        "abandon",
+        "complete",
+        "cancel",
+    ],
     "view": [
         "list",
         "show",
@@ -426,6 +494,8 @@ def test_every_grouped_verb_parses_to_a_handler(group, verb):
         args.append("a title")
     if verb == "reject":
         args += ["--note", "why"]
+    if verb in ("complete", "cancel"):
+        args += ["--reason", "why"]
     ns = cli.build_parser().parse_args(args)
     assert callable(ns.func)
 

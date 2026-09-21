@@ -273,6 +273,9 @@ def test_a_co_task_exception_is_logged_even_when_budget_wins(monkeypatch, caplog
         async def write(self, fn):
             return None
 
+        def read(self, fn):
+            return frozenset()  # nothing skipped (`store.skipped_paths`)
+
     async def fake_dispatch_node(db, run_dirs, task, node, row, worktree, **kw):
         if task.task.id == "suite":
             raise RuntimeError("co-task blew up")

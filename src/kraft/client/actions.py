@@ -195,19 +195,34 @@ async def abandon(work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{target}/abandon")
 
 
-async def resume(steer: str | None = None, work_item_id: str | None = None) -> dict:
-    """Restart a paused item, optionally carrying a steer into the next attempt.
+async def resume(
+    steer: str | None = None,
+    work_item_id: str | None = None,
+    steers: dict[str, str] | None = None,
+) -> dict:
+    """Restart a paused item. `steer` reaches every paused agent task;
+    `steers` gives individual paused agent tasks their own, by canonical task
+    path (`node.step.task`).
 
     This is also how a created-paused item is started for the first time: a NULL
     current_node_id resolves to node zero (design §6 rule 1).
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"steer": steer.strip()} if steer and steer.strip() else {}
+    payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
+    if steers:
+        payload["steers"] = steers
     return await transport._act(f"/work-items/{target}/resume", payload)
 
 
-async def retry(steer: str | None = None, work_item_id: str | None = None) -> dict:
-    """Re-run the node an item stopped on, optionally with a steer.
+async def retry(
+    steer: str | None = None,
+    work_item_id: str | None = None,
+    path: str | None = None,
+    restart: bool = False,
+) -> dict:
+    """Rerun work on a new run fork, optionally with a steer: the node an item
+    stopped on, or `path` (`node`, `node.step`, `node.step.task`) and
+    everything after it; `restart` reruns the whole chain.
 
     The only door back onto a `needs_human` stop: resume wants `paused`, pause
     wants `running`, and approve/reject want a pending gate. `_forbid_self_action`
@@ -215,19 +230,43 @@ async def retry(steer: str | None = None, work_item_id: str | None = None) -> di
     running you.
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"steer": steer.strip()} if steer and steer.strip() else {}
+    payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
+    if path:
+        payload["path"] = path
+    if restart:
+        payload["restart"] = True
     return await transport._act(f"/work-items/{target}/retry", payload)
 
 
-async def skip(note: str | None = None, work_item_id: str | None = None) -> dict:
+async def skip(
+    note: str | None = None, work_item_id: str | None = None, path: str | None = None
+) -> dict:
     """Advance past the current node or pending gate without running or
-    approving it. The one door that bypasses a step outright, rather than
-    retrying, resuming, or approving/rejecting it — works whether the item
-    is running, paused, or stopped for a human.
+    approving it -- or, with `path`, skip only a `node.step` or
+    `node.step.task` inside the current node, stopping nothing beside it.
+    Works whether the item is running, paused, or stopped for a human.
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"note": note.strip()} if note and note.strip() else {}
+    payload: dict = {"note": note.strip()} if note and note.strip() else {}
+    if path:
+        payload["path"] = path
     return await transport._act(f"/work-items/{target}/skip", payload)
+
+
+async def complete(reason: str, work_item_id: str | None = None, close_beads: bool = False) -> dict:
+    """End the item as completed by hand. A reason is required and recorded;
+    its beads close only with `close_beads`."""
+    target = context._forbid_self_action(work_item_id)
+    payload: dict = {"reason": reason}
+    if close_beads:
+        payload["close_beads"] = True
+    return await transport._act(f"/work-items/{target}/complete", payload)
+
+
+async def cancel(reason: str, work_item_id: str | None = None) -> dict:
+    """Cancel the item. A reason is required and recorded; the worktree stays."""
+    target = context._forbid_self_action(work_item_id)
+    return await transport._act(f"/work-items/{target}/cancel", {"reason": reason})
 
 
 async def report_progress(task: int, work_item_id: str | None = None) -> dict:

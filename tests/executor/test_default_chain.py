@@ -14,7 +14,7 @@ import pytest
 
 from kraft import executor, store
 from kraft import policy as _policy
-from kraft.executor import gates, walk
+from kraft.executor import gates
 from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import BuiltinTask
 
@@ -117,28 +117,19 @@ def _moves_base_once(it):
     return effect
 
 
-@pytest.mark.parametrize(
-    ("reopens", "tail", "stops_at"),
-    [
-        (False, ["open", "await_ci", "await_review", "author"], "chain_review"),
-        (True, [], "local_review"),
-    ],
-    ids=["approved-gate-passes", "approved-gate-reopens"],
-)
 async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head(
-    item_on, script, default_chain, monkeypatch, reopens, tail, stops_at
+    item_on, script, default_chain
 ):
     """Kraft-bjw6a. A CI conflict rebased away moves the base, and
     `merge_request_feedback` declares `on_base_changed: {restart_from:
     verification}`, so the rebased head is tested and reviewed again before
     anything reads it as green.
 
-    Both sides of `walk.RESTART_REOPENS_APPROVED_GATES`, the one decision point
-    for a gate inside the restart span: an approved `local_review` is passed
-    through (the shipped default, so that case leaves the flag alone), or
-    reopened."""
-    if reopens:
-        monkeypatch.setattr(walk, "RESTART_REOPENS_APPROVED_GATES", True)
+    The rebase was clean -- the forge's forced rebase succeeds only with no
+    textual conflict -- so the approved `local_review` in the restart span keeps
+    its approval and the walk passes over it (Ruling 162). A rebase that had to
+    resolve a conflict reopens it:
+    test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span."""
     it = await item_on(default_chain, "merge_request_feedback")
     await _approved(it, "local_review")
     script.effects = {"await_ci": _moves_base_once(it)}
@@ -150,10 +141,14 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
         "test_changed_scopes",
         "code_review",
         "author",
-        *tail,
+        "open",
+        "await_ci",
+        "await_review",
+        "author",
     ]
     [restart] = it.events("base_change_restart")
     assert restart["payload"]["restart_from"] == "verification"
-    assert gates.pending_gate(it.database, it.id) == stops_at
+    assert gates.pending_gate(it.database, it.id) == "chain_review"
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
-    assert requested == ["local_review", stops_at]
+    assert requested == ["local_review", "chain_review"]
+    assert it.events("gate_reopened") == []
