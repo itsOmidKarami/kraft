@@ -101,57 +101,37 @@ def test_every_transport_failure_is_none_not_an_exception(cache, monkeypatch, bo
     assert update.latest() is None
 
 
-def test_a_garbage_body_is_none(cache, monkeypatch):
-    monkeypatch.setattr(update, "_fetch", _fetch({"not": "a list"}))
-    assert update.latest() is None
-
-
-def test_an_empty_release_list_is_none(cache, monkeypatch):
-    monkeypatch.setattr(update, "_fetch", _fetch([]))
-    assert update.latest() is None
-
-
-def test_a_release_with_no_wheel_is_none(cache, monkeypatch):
-    payload = [{"tag_name": "v9.0.0", "draft": False, "prerelease": False, "assets": []}]
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"not": "a list"},
+        [],
+        [{"tag_name": "v9.0.0", "draft": False, "prerelease": False, "assets": []}],
+    ],
+    ids=["garbage-body", "empty-release-list", "no-wheel"],
+)
+def test_a_feed_with_no_usable_release_is_none(cache, monkeypatch, payload):
     monkeypatch.setattr(update, "_fetch", _fetch(payload))
     assert update.latest() is None
 
 
-def test_a_draft_release_is_not_an_update(cache, monkeypatch):
-    """GitHub lists drafts in the same feed; GitLab had no equivalent."""
-    payload = [
-        {
-            "tag_name": "v0.9.9",
-            "draft": True,
-            "prerelease": False,
-            "assets": [{"name": "k.whl", "browser_download_url": "https://x/d.whl"}],
-        },
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
-    assert update.latest().tag == "v0.4.0"
+def _release(tag, *, draft=False, prerelease=False, wheel=True):
+    assets = [{"name": "k.whl", "browser_download_url": "https://x/k.whl"}] if wheel else []
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": assets}
 
 
-def test_a_prerelease_is_not_an_update(cache, monkeypatch):
-    payload = [
-        {
-            "tag_name": "v1.0.0rc1",
-            "draft": False,
-            "prerelease": True,
-            "assets": [{"name": "k.whl", "browser_download_url": "https://x/p.whl"}],
-        },
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
-    assert update.latest().tag == "v0.4.0"
-
-
-def test_a_release_with_no_wheel_is_skipped(cache, monkeypatch):
-    payload = [
-        {"tag_name": "v0.9.9", "draft": False, "prerelease": False, "assets": []},
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
+@pytest.mark.parametrize(
+    "newer",
+    [
+        # GitHub lists drafts in the same feed; GitLab had no equivalent.
+        _release("v0.9.9", draft=True),
+        _release("v1.0.0rc1", prerelease=True),
+        _release("v0.9.9", wheel=False),
+    ],
+    ids=["draft", "prerelease", "no-wheel"],
+)
+def test_a_release_that_is_not_an_update_is_skipped(cache, monkeypatch, newer):
+    monkeypatch.setattr(update, "_fetch", _fetch([newer, *RELEASE_JSON]))
     assert update.latest().tag == "v0.4.0"
 
 
