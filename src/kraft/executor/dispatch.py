@@ -467,6 +467,11 @@ async def dispatch_node(
             orig_repo=Path(work_item_row["repo"]),
             branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
+            # A node that declares `on_base_changed` restarts its span when a
+            # rebase moves the base, so the forge may report the move instead
+            # of re-verifying the rebased head itself (`merge`'s conflict
+            # rebase leans on this).
+            has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
             **poll,
             **common,
         )

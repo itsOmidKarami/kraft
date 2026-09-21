@@ -1355,6 +1355,59 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
         )
 
 
+async def _restart_for_base_change(
+    db, work_item_id: str, nodes, index: int, restart_from: str, policy: _policy.Policy | None
+) -> int | None:
+    """Restart the chain at `restart_from` because node `index` moved the
+    worktree base (`base-change-restarts-a-declared-chain-span`), or stop for a
+    human once the node's restarts are spent.
+
+    A base change is not an execution failure
+    (`base-change-is-not-an-execution-failure`): no recovery ran for it and no
+    fix attempt is bumped. Every node in the span gets a fresh fix-loop budget
+    instead -- re-running a node is a fresh pass over it, and a clock from
+    before the restart would price the new pass at the old one's cost
+    (Kraft-s7c04.25). The restarts themselves are bounded by their own
+    `<node>.on_base_changed` counter, which the span never clears: a base that
+    moves on every pass would otherwise restart forever.
+    """
+    node = nodes[index]
+    key = f"{node.id}.on_base_changed"
+    cap = (
+        _policy.resolve_cap(policy, key)
+        if policy is not None
+        else _policy.Cap(attempts=3, wall_clock_s=3600)
+    )
+    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
+    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+        reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
+        capped = {"cycles": count - 1, "attempts": cap.attempts}
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, capped))
+        return None
+    target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
+    span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
+    for n in span:
+        await db.write(
+            lambda c, n=n: store.clear_loop_counters(
+                c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
+            )
+        )
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "base_change_restart",
+            {
+                "node_id": node.id,
+                "restart_from": restart_from,
+                "nodes": [n.id for n in span],
+                "restart": count,
+            },
+        )
+    )
+    return target
+
+
 async def run_once(
     db,
     run_dirs,
@@ -1500,6 +1553,8 @@ async def run_once(
         if await gates.maybe_gate(db, work_item_id, node):
             await _report_if_undelivered(db, work_item_id, carried)
             return "awaiting_gate"
+        base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
+        pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         result = await walk_node(
             db,
             run_dirs,
@@ -1530,6 +1585,28 @@ async def run_once(
             return RATE_LIMITED
         if result == WAITING:
             return WAITING
+        new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
+        if base_change is not None and (result == BASE_MOVED or new_base != pre_base):
+            target = await _restart_for_base_change(
+                db, work_item_id, nodes, i, base_change.restart_from, policy
+            )
+            if target is None:
+                await _report_if_undelivered(db, work_item_id, carried)
+                return "needs_human"
+            # `carried` is about to be replaced by Kraft's own drift note -- if
+            # the original steer survived this far untaken, report it before
+            # it is overwritten (Kraft-s7c04.50).
+            await _report_if_undelivered(db, work_item_id, carried)
+            carried = Steer(
+                prompts.rebase_drift_note(
+                    worktree, store.branch_for(row), pre_base or "HEAD", new_base or "HEAD"
+                ),
+                # Kraft wrote this one, not a person; it must not claim the
+                # judge exemption a human's own answer gets.
+                source="seeded",
+            )
+            i = target
+            continue
         i += 1
 
     # The whole chain ran to completion without any node's dispatch ever
