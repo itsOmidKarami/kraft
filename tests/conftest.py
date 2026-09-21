@@ -10,6 +10,7 @@ import pytest
 from support import api as api_support
 from support import harness
 from support.fake_beads import Bd, FakeBeads
+from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 from support.harness import fake_templates_dir, isolated_bd, make_repo
 
 from kraft import client as kraft_client
@@ -73,15 +74,6 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
 
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
     monkeypatch.setattr(builtins_mod, "prepare_runtime", _prepare_runtime_with_default)
-
-
-#: Agent CLIs this suite must never actually launch. Kraft-jxu39: the only reason
-#: a stray real launch has been cheap so far is that `_isolated_kraft_home`
-#: redirects `HOME` to an empty temp dir and this machine has no
-#: `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary resolves and
-#: exits in milliseconds. On a developer machine with a key set the same call is
-#: a real agent turn: network, tokens, tens of seconds.
-_REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
 
 
 @pytest.fixture(autouse=True)

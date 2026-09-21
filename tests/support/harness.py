@@ -20,6 +20,17 @@ _SUPPORT = Path(__file__).parent
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+#: Agent CLIs this suite must never actually launch (tests/conftest.py refuses
+#: them). Kraft-jxu39: the only reason a stray real launch has been cheap so far
+#: is that `_isolated_kraft_home` redirects `HOME` to an empty temp dir and this
+#: machine has no `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`, so the binary
+#: resolves and exits in milliseconds. On a developer machine with a key set the
+#: same call is a real agent turn: network, tokens, tens of seconds. Here, not in
+#: the conftest, so a test can import it without `import conftest`, which is
+#: ambiguous now the repo root has a conftest.py too.
+REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
+
+
 #: Commits are made at a fixed time so that building the same tree twice gives
 #: the same SHA. A commit hash covers its own timestamp at one-second
 #: granularity, so two `make_repo()` calls either side of a second boundary used
