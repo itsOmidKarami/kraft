@@ -219,6 +219,33 @@ def test_chain_review_repeated_approve_keeps_erroring(tmp_path, monkeypatch):
         assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "chain_review"
 
 
+def test_chain_review_approval_advances_without_splicing(tmp_path, monkeypatch):
+    """V1's final-review approval advances to the node after the gate, and a
+    reviewer's legacy `revised_chain_nodes` envelope is ignored rather than
+    refusing the approval or rewriting the tail (Task 4b parked
+    `_splice_chain_review`). The envelope below would drop `after` if it were
+    spliced, so `after` starting is the proof it was not."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    repo = make_repo(tmp_path)
+    tdir = _review_early(tmp_path)
+    (tdir / "chains" / "review-then-more.yaml").write_text(
+        _REVIEW_EARLY.replace("id: review-early", "id: review-then-more")
+        + "  - id: after\n    kind: exec\n    tasks:\n      - id: implement\n"
+        "        extends: implementer\n"
+    )
+    with _client(tmp_path, monkeypatch, templates_dir=tdir) as client:
+        wid = _post(client, repo, "review-then-more")
+        _await_gate(client, wid, "chain_review")
+        _review_brief_path(client, wid).write_text(
+            "---\nkind: review_brief\n---\n"
+            + json.dumps({"status": "ready_for_approval", "revised_chain_nodes": []})
+        )
+
+        r = _approve_gate(client, wid, "chain_review")
+        assert r.status_code == 200, r.text
+        _poll_node_started(client, wid, "after")
+
+
 def test_gate_approve_wrong_gate_409(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
