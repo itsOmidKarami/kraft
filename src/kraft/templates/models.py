@@ -184,6 +184,19 @@ class ForgeAction(StrEnum):
     MR_POST_MERGE_CI = "mr.post_merge_ci"
 
 
+class AgentInput(StrEnum):
+    """What Kraft hands an agent task beyond its prompt, when the task asks for
+    it by name. Declared on the task rather than keyed on a task's name or
+    role, which is the indirection V1 deletes (Ruling 47).
+
+    * `review_package` -- the change under review written out to a file, its
+      path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then
+      from a task's second session on only what changed since its previous
+      one (`review-package-is-delivered-to-a-task-that-declares-it`)."""
+
+    REVIEW_PACKAGE = "review_package"
+
+
 class TaskScope(StrEnum):
     """`task-may-explicitly-fan-out-by-repository`: fan-out is opt-in, so
     `ONCE` -- the work item's ordinary execution context -- is the default."""
@@ -281,6 +294,9 @@ class AgentTask(TaskBase):
     produces: Identifier | None = None
     model: StrictStr | None = None
     effort: StrictStr | None = None
+    #: Inputs Kraft delivers to this task (`AgentInput`), e.g.
+    #: `inputs: [review_package]`.
+    inputs: list[Annotated[AgentInput, _LOOSE]] = Field(default_factory=list)
 
 
 class SubprocessTask(TaskBase):

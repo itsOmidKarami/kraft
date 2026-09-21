@@ -69,14 +69,6 @@ def test_no_previous_round_means_no_note_at_all():
     assert prompts.carried_findings_note([]) == ""
 
 
-def test_the_security_reviewer_is_a_review_hook_too():
-    """It was missing from REVIEW_HOOKS, so `review_package` returned None for
-    it and a security review was dispatched with no diff by any route at all.
-    `chain_review` adds this hook to `verify` whenever a plan touches auth,
-    sessions, tokens, secrets or permission checks."""
-    assert "on.review.security.run" in prompts.REVIEW_HOOKS
-
-
 # --------------------------------------------------------------------------
 # the dispatch actually carries it
 # --------------------------------------------------------------------------

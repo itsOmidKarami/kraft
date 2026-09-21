@@ -38,6 +38,7 @@ from kraft.executor.context import (
 )
 from kraft.store import _now as _now
 from kraft.templates.models import (
+    AgentInput,
     AgentTask,
     BuiltinTask,
     ExecutionMode,
@@ -562,6 +563,13 @@ async def dispatch_node(
         # to stop with `needs_context` instead. A steering selection the
         # snapshot cannot supply stops the same way rather than run unsteered.
         return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
+    # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
+    # the change under review, written out for this session.
+    package = (
+        prompts.review_package(db, run_dirs, work_item_row["id"], worktree, task.path, session_id)
+        if AgentInput.REVIEW_PACKAGE in t.inputs
+        else None
+    )
     try:
         status = await _agent.run_agent_task(
             db,
@@ -588,6 +596,7 @@ async def dispatch_node(
             repo_path=work_item_row["repo"],
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
+            review_package=package,
             **common,
         )
     except _agent.LaunchRefused as exc:

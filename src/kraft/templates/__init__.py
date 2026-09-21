@@ -389,9 +389,8 @@ def with_inputs(binding: dict, task_hook: str) -> dict:
     """The binding's resolved input table. **PARKED: no `src/` caller since
     Template Schema V1 stopped the executor reading hook bindings at all**
     (`TEST_HOOK` with it). Kept, with `_INPUT_CHANNELS` and its validation, for
-    Task 7 of the template-schema-v1 plan, which declares a task's inputs on the
-    `AgentTask` instead of on a hook name -- see `executor.prompts.REVIEW_HOOKS`
-    for what is inert meanwhile.
+    the legacy loader's own validation. V1 declares an agent task's inputs on
+    the task itself (`AgentTask.inputs`), not on a hook binding.
 
     An explicit `inputs:` is authoritative: exactly what is declared, nothing
     implied. Absent, today's hardcoded rules are reproduced, because
