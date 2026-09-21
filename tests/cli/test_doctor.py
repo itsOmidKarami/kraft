@@ -520,6 +520,19 @@ def test_doctor_does_not_check_a_profile_nothing_selects(tmp_path, monkeypatch):
     assert not any(r["name"] == "agent: idle" for r in rows)
 
 
+def test_a_profile_s_own_executable_is_what_is_checked(tmp_path, monkeypatch):
+    """A profile that names its `executable:` launches that, not the
+    provider's default command, so that is what has to be on PATH."""
+    live = _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
+    (live / "harnesses.yaml").write_text(
+        yaml.safe_dump({"harnesses": {"a": {"provider": "claude", "executable": "my-claude"}}})
+    )
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    row = _by_name(doctor._agent_checks(), "agent: a")
+    assert not row["ok"]
+    assert "my-claude" in row["detail"]
+
+
 def test_a_selected_profile_harnesses_yaml_lacks_fails(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {}, ["ghost"])
     row = _by_name(doctor._agent_checks(), "agent: ghost")
