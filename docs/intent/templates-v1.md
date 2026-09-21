@@ -619,7 +619,7 @@ enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_expl
 
 When an explicit conflict handler resolves a conflict and changes the worktree
 base, the system SHALL apply that node's `on_base_changed` restart behaviour.
-enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_handler_that_does_not_rebase_stops_for_a_human
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[did-not-rebase], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[failed], tests/executor/test_base_change.py::test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human[asked]
 
 ## REQ policy-is-layered-by-execution-scope
 

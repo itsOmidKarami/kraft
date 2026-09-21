@@ -80,10 +80,11 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     `base-change-is-not-an-execution-failure`: the span reruns with a fresh
     fix-loop budget, and the base change itself opens no recovery and no fix
     cycle."""
-    it = await item_on(_chain(**RESTART))
+    it = await item_on(_chain(**RESTART, fix_loop={"tasks": [_sub("rebase_fix")]}))
     script.effects = {"sync": _moves_base(it)}
     stale = _policy.Cap(attempts=3, wall_clock_s=3600)
-    await it.database.write(lambda c: store.bump_counter(c, it.id, "verify.fix_loop", stale))
+    for key in ("verify.fix_loop", "rebase.fix_loop"):
+        await it.database.write(lambda c, key=key: store.bump_counter(c, it.id, key, stale))
 
     assert await _walk(it) == "completed"
     assert _starts(it) == ["verify", "rebase", "verify", "rebase", "publish"]
@@ -95,7 +96,9 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
         "nodes": ["verify", "rebase"],
         "restart": 1,
     }
-    assert it.database.read(lambda c: store.read_counter(c, it.id, "verify.fix_loop")) is None
+    # The whole span gets a fresh budget, not only its first node.
+    for key in ("verify.fix_loop", "rebase.fix_loop"):
+        assert it.database.read(lambda c, key=key: store.read_counter(c, it.id, key)) is None
     assert not it.events("fix_cycle_started")
     assert not it.events("node_recovery_started")
     # The restarted span is told what moved. Nothing here is an agent to take
@@ -223,19 +226,34 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
     assert "A rebase conflict stopped this work item" in script.steers["resolve"][0].take()
 
 
-async def test_a_conflict_handler_that_does_not_rebase_stops_for_a_human(item_on, script):
+@pytest.mark.parametrize(
+    ("ending", "reason"),
+    [
+        ("done", "the conflict handler in node rebase finished without rebasing onto"),
+        ("failed", "the conflict handler in node rebase could not resolve it: "),
+        ("needs_context", "needs_context: "),
+    ],
+    ids=["did-not-rebase", "failed", "asked"],
+)
+async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
+    item_on, script, ending, reason
+):
+    """A handler reporting success is believed only once the worktree sits on
+    the upstream tip; one that failed stops naming the conflict, and one that
+    asked stops with its question."""
     it = await item_on(_chain(**_with_handler()))
-    script.plan = {"sync": ["conflict"]}
-
+    script.plan = {"sync": ["conflict"], "resolve": [ending]}
     landed = []
 
     async def land_upstream(_row):
         if not landed:
             landed.append(await _upstream_moves(it))
 
-    script.effects = {"check": land_upstream}
+    async def record(_row):
+        await it.session("s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", ending)
+
+    script.effects = {"check": land_upstream, "resolve": record}
 
     assert await _walk(it) == "needs_human"
-    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
-    assert reason.startswith("the conflict handler in node rebase finished without rebasing onto")
+    assert it.events("work_item_needs_human")[-1]["payload"]["reason"].startswith(reason)
     assert not it.events("base_change_restart")

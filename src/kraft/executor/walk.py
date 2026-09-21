@@ -570,6 +570,10 @@ async def _resolve_conflict(
             f"the conflict handler in node {node.id} finished without rebasing onto "
             f"{new_base or 'the upstream tip'}: {detail}"
         )
+    elif (question := dispatch.needs_context_question(db, work_item_id, node, round)) is not None:
+        # The handler judged that what landed upstream changes what this item
+        # is for, and asked: the question is the stop.
+        reason = f"needs_context: {question}"
     else:
         reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
