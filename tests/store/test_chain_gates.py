@@ -46,11 +46,8 @@ async def test_row_and_event_are_atomic(database):
         store.enter_node(c, "w1", "env_setup")
         raise RuntimeError("boom")
 
-    try:
+    with pytest.raises(RuntimeError, match="boom"):
         await database.write(bad)
-        raise AssertionError("expected RuntimeError")
-    except RuntimeError:
-        pass
 
     row = database.read(
         lambda c: c.execute("SELECT current_node_id FROM work_items WHERE id='w1'").fetchone()
