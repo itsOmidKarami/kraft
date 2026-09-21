@@ -544,6 +544,23 @@ async def test_infra_red_is_retried_across_entries_then_stops_with_the_reason(
 # --- merge ---------------------------------------------------------------------
 
 
+class _MergesOnlyOnGreen(forge.FakeForge):
+    """`glab mr merge --yes` against a still-running pipeline exits 0 but merges
+    nothing (Kraft-79x3): this fake refuses unless the last read was green."""
+
+    last = None
+
+    async def ci_status(self, **kw):
+        status = await super().ci_status(**kw)
+        self.last = status.state
+        return status
+
+    async def merge(self, *, repo, branch="", mr):
+        if self.last != "success":
+            raise forge.ForgeError(f"merged over a {self.last} pipeline")
+        await super().merge(repo=repo, branch=branch, mr=mr)
+
+
 class _Refusing(forge.FakeForge):
     async def merge(self, *, repo, branch="", mr):
         raise forge.ForgeError("merge blocked: 1 approval required")
@@ -580,7 +597,7 @@ class _ClosedAfterwards(_AutoMergeScheduled):
         # mr_checks never watched; merge waits it out before `forge.merge()`,
         # and success is decided by a read of the forge, not by an exit code.
         (
-            lambda: forge.FakeForge(ci_states=["pending", "pending", "success"]),
+            lambda: _MergesOnlyOnGreen(ci_states=["pending", "pending", "success"]),
             True,
             {},
             "done",

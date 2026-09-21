@@ -156,6 +156,7 @@ async def test_merge_watch_does_not_pin_a_pipeline_read_for_a_different_commit(r
     # `render_ci`'s own sha guard keeps the wrong-sha read from a false
     # "done"; only that read is wrong-sha, and it must never be pinned.
     assert results == ["waiting", "done"]
+    assert fake.pipeline_ids_requested == ["", ""], "the second read polled the wrong-sha pin"
     assert run_forge.item.row()["ci_pipeline_ref"] == f"{head_sha}:222"
 
 

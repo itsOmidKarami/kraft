@@ -308,12 +308,12 @@ async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
     _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
     _commit(worktree, "root-change.txt", "x\n", "root change")
-    fake = forge.FakeForge(ci_states=["success"])
+    fake = _RecordingForge(ci_states=["success"])
 
     assert await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch) == "done"
 
     repos = database.read(lambda c: store.repos_for(c, it.id))
-    assert len(fake.opened) == 2
+    assert fake.cwds == [worktree / "repos" / "pkg", worktree], "submodule first, root last"
     assert [r["role"] for r in repos] == ["submodule", "root"]
     assert repos[0]["state"] == "open"
 
