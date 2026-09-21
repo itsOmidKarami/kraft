@@ -24,6 +24,28 @@ kraft item retry                     # re-run the node a stopped item stopped on
 kraft view search "retry policy"
 ```
 
+### Addressing work by path
+
+Retry, skip and resume address chain work by its canonical path: `node`,
+`node.step` or `node.step.task` (a `tasks:` node's one step is `main`, so
+`implementation.main.implement`). `kraft view show --json` lists every path.
+
+```bash
+kraft item retry --path verification.review               # that step, and everything after it
+kraft item retry --path verification.review.code_review   # that task; its finished siblings stand
+kraft item retry --path spec                              # a node that already completed, and on
+kraft item retry --restart                                # the whole chain from its first node
+kraft item resume --steer "keep the old API" \
+  --steer-task verification.review.code_review="check the auth module first"
+kraft item skip --path verification.review.code_review    # only that task; its siblings keep running
+```
+
+A retry keeps everything the earlier run did and runs on a new run fork. It
+reopens every gate it has to rerun; a gate before the retried work keeps its
+decision. `resume --steer` reaches every paused agent task; `--steer-task`
+gives one its own, and naming a task that is not a paused agent task is
+refused. Pause is always the whole work item.
+
 ## Following a running item
 
 ```bash
@@ -63,6 +85,8 @@ kraft item set-overrides --clear                  # back to the template's own b
 kraft item set-node-override --node verify --auto-escalate-stuck
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
 kraft item abandon --yes                          # drops the item, reclaims its worktree
+kraft item complete --reason "shipped by hand"    # end it as completed, stopping anything running
+kraft item cancel --reason "superseded by #412"   # end it as cancelled; the worktree stays
 ```
 
 `progress` is what a worker session itself calls to report which plan task it
@@ -70,7 +94,9 @@ started — you'll see it in logs more than type it. `escalate` is the manual
 door onto the same path `kraft admin` and the board's own auto-escalation use
 to ask an agent to help resolve a `needs_human` stop. `abandon` destroys
 uncommitted work in the item's worktree; `--yes` is required, not optional,
-on purpose.
+on purpose. `complete` and `cancel` are the explicit terminal actions: each
+needs a `--reason`, stops whatever is running, and records the reason on the
+item's timeline.
 
 ## Repos and worktrees
 

@@ -61,15 +61,39 @@ def _cmd_abandon(ns: argparse.Namespace) -> None:
 
 
 def _cmd_resume(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.resume(ns.steer, ns.id)), common._render_action, ns.json)
+    steers = {}
+    for pair in ns.steer_task or []:
+        path, sep, text = pair.partition("=")
+        if not sep:
+            raise ValueError(f"--steer-task takes PATH=TEXT, not {pair!r}")
+        steers[path] = text
+    common.emit(
+        asyncio.run(client.resume(ns.steer, ns.id, steers=steers or None)),
+        common._render_action,
+        ns.json,
+    )
 
 
 def _cmd_retry(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.retry(ns.steer, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.retry(ns.steer, ns.id, path=ns.path, restart=ns.restart)),
+        common._render_action,
+        ns.json,
+    )
 
 
 def _cmd_skip(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.skip(ns.note, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.skip(ns.note, ns.id, path=ns.path)), common._render_action, ns.json
+    )
+
+
+def _cmd_complete(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.complete(ns.reason, ns.id)), common._render_action, ns.json)
+
+
+def _cmd_cancel(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.cancel(ns.reason, ns.id)), common._render_action, ns.json)
 
 
 def _cmd_progress(ns: argparse.Namespace) -> None:
@@ -174,7 +198,13 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
 
     resume = subs.add_parser("resume", parents=[common], help="start or restart a paused item")
     resume.add_argument("id", nargs="?")
-    resume.add_argument("--steer", help="carried into the next attempt's prompt")
+    resume.add_argument("--steer", help="reaches every paused agent task")
+    resume.add_argument(
+        "--steer-task",
+        action="append",
+        metavar="PATH=TEXT",
+        help="a steer for one paused agent task, by canonical path (node.step.task); repeatable",
+    )
     resume.set_defaults(func=_cmd_resume)
 
     retry = subs.add_parser(
@@ -182,14 +212,35 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     retry.add_argument("id", nargs="?")
     retry.add_argument("--steer", help="carried into the retry's prompt")
+    retry_what = retry.add_mutually_exclusive_group()
+    retry_what.add_argument(
+        "--path",
+        help="what to rerun, with everything after it: node, node.step or node.step.task",
+    )
+    retry_what.add_argument(
+        "--restart", action="store_true", help="rerun the whole chain from its first node"
+    )
     retry.set_defaults(func=_cmd_retry)
 
     skip = subs.add_parser(
         "skip", parents=[common], help="advance past the current node or gate without running it"
     )
     skip.add_argument("id", nargs="?")
-    skip.add_argument("--note", help="optional reason, recorded on the node_skipped event")
+    skip.add_argument("--note", help="optional reason, recorded on the skip's event")
+    skip.add_argument(
+        "--path",
+        help="skip only this node.step or node.step.task of the current node",
+    )
     skip.set_defaults(func=_cmd_skip)
+
+    for verb, fn, what in (
+        ("complete", _cmd_complete, "mark the item complete by hand"),
+        ("cancel", _cmd_cancel, "cancel the item (its worktree stays)"),
+    ):
+        ending = subs.add_parser(verb, parents=[common], help=what)
+        ending.add_argument("id", nargs="?")
+        ending.add_argument("--reason", required=True, help="why; recorded on the audit event")
+        ending.set_defaults(func=fn)
 
     progress = subs.add_parser(
         "progress", parents=[common], help="say which plan task the implementation has started"

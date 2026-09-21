@@ -35,6 +35,8 @@ def test_the_tools_are_registered():
         "resume_work_item",
         "retry_work_item",
         "skip_work_item",
+        "complete_work_item",
+        "cancel_work_item",
         "escalate_work_item",
         "set_mr_labels",
         "set_chain_template",
