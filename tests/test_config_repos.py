@@ -152,6 +152,9 @@ def test_a_retired_repo_key_is_dropped_on_read_and_gone_after_a_save(tmp_path, c
     assert key not in entry
     assert entry["models"] == {}
     assert key in caplog.text
+    # Its own warning, never the unrecognised-key one (nor its near-miss
+    # refusal): a retired key is known, and where it went is named.
+    assert "unrecognised" not in caplog.text
     config.save_repos(tmp_path / "repos.yaml", [entry])
     assert key not in (tmp_path / "repos.yaml").read_text()
 

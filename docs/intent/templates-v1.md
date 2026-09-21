@@ -962,7 +962,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_rea
 
 When a child merge request is rejected, blocked, or fails to merge, the system
 SHALL leave its workspace root pointer unchanged and require human action.
-enforced-by: tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[root-with-source], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[pointer-only-root], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[pointer-only-root-one-member-landed]
+enforced-by: tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[root-with-source-awaiting-approval], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[pointer-only-root-refused], tests/templates/test_workspace_publication.py::test_blocked_child_merge_leaves_the_root_unchanged[one-member-landed]
 
 ## REQ template-policy-may-replace-operational-defaults
 

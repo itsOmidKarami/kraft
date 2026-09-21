@@ -265,18 +265,21 @@ class _LandingForge(forge.FakeForge):
     origin `main`, and which records, in order, every merge and every
     readiness -- the root's with the member pointer its head carried then."""
 
-    def __init__(self, refuse: str | None = None):
+    def __init__(self, refuse: str | None = None, raise_on_merge: bool = False):
         super().__init__(ci_states=["success"])
         self.order: list[tuple] = []
         self.refuse = refuse
+        self.raise_on_merge = raise_on_merge
 
     async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
         status = await super().ci_status(repo=repo, mr=mr, branch=branch, pipeline_id=pipeline_id)
-        if Path(repo).name != self.refuse:
+        if Path(repo).name != self.refuse or self.raise_on_merge:
             return status
         return dataclasses.replace(status, block_reason="not_approved", merge_detail="1 approval")
 
     async def merge(self, *, repo, branch="", mr):
+        if self.raise_on_merge and Path(repo).name == self.refuse:
+            raise forge.ForgeError("merge refused: the branch is protected")
         await super().merge(repo=repo, branch=branch, mr=mr)
         _git(repo, "push", "-q", "origin", "HEAD:main")
         self.order.append(("merge", Path(repo).name))
@@ -329,8 +332,6 @@ async def _run(database, run_dirs, row, worktree, fake, monkeypatch, handler):
         repo=worktree,
         branch=store.branch_for(row),
         title="t",
-        poll_interval=0,
-        merge_interval=0,
     )
 
 
@@ -422,18 +423,24 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
 
 
 @pytest.mark.parametrize(
-    ("root_source", "second", "landed"),
-    [(True, False, []), (False, False, []), (False, True, [("merge", "pkg")])],
-    ids=["root-with-source", "pointer-only-root", "pointer-only-root-one-member-landed"],
+    ("root_source", "second", "refused", "status", "landed"),
+    [
+        (True, False, False, "waiting", []),
+        (False, False, True, "failed", []),
+        (False, True, False, "waiting", [("merge", "pkg")]),
+    ],
+    ids=["root-with-source-awaiting-approval", "pointer-only-root-refused", "one-member-landed"],
 )
 async def test_blocked_child_merge_leaves_the_root_unchanged(
-    database, run_dirs, tmp_path, monkeypatch, root_source, second, landed
+    database, run_dirs, tmp_path, monkeypatch, root_source, second, refused, status, landed
 ):
-    """`blocked-child-merge-leaves-parent-unchanged`: a member whose merge
-    request is blocked -- here, awaiting an approval -- fails the node, and
-    nothing of the root's moves: no readiness, no merge, no pointer bump, not
-    even to a member that did land before it. The merge node has no recovery
-    of its own, so the item stops for a person."""
+    """`blocked-child-merge-leaves-parent-unchanged`: while a member's merge
+    request waits on an approval, or after its merge is refused, nothing of
+    the root's moves -- no readiness, no merge, no pointer bump, not even to a
+    member that did land before it. A refusal fails the node; the merge node
+    has no recovery of its own, so the item stops for a person. A missing
+    approval is an ordinary wait (`missing-external-approval-is-normal-
+    pending-state`), and the root waits with it."""
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", second=second
     )
@@ -442,14 +449,14 @@ async def test_blocked_child_merge_leaves_the_root_unchanged(
         _git(worktree, "add", "root.txt")
         _git(worktree, "commit", "-qm", "root source change")
     before = _git_out(origin, "rev-parse", "main")
-    fake = _LandingForge(refuse="pkg2" if second else "pkg")
+    fake = _LandingForge(refuse="pkg2" if second else "pkg", raise_on_merge=refused)
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
-    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "failed"
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == status
 
     assert fake.order == landed
     assert _git_out(origin, "rev-parse", "main") == before
-    assert "failed" in {r["state"] for r in database.read(lambda c: store.repos_for(c, row["id"]))}
+    assert _repos(database, row)["root"] != "merged"
 
 
 # ── publication in the chain's own order ──
