@@ -182,13 +182,19 @@ shape rules that don't:
   check; the runtime guard (`tests/conftest.py`'s autouse fixtures) is what
   actually stops it at test time.
 - **(c)** a per-file line budget for `tests/**`, with an explicit allowlist
-  (`dev/tests_line_budget_allowlist.py`) naming today's over-budget files
-  and their current size. An allowlisted file may shrink but not grow past
-  its recorded size; a new file must be under budget from the start.
+  (`LINE_BUDGET_ALLOWLIST`, a dict at the top of `dev/check_tests.py` —
+  there is no separate allowlist file) naming today's over-budget files and
+  their current size. An allowlisted file may shrink but not grow past its
+  recorded size; a new file must be under budget from the start. The
+  allowlist can't drift stale either: an entry for a file that's shrunk to
+  budget or under, or whose recorded ceiling now sits more than a small
+  margin above the file's real size, fails the check until it's tightened
+  or removed.
 - **(d)** every `def test_` has an assert, a `pytest.raises`/`pytest.warns`,
-  or an explicit expectation helper call. (Dropped if it's noisy on this
-  tree — see the script's own docstring for the measured false-positive
-  rate before relying on it.)
+  or delegates to a same-module helper that does. A handful of tests where
+  "did not raise" is genuinely the only honest assertion are named in
+  `EXPECTATION_ALLOWLIST` (same file), each with an inline reason; an entry
+  for a test id that no longer exists fails the check.
 
 A parse failure in the checker is a failure, not a skip — a checker that
 can't read a file must not read as "passing" (this is the same bug class
