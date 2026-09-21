@@ -5,18 +5,17 @@ scenario(): ...` under `asyncio.run`) rather than editing that file or
 `tests/test_findings_loop.py`, both of which stay green and unedited.
 """
 
-import asyncio
 import json
 import shlex
 import sys
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
+from support.chain_run import loop_policy, run_chain
+from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
-from kraft import db, executor, policy, store
+from kraft import executor, policy, store
 from kraft.adapters.subprocess import read_concerns
-from kraft.paths import RunDirs
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE = f"{sys.executable} {_FAKE_AGENT}"
@@ -67,64 +66,22 @@ def _fixloop_template(tmp_path, *, fix_model: str | None = None):
     return v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE)
 
 
-def _make_policy(tmp_path, *, attempts=5, wall_clock_s=3600) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        # Kraft-lpdd: this suite is about fix-cycle handoff, not the
-        # unrelated auto-escalate trigger a `needs_human` cap breach would
-        # otherwise also fire.
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 def _run(tmp_path, monkeypatch, prompts_path):
     """Drive a fix loop that never fixes the code, so it runs multiple cycles.
 
-    Returns (worker_sessions rows for the fix task, ordered by round).
+    Returns the fix task's worker_sessions rows, ordered by round.
     """
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            pol = _make_policy(tmp_path)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="never fixed",
-                repo=str(repo),
-                chain=_fixloop_template(tmp_path),
-                bd_cwd=str(tracker),
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-            assert result == "needs_human"  # cap breaches; irrelevant to what's asserted below
-            return database.read(
-                lambda c: c.execute(
-                    "SELECT result_path, session_summary_ref, round FROM worker_sessions "
-                    "WHERE work_item_id = ? AND hook_point = ? "
-                    "ORDER BY round",
-                    (wid, _FIX),
-                ).fetchall()
-            )
-        finally:
-            await database.close()
-
-    return asyncio.run(scenario())
+    out = run_chain(
+        tmp_path,
+        _fixloop_template(tmp_path),
+        policy=loop_policy(tmp_path, "verify.fix_loop", attempts=5),
+        title="never fixed",
+    )
+    assert out["result"] == "needs_human"  # cap breaches; irrelevant to what's asserted below
+    return sorted((s for s in out["sessions"] if s["hook_point"] == _FIX), key=lambda s: s["round"])
 
 
 def _sent_prompts(prompts_path):
@@ -209,7 +166,7 @@ async def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(
 
     # attempts=2 on both sides of the retry: 2 abandoned pre-retry cycles,
     # then 2 post-retry cycles reusing the exact same round numbers (1, 2).
-    pol = _make_policy(tmp_path, attempts=2)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -268,7 +225,7 @@ async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path, attempts=2)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
     wid = await executor.intake(
         database,
         run_dirs,

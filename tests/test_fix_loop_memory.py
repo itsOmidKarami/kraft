@@ -16,10 +16,11 @@ import shlex
 import sys
 from pathlib import Path
 
+from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 from support.store_fixtures import mk_item, open_db
 
-from kraft import db, events, executor, policy
+from kraft import db, events, executor
 from kraft.executor import dispatch, prompts, walk
 from kraft.findings import Finding
 from kraft.paths import RunDirs
@@ -163,51 +164,17 @@ def _loop_chain(tmp_path):
     )
 
 
-def _loop_policy(tmp_path, *, attempts=3) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  review.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 def _run_loop(tmp_path, monkeypatch, entries, *, attempts=3):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     plan = tmp_path / "review-plan.json"
     plan.write_text(json.dumps(entries))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    out = {}
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                chain=_loop_chain(tmp_path),
-                bd_cwd=str(tracker),
-            )
-            out["result"] = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_loop_policy(tmp_path, attempts=attempts),
-            )
-            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return out
+    return run_chain(
+        tmp_path,
+        _loop_chain(tmp_path),
+        policy=loop_policy(tmp_path, "review.fix_loop", attempts=attempts),
+        title="review me",
+    )
 
 
 def _stop_reason(out):

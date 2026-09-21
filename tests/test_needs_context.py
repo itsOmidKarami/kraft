@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 from support import api as api_support
+from support.chain_run import loop_policy
 from support.harness import (
     fake_templates_dir,
     isolated_bd,
@@ -23,7 +24,7 @@ from support.harness import (
     v1_seeded_chain,
 )
 
-from kraft import events, executor, policy, store
+from kraft import events, executor, store
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
@@ -102,19 +103,6 @@ def _fixloop_template(tmp_path):
     )
 
 
-def _make_policy(tmp_path, *, attempts=3, wall_clock_s=3600) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        # Kraft-lpdd: this suite is about needs_context detection, not the
-        # unrelated auto-escalate trigger a real cap breach would otherwise
-        # also fire (and `executor.run` is called here without a `launch`).
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 async def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(
     tmp_path, monkeypatch, database, run_dirs, repo
 ):
@@ -122,7 +110,7 @@ async def test_needs_context_from_a_measuring_task_does_not_consume_a_cycle(
     monkeypatch.setenv("KRAFT_FAKE_AGENT_QUESTION", "which branch is the target?")
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path)
+    pol = loop_policy(tmp_path, "verify.fix_loop")
     wid = await executor.intake(
         database,
         run_dirs,
@@ -180,7 +168,7 @@ async def test_needs_context_ignores_a_stale_row_from_an_earlier_pass(
     monkeypatch.setenv("KRAFT_FAKE_AGENT_QUESTION", "which branch is the target?")
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path, attempts=1)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=1)
     wid = await executor.intake(
         database,
         run_dirs,

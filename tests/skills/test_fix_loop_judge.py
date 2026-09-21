@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from support.chain_run import loop_policy, run_chain
 from support.harness import (
     isolated_bd,
     make_repo,
@@ -331,16 +332,6 @@ _SUCCEEDS_WITH_FINDING_SCRIPT = (
 )
 
 
-def _judge_policy(tmp_path, *, attempts):
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, check_script=None, prompt_log=None):
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan))
@@ -348,39 +339,13 @@ def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, check_script=None,
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
     if prompt_log is not None:
         monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompt_log))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            pol = _judge_policy(tmp_path, attempts=attempts)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="judged loop",
-                repo=str(repo),
-                chain=_judge_template(tmp_path, check_script),
-                bd_cwd=str(tracker),
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-            evts = database.read(lambda c: events.read_after(c, 0, wid))
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
-            )
-            return result, evts, row
-        finally:
-            await database.close()
-
-    return asyncio.run(scenario())
+    out = run_chain(
+        tmp_path,
+        _judge_template(tmp_path, check_script),
+        policy=loop_policy(tmp_path, "verify.fix_loop", attempts=attempts),
+        title="judged loop",
+    )
+    return out["result"], out["events"], out["row"]
 
 
 def test_round_one_fixes_freely_no_judge_call(tmp_path, monkeypatch):
@@ -524,7 +489,7 @@ async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
     tracker = isolated_bd(tmp_path)
 
-    pol = _judge_policy(tmp_path, attempts=2)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -679,7 +644,7 @@ def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            pol = _judge_policy(tmp_path, attempts=1)
+            pol = loop_policy(tmp_path, "verify.fix_loop", attempts=1)
             chain = _judge_template(tmp_path)
             wid = await executor.intake(
                 database,

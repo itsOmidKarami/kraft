@@ -1,12 +1,11 @@
-import asyncio
 import shlex
 import sys
 from pathlib import Path
 
-from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
+from support.chain_run import loop_policy, run_chain
+from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
-from kraft import db, events, executor, policy, store
-from kraft.paths import RunDirs
+from kraft import events, executor, policy, store
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE = f"{sys.executable} {_FAKE_AGENT}"
@@ -27,24 +26,11 @@ def _types(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
 
-def _make_policy(tmp_path, *, attempts=3, wall_clock_s=3600) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        # Kraft-lpdd: this suite is about the fix loop's own cap, not the
-        # unrelated auto-escalate trigger a `needs_human` cap breach would
-        # otherwise also fire.
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
-
-
 async def test_fix_loop_succeeds_first_cycle(tmp_path, monkeypatch, database, run_dirs, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path)
+    pol = loop_policy(tmp_path, "verify.fix_loop")
     wid = await executor.intake(
         database,
         run_dirs,
@@ -83,7 +69,7 @@ async def test_fix_loop_cap_breach(tmp_path, monkeypatch, database, run_dirs, re
     # test still exercises the cap-breach path specifically rather
     # than the stuck path (both are `needs_human`, but for different
     # reasons, and this test is about the cap).
-    pol = _make_policy(tmp_path, attempts=1)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=1)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -130,7 +116,7 @@ async def test_fix_loop_per_item_attempts_override_breaches_before_policy_cap(
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path, attempts=5)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=5)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -172,7 +158,7 @@ async def test_resume_mid_fix_loop_reenters_and_continues_budget(
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     tracker = isolated_bd(tmp_path)
 
-    pol = _make_policy(tmp_path, attempts=5)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=5)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -242,7 +228,7 @@ async def test_fix_loop_wall_clock_breach(tmp_path, monkeypatch, database, run_d
     # (large) attempts cap.
     monkeypatch.setattr("kraft.executor.walk._now", lambda: "2099-01-01T00:00:00+00:00")
 
-    pol = _make_policy(tmp_path, attempts=99, wall_clock_s=1)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=99, wall_clock_s=1)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -275,7 +261,7 @@ async def test_retry_after_cap_clears_the_budget_and_steers_cycle_one(
     prompts = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts))
 
-    pol = _make_policy(tmp_path, attempts=2)
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
     wid = await executor.intake(
         database,
         run_dirs,
@@ -383,44 +369,13 @@ _REPAIR_SCRIPT_NOOP = "pass\n"
 def _run_repair_fixloop(tmp_path, repair_script: str, *, attempts=3, monkeypatch=None):
     if monkeypatch is not None:
         monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            pol_path = tmp_path / "policy.yaml"
-            pol_path.write_text(
-                f"loops:\n  n1.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-                f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-                # Kraft-lpdd: this suite is about the fix loop's own cap, not
-                # the unrelated auto-escalate trigger a `needs_human` cap
-                # breach would otherwise also fire.
-                "auto_escalate_stuck: false\n"
-            )
-            pol = policy.load_policy(pol_path)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="repair before paid cycle",
-                repo=str(repo),
-                chain=_repair_fixloop_template(tmp_path, repair_script),
-                bd_cwd=str(tracker),
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-            return result, database.read(lambda c: events.read_after(c, 0, wid))
-        finally:
-            await database.close()
-
-    return asyncio.run(scenario())
+    out = run_chain(
+        tmp_path,
+        _repair_fixloop_template(tmp_path, repair_script),
+        policy=loop_policy(tmp_path, "n1.fix_loop", attempts=attempts),
+        title="repair before paid cycle",
+    )
+    return out["result"], out["events"]
 
 
 def test_ci_fix_loop_runs_on_failure_repair_before_the_first_paid_fix_cycle(tmp_path):
