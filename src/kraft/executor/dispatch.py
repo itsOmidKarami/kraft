@@ -812,6 +812,7 @@ async def measure_node(
             spent.add(step.path)
             verdict, h_failed, h_excs = await _handle(step.on_failure, "step", rest)
             if verdict == "ok":
+                # Every task, a task-recovered one too (step-recovery-retries-the-entire-step).
                 return await _settle(step.tasks, retry=True), None
             if verdict != "failed":
                 return results, (verdict, h_failed, h_excs)
