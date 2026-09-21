@@ -167,10 +167,12 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
     assert row["detail"] == "gitlab · glab"
 
 
-def test_doctor_passes_a_dev_repo_on_the_fake_forge(app, tmp_path):
+def test_doctor_warns_on_a_repo_on_the_dev_only_fake_forge(app, tmp_path):
     """Ruling 147: `forge: fake` resolves to the in-process `FakeForge`, so
-    there is no `fake` binary to look for on PATH -- failing the check for one
-    would tell a `just dev` user their forge is broken when it is not."""
+    there is no `fake` binary to look for on PATH -- failing the check would
+    tell a `just dev` user their forge is broken when it is not. But green
+    would hide a real repo left on a forge that opens nothing and merges
+    nothing (review finding 5), so it is a visible warning."""
     repo = make_repo(tmp_path, name="devforge")
     asyncio.run(client.ensure_repo(str(repo)))
     path = tmp_path / "templates" / "repos.yaml"
@@ -181,8 +183,9 @@ def test_doctor_passes_a_dev_repo_on_the_fake_forge(app, tmp_path):
 
     row = _by_name(asyncio.run(doctor.run_checks()), "forge devforge")
 
-    assert row["ok"], row["detail"]
-    assert "fake" in row["detail"] and "dev" in row["detail"]
+    assert row["warn"], row
+    assert "fake" in row["detail"] and "dev only" in row["detail"]
+    assert "nothing" in row["detail"]
 
 
 def test_no_forge_check_when_nothing_is_bound_to_auto(app, tmp_path):

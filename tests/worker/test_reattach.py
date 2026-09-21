@@ -226,6 +226,13 @@ def test_unconfirmed_identity_records_which_check_failed(tmp_path):
             ]
             assert len(evts) == 1
             assert "not alive" in evts[0]["payload"]["reason"]
+            # ... and on the card, not only on the session event.
+            stop = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+                if e["type"] == "work_item_needs_human"
+            ][-1]["payload"]["reason"]
+            assert "not alive" in stop, stop
         finally:
             await database.close()
 

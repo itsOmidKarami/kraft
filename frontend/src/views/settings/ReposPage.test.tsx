@@ -66,6 +66,11 @@ describe("Settings · repos (5a)", () => {
     await userEvent.click(await screen.findByText("repo-a"));
     const forge = await screen.findByRole("radiogroup", { name: "forge" });
     expect(within(forge).getByRole("radio", { name: /fake \(dev only\)/ })).toBeChecked();
+
+    // Switching away in the draft must not take the way back with it: the
+    // option is keyed on the saved repo, not the draft (review finding 9).
+    await userEvent.click(within(forge).getByRole("radio", { name: "github" }));
+    expect(within(forge).getByRole("radio", { name: /fake \(dev only\)/ })).not.toBeChecked();
   });
 
   it("does not offer the dev-only fake forge to a real repo", async () => {

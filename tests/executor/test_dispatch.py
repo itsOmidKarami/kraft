@@ -2664,6 +2664,108 @@ def test_an_agent_task_contract_precedes_its_skill_and_steering(tmp_path, monkey
     assert context.index("THE-METHOD") < context.index("THE-STEERING")
 
 
+def _stop_reason(evts) -> str:
+    return [e for e in evts if e["type"] == "work_item_needs_human"][-1]["payload"]["reason"]
+
+
+def _loop_policy(tmp_path):
+    from kraft import policy
+
+    path = tmp_path / "policy.yaml"
+    path.write_text("default: { attempts: 9, wall_clock_s: 3600 }\n")
+    return policy.load_policy(path)
+
+
+def _unstartable_agent(task_id):
+    return {
+        "id": task_id,
+        "kind": "agent",
+        "harness": "fake",
+        "prompt": "Repair it.",
+        "skill": "no-such-method",
+    }
+
+
+def test_an_on_failure_repair_that_cannot_start_names_its_cause(tmp_path, monkeypatch):
+    """Review finding 1: a loopless node's `on_failure` repair that never
+    launched read "task failed ... repair [agent] (after on_failure)" -- no
+    cause, and not even "could not start"."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+    chain = v1_chain(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "check", "kind": "subprocess", "command": "false"}],
+                "on_failure": {"tasks": [_unstartable_agent("repair")]},
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, _sessions, _row = asyncio.run(v1_walk(tmp_path, chain, repo=repo))
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "could not start repair in node build" in reason
+    assert "no-such-method" in reason
+
+
+def test_a_fixer_that_cannot_start_names_its_cause_instead_of_stuck(tmp_path, monkeypatch):
+    """Review finding 2: a fix-loop fixer that never launched spent a cycle and
+    stopped as "stuck: 1 finding(s) unchanged" -- telling a human the fixer
+    tried, when it never ran (Kraft-579: a config_error is terminal)."""
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, [sys.executable, "-c", ""])))
+    chain = v1_chain(
+        [
+            {
+                "id": "build",
+                "kind": "exec",
+                "tasks": [{"id": "check", "kind": "subprocess", "command": "false"}],
+                "fix_loop": {"tasks": [_unstartable_agent("fixer")]},
+            }
+        ],
+        repo=repo,
+    )
+
+    status, evts, sessions, _row = asyncio.run(
+        v1_walk(tmp_path, chain, repo=repo, policy=_loop_policy(tmp_path))
+    )
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "could not start fixer in node build" in reason, reason
+    assert "no-such-method" in reason
+    assert [s["hook_point"].rsplit(".", 1)[-1] for s in sessions] == ["check", "fixer"]
+
+
+@pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
+def test_a_forge_task_with_no_forge_names_the_remedy_on_the_card(tmp_path, fix_loop):
+    """Review finding 4: an in-process task's log is Kraft's own account of
+    why it failed, so the card carries it -- here the repos.yaml remedy for a
+    repo with no forge recorded, which otherwise reached only the log."""
+    repo = make_repo(tmp_path)
+    node = {
+        "id": "draft",
+        "kind": "exec",
+        "tasks": [{"id": "open", "kind": "forge", "target": "mr.open_draft"}],
+    }
+    if fix_loop:
+        node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    chain = v1_chain([node], repo=repo)
+
+    status, evts, _sessions, _row = asyncio.run(
+        v1_walk(tmp_path, chain, repo=repo, policy=_loop_policy(tmp_path))
+    )
+
+    assert status == "needs_human"
+    reason = _stop_reason(evts)
+    assert "open [forge]" in reason
+    assert "no forge is recorded for this repo" in reason, reason
+
+
 def test_a_config_error_stop_carries_a_bounded_cause(tmp_path, monkeypatch):
     """The card carries the cause, but never an unbounded log line: past the
     cap it is cut, and the full line stays in the session log."""

@@ -220,11 +220,13 @@ def test_chain_review_repeated_approve_keeps_erroring(tmp_path, monkeypatch):
 
 
 def test_chain_review_approval_advances_without_splicing(tmp_path, monkeypatch):
-    """V1's final-review approval advances to the node after the gate, and a
-    reviewer's legacy `revised_chain_nodes` envelope is ignored rather than
-    refusing the approval or rewriting the tail (Task 4b parked
-    `_splice_chain_review`). The envelope below would drop `after` if it were
-    spliced, so `after` starting is the proof it was not."""
+    """V1's final-review approval advances to the node after the gate, and
+    nothing rewrites the materialized tail (Task 4b parked
+    `_splice_chain_review`). The brief carries a legacy envelope that proposes
+    an empty tail; nothing reads it, and `after` still starts. What this pins
+    is "approval advances past a present brief" -- a rewired splice would fail
+    it by refusing (a 422: the splice reads a different artifact and the
+    legacy `chain_definition`), not by dropping `after`."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     repo = make_repo(tmp_path)
     tdir = _review_early(tmp_path)

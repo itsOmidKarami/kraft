@@ -161,3 +161,24 @@ def test_a_gate_approval_that_cannot_start_a_walk_stops_the_item(tmp_path):
         return _status(database)
 
     assert _drive(tmp_path, body) == "needs_human"
+
+
+def test_a_stop_the_bracket_writes_names_the_exception_that_caused_it(tmp_path):
+    """Task 6b review round 1: the bracket's own reason ("could not start a
+    walk") says what happened, not why -- the exception that escaped reached
+    only the server log. It rides on the card now; an exit with nothing in
+    flight keeps the bare reason."""
+    from kraft import events
+
+    async def body(database):
+        with pytest.raises(KeyError):
+            async with stops.claimed_or_stopped(
+                database, "w1", "implementation", reason="could not start a walk"
+            ):
+                raise KeyError("no-such-node")
+        evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+        return [e for e in evts if e["type"] == "work_item_needs_human"][-1]["payload"]["reason"]
+
+    reason = _drive(tmp_path, body)
+    assert reason.startswith("could not start a walk")
+    assert "no-such-node" in reason

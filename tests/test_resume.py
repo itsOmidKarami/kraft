@@ -204,6 +204,15 @@ def test_resume_current_node_failed_session_is_needs_human(tmp_path):
             )
             assert row["status"] == "needs_human"
             assert row["current_node_id"] == "implementation"
+            # The card says which session and how it ended, not only that one
+            # did not resolve (Task 6b review round 1).
+            reason = [
+                e
+                for e in database.read(lambda c: events.read_after(c, 0, wid))
+                if e["type"] == "work_item_needs_human"
+            ][-1]["payload"]["reason"]
+            assert reason.startswith("resume: current-node session did not resolve cleanly")
+            assert "implement: failed" in reason, reason
         finally:
             await database.close()
 

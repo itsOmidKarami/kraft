@@ -303,23 +303,41 @@ async def recover_node(
 _STOP_CAUSE_MAX = 300
 
 
-def _config_error_cause(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask) -> str:
-    """The first line of the newest config_error session log for `task` -- the
-    task's own account of why it could not start -- or "" when there is none."""
+def _task_cause(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
+) -> str:
+    """The first line of the newest `status` session log for `task` -- the
+    task's own account of why it stopped -- or "" when there is none or it
+    cannot be read. Never raises: a stop must not become less legible than the
+    generic pointer to the log, and must never escape the walk."""
     row = db.read(
         lambda c: c.execute(
             "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND hook_point = ? AND status = 'config_error' "
+            "AND hook_point = ? AND status = ? "
             "ORDER BY created_at DESC, rowid DESC LIMIT 1",
-            (work_item_id, node.id, task.path),
+            (work_item_id, node.id, task.path, status),
         ).fetchone()
     )
     try:
         text = Path(row["log_path"]).read_text() if row else ""
-    except OSError:
+    except OSError, ValueError:  # ValueError: UnicodeDecodeError
         return ""
     line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
+    """ " — cause; cause" for the failed tasks Kraft runs itself, or "".
+
+    A forge or builtin task's log is Kraft's own one-line account of why it
+    failed, so it belongs on the card. An agent's or a subprocess's log is that
+    tool's output -- the card names the task and the log button opens it."""
+    causes = [
+        c
+        for t in failed
+        if _in_process(t) and (c := _task_cause(db, work_item_id, node, t, "failed"))
+    ]
+    return f" — {'; '.join(causes)}" if causes else ""
 
 
 async def _stop_for_config_error(
@@ -329,7 +347,7 @@ async def _stop_for_config_error(
     cause (Task 4b: an unmapped forge target stops "for a human naming the
     target") rather than only pointing at the session log."""
     named = ", ".join(t.task.id for t in failed)
-    causes = [c for t in failed if (c := _config_error_cause(db, work_item_id, node, t))]
+    causes = [c for t in failed if (c := _task_cause(db, work_item_id, node, t))]
     detail = "; ".join(causes) if causes else "see the session log"
     reason = f"could not start {named} in node {node.id}: {detail}"
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
@@ -446,6 +464,17 @@ async def walk_node(
                 )
                 if verdict == "paused":
                     return "paused"
+                # The same ladder the fix-loop path's repair re-measure uses:
+                # a repair that could not start, or a re-measure that hit a
+                # sentinel, is not "task failed" (review finding 1).
+                if verdict == CONFIG_ERROR:
+                    return await _stop_for_config_error(db, work_item_id, node, failed)
+                if verdict == RATE_LIMITED:
+                    return await stops.stop_for_rate_limit(db, work_item_id, node)
+                if verdict == WAITING:
+                    return await stops.stop_for_waiting(db, work_item_id, node)
+                if verdict == INFRA_STOP:
+                    return await stops.stop_for_infra(db, work_item_id, node)
                 if verdict == BUDGET:
                     return await stops.stop_for_budget(db, work_item_id, node, budget)
                 recovered = verdict == "ok"
@@ -464,6 +493,7 @@ async def walk_node(
                     # *this* retry's steer would land.
                     named = ", ".join(prompts.named_with_kind(t) for t in failed)
                     reason = f"task failed in node {node.id}: {named}"
+                    reason += _in_process_causes(db, work_item_id, node, failed)
                     if excs:
                         reason += f" ({', '.join(repr(e) for e in excs)})"
                     if node.on_failure:
@@ -758,9 +788,10 @@ async def walk_node(
                 sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
             reason = (
-                f"{named} failed in node {node.id}, and those tasks are executed by "
-                "the running Kraft daemon — a worker commit cannot change them. "
-                "Reinstall and restart, or skip the node."
+                f"{named} failed in node {node.id}"
+                f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "
+                "tasks are executed by the running Kraft daemon — a worker commit cannot "
+                "change them. Reinstall and restart, or skip the node."
             )
             await db.write(
                 lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
@@ -968,6 +999,11 @@ async def walk_node(
             return "paused"
         if fix == BUDGET:
             return await stops.stop_for_budget(db, work_item_id, node, budget)
+        # A fixer that never launched has not tried anything: re-measuring would
+        # spend a cycle and stop as "stuck", blaming a fix that never ran
+        # (review finding 2; Kraft-579 makes a config_error terminal).
+        if fix == CONFIG_ERROR:
+            return await _stop_for_config_error(db, work_item_id, node, _fix_failed)
         round = count
         _first_iteration = False
         # fix task status is not branched on; loop re-measures

@@ -537,11 +537,11 @@ async def reattach(
                 lambda c, sid=sid, reason=reason: store.session_unknown(c, sid, reason=reason)
             )
             await db.write(
-                lambda c, r=r: store.mark_needs_human(
+                lambda c, r=r, reason=reason: store.mark_needs_human(
                     c,
                     r["work_item_id"],
                     r["node_id"],
-                    "reattach: running session, PID identity unconfirmed, no result",
+                    f"reattach: running session, PID identity unconfirmed, no result ({reason})",
                 )
             )
             summary.unknown.append(sid)

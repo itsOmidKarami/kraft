@@ -61,8 +61,14 @@ async def claimed_or_stopped(
     in-flight exception, and the 409 a refused hand-off raises has to reach the
     caller.
     """
+    cause = ""
     try:
         yield
+    except BaseException as exc:
+        # The card names what escaped, not only that something did: the
+        # exception otherwise reaches the server log alone.
+        cause = f": {exc!r}"
+        raise
     finally:
         if not (handed_off is not None and handed_off()):
             row = db.read(
@@ -71,7 +77,8 @@ async def claimed_or_stopped(
                 ).fetchone()
             )
             if row is not None and row["status"] == "active":
-                await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+                stop = reason + cause
+                await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, stop))
 
 
 def budget_breach(db, work_item_id: str, budget: _policy.Budget) -> dict | None:

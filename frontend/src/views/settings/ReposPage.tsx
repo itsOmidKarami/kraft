@@ -447,9 +447,10 @@ function RepoDetail({
       <p className="settings-note">on.mr.open · on.ci.poll · on.mr.sync · on.merge</p>
       <div className="field">
         <div className="seg" role="radiogroup" aria-label="forge">
-          {/* `fake` is dev-only (Ruling 147): shown only to a repo already on
-              it, so nobody picks a forge that opens nothing by accident. */}
-          {[...(current.forge === "fake" ? ["fake"] : []), "gitlab", "github", "none"].map((f) => (
+          {/* `fake` is dev-only (Ruling 147): shown only to a repo saved on it,
+              so nobody picks a forge that opens nothing by accident -- keyed on
+              the saved repo, so a draft switch away keeps the way back. */}
+          {[...(repo.forge === "fake" ? ["fake"] : []), "gitlab", "github", "none"].map((f) => (
             <label key={f} className="seg-opt">
               <input
                 type="radio"
