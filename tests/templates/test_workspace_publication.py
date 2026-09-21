@@ -31,15 +31,24 @@ def _policy(**override) -> InstancePolicy:
     return base.apply_template_override(override) if override else base
 
 
-async def _workspace_item(database, run_dirs, tmp_path, tasks, *, pointer="ignore", **materialize):
-    """A root with one submodule `pkg` at `repos/pkg`, filed as a workspace
-    item selecting it under root-pointer policy `pointer`, on one exec node of
-    `tasks`; its checkout assembled. Returns `(row, node, worktree)`."""
+async def _workspace_item(
+    database, run_dirs, tmp_path, tasks, *, pointer="ignore", second=False, **materialize
+):
+    """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
+    `repos/pkg2` when `second`), filed as a workspace item selecting them under
+    root-pointer policy `pointer`, on one exec node of `tasks`; its checkout
+    assembled. Returns `(row, node, worktree)`."""
     root, _ = make_repo_with_submodule(tmp_path)
+    mounts = {"pkg": "repos/pkg"}
+    if second:
+        pkg2 = make_repo(tmp_path, name="pkg2")
+        _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(pkg2), "repos/pkg2")
+        _git(root, "commit", "-qm", "add a second submodule")
+        mounts["pkg2"] = "repos/pkg2"
     chain = v1_chain(
         [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
-        target=workspace_target({"pkg": "repos/pkg"}, root_pointer_policy=pointer),
+        target=workspace_target(mounts, root_pointer_policy=pointer),
     )
     if materialize:
         chain = chain.chain.materialize(target=chain.target, **materialize)
@@ -273,21 +282,22 @@ class _LandingForge(forge.FakeForge):
 
     async def mark_ready(self, *, repo, branch, mr):
         await super().mark_ready(repo=repo, branch=branch, mr=mr)
-        pointer = (
-            _git_out(repo, "rev-parse", "HEAD:repos/pkg") if Path(repo).name != "pkg" else None
-        )
+        root = not Path(repo).name.startswith("pkg")
+        pointer = _git_out(repo, "rev-parse", "HEAD:repos/pkg") if root else None
         self.order.append(("ready", Path(repo).name, pointer))
 
 
-async def _publishable(database, run_dirs, tmp_path, *, pointer, root_denies_push=False):
+async def _publishable(
+    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, second=False
+):
     """A workspace item whose root and member each have an origin that takes a
     push (the member's is its source repository), the member carrying a
     commit. Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await _workspace_item(
-        database, run_dirs, tmp_path, [_task("t")], pointer=pointer
+        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, second=second
     )
-    root, member = Path(row["repo"]), tmp_path / "pkg"
-    _git(member, "config", "receive.denyCurrentBranch", "updateInstead")
+    root = Path(row["repo"])
+    members = ["pkg", "pkg2"] if second else ["pkg"]
     origin = tmp_path / "root-origin.git"
     _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
     if root_denies_push:
@@ -296,9 +306,11 @@ async def _publishable(database, run_dirs, tmp_path, *, pointer, root_denies_pus
         hook.chmod(0o755)
     _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
-    (worktree / "repos" / "pkg" / "lib.py").write_text("x = 1\n")
-    _git(worktree / "repos" / "pkg", "add", "-A")
-    _git(worktree / "repos" / "pkg", "commit", "-qm", "member change")
+    for member in members:
+        _git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")
+        (worktree / "repos" / member / "lib.py").write_text("x = 1\n")
+        _git(worktree / "repos" / member, "add", "-A")
+        _git(worktree / "repos" / member, "commit", "-qm", "member change")
     return row, worktree, origin
 
 
@@ -409,26 +421,31 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
 
 
 @pytest.mark.parametrize(
-    "root_source", [True, False], ids=["root-with-source", "pointer-only-root"]
+    ("root_source", "second", "landed"),
+    [(True, False, []), (False, False, []), (False, True, [("merge", "pkg")])],
+    ids=["root-with-source", "pointer-only-root", "pointer-only-root-one-member-landed"],
 )
 async def test_blocked_child_merge_leaves_the_root_unchanged(
-    database, run_dirs, tmp_path, monkeypatch, root_source
+    database, run_dirs, tmp_path, monkeypatch, root_source, second, landed
 ):
     """`blocked-child-merge-leaves-parent-unchanged`: a member whose merge
     request is blocked -- here, awaiting an approval -- fails the node, and
-    nothing of the root's moves: no readiness, no merge, no pointer bump. The
-    merge node has no recovery of its own, so the item stops for a person."""
-    row, worktree, origin = await _publishable(database, run_dirs, tmp_path, pointer="bump")
+    nothing of the root's moves: no readiness, no merge, no pointer bump, not
+    even to a member that did land before it. The merge node has no recovery
+    of its own, so the item stops for a person."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", second=second
+    )
     if root_source:
         (worktree / "root.txt").write_text("root source\n")
         _git(worktree, "add", "root.txt")
         _git(worktree, "commit", "-qm", "root source change")
     before = _git_out(origin, "rev-parse", "main")
-    fake = _LandingForge(refuse="pkg")
+    fake = _LandingForge(refuse="pkg2" if second else "pkg")
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "failed"
 
-    assert fake.order == [] and fake.merged == []
+    assert fake.order == landed
     assert _git_out(origin, "rev-parse", "main") == before
-    assert _repos(database, row)["submodule"] == "failed"
+    assert "failed" in {r["state"] for r in database.read(lambda c: store.repos_for(c, row["id"]))}
