@@ -4,7 +4,6 @@ cap, raise-and-continue, and intake `skip_nodes`/`budget_usd`/`node_overrides`.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sqlite3
 import uuid
@@ -13,8 +12,7 @@ from pathlib import Path
 from support.api import _client
 from support.harness import isolated_bd, make_repo, v1_seeded_chain
 
-from kraft import db, events, executor, policy, store
-from kraft.paths import RunDirs
+from kraft import events, executor, policy, store
 
 
 def _mark_started(wid: str, node_id: str) -> None:
@@ -574,104 +572,88 @@ async def _spend(database, wid: str, usd: float) -> None:
     )
 
 
-def test_an_item_budget_overrides_a_looser_policy_default(tmp_path, monkeypatch):
+async def test_an_item_budget_overrides_a_looser_policy_default(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """Point 4: item > policy. The policy allows $20; the item capped itself at $5."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="t",
-                repo=str(repo),
-                chain=_budget_template(tmp_path),
-                bd_cwd=str(tracker),
-                budget_set=True,
-                budget_usd=5.0,
-            )
-            await _spend(database, wid, 6.0)
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_policy(work_item_usd=20.0),
-            )
-            assert result == "needs_human"
-            evts = database.read(lambda c: events.read_after(c, 0, wid))
-            payload = next(
-                e["payload"] for e in reversed(evts) if e["type"] == "work_item_needs_human"
-            )
-            assert payload["budget"] == {"scope": "work_item", "spent_usd": 6.0, "cap_usd": 5.0}
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="t",
+        repo=str(repo),
+        chain=_budget_template(tmp_path),
+        bd_cwd=str(tracker),
+        budget_set=True,
+        budget_usd=5.0,
+    )
+    await _spend(database, wid, 6.0)
+    result = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        registry=None,
+        bd_cwd=str(tracker),
+        policy=_policy(work_item_usd=20.0),
+    )
+    assert result == "needs_human"
+    evts = database.read(lambda c: events.read_after(c, 0, wid))
+    payload = next(e["payload"] for e in reversed(evts) if e["type"] == "work_item_needs_human")
+    assert payload["budget"] == {"scope": "work_item", "spent_usd": 6.0, "cap_usd": 5.0}
 
 
-def test_an_item_explicit_no_cap_overrides_a_capped_policy(tmp_path, monkeypatch):
+async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """Point 4: `budget_set=True, budget_usd=None` beats a policy cap, but the
     daily cap -- policy-only -- still applies underneath it."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="t",
-                repo=str(repo),
-                chain=_budget_template(tmp_path),
-                bd_cwd=str(tracker),
-                budget_set=True,
-                budget_usd=None,
-            )
-            await _spend(database, wid, 1000.0)
-            await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_policy(work_item_usd=5.0),
-            )
-            evts = database.read(lambda c: events.read_after(c, 0, wid))
-            assert not any(e["type"] == "work_item_needs_human" for e in evts)
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="t",
+        repo=str(repo),
+        chain=_budget_template(tmp_path),
+        bd_cwd=str(tracker),
+        budget_set=True,
+        budget_usd=None,
+    )
+    await _spend(database, wid, 1000.0)
+    await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        registry=None,
+        bd_cwd=str(tracker),
+        policy=_policy(work_item_usd=5.0),
+    )
+    evts = database.read(lambda c: events.read_after(c, 0, wid))
+    assert not any(e["type"] == "work_item_needs_human" for e in evts)
 
-            # a fresh item, same no-cap override, still stops on the daily cap
-            wid2 = await executor.intake(
-                database,
-                rd,
-                title="t2",
-                repo=str(repo),
-                chain=_budget_template(tmp_path),
-                bd_cwd=str(tracker),
-                budget_set=True,
-                budget_usd=None,
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid2,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=_policy(daily_usd=100.0),
-            )
-            assert result == "needs_human"
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    # a fresh item, same no-cap override, still stops on the daily cap
+    wid2 = await executor.intake(
+        database,
+        run_dirs,
+        title="t2",
+        repo=str(repo),
+        chain=_budget_template(tmp_path),
+        bd_cwd=str(tracker),
+        budget_set=True,
+        budget_usd=None,
+    )
+    result = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid2,
+        registry=None,
+        bd_cwd=str(tracker),
+        policy=_policy(daily_usd=100.0),
+    )
+    assert result == "needs_human"
 
 
 # --- point 5: raise budget and continue, via the API ------------------------

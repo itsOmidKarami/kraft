@@ -84,9 +84,7 @@ def _run(build, body):
     return asyncio.run(main())
 
 
-def test_tick_archives_a_completed_item_past_after_days(tmp_path):
-    repo = make_repo(tmp_path)
-
+def test_tick_archives_a_completed_item_past_after_days(tmp_path, repo):
     async def body(app):
         worktree = await _seed_completed_item(app, repo, updated_days_ago=31)
 
@@ -102,9 +100,7 @@ def test_tick_archives_a_completed_item_past_after_days(tmp_path):
     _run(lambda: _stub(tmp_path, archive_after_days=30), body)
 
 
-def test_tick_ignores_an_item_not_yet_due(tmp_path):
-    repo = make_repo(tmp_path)
-
+def test_tick_ignores_an_item_not_yet_due(tmp_path, repo):
     async def body(app):
         await _seed_completed_item(app, repo, updated_days_ago=1)
         assert await archive.tick(app) == []

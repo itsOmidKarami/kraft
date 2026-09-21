@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import fake_registry, isolated_bd
 
 from kraft import ci_wait, db, events, policy, store
 from kraft.paths import RunDirs
@@ -81,10 +81,9 @@ def _status(app, wid="w1"):
     )["status"]
 
 
-def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch):
+def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch, repo):
     """retry_at in the future: left alone, exactly as rate_limit_retry does."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2999-01-01T00:00:00+00:00", repo=str(repo))
@@ -94,11 +93,10 @@ def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_tick_re_enters_a_due_item_at_its_waiting_node(tmp_path, monkeypatch):
+def test_tick_re_enters_a_due_item_at_its_waiting_node(tmp_path, monkeypatch, repo):
     """The wait is over: the item goes back to work at the node it parked on."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -111,13 +109,12 @@ def test_tick_re_enters_a_due_item_at_its_waiting_node(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_tick_stops_at_needs_human_once_the_cap_breaches(tmp_path, monkeypatch):
+def test_tick_stops_at_needs_human_once_the_cap_breaches(tmp_path, monkeypatch, repo):
     """The replacement for today's poll_timeout: same end state, reached through
     the counter machinery that already bounds fix loops. A cap of one attempt
     means the second re-entry is the breach."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -133,12 +130,11 @@ def test_tick_stops_at_needs_human_once_the_cap_breaches(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path, ci_wait_cap=policy.Cap(attempts=1, wall_clock_s=3600)), body)
 
 
-def test_tick_ignores_an_item_that_was_paused_while_waiting(tmp_path, monkeypatch):
+def test_tick_ignores_an_item_that_was_paused_while_waiting(tmp_path, monkeypatch, repo):
     """Kraft-tnak's other half. Pause clears retry_at and moves the row off
     'waiting' (Task 4) -- waking it anyway would be the exact bug this bead is
     about, so assert it from the poller's side too."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -149,14 +145,15 @@ def test_tick_ignores_an_item_that_was_paused_while_waiting(tmp_path, monkeypatc
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(tmp_path, monkeypatch):
+def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(
+    tmp_path, monkeypatch, repo
+):
     """Kraft-ppk9: a repair that takes longer than one 30s poller interval
     must not spawn a second one for the same wait. Deliberately does NOT
     await the first tick's spawned task before calling tick() again -- that
     gap is exactly the race that used to fire twice."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -171,7 +168,7 @@ def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claimed(tmp_
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch):
+def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch, repo):
     """Re-entry recomputed start from current_node_id alone, so a node whose
     waiting step was its fourth re-ran the first three -- a paid agent session
     per poll tick on a node that opens the MR."""
@@ -184,7 +181,6 @@ def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch):
         return "waiting"
 
     monkeypatch.setattr(executor, "run", fake_run)
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_waiting(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -196,7 +192,7 @@ def test_a_ci_wait_reentry_resumes_at_the_waiting_group(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypatch):
+def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypatch, repo):
     """H1's poller half. `chain_definition` is `"{}"` on a V1 row, so the old
     `next(i for i, n in enumerate(chain["nodes"]) ...)` raised -- inside a
     poller tick, after `mark_reentered` had already bumped the counter. The item
@@ -205,7 +201,6 @@ def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypa
     """
     from support.harness import v1_chain, v1_item
 
-    repo = make_repo(tmp_path)
     chain = v1_chain(
         [
             {
@@ -242,7 +237,7 @@ def test_a_v1_item_is_re_entered_rather_than_stranded_waiting(tmp_path, monkeypa
     assert spawned, "the poller found no node index and left the item waiting"
 
 
-def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path):
+def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path, repo):
     """N1. `mark_reentered` has already flipped the row to `active` by the time
     the start index is read, and `tick`'s own SELECT filters
     `status = 'waiting'` -- so a return that leaves it `active` means no later
@@ -254,7 +249,6 @@ def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tm
     """
     from support.harness import v1_chain, v1_item
 
-    repo = make_repo(tmp_path)
     chain = v1_chain(
         [
             {

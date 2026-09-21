@@ -15,7 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
-from support.harness import _git, fake_templates_dir, isolated_bd, make_repo
+from support.harness import _git, fake_templates_dir, isolated_bd
 
 from kraft.config import git_read
 
@@ -69,11 +69,10 @@ def _running_agent(client, wid):
     return _wait(check, "a running agent session")
 
 
-def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatch):
+def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatch, repo):
     # a slow agent gives the test a live session to interrupt
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
     prompts = tmp_path / "prompts.txt"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
 
@@ -141,10 +140,9 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatc
         assert "steer_context_set" in types and "work_item_resumed" in types
 
 
-def test_steer_and_resume_are_refused_while_the_item_is_running(tmp_path, monkeypatch):
+def test_steer_and_resume_are_refused_while_the_item_is_running(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "10")
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
             "/api/work-items",
@@ -157,99 +155,77 @@ def test_steer_and_resume_are_refused_while_the_item_is_running(tmp_path, monkey
         client.post(f"/api/work-items/{wid}/pause", json={})
 
 
-def test_a_paused_row_and_its_event_never_disagree(tmp_path):
+async def test_a_paused_row_and_its_event_never_disagree(database):
     """reattach calls session_exited('failed') on a child that dies after a
     restart. If only the row were guarded, the event would still say 'failed' and
     the UI would follow the event."""
-    import asyncio
 
-    from kraft import db, events, store
+    from kraft import events, store
 
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, created_at, updated_at) VALUES "
-                    "('w','t','/r','quick-task','{}','active','now','now')"
-                )
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="s1",
-                    work_item_id="w",
-                    node_id="verify",
-                    hook_point="on.test.run",
-                    log_path="l",
-                    result_path="r",
-                )
-            )
-            await database.write(lambda c: store.pause_work_item(c, "w", ["s1"]))
-            # the SIGTERMed child's exit arrives afterwards
-            await database.write(lambda c: store.session_exited(c, "s1", "failed"))
-            row = database.read(
-                lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
-            )
-            types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w"))]
-            return row["status"], types
-        finally:
-            await database.close()
-
-    status, types = asyncio.run(scenario())
-    assert status == "paused"
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s1",
+            work_item_id="w",
+            node_id="verify",
+            hook_point="on.test.run",
+            log_path="l",
+            result_path="r",
+        )
+    )
+    await database.write(lambda c: store.pause_work_item(c, "w", ["s1"]))
+    # the SIGTERMed child's exit arrives afterwards
+    await database.write(lambda c: store.session_exited(c, "s1", "failed"))
+    row = database.read(
+        lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+    )
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w"))]
+    assert row["status"] == "paused"
     assert "worker_session_exited" not in types
 
 
-def test_a_pause_catches_a_session_still_in_its_pending_window(tmp_path):
+async def test_a_pause_catches_a_session_still_in_its_pending_window(database):
     """A row is inserted before Popen returns. A pause landing in that window has
     to mark it, and the launch finishing must not undo the mark."""
-    import asyncio
 
-    from kraft import db, store
+    from kraft import store
 
-    async def scenario():
-        database = await db.Database.open(tmp_path / "orchestrator.db")
-        try:
-            await database.write(
-                lambda c: c.execute(
-                    "INSERT INTO work_items (id, title, repo, chain_template, "
-                    "chain_definition, status, current_node_id, created_at, updated_at) "
-                    "VALUES ('w','t','/r','quick-task','{}','active','verify','now','now')"
-                )
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="s1",
-                    work_item_id="w",
-                    node_id="verify",
-                    hook_point="on.test.run",
-                    log_path="l",
-                    result_path="r",
-                )
-            )
-            pending = database.read(lambda c: store.running_sessions_for_node(c, "w"))
-            await database.write(
-                lambda c: store.pause_work_item(c, "w", [r["id"] for r in pending])
-            )
-            # the launch completes a moment later
-            await database.write(lambda c: store.session_running(c, "s1", 999, 1.0))
-            return [r["id"] for r in pending], database.read(
-                lambda c: store.session_status(c, "s1")
-            )
-        finally:
-            await database.close()
-
-    caught, status = asyncio.run(scenario())
-    assert caught == ["s1"]
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, current_node_id, created_at, updated_at) "
+            "VALUES ('w','t','/r','quick-task','{}','active','verify','now','now')"
+        )
+    )
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s1",
+            work_item_id="w",
+            node_id="verify",
+            hook_point="on.test.run",
+            log_path="l",
+            result_path="r",
+        )
+    )
+    pending = database.read(lambda c: store.running_sessions_for_node(c, "w"))
+    await database.write(lambda c: store.pause_work_item(c, "w", [r["id"] for r in pending]))
+    # the launch completes a moment later
+    await database.write(lambda c: store.session_running(c, "s1", 999, 1.0))
+    assert [r["id"] for r in pending] == ["s1"]
+    assert database.read(lambda c: store.session_status(c, "s1")) == "paused"
 
 
-def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
+def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -289,7 +265,7 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(tmp_path, monkeypatch):
         assert (worktree / "moved.txt").is_file()
 
 
-def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(tmp_path, monkeypatch):
+def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(tmp_path, monkeypatch, repo):
     """Kraft-vd8d: a rebase Kraft recorded that the worktree did not have,
     moments later. Simulate the race directly rather than chasing the
     one-off -- wrap refresh_worktree_base so that, after it does the real
@@ -299,7 +275,6 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(tmp_path, 
     """
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -347,10 +322,9 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(tmp_path, 
         )
 
 
-def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
+def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -390,7 +364,7 @@ def test_resume_skips_rebase_when_worktree_is_dirty(tmp_path, monkeypatch):
         assert client.get(f"/api/work-items/{wid}").json()["base_ref"] == before_base_ref
 
 
-def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
+def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch, repo):
     """A rebase conflict at `/resume` stops the item for a human, and
     auto-escalation (armed by default) follows.
 
@@ -407,7 +381,6 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -487,12 +460,11 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(tmp_path, monkeypatch):
         assert not dirty, dirty
 
 
-def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch):
+def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
-    repo = make_repo(tmp_path)
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "-u", "origin", "main")
 
@@ -574,10 +546,9 @@ def _seed_waiting(client, repo, wid="w1"):
     client.portal.call(go)
 
 
-def test_pausing_a_waiting_item_is_accepted(tmp_path, monkeypatch):
+def test_pausing_a_waiting_item_is_accepted(tmp_path, monkeypatch, repo):
     """It used to 409: only 'active' was pausable, and a parked item is not
     active any more (Kraft-tnak)."""
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         _seed_waiting(client, repo)
         r = client.post("/api/work-items/w1/pause", json={})
@@ -585,22 +556,20 @@ def test_pausing_a_waiting_item_is_accepted(tmp_path, monkeypatch):
         assert client.get("/api/work-items/w1").json()["status"] == "paused"
 
 
-def test_pausing_a_waiting_item_clears_retry_at(tmp_path, monkeypatch):
+def test_pausing_a_waiting_item_clears_retry_at(tmp_path, monkeypatch, repo):
     """Otherwise ci_wait.tick wakes it straight back up -- the pause would look
     like it worked and then silently undo itself."""
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         _seed_waiting(client, repo)
         assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
         assert client.get("/api/work-items/w1").json()["retry_at"] is None
 
 
-def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(tmp_path, monkeypatch):
+def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(tmp_path, monkeypatch, repo):
     """The behavioural assertion the other two exist to support: run tick()
     after the pause and assert nothing was re-entered."""
     from kraft import ci_wait
 
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         _seed_waiting(client, repo)
         assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
@@ -608,10 +577,9 @@ def test_a_paused_item_is_not_woken_by_the_ci_wait_poller(tmp_path, monkeypatch)
         assert client.get("/api/work-items/w1").json()["status"] == "paused"
 
 
-def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch):
+def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch, repo):
     """abandon refuses only 'active' (kraft.api.routes.lifecycle) -- a waiting item has no session
     to stop, so it can go straight to abandoned and reclaim its worktree."""
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         _seed_waiting(client, repo)
         r = client.post("/api/work-items/w1/abandon", json={})
@@ -619,13 +587,12 @@ def test_abandoning_a_waiting_item_is_accepted(tmp_path, monkeypatch):
         assert client.get("/api/work-items/w1").json()["status"] == "abandoned"
 
 
-def test_pause_cancels_the_walk_task_not_just_the_session(tmp_path, monkeypatch):
+def test_pause_cancels_the_walk_task_not_just_the_session(tmp_path, monkeypatch, repo):
     """Kraft-e7pm: pause must stop the walk itself, not only signal the
     session -- otherwise the task that was awaiting it keeps running past the
     live node into the next one."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    repo = make_repo(tmp_path)
 
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
@@ -641,10 +608,9 @@ def test_pause_cancels_the_walk_task_not_just_the_session(tmp_path, monkeypatch)
         assert task is None or task.done(), "pause returned before the walk task actually stopped"
 
 
-def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(tmp_path, monkeypatch):
+def test_two_concurrent_resumes_produce_one_two_hundred_and_one_409(tmp_path, monkeypatch, repo):
     """Kraft-11e0. Two callers racing `/resume` on the same paused item must
     produce exactly one winner and one 409 -- never two walks."""
-    repo = make_repo(tmp_path)
     with _client(tmp_path, monkeypatch) as client:
         wid = client.post(
             "/api/work-items",

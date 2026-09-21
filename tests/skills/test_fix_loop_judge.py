@@ -148,145 +148,129 @@ def test_stuck_fingerprint_requires_a_fix_between_rounds():
     assert dispatch.stuck_fingerprint(history, min_repeats=3) is None
 
 
-def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(tmp_path):
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = "w1"
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id=None,
-                    title="t",
-                    repo="r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            await database.write(
-                lambda c: events.append(
-                    c,
-                    wid,
-                    "findings_measured",
+async def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(database):
+    wid = "w1"
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title="t",
+            repo="r",
+            chain_template="default",
+            chain_definition="{}",
+        )
+    )
+    await database.write(
+        lambda c: events.append(
+            c,
+            wid,
+            "findings_measured",
+            {
+                "node_id": "verify",
+                "cycle": 0,
+                "findings": [
                     {
-                        "node_id": "verify",
-                        "cycle": 0,
-                        "findings": [
-                            {
-                                "severity": "critical",
-                                "message": "boom",
-                                "file": "a.py",
-                                "line": 1,
-                                "source_plugin": "p",
-                            },
-                            {
-                                "severity": "minor",
-                                "message": "nit",
-                                "file": "a.py",
-                                "line": 2,
-                                "source_plugin": "p",
-                            },
-                        ],
+                        "severity": "critical",
+                        "message": "boom",
+                        "file": "a.py",
+                        "line": 1,
+                        "source_plugin": "p",
                     },
-                )
-            )
-            await database.write(
-                lambda c: events.append(
-                    c,
-                    wid,
-                    "findings_measured",
                     {
-                        "node_id": "verify",
-                        "cycle": 1,
-                        "findings": [
-                            {
-                                "severity": "critical",
-                                "message": "boom",
-                                "file": "a.py",
-                                "line": 1,
-                                "source_plugin": "p",
-                            }
-                        ],
+                        "severity": "minor",
+                        "message": "nit",
+                        "file": "a.py",
+                        "line": 2,
+                        "source_plugin": "p",
                     },
-                )
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="fix1",
-                    work_item_id=wid,
-                    node_id="verify",
-                    hook_point="verify.fix_loop.main.fix",
-                    log_path="/l",
-                    result_path="/r1",
-                    round=1,
-                )
-            )
-            history = dispatch.judge_history(
-                database,
-                wid,
-                "verify",
-                frozenset({"critical", "important"}),
-                fix_paths=["verify.fix_loop.main.fix"],
-            )
-            assert [h["round"] for h in history] == [0, 1]
-            assert [f.message for f in history[0]["findings"]] == ["boom"]  # minor excluded
-            assert history[0]["fix_result_path"] is None  # cycle 0 predates any fix
-            assert history[1]["fix_result_path"] == "/r1"
-        finally:
-            await database.close()
+                ],
+            },
+        )
+    )
+    await database.write(
+        lambda c: events.append(
+            c,
+            wid,
+            "findings_measured",
+            {
+                "node_id": "verify",
+                "cycle": 1,
+                "findings": [
+                    {
+                        "severity": "critical",
+                        "message": "boom",
+                        "file": "a.py",
+                        "line": 1,
+                        "source_plugin": "p",
+                    }
+                ],
+            },
+        )
+    )
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="fix1",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point="verify.fix_loop.main.fix",
+            log_path="/l",
+            result_path="/r1",
+            round=1,
+        )
+    )
+    history = dispatch.judge_history(
+        database,
+        wid,
+        "verify",
+        frozenset({"critical", "important"}),
+        fix_paths=["verify.fix_loop.main.fix"],
+    )
+    assert [h["round"] for h in history] == [0, 1]
+    assert [f.message for f in history[0]["findings"]] == ["boom"]  # minor excluded
+    assert history[0]["fix_result_path"] is None  # cycle 0 predates any fix
+    assert history[1]["fix_result_path"] == "/r1"
 
-    asyncio.run(scenario())
 
-
-def test_judge_verdict_fails_open_when_the_hook_is_not_registered(tmp_path):
+async def test_judge_verdict_fails_open_when_the_hook_is_not_registered(database, run_dirs):
     """A fix loop with no judge at all (`fix-loop-judge-is-optional`) must
     never raise, only fail open, same as any other untrusted judge outcome."""
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = "w1"
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id=None,
-                    title="t",
-                    repo="r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
-            )
-            pol = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=3600))
-            node = v1_resolved(
-                [v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT), judge=False)]
-            ).nodes[0]
-            verdict, reasoning = await dispatch.judge_verdict(
-                database,
-                rd,
-                wid,
-                node,
-                row,
-                rd.worktrees / wid,
-                round=1,
-                key="verify.fix_loop",
-                cap=pol.default,
-                policy=pol,
-                launch=None,
-                budget=policy.NO_BUDGET,
-            )
-            assert (verdict, reasoning) == ("continue", "")
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = "w1"
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title="t",
+            repo="r",
+            chain_template="default",
+            chain_definition="{}",
+        )
+    )
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
+    )
+    pol = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=3600))
+    node = v1_resolved(
+        [v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT), judge=False)]
+    ).nodes[0]
+    verdict, reasoning = await dispatch.judge_verdict(
+        database,
+        run_dirs,
+        wid,
+        node,
+        row,
+        run_dirs.worktrees / wid,
+        round=1,
+        key="verify.fix_loop",
+        cap=pol.default,
+        policy=pol,
+        launch=None,
+        budget=policy.NO_BUDGET,
+    )
+    assert (verdict, reasoning) == ("continue", "")
 
 
 def _check(script: str) -> dict:
@@ -512,7 +496,9 @@ def test_judge_dispatch_failure_falls_open_to_continue(tmp_path, monkeypatch):
     assert "capped" in needs_human["payload"]  # a genuine cap breach, not a judge stop
 
 
-def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(tmp_path, monkeypatch):
+async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """`/retry` (`store.retry_after_cap`) deletes the loop counter but leaves
     the pre-retry `worker_sessions` rows in place, so `previous_fix_session`
     (history-wide) is still non-None right after a retry. Gating the judge on
@@ -537,56 +523,45 @@ def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(tmp_path
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PLAN", str(plan_path))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            pol = _judge_policy(tmp_path, attempts=2)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="judged retry",
-                repo=str(repo),
-                chain=_judge_template(tmp_path),
-                bd_cwd=str(tracker),
-            )
-            first = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-            assert first == "needs_human"  # pre-retry cap breach
+    pol = _judge_policy(tmp_path, attempts=2)
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="judged retry",
+        repo=str(repo),
+        chain=_judge_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    first = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        registry=None,
+        bd_cwd=str(tracker),
+        policy=pol,
+    )
+    assert first == "needs_human"  # pre-retry cap breach
 
-            await database.write(
-                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
-            )
-            await database.write(
-                lambda c: store.retry_after_cap(
-                    c, wid, "verify", "verify.fix_loop", "steer toward the real cause"
-                )
-            )
-            second = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=None,
-                bd_cwd=str(tracker),
-                policy=pol,
-                start_index=0,
-            )
-            assert second == "needs_human"  # post-retry cap breaches too
+    await database.write(lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"]))
+    await database.write(
+        lambda c: store.retry_after_cap(
+            c, wid, "verify", "verify.fix_loop", "steer toward the real cause"
+        )
+    )
+    second = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        registry=None,
+        bd_cwd=str(tracker),
+        policy=pol,
+        start_index=0,
+    )
+    assert second == "needs_human"  # post-retry cap breaches too
 
-            evts = database.read(lambda c: events.read_after(c, 0, wid))
-            return evts
-        finally:
-            await database.close()
-
-    evts = asyncio.run(scenario())
+    evts = database.read(lambda c: events.read_after(c, 0, wid))
+    evts = evts
     types = [e["type"] for e in evts]
     assert types.count("fix_cycle_started") == 4
     assert types.count("judge_verdict") == 4  # 2 pre-retry, 2 post-retry
@@ -614,102 +589,82 @@ def _measured(cycle: int, message: str) -> dict:
     }
 
 
-def test_judge_history_keeps_both_entries_first_measurements_at_cycle_zero(tmp_path):
+async def test_judge_history_keeps_both_entries_first_measurements_at_cycle_zero(database):
     """`walk_node` resets `round` to 0 on every re-entry while the loop counter
     persists, so two entries' first measurements collide on cycle 0. Keyed by
     that number, the older one vanished and the newest was relabelled the
     oldest — the judge's trend pointed backwards."""
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = "w1"
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id=None,
-                    title="t",
-                    repo="r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            # entry 1: cycle 0 then cycle 1; a repair pass; entry 2 re-enters at
-            # cycle 0 again, then resumes from the counter at cycle 2.
-            for payload in (
-                _measured(0, "first entry, oldest"),
-                _measured(1, "first entry, after one fix"),
-                _measured(-1, "a repair pass, not a paid cycle"),
-                _measured(0, "second entry, after the retry"),
-                _measured(2, "second entry, newest"),
-            ):
-                await database.write(
-                    lambda c, p=payload: events.append(c, wid, "findings_measured", p)
-                )
-            history = dispatch.judge_history(
-                database, wid, "verify", frozenset({"critical", "important"})
-            )
-            assert [h["findings"][0].message for h in history] == [
-                "first entry, oldest",
-                "first entry, after one fix",
-                "second entry, after the retry",
-                "second entry, newest",
-            ]
-            # Renumbered by position, so "round 0" really is the oldest.
-            assert [h["round"] for h in history] == [0, 1, 2, 3]
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = "w1"
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title="t",
+            repo="r",
+            chain_template="default",
+            chain_definition="{}",
+        )
+    )
+    # entry 1: cycle 0 then cycle 1; a repair pass; entry 2 re-enters at
+    # cycle 0 again, then resumes from the counter at cycle 2.
+    for payload in (
+        _measured(0, "first entry, oldest"),
+        _measured(1, "first entry, after one fix"),
+        _measured(-1, "a repair pass, not a paid cycle"),
+        _measured(0, "second entry, after the retry"),
+        _measured(2, "second entry, newest"),
+    ):
+        await database.write(lambda c, p=payload: events.append(c, wid, "findings_measured", p))
+    history = dispatch.judge_history(database, wid, "verify", frozenset({"critical", "important"}))
+    assert [h["findings"][0].message for h in history] == [
+        "first entry, oldest",
+        "first entry, after one fix",
+        "second entry, after the retry",
+        "second entry, newest",
+    ]
+    # Renumbered by position, so "round 0" really is the oldest.
+    assert [h["round"] for h in history] == [0, 1, 2, 3]
 
 
-def test_needs_context_question_ignores_a_judge_session(tmp_path):
+async def test_needs_context_question_ignores_a_judge_session(tmp_path, database):
     """The judge must never be a second way to get stuck. `_judge_result` fails
     open in-process, but the session row persists — and `needs_context_question`
     deliberately scans every hook point, so without a filter the next re-entry
     strands the item on the judge's own question."""
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = "w1"
-            await database.write(
-                lambda c: store.create_work_item(
-                    c,
-                    id=wid,
-                    bead_id=None,
-                    title="t",
-                    repo="r",
-                    chain_template="default",
-                    chain_definition="{}",
-                )
-            )
-            node = v1_resolved([v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT))]).nodes[0]
-            result = tmp_path / "judge.json"
-            result.write_text(json.dumps({"status": "needs_context", "question": "which cap?"}))
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="judge1",
-                    work_item_id=wid,
-                    node_id="verify",
-                    hook_point=node.judge.path,
-                    log_path="/l",
-                    result_path=str(result),
-                    round=0,
-                )
-            )
-            await database.write(
-                lambda c: store.session_exited(c, "judge1", "needs_context", question="which cap?")
-            )
-            assert dispatch.needs_context_question(database, wid, node, 0) is None
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = "w1"
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title="t",
+            repo="r",
+            chain_template="default",
+            chain_definition="{}",
+        )
+    )
+    node = v1_resolved([v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT))]).nodes[0]
+    result = tmp_path / "judge.json"
+    result.write_text(json.dumps({"status": "needs_context", "question": "which cap?"}))
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="judge1",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point=node.judge.path,
+            log_path="/l",
+            result_path=str(result),
+            round=0,
+        )
+    )
+    await database.write(
+        lambda c: store.session_exited(c, "judge1", "needs_context", question="which cap?")
+    )
+    assert dispatch.needs_context_question(database, wid, node, 0) is None
 
 
 def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):

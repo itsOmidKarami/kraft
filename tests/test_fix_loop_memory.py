@@ -622,7 +622,7 @@ def test_a_finding_that_burned_a_cycle_is_not_deferred(tmp_path, monkeypatch):
     assert "a real defect" not in prompt
 
 
-def test_the_board_and_the_brief_read_one_function(tmp_path, monkeypatch):
+def test_the_board_and_the_brief_read_one_function(monkeypatch):
     """One implementation, one severity set: a brief listing a different set
     from the card above it would be worse than one listing nothing."""
     assert dispatch.deferred_findings is not None

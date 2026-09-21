@@ -10,16 +10,14 @@ suite, which is why none of this was caught.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
 import pytest
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import isolated_bd, make_repo, v1_named_chain
+from support.harness import isolated_bd, v1_named_chain
 
-from kraft import db, executor
-from kraft.paths import RunDirs
+from kraft import executor
 
 #: The app with KRAFT_BD_CWD *unset* -- the installed-daemon default, and the
 #: state tests/conftest.py never lets the rest of the suite reach.
@@ -46,34 +44,28 @@ def _row(database, wid, columns="*"):
 
 
 @ON_FAKE_AND_REAL_BD
-def test_intake_files_the_bead_in_the_work_items_repo(bd, tmp_path, monkeypatch):
+async def test_intake_files_the_bead_in_the_work_items_repo(
+    bd, tmp_path, monkeypatch, database, run_dirs
+):
     """Kraft-ibwj: with no KRAFT_BD_CWD, the bead goes to the item's repo, not
     to whatever directory the server process happens to be sitting in."""
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
     repo = isolated_bd(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="file me where I belong",
-                repo=str(repo),
-                chain=_quick_task(tmp_path),
-            )
-            row = _row(database, wid, "bead_id, bead_cwd")
-            assert row["bead_id"]
-            assert row["bead_id"] in bd.ids(cwd=repo)
-            assert row["bead_cwd"] == str(repo)
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="file me where I belong",
+        repo=str(repo),
+        chain=_quick_task(tmp_path),
+    )
+    row = _row(database, wid, "bead_id, bead_cwd")
+    assert row["bead_id"]
+    assert row["bead_id"] in bd.ids(cwd=repo)
+    assert row["bead_cwd"] == str(repo)
 
 
-def test_kraft_bd_cwd_still_overrides_the_repo(bd, tmp_path, monkeypatch):
+async def test_kraft_bd_cwd_still_overrides_the_repo(bd, tmp_path, monkeypatch, database, run_dirs):
     """The repo is the *default*, not the winner. An operator who set
     KRAFT_BD_CWD as the workaround for Kraft-ibwj must not silently start
     filing into per-repo trackers on upgrade."""
@@ -81,32 +73,23 @@ def test_kraft_bd_cwd_still_overrides_the_repo(bd, tmp_path, monkeypatch):
     repo = isolated_bd(tmp_path, name="theproject")
     monkeypatch.setenv("KRAFT_BD_CWD", str(tracker))
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="the env still wins",
-                repo=str(repo),
-                chain=_quick_task(tmp_path),
-                bd_cwd=str(tracker),
-            )
-            row = _row(database, wid, "bead_id, bead_cwd")
-            assert row["bead_id"] in bd.ids(cwd=tracker)
-            assert row["bead_id"] not in bd.ids(cwd=repo)
-            assert row["bead_cwd"] == str(tracker)
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="the env still wins",
+        repo=str(repo),
+        chain=_quick_task(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    row = _row(database, wid, "bead_id, bead_cwd")
+    assert row["bead_id"] in bd.ids(cwd=tracker)
+    assert row["bead_id"] not in bd.ids(cwd=repo)
+    assert row["bead_cwd"] == str(tracker)
 
 
-def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path):
+def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, repo):
     """The Kraft-ibwj repro, inverted: this must not be a 502. bd's own words
     reach the caller, and the timeline records why there is no bead."""
-    repo = make_repo(tmp_path)  # a plain git repo: no .beads
     resp = client.post(
         "/api/work-items", json={"title": "no tracker here", "repo": str(repo), "autostart": False}
     )
@@ -125,10 +108,9 @@ def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, tmp_path
 
 
 @pytest.mark.beads_adapter
-def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
+def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch, repo):
     """Kraft-7gy: bd is a tracker a newcomer has never heard of. Not having it
     installed is not an intake failure."""
-    repo = make_repo(tmp_path)
     # After the fixtures, which need the real bd to build their workspaces.
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     resp = client.post(
@@ -139,36 +121,29 @@ def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch):
     assert client.get(f"/api/work-items/{resp.json()['id']}").json()["bead_id"] is None
 
 
-def test_a_bead_less_item_completes_without_calling_bd(tmp_path, monkeypatch, caplog):
+async def test_a_bead_less_item_completes_without_calling_bd(
+    tmp_path, monkeypatch, caplog, database, run_dirs, repo
+):
     """Without the `if row["bead_id"]` guard, `bd close None` raises TypeError
     inside the except and gets logged as a bead close failure that never
     happened. Harmless, and exactly the kind of noise a degrade must not add."""
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
-    repo = make_repo(tmp_path)  # no .beads: intake files no bead
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="make the failing test pass",
-                repo=str(repo),
-                chain=_quick_task(tmp_path),
-            )
-            assert _row(database, wid, "bead_id")["bead_id"] is None
-            with caplog.at_level("WARNING"):
-                result = await executor.run(
-                    database,
-                    rd,
-                    work_item_id=wid,
-                    registry=None,
-                )
-            assert result == "completed"
-            assert "bead close failed" not in caplog.text
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="make the failing test pass",
+        repo=str(repo),
+        chain=_quick_task(tmp_path),
+    )
+    assert _row(database, wid, "bead_id")["bead_id"] is None
+    with caplog.at_level("WARNING"):
+        result = await executor.run(
+            database,
+            run_dirs,
+            work_item_id=wid,
+            registry=None,
+        )
+    assert result == "completed"
+    assert "bead close failed" not in caplog.text

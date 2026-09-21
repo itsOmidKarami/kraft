@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import fake_registry, isolated_bd
 
 from kraft import db, events, policy, rate_limit_retry, store
 from kraft.paths import RunDirs
@@ -78,9 +78,8 @@ def _run(build, body):
     return asyncio.run(main())
 
 
-def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch):
+def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_rate_limited(app, retry_at="2999-01-01T00:00:00+00:00", repo=str(repo))
@@ -93,10 +92,9 @@ def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_tick_relaunches_a_due_item(tmp_path, monkeypatch):
+def test_tick_relaunches_a_due_item(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # leaves the calc bug in place, on purpose
     isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -124,9 +122,8 @@ def test_tick_relaunches_a_due_item(tmp_path, monkeypatch):
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_tick_falls_back_to_needs_human_once_the_cap_breaches(tmp_path, monkeypatch):
+def test_tick_falls_back_to_needs_human_once_the_cap_breaches(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -147,12 +144,11 @@ def test_tick_falls_back_to_needs_human_once_the_cap_breaches(tmp_path, monkeypa
     _run(lambda: _stub(tmp_path, rate_limit_retries=1), body)
 
 
-def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(tmp_path, monkeypatch):
+def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(tmp_path, monkeypatch, repo):
     """The status flip is now `claim_for_run`'s, not `retry_after_cap`'s --
     without the poller's own claim, this would blindly write the item back to
     'active' and spawn into a worktree that may already be gone."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
     async def body(app):
         await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
@@ -178,7 +174,7 @@ def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(tmp_path, monke
     _run(lambda: _stub(tmp_path), body)
 
 
-def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(tmp_path, monkeypatch):
+def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(tmp_path, monkeypatch, repo):
     """The same H1 shape as `ci_wait`'s, in the other poller: a V1 row's
     `chain_definition` is `"{}"`, and the start index used to come from it after
     the counter had already been bumped -- so the item stayed `rate_limited`
@@ -186,7 +182,6 @@ def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(tmp_path, mon
     which also needed `materialized_chain` adding to this poller's own SELECT."""
     from support.harness import v1_chain, v1_item
 
-    repo = make_repo(tmp_path)
     chain = v1_chain(
         [
             {
@@ -226,14 +221,13 @@ def _status_of(app, wid="w1"):
     )["status"]
 
 
-def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path):
+def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(tmp_path, repo):
     """N1's other half, and worse ordered: `claim_for_run` *then*
     `retry_after_cap` *then* the index read, with `tick` filtering
     `status = 'rate_limited'`. A return leaving it `active` is a permanent wedge
     that looks live. The stop is `stops.claimed_or_stopped`'s."""
     from support.harness import v1_chain, v1_item
 
-    repo = make_repo(tmp_path)
     chain = v1_chain(
         [
             {

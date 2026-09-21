@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
-from support.harness import make_repo, v1_chain, v1_item
+from support.harness import v1_chain, v1_item
 
 from kraft import auto_escalate_delay, db, policy, store
 from kraft.paths import RunDirs
@@ -82,9 +82,10 @@ async def _seed_awaiting_gate(app, repo, *, wid="w1", auto_gate=True) -> None:
     await app.state.db.write(lambda c: store.request_gate(c, wid, "g", "g"))
 
 
-def test_tick_leaves_an_awaiting_gate_item_alone_before_its_delay_elapses(tmp_path, monkeypatch):
+def test_tick_leaves_an_awaiting_gate_item_alone_before_its_delay_elapses(
+    tmp_path, monkeypatch, repo
+):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=600)
 
     def build():
@@ -110,9 +111,10 @@ def test_tick_leaves_an_awaiting_gate_item_alone_before_its_delay_elapses(tmp_pa
     _run(build, body)
 
 
-def test_tick_dispatches_an_awaiting_gate_item_once_its_delay_has_elapsed(tmp_path, monkeypatch):
+def test_tick_dispatches_an_awaiting_gate_item_once_its_delay_has_elapsed(
+    tmp_path, monkeypatch, repo
+):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     calls = []
 
     async def fake_review(*a, **kw):
@@ -135,9 +137,8 @@ def test_tick_dispatches_an_awaiting_gate_item_once_its_delay_has_elapsed(tmp_pa
     _run(build, body)
 
 
-def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(tmp_path, monkeypatch):
+def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(tmp_path, monkeypatch, repo):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     calls = []
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
@@ -173,13 +174,12 @@ def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(tmp_path,
     _run(build, body)
 
 
-def test_tick_bounds_dispatches_by_max_concurrent(tmp_path, monkeypatch):
+def test_tick_bounds_dispatches_by_max_concurrent(tmp_path, monkeypatch, repo):
     """A backlog of `needs_human` rows parked before this feature existed must
     not all fire at once (code review finding): `max_concurrent` bounds this
     poller's dispatches the same way it already bounds `intake.tick` and a
     manual resume."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     calls = []
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
@@ -221,7 +221,7 @@ def test_tick_bounds_dispatches_by_max_concurrent(tmp_path, monkeypatch):
     _run(build, body)
 
 
-def test_tick_bounds_dispatches_across_ticks_via_live_tasks(tmp_path, monkeypatch):
+def test_tick_bounds_dispatches_across_ticks_via_live_tasks(tmp_path, monkeypatch, repo):
     """`active_count` alone only holds inside one tick: an auto-escalate turn
     never makes its row `active`, so a session a previous tick spawned is
     invisible to a later tick's budget unless that budget also counts live
@@ -230,7 +230,6 @@ def test_tick_bounds_dispatches_across_ticks_via_live_tasks(tmp_path, monkeypatc
     `max_concurrent=1` that must leave zero slots for w1, even though w1's
     own row is `needs_human` and due, same as w2's was."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     calls = []
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
@@ -280,13 +279,12 @@ def test_tick_bounds_dispatches_across_ticks_via_live_tasks(tmp_path, monkeypatc
     _run(build, body)
 
 
-def test_tick_skips_a_row_with_a_live_task_already_running(tmp_path, monkeypatch):
+def test_tick_skips_a_row_with_a_live_task_already_running(tmp_path, monkeypatch, repo):
     """Two ticks 30s apart must not both dispatch: `review_gates`'s own
     docstring calls a second concurrent run for one item the failure this
     feature most has to avoid, and a slow `gate_review.review` (an agent
     call) leaves `status` at `awaiting_gate` the whole time it runs."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=600)
 
     def build():
@@ -306,7 +304,7 @@ def test_tick_skips_a_row_with_a_live_task_already_running(tmp_path, monkeypatch
     _run(build, body)
 
 
-def test_tick_skips_a_row_whose_effective_delay_is_zero(tmp_path, monkeypatch):
+def test_tick_skips_a_row_whose_effective_delay_is_zero(tmp_path, monkeypatch, repo):
     """The default (0) means the inline call from run()/resume() already
     fired immediately, so there is nothing for this backstop to back-stop.
     Checking those rows anyway would hand a stuck item a fresh
@@ -314,7 +312,6 @@ def test_tick_skips_a_row_whose_effective_delay_is_zero(tmp_path, monkeypatch):
     this poller existed it got one per run()/resume() (code review
     finding)."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     calls = []
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
@@ -349,13 +346,12 @@ def test_tick_skips_a_row_whose_effective_delay_is_zero(tmp_path, monkeypatch):
     _run(build, body)
 
 
-def test_tick_skips_a_row_that_is_not_armed_for_auto_escalation(tmp_path, monkeypatch):
+def test_tick_skips_a_row_that_is_not_armed_for_auto_escalation(tmp_path, monkeypatch, repo):
     """A row parked forever with `auto_escalate_stuck: false` can only return
     its status unchanged, so it must not spend a `max_concurrent` slot (or
     briefly hold the item's task slot, which 409s a human's retry) every
     tick (code review finding)."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)
     pol = policy.Policy(
         loops={},
@@ -387,7 +383,7 @@ def test_tick_skips_a_row_that_is_not_armed_for_auto_escalation(tmp_path, monkey
     _run(build, body)
 
 
-def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(tmp_path, monkeypatch):
+def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(tmp_path, monkeypatch, repo):
     """A legacy row with a pending gate and a delay > 0 makes `auto_check_due`
     walk the V1 chain, and `walk.chain_of` raises `LookupError` for a row the
     legacy intake path wrote. Uncaught, that aborted the whole scan -- every
@@ -398,7 +394,6 @@ def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(tmp_path, monk
     legacy row is deliberately the first one seeded.
     """
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
     pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=0)
     # Off the clock, the same seam the sibling delay tests use.
     monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)

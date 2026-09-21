@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import fake_templates_dir, isolated_bd
 from support.server import running_server
 
 from kraft import db, events
@@ -331,14 +331,13 @@ def _wait_events(client, wid, want, timeout=30):
 
 
 @pytest.mark.slow
-def test_ws_events_delivered_under_real_uvicorn(tmp_path):
+def test_ws_events_delivered_under_real_uvicorn(tmp_path, repo):
     """The TestClient does WS in-process; this proves a real uvicorn handshake to
     /api/ws/events works (needs the `websockets` protocol lib) and streams frames."""
     from websockets.sync.client import connect
 
     templates = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
     with running_server(run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=tracker) as srv:
         with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0") as ws:
             r = srv.client.post(
