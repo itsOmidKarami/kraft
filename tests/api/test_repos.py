@@ -1,4 +1,4 @@
-"""Repo CRUD (design 5a) and the `config` probe/load/save helpers it is built on."""
+"""Repo CRUD (design 5a) over HTTP. The `config` helpers under it: tests/test_config_repos.py."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from support.harness import (
     v1_item,
 )
 
-from kraft import config, events, store, templates
 from kraft import db as kdb
+from kraft import events, store, templates
 from kraft.api.routes.repos import RepoBody, RepoPatch
 from kraft.paths import RunDirs
 
@@ -77,6 +77,10 @@ def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
     body = client.post("/api/repos/probe", json={"path": str(repo)}).json()
     assert body["submodules"] == ["libs/a", "libs/b"]
     assert body["test_command"] == "uv run pytest -q"
+
+
+def _set_origin(repo, url):
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
 
 
 def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir):
@@ -152,47 +156,48 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
     assert client.get("/api/repos").json()["repos"] == []
 
 
-def test_patch_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
-    repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo), "enabled": False})
-    before = (templates_dir / "repos.yaml").read_text()
+def _disabled(client, repo):
+    """Connect `repo`, disabled (no test command needed); return its stored path."""
+    r = client.post("/api/repos", json={"path": str(repo), "enabled": False})
+    assert r.status_code == 201, r.text
+    return r.json()["path"]
 
-    r = client.patch(f"/api/repos?path={repo}", json={"steering": ["does-not-exist"]})
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("local_files", [".python-version"]), ("default_root_merge_policy", "skip")],
+    ids=["local-files", "root-merge-policy-as-a-yaml-string"],
+)
+def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, value):
+    """The Settings UI's only write path for these (Kraft-gxcmy): PATCH goes
+    through the same `entry.update`/`_validate_repos` machinery as every other
+    repos.yaml field, so this pins the round trip end to end rather than
+    re-testing `load_repos`' own validation (tests/test_config_repos.py)."""
+    _disabled(client, repo)
+    r = client.patch(f"/api/repos?path={repo}", json={field: value})
+    assert r.status_code == 200, r.text
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    assert on_disk["repos"][0][field] == value
+    (entry,) = client.get("/api/repos").json()["repos"]
+    assert entry[field] == value
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "unchanged"),
+    [("steering", ["does-not-exist"], []), ("local_files", ["*.pyc"], [])],
+    ids=["a-missing-steering-name", "a-glob-in-local-files"],
+)
+def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value, unchanged):
+    """Write-side validation must reject exactly what the read side would
+    later choke on, so a bad PATCH from the UI cannot brick every later
+    GET /repos."""
+    _disabled(client, repo)
+    before = (templates_dir / "repos.yaml").read_text()
+    r = client.patch(f"/api/repos?path={repo}", json={field: value})
     assert 400 <= r.status_code < 500, r.text
     assert (templates_dir / "repos.yaml").read_text() == before
-
     (entry,) = client.get("/api/repos").json()["repos"]
-    assert entry["steering"] == []
-
-
-def test_patch_repo_round_trips_local_files(tmp_path, client, templates_dir):
-    """The Settings UI's only write path for `local_files` (Kraft-gxcmy):
-    PATCH goes through the same `entry.update`/`_validate_repos` machinery as
-    every other repos.yaml list field, so this pins the round trip end to end
-    rather than re-testing `load_repos`' own validation (tests/test_api_repos.py's
-    `local_file` tests already cover that)."""
-    repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo), "enabled": False})
-
-    r = client.patch(f"/api/repos?path={repo}", json={"local_files": [".python-version"]})
-    assert r.status_code == 200, r.text
-
-    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
-    assert on_disk["repos"][0]["local_files"] == [".python-version"]
-
-    (entry,) = client.get("/api/repos").json()["repos"]
-    assert entry["local_files"] == [".python-version"]
-
-
-def test_patch_repo_round_trips_root_merge_policy_as_a_yaml_string(tmp_path, client, templates_dir):
-    repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo), "enabled": False})
-
-    r = client.patch(f"/api/repos?path={repo}", json={"default_root_merge_policy": "skip"})
-    assert r.status_code == 200, r.text
-
-    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
-    assert on_disk["repos"][0]["default_root_merge_policy"] == "skip"
+    assert entry[field] == unchanged
 
 
 @pytest.mark.parametrize("model, payload", [(RepoBody, {"path": "/r"}), (RepoPatch, {})])
@@ -200,22 +205,6 @@ def test_repo_request_models_reject_an_unknown_root_merge_policy(model, payload)
     """An API schema must reject an invalid policy before a route touches disk."""
     with pytest.raises(ValidationError):
         model.model_validate({**payload, "default_root_merge_policy": "nope"})
-
-
-def test_patch_repo_with_a_glob_in_local_files_is_refused(tmp_path, client, templates_dir):
-    """Write-side validation must reject exactly what the read side would
-    later choke on (same shape as the steering regression guard above), so a
-    bad PATCH from the UI cannot brick every later GET /repos."""
-    repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo), "enabled": False})
-    before = (templates_dir / "repos.yaml").read_text()
-
-    r = client.patch(f"/api/repos?path={repo}", json={"local_files": ["*.pyc"]})
-    assert 400 <= r.status_code < 500, r.text
-    assert (templates_dir / "repos.yaml").read_text() == before
-
-    (entry,) = client.get("/api/repos").json()["repos"]
-    assert entry["local_files"] == []
 
 
 def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):
@@ -394,211 +383,6 @@ def test_patch_repo_can_clear_test_scopes_with_an_explicit_null(client, tmp_path
     assert r.json()["test_scopes"] is None
 
 
-def _set_origin(repo, url):
-    subprocess.run(["git", "remote", "add", "origin", url], cwd=repo, check=True)
-
-
-def test_probe_survives_a_repo_whose_remote_was_removed(tmp_path):
-    """Distinct from test_probe_detects_no_forge_without_remote: make_repo never
-    adds an origin, so without this the `git remote remove` was a silent no-op
-    and both tests exercised the same never-had-a-remote state."""
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "git@gitlab.com:group/repo.git")
-    subprocess.run(["git", "remote", "remove", "origin"], cwd=repo, check=True)
-    probed = config.probe_repo(repo)
-    assert probed["forge"] is None
-    assert probed["project"] is None
-    assert "gitlab_project" not in probed
-    assert Path(probed["path"]) == repo.resolve()
-
-
-def test_probe_survives_a_gitmodules_that_is_not_utf8(tmp_path):
-    """`.gitmodules` is read best-effort — a repo whose submodule list cannot be
-    parsed still probes, with no submodules. read_text() raises UnicodeDecodeError,
-    a ValueError, which `except OSError` does not catch."""
-    repo = make_repo(tmp_path)
-    (repo / ".gitmodules").write_bytes(b'[submodule "\xff\xfe libs/x"]\n\tpath = libs/x\n')
-    assert config.probe_repo(repo)["submodules"] == []
-
-
-def test_an_expected_git_failure_logs_at_debug(caplog):
-    """`remote get-url origin` failing is a normal probe outcome — _detect_forge
-    returns (None, None) and the probe succeeds — so it must not warn. git_read's
-    warning stays for failures no caller handles."""
-    import logging
-
-    with caplog.at_level(logging.DEBUG, logger="kraft.config"):
-        assert (
-            config.git_read(Path.cwd(), "remote", "get-url", "nope", expected_failure=True) is None
-        )
-    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
-    assert any(r.levelno == logging.DEBUG for r in caplog.records)
-
-
-def test_an_unhandled_git_failure_still_warns(caplog):
-    import logging
-
-    with caplog.at_level(logging.DEBUG, logger="kraft.config"):
-        assert config.git_read(Path.cwd(), "remote", "get-url", "nope") is None
-    assert [r for r in caplog.records if r.levelno >= logging.WARNING]
-
-
-def test_an_explicit_project_survives_a_legacy_key_beside_it():
-    """A hand-edited half-migrated entry: `project` set, `forge` absent, and the
-    pre-rename `gitlab_project` still present. The explicit value wins."""
-    repo = {"path": "/r", "project": "group/kept", "gitlab_project": "group/legacy"}
-    repo = config.RepoEntry.model_validate(repo).model_dump()
-    assert repo["project"] == "group/kept"
-    assert repo["forge"] is None
-    assert "gitlab_project" not in repo
-
-
-def test_the_legacy_key_still_migrates_when_nothing_else_is_set():
-    repo = {"path": "/r", "gitlab_project": "group/legacy"}
-    repo = config.RepoEntry.model_validate(repo).model_dump()
-    assert (repo["forge"], repo["project"]) == ("gitlab", "group/legacy")
-    assert "gitlab_project" not in repo
-
-
-def test_probe_detects_no_forge_without_remote(tmp_path):
-    repo = make_repo(tmp_path)
-    probed = config.probe_repo(repo)
-    assert probed["forge"] is None
-    assert probed["project"] is None
-    assert "gitlab_project" not in probed
-
-
-def test_probe_detects_gitlab_ssh(tmp_path):
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "git@gitlab.com:group/repo.git")
-    probed = config.probe_repo(repo)
-    assert probed["forge"] == "gitlab"
-    assert probed["project"] == "group/repo"
-
-
-def test_probe_detects_gitlab_https(tmp_path):
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "https://gitlab.com/group/sub/repo.git")
-    probed = config.probe_repo(repo)
-    assert probed["forge"] == "gitlab"
-    assert probed["project"] == "group/sub/repo"
-
-
-def test_probe_detects_github_ssh(tmp_path):
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "git@github.com:owner/repo.git")
-    probed = config.probe_repo(repo)
-    assert probed["forge"] == "github"
-    assert probed["project"] == "owner/repo"
-
-
-def test_probe_detects_github_https(tmp_path):
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "https://github.com/owner/repo")
-    probed = config.probe_repo(repo)
-    assert probed["forge"] == "github"
-    assert probed["project"] == "owner/repo"
-
-
-def test_probe_unknown_host_is_not_an_error(tmp_path):
-    repo = make_repo(tmp_path)
-    _set_origin(repo, "git@git.example.com:team/repo.git")
-    probed = config.probe_repo(repo)
-    assert probed["forge"] is None
-    assert probed["project"] is None
-    assert probed["name"] == "sample"
-
-
-def test_load_repos_reads_legacy_gitlab_project(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["forge"] == "gitlab"
-    assert repo["project"] == "group/repo"
-    assert "gitlab_project" not in repo
-
-
-def test_load_repos_passes_through_new_shape(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "forge": "github", "project": "o/r"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["forge"] == "github"
-    assert repo["project"] == "o/r"
-
-
-def test_load_repos_sandbox_defaults_to_none(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["sandbox"] is None
-
-
-def test_load_repos_passes_through_a_well_formed_sandbox(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(
-        path,
-        {"repos": [{"path": "/r", "sandbox": {"kind": "docker", "image": "kraft-worker:node"}}]},
-    )
-    (repo,) = config.load_repos(path)
-    assert repo["sandbox"] == {"kind": "docker", "image": "kraft-worker:node"}
-
-
-def test_load_repos_passes_through_an_explicit_sandbox_off(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "sandbox": False}]})
-    (repo,) = config.load_repos(path)
-    assert repo["sandbox"] is False
-
-
-def test_load_repos_rejects_a_malformed_sandbox(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "sandbox": {"kind": "docker"}}]})
-    with pytest.raises(config.ConfigError, match="image"):
-        config.load_repos(path)
-
-
-def test_load_repos_new_shape_wins_over_legacy(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(
-        path,
-        {"repos": [{"path": "/r", "forge": "github", "project": "o/r", "gitlab_project": "g/r"}]},
-    )
-    (repo,) = config.load_repos(path)
-    assert repo["forge"] == "github"
-    assert repo["project"] == "o/r"
-    assert "gitlab_project" not in repo
-
-
-def test_load_repos_defaults_both_to_none(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["forge"] is None
-    assert repo["project"] is None
-
-
-def test_load_repos_keeps_unknown_forge(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "forge": "gitea", "project": "t/r"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["forge"] == "gitea"
-
-
-def test_load_repos_rejects_a_missing_steering_file(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "steering": ["missing"]}]})
-    with pytest.raises(config.ConfigError):
-        config.load_repos(path)
-
-
-def test_save_repos_round_trip_drops_legacy_key(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
-    config.save_repos(path, config.load_repos(path))
-    assert "gitlab_project" not in path.read_text()
-    assert "forge: gitlab" in path.read_text()
-
-
 def _seed_active_work_item(
     run_dir: Path, *, wid: str, node_id: str, gate: str | None = None
 ) -> None:
@@ -768,212 +552,21 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
     assert "Prefer tabs over spaces." in prompt
 
 
-def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(tmp_path, monkeypatch):
+@pytest.mark.api_client(edit_templates=_broken_repos_yaml)
+def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(client):
     """A steering file deleted after the fact (an operator's `rm`, since there is
     no Settings screen for steering files) must not 422 the only screen that
     could fix it. `GET /repos` reads without steering validation and returns the
     entry as-is; `PATCH /repos` clearing the bad name must succeed too — that is
     how an operator actually recovers, short of hand-editing the YAML."""
-    templates_dir = fake_templates_dir(tmp_path, "claude")
-    _broken_repos_yaml(templates_dir)
+    got = client.get("/api/repos")
+    assert got.status_code == 200
+    assert got.json()["repos"][0]["steering"] == ["deleted"]
 
-    with _client(tmp_path, monkeypatch, templates_dir=templates_dir, default_setup=False) as client:
-        got = client.get("/api/repos")
-        assert got.status_code == 200
-        assert got.json()["repos"][0]["steering"] == ["deleted"]
-
-        patched = client.patch("/api/repos?path=/r", json={"steering": []})
-        assert patched.status_code == 200
-        assert patched.json()["steering"] == []
-        assert client.get("/api/repos").json()["repos"][0]["steering"] == []
-
-
-def test_probe_from_a_worktree_reports_the_main_checkout(tmp_path):
-    """An agent's cwd IS a linked worktree, and `/kraft:handoff` tells it to call
-    `ensure_repo()` every time. Without this, every handoff registers the
-    worktree as a repo of its own — observed live in repos.yaml."""
-    repo = make_repo(tmp_path)
-    worktree = tmp_path / "wt"
-    subprocess.run(
-        ["git", "worktree", "add", "-q", str(worktree), "-b", "wt-branch"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    assert Path(config.probe_repo(worktree)["path"]) == repo.resolve()
-
-
-def test_probe_of_a_submodule_stays_the_submodule(tmp_path):
-    """A submodule's common dir is `<super>/.git/modules/<path>`, whose parent is
-    `<super>/.git/modules` — not a repo at all. The `.git` guard keeps a
-    submodule on the `--show-toplevel` answer it has always had."""
-    lib = make_repo(tmp_path, name="lib")
-    super_repo = make_repo(tmp_path, name="super")
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "add",
-            "-q",
-            str(lib),
-            "libs/sub",
-        ],
-        cwd=super_repo,
-        check=True,
-        capture_output=True,
-    )
-    assert (
-        Path(config.probe_repo(super_repo / "libs" / "sub")["path"])
-        == (super_repo / "libs" / "sub").resolve()
-    )
-
-
-def test_load_repos_defaults_root_merge_policy(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r"}]})
-    (repo,) = config.load_repos(path)
-    assert repo["default_root_merge_policy"] == "bump"
-
-
-def test_load_repos_defaults_managed_true_for_pre_existing_entries(tmp_path):
-    # Anything already in a repos.yaml was connected by a human -- auto-connect
-    # did not exist when it was written. Defaulting to False here would hide
-    # every repo a user has behind the Detected section on first load.
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
-    assert config.load_repos(path)[0]["managed"] is True
-
-
-def test_load_repos_keeps_an_explicit_managed_false(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "managed": False}]}))
-    assert config.load_repos(path)[0]["managed"] is False
-
-
-def test_load_repos_rejects_a_non_boolean_managed(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "managed": "yes"}]}))
-    with pytest.raises(config.ConfigError, match="'managed' must be a boolean"):
-        config.load_repos(path)
-
-
-def test_load_repos_defaults_local_files_to_empty(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
-    assert config.load_repos(path)[0]["local_files"] == []
-
-
-def test_load_repos_keeps_a_declared_local_file(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": [".python-version"]}]}))
-    assert config.load_repos(path)[0]["local_files"] == [".python-version"]
-
-
-def test_load_repos_rejects_a_non_list_local_files(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ".python-version"}]}))
-    with pytest.raises(config.ConfigError, match="'local_files' must be a list"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_an_absolute_local_file(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["/etc/passwd"]}]}))
-    with pytest.raises(config.ConfigError, match="must be a relative path"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_local_file_escaping_the_repo(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["../secrets"]}]}))
-    with pytest.raises(config.ConfigError, match="must be a relative path"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_local_files_directory_entry(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": [".venv/"]}]}))
-    with pytest.raises(config.ConfigError, match="must name a file"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_local_files_glob_pattern_star(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["*.pyc"]}]}))
-    with pytest.raises(config.ConfigError, match="must be a literal path, not a glob"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_local_files_glob_pattern_double_star(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "local_files": ["**/*.env"]}]}))
-    with pytest.raises(config.ConfigError, match="must be a literal path, not a glob"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_non_string_setup_command(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "setup_command": ["uv", "sync"]}]}))
-    with pytest.raises(config.ConfigError, match="setup_command"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_non_flat_string_map_env(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "env": {"A": 1}}]}))
-    with pytest.raises(config.ConfigError, match="'env'"):
-        config.load_repos(path)
-
-
-def test_load_repos_rejects_a_non_string_env_passthrough_entry(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a", "env_passthrough": ["", "OK"]}]}))
-    with pytest.raises(config.ConfigError, match="env_passthrough"):
-        config.load_repos(path)
-
-
-@pytest.mark.parametrize("field", ["env_passthrough", "local_files"])
-def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
-    with pytest.raises(ValidationError) as exc:
-        config.RepoEntry.model_validate({"path": "/a", field: [""]})
-    assert exc.value.errors()[0]["type"] == "string_too_short"
-
-
-def test_load_repos_defaults_setup_command_env_and_env_passthrough(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(yaml.safe_dump({"repos": [{"path": "/a"}]}))
-    entry = config.load_repos(path)[0]
-    assert entry["setup_command"] is None
-    assert entry["env"] == {}
-    assert entry["env_passthrough"] == []
-
-
-@pytest.mark.parametrize(
-    "marker, expected",
-    [
-        ("pyproject.toml", "uv sync"),
-        ("package-lock.json", "npm ci"),
-        ("yarn.lock", "yarn install --frozen-lockfile"),
-        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
-        ("Cargo.toml", "cargo fetch"),
-        ("go.mod", "go mod download"),
-    ],
-)
-def test_the_setup_probe_suggests_per_marker(tmp_path, marker, expected):
-    (tmp_path / marker).write_text("")
-    assert config._first_setup_command(tmp_path) == expected
-
-
-def test_the_setup_probe_suggests_nothing_for_an_unmarked_repo(tmp_path):
-    assert config._first_setup_command(tmp_path) is None
-
-
-def test_probe_repo_suggests_a_setup_command(tmp_path):
-    repo = make_repo(tmp_path)
-    (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
-    assert config.probe_repo(repo)["setup_command"] == "uv sync"
+    patched = client.patch("/api/repos?path=/r", json={"steering": []})
+    assert patched.status_code == 200
+    assert patched.json()["steering"] == []
+    assert client.get("/api/repos").json()["repos"][0]["steering"] == []
 
 
 def test_add_repo_writes_the_probed_setup_command(tmp_path, client):
@@ -987,122 +580,6 @@ def test_add_repo_leaves_setup_command_undeclared_with_no_marker(tmp_path, clien
     repo = make_repo(tmp_path, name="plain")
     entry = client.post("/api/repos", json={"path": str(repo)}).json()
     assert entry["setup_command"] is None
-
-
-def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "repos": [
-                    {
-                        "path": "/ws",
-                        "name": "ws",
-                        "submodules": [
-                            {
-                                "path": "libs/a",
-                                "enabled": True,
-                                "test_command": "cargo test",
-                                "chain_override": "quick",
-                            },
-                        ],
-                    }
-                ]
-            }
-        )
-    )
-    repos = config.load_repos(path)
-    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
-    child = repos[1]
-    assert child["name"] == "a"
-    assert child["enabled"] is True
-    assert child["test_command"] == "cargo test"
-    assert child["default_chain_template"] == "quick"
-    # a human had set these values, so the child is a decision, not noise
-    assert child["managed"] is True
-
-
-def test_an_all_default_submodule_edge_is_dropped(tmp_path):
-    # Carries no human decision, so there is nothing to preserve. Task 3's
-    # auto-connect re-creates it as managed: false.
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "repos": [
-                    {
-                        "path": "/ws",
-                        "submodules": [{"path": "libs/a", "enabled": False}],
-                    }
-                ]
-            }
-        )
-    )
-    repos = config.load_repos(path)
-    assert [r["path"] for r in repos] == ["/ws"]
-
-
-def test_an_existing_child_entry_wins_over_a_legacy_edge(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "repos": [
-                    {"path": "/ws", "submodules": [{"path": "libs/a", "test_command": "stale"}]},
-                    {"path": "/ws/libs/a", "test_command": "real"},
-                ]
-            }
-        )
-    )
-    repos = config.load_repos(path)
-    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
-    assert repos[1]["test_command"] == "real"
-
-
-def test_migration_drops_submodules_and_allow_cross_repo_keys(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "repos": [
-                    {
-                        "path": "/ws",
-                        "allow_cross_repo": True,
-                        "submodules": [{"path": "libs/a", "enabled": True}],
-                    }
-                ]
-            }
-        )
-    )
-    for entry in config.load_repos(path):
-        assert "submodules" not in entry
-        assert "allow_cross_repo" not in entry
-
-
-def test_migration_is_idempotent(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "repos": [
-                    {
-                        "path": "/ws",
-                        "submodules": [{"path": "libs/a", "enabled": True}],
-                    }
-                ]
-            }
-        )
-    )
-    once = config.load_repos(path)
-    config.save_repos(path, once)
-    assert config.load_repos(path) == once
-
-
-def test_load_repos_rejects_unknown_root_merge_policy(tmp_path):
-    path = tmp_path / "repos.yaml"
-    config.write_yaml(path, {"repos": [{"path": "/r", "default_root_merge_policy": "nope"}]})
-    with pytest.raises(config.ConfigError):
-        config.load_repos(path)
 
 
 def test_add_repo_enabled_with_no_test_command_is_refused(tmp_path, monkeypatch):
@@ -1201,23 +678,3 @@ def test_startup_hardens_the_git_env_for_everything_the_server_spawns(tmp_path, 
             for i in range(count)
         }
     assert pinned["core.hooksPath"] == os.devnull
-
-
-def test_repo_entry_keeps_the_messages_the_hand_rolled_loader_gave(tmp_path):
-    """Thirteen of repos.yaml's fourteen ConfigError messages name the offending key.
-    A model that says 'Input should be a valid boolean' instead is a regression
-    an operator pays for at 3am. (Characterization: pinned before the rewrite.)"""
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    managed: sometimes\n")
-    with pytest.raises(config.ConfigError) as exc:
-        config.load_repos(p)
-    assert "managed" in str(exc.value)
-    assert "repos.yaml" in str(exc.value)
-
-
-def test_test_scopes_entry_needs_a_command(tmp_path):
-    p = tmp_path / "repos.yaml"
-    p.write_text("repos:\n  - path: /r\n    test_scopes:\n      - paths: ['src/**']\n")
-    with pytest.raises(config.ConfigError) as exc:
-        config.load_repos(p)
-    assert "command" in str(exc.value)
