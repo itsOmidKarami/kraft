@@ -411,13 +411,30 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     return templates_dir
 
 
-def v1_library(templates_dir: Path):
+def v1_library(templates_dir: Path, *, agent_command: str = "true"):
     """The `TemplateLibrary` for `templates_dir`, seeding the V1 layout first
-    if it is not already there."""
+    if it is not already there.
+
+    **The seed it writes is always a rewritten one.** `seed_v1_library` only
+    swaps agent tasks onto the `fake` harness and neuters the
+    `kraft.verify_changed_test_scopes` builtin when it is given an
+    `agent_command`; seeded without one, a resolved chain carries
+    `codex_default` and the real builtin, so a test that dispatched it would
+    launch the operator's `codex` and run this suite inside itself. Nothing was
+    walking such a chain when this defaulted to `None`, but `v1_named_chain`
+    below is about to be the door ~156 call sites go through, and a helper that
+    many callers adopt has to be safe by default rather than safe by accident.
+
+    `true` rather than a real fake agent: it makes an agent task launchable and
+    harmless. A caller whose assertions are *about* the agent seeds the
+    directory itself first -- `fake_templates_dir` does, and this only seeds a
+    directory that has no `library.yaml` yet, so passing one through is
+    unchanged.
+    """
     from kraft.templates.library import TemplateLibrary
 
     if not (Path(templates_dir) / "library.yaml").is_file():
-        seed_v1_library(Path(templates_dir))
+        seed_v1_library(Path(templates_dir), agent_command=agent_command)
     return TemplateLibrary.from_yaml_dir(templates_dir)
 
 
@@ -428,10 +445,11 @@ def v1_named_chain(templates_dir: Path, chain_id: str = "quick-task"):
     `executor.entry.intake` takes a `ResolvedChain`, and the legacy callers it
     replaces named a template by string -- overwhelmingly `"quick-task"`, which
     is why that is the default. Deliberately resolved from the test's own
-    templates directory rather than the packaged one: `seed_v1_library` rewrites
-    every agent task onto the `fake` harness and neuters the
-    `verify_changed_test_scopes` builtin there, so a chain resolved from the
-    packaged tree would launch a real agent and run this suite inside itself.
+    templates directory rather than the packaged one: the dir `v1_library` seeds
+    has every agent task on the `fake` harness and the
+    `verify_changed_test_scopes` builtin neutered, where a chain resolved from
+    the packaged tree would launch a real agent and run this suite inside
+    itself.
     """
     return v1_library(templates_dir).resolve_chain(chain_id)
 

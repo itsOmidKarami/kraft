@@ -148,6 +148,25 @@ def test_the_harness_resolves_a_named_seeded_chain(tmp_path):
     assert v1_named_chain(tmp_path, "default").id == "default"
 
 
+def test_a_harness_resolved_chain_launches_no_real_agent_and_no_real_builtin(tmp_path):
+    """The seed `v1_library` writes is a rewritten one, on an unseeded directory
+    too.
+
+    Seeded without an `agent_command`, the resolved chain carries
+    `codex_default` and the real `kraft.verify_changed_test_scopes` -- a
+    dispatched task would launch the operator's `codex` and run this suite
+    inside itself. Pinned rather than documented, because ~156 of 5b's call
+    sites come through here and would inherit the hazard silently.
+    """
+    from support.harness import v1_named_chain
+
+    tasks = [t.task for node in v1_named_chain(tmp_path).nodes for t in node.tasks()]
+
+    assert [t.harness for t in tasks if isinstance(t, AgentTask)] == ["fake"]
+    assert [t for t in tasks if isinstance(t, BuiltinTask)] == []
+    assert [t.command for t in tasks if isinstance(t, SubprocessTask)] == ["true"]
+
+
 def test_the_seeded_library_has_no_lint_errors():
     assert TemplateLibrary.from_yaml_dir(SEEDED).lint() == []
 
