@@ -435,62 +435,6 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     return {"id": wid, "steer": text}
 
 
-async def _resolve_conflict_task(
-    st,
-    wid: str,
-    row,
-    node_id: str,
-    steer_text: str | None,
-    reason: str,
-) -> None:
-    """A rebase conflict at `/resume` or `/retry`: stop for a human, then let
-    auto-escalation take it if the policy arms that, run as the item's own
-    spawned task rather than awaited inline in the route (Kraft-s7c04.20: a
-    task registered under `wid` is what keeps a concurrent `/retry` out).
-
-    The rebase-conflict *resolver* this used to dispatch first
-    (`walk.resolve_rebase_conflict`, Kraft-s7c04.23) was deleted with the
-    legacy rebase layer (Task 4a), and V1 resolves a conflict only through a
-    chain's explicit handler (`rebase-conflict-requires-explicit-handler`,
-    Task 7). Calling it here raised `AttributeError` on every conflict.
-    """
-    if steer_text:
-        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
-    await gates.auto_escalate_stuck(
-        "needs_human",
-        st.db,
-        st.run_dirs,
-        work_item_id=wid,
-        registry=st.registry,
-        policy=st.policy,
-        launch=deps.launch(st, row["repo"]),
-        bd_cwd=deps.bd_cwd(),
-        on_approve=deps._on_approve(st),
-    )
-
-
-def _spawn_conflict_resolution(
-    st, request: Request, wid: str, row, node_id: str, steer_text: str | None, exc
-) -> dict:
-    """Registers `_resolve_conflict_task` as `wid`'s task and returns the
-    item's current row immediately -- the route itself does not wait on it
-    (design §4.8: "the route returns immediately either way")."""
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                _resolve_conflict_task(st, wid, row, node_id, steer_text, str(exc)),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-
-
 @api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
@@ -576,17 +520,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
         worktree = st.run_dirs.worktrees / wid
+        conflict = None
         try:
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree, Path(row["repo"]), store.branch_for(row)
             )
         except builtins_mod.RebaseConflict as exc:
-            # `steer` here is already the taken local (line 414, above the
-            # rebase) -- the helper must not re-read `pending_steer_context`,
-            # which this call already emptied.
-            return _spawn_conflict_resolution(
-                st, request, wid, row, row["current_node_id"], steer, exc
-            )
+            # Handed to the walk, which gives it to the node's `on_conflict`
+            # handler as it would a task's, or stops for a human (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             # The claim already flipped this item to 'active'; a failed rebase
             # must not leave it stranded there with no walk behind it.
@@ -658,6 +600,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         steer_to=targets,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )
@@ -881,14 +824,16 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 )
             raise HTTPException(409, "work item is not stopped")
         worktree = st.run_dirs.worktrees / wid
+        conflict = None
         try:
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree, Path(row["repo"]), store.branch_for(row)
             )
         except builtins_mod.RebaseConflict as exc:
-            # `/retry` never persists `steer` ahead of the rebase the way
-            # `/resume` does -- the helper is the first thing to write it.
-            return _spawn_conflict_resolution(st, request, wid, row, node_id, steer, exc)
+            # The retry still forks; the walk hands the conflict to the
+            # starting node's `on_conflict` handler, or stops for a human
+            # (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             reason = str(exc)
             await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
@@ -947,6 +892,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                         seeded=seeded,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )

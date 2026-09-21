@@ -198,9 +198,9 @@ async def apply_rejection(
 def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     """True iff the most recent gate_* event for the item is gate_approved <gate>.
 
-    `gate_reopened` (a base-change restart, only while
-    `walk.RESTART_REOPENS_APPROVED_GATES` is on) is the newest word on a gate
-    it names, so the restarted walk requests it again."""
+    `gate_reopened` (a retry's fork, or a base-change restart after a resolved
+    conflict) is the newest word on a gate it names, so the rerun requests it
+    again."""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] in ("gate_requested", "gate_approved", "gate_rejected", "gate_reopened"):

@@ -48,6 +48,12 @@ BASE_MOVED = "base_moved"
 #: this for the node and `walk` hands it to that handler.
 CONFLICT = "conflict"
 
+#: The node's `on_conflict` handler resolved a rebase conflict and the base
+#: moved (`walk._resolve_conflict`). A base change like `BASE_MOVED`, with one
+#: difference `run_once` acts on: code changed that no gate in the restart span
+#: saw, so the span's approved gates reopen (Ruling 162).
+CONFLICT_RESOLVED = "conflict_resolved"
+
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
 #: forge, up to a small cap; this is what it returns once retries are
@@ -79,6 +85,7 @@ SCOPE: dict[str, str] = {
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     BASE_MOVED: "chain",  # the bounce, taken by run_once
+    CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
 }
 
 

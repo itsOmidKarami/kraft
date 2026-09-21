@@ -5,7 +5,7 @@ reruns is tests/executor/test_retry_scopes.py."""
 from __future__ import annotations
 
 import pytest
-from support.api import _force_node, _poll_events, _post_default
+from support.api import _force_node
 
 
 @pytest.fixture
@@ -24,8 +24,11 @@ def retried(client, monkeypatch):
 
 
 def _stopped_at(client, repo, node_id):
-    wid = _post_default(client, repo)
-    _poll_events(client, wid, "gate_requested")
+    """Stopped at `node_id`, forced there: nothing walks before the test."""
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
     _force_node(wid, node_id, "needs_human")
     return wid
 
@@ -102,3 +105,34 @@ def _wait_for(predicate, timeout=10.0):
     while not predicate():
         assert time.monotonic() < deadline, "the retry never reached executor.retry"
         time.sleep(0.02)
+
+
+@pytest.mark.parametrize("door", ["retry", "resume"])
+def test_a_refresh_conflict_at_the_door_is_handed_to_the_walk(client, repo, monkeypatch, door):
+    """Kraft-e7anb: `/retry` and `/resume` no longer stop for a human on the
+    spot. The conflict rides into the walk, which gives it to the node's
+    `on_conflict` handler or stops
+    (tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler)."""
+    import kraft.builtins as builtins_mod
+    from kraft import executor
+
+    async def conflicts(*args, **kwargs):
+        raise builtins_mod.RebaseConflict("rebase failed for x")
+
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        seen.update(kwargs)
+        return "completed"
+
+    monkeypatch.setattr(builtins_mod, "refresh_worktree_base", conflicts)
+    monkeypatch.setattr(executor, "retry" if door == "retry" else "run", fake)
+    wid = _stopped_at(client, repo, "verification")
+    if door == "resume":
+        from support.api import _set_status
+
+        _set_status(wid, "paused")
+
+    assert client.post(f"/api/work-items/{wid}/{door}", json={}).status_code == 200
+    _wait_for(lambda: "conflict" in seen)
+    assert seen["conflict"] == "rebase failed for x"

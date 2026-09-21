@@ -293,3 +293,33 @@ async def test_a_step_handler_reruns_a_task_its_own_handler_already_recovered(it
         for e in it.events("node_recovery_started")
     ]
     assert handlers == [("task", ["build.check.a"]), ("step", ["build.check.b"])]
+
+
+@pytest.mark.parametrize("with_fix_loop", [True, False], ids=["fix-loop", "no-fix-loop"])
+async def test_a_measuring_tasks_question_stops_before_node_recovery(
+    item_on, script, with_fix_loop
+):
+    """Kraft-tr0o9: a question an agent asked is for a human, so the node's
+    `on_failure` never runs on it -- in a node with a fix loop as in one
+    without (the fix-loop branch used to recover first and ask after)."""
+
+    asked = []
+
+    async def asks(_row):
+        asked.append(True)
+        await it.session(f"s-a{len(asked)}", "build.check.a", "needs_context")
+
+    script.plan = {"a": ["needs_context"]}
+    script.effects = {"a": asks}
+    fields = {"fix_loop": {"tasks": [_sub("repair")]}} if with_fix_loop else {}
+    it = await item_on(
+        [_node([{"id": "check", "tasks": [_sub("a")]}], on_failure=_fix("n"), **fields)]
+    )
+
+    assert await _walk(it, policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600))) == (
+        "needs_human"
+    )
+    assert script.calls == ["a"]
+    assert it.events("node_recovery_started") == []
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert reason.startswith("needs_context: ")

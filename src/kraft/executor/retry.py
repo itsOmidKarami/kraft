@@ -26,6 +26,7 @@ async def retry(
     policy: _policy.Policy | None = None,
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
+    conflict: str | None = None,
 ) -> str:
     """Rerun `target` and everything after it on a new run fork; `None`
     restarts the work item from its first node
@@ -38,6 +39,9 @@ async def retry(
     its counters. The walk then starts at the fork's own start: the retried
     node's first step, the retried step, or the retried task's step -- whose
     completed siblings the walk keeps (`RunFork.preserved`).
+
+    `conflict` is a rebase conflict the caller hit refreshing the worktree:
+    the fork's starting node's `on_conflict` handler takes it (`walk.run_once`).
     """
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
@@ -75,4 +79,5 @@ async def retry(
         steer_source="seeded" if seeded else "human",
         launch=launch,
         on_approve=on_approve,
+        conflict=conflict,
     )
