@@ -186,26 +186,34 @@ def fake_beads(request, monkeypatch):
     a test can read or seed its state.
     """
     if "bd" in _e2e_binaries(request.node) or os.environ.get("KRAFT_TEST_REAL_BD") == "1":
-        return None
+        yield None
+        return
     # Past here nothing needs a real workspace, so no test pays for `bd init`.
     monkeypatch.setattr(harness, "REAL_BD", False)
     if "beads_adapter" in request.keywords:
-        return None
+        yield None
+        return
     import kraft.adapters.beads as beads_mod
 
     fake = FakeBeads()
     for name in ("intake", "complete", "search", "ready", "blocked_by"):
         monkeypatch.setattr(beads_mod, name, getattr(fake, name))
 
+    # Refused here and re-raised at teardown: Kraft swallows a failed intake
+    # or close into a warning, so the raise alone could go unseen.
+    reached: list = []
+
     def _refuse(argv, *a, **k):
-        raise AssertionError(
-            f"{request.node.nodeid} reached the real `bd` through kraft.adapters.beads "
-            f"({argv!r}) with the fake installed: fake the new function in "
-            f"tests/support/fake_beads.py, or mark the test e2e('bd')."
-        )
+        reached.append(argv)
+        raise AssertionError(f"real bd reached with the fake installed: {argv!r}")
 
     monkeypatch.setattr(beads_mod, "subprocess", type("_NoBd", (), {"run": staticmethod(_refuse)}))
-    return fake
+    yield fake
+    assert not reached, (
+        f"{request.node.nodeid} reached the real `bd` through kraft.adapters.beads "
+        f"({reached!r}) with the fake installed: fake the new function in "
+        f"tests/support/fake_beads.py, or mark the test e2e('bd')."
+    )
 
 
 @pytest.fixture(autouse=True)
