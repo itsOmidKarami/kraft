@@ -463,7 +463,7 @@ def auto_check_due(row, gate: str | None, evts: list, policy) -> bool:
             row, policy.auto_escalate_stuck if policy else False
         ):
             return False
-        if _auto_escalate_already_handled(evts):
+        if _auto_escalate_already_handled(evts) or not stuck_stop(evts):
             return False
         elapsed = _seconds_since(evts, lambda e: e["type"] == "work_item_needs_human")
     return elapsed is not None and elapsed >= delay
@@ -646,29 +646,21 @@ _RUN_BOUNDARY = (
 )
 
 
-def _latest_needs_human_reason(evts) -> str | None:
-    """The most recent `work_item_needs_human` event's reason in `evts`, or
-    None if the item has never stopped that way. Same reverse-scan idiom as
-    `kraft.escalate._reason`, kept separate: that one always hands back a
-    display string ("(no reason recorded)"), and this one needs a real
-    `None` to tell "never stopped this way" apart from "stopped with an
-    empty reason".
-
-    Takes the timeline itself rather than `(db, work_item_id)` --
-    `auto_escalate_stuck` fetches it once and shares the same list across
-    this, `_auto_dispatch_count`, `pending_gate`, and `escalate.dispatch`.
-    """
+def stuck_stop(evts) -> bool:
+    """Whether the item's newest `work_item_needs_human` stop is in the stuck
+    set (`walk._Stuck`, Ruling 176) -- the only stops `auto_escalate_stuck`
+    answers."""
     for e in reversed(evts):
         if e["type"] == "work_item_needs_human":
-            return e["payload"].get("reason")
-    return None
+            return e["payload"].get("stuck") is True
+    return False
 
 
 def _auto_dispatch_count(evts) -> int:
     """How many auto-dispatched escalation turns (`escalation_message`
     events tagged `{"auto": true}`) have fired since the item's current
     run of `needs_human` stops began, scanning `evts` (the already-fetched
-    timeline -- see `_latest_needs_human_reason`) from the newest event
+    timeline) from the newest event
     backwards.
 
     Stops at the first event whose type is in `_RUN_BOUNDARY`. Every
@@ -769,7 +761,7 @@ async def auto_escalate_stuck(
     module.
 
     Reads the item's event timeline once (`evts` below) and shares it
-    across `pending_gate`, `_latest_needs_human_reason`,
+    across `pending_gate`, `stuck_stop`,
     `_auto_dispatch_count`, and `escalate.dispatch`'s own `_reason`
     lookup -- four separate full `events.read_after` reads on every single
     `run()`/`resume()` call otherwise, for one function.
@@ -785,10 +777,10 @@ async def auto_escalate_stuck(
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     if pending_gate(db, work_item_id, evts=evts) is not None:
         return status  # the gate flow owns this stop, unrelated to this feature
-    reason = _latest_needs_human_reason(evts)
-    if reason is not None and reason.startswith("needs_context:"):
-        # A worker asked a direct question. Dispatching an agent back onto
-        # it only asks again; a human has to actually answer.
+    if not stuck_stop(evts):
+        # Ruling 176: config, budget, infra, a wait timeout, a rate limit or a
+        # question -- an agent cannot fix any of them, and the stop already
+        # names its cause for the human it is for.
         return status
     current_session_id = _current_run_escalation_session_id(evts)
     if current_session_id and escalate.session_status(db, current_session_id) == "needs_context":

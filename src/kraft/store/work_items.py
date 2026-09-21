@@ -145,8 +145,14 @@ def mark_needs_human(
     capped: dict | None = None,
     budget: dict | None = None,
     bundle: dict | None = None,
+    *,
+    stuck: bool = False,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
+
+    `stuck` marks a stop in the stuck set (`walk._Stuck`, Ruling 176): the only
+    stops automatic escalation answers. Written only by `walk._stop_stuck`;
+    `executor.gates.stuck_stop` is its reader.
 
     The UI shows capped-out as a glyph *plus* the words "capped n/n", and the
     board never fetches sessions per row — so the numbers have to ride the
@@ -192,6 +198,8 @@ def mark_needs_human(
         payload["budget"] = budget
     if bundle is not None:
         payload["bundle"] = bundle
+    if stuck:
+        payload["stuck"] = True
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 

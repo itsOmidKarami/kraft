@@ -7,7 +7,7 @@ from kraft import executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
-from kraft.executor import gates, stops
+from kraft.executor import stops
 from kraft.templates.models import GateNode
 
 
@@ -259,27 +259,7 @@ async def reject_gate(wid: str, gate: str, body: GateReject, request: Request):
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         if target is None:
-            try:
-                deps.spawn(
-                    request.app,
-                    wid,
-                    deps.guard(
-                        st.db,
-                        wid,
-                        gates.auto_escalate_stuck(
-                            "needs_human",
-                            st.db,
-                            st.run_dirs,
-                            work_item_id=wid,
-                            policy=st.policy,
-                            launch=deps.launch(st, row["repo"]),
-                            bd_cwd=deps.bd_cwd(),
-                            on_approve=deps._on_approve(st),
-                        ),
-                    ),
-                )
-            except deps.AlreadyRunning:
-                raise HTTPException(409, "a walk is already running for this work item") from None
+            # A spent reject loop goes to a human, not an agent (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
         try:

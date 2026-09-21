@@ -406,20 +406,16 @@ def test_gate_reject_is_bounded_by_its_reject_loop(client, repo):
 
 
 @pytest.mark.parametrize(
-    "escalated",
+    "armed",
     [
         pytest.param(True, marks=_reject_cap(escalate=True), id="armed"),
         pytest.param(False, marks=_reject_cap(escalate=False), id="disarmed"),
     ],
 )
-def test_gate_reject_loop_breach_auto_escalates_only_when_armed(
-    client, repo, monkeypatch, escalated
-):
-    """Kraft-h48r: `reject_gate`'s cap-breach branch used to return straight
-    past `auto_escalate_stuck` -- the agent-side `reject` verdict re-enters
-    `walk.run_once`, whose own post-step call reaches it normally, but this
-    HTTP route never goes through either `walk.run` or `resuming.resume`.
-    Disarmed, it must still no-op exactly like it does on the walk-driven path."""
+def test_a_gate_reject_loop_breach_goes_to_a_human_armed_or_not(client, repo, monkeypatch, armed):
+    """A spent reject loop is not in the stuck set (Ruling 176): the item
+    stops for a human, and no agent is dispatched onto it whether or not
+    `auto_escalate_stuck` is armed."""
     calls = []
 
     async def fake_dispatch(database, run_dirs, *, work_item_id, message, launch, auto, evts=None):
@@ -431,7 +427,7 @@ def test_gate_reject_loop_breach_auto_escalates_only_when_armed(
     _first, r = _reject_past_the_cap(client, wid)
     assert r.status_code == 200, r.text
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-    assert calls == ([(wid, True)] if escalated else [])
+    assert calls == []
 
 
 @_REVIEW

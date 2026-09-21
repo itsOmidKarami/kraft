@@ -129,7 +129,7 @@ async def test_tick_dispatches_a_needs_human_item_once_its_delay_has_elapsed(
         )
     )
     await app.state.db.write(lambda c: store.enter_node(c, "w1", "a"))
-    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck"))
+    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck", stuck=True))
     await auto_escalate_delay.tick(app)
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
     assert len(calls) == 1
@@ -168,7 +168,9 @@ async def test_tick_bounds_dispatches_by_max_concurrent(tmp_path, monkeypatch, r
             )
         )
         await app.state.db.write(lambda c, wid=wid: store.enter_node(c, wid, "a"))
-        await app.state.db.write(lambda c, wid=wid: store.mark_needs_human(c, wid, "a", "stuck"))
+        await app.state.db.write(
+            lambda c, wid=wid: store.mark_needs_human(c, wid, "a", "stuck", stuck=True)
+        )
     attempted = await auto_escalate_delay.tick(app)
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
     assert len(attempted) == 1
@@ -213,7 +215,9 @@ async def test_tick_bounds_dispatches_across_ticks_via_live_tasks(
             )
         )
         await app.state.db.write(lambda c, wid=wid: store.enter_node(c, wid, "a"))
-        await app.state.db.write(lambda c, wid=wid: store.mark_needs_human(c, wid, "a", "stuck"))
+        await app.state.db.write(
+            lambda c, wid=wid: store.mark_needs_human(c, wid, "a", "stuck", stuck=True)
+        )
     # w2's dispatch from a previous tick is still in flight: its row is
     # still `needs_human` (an auto-escalate turn never flips it to
     # `active`), so only `app.state.tasks` still knows it is running.
@@ -283,7 +287,7 @@ async def test_tick_skips_a_row_whose_effective_delay_is_zero(
         )
     )
     await app.state.db.write(lambda c: store.enter_node(c, "w1", "a"))
-    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck"))
+    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck", stuck=True))
     assert await auto_escalate_delay.tick(app) == []
     await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
     assert calls == []
@@ -319,7 +323,35 @@ async def test_tick_skips_a_row_that_is_not_armed_for_auto_escalation(
         )
     )
     await app.state.db.write(lambda c: store.enter_node(c, "w1", "a"))
-    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck"))
+    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "stuck", stuck=True))
+    assert await auto_escalate_delay.tick(app) == []
+
+
+async def test_tick_skips_a_row_stopped_outside_the_stuck_set(
+    tmp_path, monkeypatch, repo, stub_app
+):
+    """Armed, and past its delay, but stopped for something no agent can fix
+    (Ruling 176): `auto_escalate_stuck` would only hand the status back, so
+    the tick must not spend a slot on it either."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    monkeypatch.setattr("kraft.executor.gates._seconds_since", lambda evts, pred: 10_000.0)
+    pol = policy.Policy(loops={}, default=policy.Cap(3, 3600), auto_escalate_delay_s=600)
+
+    app = stub_app(**_state(tmp_path, policy_obj=pol))
+    chain = '{"template_id": "t", "nodes": [{"id": "a", "tasks": []}]}'
+    await app.state.db.write(
+        lambda c: store.create_work_item(
+            c,
+            id="w1",
+            bead_id=None,
+            title="t",
+            repo=str(repo),
+            chain_template="t",
+            chain_definition=chain,
+        )
+    )
+    await app.state.db.write(lambda c: store.enter_node(c, "w1", "a"))
+    await app.state.db.write(lambda c: store.mark_needs_human(c, "w1", "a", "budget cap reached"))
     assert await auto_escalate_delay.tick(app) == []
 
 
@@ -374,7 +406,7 @@ async def test_a_legacy_row_does_not_abort_the_tick_for_every_other_row(
         )
     )
     await app.state.db.write(
-        lambda c: store.mark_needs_human(c, "v1", "implementation", "verify failed")
+        lambda c: store.mark_needs_human(c, "v1", "implementation", "verify failed", stuck=True)
     )
     attempted = await auto_escalate_delay.tick(app)
 

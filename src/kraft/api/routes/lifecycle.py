@@ -493,27 +493,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             await st.db.write(
                 lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
             )
-            try:
-                deps.spawn(
-                    request.app,
-                    wid,
-                    deps.guard(
-                        st.db,
-                        wid,
-                        gates.auto_escalate_stuck(
-                            "needs_human",
-                            st.db,
-                            st.run_dirs,
-                            work_item_id=wid,
-                            policy=st.policy,
-                            launch=deps.launch(st, row["repo"]),
-                            bd_cwd=deps.bd_cwd(),
-                            on_approve=deps._on_approve(st),
-                        ),
-                    ),
-                )
-            except deps.AlreadyRunning:
-                raise HTTPException(409, "a walk is already running for this work item") from None
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         if new_base:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
@@ -794,27 +774,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         except RuntimeError as exc:
             reason = str(exc)
             await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
-            try:
-                deps.spawn(
-                    request.app,
-                    wid,
-                    deps.guard(
-                        st.db,
-                        wid,
-                        gates.auto_escalate_stuck(
-                            "needs_human",
-                            st.db,
-                            st.run_dirs,
-                            work_item_id=wid,
-                            policy=st.policy,
-                            launch=deps.launch(st, row["repo"]),
-                            bd_cwd=deps.bd_cwd(),
-                            on_approve=deps._on_approve(st),
-                        ),
-                    ),
-                )
-            except deps.AlreadyRunning:
-                raise HTTPException(409, "a walk is already running for this work item") from None
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         if new_base:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)

@@ -200,14 +200,13 @@ _STOP_STATUS = {"resume": "paused", "retry": "needs_human"}
 
 
 @pytest.mark.parametrize("verb", ["resume", "retry"])
-def test_a_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, monkeypatch, verb):
-    """A git failure that is NOT a conflict (`RebaseConflict` specifically) --
-    still stops and escalates exactly as before Kraft-s7c04.23; only a
-    conflict gets the new resolver path. Kraft-h48r: the resume and retry
-    routes' rebase-failure branch used to `mark_needs_human` and return
-    without ever giving `auto_escalate_stuck` a chance to fire --
-    `walk.run`/`resuming.resume` call it after every step, and this route
-    terminates before either of them runs."""
+def test_a_non_conflict_rebase_failure_goes_to_a_human_even_when_armed(
+    client, repo, monkeypatch, verb
+):
+    """A git failure that is NOT a conflict (`RebaseConflict` specifically)
+    stops for a human naming it; only a conflict gets the resolver path
+    (Kraft-s7c04.23). It is not in the stuck set, so no agent is dispatched
+    onto it even with `auto_escalate_stuck` armed (Ruling 176)."""
     calls = _rebase_fails(monkeypatch, lambda b: RuntimeError)
     wid = _completed_quick_task(client, repo)
     _force_node(wid, "verify", _STOP_STATUS[verb])
@@ -215,8 +214,15 @@ def test_a_non_conflict_rebase_failure_auto_escalates_when_armed(client, repo, m
     r = _post_past_the_still_finishing_walk(client, f"/api/work-items/{wid}/{verb}")
 
     assert r.status_code == 200, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
-    assert calls == [(wid, True)]
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
+    stops = [
+        e
+        for e in _poll_events(client, wid, "work_item_needs_human")
+        if e["type"] == "work_item_needs_human"
+    ]
+    assert stops[-1]["payload"]["reason"] == "rebase conflict: could not apply"
+    assert calls == []
 
 
 @pytest.mark.parametrize("verb", ["resume", "retry"])
