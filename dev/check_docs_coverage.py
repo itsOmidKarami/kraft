@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -122,9 +123,39 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
 ]
 
 
+#: A backticked gate-shaped name in the docsite: `spec_approval`, and the
+#: legacy `human_review_approval` this check exists to catch (Kraft-cusz8).
+_GATE_NAME = re.compile(r"`([a-z][a-z0-9_]*_approval)`")
+
+
+def unknown_gates() -> list[str]:
+    """`page: name` for every gate-shaped name the docsite gives that no
+    shipped chain has -- the reverse direction of CHECKS: a doc naming a gate
+    that does not exist sends a reader looking for it."""
+    from kraft.templates.library import TemplateLibrary
+    from kraft.templates.models import GateNode
+
+    library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
+    gates = {
+        n.id
+        for id in library.chain_ids
+        for n in library.resolve_chain(id).nodes
+        if isinstance(n.node, GateNode)
+    }
+    return [
+        f"{page.name}: {name}"
+        for page in sorted(DOCSITE.glob("*.md"))
+        for name in sorted(set(_GATE_NAME.findall(page.read_text())))
+        if name not in gates
+    ]
+
+
 def main() -> int:
     sys.path.insert(0, str(ROOT / "src"))
     failed = False
+    for unknown in unknown_gates():
+        failed = True
+        print(f"docsite/{unknown}: names a gate no shipped chain has")
     for label, extractor, page in CHECKS:
         text = (DOCSITE / page).read_text()
         missing = sorted(term for term in extractor() if term not in text)
