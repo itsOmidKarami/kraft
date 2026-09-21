@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import make_repo_with_submodule, v1_chain, workspace_target
+from support.harness import _git, make_repo, make_repo_with_submodule, v1_chain, workspace_target
 
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
@@ -153,3 +153,85 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
 
     assert [sandbox for _, sandbox in ran] == [None, member["sandbox"]]
+
+
+# ── areas (`repository-area-can-declare-setup-and-test-scopes`) ──
+
+_AREAS = {
+    "setup_command": "",
+    "test_scopes": [{"paths": ["src/**"], "command": "just test"}],
+    "areas": {
+        "python_api": {
+            "paths": ["services/api/**"],
+            "setup": "uv sync",
+            "verification": {
+                "test_scopes": [{"paths": ["services/api/**"], "command": "just test-api"}]
+            },
+        },
+        "java_worker": {
+            "paths": ["services/worker/**"],
+            "setup": "./gradlew classes",
+            "verification": {
+                "test_scopes": [{"paths": ["services/worker/**"], "command": "./gradlew test"}]
+            },
+        },
+    },
+}
+
+
+@pytest.fixture
+def commands(monkeypatch):
+    """Every command a verification task ran, in order; each reports done."""
+    calls: list[list[str]] = []
+
+    async def run_task(db, run_dirs, *, cmd, **_):
+        calls.append(list(cmd))
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+    return calls
+
+
+async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
+    database, run_dirs, tmp_path, commands
+):
+    """An area's test scopes join the repository's in one table, selected by
+    changed paths the same way; before an area's scope runs, its setup runs
+    (`selected-test-scope-activates-its-area-setup`). No area is ever chosen
+    at intake, so this one is "unexpected" in the requirement's sense, and is
+    still set up and tested (`unexpected-area-changes-are-tested`); the area
+    nothing changed is neither."""
+    repo = make_repo(tmp_path)
+    chain = v1_chain(
+        [
+            {
+                "id": "v",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
+                ],
+            }
+        ],
+        repo=repo,
+    )
+    await wtree.make_item(database, repo, materialized_chain=chain.to_json())
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    (worktree / "services" / "api").mkdir(parents=True)
+    (worktree / "services" / "api" / "app.py").write_text("x = 1\n")
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-qm", "touch the api area")
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
+    node = chain.chain.nodes[0]
+
+    status = await dispatch.dispatch_node(
+        database,
+        run_dirs,
+        next(iter(node.tasks())),
+        node,
+        row,
+        worktree,
+        launch=LaunchContext(repo_entry=_AREAS, steering_dir=None),
+    )
+
+    assert status == "done"
+    assert commands == [["uv", "sync"], ["just", "test-api"]]

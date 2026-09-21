@@ -48,7 +48,11 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"sandbox": None}),
         ({"sandbox": _SANDBOX}, {"sandbox": _SANDBOX}),
         ({"sandbox": False}, {"sandbox": False}),
-        ({}, {"models": {}}),
+        ({}, {"models": {}, "areas": {}}),
+        (
+            {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
+            {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
+        ),
         ({"models": {"claude_review": "opus"}}, {"models": {"claude_review": "opus"}}),
         # Anything already in a repos.yaml was connected by a human --
         # auto-connect did not exist when it was written. Defaulting to False
@@ -69,7 +73,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "sandbox-defaults-to-none",
         "passes-through-a-well-formed-sandbox",
         "passes-through-an-explicit-sandbox-off",
-        "models-default-to-empty",
+        "models-and-areas-default-to-empty",
+        "keeps-an-area-as-written",
         "keeps-a-per-profile-model",
         "managed-defaults-true-for-a-pre-existing-entry",
         "keeps-an-explicit-managed-false",
@@ -101,6 +106,8 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"env_passthrough": ["", "OK"]}, "env_passthrough"),
         ({"models": {"Claude Review": "opus"}}, "models"),
         ({"models": {"claude_review": 4}}, "models"),
+        ({"areas": {"api": {"paths": []}}}, "areas"),
+        ({"areas": {"api": {"paths": ["a/**"], "forge": {"kind": "github"}}}}, "areas"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),
     ],
     ids=[
@@ -118,6 +125,8 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         "an-empty-env-passthrough-entry",
         "a-models-key-that-is-no-profile-id",
         "a-non-string-model",
+        "an-area-covering-no-path",
+        "an-area-naming-a-forge",
         "a-test-scope-with-no-command",
     ],
 )

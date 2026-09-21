@@ -207,9 +207,25 @@ def _select_scopes(
         # that for a `LaunchContext` built by hand (tests, or any future
         # caller that skips the yaml round-trip).
         repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
-    if not repo_scopes:
+    # One table after resolution: the repository's scopes, then each area's,
+    # every area scope carrying the setup it needs first
+    # (`repository-area-can-declare-setup-and-test-scopes`).
+    area_scopes = [
+        {**scope, "area": name, "setup": area.get("setup")}
+        for name, area in (repo_entry.get("areas") or {}).items()
+        for scope in (area.get("verification") or {}).get("test_scopes") or []
+    ]
+    if not repo_scopes and not area_scopes:
         return [], sandbox
-    scopes = [{"paths": s["paths"], "cmd": shlex.split(s["command"])} for s in repo_scopes]
+    scopes = [
+        {
+            "paths": s["paths"],
+            "cmd": shlex.split(s["command"]),
+            "area": s.get("area"),
+            "setup": shlex.split(s["setup"]) if s.get("setup") else None,
+        }
+        for s in [*(repo_scopes or []), *area_scopes]
+    ]
     base_ref = _current_base_ref(db, work_item_id)
     # `since` is the diff's lower bound: round <= 0 always measures the whole
     # branch (never reads another round or another node's head), and only a
@@ -351,11 +367,11 @@ async def _run_changed_test_scopes(
             "and Kraft will not guess a command\n",
         )
 
-    async def _scope(scope: dict) -> str:
+    async def _run(cmd: list[str]) -> str:
         return await _subprocess.run_task(
             db,
             run_dirs,
-            cmd=scope["cmd"],
+            cmd=cmd,
             cwd=worktree,
             repo_entry=repo_entry,
             # The fix loop re-runs the test command after an agent edits source in
@@ -367,6 +383,21 @@ async def _run_changed_test_scopes(
             sandbox=sandbox,
             **{**common, "session_id": uuid.uuid4().hex},
         )
+
+    # An area's setup runs once, before the first of its scopes -- including
+    # an area nobody chose at intake that the changed paths selected anyway
+    # (`selected-test-scope-activates-its-area-setup`, `unexpected-area-
+    # changes-are-tested`). A setup that does not finish is its scopes' result.
+    setups: dict[str, asyncio.Task] = {}
+
+    async def _scope(scope: dict) -> str:
+        if scope["setup"]:
+            if scope["area"] not in setups:
+                setups[scope["area"]] = asyncio.ensure_future(_run(scope["setup"]))
+            ready = await setups[scope["area"]]
+            if ready != "done":
+                return ready
+        return await _run(scope["cmd"])
 
     if execution is ExecutionMode.PARALLEL:
         results = list(await asyncio.gather(*(_scope(s) for s in to_run)))

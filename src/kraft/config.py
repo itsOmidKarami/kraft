@@ -27,6 +27,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     ValidationInfo,
     field_serializer,
@@ -183,6 +184,11 @@ class RepoEntry(BaseModel):
     # and CI drift apart (Kraft-579). None keeps the registry's command.
     test_command: str | None = None
     test_scopes: list[TestScope] | None = Field(default=None, min_length=1)
+    #: Path-scoped execution contexts inside this repository, in the V1
+    #: `Area` shape (`repository-area-can-declare-setup-and-test-scopes`):
+    #: each area's test scopes join the repository's, and its `setup` runs
+    #: before any of them does. Never forge targets.
+    areas: dict[str, dict] = {}
     # Files `git worktree add` cannot carry: it checks out tracked content at
     # HEAD, so an untracked `.python-version` never reaches the worktree
     # (Kraft-gxcmy). Relative file paths only: a directory here is how a list
@@ -244,6 +250,15 @@ class RepoEntry(BaseModel):
             data["forge"] = "gitlab"
             data["project"] = legacy
         return data
+
+    @field_validator("areas")
+    @classmethod
+    def _typed_areas(cls, v: dict[str, dict]) -> dict[str, dict]:
+        """Checked as V1 `Area`s, kept as written so a re-save round-trips."""
+        from kraft.templates.environment import Area, Identifier  # `kraft.templates` imports us
+
+        TypeAdapter(dict[Identifier, Area]).validate_python(v)
+        return v
 
     @field_validator("local_files")
     @classmethod
