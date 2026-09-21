@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -203,6 +203,12 @@ async def reload_templates_endpoint(request: Request):
 
 
 class PolicyBody(BaseModel):
+    """What the Policy screen edits. `extra="allow"`: a key this model doesn't
+    name (V1 `defaults:`/`maxima:`, `forge_cli_timeout_s`, ...) still reaches
+    the merge and the loader's own validation instead of being dropped here."""
+
+    model_config = ConfigDict(extra="allow")
+
     loops: dict
     default: dict
     findings: dict | None = None
@@ -227,34 +233,37 @@ async def get_policy(request: Request):
 @api_router.put("/policy")
 async def put_policy(body: PolicyBody, request: Request):
     """Caps apply to loops that start after the save — a counter already running
-    keeps the cap it snapshotted at first fire (`02` §2.C)."""
+    keeps the cap it snapshotted at first fire (`02` §2.C).
+
+    The body is merged over the file on disk, top-level key by key (Kraft-xh2x8):
+    a key the request doesn't send is kept, and a key it sends as `null` is
+    removed. A save never drops what it didn't edit. The V1 instance policy
+    (`defaults:`/`maxima:`) is refreshed with the legacy `Policy`, so the
+    daemon holds the ceiling the file now says from the next intake on."""
     st = request.app.state
-    data = {"loops": body.loops, "default": body.default, "max_concurrent": body.max_concurrent}
-    if body.findings is not None:
-        data["findings"] = body.findings
-    if body.budget is not None:
-        data["budget"] = body.budget
-    if body.rate_limit_retries is not None:
-        data["rate_limit_retries"] = body.rate_limit_retries
-    if body.triggers is not None:
-        data["triggers"] = body.triggers
-    if body.archive is not None:
-        data["archive"] = body.archive
-    if body.auto_escalate_stuck is not None:
-        data["auto_escalate_stuck"] = body.auto_escalate_stuck
-    if body.auto_escalate_stuck_cap is not None:
-        data["auto_escalate_stuck_cap"] = body.auto_escalate_stuck_cap
-    if body.auto_escalate_delay_s is not None:
-        data["auto_escalate_delay_s"] = body.auto_escalate_delay_s
+    try:
+        data = config_mod.read_yaml(st.templates_dir / "policy.yaml", {})
+    except config_mod.ConfigError:
+        # An unparseable file has nothing to keep; the save replaces it, as
+        # it always has, so the screen stays a way out of a broken file.
+        data = {}
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    data.setdefault("max_concurrent", body.max_concurrent)
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))
         try:
-            policy_obj = policy_mod.load_policy(candidate)
+            parsed = policy_mod.PolicyInput.from_yaml(candidate)
+            policy_obj = policy_mod.Policy.from_input(parsed, source=candidate)
         except policy_mod.PolicyError as exc:
             raise HTTPException(422, str(exc)) from exc
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     st.policy = policy_obj
+    st.instance_policy = parsed.instance_policy()
     st.invalid_policy = []
     return data
 

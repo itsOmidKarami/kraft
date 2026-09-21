@@ -28,9 +28,12 @@ def test_policy_put_rejects_a_cap_that_would_not_load(client, templates_dir):
         "loops": {"verify_fix_loop": {"attempts": 5, "wall_clock_s": 60}},
         "default": {"attempts": 3, "wall_clock_s": 3600},
     }
+    seed = yaml.safe_load((templates_dir / "policy.yaml").read_text())
     assert client.put("/api/policy", json=good).status_code == 200
     assert client.get("/api/policy").json()["loops"]["verify_fix_loop"]["attempts"] == 5
+    # Merged over the file, not replacing it: the seed's other keys stay (Kraft-xh2x8).
     assert yaml.safe_load((templates_dir / "policy.yaml").read_text()) == {
+        **seed,
         **good,
         "max_concurrent": 3,
     }
@@ -155,3 +158,52 @@ def test_put_policy_rejects_bad_max_concurrent(client):
     body = client.get("/api/policy").json()
     body["max_concurrent"] = 0
     assert client.put("/api/policy", json=body).status_code == 422
+
+
+def test_a_get_then_put_round_trip_keeps_every_key_and_refreshes_the_ceiling(client, templates_dir):
+    """Kraft-xh2x8: a save rewrites policy.yaml from what it was sent. A key the
+    screen doesn't edit -- V1 `defaults:`/`maxima:`, `forge_cli_timeout_s`,
+    `auto_review_attempts` -- must survive it, and the running daemon must
+    hold the ceiling the file now says, not the one it read at startup."""
+    written = {
+        "loops": {},
+        "default": {"attempts": 3, "wall_clock_s": 3600},
+        "forge_cli_timeout_s": 300,
+        "auto_review_attempts": 2,
+        "defaults": {"max_attempts": 2},
+        "maxima": {"token_budget": 1000, "allowed_tools": ["git"]},
+    }
+    (templates_dir / "policy.yaml").write_text(yaml.safe_dump(written))
+    body = client.get("/api/policy").json()
+    assert client.put("/api/policy", json=body).status_code == 200
+
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk == {**written, "max_concurrent": 3}
+    live = client.app.state.instance_policy
+    assert (live.token_budget, live.allowed_tools, live.max_attempts) == (1000, ("git",), 2)
+
+
+def test_a_save_that_omits_a_key_keeps_it_on_disk(client, templates_dir):
+    """An older SPA build sends only what it knows; the rest stays."""
+    (templates_dir / "policy.yaml").write_text(
+        "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
+        "maxima: { token_budget: 1000 }\nforge_cli_timeout_s: 300\n"
+    )
+    body = {"loops": {}, "default": {"attempts": 5, "wall_clock_s": 3600}}
+    assert client.put("/api/policy", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk["maxima"] == {"token_budget": 1000}
+    assert on_disk["forge_cli_timeout_s"] == 300
+    assert on_disk["default"]["attempts"] == 5
+
+
+def test_a_save_that_edits_a_key_the_form_does_not_name_applies_it(client, templates_dir):
+    """The other half of Kraft-xh2x8: a key outside `PolicyBody`'s fields is
+    not ignored either -- a save that changes `maxima:` must not answer 200
+    and leave the old ceiling on disk."""
+    body = client.get("/api/policy").json()
+    body["maxima"] = {"token_budget": 2000}
+    assert client.put("/api/policy", json=body).status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
+    assert on_disk["maxima"] == {"token_budget": 2000}
+    assert client.app.state.instance_policy.token_budget == 2000
