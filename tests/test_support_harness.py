@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from support import harness
 from support.harness import _git, isolated_bd, make_repo
 
 
@@ -49,6 +52,24 @@ def test_a_make_repo_copy_reads_clean_to_git_plumbing(tmp_path):
         check=True,
     ).stdout
     assert out == ""
+
+
+def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, monkeypatch):
+    """Kraft-vrcw3: the beads fake cannot reach a `python -m kraft` child, so a
+    unit test's child must resolve `bd` to the stub that refuses loudly, never
+    the real binary; an `e2e("bd")` test's child keeps the real one."""
+    from support import server
+
+    env = server.child_env(tmp_path, tmp_path, tmp_path, 1, None)
+    stub = shutil.which("bd", path=env["PATH"])
+    assert stub == str(server._bd_stub_dir() / "bd")
+    refused = subprocess.run([stub, "create"], capture_output=True, text=True, env=env)
+    assert refused.returncode == 127
+    assert server.BD_STUB_MESSAGE in refused.stderr
+
+    monkeypatch.setattr(harness, "REAL_BD", True)
+    real_env = server.child_env(tmp_path, tmp_path, tmp_path, 1, None)
+    assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
 
 
 @pytest.mark.parametrize("backend", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))])

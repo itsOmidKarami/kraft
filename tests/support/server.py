@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import atexit
 import contextlib
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
+
+from support import harness
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,6 +38,56 @@ class Server:
             self.proc.wait()
 
 
+_bd_stub: Path | None = None
+
+#: What the stub says, so a child's log shows why its intake failed.
+BD_STUB_MESSAGE = (
+    "bd is stubbed out for this server child (tests/support/server.py, Kraft-vrcw3): "
+    "a unit test must not spawn the real bd. Mark the test e2e('bd') if it needs one."
+)
+
+
+def _bd_stub_dir() -> Path:
+    """A directory holding a `bd` that refuses loudly: it prints
+    `BD_STUB_MESSAGE` and exits 127. Built once per process.
+    `KRAFT_BD_STUB_LOG`, when set, collects each call's argv."""
+    global _bd_stub
+    if _bd_stub is None:
+        d = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-"))
+        (d / "bd").write_text(
+            "#!/bin/sh\n"
+            'if [ -n "$KRAFT_BD_STUB_LOG" ]; then echo "$*" >> "$KRAFT_BD_STUB_LOG"; fi\n'
+            f"echo {BD_STUB_MESSAGE!r} >&2\n"
+            "exit 127\n"
+        )
+        (d / "bd").chmod(0o755)
+        atexit.register(shutil.rmtree, d, ignore_errors=True)
+        _bd_stub = d
+    return _bd_stub
+
+
+def child_env(run_dir: Path, templates_dir: Path, bd_cwd: Path, port: int, env: dict | None):
+    """The environment a `python -m kraft` child starts with.
+
+    The in-process beads fake (tests/conftest.py) cannot reach a child
+    process, so a unit test's child finds the loud stub `bd` first on PATH
+    instead of the real one (Kraft-vrcw3): a failed `bd` is what Kraft
+    already degrades on. `harness.REAL_BD` says which tier this is -- the
+    conftest turns it off for every test the fake covers, and leaves it on
+    for `e2e("bd")` tests, whose child gets the real bd."""
+    child = {
+        **os.environ,
+        "KRAFT_RUN_DIR": str(run_dir),
+        "KRAFT_TEMPLATES_DIR": str(templates_dir),
+        "KRAFT_BD_CWD": str(bd_cwd),
+        "KRAFT_PORT": str(port),
+        **(env or {}),
+    }
+    if not harness.REAL_BD:
+        child["PATH"] = os.pathsep.join([str(_bd_stub_dir()), child.get("PATH", "")])
+    return child
+
+
 def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None):
     """One attempt at a live server. Returns a `Server`, or the child's returncode
     if it exited before it ever served.
@@ -42,15 +97,11 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | Non
     immediate exit, and a fresh port is all it needs.
     """
     port = _free_port()
-    child_env = {
-        **os.environ,
-        "KRAFT_RUN_DIR": str(run_dir),
-        "KRAFT_TEMPLATES_DIR": str(templates_dir),
-        "KRAFT_BD_CWD": str(bd_cwd),
-        "KRAFT_PORT": str(port),
-        **(env or {}),
-    }
-    proc = subprocess.Popen([sys.executable, "-m", "kraft"], cwd=_REPO_ROOT, env=child_env)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "kraft"],
+        cwd=_REPO_ROOT,
+        env=child_env(run_dir, templates_dir, bd_cwd, port, env),
+    )
     base = f"http://127.0.0.1:{port}"
     client = httpx.Client(base_url=base, timeout=10.0)
     deadline = time.monotonic() + 15
