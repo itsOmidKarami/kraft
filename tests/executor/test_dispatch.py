@@ -2699,8 +2699,9 @@ def test_an_unloadable_selected_skill_stops_for_a_human(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("profiles", "why"),
     [
-        # A task naming no profile -- even though `claude` below *is* an
-        # installed provider, the id a task names is never read as one.
+        # No profile `ghost` -- and, below, none named `codex` either, though
+        # `codex` *is* an installed provider: the id a task names is never
+        # read as one.
         ({"claude": {"provider": "claude"}}, "defines no such profile"),
         ({"ghost": {"provider": "claude", "enabled": False}}, "'ghost' is disabled"),
         ({"ghost": {"provider": "nonesuch"}}, "provider 'nonesuch' is not an installed harness"),
@@ -2723,6 +2724,7 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
     if profiles is not None:
         (templates / "harnesses.yaml").write_text(json.dumps({"harnesses": profiles}))
+    selected = "codex" if why == "defines no such profile" else "ghost"
     chain = v1_chain(
         [
             {
@@ -2732,7 +2734,7 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
                     {
                         "id": "write",
                         "kind": "agent",
-                        "harness": "ghost",
+                        "harness": selected,
                         "prompt": "Produce the specification.",
                     }
                 ],
@@ -2746,7 +2748,7 @@ def test_an_unavailable_selected_harness_stops_for_a_human(tmp_path, monkeypatch
     assert status == "needs_human"
     assert [s["status"] for s in sessions] == ["config_error"]
     log = Path(sessions[0]["log_path"]).read_text()
-    assert "selects harness 'ghost', which is not available" in log
+    assert f"selects harness {selected!r}, which is not available" in log
     assert why in log, log
 
 
