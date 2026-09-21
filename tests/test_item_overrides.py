@@ -11,11 +11,10 @@ import uuid
 from pathlib import Path
 
 from support.api import _client
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, v1_seeded_chain
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
-from kraft.templates import Template
 
 
 def _mark_started(wid: str, node_id: str) -> None:
@@ -34,6 +33,10 @@ def _mark_started(wid: str, node_id: str) -> None:
 
 
 def test_patch_sets_a_node_override_and_the_detail_reports_it(tmp_path, monkeypatch):
+    """V1: `auto_escalate` can only confirm or suppress a gate's own declared
+    reviewer, and the shipped `default` chain declares none, so the override
+    this pins the mechanics with is a `model` -- any node, no declaration
+    needed. The refusal itself is pinned in tests/executor/test_gates.py."""
     client = _client(tmp_path, monkeypatch)
     with client:
         repo = make_repo(tmp_path)
@@ -49,18 +52,18 @@ def test_patch_sets_a_node_override_and_the_detail_reports_it(tmp_path, monkeypa
 
         r = client.patch(
             f"/api/work-items/{wid}",
-            json={"node_overrides": {"plan": {"auto_escalate": True}}},
+            json={"node_overrides": {"plan": {"model": "opus"}}},
         )
         assert r.status_code == 200, r.text
 
         detail = client.get(f"/api/work-items/{wid}").json()
-        assert detail["node_overrides"] == {"plan": {"auto_escalate": True}}
+        assert detail["node_overrides"] == {"plan": {"model": "opus"}}
         assert detail["node_overrides_count"] == 1
         plan_node = next(n for n in detail["effective_chain"]["nodes"] if n["id"] == "plan")
-        assert plan_node["auto_escalate"] is True
+        assert plan_node["model"] == "opus"
         # chain_definition itself is untouched -- the override is a layer, not a mutation
         plan_raw = next(n for n in detail["chain_definition"]["nodes"] if n["id"] == "plan")
-        assert plan_raw.get("auto_escalate") is not True
+        assert plan_raw.get("model") != "opus"
 
 
 def test_patch_node_overrides_merges_per_node_not_whole_object(tmp_path, monkeypatch):
@@ -71,18 +74,19 @@ def test_patch_node_overrides_merges_per_node_not_whole_object(tmp_path, monkeyp
             "/api/work-items",
             json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
         ).json()["id"]
-        client.patch(
-            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"auto_escalate": True}}}
+        first = client.patch(
+            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "opus"}}}
         )
+        assert first.status_code == 200, first.text
         r = client.patch(
             f"/api/work-items/{wid}",
-            json={"node_overrides": {"human_review": {"auto_escalate": True}}},
+            json={"node_overrides": {"implementation": {"effort": "high"}}},
         )
         assert r.status_code == 200, r.text
         overrides = client.get(f"/api/work-items/{wid}").json()["node_overrides"]
         assert overrides == {
-            "plan": {"auto_escalate": True},
-            "human_review": {"auto_escalate": True},
+            "plan": {"model": "opus"},
+            "implementation": {"effort": "high"},
         }
 
 
@@ -126,11 +130,11 @@ def test_patch_sets_a_node_model_override(tmp_path, monkeypatch):
         ).json()["id"]
         r = client.patch(
             f"/api/work-items/{wid}",
-            json={"node_overrides": {"verify": {"model": "opus", "effort": "high"}}},
+            json={"node_overrides": {"implementation": {"model": "opus", "effort": "high"}}},
         )
         assert r.status_code == 200, r.text
         row = client.get(f"/api/work-items/{wid}").json()
-        assert row["node_overrides"]["verify"] == {"model": "opus", "effort": "high"}
+        assert row["node_overrides"]["implementation"] == {"model": "opus", "effort": "high"}
 
 
 def test_patch_rejects_a_node_override_with_bad_effort(tmp_path, monkeypatch):
@@ -143,7 +147,7 @@ def test_patch_rejects_a_node_override_with_bad_effort(tmp_path, monkeypatch):
         ).json()["id"]
         r = client.patch(
             f"/api/work-items/{wid}",
-            json={"node_overrides": {"verify": {"effort": "turbo"}}},
+            json={"node_overrides": {"implementation": {"effort": "turbo"}}},
         )
         assert r.status_code == 422
         assert "effort" in r.json()["detail"]
@@ -241,13 +245,13 @@ def test_patch_node_overrides_409s_on_a_node_that_has_started(tmp_path, monkeypa
         ).json()["id"]
         _mark_started(wid, "spec")
         r = client.patch(
-            f"/api/work-items/{wid}", json={"node_overrides": {"spec": {"auto_escalate": True}}}
+            f"/api/work-items/{wid}", json={"node_overrides": {"spec": {"model": "opus"}}}
         )
         assert r.status_code == 409, r.text
         assert "locked" in r.json()["detail"]
         # a node that has NOT started is still free to override
         r2 = client.patch(
-            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"auto_escalate": True}}}
+            f"/api/work-items/{wid}", json={"node_overrides": {"plan": {"model": "opus"}}}
         )
         assert r2.status_code == 200, r2.text
 
@@ -435,8 +439,9 @@ def test_intake_skip_nodes_rejects_emptying_the_whole_chain(tmp_path, monkeypatc
     client = _client(tmp_path, monkeypatch)
     with client:
         repo = make_repo(tmp_path)
-        template = client.get("/api/templates/default").json()
-        all_ids = [n["id"] for n in template["nodes"]]
+        # The V1 chain the intake door resolves `default` to, not the legacy
+        # template list: the skip is validated against the resolved chain.
+        all_ids = [n.id for n in client.app.state.library.resolve_chain("default").nodes]
         r = client.post(
             "/api/work-items",
             json={
@@ -521,17 +526,19 @@ def test_no_budget_usd_at_intake_defers_to_the_policy_default(tmp_path, monkeypa
 _FAKE_AGENT = Path(__file__).parents[0] / "support" / "fake_agent.py"
 
 
-def _budget_template() -> Template:
-    return Template(
-        id="budget-item",
-        nodes=[
+def _budget_template(tmp_path):
+    return v1_seeded_chain(
+        tmp_path / "templates",
+        [
             {
                 "id": "work",
-                "tasks": ["on.implementation.start"],
-                "gate_after": None,
-                "fix_loop": None,
-            },
+                "kind": "exec",
+                "tasks": [
+                    {"id": "implement", "kind": "agent", "harness": "fake", "prompt": "Do it."}
+                ],
+            }
         ],
+        agent_command=f"{__import__('sys').executable} {_FAKE_AGENT}",
     )
 
 
@@ -582,7 +589,7 @@ def test_an_item_budget_overrides_a_looser_policy_default(tmp_path, monkeypatch)
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_budget_template(),
+                chain=_budget_template(tmp_path),
                 bd_cwd=str(tracker),
                 budget_set=True,
                 budget_usd=5.0,
@@ -592,7 +599,7 @@ def test_an_item_budget_overrides_a_looser_policy_default(tmp_path, monkeypatch)
                 database,
                 rd,
                 work_item_id=wid,
-                registry=fake_registry(__import__("sys").executable, _FAKE_AGENT),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=_policy(work_item_usd=20.0),
             )
@@ -624,7 +631,7 @@ def test_an_item_explicit_no_cap_overrides_a_capped_policy(tmp_path, monkeypatch
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_budget_template(),
+                chain=_budget_template(tmp_path),
                 bd_cwd=str(tracker),
                 budget_set=True,
                 budget_usd=None,
@@ -634,7 +641,7 @@ def test_an_item_explicit_no_cap_overrides_a_capped_policy(tmp_path, monkeypatch
                 database,
                 rd,
                 work_item_id=wid,
-                registry=fake_registry(__import__("sys").executable, _FAKE_AGENT),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=_policy(work_item_usd=5.0),
             )
@@ -647,7 +654,7 @@ def test_an_item_explicit_no_cap_overrides_a_capped_policy(tmp_path, monkeypatch
                 rd,
                 title="t2",
                 repo=str(repo),
-                template=_budget_template(),
+                chain=_budget_template(tmp_path),
                 bd_cwd=str(tracker),
                 budget_set=True,
                 budget_usd=None,
@@ -656,7 +663,7 @@ def test_an_item_explicit_no_cap_overrides_a_capped_policy(tmp_path, monkeypatch
                 database,
                 rd,
                 work_item_id=wid2,
-                registry=fake_registry(__import__("sys").executable, _FAKE_AGENT),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=_policy(daily_usd=100.0),
             )
