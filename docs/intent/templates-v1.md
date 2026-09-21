@@ -117,7 +117,7 @@ origin: src/kraft/templates/environment.py -- a profile names a provider and its
 
 An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
-enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults
+enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults, tests/templates/test_policy_scopes.py::test_materialization_refuses_an_agent_task_on_a_harness_its_policy_disallows[task-scope], tests/executor/test_policy_enforcement.py::test_a_harness_its_policy_disallows_never_launches
 
 ## REQ unavailable-selected-harness-needs-human
 
@@ -282,8 +282,8 @@ enforced-by: tests/templates/test_library.py::test_extends_cannot_change_the_par
 
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
-enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent, tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected
-origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`, and invalid per-scope policy overrides join this pin once chain/node/step/task policy layers exist.
+enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent, tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected, tests/templates/test_materialization.py::test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling
+origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`. Invalid per-scope policy overrides are refused by `ResolvedChain.check_scopes`, which lint and materialization share.
 
 ## REQ template-resolution-preserves-source-context
 
@@ -368,6 +368,8 @@ decisions before the retry target SHALL remain in effect.
 An operator MAY change task configuration or policy for a retry when the
 change is valid for that task and within the applicable policy bounds. A retry
 SHALL NOT change the chain's structure, identifiers, order, or task kinds.
+enforced-by: tests/templates/test_retry_override.py::test_a_task_override_narrows_the_task_and_is_written_into_its_scope, tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[widens-the-inherited-allowlist], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[renames-the-task], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[changes-the-task-kind], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[adds-structure], tests/templates/test_retry_override.py::test_a_harness_change_is_held_to_the_paths_allowed_harnesses
+origin: src/kraft/templates/retry.py §validate_retry_override -- the validation half. The retry route that accepts an override and applies it to a fork is Task 8b's, which calls this function.
 
 ## REQ task-step-and-node-are-skippable-by-default
 
@@ -626,8 +628,8 @@ enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_re
 The effective task policy SHALL resolve from instance policy through repository,
 work-item, chain, node, step, and task policy overrides, from broadest scope
 to narrowest scope.
-enforced-by: tests/test_policy.py::test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one
-origin: docs/templates-v1-design.md "Policy" -- the chain/node/step/task layers are Task 8's, deliberately not added earlier because nothing consumes them until `retry-overrides-are-policy-bounded`; this pins the mechanism through the scopes typed so far.
+enforced-by: tests/test_policy.py::test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one, tests/templates/test_policy_scopes.py::test_a_narrower_scope_narrows_what_it_inherits, tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[task], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[task-recovery-sits-in-its-task], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[fix-loop-sits-in-its-node], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[auto-review-sits-in-its-gate], tests/api/test_repository_policy.py::test_the_repository_layer_folds_in_the_entrys_own_deny_tools_and_sandbox
+origin: src/kraft/templates/models.py §MaterializedChain.policy_for -- the chain's policy (instance → repository → chain, folded at materialization) with each enclosing node, step and task override applied. No intake door supplies a work-item override yet: the layer sits between the repository and the chain in `deps.item_policy`'s result whenever one is added.
 
 ## REQ policy-has-defaults-and-administrator-maxima
 
@@ -649,13 +651,14 @@ inherited value: `allowed_tools` and `token_budget`. An **operational value** ma
 move in either direction, bounded by an explicitly configured administrator
 maximum rather than by the inherited value: timeouts, retry and wait timing, and
 `allowed_harnesses`. A field absent from `maxima:` is unbounded.
-enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling, tests/test_policy.py::test_token_budget_ratchets_against_the_inherited_value_not_the_maximum
+enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling, tests/test_policy.py::test_token_budget_ratchets_against_the_inherited_value_not_the_maximum, tests/test_policy.py::test_deny_tools_only_accumulate_down_the_layers, tests/test_policy.py::test_a_sandbox_once_set_cannot_be_changed_by_a_narrower_layer, tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[node-widens-chain], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[task-widens-step], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[step-raises-node-budget], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[task-swaps-step-sandbox], tests/test_permissions.py::test_permission_request_answers_from_the_tasks_resolved_policy[empty-allowlist], tests/test_permissions.py::test_permission_request_answers_from_the_tasks_resolved_policy[denied-beats-allowlisted], tests/executor/test_policy_enforcement.py::test_a_tasks_resolved_tool_policy_reaches_its_launch, tests/executor/test_policy_enforcement.py::test_token_budget_refuses_the_next_agent_launch[at]
 
 ## REQ repository-policy-cannot-relax-instance-safety
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-origin: src/kraft/templates/environment.py -- NOT ENFORCED YET. `Repository` has no `policy:` field, and nothing applies a repository-scoped override: `apply_template_override`'s only `src/` caller is the chain policy in `templates/models.py`. The layer (where `sandbox`/`deny_tools` belong) is built with the template schema's runtime policy enforcement, tracked as Kraft-jzv1l; pin it at materialization when the layer exists.
+enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy
+origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `config.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
@@ -904,7 +907,7 @@ SHALL leave its workspace root pointer unchanged and require human action.
 
 Template policy overrides MAY replace operational defaults, including timeouts
 and retry or wait timing, in either direction.
-enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction
+enforced-by: tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/executor/test_policy_enforcement.py::test_a_fix_loops_bounds_come_from_its_nodes_policy[v1-policy-replaces-it], tests/executor/test_policy_enforcement.py::test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves
 
 ## REQ work-item-policy-may-exceed-default-ceilings-within-admin-maximum
 
@@ -916,7 +919,7 @@ enforced-by: tests/test_policy.py::test_work_item_policy_may_exceed_default_with
 
 The system SHALL apply field-specific restriction rules to policy overrides and
 SHALL NOT treat policy overrides as an unrestricted generic merge.
-enforced-by: tests/test_policy.py::test_policy_override_rejects_unknown_fields_field_specifically, tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction
+enforced-by: tests/test_policy.py::test_policy_override_rejects_unknown_fields_field_specifically, tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_may_replace_operational_defaults_either_direction, tests/test_policy.py::test_a_policy_refusal_names_the_field_it_refused[allowed_tools], tests/test_policy.py::test_a_task_scope_override_refuses_the_loop_bounds, tests/templates/test_policy_scopes.py::test_a_scope_without_a_fix_loop_refuses_the_loop_bounds_at_load[step-max_attempts], tests/templates/test_policy_scopes.py::test_a_scope_without_a_fix_loop_refuses_the_loop_bounds_at_load[gate-timeout_minutes]
 
 ## REQ template-lint-reports-library-validity
 

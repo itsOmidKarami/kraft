@@ -77,19 +77,28 @@ archive:
 # ── Template Schema V1: operational defaults and administrator maxima ─────────
 #
 # `defaults:` are inheritable starting points with no safety meaning of their
-# own; a repository, work item, chain, node, step or task may move them in
+# own; a repository, work item, chain or execution node may move them in
 # either direction. `maxima:` bounds those overrides — a safety field listed
 # only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can
 # only ever be narrowed. Read by the same loader as everything above:
 # `policy.yaml` has one reader.
 #
-# NOT ENFORCED AT RUNTIME YET (Kraft-q55aw). Today these values are checked in
-# exactly two places: here, when the file loads (a `defaults:` entry past a
-# `maxima:` ceiling is refused), and at intake, where a chain's own `policy:`
-# past a ceiling is refused. Nothing reads them when an agent launches: an
-# agent is not restricted to `allowed_tools`, `allowed_harnesses` does not
-# stop any profile launching, and `token_budget`, `timeout_minutes` and
-# `max_attempts` bound no run. Do not rely on them as a safety control yet.
+# A work item freezes its policy when it is filed: this file, then the
+# repository's `policy:` in repos.yaml, then the chain's, node's, step's and
+# task's. A layer that relaxes what it inherits is refused then, not mid-run.
+# What each field does to a running task:
+#
+#   allowed_tools      tools an agent may use; asked through the permission
+#                      gate and passed as --allowedTools. Unset allows every
+#                      tool; `[]` allows none. A harness that cannot enforce
+#                      a tool list (codex, gemini) refuses to launch under one.
+#   token_budget       tokens a work item may spend before its next agent task
+#                      is refused, checked like budget.work_item_usd.
+#   allowed_harnesses  profiles an agent task may select; checked at intake
+#                      and again at launch.
+#   max_attempts       a node's fix-loop attempts, and timeout_minutes its wall
+#   timeout_minutes    clock -- under the loop's own `max_attempts` and an
+#                      operator's per-item node override, over loops:/default:.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install

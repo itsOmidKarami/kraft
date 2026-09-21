@@ -118,8 +118,26 @@ maxima:
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
-| `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain, node, step or task may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. **Not read at runtime yet** (Kraft-q55aw): they are recorded in each item's materialized chain, and nothing applies them to a run. |
-| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read, and a chain `policy:` past one is refused at intake. **Not enforced at runtime yet** (Kraft-q55aw): nothing reads these when an agent launches, so `allowed_tools` restricts no agent, `allowed_harnesses` stops no profile, and `token_budget`, `timeout_minutes` and `max_attempts` bound no run. Do not rely on them as a safety control yet. |
+| `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain or execution node may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+
+**How V1 policy resolves and what it does.** A work item's policy is frozen
+when it is filed, layered broadest first: `defaults`/`maxima` here, the
+repository's `policy:` in `repos.yaml`, then the chain's, each node's, each
+step's and each task's own `policy:`. A layer that relaxes what it inherits is
+refused at intake, naming the scope. A
+recovery plan inherits the task, step or node that declares it; a fix loop,
+its judge, a node's escalation task and its conflict handler inherit their
+node; a gate's `auto_review` inherits its gate. At runtime:
+
+| Field | Rule down the layers | Enforced where |
+|---|---|---|
+| `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. |
+| `deny_tools` | only accumulates | Denied by the permission gate and passed as `--disallowed-tools`, on top of `allowed_tools`. |
+| `sandbox` | set once, never changed or removed | Wraps the task's process (agent, subprocess, builtin) in `docker run`. |
+| `token_budget` | only narrows | Before each agent launch, gate reviewers included: once the work item's sessions have spent this many tokens (input plus output) the next agent task is refused and the item stops for a human. Like `budget`, it cannot interrupt a running agent. |
+| `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |
+| `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item node override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |
 
 ## `harnesses.yaml` — harness profiles
 
@@ -179,6 +197,8 @@ repos:
     deny_tools: []
     steering: []
     sandbox: null
+    policy:
+      allowed_tools: [Read, Edit, Bash]
 ```
 
 | Field | Default | Means |
@@ -197,9 +217,10 @@ repos:
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist doesn't cover. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. |
 | `default_root_merge_policy` | `bump` | How a submodule bump at this repo's root is handled by default. |
-| `deny_tools` | `[]` | Tool names withheld from every agent hook on this repo. |
+| `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent hook on this repo, layered under the registry's own defaults. |
-| `sandbox` | `null` | Sandbox policy for this repo's worker processes, if set. |
+| `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
+| `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `token_budget`, `allowed_harnesses`, `timeout_minutes`, `max_attempts`, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
 
 `kraft repo connect` probes a `setup_command` from the repo's markers; check it
 before trusting it, and `kraft admin doctor` reports any connected repo still

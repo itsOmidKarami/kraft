@@ -468,11 +468,12 @@ class PolicyDefaultsInput(BaseModel):
 
 class PolicyMaximaInput(BaseModel):
     """`policy.yaml`'s `maxima:` -- the administrator ceiling no policy
-    override may exceed. Checked at load and at materialization only: nothing
-    reads it when a task launches yet (Kraft-q55aw). `timeout_minutes`/
-    `max_attempts` here are optional administrator maxima on the operational
-    fields of the same name; the design doc's example omits them because most
-    installs never set one."""
+    override may exceed, checked when a layer is applied (at load, at
+    materialization, and on a retry override); the resolved values it bounds
+    are what a task launch reads (`MaterializedChain.policy_for`).
+    `timeout_minutes`/`max_attempts` here are optional administrator maxima on
+    the operational fields of the same name; the design doc's example omits
+    them because most installs never set one."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
