@@ -163,10 +163,13 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     attachedKinds.has(n.covered_by);
   const selectedNodes =
     templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
+  // Only the gates that declare a reviewer (`auto_escalate` on the node view):
+  // the server refuses the switch on a gate with none, since an override can
+  // arm a reviewer but never supply one.
   const autoEscalateOverrides: NodeOverrides = autoEscalate
     ? Object.fromEntries(
         selectedNodes
-          .filter((n) => n.gate_after)
+          .filter((n) => n.gate_after && n.auto_escalate)
           .map((n) => [n.id, { auto_escalate: true }]),
       )
     : {};
@@ -656,7 +659,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             <SectionLabel>Will happen on start</SectionLabel>
             <p className="field-hint">
               {runCount} node{runCount === 1 ? "" : "s"} run
-              {autoEscalate ? ", every gate escalates before you see it" : ""}
+              {autoEscalate ? ", every gate with a reviewer escalates before you see it" : ""}
               {autoGate ? " and an agent reviews first" : ""}.
             </p>
           </div>
