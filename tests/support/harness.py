@@ -45,7 +45,7 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     """A committed copy of `sample_repo`. Built once per process and copied,
     the way `isolated_bd` is: five git spawns a call were ~15% of the suite's
     git (Kraft-qmhfc). Commits use `_FIXED_DATE`, so a copy carries the same
-    SHAs a fresh build would."""
+    SHAs a fresh build would, and its index is refreshed, so it reads clean."""
     global _repo_template
     if _repo_template is None:
         tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-")) / "sample"
@@ -59,6 +59,10 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
         _repo_template = tpl
     dest = tmp_path / name
     shutil.copytree(_repo_template, dest, symlinks=True)
+    # The copy's index still carries the template's stat data (inode, mtime),
+    # so plumbing that does not refresh -- `git diff-index HEAD` -- would call
+    # every tracked file modified. A fresh build would not.
+    _git(dest, "update-index", "-q", "--refresh")
     return dest
 
 

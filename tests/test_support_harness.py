@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git, isolated_bd
+from support.harness import _git, isolated_bd, make_repo
 
 
 def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
@@ -33,6 +33,22 @@ def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
     _git(repo, "commit", "-m", "no ambient identity")  # must not exit 128
     log = Path.read_text(repo / ".git" / "HEAD")
     assert log  # the commit landed; a 128 exit would have raised in _git first
+
+
+def test_a_make_repo_copy_reads_clean_to_git_plumbing(tmp_path):
+    """`make_repo` copies a cached template (Kraft-qmhfc). Its index must not
+    keep the template's stat data: `git diff-index` does not refresh the index
+    the way porcelain does, and on a stale one it calls every tracked file
+    modified, which a fresh build never would (PR #88 review, F3)."""
+    repo = make_repo(tmp_path)
+    out = subprocess.run(
+        ["git", "diff-index", "--name-only", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out == ""
 
 
 @pytest.mark.parametrize("backend", ["fake", pytest.param("bd", marks=pytest.mark.e2e("bd"))])
