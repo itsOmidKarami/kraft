@@ -1483,6 +1483,7 @@ async def run_once(
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
 ) -> str:
     """The one way into the walk.
@@ -1499,7 +1500,7 @@ async def run_once(
     item, and every result is returned as it is, never remapped (Kraft-z0hah).
     """
     # the note is good for one agent launch, whichever task gets there first
-    carried = Steer(steer, source=steer_source)
+    carried = Steer(steer, source=steer_source, to=steer_to)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
@@ -1725,6 +1726,7 @@ async def run(
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
 ) -> str:
@@ -1739,6 +1741,7 @@ async def run(
         policy=policy,
         steer=steer,
         steer_source=steer_source,
+        steer_to=steer_to,
         launch=launch,
     )
     status = await gates.review_gates(

@@ -629,3 +629,25 @@ def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: st
         "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
         (work_item_id, path, path + ".", path + "."),
     ).fetchall()
+
+
+def resumable_agent_session(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_point: str
+):
+    """The session a paused agent task resumes: the task's latest session in
+    this node, if an operator paused it and no retry or restart has begun a new
+    pass since (`reusable_session`'s rule, Kraft-znsvg). None otherwise."""
+    latest = conn.execute(
+        "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node_id, hook_point),
+    ).fetchone()
+    if latest is None or latest["status"] != "paused":
+        return None
+    newer_pass = conn.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? "
+        "AND type IN ('work_item_retried', 'run_forked', 'base_change_restart') "
+        "AND created_at > ? LIMIT 1",
+        (work_item_id, latest["created_at"]),
+    ).fetchone()
+    return None if newer_pass else latest

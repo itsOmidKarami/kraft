@@ -674,3 +674,79 @@ def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):
     _wait(lambda: seen, "the resumed walk")
     assert "start_index" not in seen and "start_step" not in seen
     assert seen["work_item_id"] == "w1"
+
+
+def _paused_in_verification(client, repo):
+    """An item paused in `verification` with its agent review's session
+    paused, the way `/pause` leaves one; forced, so no agent runs."""
+    from kraft import store
+
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    db = client.app.state.db
+
+    async def seed():
+        await db.write(lambda c: store.load_chain(c, wid, "verification"))
+        await db.write(
+            lambda c: store.create_session(
+                c,
+                id="s-review",
+                work_item_id=wid,
+                node_id="verification",
+                hook_point="verification.review.code_review",
+                log_path="/l",
+                result_path="/r",
+            )
+        )
+        await db.write(lambda c: store.session_exited(c, "s-review", "paused"))
+
+    client.portal.call(seed)
+    return wid
+
+
+@pytest.mark.parametrize(
+    ("body", "targets"),
+    [
+        ({"steer": "keep the old API"}, {"verification.review.code_review": "keep the old API"}),
+        (
+            {"steer": "x", "steers": {"verification.review.code_review": "only you"}},
+            {"verification.review.code_review": "only you"},
+        ),
+    ],
+    ids=["one-steer-for-every-paused-agent", "individual"],
+)
+def test_resume_addresses_its_steer_to_the_paused_agent_tasks(
+    monkeypatch, repo, client, body, targets
+):
+    from kraft import executor
+
+    seen = {}
+
+    async def fake_run(*args, **kw):
+        seen.update(kw)
+        return "completed"
+
+    monkeypatch.setattr(executor, "run", fake_run)
+    wid = _paused_in_verification(client, repo)
+
+    r = client.post(f"/api/work-items/{wid}/resume", json=body)
+
+    assert r.status_code == 200, r.text
+    _wait(lambda: seen, "the resumed walk")
+    assert (seen["steer_to"], seen["steer"]) == (targets, None)
+
+
+def test_a_steer_aimed_at_a_non_agent_task_is_refused_naming_it(repo, client):
+    """`steer-can-address-paused-agent-tasks-individually`: a steer SHALL NOT
+    target a non-agent task."""
+    wid = _paused_in_verification(client, repo)
+    path = "verification.tests.test_changed_scopes"
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={"steers": {path: "x"}})
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith(f"steers.{path}: ")
+    assert "a steer reaches only an agent task" in r.json()["detail"]
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"

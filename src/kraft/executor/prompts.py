@@ -788,3 +788,12 @@ def format_judge_history(history: list[dict]) -> str:
         )
         lines.append(f"round {h['round']}: {text}{fix_note}")
     return "\n".join(lines)
+
+
+#: What a paused agent task is told when it resumes its own session
+#: (`dispatch._resumable_session`): the conversation already holds the brief,
+#: so this is the whole new turn, after any steer.
+AGENT_RESUMED_NOTE = (
+    "An operator paused you mid-task and has now resumed you. Carry on with the "
+    "task you were given, from where you stopped, and finish it as instructed."
+)

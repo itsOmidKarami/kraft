@@ -73,6 +73,61 @@ async def reconcile_current_node(
     return "needs_human"
 
 
+class SteerError(ValueError):
+    """A steer that cannot land, naming the one field it was refused for."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(f"{field}: {message}")
+        self.field = field
+
+
+def resume_steer(db, row, text: str | None, steers: dict[str, str]) -> dict[str, str | None] | None:
+    """Who a resume's steer reaches, by task path.
+
+    `text` reaches every paused agent task of the node the item stands on
+    (`steer-defaults-to-all-paused-agent-tasks`); `steers` addresses paused
+    agent tasks individually and wins for the task it names
+    (`steer-can-address-paused-agent-tasks-individually`). `None` when no agent
+    task is paused there -- then `text`, if any, is the unaddressed note the
+    next agent launch takes. A path that is not a paused agent task of this
+    node is a `SteerError` naming it: a steer never targets a non-agent task.
+    """
+    from kraft.templates.forks import ChainPath, PathError
+    from kraft.templates.models import AgentTask
+
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        # A legacy row, which no walk can run: the walk says so, not this.
+        return None
+    node_id = row["current_node_id"]
+    node = next((n for n in chain.chain.nodes if n.id == node_id), None)
+    own = [t for s in node.steps for t in s.tasks] if node is not None else []
+    agents = [t.path for t in own if isinstance(t.task, AgentTask)]
+    latest = db.read(lambda c: store.latest_session_per_task(c, row["id"], node_id, agents))
+    paused = [r["hook_point"] for r in latest if r["status"] == "paused"]
+    for path in steers:
+        field = f"steers.{path}"
+        try:
+            target = ChainPath.parse(chain, path)
+        except PathError as exc:
+            raise SteerError(field, str(exc)) from None
+        if target.task is None:
+            raise SteerError(field, f"{path!r} is not a task")
+        if not isinstance(target.task.task, AgentTask):
+            raise SteerError(
+                field,
+                f"{path!r} is a {target.task.task.kind.value} task, and a steer reaches "
+                "only an agent task",
+            )
+        if path not in paused:
+            raise SteerError(field, f"{path!r} is not paused")
+    if not paused:
+        return None
+    # A paused task with no text of its own yet maps to None: a steer left
+    # earlier through `/steer` is read only once the resume has claimed the item.
+    return {p: steers.get(p, text) for p in paused}
+
+
 async def resume_once(
     db,
     run_dirs,

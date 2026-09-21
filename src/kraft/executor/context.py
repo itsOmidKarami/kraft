@@ -135,9 +135,21 @@ class Steer:
     #: a say. See `exempts_judge`.
     _JUDGE_EXEMPT = ("human", "gate_review")
 
-    def __init__(self, text: str | None = None, *, source: str = "human") -> None:
+    def __init__(
+        self, text: str | None = None, *, source: str = "human", to: dict[str, str] | None = None
+    ) -> None:
         self._text = text or None
         self.source = source
+        #: A steer addressed to tasks by path (`resuming.resume_steer`): each
+        #: named task's launch takes its own text, once, and no other launch
+        #: takes any (`steer-defaults-to-all-paused-agent-tasks`,
+        #: `steer-can-address-paused-agent-tasks-individually`). `None` is the
+        #: unaddressed note the first agent launch takes.
+        self._to = dict(to) if to else None
+
+    @property
+    def targeted(self) -> bool:
+        return self._to is not None
 
     @property
     def human(self) -> bool:
@@ -164,9 +176,17 @@ class Steer:
         """
         return self.source in self._JUDGE_EXEMPT
 
-    def take(self) -> str | None:
+    def take(self, path: str | None = None) -> str | None:
+        """The note for the launch of `path`. An addressed steer answers only a
+        task it names; asked with no path, it gives up everything still
+        undelivered (what `walk._report_if_undelivered` reports)."""
+        if self._to is not None:
+            if path is not None:
+                return self._to.pop(path, None)
+            left, self._to = self._to, {}
+            return "\n".join(f"{p}: {t}" for p, t in left.items()) or None
         text, self._text = self._text, None
         return text
 
     def __bool__(self) -> bool:
-        return self._text is not None
+        return bool(self._to) if self._to is not None else self._text is not None

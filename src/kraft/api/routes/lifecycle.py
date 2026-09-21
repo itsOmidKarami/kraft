@@ -70,7 +70,11 @@ class Steer(BaseModel):
 
 
 class Resume(BaseModel):
+    #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
+    #: Individual steers for paused agent tasks, by canonical task path; each
+    #: wins over `steer` for the task it names.
+    steers: dict[str, str] = {}
 
 
 class Escalate(BaseModel):
@@ -515,6 +519,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 "this text would be dropped",
             )
 
+    individual = {p: t.strip() for p, t in body.steers.items() if t.strip()}
+    try:
+        steer_to = executor.resume_steer(st.db, row, steer_text, individual)
+    except executor.SteerError as exc:
+        raise HTTPException(422, str(exc)) from None
+
     if deps.task_is_live(request.app, wid):
         # Checked before the claim and the rebase below: a paused/needs_human
         # item can still have a live walk task behind it (the brief window
@@ -613,6 +623,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
         await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
+        # Every paused agent task gets the steer, or its own; a steer left
+        # through `/steer` stands in for the one this request did not type.
+        targets = {p: t or steer for p, t in (steer_to or {}).items()}
+        targets = {p: t for p, t in targets.items() if t} or None
 
         try:
             deps.spawn(
@@ -632,7 +646,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         # not rerun (Kraft-c3dab). An item that never started
                         # stands at the start of its chain.
                         policy=st.policy,
-                        steer=steer,
+                        # Addressed to the paused agent tasks when there are
+                        # any; otherwise the note the next agent launch takes.
+                        steer=None if targets else steer,
+                        steer_to=targets,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                     ),
@@ -640,7 +657,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
+        return {
+            "id": wid,
+            "node_id": row["current_node_id"],
+            "steer": steer,
+            "steered": sorted(targets or {}),
+        }
 
 
 @api_router.post("/work-items/{wid}/open-worktree")
