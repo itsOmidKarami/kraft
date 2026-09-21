@@ -9,9 +9,25 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from support.harness import write_harness_profiles
+
 from kraft import escalate, events, executor, store
 from kraft.db import Database
 from kraft.paths import RunDirs
+
+
+@pytest.fixture(autouse=True)
+def escalation_profile(tmp_path, monkeypatch):
+    """The profile `escalate.ESCALATION_TASK` selects, in this test's own
+    templates dir: an escalation turn resolves its harness like any agent task,
+    so without one every turn here would stop as a config error."""
+    templates = tmp_path / "escalation-templates"
+    write_harness_profiles(
+        templates, {"claude_review": {"provider": "claude", "defaults": {"model": "sonnet"}}}
+    )
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    return templates
 
 
 async def _seed_needs_human(database, rd, wid: str) -> None:
@@ -590,26 +606,28 @@ def test_no_judge_verdict_means_no_judge_line(tmp_path, monkeypatch):
     assert "fix-loop judge" not in prompt
 
 
-async def test_dispatch_resolves_its_agent_through_the_harness_not_a_hardcoded_command(
-    monkeypatch, database, run_dirs
+async def test_dispatch_resolves_its_agent_through_its_harness_profile(
+    monkeypatch, database, run_dirs, escalation_profile
 ):
-    """Kraft-jxu39. `escalate` built its launch from `{"command": "claude"}`,
-    which bypasses the harness declaration entirely: an operator overlaying
-    `~/.kraft/templates/harnesses/claude.yaml` was ignored, and no fixture could
-    substitute a fake -- so any test reaching this path spawned a real `claude`.
-    Cheap only by accident, because `conftest._isolated_kraft_home` empties
-    `HOME` and CI has no API key; with one set it is a real agent turn.
-
-    Task 4b removed the identical hardcode from `gate_review.py`
-    (`{"command": "claude", "skill": "gate-review"}`); this is its sibling.
-    `run_agent_task` falls through to the harness's own declared command when
-    `command` is empty, which is what every other V1 agent launch does.
-    """
+    """`agent-roles-use-ordinary-agent-task-runtime-configuration`: an
+    escalation turn is an ordinary `AgentTask` on a `harnesses.yaml` profile,
+    so the profile's provider, executable and defaults reach the launch --
+    never a hardcoded `claude` command (Kraft-jxu39), and never a harness id
+    special to escalation."""
+    write_harness_profiles(
+        escalation_profile,
+        {
+            "claude_review": {
+                "provider": "claude",
+                "executable": "/opt/fake-claude",
+                "defaults": {"model": "opus", "effort": "high"},
+            }
+        },
+    )
     seen = {}
 
     async def fake_run_agent_task(db, run_dirs, *, session_id, command, harness, **kw):
-        seen["command"] = command
-        seen["harness"] = harness
+        seen.update(command=command, harness=harness, model=kw["model"], effort=kw["effort"])
         log_path = run_dirs.logs / f"{session_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("")
@@ -620,8 +638,46 @@ async def test_dispatch_resolves_its_agent_through_the_harness_not_a_hardcoded_c
     await _seed_needs_human(database, run_dirs, "w1")
     launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id="w1", message="m", launch=launch)
-    assert seen["command"] == "", "a hardcoded command bypasses the harness declaration"
-    assert seen["harness"] == "claude"
+    assert seen == {
+        "command": "/opt/fake-claude",
+        "harness": "claude",
+        "model": "opus",
+        "effort": "high",
+    }
+
+
+async def test_an_escalation_on_an_unavailable_profile_launches_nothing(
+    monkeypatch, database, run_dirs, escalation_profile
+):
+    """`unavailable-selected-harness-needs-human`, for the escalation role too:
+    the turn is recorded as a config error naming the profile, and nothing is
+    substituted for it."""
+    write_harness_profiles(
+        escalation_profile, {"claude_review": {"provider": "claude", "enabled": False}}
+    )
+    launched = []
+
+    async def fake_run_agent_task(*a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+    await _seed_needs_human(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+
+    status = await escalate.dispatch(
+        database, run_dirs, work_item_id="w1", message="m", launch=launch
+    )
+
+    assert status == "config_error"
+    assert launched == []
+    [session] = database.read(
+        lambda c: c.execute(
+            "SELECT status, log_path FROM worker_sessions WHERE hook_point = 'escalation'"
+        ).fetchall()
+    )
+    assert session["status"] == "config_error"
+    assert "'claude_review'" in open(session["log_path"]).read()
 
 
 async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, database, run_dirs):

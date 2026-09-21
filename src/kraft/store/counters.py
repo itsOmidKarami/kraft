@@ -61,6 +61,12 @@ def refund_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> Non
     )
 
 
+def delete_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
+    )
+
+
 def clear_loop_counters(
     conn: sqlite3.Connection, work_item_id: str, node_id: str, key: str | None
 ) -> None:

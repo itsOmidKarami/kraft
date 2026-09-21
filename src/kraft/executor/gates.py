@@ -741,6 +741,16 @@ def _current_run_escalation_session_id(evts: list) -> str | None:
     return None
 
 
+def _declares_escalation(row) -> bool:
+    """Whether the node this item stopped at declares its own stuck
+    escalation (`ExecNode.escalation`)."""
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    if snapshot is None:
+        return False
+    node = next((n for n in snapshot.chain.nodes if n.id == row["current_node_id"]), None)
+    return node is not None and node.escalation is not None
+
+
 async def auto_escalate_stuck(
     status: str,
     db,
@@ -804,6 +814,21 @@ async def auto_escalate_stuck(
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
+    if _declares_escalation(row):
+        # The node's own `escalation` task already had its turn inside the
+        # walk, and a stop after it is the human's
+        # (`failed-or-questioning-stuck-escalation-needs-human`). A second,
+        # generic escalation on top would make the declared bound meaningless.
+        if not _auto_escalate_already_handled(evts):
+            await db.write(
+                lambda c: events.append(
+                    c,
+                    work_item_id,
+                    "work_item_auto_escalate_skipped",
+                    {"reason": "node_escalation"},
+                )
+            )
+        return status
     # A conservative False, not `policy.auto_escalate_stuck`'s own True
     # default, when policy failed to load entirely -- an explicit
     # per-item or per-node override still wins inside

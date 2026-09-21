@@ -418,22 +418,19 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         (harnesses / "fake.yaml").write_text(
             bundled.replace("id: claude", "id: fake").replace("command: [claude]", command)
         )
-        # And `claude` itself, because `escalate.dispatch` selects that harness by
-        # name -- escalation is not a chain node, so nothing declares a harness
-        # for it (see `escalate._ESCALATION_HARNESS`). Without this overlay every
-        # test that reaches an escalation launched the real `claude` binary:
-        # cheap only by accident, because `conftest._isolated_kraft_home` empties
-        # `HOME` and CI has no API key, and a real agent turn on a developer
-        # machine that does. `conftest._no_real_agent_binary` now refuses it, but
-        # a refusal is not a fix -- the fix is that there is nothing left to
-        # refuse.
+        # And `claude` itself, for a hand-built chain or profile that names the
+        # provider directly: without this overlay it would launch the real
+        # `claude` binary -- cheap only by accident, because
+        # `conftest._isolated_kraft_home` empties `HOME` and CI has no API key.
+        # `conftest._no_real_agent_binary` refuses it, but a refusal is not a
+        # fix -- the fix is that there is nothing left to refuse. (An escalation
+        # turn runs on the `claude_review` profile, `escalate.ESCALATION_TASK`,
+        # which the profiles above already put on `fake`.)
         #
         # The *bundled* declaration with its `command:` swapped, not
         # `_FAKE_HARNESS`: escalation asks for `autocompact`, `permission_mode`
         # and `deny_tools`, which the minimal fake does not declare, and
         # `run_agent_task` raises on a capability a harness has not declared.
-        # Swapping one line is what `escalate` naming a harness instead of a
-        # command made possible.
         (harnesses / "claude.yaml").write_text(bundled.replace("command: [claude]", command))
         # Beside the library, and where dispatch reads it when no
         # `KRAFT_TEMPLATES_DIR` is set (`agent.harness_profile`) -- the same

@@ -458,12 +458,10 @@ async def _escalate_stuck(
         return "paused"
     if status in _ADVANCING:
         # A retried node is a fresh pass: the loop that got stuck must not
-        # re-breach on the attempt count that stuck it.
-        await db.write(
-            lambda c: store.clear_loop_counters(
-                c, work_item_id, node.id, _loop_key(node) if node.fix_loop else None
-            )
-        )
+        # re-breach on the attempt count that stuck it. Only that counter --
+        # the escalation's own bound is what keeps this from repeating.
+        if node.fix_loop:
+            await db.write(lambda c: store.delete_counter(c, work_item_id, _loop_key(node)))
         return "retry"
     if status == "needs_context":
         session = dispatch._latest_session(db, work_item_id, node, task)
