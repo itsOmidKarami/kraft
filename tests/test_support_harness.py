@@ -73,6 +73,27 @@ def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, mon
     assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
 
 
+@pytest.mark.slow
+def test_a_bd_call_from_a_server_child_shows_in_the_test_result(tmp_path):
+    """Kraft-vrcw3's stub refuses loudly in the child's log; Kraft degrades on
+    the refusal and the test passes. `running_server` also reports each call
+    as a `BdStubRefused` warning, so it is on the test's own result."""
+    from support.server import BdStubRefused, running_server
+
+    repo = make_repo(tmp_path)
+    templates = harness.fake_templates_dir(tmp_path, "true")
+    with pytest.warns(BdStubRefused, match="create --json --title filed from a child"):
+        with running_server(
+            run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=isolated_bd(tmp_path)
+        ) as srv:
+            r = srv.client.post(
+                "/api/work-items",
+                json={"title": "filed from a child", "repo": str(repo), "autostart": False},
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["bead_warning"]
+
+
 @ON_FAKE_AND_REAL_BD
 def test_the_beads_fake_and_real_bd_agree(bd, tmp_path):
     """One scenario, run against the autouse fake (tests/support/fake_beads.py)

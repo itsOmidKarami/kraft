@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,8 +123,26 @@ def _try_start(run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | Non
     raise RuntimeError("server did not become healthy in 15s")
 
 
+class BdStubRefused(UserWarning):
+    """A server child ran `bd` and the stub refused it (Kraft-vrcw3). Kraft
+    degrades on that, so the test still passes; this puts the calls in the
+    test's own result rather than only in the child's log."""
+
+
+def report_stub_calls(log: Path) -> None:
+    """Warn, as `BdStubRefused`, with every call the stub logged to `log`."""
+    calls = log.read_text().splitlines() if log.is_file() else []
+    if calls:
+        warnings.warn(
+            BdStubRefused(f"the server child ran bd {len(calls)}x, refused by the stub: {calls}"),
+            stacklevel=2,
+        )
+
+
 @contextlib.contextmanager
 def running_server(*, run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dict | None = None):
+    stub_log = Path(tempfile.mkdtemp(prefix="kraft-bd-stub-log-")) / "calls.log"
+    env = {"KRAFT_BD_STUB_LOG": str(stub_log), **(env or {})}
     codes = []
     for _ in range(3):
         result = _try_start(run_dir, templates_dir, bd_cwd, env)
@@ -140,3 +159,5 @@ def running_server(*, run_dir: Path, templates_dir: Path, bd_cwd: Path, env: dic
         if srv.proc.poll() is None:
             srv.proc.kill()
             srv.proc.wait()
+        report_stub_calls(stub_log)
+        shutil.rmtree(stub_log.parent, ignore_errors=True)
