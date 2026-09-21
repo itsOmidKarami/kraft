@@ -5,7 +5,7 @@ Four specs, all against one running orchestrator:
 | spec | what it drives |
 | --- | --- |
 | `chain.spec.ts` | create a `quick-task` item against a sample repo with a failing test, watch it reach `work_item_completed`, open the linked session summary |
-| `lifecycle.spec.ts` | the human-in-the-loop controls: gate approve, gate reject → re-plan, pause / steer / resume |
+| `lifecycle.spec.ts` | the human-in-the-loop controls: gate approve, gate reject → send back, pause / steer / resume |
 | `regression.spec.ts` | every Settings page (repos, templates, plugins, policy, access), Analytics, the search overlay |
 | `search.spec.ts` | the search overlay in detail: filters, document viewer, Escape handling |
 | `phone.visual.spec.ts` | sub-project B's phone contract at a 390x844 viewport: the board, the gate, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), and the diff viewer wrapping a **real** diff. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so the unit tests can only assert class boundaries and stylesheet source order — this is the only place the media queries are real |
@@ -57,6 +57,7 @@ Env it sets for the child `python -m kraft`:
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
+| `KRAFT_HOME` | `<tmp>` — pinned, never inherited: the V1 `fake` harness overlay is written to `$KRAFT_HOME/templates/harnesses`, which is the only place the daemon reads it from |
 
 It polls the port it picked (or the one you pinned) until `/api/health` answers 200, then prints:
 
