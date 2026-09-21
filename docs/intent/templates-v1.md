@@ -16,8 +16,8 @@ origin: src/kraft/templates/library.py §is_pre_v1 -- Task 11a: a legacy chain d
 When an update crosses a major version with an incompatible template schema,
 the update SHALL install the new version's template configuration rather than
 continue to use the incompatible configuration.
-enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_an_update_leaves_a_v1_home_alone
-origin: src/kraft/cli/admin.py §replace_pre_v1_config -- "incompatible" is a pre-V1 home (`templates.library.is_pre_v1`: a `registry.yaml` and no `library.yaml`), the one incompatible schema that exists. The machine's own files (`MACHINE_CONFIG`) are carried across; the rest is the bundled V1 configuration.
+enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_an_update_leaves_a_v1_home_alone, tests/test_update.py::test_a_major_update_keeps_the_policy_values_v1_still_has, tests/test_update.py::test_a_major_update_reports_each_policy_key_it_drops
+origin: src/kraft/cli/admin.py §replace_pre_v1_config -- "incompatible" is a pre-V1 home (`templates.library.is_pre_v1`: a `registry.yaml` and no `library.yaml`), the one incompatible schema that exists. The machine's own files (`MACHINE_CONFIG`) are carried across; `policy.yaml` starts from the V1 seed and keeps the operator's value for every key V1 still has, printing each dropped key (`policy.CarriedPolicy`, Ruling 172); the rest is the bundled V1 configuration.
 
 ## REQ major-update-requires-explicit-acceptance
 
@@ -30,7 +30,8 @@ enforced-by: tests/test_update.py::test_the_major_update_warns_before_it_asks, t
 
 Before an incompatible major update replaces template configuration, the system
 SHALL create a recoverable backup of the configuration it replaces.
-enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt]
+enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_a_crash_between_the_swap_renames_is_finished_not_reseeded[start], tests/test_update.py::test_a_crash_between_the_swap_renames_is_finished_not_reseeded[update], tests/test_update.py::test_a_staging_dir_no_update_finished_writing_is_never_installed
+origin: src/kraft/cli/admin.py §finish_interrupted_update -- Kraft-cttgx: the staged home is marked complete before the old one moves, so a crash between the two renames is finished by the next start or update, never seeded over.
 
 ## REQ migration-helper-is-not-guaranteed
 
@@ -963,14 +964,14 @@ origin: src/kraft/templates/library.py §TemplateLibrary.lint_dir -- reads the i
 
 `GET /templates/{id}/resolved` SHALL return the fully resolved configuration of
 a saved chain, before per-work-item materialization.
-enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_an_unknown_chain_is_404
+enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_an_unknown_chain_is_404, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
 
 ## REQ resolve-api-supports-candidate-and-library-input
 
 `POST /templates/resolve` SHALL resolve a single unsaved candidate chain
 against the installed library and SHALL also resolve a complete unsaved
 template library in isolation, without writing either input to disk.
-enforced-by: tests/api/test_templates_inspection.py::test_resolve_candidate_uses_installed_library_without_writing, tests/api/test_templates_inspection.py::test_resolve_a_complete_library_in_isolation_without_writing, tests/api/test_templates_inspection.py::test_a_candidate_that_does_not_resolve_is_reported_not_raised
+enforced-by: tests/api/test_templates_inspection.py::test_resolve_candidate_uses_installed_library_without_writing, tests/api/test_templates_inspection.py::test_resolve_a_complete_library_in_isolation_without_writing, tests/api/test_templates_inspection.py::test_a_candidate_that_does_not_resolve_is_reported_not_raised, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
 
 ## REQ resolved-template-is-deterministic
 
