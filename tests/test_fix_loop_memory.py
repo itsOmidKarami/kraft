@@ -16,6 +16,7 @@ import shlex
 import sys
 from pathlib import Path
 
+import pytest
 from support.chain_run import loop_policy, run_chain
 from support.harness import isolated_bd, make_repo, v1_fix_loop_node, v1_seeded_chain
 from support.store_fixtures import mk_item, open_db
@@ -308,30 +309,32 @@ def test_the_last_review_session_carries_its_own_artifacts(tmp_path):
     assert row["session_summary_ref"] is None
 
 
-def test_since_comes_from_the_last_session_that_ran_this_hook(tmp_path):
-    """head_sha is stamped at dispatch and lives in the table, so it survives a
-    crash or a resume -- which a local in the walk's stack frame would not."""
+@pytest.mark.parametrize(
+    ("later_hook", "since"),
+    [
+        # head_sha is stamped at dispatch and lives in the table, so it survives
+        # a crash or a resume -- which a local in the walk's stack frame would not
+        ("on.review.local.run", "bbb222"),
+        # each reviewer narrows against its own last look, not somebody else's:
+        # `on.test.run` running later says nothing about what was reviewed
+        ("on.test.run", "aaa111"),
+    ],
+    ids=["the-last-session-of-this-hook", "not-another-hooks-head"],
+)
+def test_since_comes_from_the_last_session_that_ran_this_hook(tmp_path, later_hook, since):
     got = _seed_session(
         tmp_path,
         [
             ("on.review.local.run", "done", "aaa111", "2026-01-01T00:00:00"),
-            ("on.review.local.run", "done", "bbb222", "2026-01-01T00:01:00"),
+            (
+                later_hook,
+                "done",
+                "bbb222" if later_hook == "on.review.local.run" else "zzz999",
+                "2026-01-01T00:01:00",
+            ),
         ],
     )
-    assert got == "bbb222"
-
-
-def test_another_hooks_head_is_not_taken(tmp_path):
-    """Each reviewer narrows against its own last look, not somebody else's:
-    `on.test.run` running later says nothing about what was reviewed."""
-    got = _seed_session(
-        tmp_path,
-        [
-            ("on.review.local.run", "done", "aaa111", "2026-01-01T00:00:00"),
-            ("on.test.run", "done", "zzz999", "2026-01-01T00:01:00"),
-        ],
-    )
-    assert got == "aaa111"
+    assert got == since
 
 
 def test_a_session_that_did_not_finish_is_not_a_reviewed_head(tmp_path):
@@ -366,26 +369,32 @@ def test_nothing_reviewed_yet_means_the_whole_branch(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_a_repeat_keeps_its_severity_when_no_fix_ran_between_measurements():
-    """43717ee6 priced one forge/run.py:394 defect minor -> absent -> important
-    across three reviews OF A BYTE-IDENTICAL TREE. `loop_severities` is a hard
-    cliff, so the one round that said `minor` is what let the loop believe it
-    was converging."""
+@pytest.mark.parametrize(
+    ("unchanged_tree", "severity"),
+    [
+        # 43717ee6 priced one forge/run.py:394 defect minor -> absent -> important
+        # across three reviews OF A BYTE-IDENTICAL TREE. `loop_severities` is a
+        # hard cliff, so the one round that said `minor` is what let the loop
+        # believe it was converging.
+        (True, "important"),
+        # The reason this is gated on the head at all. Flooring unconditionally
+        # turns a genuine partial fix -- important reduced to minor because the
+        # fix worked -- into `prints == previous_prints` and parks the item at
+        # "stuck: 1 finding(s) unchanged". Real progress reported as being stuck.
+        (False, "minor"),
+    ],
+    ids=[
+        "a-repeat-on-an-unchanged-tree-keeps-its-severity",
+        "a-downgrade-after-a-real-fix-is-taken",
+    ],
+)
+def test_a_repeat_keeps_its_severity_only_when_no_fix_ran_between_measurements(
+    unchanged_tree, severity
+):
     was = Finding("important", "m", "a.py", 1, "p")
     now = Finding("minor", "reworded", "a.py", 9, "p", same_as=was.fingerprint)
-    (out,) = walk._carry_severity([now], [was], unchanged_tree=True)
-    assert out.severity == "important"
-
-
-def test_a_downgrade_after_a_real_fix_is_taken_as_given():
-    """The reason this is gated on the head at all. Flooring unconditionally
-    turns a genuine partial fix -- important reduced to minor because the fix
-    worked -- into `prints == previous_prints` and parks the item at "stuck: 1
-    finding(s) unchanged". Real progress reported as being stuck."""
-    was = Finding("important", "m", "a.py", 1, "p")
-    now = Finding("minor", "reworded", "a.py", 9, "p", same_as=was.fingerprint)
-    (out,) = walk._carry_severity([now], [was], unchanged_tree=False)
-    assert out.severity == "minor"
+    (out,) = walk._carry_severity([now], [was], unchanged_tree=unchanged_tree)
+    assert out.severity == severity
 
 
 def test_an_upgrade_is_always_taken_as_given():
@@ -400,17 +409,18 @@ def test_a_finding_with_no_previous_round_is_untouched():
     assert walk._carry_severity([now], [], unchanged_tree=True) == [now]
 
 
-def test_an_unrelated_previous_finding_does_not_floor_anything():
-    was = Finding("critical", "somewhere else", "b.py", 1, "p")
-    now = Finding("minor", "m", "a.py", 1, "p")
-    assert walk._carry_severity([now], [was], unchanged_tree=True) == [now]
-
-
-def test_a_previous_severity_the_parser_never_validated_does_not_raise():
-    """`from_payload` does `raw.get("severity", "")` with no validation -- its
-    whole docstring is about tolerating payloads it did not write. A legacy or
-    truncated findings_measured payload must not KeyError inside the fix loop."""
-    was = Finding("", "m", "a.py", 1, "p")
+@pytest.mark.parametrize(
+    "was",
+    [
+        Finding("critical", "somewhere else", "b.py", 1, "p"),
+        # `from_payload` does `raw.get("severity", "")` with no validation -- its
+        # whole docstring is about tolerating payloads it did not write. A legacy
+        # or truncated findings_measured payload must not KeyError in the loop.
+        Finding("", "m", "a.py", 1, "p"),
+    ],
+    ids=["an-unrelated-previous-finding", "a-previous-severity-never-validated"],
+)
+def test_a_previous_finding_that_is_no_floor_leaves_the_severity_alone(was):
     now = Finding("minor", "m", "a.py", 1, "p")
     assert walk._carry_severity([now], [was], unchanged_tree=True) == [now]
 
