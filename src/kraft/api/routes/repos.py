@@ -264,8 +264,7 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
 
     The repo's own `test_command`/`test_scopes` only. V1 verification has no
     registry fallback (`executor.dispatch._select_scopes`): a repo declaring
-    neither stops every item, whatever the legacy registry's `on.test.run`
-    says, so that binding cannot stand in for one here (Kraft-vd1ed).
+    neither stops every item (Kraft-vd1ed).
     """
     if entry.get("enabled") and not (entry.get("test_command") or entry.get("test_scopes")):
         raise HTTPException(

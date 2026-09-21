@@ -17,9 +17,9 @@ capabilities:
   # fable, opus, or sonnet) or a model's full name", plus the provider-prefixed
   # ids Bedrock and Vertex use (us.anthropic.claude-...): a set Anthropic
   # changes without Kraft, so any list shipped here goes stale. It is also a
-  # hard gate rather than a warning -- load_registry rejects a binding whose
-  # value fails `values:`, and api/startup.py does not catch RegistryError --
-  # so a too-narrow list stops an existing install booting after an upgrade.
+  # hard gate rather than a warning -- a profile or task whose value fails
+  # `values:` is refused at load -- so a too-narrow list stops an existing
+  # install's chains resolving after an upgrade.
   # A wrong model is caught by the CLI at launch, which is the cheap failure.
   # `effort` and `permission_mode` below keep their lists: those really are
   # closed vocabularies the CLI prints back at you.

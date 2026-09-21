@@ -371,7 +371,7 @@ async def _run_one(
                         "message": _job_finding_message(ci_status.jobs, j),
                         "file": _trace_file(log),
                         "line": _trace_line(log),
-                        "source_plugin": "on.ci.poll",
+                        "source_plugin": hook_point,
                     }
                     for j in ci_status.failed_jobs
                 ]

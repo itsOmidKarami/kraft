@@ -179,9 +179,10 @@ class RepoEntry(BaseModel):
     #: override, over the profile's `defaults:`. Keyed by profile because one
     #: repo-wide `default_model` was handed to every provider alike.
     models: dict[Annotated[str, Field(pattern=_PROFILE_ID)], str] = {}
-    # The command CI runs for this repo. The registry's `on.test.run` binding
-    # is one command for every repo on the install, which is what lets verify
-    # and CI drift apart (Kraft-579). None keeps the registry's command.
+    # The command CI runs for this repo -- what the changed-test-scope
+    # verification runs as one `**` scope. One command for every repo is what
+    # let verify and CI drift apart (Kraft-579). None, with no `test_scopes`,
+    # leaves verification nothing to run, and it stops for a human.
     test_command: str | None = None
     test_scopes: list[TestScope] | None = Field(default=None, min_length=1)
     #: Path-scoped execution contexts inside this repository, in the V1

@@ -340,8 +340,8 @@ def build_argv(
 
     Order is `capabilities:` declaration order, after the command prefix --
     the file reads as the command line it builds. A capability the harness
-    does not declare is *skipped*, never emitted flagless: `load_registry`
-    already rejected the binding, and a second line of defence here is what
+    does not declare is *skipped*, never emitted flagless: loading the task or
+    profile already refused it, and a second line of defence here is what
     makes the old `agent.py:473` bare-positional bug unrepresentable.
     """
     opts = dict(options or {})
