@@ -1,18 +1,25 @@
 import asyncio
 import json
+import shlex
 import sys
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo
+from support.harness import (
+    isolated_bd,
+    make_repo,
+    v1_fix_loop_node,
+    v1_resolved,
+    v1_seeded_chain,
+)
 
 from kraft import db, events, executor, policy, store
 from kraft import findings as _findings
 from kraft.executor import dispatch, prompts
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
 
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
 
 
 @pytest.mark.parametrize(
@@ -211,14 +218,18 @@ def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(tmp_p
                     id="fix1",
                     work_item_id=wid,
                     node_id="verify",
-                    hook_point="on.implementation.start",
+                    hook_point="verify.fix_loop.main.fix",
                     log_path="/l",
                     result_path="/r1",
                     round=1,
                 )
             )
             history = dispatch.judge_history(
-                database, wid, "verify", frozenset({"critical", "important"})
+                database,
+                wid,
+                "verify",
+                frozenset({"critical", "important"}),
+                fix_paths=["verify.fix_loop.main.fix"],
             )
             assert [h["round"] for h in history] == [0, 1]
             assert [f.message for f in history[0]["findings"]] == ["boom"]  # minor excluded
@@ -231,10 +242,8 @@ def test_judge_history_keeps_only_eligible_findings_with_their_fix_pointer(tmp_p
 
 
 def test_judge_verdict_fails_open_when_the_hook_is_not_registered(tmp_path):
-    """A registry that predates this feature (or a hand-built test registry,
-    Task 2's own fixtures among them) has no `dispatch.JUDGE_HOOK` entry at
-    all -- this must never `KeyError`, only fail open, same as any other
-    untrusted judge outcome."""
+    """A fix loop with no judge at all (`fix-loop-judge-is-optional`) must
+    never raise, only fail open, same as any other untrusted judge outcome."""
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -256,17 +265,19 @@ def test_judge_verdict_fails_open_when_the_hook_is_not_registered(tmp_path):
                 lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
             )
             pol = policy.Policy(loops={}, default=policy.Cap(attempts=3, wall_clock_s=3600))
+            node = v1_resolved(
+                [v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT), judge=False)]
+            ).nodes[0]
             verdict, reasoning = await dispatch.judge_verdict(
                 database,
                 rd,
                 wid,
-                {"id": "verify", "fix_loop": "verify_fix_loop"},
+                node,
                 row,
-                Registry(hooks={}),
                 rd.worktrees / wid,
                 round=1,
-                key="verify_fix_loop",
-                eligible=[],
+                key="verify.fix_loop",
+                cap=pol.default,
                 policy=pol,
                 launch=None,
                 budget=policy.NO_BUDGET,
@@ -278,19 +289,19 @@ def test_judge_verdict_fails_open_when_the_hook_is_not_registered(tmp_path):
     asyncio.run(scenario())
 
 
-def _judge_template():
-    return Template(
-        id="judgeloop",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "verify",
-                "tasks": ["on.check"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
-    )
+def _check(script: str) -> dict:
+    return {
+        "id": "check",
+        "kind": "subprocess",
+        "command": shlex.join([sys.executable, "-c", script]),
+    }
+
+
+def _judge_template(tmp_path, check_script=None):
+    """`verify` measured by `check_script`, with a fix loop and judge on the
+    fake agent. No `env_setup` node: V1 prepares the worktree first."""
+    node = v1_fix_loop_node("verify", _check(check_script or _ALWAYS_FAILS_SCRIPT))
+    return v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE)
 
 
 #: A measuring task that never resolves on its own -- only the cap or the
@@ -336,32 +347,17 @@ _SUCCEEDS_WITH_FINDING_SCRIPT = (
 )
 
 
-def _judge_registry(check_script=_ALWAYS_FAILS_SCRIPT):
-    fake = f"{sys.executable} {_FAKE_AGENT}"
-    return Registry(
-        hooks={
-            "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-            "on.check": {
-                "kind": "subprocess",
-                "command": [sys.executable, "-c", check_script],
-            },
-            "on.implementation.start": {"kind": "agent", "command": fake},
-            dispatch.JUDGE_HOOK: {"kind": "agent", "command": fake},
-        }
-    )
-
-
 def _judge_policy(tmp_path, *, attempts):
     p = tmp_path / "policy.yaml"
     p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
+        f"loops:\n  verify.fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
         "auto_escalate_stuck: false\n"
     )
     return policy.load_policy(p)
 
 
-def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, registry=None, prompt_log=None):
+def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, check_script=None, prompt_log=None):
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(plan))
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
@@ -381,14 +377,14 @@ def _run_judge_loop(tmp_path, monkeypatch, plan, *, attempts, registry=None, pro
                 rd,
                 title="judged loop",
                 repo=str(repo),
-                template=_judge_template(),
+                chain=_judge_template(tmp_path, check_script),
                 bd_cwd=str(tracker),
             )
             result = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry or _judge_registry(),
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
             )
@@ -464,7 +460,7 @@ def test_judge_stop_downgrade_exits_the_loop_clean(tmp_path, monkeypatch):
         monkeypatch,
         plan,
         attempts=99,
-        registry=_judge_registry(_SUCCEEDS_WITH_FINDING_SCRIPT),
+        check_script=_SUCCEEDS_WITH_FINDING_SCRIPT,
     )
     types = [e["type"] for e in evts]
     assert result == "completed"
@@ -512,7 +508,7 @@ def test_judge_dispatch_failure_falls_open_to_continue(tmp_path, monkeypatch):
     assert len(judge_events) == 1
     assert judge_events[0]["payload"]["verdict"] == "continue"
     needs_human = next(e for e in evts if e["type"] == "work_item_needs_human")
-    assert needs_human["payload"]["reason"].startswith("verify_fix_loop exhausted")
+    assert needs_human["payload"]["reason"].startswith("verify.fix_loop exhausted")
     assert "capped" in needs_human["payload"]  # a genuine cap breach, not a judge stop
 
 
@@ -548,20 +544,19 @@ def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(tmp_path
         database = await db.Database.open(rd.db)
         try:
             pol = _judge_policy(tmp_path, attempts=2)
-            registry = _judge_registry()
             wid = await executor.intake(
                 database,
                 rd,
                 title="judged retry",
                 repo=str(repo),
-                template=_judge_template(),
+                chain=_judge_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             first = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
             )
@@ -572,17 +567,17 @@ def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(tmp_path
             )
             await database.write(
                 lambda c: store.retry_after_cap(
-                    c, wid, "verify", "verify_fix_loop", "steer toward the real cause"
+                    c, wid, "verify", "verify.fix_loop", "steer toward the real cause"
                 )
             )
             second = await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 policy=pol,
-                start_index=1,
+                start_index=0,
             )
             assert second == "needs_human"  # post-retry cap breaches too
 
@@ -692,6 +687,7 @@ def test_needs_context_question_ignores_a_judge_session(tmp_path):
                     chain_definition="{}",
                 )
             )
+            node = v1_resolved([v1_fix_loop_node("verify", _check(_ALWAYS_FAILS_SCRIPT))]).nodes[0]
             result = tmp_path / "judge.json"
             result.write_text(json.dumps({"status": "needs_context", "question": "which cap?"}))
             await database.write(
@@ -700,7 +696,7 @@ def test_needs_context_question_ignores_a_judge_session(tmp_path):
                     id="judge1",
                     work_item_id=wid,
                     node_id="verify",
-                    hook_point=dispatch.JUDGE_HOOK,
+                    hook_point=node.judge.path,
                     log_path="/l",
                     result_path=str(result),
                     round=0,
@@ -709,7 +705,6 @@ def test_needs_context_question_ignores_a_judge_session(tmp_path):
             await database.write(
                 lambda c: store.session_exited(c, "judge1", "needs_context", question="which cap?")
             )
-            node = {"id": "verify", "tasks": ["on.check"]}
             assert dispatch.needs_context_question(database, wid, node, 0) is None
         finally:
             await database.close()
@@ -729,23 +724,27 @@ def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = _judge_registry()
             pol = _judge_policy(tmp_path, attempts=1)
+            chain = _judge_template(tmp_path)
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_judge_template(),
+                chain=chain,
                 bd_cwd=str(tracker),
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
             )
-            wt = rd.worktrees / wid
-            await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
-            env_node = {"id": "env_setup", "tasks": ["on.env.prepare"], "fix_loop": None}
-            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+            # The worktree the loop runs in, cut for real -- the preparation V1
+            # runs before the first node.
+            from kraft import builtins
+
+            wt = await builtins.ensure_worktree(
+                database, rd, repo=str(repo), work_item_id=wid, repo_entry=None
+            )
+            await database.write(lambda c: store.load_chain(c, wid, "verify"))
 
             await database.write(lambda c: store.enter_node(c, wid, "verify"))
             await database.write(
@@ -754,18 +753,18 @@ def _seeded_judge_scenario(tmp_path, monkeypatch, *, steer):
                     id="prior-fix",
                     work_item_id=wid,
                     node_id="verify",
-                    hook_point="on.implementation.start",
+                    hook_point="verify.fix_loop.main.fix",
                     log_path="/l",
                     result_path="/r",
                 )
             )
             await database.write(lambda c: store.session_exited(c, "prior-fix", "done"))
-            cap = policy.resolve_cap(pol, "verify_fix_loop")
-            await database.write(lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap))
+            cap = policy.resolve_cap(pol, "verify.fix_loop")
+            await database.write(lambda c: store.bump_counter(c, wid, "verify.fix_loop", cap))
 
-            node = _judge_template().nodes[1]
+            node = chain.nodes[0]
             result = await executor.walk_node(
-                database, rd, wid, node, row, registry, wt, policy=pol, steer=steer
+                database, rd, wid, node, row, wt, policy=pol, steer=steer
             )
             types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
             return result, types
