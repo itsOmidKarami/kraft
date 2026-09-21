@@ -723,14 +723,14 @@ enforced-by: tests/api/test_workspace_intake.py::test_a_workspace_intake_freezes
 
 The default workspace root-pointer policy SHALL leave the root repository
 unchanged.
-enforced-by: tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged, tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/adapters/forge/test_run_chain.py::test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660
+enforced-by: tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[workspace], tests/templates/test_workspace_publication.py::test_the_default_root_pointer_policy_leaves_the_root_unchanged[filed-before-workspaces-skip], tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/adapters/forge/test_run_chain.py::test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660
 
 ## REQ workspace-pointer-bump-prefers-direct-push
 
 When a selected root-pointer policy requests a bump without root source
 changes, the system SHALL commit and push the pointer update directly to the
 workspace root when permitted.
-enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces]
 
 ## REQ workspace-pointer-bump-falls-back-to-merge-request
 
@@ -942,7 +942,7 @@ enforced-by: tests/adapters/forge/test_waits.py::test_missing_external_approval_
 
 The system SHALL wait for a changed child repository to merge before updating
 a workspace root pointer to that child's revision.
-enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update, tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
 
 ## REQ root-source-draft-merge-request-may-run-early
 
