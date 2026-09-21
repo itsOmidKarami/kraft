@@ -501,14 +501,17 @@ def test_default_profile_reproduces_todays_command_line(monkeypatch):
     """
     seen = _capture_cmd(monkeypatch)
     _run(command="claude", task_instruction="do the thing")
-    ctx = agent._CTX.format(
-        title="t",
-        task_instruction="do the thing",
-        repo_path="/repo",
-        work_item_id="w1",
-        node_id="implementation",
-        hook_point="on.implementation.start",
-        session_id="s1",
+    ctx = (
+        agent._CTX.format(
+            title="t",
+            task_instruction="do the thing",
+            repo_path="/repo",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point="on.implementation.start",
+            session_id="s1",
+        )
+        + agent.SAFETY_RULES
     )
     assert seen["cmd"] == [
         *shlex.split("claude"),
@@ -697,14 +700,17 @@ def test_no_steering_leaves_the_system_prompt_byte_identical(monkeypatch):
     """Regression guard: this sub-project's central compatibility claim."""
     seen = _capture_cmd(monkeypatch)
     _run(steering_texts=())
-    ctx = agent._CTX.format(
-        title="t",
-        task_instruction="do the thing",
-        repo_path="/repo",
-        work_item_id="w1",
-        node_id="implementation",
-        hook_point="on.implementation.start",
-        session_id="s1",
+    ctx = (
+        agent._CTX.format(
+            title="t",
+            task_instruction="do the thing",
+            repo_path="/repo",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point="on.implementation.start",
+            session_id="s1",
+        )
+        + agent.SAFETY_RULES
     )
     assert _system_prompt(seen["cmd"]) == ctx
 

@@ -760,3 +760,41 @@ def test_dispatch_resolves_its_agent_through_the_harness_not_a_hardcoded_command
     asyncio.run(scenario())
     assert seen["command"] == "", "a hardcoded command bypasses the harness declaration"
     assert seen["harness"] == "claude"
+
+
+def test_an_escalation_launch_carries_the_never_signal_rule(tmp_path, monkeypatch):
+    """`every-agent-launch-carries-kraft-safety-rules`: an escalation turn is
+    an agent launch outside any chain, with full tools, and still gets the
+    rule. Only the spawn is faked, so the real context builder runs."""
+    import asyncio
+
+    from kraft.adapters import agent as agent_mod
+
+    launched = {}
+
+    async def _spawn(_db, run_dirs, *, cmd, session_id, **_kw):
+        launched["argv"] = "\n".join(cmd)
+        log_path = run_dirs.logs / f"{session_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return "done"
+
+    monkeypatch.setattr(agent_mod._subprocess, "run_task", _spawn)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            await _seed_needs_human(database, rd, "w1")
+            await escalate.dispatch(
+                database,
+                rd,
+                work_item_id="w1",
+                message="any update?",
+                launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert agent_mod.SAFETY_RULES in launched["argv"]

@@ -72,6 +72,27 @@ _CTX = (
     "force it in."
 )
 
+#: Kraft's own safety rules, part of the contract every agent launch carries
+#: (`every-agent-launch-carries-kraft-safety-rules`). Not steering: nothing a
+#: task, chain, repo or operator writes can select it away. A worker once
+#: SIGKILLed the Kraft daemon it was running under (Kraft-f8u3); the legacy
+#: registry answered with a default steering on every agent hook, and V1 has no
+#: such default (Kraft-5x93b), so the rule lives here instead.
+SAFETY_RULES = (
+    "\n\nNever signal a process you did not start. If something is already "
+    "listening on a port you need, it is not a stale leftover to clear -- it "
+    "might be the Kraft daemon serving other work right now. Check "
+    "$KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before "
+    "touching anything you find on a port: if the pid or the port matches, it "
+    "is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill` "
+    "would take down orchestration for every other work item on this install, "
+    "including this one. Ask any server you start yourself for an ephemeral "
+    "port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the "
+    "daemon's. If a task genuinely needs the daemon's own port, that is a "
+    "question for a human, not something to resolve by killing what is "
+    "already there."
+)
+
 #: Asked only of a harness whose `usage` capability says `result_file` -- the
 #: agent is then the only source of its own numbers, and without this the row
 #: stores NULL tokens as well as NULL cost. `usage._from_usage_block` already
@@ -482,6 +503,10 @@ def build_context(
             "read with the git command that header names -- use it when you "
             "need to judge the change as a whole.\n"
         )
+    # Unconditional, and here because every agent launch -- chain dispatch,
+    # gate auto-review, escalation -- builds its context through this function
+    # and `run_agent_task` is `harness.build_argv`'s only caller.
+    ctx += SAFETY_RULES
     if method_text:
         # After the contract, before steering: the agent reads what it must
         # produce, then how to produce it, then the house rules that apply to

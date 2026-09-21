@@ -66,6 +66,16 @@ contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
 enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file
 
+## REQ every-agent-launch-carries-kraft-safety-rules
+
+Every agent launch -- a chain task, a gate auto-review, an escalation turn --
+SHALL carry Kraft's own safety rules as part of its contract, including the rule
+never to signal a process the agent did not start. The rules SHALL NOT depend
+on a task selecting them, and no task, chain, steering profile or repository
+configuration SHALL be able to remove them.
+enforced-by: tests/executor/test_dispatch.py::test_every_seeded_agent_task_launches_with_the_never_signal_rule, tests/executor/test_dispatch.py::test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule, tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_never_signal_rule, tests/test_escalate.py::test_an_escalation_launch_carries_the_never_signal_rule
+origin: src/kraft/adapters/agent.py §SAFETY_RULES -- Kraft-5x93b: the legacy registry's `defaults: {agent: {steering: [never-signal-processes-you-didnt-start]}}` gave every agent the rule born of Kraft-f8u3 (a worker SIGKILLed the daemon); V1 has no registry default, so the rule became contract text appended by `build_context`, the one builder every launch path uses.
+
 ## REQ selected-skill-must-be-available
 
 When an agent task selects a skill that its execution environment cannot load,

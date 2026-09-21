@@ -2986,3 +2986,145 @@ def test_a_snapshot_without_frozen_steering_stops_for_a_human(tmp_path, monkeypa
     assert argv == ""
     log = Path(sessions[0]["log_path"]).read_text()
     assert "project-standards" in log and "before steering was frozen" in log, log
+
+
+def _capture_launches(monkeypatch) -> dict[str, str]:
+    """Stand in for the process spawn only: every agent launch still goes
+    through `run_agent_task`, `build_context` and `harness.build_argv`, and the
+    argv it would have run is recorded by hook point, one argument per line."""
+    import kraft.adapters.agent as agent_adapter
+
+    launched: dict[str, str] = {}
+
+    async def _spawn(_db, _rd, *, hook_point, cmd, **_kw):
+        launched[hook_point] = "\n".join(cmd)
+        return "done"
+
+    monkeypatch.setattr(agent_adapter._subprocess, "run_task", _spawn)
+    return launched
+
+
+def _seeded_agent_launches(tmp_path, monkeypatch) -> tuple[set[str], dict[str, str]]:
+    """Every agent task of every chain the shipped seed selects, materialized
+    the way intake does and dispatched through `dispatch_node` on the shipped
+    harness profiles. Returns the agent task paths found (as `chain:path`) and
+    the argv each launch assembled."""
+    from kraft.executor.context import LaunchContext
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.library import TemplateLibrary
+    from kraft.templates.models import AgentTask
+
+    repo = make_repo(tmp_path)
+    templates = seed_v1_library(tmp_path / "templates")
+    shutil.rmtree(templates / "steering", ignore_errors=True)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    launched = _capture_launches(monkeypatch)
+    library = TemplateLibrary.from_yaml_dir(templates)
+    found: set[str] = set()
+    argv: dict[str, str] = {}
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            for n, chain_id in enumerate(library.chain_ids):
+                chain = library.resolve_chain(chain_id).materialize(
+                    target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+                    effective_policy=InstancePolicy.from_input(
+                        InstancePolicyInput.model_validate({})
+                    ),
+                )
+                wid = f"w{n}"
+                await v1_item(database, chain, repo=repo, wid=wid)
+                row = database.read(
+                    lambda c, wid=wid: c.execute(
+                        "SELECT * FROM work_items WHERE id = ?", (wid,)
+                    ).fetchone()
+                )
+                for node in chain.chain.nodes:
+                    for task in node.tasks():
+                        if not isinstance(task.task, AgentTask):
+                            continue
+                        found.add(f"{chain_id}:{task.path}")
+                        launched.clear()
+                        await dispatch.dispatch_node(
+                            database,
+                            rd,
+                            task,
+                            node,
+                            row,
+                            repo,
+                            launch=LaunchContext(
+                                repo_entry={"setup_command": ""},
+                                steering_dir=templates / "steering",
+                            ),
+                        )
+                        argv[f"{chain_id}:{task.path}"] = launched.get(task.path, "")
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    return found, argv
+
+
+def test_every_seeded_agent_task_launches_with_the_never_signal_rule(tmp_path, monkeypatch):
+    """`every-agent-launch-carries-kraft-safety-rules` (Kraft-5x93b): the legacy
+    registry gave every agent the never-signal steering by default; V1 has no
+    such default, so the rule is Kraft's own contract text instead. The task
+    list is derived from the seed, so a new seeded agent task is covered the
+    moment it exists."""
+    import kraft.adapters.agent as agent_adapter
+
+    found, argv = _seeded_agent_launches(tmp_path, monkeypatch)
+
+    # Not vacuous: the seed was read, and its known agent tasks were launched.
+    assert {
+        "default:implementation.implementation.implement",
+        "default:spec.main.author",
+        "quick-task:implementation.main.implement",
+    } <= found, found
+    assert "KRAFT_DAEMON_PID" in agent_adapter.SAFETY_RULES
+    missing = sorted(p for p in found if agent_adapter.SAFETY_RULES not in argv[p])
+    assert missing == [], missing
+
+
+def test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule(
+    tmp_path, monkeypatch
+):
+    """The rule is not something a task opts into, so a task an operator
+    writes without any steering or skill carries it all the same."""
+    import kraft.adapters.agent as agent_adapter
+    from kraft.executor.context import LaunchContext
+
+    repo = make_repo(tmp_path)
+    fake_harness_home(tmp_path, ["true"])
+    launched = _capture_launches(monkeypatch)
+    raw = {"id": "write", "kind": "agent", "harness": "fake", "prompt": "Do the thing."}
+    node, task = _v1_task("work", "do", raw)
+    chain = v1_chain(
+        [{"id": "work", "kind": "exec", "steps": [{"id": "do", "tasks": [raw]}]}], repo=repo
+    )
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=repo)
+            row = database.read(
+                lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone()
+            )
+            return await dispatch.dispatch_node(
+                database,
+                rd,
+                task,
+                node,
+                row,
+                repo,
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == "done"
+    assert agent_adapter.SAFETY_RULES in launched["work.do.write"]

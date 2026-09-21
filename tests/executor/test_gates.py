@@ -2425,3 +2425,38 @@ def test_gate_review_that_cannot_locate_its_gate_stops_rather_than_leaving_it_cl
 
 async def _approve_verdict():
     return "approve", None
+
+
+def test_a_gate_auto_review_launch_carries_the_never_signal_rule(tmp_path, monkeypatch):
+    """`every-agent-launch-carries-kraft-safety-rules`: the gate's reviewer is
+    launched by `gate_review`, not `dispatch_node`, and still gets the rule."""
+    repo = make_repo(tmp_path)
+    chain = _reviewed_chain(repo)
+    rd = RunDirs(tmp_path / "run").ensure()
+    fake_harness_home(tmp_path, ["true"])
+    launched = {}
+
+    async def _spawn(_db, _rd, *, cmd, **_kw):
+        launched["argv"] = "\n".join(cmd)
+        return "done"
+
+    monkeypatch.setattr(agent_mod._subprocess, "run_task", _spawn)
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "k.db")
+        try:
+            await v1_item(database, chain, repo=repo, auto_gate=True)
+            await _seed_pending_gate(database)
+            return await gates_module.gate_review.review(
+                database,
+                rd,
+                work_item_id="w1",
+                gate="spec_approval",
+                node=chain.chain.nodes[1],
+                launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+            )
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert agent_mod.SAFETY_RULES in launched["argv"]
