@@ -253,10 +253,14 @@ async def skip(
     return await transport._act(f"/work-items/{target}/skip", payload)
 
 
-async def complete(reason: str, work_item_id: str | None = None) -> dict:
-    """End the item as completed by hand. A reason is required and recorded."""
+async def complete(reason: str, work_item_id: str | None = None, close_beads: bool = False) -> dict:
+    """End the item as completed by hand. A reason is required and recorded;
+    its beads close only with `close_beads`."""
     target = context._forbid_self_action(work_item_id)
-    return await transport._act(f"/work-items/{target}/complete", {"reason": reason})
+    payload: dict = {"reason": reason}
+    if close_beads:
+        payload["close_beads"] = True
+    return await transport._act(f"/work-items/{target}/complete", payload)
 
 
 async def cancel(reason: str, work_item_id: str | None = None) -> dict:

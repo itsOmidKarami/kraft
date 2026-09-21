@@ -106,3 +106,23 @@ def test_an_ended_item_cannot_be_ended_again(client, repo, verb, ended):
 
     assert r.status_code == 409, r.text
     assert client.get(f"/api/work-items/{wid}").json()["status"] == ended
+
+
+@pytest.mark.parametrize("close", [False, True], ids=["by-default", "opted-in"])
+def test_manual_completion_closes_beads_only_when_asked(client, repo, monkeypatch, close):
+    """Ruling 167 (Kraft-kgbwt): a hand-completed item's work may have landed
+    elsewhere, or not at all, so its beads stay open unless the operator says
+    `close_beads`."""
+    from kraft import executor
+
+    closed = []
+
+    async def fake_close(db, row, bd_cwd, run_dirs):
+        closed.append(row["id"])
+
+    monkeypatch.setattr(executor, "close_beads", fake_close)
+    wid = _stopped(client, repo)
+    body = {"reason": "done by hand", **({"close_beads": True} if close else {})}
+
+    assert client.post(f"/api/work-items/{wid}/complete", json=body).status_code == 200
+    assert closed == ([wid] if close else [])

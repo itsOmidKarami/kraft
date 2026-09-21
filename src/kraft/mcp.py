@@ -171,11 +171,13 @@ def build() -> MCPServer:
         return await client.skip(note, work_item_id, path=path)
 
     @server.tool()
-    async def complete_work_item(reason: str, work_item_id: str | None = None) -> dict:
+    async def complete_work_item(
+        reason: str, work_item_id: str | None = None, close_beads: bool = False
+    ) -> dict:
         """Mark a Kraft work item complete by hand, stopping anything running.
-        The reason is required and recorded. Only a human should decide this —
-        ask first."""
-        return await client.complete(reason, work_item_id)
+        The reason is required and recorded. Its beads stay open unless
+        `close_beads` is true. Only a human should decide this — ask first."""
+        return await client.complete(reason, work_item_id, close_beads=close_beads)
 
     @server.tool()
     async def cancel_work_item(reason: str, work_item_id: str | None = None) -> dict:

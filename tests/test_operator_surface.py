@@ -37,7 +37,7 @@ def test_pause_is_a_work_item_control_only():
         ("retry_work_item", {"path", "restart"}),
         ("skip_work_item", {"path"}),
         ("resume_work_item", {"steers"}),
-        ("complete_work_item", {"reason"}),
+        ("complete_work_item", {"reason", "close_beads"}),
         ("cancel_work_item", {"reason"}),
     ],
 )

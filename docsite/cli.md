@@ -85,7 +85,7 @@ kraft item set-overrides --clear                  # back to the template's own b
 kraft item set-node-override --node verify --auto-escalate-stuck
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
 kraft item abandon --yes                          # drops the item, reclaims its worktree
-kraft item complete --reason "shipped by hand"    # end it as completed, stopping anything running
+kraft item complete --reason "shipped by hand"    # end it as completed; add --close-beads to close its beads
 kraft item cancel --reason "superseded by #412"   # end it as cancelled; the worktree stays
 ```
 

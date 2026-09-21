@@ -89,7 +89,11 @@ def _cmd_skip(ns: argparse.Namespace) -> None:
 
 
 def _cmd_complete(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.complete(ns.reason, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.complete(ns.reason, ns.id, close_beads=ns.close_beads)),
+        common._render_action,
+        ns.json,
+    )
 
 
 def _cmd_cancel(ns: argparse.Namespace) -> None:
@@ -240,6 +244,12 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         ending = subs.add_parser(verb, parents=[common], help=what)
         ending.add_argument("id", nargs="?")
         ending.add_argument("--reason", required=True, help="why; recorded on the audit event")
+        if verb == "complete":
+            ending.add_argument(
+                "--close-beads",
+                action="store_true",
+                help="also close the item's beads (off: work done by hand may live elsewhere)",
+            )
         ending.set_defaults(func=fn)
 
     progress = subs.add_parser(

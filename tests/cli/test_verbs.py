@@ -361,7 +361,12 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         (
             ["item", "complete", "w1", "--reason", "shipped by hand"],
             "complete",
-            {"reason": "shipped by hand", "work_item_id": "w1"},
+            {"reason": "shipped by hand", "work_item_id": "w1", "close_beads": False},
+        ),
+        (
+            ["item", "complete", "w1", "--reason", "shipped by hand", "--close-beads"],
+            "complete",
+            {"reason": "shipped by hand", "work_item_id": "w1", "close_beads": True},
         ),
         (
             ["item", "cancel", "w1", "--reason", "not needed"],
@@ -388,6 +393,7 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         "skip-path",
         "resume-steer-task",
         "complete-reason",
+        "complete-close-beads",
         "cancel-reason",
         "escalate-message",
         "escalate-new-thread",
