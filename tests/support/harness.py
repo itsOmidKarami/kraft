@@ -38,14 +38,27 @@ def _git(cwd: Path, *args: str) -> None:
     )
 
 
+_repo_template: Path | None = None
+
+
 def make_repo(tmp_path: Path, name: str = "sample") -> Path:
+    """A committed copy of `sample_repo`. Built once per process and copied,
+    the way `isolated_bd` is: five git spawns a call were ~15% of the suite's
+    git (Kraft-qmhfc). Commits use `_FIXED_DATE`, so a copy carries the same
+    SHAs a fresh build would."""
+    global _repo_template
+    if _repo_template is None:
+        tpl = Path(tempfile.mkdtemp(prefix="kraft-repo-tpl-")) / "sample"
+        shutil.copytree(_SUPPORT / "sample_repo", tpl)
+        _git(tpl, "init", "-q", "-b", "main")
+        _git(tpl, "config", "user.email", "t@t")
+        _git(tpl, "config", "user.name", "t")
+        _git(tpl, "add", "-A")
+        _git(tpl, "commit", "-m", "init")
+        atexit.register(shutil.rmtree, tpl.parent, ignore_errors=True)
+        _repo_template = tpl
     dest = tmp_path / name
-    shutil.copytree(_SUPPORT / "sample_repo", dest)
-    _git(dest, "init", "-q", "-b", "main")
-    _git(dest, "config", "user.email", "t@t")
-    _git(dest, "config", "user.name", "t")
-    _git(dest, "add", "-A")
-    _git(dest, "commit", "-m", "init")
+    shutil.copytree(_repo_template, dest, symlinks=True)
     return dest
 
 
