@@ -869,7 +869,7 @@ async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
 
     # Not vacuous: the seed was read, and its known agent tasks were launched.
     assert {
-        "default:implementation.implementation.implement",
+        "default:implementation.main.implement",
         "default:spec.main.author",
         "quick-task:implementation.main.implement",
     } <= set(argv), argv

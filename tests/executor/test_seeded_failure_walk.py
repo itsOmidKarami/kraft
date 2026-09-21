@@ -1,8 +1,11 @@
 """Phase 4's exit criterion on the shipped default chain: a `KRAFT_FAIL` work
 item whose merge request keeps failing CI walks the node's recovery, then its
 fix loop, then escalation -- and ends with a human, having spent exactly the
-attempts the seed allows. The agents are `fixtures/fake-claude.sh`, which fails
-every launch whose context names `KRAFT_FAIL`; git is real, the forge is fake."""
+attempts the seed allows. And the same item failing its local review walks
+`verification`'s own fix loop, which re-runs the tests and the review and never
+the implementer (Ruling 87). The agents are `fixtures/fake-claude.sh`, which
+fails every launch whose context names `KRAFT_FAIL`; git is real, the forge is
+fake."""
 
 from pathlib import Path
 
@@ -28,10 +31,9 @@ TRAIL = (
 )
 
 
-@pytest.fixture
-async def failed_walk(item_on, tmp_path, monkeypatch):
-    """The walk this file is about, once: `(item, status, argv of every agent
-    launch)`."""
+async def _walk_from(node, item_on, tmp_path, monkeypatch):
+    """One walk of a `KRAFT_FAIL` item from `node`: `(item, status, argv of
+    every agent launch)`."""
     templates = seed_v1_library(tmp_path / "templates", agent_command=str(FAKE_CLAUDE))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
     argv_log = tmp_path / "argv.log"
@@ -42,8 +44,8 @@ async def failed_walk(item_on, tmp_path, monkeypatch):
         lambda name: forge.FakeForge(ci_states=["failed"], ci_failed_jobs=[RED]),
     )
     chain = v1_named_chain(templates, "default")
-    it = await item_on(chain, NODE, title="KRAFT_FAIL the pipeline never goes green")
-    start = [n.id for n in chain.nodes].index(NODE)
+    it = await item_on(chain, node, title="KRAFT_FAIL the pipeline never goes green")
+    start = [n.id for n in chain.nodes].index(node)
 
     status = await executor.run(
         it.database,
@@ -58,12 +60,23 @@ async def failed_walk(item_on, tmp_path, monkeypatch):
     return it, status, [r.splitlines() for r in records if r.strip()]
 
 
-async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(failed_walk):
-    it, status, _launches = failed_walk
-
+def _trail(it) -> list[tuple[str, dict]]:
     trail = [(e["type"], e["payload"]) for e in it.events() if e["type"] in TRAIL]
     for kind, payload in trail:  # the report's event trail: `just test ... -s`
         print(kind, {k: payload.get(k) for k in ("scope", "cycle", "verdict", "reason", "auto")})
+    return trail
+
+
+@pytest.fixture
+async def failed_walk(item_on, tmp_path, monkeypatch):
+    """The post-draft walk, once."""
+    return await _walk_from(NODE, item_on, tmp_path, monkeypatch)
+
+
+async def test_a_failing_item_walks_recovery_then_the_fix_loop_then_escalation(failed_walk):
+    it, status, _launches = failed_walk
+
+    trail = _trail(it)
     kinds = [k for k, _ in trail]
 
     assert status == "needs_human"
@@ -105,3 +118,35 @@ async def test_the_judge_launches_on_its_own_runtime_not_the_fixers(failed_walk)
     assert judges and repairs
     assert {(_option(a, "--model"), _option(a, "--effort")) for a in judges} == {("sonnet", "high")}
     assert {_option(a, "--model") for a in repairs} == {"gpt-5.6-terra"}
+
+
+async def test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer(
+    item_on, tmp_path, monkeypatch
+):
+    """Ruling 87 on real launches. The tests pass (the seed's test builtin is
+    neutered to `true` here) and the review fails, so `verification`'s fix loop
+    repairs and re-measures from its first step -- the tests, then the review,
+    each round -- until the stall stops it. The implementer never launches,
+    and every review launch is handed the review package."""
+    it, status, launches = await _walk_from("verification", item_on, tmp_path, monkeypatch)
+
+    trail = _trail(it)
+    assert status == "needs_human"
+    assert {p["node_id"] for k, p in trail if k == "fix_cycle_started"} == {"verification"}
+    paths = [s["hook_point"] for s in it.sessions("verification")]
+    measured = [p for p in paths if p.startswith(("verification.tests", "verification.review"))]
+    rounds = len(it.events("findings_measured"))
+    assert rounds >= 2
+    assert (
+        measured
+        == [
+            "verification.tests.test_changed_scopes",
+            "verification.review.code_review",
+        ]
+        * rounds
+    )
+    assert "verification.fix_loop.main.repair" in paths
+    assert not it.sessions("implementation")
+    reviews = [a for a in launches if (_option(a, "-p") or "").startswith("Review this work")]
+    assert len(reviews) == rounds
+    assert all("$KRAFT_REVIEW_PACKAGE" in " ".join(a) for a in reviews)

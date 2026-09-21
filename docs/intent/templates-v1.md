@@ -144,8 +144,8 @@ An agent task that declares the `review_package` input SHALL be handed the
 change under review -- the whole branch on its first session, then only what
 changed since its previous session -- and a task that does not declare it
 SHALL NOT be.
-enforced-by: tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[undeclared]
-origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name (Ruling 47). Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer.
+enforced-by: tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[undeclared], tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method, tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer
+origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name (Ruling 47). Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer, and the default chain's in-loop code review (`verification.review.code_review`, Ruling 87) its second.
 
 ## REQ carried-findings-are-delivered-to-a-reviewing-task
 
@@ -760,6 +760,47 @@ request for each changed child repository.
 The system MAY create a draft merge request before final-gate approval so CI
 and automated merge-request review can run. A draft merge request SHALL NOT be
 marked ready or merged before that approval.
+
+## REQ default-chain-verification-does-not-rerun-the-implementer
+
+The default chain SHALL run its implementing agent in an execution node with no
+fix loop, and SHALL repair a failing test or a failing review in the
+verification node after it, whose fix loop re-runs the tests and the review
+and SHALL NOT re-run the implementing agent.
+enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[review-red], tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
+origin: templates/library.yaml -- Ruling 87. `fix-loop-remeasures-the-whole-node` reruns a node from its first step, so on the merged `implementation` node every test failure re-ran the implementer; splitting the node makes a repair re-run only the tests and the review. The walks use the seed's own changed-test-scope `builtin`, which `walk._IN_PROCESS_KINDS` had counted as Kraft's own code: every red test stopped with "reinstall and restart" instead of opening the fix loop.
+
+## REQ default-chain-reviews-only-green-tests
+
+The default chain's in-loop code review SHALL run only after the
+changed-test-scope verification in the same node has passed.
+enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer
+origin: templates/library.yaml -- the review is the verification node's second step, and a step group stops at its first failure (`exec-node-orders-concurrent-task-groups`), so no new mechanism is needed.
+
+## REQ pre-draft-gate-shows-a-work-brief
+
+The default chain's pre-draft gate SHALL show a work brief written by the
+execution node before it. The brief SHALL say what was asked, what changed,
+what was verified, what the review found and what was done about it, what is
+unresolved, and that approving opens a draft merge request and starts CI. It
+SHALL NOT contain the diff.
+enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unresolved], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
+origin: src/kraft/skills/work-brief/SKILL.md -- Ruling 87 (Omid). The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
+
+## REQ default-chain-retests-a-rebased-head
+
+When the default chain's post-draft feedback moves the worktree base, the
+system SHALL restart at the verification node, so the rebased head is tested
+and reviewed again before the chain goes on.
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-passes], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-reopens], tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
+origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `chain_review`.
+
+## REQ base-change-restart-passes-an-approved-gate
+
+A base-change restart SHALL NOT reopen a gate in its span that was already
+approved; the restarted walk SHALL pass over it.
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-passes]
+origin: src/kraft/executor/walk.py §RESTART_REOPENS_APPROVED_GATES -- the default while the question is open with Omid (Ruling 87, Kraft-bjw6a); flipping the flag reopens the gate, and that side is pinned by the `[approved-gate-reopens]` case. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
 

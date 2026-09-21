@@ -672,11 +672,11 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
         # The fields the Config tab renders, where a blank reads as
         # "not configured": the fix-loop *cap key*, and whether the gate
         # declares a reviewing task.
-        impl = next(n for n in nodes if n["id"] == "implementation")
-        assert impl["fix_loop"] == "implementation.fix_loop"
-        assert impl["steps"] == [
-            ["implementation.implementation.implement"],
-            ["implementation.verification.test_changed_scopes"],
+        verification = next(n for n in nodes if n["id"] == "verification")
+        assert verification["fix_loop"] == "verification.fix_loop"
+        assert verification["steps"] == [
+            ["verification.tests.test_changed_scopes"],
+            ["verification.review.code_review"],
         ]
         assert nodes[1]["auto_escalate"] is False
         assert payload["chain_definition"]["template_id"] == "default"
