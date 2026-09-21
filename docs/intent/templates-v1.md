@@ -8,28 +8,36 @@ unpinned until the migration supplies their implementation tests.
 
 The system SHALL accept only the V1 template schema and SHALL NOT preserve
 compatibility with legacy hook bindings or `gate_after` chains.
+enforced-by: tests/api/test_templates_inspection.py::test_a_legacy_gate_after_chain_does_not_resolve, tests/api/test_templates_inspection.py::test_a_legacy_home_starts_degraded_and_names_the_update_command
+origin: src/kraft/templates/library.py §is_pre_v1 -- Task 11a: a legacy chain does not resolve and a pre-V1 home is refused, never converted. The legacy loader itself (`registry.yaml`, `load_templates`, the legacy `GET /templates`) still runs beside V1 until Task 11b deletes it.
 
 ## REQ major-update-replaces-incompatible-template-config
 
 When an update crosses a major version with an incompatible template schema,
 the update SHALL install the new version's template configuration rather than
 continue to use the incompatible configuration.
+enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_an_update_leaves_a_v1_home_alone
+origin: src/kraft/cli/admin.py §replace_pre_v1_config -- "incompatible" is a pre-V1 home (`templates.library.is_pre_v1`: a `registry.yaml` and no `library.yaml`), the one incompatible schema that exists. The machine's own files (`MACHINE_CONFIG`) are carried across; the rest is the bundled V1 configuration.
 
 ## REQ major-update-requires-explicit-acceptance
 
 Before replacing configuration for an incompatible major update, the update
 command SHALL warn about the breaking change and require explicit acceptance;
 the `-y` option MAY provide that acceptance for non-interactive use.
+enforced-by: tests/test_update.py::test_the_major_update_warns_before_it_asks, tests/test_update.py::test_major_update_without_acceptance_changes_nothing[no], tests/test_update.py::test_major_update_without_acceptance_changes_nothing[enter], tests/test_update.py::test_major_update_without_acceptance_changes_nothing[no-terminal], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag]
 
 ## REQ major-update-preserves-replaced-configuration
 
 Before an incompatible major update replaces template configuration, the system
 SHALL create a recoverable backup of the configuration it replaces.
+enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt]
 
 ## REQ migration-helper-is-not-guaranteed
 
 The system MAY provide a migration helper for a major template-schema change,
 but the availability of such a helper SHALL NOT be required for the update.
+enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag]
+origin: src/kraft/cli/admin.py §replace_pre_v1_config -- no helper is offered: the update completes, and a legacy chain is left in the backup rather than converted.
 
 ## REQ template-library-has-shared-components-and-chain-files
 
@@ -948,17 +956,21 @@ enforced-by: tests/test_policy.py::test_policy_override_rejects_unknown_fields_f
 `GET /templates/lint` SHALL validate the complete installed template library
 and report all parse, resolution, schema, reference, and identifier errors
 without writing or reloading configuration.
+enforced-by: tests/api/test_templates_inspection.py::test_lint_reports_all_library_errors_without_writing, tests/api/test_templates_inspection.py::test_lint_reports_an_unreadable_library_file_as_an_issue, tests/api/test_templates_inspection.py::test_lint_of_the_installed_library_is_clean
+origin: src/kraft/templates/library.py §TemplateLibrary.lint_dir -- reads the installed directory into a scratch library, never into the daemon's `st.library`. A bad `library.yaml` is one issue: nothing can be resolved against it.
 
 ## REQ resolved-template-api-shows-saved-chain
 
 `GET /templates/{id}/resolved` SHALL return the fully resolved configuration of
 a saved chain, before per-work-item materialization.
+enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_an_unknown_chain_is_404
 
 ## REQ resolve-api-supports-candidate-and-library-input
 
 `POST /templates/resolve` SHALL resolve a single unsaved candidate chain
 against the installed library and SHALL also resolve a complete unsaved
 template library in isolation, without writing either input to disk.
+enforced-by: tests/api/test_templates_inspection.py::test_resolve_candidate_uses_installed_library_without_writing, tests/api/test_templates_inspection.py::test_resolve_a_complete_library_in_isolation_without_writing, tests/api/test_templates_inspection.py::test_a_candidate_that_does_not_resolve_is_reported_not_raised
 
 ## REQ resolved-template-is-deterministic
 
@@ -972,3 +984,4 @@ enforced-by: tests/templates/test_materialization.py::test_resolution_is_expansi
 `kraft admin templates lint` SHALL lint the installed template library and exit
 non-zero when errors exist. `kraft admin templates show <id> --resolved` SHALL
 print a selected chain's resolved configuration.
+enforced-by: tests/cli/test_admin.py::test_admin_templates_lint_of_a_clean_library_exits_0, tests/cli/test_admin.py::test_admin_templates_lint_prints_each_error_and_exits_1, tests/cli/test_admin.py::test_admin_templates_show_resolved_prints_the_expanded_chain
