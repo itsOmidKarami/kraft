@@ -1,6 +1,6 @@
-import { createElement } from "react";
+import { createElement, useContext } from "react";
 import { act, render } from "@testing-library/react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, UNSAFE_NavigationContext, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { useItemUrlState } from "./useItemUrlState";
 
@@ -128,5 +128,27 @@ describe("useItemUrlState", () => {
 
     h.back();
     expect(h.current.maximized).toBe(false); // did not pop back INTO fullscreen
+  });
+});
+
+// Kraft-utvg3 (phone.visual "bottom nav"): the router commits a navigation in
+// a transition, so for a moment the URL has moved on while this page is still
+// rendered. A hash write in that window resolved against the old path and
+// `replace`d the new entry, putting the user back on the item page.
+describe("a write while a navigation away is still pending", () => {
+  it("leaves the new location alone", async () => {
+    let latest: ReturnType<typeof useItemUrlState> | undefined;
+    let nav: { push(to: string): void; location: { pathname: string } } | undefined;
+    function Probe() {
+      latest = useItemUrlState(null);
+      nav = useContext(UNSAFE_NavigationContext).navigator as never;
+      return null;
+    }
+    render(createElement(MemoryRouter, { initialEntries: ["/work-items/w1"] }, createElement(Probe)));
+    const stale = latest!;
+    nav!.push("/analytics"); // history moves now; the route commits later
+    stale.select({ kind: "session", id: "s1" });
+    await act(async () => {});
+    expect(nav!.location.pathname).toBe("/analytics");
   });
 });
