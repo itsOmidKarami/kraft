@@ -23,6 +23,11 @@ from kraft import config as config_mod
 from kraft import executor, harness, store
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 from kraft.templates import load_registry, load_templates
+from kraft.templates.environment import (
+    RootPointerPolicy,
+    TemplateEnvironmentError,
+    WorkItemTarget,
+)
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
 
 logger = logging.getLogger(__name__)
@@ -298,6 +303,44 @@ def _connected(repos: list[dict], path: str) -> dict | None:
         return entry
     resolved = str(Path(path).expanduser().resolve())
     return next((r for r in repos if r["path"] == resolved), None)
+
+
+def workspace_target(
+    st,
+    repo: str,
+    *,
+    workspace: str | None,
+    members: list[str],
+    root_pointer_policy: RootPointerPolicy | None,
+) -> WorkItemTarget | None:
+    """The workspace target an intake selects, or None for a plain repository
+    item. Raises a 422 for a selection that cannot assemble: an undeclared
+    workspace, one rooted elsewhere, a member it does not mount. The
+    pointer policy defaults to the workspace's own
+    (`workspace-root-pointer-update-is-explicit`)."""
+    if workspace is None:
+        if members:
+            raise HTTPException(422, "members are selected, but the item names no workspace")
+        return None
+    try:
+        declared = config_mod.load_workspaces(repos_path(st))
+        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    ws = declared.get(workspace)
+    if ws is None:
+        raise HTTPException(422, f"no workspace {workspace!r} is declared in repos.yaml")
+    root = next(r for r in repos if r.get("id") == ws.root)
+    if _connected([root], repo) is None:
+        raise HTTPException(
+            422, f"workspace {workspace!r} is rooted at {root['path']}, not at {repo}"
+        )
+    try:
+        return WorkItemTarget.from_selection(
+            ws, members=members, root_pointer_policy=root_pointer_policy
+        )
+    except TemplateEnvironmentError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def item_policy(st, repo: str) -> InstancePolicy:

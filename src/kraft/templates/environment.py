@@ -215,6 +215,11 @@ class WorkItemTarget(BaseModel):
     #: `model_validate(dict)` takes -- would otherwise fail on its own
     #: `model_dump()` output. `members` stays a tuple on the model either way.
     members: Annotated[tuple[Identifier, ...], Field(strict=False)] = ()
+    #: Each selected member's repository and mount path, frozen at intake
+    #: (`work-item-target-is-typed-and-immutable`): the checkout assembles
+    #: from these, so a later edit to the workspace moves nothing under a
+    #: running item. Keyed by member, exactly the `members` selected.
+    mounts: dict[Identifier, WorkspaceMember] = Field(default_factory=dict)
     #: Meaningless outside a workspace target, so it defaults off; only
     #: `kind="workspace"` may turn it on (`_kind_owns_its_fields` below).
     include_root: bool = False
@@ -230,7 +235,7 @@ class WorkItemTarget(BaseModel):
         if self.kind == "repository":
             if self.repository is None:
                 raise ValueError("a repository target must name a repository")
-            if self.workspace is not None or self.members:
+            if self.workspace is not None or self.members or self.mounts:
                 raise ValueError("a repository target has no workspace or members")
             if self.include_root:
                 raise ValueError("a repository target has no root to include")
@@ -239,6 +244,11 @@ class WorkItemTarget(BaseModel):
                 raise ValueError("a workspace target must name a workspace")
             if self.repository is not None:
                 raise ValueError("a workspace target has no repository")
+            if set(self.mounts) != set(self.members):
+                raise ValueError(
+                    f"a workspace target mounts exactly its selected members: selected "
+                    f"{sorted(self.members)}, mounted {sorted(self.mounts)}"
+                )
         return self
 
     @classmethod
@@ -266,6 +276,7 @@ class WorkItemTarget(BaseModel):
             kind="workspace",
             workspace=workspace.id,
             members=tuple(members),
+            mounts={m: workspace.members[m] for m in members},
             include_root=include_root,
             root_pointer_policy=root_pointer_policy or workspace.root_pointer_default,
         )

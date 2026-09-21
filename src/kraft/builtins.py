@@ -476,7 +476,8 @@ async def ensure_worktree(
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
         lambda c: c.execute(
-            "SELECT base_ref, branch, id FROM work_items WHERE id = ?", (work_item_id,)
+            "SELECT base_ref, branch, id, materialized_chain FROM work_items WHERE id = ?",
+            (work_item_id,),
         ).fetchone()
     )
     head = None
@@ -550,14 +551,14 @@ async def ensure_worktree(
         left = await _discard_worktree(Path(repo), worktree)
         suffix = f" (and its worktree could not be removed: {left})" if left else ""
         raise RuntimeError(f"{exc}{suffix}") from exc
-    decl = db.read(
-        lambda c: c.execute(
-            "SELECT submodules FROM work_items WHERE id = ?", (work_item_id,)
-        ).fetchone()
-    )
-    submodules = json.loads(decl["submodules"]) if decl and decl["submodules"] else []
-    if submodules:
-        await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, submodules)
+    # The checkout assembles exactly the members the item's frozen target
+    # selected, at their frozen mount paths (`workspace-tasks-have-an-
+    # assembled-checkout`) -- typed membership, never whatever `.gitmodules`
+    # lists or the agent later touches.
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    mounts = [m.path for m in snapshot.target.mounts.values()] if snapshot is not None else []
+    if mounts:
+        await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, mounts)
     return worktree
 
 
@@ -796,110 +797,6 @@ async def mr_rebase_forced(worktree: Path, repo: Path, branch: str) -> str | Non
     confirmed, from the forge's own re-fetched read, that this branch cannot
     land as it stands."""
     return await refresh_worktree_base(worktree, repo, branch, force=True)
-
-
-async def scan_submodules(
-    db,
-    run_dirs,
-    *,
-    session_id: str,
-    work_item_id: str,
-    node_id: str,
-    hook_point: str,
-    round: int,
-    repo: str,
-    worktree: str,
-    head_sha: str | None = None,
-) -> str:
-    """Design 3a: catch a submodule the agent touched but the item never
-    declared, give it a `work_item_repos` row and a pinned identity, before
-    `open_mr` would otherwise have to refuse over it.
-
-    Runs in its own node right after `implementation` (see `default.yaml`),
-    so a plain green `verify` never masks a change `open_mr`
-    would reject three nodes later -- this is what would have rescued work
-    item 9d0ab38ff3c9439b90506df0f6966660, which declared nothing.
-    """
-    _, log_path, result_path = await start_session(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=node_id,
-        hook_point=hook_point,
-        round=round,
-        head_sha=head_sha,
-    )
-    wt = Path(worktree)
-    known = {
-        r["submodule_path"]
-        for r in db.read(
-            lambda c: c.execute(
-                "SELECT submodule_path FROM work_item_repos "
-                "WHERE work_item_id = ? AND role = 'submodule'",
-                (work_item_id,),
-            ).fetchall()
-        )
-        if r["submodule_path"]
-    }
-    # '+' means the submodule's checked-out commit no longer matches what the
-    # superproject's index records -- new commits sitting in the worktree,
-    # exactly the shape that went unreported before this plan.
-    raw = git_read(wt, "submodule", "status", expected_failure=True) or ""
-    touched = set()
-    for line in raw.splitlines():
-        if not line or line[0] != "+":
-            continue
-        parts = line[1:].split()
-        if len(parts) >= 2:
-            touched.add(parts[1])
-
-    undeclared = sorted(touched - known)
-    if not undeclared:
-        return await finish_session(
-            db,
-            log_path,
-            result_path,
-            session_id=session_id,
-            status="done",
-            log="no undeclared submodule changes\n",
-        )
-
-    existing = db.read(
-        lambda c: c.execute(
-            "SELECT COUNT(*) AS n FROM work_item_repos WHERE work_item_id = ?", (work_item_id,)
-        ).fetchone()
-    )
-    next_rank = existing["n"] + 1
-    log = ""
-    for rel in undeclared:
-        sub = wt / rel
-        await asyncio.to_thread(_pin_identity, Path(repo), sub, work_item_id)
-        rank = next_rank
-        await db.write(
-            lambda c, p=str(sub), r=rel, rk=rank: store.add_repo(
-                c,
-                work_item_id=work_item_id,
-                repo_path=p,
-                role="submodule",
-                submodule_path=r,
-                merge_rank=rk,
-            )
-        )
-        log += f"found undeclared submodule change: {rel}\n"
-        next_rank += 1
-    # The root row (written by ensure_worktree, if this item declared any
-    # submodule at all) now has to merge after these too.
-    final_rank = next_rank
-    await db.write(
-        lambda c, rk=final_rank: c.execute(
-            "UPDATE work_item_repos SET merge_rank = ? WHERE work_item_id = ? AND role = 'root'",
-            (rk, work_item_id),
-        )
-    )
-    return await finish_session(
-        db, log_path, result_path, session_id=session_id, status="done", log=log
-    )
 
 
 async def start_session(

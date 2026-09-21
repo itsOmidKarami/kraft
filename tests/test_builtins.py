@@ -8,7 +8,9 @@ from support.harness import (
     isolated_bd,
     make_repo_with_engineering,
     make_repo_with_submodule,
+    v1_chain,
     v1_resolved,
+    workspace_target,
 )
 
 from kraft import builtins as kraft_builtins
@@ -394,42 +396,61 @@ async def test_ensure_worktree_pins_commit_identity_into_the_worktree(database, 
     assert git_read(wt, "config", "--local", "user.email") == "t@t"
 
 
-async def test_ensure_worktree_checks_out_a_declared_submodule_on_the_items_branch(
+def _workspace_item(database, root, mounts):
+    """Item w1 filed against `root` as a workspace target selecting `mounts`
+    (member -> mount path): the frozen target is what `ensure_worktree` reads."""
+    chain = v1_chain(_ONE_NODE, repo=root, target=workspace_target(mounts))
+    return wtree.make_item(database, root, materialized_chain=chain.to_json())
+
+
+_ONE_NODE = [
+    {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+]
+
+
+async def test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch(
     tmp_path, database, run_dirs
 ):
+    """`workspace-tasks-have-an-assembled-checkout` and `selected-repositories-
+    get-corresponding-branches`: the item's checkout is the root with each
+    selected member at its frozen mount path, and every selected repository
+    -- members and the root -- is on the item's branch, one row each so the
+    forge nodes know what to publish and in what order."""
     root, _sub = make_repo_with_submodule(tmp_path)
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
 
-    await wtree.make_item(
-        database,
-        root,
-        chain_template="default",
-        submodules=["repos/pkg"],
-        root_merge_policy="bump_no_mr",
-    )
     worktree = await wtree.ensure(database, run_dirs, root)
-    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
-    branch = store.branch_for(row)
-    sub_path = worktree / "repos" / "pkg"
-    current = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=sub_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    repos = database.read(lambda c: store.repos_for(c, "w1"))
-    branch, current, repos = branch, current, repos
 
-    assert current == branch
-    assert [r["role"] for r in repos] == ["submodule", "root"]
-    assert repos[0]["path"].endswith("repos/pkg")
+    branch = wtree.branch(database)
+    for checkout in (worktree, worktree / "repos" / "pkg"):
+        assert git_read(checkout, "branch", "--show-current") == branch
+    assert (worktree / "repos" / "pkg" / ".git").exists(), "the member is initialized"
+    repos = database.read(lambda c: store.repos_for(c, "w1"))
+    assert [(r["role"], r["path"]) for r in repos] == [
+        ("submodule", str(worktree / "repos" / "pkg")),
+        ("root", str(worktree)),
+    ]
+
+
+async def test_a_single_repository_item_initializes_no_submodule(tmp_path, database, run_dirs):
+    """Membership is the target's, never `.gitmodules`': a root filed as a
+    plain repository gets no member checked out and no repository rows."""
+    root, _sub = make_repo_with_submodule(tmp_path)
+    await wtree.make_item(
+        database, root, materialized_chain=v1_chain(_ONE_NODE, repo=root).to_json()
+    )
+
+    worktree = await wtree.ensure(database, run_dirs, root)
+
+    assert not (worktree / "repos" / "pkg" / ".git").exists()
+    assert database.read(lambda c: store.repos_for(c, "w1")) == []
 
 
 async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
     tmp_path, monkeypatch, database, run_dirs
 ):
-    """Global constraint: only declared paths, never every submodule in
-    .gitmodules (design §3 step 2)."""
+    """Global constraint: only the selected members' mount paths, never every
+    submodule in .gitmodules (design §3 step 2)."""
     root, _sub = make_repo_with_submodule(tmp_path)
     calls: list[list[str]] = []
     real_run = subprocess.run
@@ -441,13 +462,7 @@ async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
 
     monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
 
-    await wtree.make_item(
-        database,
-        root,
-        chain_template="default",
-        submodules=["repos/pkg"],
-        root_merge_policy="bump_no_mr",
-    )
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
     await wtree.ensure(database, run_dirs, root)
     assert calls == [
         [
@@ -461,58 +476,6 @@ async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
             "repos/pkg",
         ]
     ]
-
-
-async def test_scan_submodules_finds_a_submodule_the_agent_touched_but_nobody_declared(
-    tmp_path, database, run_dirs
-):
-    root, _sub = make_repo_with_submodule(tmp_path)
-
-    await wtree.make_item(
-        database, root, chain_template="default"
-    )  # no submodules declared -- exactly the real item's shape
-    worktree = await wtree.ensure(database, run_dirs, root)
-    # the agent's own half, done correctly: init + branch + commit
-    # inside the submodule, root pointer never touched
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-            "--",
-            "repos/pkg",
-        ],
-        cwd=worktree,
-        check=True,
-    )
-    sub = worktree / "repos" / "pkg"
-    subprocess.run(["git", "checkout", "-b", "agent-work"], cwd=sub, check=True)
-    (sub / "new.txt").write_text("metric\n")
-    subprocess.run(["git", "add", "-A"], cwd=sub, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "m"],
-        cwd=sub,
-        check=True,
-    )
-
-    await kraft_builtins.scan_submodules(
-        database,
-        run_dirs,
-        session_id="s1",
-        work_item_id="w1",
-        node_id="implementation",
-        hook_point="on.repos.scan",
-        round=0,
-        repo=str(root),
-        worktree=str(worktree),
-    )
-    repos = database.read(lambda c: store.repos_for(c, "w1"))
-    assert len(repos) == 1
-    assert repos[0]["role"] == "submodule"
-    assert repos[0]["path"].endswith("repos/pkg")
 
 
 async def test_ensure_worktree_raises_when_git_fails(tmp_path, database, run_dirs):
