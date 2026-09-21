@@ -1,40 +1,45 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, make_repo, v1_named_chain, v1_seeded_chain
 
-from kraft import db, events, executor, store
+from kraft import builtins, db, events, executor, store
 from kraft.paths import RunDirs
-from kraft.templates import Template, load_registry, load_templates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
 
 
-def _quick_task() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["quick-task"]
+def _quick_task(tmp_path):
+    """The shipped gateless `quick-task`, its agent task on the fake agent."""
+    return v1_named_chain(tmp_path / "templates", agent_command=_FAKE)
 
 
-def _default_template() -> Template:
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+def _default_template(tmp_path):
+    """The shipped `default` chain, its agent tasks on the fake agent."""
+    return v1_named_chain(tmp_path / "templates", "default", agent_command=_FAKE)
+
+
+async def _prepare(database, rd, repo, wid):
+    """The worktree, cut the way V1 does before the first node (no env node)."""
+    return await builtins.ensure_worktree(
+        database, rd, repo=str(repo), work_item_id=wid, repo_entry=None
+    )
 
 
 def _types(database, wid):
     return [e["type"] for e in database.read(lambda c: events.read_after(c, 0, wid))]
 
 
-def _launch() -> executor.LaunchContext:
-    # `fake_registry` spreads the shipped `on.spec.requested`/etc bindings, so
-    # they carry the real `steering:` key -- a dispatch that reaches them needs
-    # a real steering_dir to resolve against, same as production.
-    return executor.LaunchContext(
-        repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
-    )
+def _launch(tmp_path) -> executor.LaunchContext:
+    # The shipped spec task names a `steering:` profile, which dispatch still
+    # resolves to a file (`seed_v1_library` writes it out beside the library).
+    return executor.LaunchContext(repo_entry=None, steering_dir=tmp_path / "templates" / "steering")
 
 
 def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
@@ -47,26 +52,23 @@ def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
-            # Simulate a partial run: env_setup + implementation done, stopped before verify.
-            await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
-            # do the real env_setup + implementation via run's node walker
+            # Simulate a partial run: implementation done, stopped before verify.
+            await database.write(lambda c: store.load_chain(c, wid, "implementation"))
+            # do the real implementation via run's node walker
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
             )
-            wt = rd.worktrees / wid
-            env_node = {"id": "env_setup", "tasks": ["on.env.prepare"]}
-            impl_node = {"id": "implementation", "tasks": ["on.implementation.start"]}
-            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
-            assert await executor.walk_node(database, rd, wid, impl_node, row, registry, wt) == "ok"
+            wt = await _prepare(database, rd, repo, wid)
+            impl_node = executor.chain_of(row).chain.nodes[0]
+            assert await executor.walk_node(database, rd, wid, impl_node, row, wt) == "ok"
             # current_node_id now points at implementation (last enter_node). Move it to verify
             # the way a crash-recovery would NOT — instead leave it and call resume, which
             # should see implementation's session done and advance.
@@ -74,7 +76,7 @@ def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
             )
@@ -82,8 +84,8 @@ def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
             assert "a + b" in (wt / "calc.py").read_text()
             t = _types(database, wid)
             assert t[-1] == "work_item_completed"
-            # verify ran exactly once
-            assert t.count("node_started") == 3
+            # implementation once, then verify exactly once
+            assert t.count("node_started") == 2
         finally:
             await database.close()
 
@@ -93,7 +95,9 @@ def test_resume_from_verify_with_env_and_impl_done(tmp_path, monkeypatch):
 def test_resume_no_session_for_current_node_dispatches_fresh(tmp_path, monkeypatch):
     """Crash between enter_node and create_session -> resume re-dispatches the node fresh.
 
-    Exercises env_setup (the non-idempotent node) so its worktree-exists guard is covered.
+    V1 has no `env_setup` node; the worktree it used to cut is prepared before
+    the first node, so the crash here lands on `implementation`, and its
+    already-existing worktree must not break the fresh re-dispatch.
     """
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
     tracker = isolated_bd(tmp_path)
@@ -103,40 +107,38 @@ def test_resume_no_session_for_current_node_dispatches_fresh(tmp_path, monkeypat
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             row = database.read(
                 lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
             )
-            wt = rd.worktrees / wid
-            env_node = {"id": "env_setup", "tasks": ["on.env.prepare"]}
-            impl_node = {"id": "implementation", "tasks": ["on.implementation.start"]}
-            await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
-            await executor.walk_node(database, rd, wid, env_node, row, registry, wt)
-            await executor.walk_node(database, rd, wid, impl_node, row, registry, wt)
-            # Simulate a crash between enter_node(env_setup) and its create_session:
-            # drop env_setup's session rows and point current_node_id back at it.
-            # The worktree it already created must not break the fresh re-dispatch.
+            wt = await _prepare(database, rd, repo, wid)
+            impl_node = executor.chain_of(row).chain.nodes[0]
+            await database.write(lambda c: store.load_chain(c, wid, "implementation"))
+            await executor.walk_node(database, rd, wid, impl_node, row, wt)
+            # Simulate a crash between enter_node(implementation) and its
+            # create_session: drop its session rows and point current_node_id
+            # back at it. The worktree must not break the fresh re-dispatch.
             await database.write(
                 lambda c: c.execute(
-                    "DELETE FROM worker_sessions WHERE work_item_id = ? AND node_id = 'env_setup'",
+                    "DELETE FROM worker_sessions WHERE work_item_id = ? "
+                    "AND node_id = 'implementation'",
                     (wid,),
                 )
             )
-            await database.write(lambda c: store.enter_node(c, wid, "env_setup"))
+            await database.write(lambda c: store.enter_node(c, wid, "implementation"))
             assert wt.is_dir()  # worktree survived the "crash"
             result = await executor.resume(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
             )
@@ -163,21 +165,12 @@ def test_resume_current_node_failed_session_is_needs_human(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            from kraft.templates import Registry
-
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.implementation.start": {"kind": "agent", "command": "unused"},
-                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             await database.write(lambda c: store.load_chain(c, wid, "implementation"))
@@ -189,7 +182,7 @@ def test_resume_current_node_failed_session_is_needs_human(tmp_path):
                     id="s-impl",
                     work_item_id=wid,
                     node_id="implementation",
-                    hook_point="on.implementation.start",
+                    hook_point="implementation.main.implement",
                     log_path="/l",
                     result_path="/r",
                 )
@@ -199,7 +192,7 @@ def test_resume_current_node_failed_session_is_needs_human(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
             )
@@ -222,46 +215,42 @@ def test_resume_still_gives_a_node_the_repair_its_template_declared(tmp_path):
     exactly when the repair matters, and the session-count reconciliation would
     read it as "did not resolve cleanly" and stop for a human with the repair
     never tried."""
-    from kraft.templates import Registry
-
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
     flag = tmp_path / "labelled"
+    measure = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            f"import pathlib,sys; sys.exit(0 if pathlib.Path({str(flag)!r}).exists() else 1)",
+        ]
+    )
+    repair = shlex.join(
+        [sys.executable, "-c", f"import pathlib; pathlib.Path({str(flag)!r}).touch()"]
+    )
+    chain = v1_seeded_chain(
+        tmp_path / "templates",
+        [
+            {
+                "id": "checks",
+                "kind": "exec",
+                "tasks": [{"id": "poll", "kind": "subprocess", "command": measure}],
+                "on_failure": {"tasks": [{"id": "sync", "kind": "subprocess", "command": repair}]},
+            }
+        ],
+        agent_command=_FAKE,
+    )
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = Registry(
-                hooks={
-                    "on.ci.poll": {
-                        "kind": "subprocess",
-                        "command": [
-                            sys.executable,
-                            "-c",
-                            f"import pathlib,sys; sys.exit(0 if pathlib.Path({str(flag)!r})"
-                            ".exists() else 1)",
-                        ],
-                    },
-                    "on.mr.sync": {
-                        "kind": "subprocess",
-                        "command": [
-                            sys.executable,
-                            "-c",
-                            f"import pathlib; pathlib.Path({str(flag)!r}).touch()",
-                        ],
-                    },
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="a red pipeline the server restarted under",
                 repo=str(repo),
-                template=Template(
-                    id="recovering",
-                    nodes=[{"id": "checks", "tasks": ["on.ci.poll"], "on_failure": ["on.mr.sync"]}],
-                ),
+                chain=chain,
                 bd_cwd=str(tracker),
             )
             await database.write(lambda c: store.load_chain(c, wid, "checks"))
@@ -272,7 +261,7 @@ def test_resume_still_gives_a_node_the_repair_its_template_declared(tmp_path):
                     id="s-poll",
                     work_item_id=wid,
                     node_id="checks",
-                    hook_point="on.ci.poll",
+                    hook_point="checks.main.poll",
                     log_path="/l",
                     result_path="/r",
                 )
@@ -280,7 +269,7 @@ def test_resume_still_gives_a_node_the_repair_its_template_declared(tmp_path):
             await database.write(lambda c: store.session_exited(c, "s-poll", "failed"))
 
             result = await executor.resume(
-                database, rd, work_item_id=wid, registry=registry, adopted={}, bd_cwd=str(tracker)
+                database, rd, work_item_id=wid, registry=None, adopted={}, bd_cwd=str(tracker)
             )
             return result, _types(database, wid)
         finally:
@@ -301,21 +290,12 @@ def test_resume_awaits_adopted_task_before_reading_status(tmp_path):
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            from kraft.templates import Registry
-
-            registry = Registry(
-                hooks={
-                    "on.env.prepare": {"kind": "builtin", "handler": "env_setup"},
-                    "on.implementation.start": {"kind": "agent", "command": "unused"},
-                    "on.test.run": {"kind": "subprocess", "command": ["true"]},
-                }
-            )
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_quick_task(),
+                chain=_quick_task(tmp_path),
                 bd_cwd=str(tracker),
             )
             sid = "s-impl-running"
@@ -328,7 +308,7 @@ def test_resume_awaits_adopted_task_before_reading_status(tmp_path):
                     id=sid,
                     work_item_id=wid,
                     node_id="implementation",
-                    hook_point="on.implementation.start",
+                    hook_point="implementation.main.implement",
                     log_path="/l",
                     result_path="/r",
                 )
@@ -344,7 +324,7 @@ def test_resume_awaits_adopted_task_before_reading_status(tmp_path):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={sid: task},
                 bd_cwd=str(tracker),
             )
@@ -367,13 +347,12 @@ def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypat
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="make the failing test pass",
                 repo=str(repo),
-                template=_default_template(),
+                chain=_default_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             # walk to the spec gate
@@ -381,9 +360,9 @@ def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypat
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=_launch(),
+                launch=_launch(tmp_path),
             )
             assert r == "awaiting_gate"
             # approve it, then simulate a crash BEFORE the approve endpoint's run() spawns
@@ -393,17 +372,18 @@ def test_resume_after_gate_approval_does_not_re_request_gate(tmp_path, monkeypat
                     "SELECT status, current_node_id FROM work_items WHERE id=?", (wid,)
                 ).fetchone()
             )
-            assert wi["status"] == "active" and wi["current_node_id"] == "spec"
+            # A V1 gate is its own node, so the walk stands on it.
+            assert wi["status"] == "active" and wi["current_node_id"] == "spec_approval"
 
             before = _types(database, wid)
             r2 = await executor.resume(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
-                launch=_launch(),
+                launch=_launch(tmp_path),
             )
             after = _types(database, wid)
             new_events = after[len(before) :]
@@ -438,22 +418,21 @@ def test_resume_before_gate_approval_still_re_requests_gate(tmp_path, monkeypatc
         rd = RunDirs(tmp_path / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
             wid = await executor.intake(
                 database,
                 rd,
                 title="t",
                 repo=str(repo),
-                template=_default_template(),
+                chain=_default_template(tmp_path),
                 bd_cwd=str(tracker),
             )
             await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
-                launch=_launch(),
+                launch=_launch(tmp_path),
             )
             # NOT approved. Force status back to active as a crash-mid-await would look?
             # No — a genuine await leaves status=needs_human, which reattach does not
@@ -466,10 +445,10 @@ def test_resume_before_gate_approval_still_re_requests_gate(tmp_path, monkeypatc
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 adopted={},
                 bd_cwd=str(tracker),
-                launch=_launch(),
+                launch=_launch(tmp_path),
             )
             assert r == "awaiting_gate"
             last_gate = [
