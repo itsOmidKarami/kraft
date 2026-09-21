@@ -629,17 +629,29 @@ def test_instance_policy_loads_defaults_and_maxima_from_yaml(tmp_path):
     ).allowed_harnesses == ("codex_default", "claude_review")
 
 
-def test_policy_yaml_defaults_past_maxima_are_refused_at_load(tmp_path):
-    """The coherence rule fires where the file is read, not at first use --
-    otherwise a ceiling the administrator wrote is only discovered by the
-    dispatch that violates it."""
+@pytest.mark.parametrize(
+    ("tail", "names"),
+    [
+        # The coherence rule fires where the file is read, not at first use --
+        # otherwise a ceiling the administrator wrote is only discovered by the
+        # dispatch that violates it.
+        (
+            "defaults: { timeout_minutes: 120 }\nmaxima: { timeout_minutes: 90 }\n",
+            "timeout_minutes",
+        ),
+        # `PolicyError`, never a raw `OSError`/`YAMLError`/`ValidationError`, and
+        # it says which file -- `lifespan` catches only the former.
+        ("defaults: [not, a, mapping]\n", "policy.yaml"),
+        # Kraft-sz4dh: `maximum:` for `maxima:` used to load cleanly and bound
+        # nothing. An unknown top-level key is refused, naming the key.
+        ("maximum: { allowed_tools: [git] }\n", "unknown key 'maximum'"),
+    ],
+    ids=["defaults-past-maxima", "malformed-names-its-file", "misspelled-top-level-key"],
+)
+def test_a_bad_policy_yaml_is_refused_at_load_naming_why(tmp_path, tail, names):
     p = tmp_path / "policy.yaml"
-    p.write_text(
-        "default: { attempts: 3, wall_clock_s: 60 }\n"
-        "defaults: { timeout_minutes: 120 }\n"
-        "maxima: { timeout_minutes: 90 }\n"
-    )
-    with pytest.raises(policy.PolicyError, match="timeout_minutes"):
+    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\n" + tail)
+    with pytest.raises(policy.PolicyError, match=names):
         policy.PolicyInput.from_yaml(p)
 
 
@@ -652,15 +664,6 @@ def test_policy_yaml_has_exactly_one_loader():
     assert not hasattr(policy.InstancePolicyInput, "from_yaml")
 
 
-def test_a_malformed_policy_yaml_names_its_file(tmp_path):
-    """`PolicyError`, never a raw `OSError`/`YAMLError`/`ValidationError`, and
-    it says which file -- `lifespan` catches only the former."""
-    p = tmp_path / "policy.yaml"
-    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\ndefaults: [not, a, mapping]\n")
-    with pytest.raises(policy.PolicyError, match="policy.yaml"):
-        policy.PolicyInput.from_yaml(p)
-
-
 def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
     """Ruling 57. A `loops:` key naming no live loop is *silently* unused --
     `Policy.cap_for` is `self.loops.get(key, self.default)`, no error and no
@@ -669,15 +672,6 @@ def test_the_seeded_policy_yaml_names_no_loop_that_binds_nothing():
     decides the node it hangs off; until then the seed names none."""
     parsed = policy.PolicyInput.from_yaml(_SHIPPED)
     assert parsed.loops == {} or set(parsed.loops) <= {"ci_wait"}, parsed.loops
-
-
-def test_a_misspelled_top_level_key_is_refused_by_name(tmp_path):
-    """Kraft-sz4dh: `maximum:` for `maxima:` used to load cleanly and bound
-    nothing. An unknown top-level key is refused, naming the key."""
-    p = tmp_path / "policy.yaml"
-    p.write_text("default: { attempts: 3, wall_clock_s: 60 }\nmaximum: { allowed_tools: [git] }\n")
-    with pytest.raises(policy.PolicyError, match="unknown key 'maximum'"):
-        policy.PolicyInput.from_yaml(p)
 
 
 def test_the_shipped_policy_yaml_has_no_unknown_key():

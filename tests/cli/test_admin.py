@@ -527,26 +527,18 @@ def test_kraft_9oab_sigterm_stops_the_real_server(tmp_path):
             proc.wait()
 
 
-def test_serve_refuses_when_the_address_already_answers(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "squatter_host",
+    # the wildcard is the exact Kraft-kquf shape: an existing daemon bound
+    # *:PORT, and we are about to bind the specific loopback address next to it
+    ["127.0.0.1", "0.0.0.0"],
+    ids=["same-address", "wildcard-probed-from-loopback"],
+)
+def test_serve_refuses_when_the_address_already_answers(tmp_path, monkeypatch, squatter_host):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
-        squatter.bind(("127.0.0.1", 0))
-        squatter.listen(1)
-        port = squatter.getsockname()[1]
-        monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
-        monkeypatch.setenv("KRAFT_PORT", str(port))
-        with pytest.raises(SystemExit, match="already answering"):
-            cli.admin._serve()
-
-
-def test_serve_refuses_a_wildcard_listener_probed_from_loopback(tmp_path, monkeypatch):
-    """The exact Kraft-kquf shape: an existing daemon bound *:PORT, and we
-    are about to bind the specific loopback address next to it."""
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
-        squatter.bind(("0.0.0.0", 0))
+        squatter.bind((squatter_host, 0))
         squatter.listen(1)
         port = squatter.getsockname()[1]
         monkeypatch.setenv("KRAFT_HOST", "127.0.0.1")
