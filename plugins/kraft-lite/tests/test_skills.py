@@ -186,6 +186,7 @@ def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
         # the Kraft-l5z case: this passed validation and died at dispatch, six nodes in
         "on.ci.poll:\non.merge:\n  kind: skill\n",
         "on.ci.poll:\n# TODO: pick a client\non.merge:\n  kind: skill\n",
+        "on.ci.poll:\n  # TODO: pick a client\non.merge:\n  kind: skill\n",
         "on.merge:\n  kind: skill\non.ci.poll:\n",
         "on.merge:\n\n  kind: skill\n",
     ],
@@ -193,6 +194,7 @@ def test_a_skill_says_the_registry_can_be_edited_mid_run(texts):
         "a-key-with-a-body",
         "a-key-with-no-body-is-not",
         "a-comment-only-body-is-not",
+        "an-indented-comment-only-body-is-not",
         "a-trailing-key-with-no-body-is-not",
         "blank-lines-before-the-body-do-not-unbind",
     ],
