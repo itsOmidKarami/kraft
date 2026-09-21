@@ -75,10 +75,18 @@ archive:
 #
 # `defaults:` are inheritable starting points with no safety meaning of their
 # own; a repository, work item, chain, node, step or task may move them in
-# either direction. `maxima:` is the administrator ceiling nothing downstream
-# may exceed — a safety field listed only here (`token_budget`,
-# `allowed_tools`) starts *at* its maximum and can only ever be narrowed.
-# Read by the same loader as everything above: `policy.yaml` has one reader.
+# either direction. `maxima:` bounds those overrides — a safety field listed
+# only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can
+# only ever be narrowed. Read by the same loader as everything above:
+# `policy.yaml` has one reader.
+#
+# NOT ENFORCED AT RUNTIME YET (Kraft-q55aw). Today these values are checked in
+# exactly two places: here, when the file loads (a `defaults:` entry past a
+# `maxima:` ceiling is refused), and at intake, where a chain's own `policy:`
+# past a ceiling is refused. Nothing reads them when an agent launches: an
+# agent is not restricted to `allowed_tools`, `allowed_harnesses` does not
+# stop any profile launching, and `token_budget`, `timeout_minutes` and
+# `max_attempts` bound no run. Do not rely on them as a safety control yet.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install

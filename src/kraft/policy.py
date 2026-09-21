@@ -451,10 +451,12 @@ class PolicyDefaultsInput(BaseModel):
 
 
 class PolicyMaximaInput(BaseModel):
-    """`policy.yaml`'s `maxima:` -- the administrator ceiling nothing
-    downstream may exceed. `timeout_minutes`/`max_attempts` here are optional
-    administrator maxima on the operational fields of the same name; the
-    design doc's example omits them because most installs never set one."""
+    """`policy.yaml`'s `maxima:` -- the administrator ceiling no policy
+    override may exceed. Checked at load and at materialization only: nothing
+    reads it when a task launches yet (Kraft-q55aw). `timeout_minutes`/
+    `max_attempts` here are optional administrator maxima on the operational
+    fields of the same name; the design doc's example omits them because most
+    installs never set one."""
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
