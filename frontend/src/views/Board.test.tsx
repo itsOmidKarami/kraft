@@ -210,6 +210,25 @@ describe("Board", () => {
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
   });
 
+  // The New work item dialog omits `chain_template` when `default` is chosen
+  // (Kraft-cd47), so a board holding one explicit template and one default
+  // item mixes a real id with a null. Sorting those keys with
+  // `localeCompare` threw on the null and blanked the whole board -- and only
+  // when the null sorted first, which is why it survived so long. The null
+  // item is created first here on purpose: that is the order that threw.
+  it("counts an item with no explicit template as `default` instead of blanking the board", async () => {
+    setItems(
+      wi({ id: "w0", repo: "/repo-a", status: "active", chain_template: null as never }),
+      wi({ id: "w1", repo: "/repo-a", status: "active", chain_template: "quick-task" }),
+    );
+    renderBoard();
+    expect(screen.getAllByTestId("board-card")).toHaveLength(2);
+    expect(within(filters()).getByRole("button", { name: /^default/ })).toHaveTextContent("1");
+    // And the chip filters to that item rather than to nothing.
+    await userEvent.click(within(filters()).getByRole("button", { name: /^default/ }));
+    expect(screen.getAllByTestId("board-card")).toHaveLength(1);
+  });
+
   it("caps the Done group at five until 'show all' is clicked", async () => {
     setItems(
       ...Array.from({ length: 7 }, (_, n) =>

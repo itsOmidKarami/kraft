@@ -16,6 +16,17 @@ import { usePhone } from "./work_item/usePhone";
 
 const FILTERS_KEY = "kraft.board_filters";
 
+/** The template a work item is grouped, counted and filtered by.
+ *
+ *  `chain_template` is NULL when intake named no template (Kraft-cd47); it
+ *  resolves to `default` only when one is looked up, and the New work item
+ *  dialog omits the field for exactly that choice. So the board routinely
+ *  holds a mix of null and real ids -- and `tally`/`axisGroups` sorted those
+ *  keys with `localeCompare`, which threw on the null and took the entire
+ *  board down with it (a blank page, not a missing chip). Order-dependent, so
+ *  it only fired when the null key happened to sort first. */
+const tplOf = (i: WorkItem) => i.chain_template ?? "default";
+
 /** Sidebar counts, sorted by name so the list does not reorder as work moves. */
 function tally(items: WorkItem[], key: (i: WorkItem) => string) {
   const counts = new Map<string, number>();
@@ -113,7 +124,7 @@ function axisGroups(items: WorkItem[], axis: "repo" | "template", sort: keyof ty
   const bySort = (a: WorkItem, b: WorkItem) => SORTS[sort](a, b, stateOf);
   const needsItems = items.filter((i) => stateOf(i).needsYou);
   const rest = items.filter((i) => !stateOf(i).needsYou);
-  const key = axis === "repo" ? (i: WorkItem) => i.repo : (i: WorkItem) => i.chain_template;
+  const key = axis === "repo" ? (i: WorkItem) => i.repo : tplOf;
   const byKey = new Map<string, WorkItem[]>();
   for (const i of rest) {
     const k = key(i);
@@ -249,7 +260,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   // A facet with nothing picked matches everything; otherwise an item needs
   // only one of the picked values (OR within a facet, AND across facets).
   const matchesRepo = (i: WorkItem) => repo.size === 0 || repo.has(i.repo);
-  const matchesTpl = (i: WorkItem) => tpl.size === 0 || tpl.has(i.chain_template);
+  const matchesTpl = (i: WorkItem) => tpl.size === 0 || tpl.has(tplOf(i));
   const matchesStatus = (i: WorkItem) =>
     status.size === 0 || STATUS_GROUPS.some((g) => status.has(g.label) && g.test(stateOf(i)));
 
@@ -268,7 +279,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
   const chipsRef = useRef<HTMLDivElement>(null);
   const phone = usePhone();
   const tplRows = useMemo(
-    () => tally(items.filter((i) => matchesRepo(i) && matchesStatus(i)), (i) => i.chain_template),
+    () => tally(items.filter((i) => matchesRepo(i) && matchesStatus(i)), tplOf),
     [items, repo, status],
   );
   const statusRows = useMemo(() => {
