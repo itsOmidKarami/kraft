@@ -271,11 +271,21 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
     events.append(conn, work_item_id, "work_item_completed", {})
 
 
-#: An operator's terminal action -> (the status it ends the item in, its audit
-#: event, the ordinary event every reader of that status already knows).
+#: An operator's terminal action -> (the write that ends the item, its audit
+#: event, the ordinary event every reader of that status already knows). The
+#: status is a literal in each write, not a parameter, so no reader of this
+#: module (`dev/check_claim_handoff.py`) can take it for a claim to `active`.
 MANUAL_ENDS = {
-    "complete": ("completed", "work_item_manually_completed", "work_item_completed"),
-    "cancel": ("abandoned", "work_item_cancelled", "work_item_abandoned"),
+    "complete": (
+        "UPDATE work_items SET status = 'completed', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_manually_completed",
+        "work_item_completed",
+    ),
+    "cancel": (
+        "UPDATE work_items SET status = 'abandoned', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_cancelled",
+        "work_item_abandoned",
+    ),
 }
 
 
@@ -296,7 +306,7 @@ def end_work_item(
     set for good -- which is what stops the walk at its next node -- and the
     audit event carries the reason and the node the item stood on.
     """
-    status, audit, ordinary = MANUAL_ENDS[action]
+    ending, audit, ordinary = MANUAL_ENDS[action]
     now = _now()
     for sid in session_ids or []:
         conn.execute(
@@ -307,10 +317,7 @@ def end_work_item(
     node_id = conn.execute(
         "SELECT current_node_id FROM work_items WHERE id = ?", (work_item_id,)
     ).fetchone()[0]
-    conn.execute(
-        "UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? WHERE id = ?",
-        (status, now, work_item_id),
-    )
+    conn.execute(ending, (now, work_item_id))
     events.append(conn, work_item_id, audit, {"reason": reason, "node_id": node_id})
     events.append(conn, work_item_id, ordinary, {})
 

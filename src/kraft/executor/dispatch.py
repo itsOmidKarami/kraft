@@ -1353,9 +1353,9 @@ def last_measurement(
     measurement is ever returned, so nothing older than one round can leak into
     `resolve_identity`'s `known` however long the item's history is.
 
-    Read from the event log rather than carried in a local: `kraft.executor.
-    resuming.reconcile_current_node` re-enters `kraft.executor.walk.walk_node`
-    after a crash or a resume with the counter intact, and a loop holding its
+    Read from the event log rather than carried in a local: crash resume and
+    `/resume` re-enter the node through `kraft.executor.walk.run_once` with the
+    counter intact, and a loop holding its
     history in the stack frame forgets everything it has seen — on exactly the
     path that motivates escalation.
 

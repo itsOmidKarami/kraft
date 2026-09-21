@@ -545,8 +545,8 @@ def _last_review_session(db, work_item_id: str, task_hook: str) -> sqlite3.Row |
     `worker_sessions.head_sha` is stamped by `dispatch.dispatch_node` at
     dispatch, so it is the commit that review was actually about. Read from the
     table rather than carried in a local, for the reason `last_measurement`'s
-    docstring gives: `resuming.reconcile_current_node` re-enters `walk_node`
-    after a crash and a loop holding its history in a stack frame forgets
+    docstring gives: crash resume re-enters the node through `walk.run_once`
+    and a loop holding its history in a stack frame forgets
     everything it has seen.
 
     The row for the session now being dispatched does not exist yet -- this runs
