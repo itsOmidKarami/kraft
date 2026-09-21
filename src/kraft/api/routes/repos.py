@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
+from itertools import count
 from pathlib import Path
 
 import yaml
@@ -38,8 +40,12 @@ class ProbeBody(BaseModel):
     path: str
 
 
-def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: list[str]) -> None:
+def _auto_connect_children(
+    repos: list[dict], parent: dict, submodule_paths: list[str]
+) -> dict[str, dict]:
     """One disabled entry per `.gitmodules` path, appended to `repos` in place.
+    Returns every child now connected -- new or already there -- by its path
+    relative to `parent`: the members of the workspace `add_repo` declares.
 
     `managed: False` -- detected, nobody has looked. Each child is probed on
     its own, so a Rust submodule under a Python workspace gets `cargo test`
@@ -49,7 +55,8 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
     connecting one whose child an operator already added by hand, must not
     reset that child's latch.
     """
-    known = {r["path"] for r in repos}
+    known = {r["path"]: r for r in repos}
+    children: dict[str, dict] = {}
     for rel in submodule_paths:
         child_path = Path(parent["path"]) / rel
         try:
@@ -60,39 +67,83 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
             # connected, so skipping is the whole recovery.
             continue
         if probed["path"] in known:
+            children[rel] = known[probed["path"]]
             continue
-        known.add(probed["path"])
-        repos.append(
-            {
-                "path": probed["path"],
-                "name": probed["name"],
-                "default_chain_template": "default",
-                "test_command": probed["test_command"],
-                "test_scopes": None,
-                "setup_command": probed["setup_command"],
-                "forge": probed["forge"],
-                "project": probed["project"],
-                "enabled": False,
-                "managed": False,
-                "models": {},
-                "deny_tools": [],
-                "steering": [],
-            }
-        )
+        child = {
+            "path": probed["path"],
+            "name": probed["name"],
+            "default_chain_template": "default",
+            "test_command": probed["test_command"],
+            "test_scopes": None,
+            "setup_command": probed["setup_command"],
+            "forge": probed["forge"],
+            "project": probed["project"],
+            "enabled": False,
+            "managed": False,
+            "models": {},
+            "deny_tools": [],
+            "steering": [],
+        }
+        known[probed["path"]] = children[rel] = child
+        repos.append(child)
+    return children
 
 
-def _validate_repos(st, repos: list[dict]) -> None:
+def _repository_id(entry: dict, repos: list[dict]) -> str:
+    """`entry`'s repository id, minted from its name when it has none: the
+    `[a-z][a-z0-9_-]*` rule a workspace reference must match, and unique
+    among `repos`. Adding an id changes nothing else about an entry."""
+    if entry.get("id"):
+        return entry["id"]
+    base = re.sub(r"[^a-z0-9_-]+", "-", str(entry.get("name") or "repo").lower()).strip("-_")
+    base = base if base[:1].isalpha() else f"repo-{base}".rstrip("-")
+    taken = {r.get("id") for r in repos}
+    entry["id"] = next(c for n in count(1) if (c := base if n == 1 else f"{base}-{n}") not in taken)
+    return entry["id"]
+
+
+def _declare_workspace(
+    workspaces: dict, repos: list[dict], root: dict, children: dict[str, dict]
+) -> None:
+    """Declare `root` a workspace mounting `children` (`workspace-declares-
+    root-and-members`), unless one is already rooted there. Typed membership
+    replaces reading `.gitmodules` at intake: the intake picker offers these
+    members, and the item's checkout assembles exactly the ones chosen."""
+    if not children:
+        return
+    root_id = _repository_id(root, repos)
+    if any(w.get("root") == root_id for w in workspaces.values()):
+        return
+    members = {}
+    for rel, child in children.items():
+        child_id = _repository_id(child, repos)
+        members[child_id] = {"repository": child_id, "path": rel}
+    ws_id = root_id if root_id not in workspaces else f"{root_id}-workspace"
+    workspaces[ws_id] = {"root": root_id, "members": members}
+
+
+def _workspaces(st) -> dict:
+    """The raw `workspaces:` section, as written."""
+    return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
+
+
+def _validate_repos(
+    st, repos: list[dict], workspaces: dict | None = None, *, steering: bool = True
+) -> None:
     """Write `repos` to a scratch file and run the real loader over it.
 
     Mirrors `put_registry`: the write side must reject exactly what the read
     side would later choke on, or a bad `POST`/`PATCH` persists and every
     subsequent `GET /repos` 500s until an operator hand-edits the file.
     """
+    workspaces = _workspaces(st) if workspaces is None else workspaces
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "repos.yaml"
-        candidate.write_text(yaml.safe_dump({"repos": repos}))
+        candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
-            config_mod.load_repos(candidate, steering_dir=st.templates_dir / "steering")
+            if steering:
+                config_mod.load_repos(candidate, steering_dir=st.templates_dir / "steering")
+            config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -103,7 +154,14 @@ async def list_repos(request: Request):
     # No steering validation on the read path (config.load_repos): a steering
     # file deleted out from under an entry must not 422 the screen that would
     # let an operator clear it. See `config.load_repos`'s docstring.
-    return {"repos": config_mod.load_repos(deps.repos_path(st), validate_steering=False)}
+    path = deps.repos_path(st)
+    return {
+        "repos": config_mod.load_repos(path, validate_steering=False),
+        "workspaces": {
+            ws_id: ws.model_dump(mode="json")
+            for ws_id, ws in config_mod.load_workspaces(path).items()
+        },
+    }
 
 
 @api_router.post("/repos/probe")
@@ -167,10 +225,12 @@ async def add_repo(body: RepoBody, request: Request):
         "managed": True,
     }
     repos.append(entry)
-    _auto_connect_children(repos, entry, probed["submodules"])
+    children = _auto_connect_children(repos, entry, probed["submodules"])
+    workspaces = _workspaces(st)
+    _declare_workspace(workspaces, repos, entry, children)
     _refuse_enable_without_test_command(entry)
-    _validate_repos(st, repos)
-    config_mod.save_repos(deps.repos_path(st), repos)
+    _validate_repos(st, repos, workspaces)
+    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -245,6 +305,10 @@ async def remove_repo(request: Request, path: str):
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]
+    # A workspace still naming it would no longer load; refused, not dropped.
+    # Steering is not re-checked: a deleted steering file elsewhere must not
+    # block a disconnect.
+    _validate_repos(st, kept, steering=False)
     config_mod.save_repos(deps.repos_path(st), kept)
     # Mirror of the connect-time scan. A repo with work items stays in
     # `Indexer.repos()` and is simply re-ingested by the next rescan.

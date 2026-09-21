@@ -20,7 +20,7 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
 from pydantic import (
@@ -38,6 +38,9 @@ from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
+
+if TYPE_CHECKING:
+    from kraft.templates.environment import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +162,10 @@ class RepoEntry(BaseModel):
     model_config = ConfigDict(strict=True, extra="allow")
 
     path: str = Field(min_length=1)
+    #: The repository id a workspace names this entry by (`workspaces:`
+    #: below the list). Optional: only a workspace's root and members need
+    #: one, and `kraft repo connect` writes it for them.
+    id: Annotated[str, Field(pattern=_PROFILE_ID)] | None = None
     forge: str | None = None
     project: str | None = None
     # True, not False: every entry that predates this field was connected by a
@@ -435,11 +442,53 @@ def load_repos(
             if msg.startswith("repos.yaml"):
                 raise ConfigError(msg) from exc
             raise ConfigError(first_error(exc, "repos.yaml")) from exc
+    ids = [r["id"] for r in out if r.get("id")]
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        raise ConfigError(f"repos.yaml: repository id(s) {twice} name more than one entry")
     return out
 
 
-def save_repos(path: str | Path, repos: list[dict]) -> None:
-    write_yaml(path, {"repos": repos})
+def load_workspaces(path: str | Path) -> dict[str, Workspace]:
+    """`repos.yaml`'s `workspaces:`, in the V1 shape: a root repository and
+    each member mounted at its path, both naming a connected entry by `id`
+    (`workspace-declares-root-and-members`). Both ends of every reference are
+    resolved here, when the file is read: a workspace naming no connected
+    repository would otherwise assemble an empty checkout hours later."""
+    # Here, not at the top: `kraft.templates` imports this module.
+    from kraft.templates.environment import Workspace
+
+    repos = load_repos(path, validate_steering=False)
+    ids = {r["id"] for r in repos if r.get("id")}
+    raw = read_yaml(path, REPOS_DEFAULT).get("workspaces") or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("repos.yaml: 'workspaces' must be a mapping keyed by workspace id")
+    out: dict[str, Workspace] = {}
+    for ws_id, body in raw.items():
+        try:
+            ws = Workspace.model_validate({"id": ws_id, **(body or {})})
+        except ValidationError as exc:
+            raise ConfigError(first_error(exc, f"repos.yaml: workspaces.{ws_id}")) from exc
+        if ws.root not in ids:
+            raise ConfigError(
+                f"repos.yaml: workspaces.{ws_id}: root {ws.root!r} is no connected repository id"
+            )
+        for name, member in ws.members.items():
+            if member.repository not in ids:
+                raise ConfigError(
+                    f"repos.yaml: workspaces.{ws_id}.members.{name}: {member.repository!r} "
+                    "is no connected repository id"
+                )
+        out[ws_id] = ws
+    return out
+
+
+def save_repos(path: str | Path, repos: list[dict], workspaces: dict | None = None) -> None:
+    """Write the repository list. `workspaces` None keeps the file's own
+    `workspaces:` section, so a Settings save of one entry never drops them."""
+    if workspaces is None:
+        workspaces = read_yaml(path, REPOS_DEFAULT).get("workspaces")
+    write_yaml(path, {"repos": repos, **({"workspaces": workspaces} if workspaces else {})})
 
 
 def git_read(

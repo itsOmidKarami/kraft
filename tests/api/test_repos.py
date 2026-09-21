@@ -221,6 +221,38 @@ def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, 
     assert repos[str(root)]["managed"] is True
 
 
+def test_connecting_a_workspace_declares_it_with_its_submodules_as_members(tmp_path, client):
+    """Typed membership replaces reading `.gitmodules` at intake: connecting a
+    root declares its workspace, each submodule a member mounted at its path,
+    under repository ids the declaration can name. The pointer default is the
+    shipped `ignore` (`workspace-root-pointer-update-defaults-to-ignore`)."""
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root), "enabled": False})
+
+    body = client.get("/api/repos").json()
+    ids = {r["path"]: r.get("id") for r in body["repos"]}
+    assert ids == {str(root): "ws", str(root / "libs/a"): "a"}
+    assert body["workspaces"] == {
+        "ws": {
+            "id": "ws",
+            "root": "ws",
+            "root_pointer_default": "ignore",
+            "members": {"a": {"repository": "a", "path": "libs/a"}},
+        }
+    }
+
+
+def test_disconnecting_a_repository_a_workspace_mounts_is_refused(tmp_path, client, templates_dir):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    client.post("/api/repos", json={"path": str(root), "enabled": False})
+    before = (templates_dir / "repos.yaml").read_text()
+
+    r = client.delete(f"/api/repos?path={root / 'libs/a'}")
+    assert r.status_code == 422, r.text
+    assert "'a'" in r.json()["detail"]
+    assert (templates_dir / "repos.yaml").read_text() == before
+
+
 def test_a_hand_added_repo_is_managed_even_when_left_disabled(tmp_path, client):
     repo = make_repo(tmp_path)
     body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
