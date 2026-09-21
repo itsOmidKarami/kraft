@@ -58,17 +58,25 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
         if chain is None:
             logger.warning("trigger %d: unknown chain template %r, skipped", index, trig.chain)
             continue
-        wid = await executor.intake(
-            st.db,
-            st.run_dirs,
-            title=trig.title,
-            description=trig.description,
-            repo=trig.repo,
-            chain=chain,
-            effective_policy=getattr(st, "instance_policy", None),
-            chain_template=trig.chain,
-            status="paused",
-        )
+        try:
+            wid = await executor.intake(
+                st.db,
+                st.run_dirs,
+                title=trig.title,
+                description=trig.description,
+                repo=trig.repo,
+                chain=chain,
+                effective_policy=getattr(st, "instance_policy", None),
+                chain_template=trig.chain,
+                status="paused",
+            )
+        except ValueError as exc:
+            # Intake's own refusal (a chain `policy:` past the instance maxima,
+            # an unreadable attachment), raised before any side effect. One
+            # trigger's bad config skips that trigger, not the rest of the tick
+            # (Kraft-ib2af).
+            logger.warning("trigger %d: refused at intake, skipped: %s", index, exc)
+            continue
         filed.append(wid)
     return filed
 

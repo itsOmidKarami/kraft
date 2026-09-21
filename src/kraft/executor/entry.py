@@ -108,6 +108,34 @@ async def intake(
     # the e2e harness set it, and an operator who set it as the workaround for
     # this very bug must not silently start filing per-repo on upgrade.
     cwd = bd_cwd or repo
+    # An attachment's trim is the V1 chain's own decision -- the gate's
+    # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
+    # name table this layer looks up -- and it happens in the same drop as
+    # `skip_nodes`, so a chain the two together would empty is refused once.
+    materialized = chain.materialize(
+        target=single_repo_target(repo),
+        effective_policy=(
+            effective_policy
+            if effective_policy is not None
+            else InstancePolicy.from_input(InstancePolicyInput())
+        ),
+        # Derived from the attachments themselves, never passed in beside
+        # them: the kinds that trim the chain and the documents that justify
+        # the trim have to be the same list, and a caller holding both is a
+        # caller that can make them disagree.
+        attachment_kinds=frozenset(a["kind"] for a in attachments or []),
+        skip_nodes=skip_nodes,
+    )
+    # Everything above is pure; everything below has a side effect. A chain
+    # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
+    # here, before a bead is filed or an attachment copied -- a trigger used to
+    # file an orphaned bead on every due minute (Kraft-ib2af).
+    # Raising rather than degrading, and before the bead: `materialize` above
+    # has removed this attachment's gate from the chain permanently, and
+    # a trim whose document is not Kraft's own is a promise something outside
+    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
+    # caller can fix the path, so it is where this fails.
+    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
     # An auto-intaken bead already exists; filing a second one for the same work
     # is the duplicate this parameter prevents.
     bead_warning: str | None = None
@@ -126,30 +154,6 @@ async def intake(
             bead_warning = str(exc)
         if bead_warning:
             logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
-    # Before the trim below, and raising rather than degrading: `materialize`
-    # is about to remove this attachment's gate from the chain permanently, and
-    # a trim whose document is not Kraft's own is a promise something outside
-    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
-    # caller can fix the path, so it is where this fails.
-    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
-    # An attachment's trim is the V1 chain's own decision -- the gate's
-    # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
-    # name table this layer looks up -- and it happens in the same drop as
-    # `skip_nodes`, so a chain the two together would empty is refused once.
-    materialized = chain.materialize(
-        target=single_repo_target(repo),
-        effective_policy=(
-            effective_policy
-            if effective_policy is not None
-            else InstancePolicy.from_input(InstancePolicyInput())
-        ),
-        # Derived from the attachments themselves, never passed in beside
-        # them: the kinds that trim the chain and the documents that justify
-        # the trim have to be the same list, and a caller holding both is a
-        # caller that can make them disagree.
-        attachment_kinds=frozenset(a["kind"] for a in attachments),
-        skip_nodes=skip_nodes,
-    )
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):

@@ -23,8 +23,12 @@ from pydantic.dataclasses import dataclass as model
 from kraft.findings import SEVERITIES
 
 
-class PolicyError(Exception):
-    pass
+class PolicyError(ValueError):
+    """Bad policy: an unreadable `policy.yaml`, or an override past a ceiling.
+
+    A `ValueError`, so every intake door's existing `except ValueError` answers
+    a chain `policy:` over the instance maxima as the refusal it is (a 422, a
+    skipped trigger), not an unhandled 500 (Kraft-ib2af)."""
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})

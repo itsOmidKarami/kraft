@@ -479,3 +479,62 @@ def test_a_bare_bead_id_in_a_commit_body_is_not_a_trailer():
     """Same discipline as the description: mentioning an id promises nothing.
     Only `Fixes`/`Closes` does."""
     assert executor.entry._trailer_beads(["fix: touches Kraft-abc12 in passing"]) == []
+
+
+def _over_ceiling():
+    """A chain whose own `policy:` widens `allowed_tools` past a ceiling of
+    `[git]`, and that ceiling (Kraft-ib2af)."""
+    import dataclasses
+
+    from kraft.policy import InstancePolicy, InstancePolicyInput, TemplatePolicyOverride
+
+    chain = _quick_task()
+    chain = dataclasses.replace(
+        chain,
+        chain=chain.chain.model_copy(
+            update={"policy": TemplatePolicyOverride(allowed_tools=["git", "rm_rf"])}
+        ),
+    )
+    ceiling = InstancePolicy.from_input(
+        InstancePolicyInput.model_validate({"maxima": {"allowed_tools": ["git"]}})
+    )
+    return chain, ceiling
+
+
+def test_a_chain_policy_over_the_ceiling_is_refused_before_any_side_effect(tmp_path, monkeypatch):
+    """Kraft-ib2af: the refusal is a `ValueError` every intake door already
+    turns into a legible answer, and it comes before the bead is filed and the
+    attachments are copied -- a trigger filing an orphaned bead every due
+    minute was the failure."""
+    chain, ceiling = _over_ceiling()
+    filed = []
+
+    async def record(*a, **kw):
+        filed.append(a)
+        return "TEST-orphan"
+
+    monkeypatch.setattr("kraft.executor.beads.intake", record)
+    doc = tmp_path / "plan.md"
+    doc.write_text("# plan\n")
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            with pytest.raises(ValueError, match="cannot widen the inherited safety ceiling"):
+                await executor.intake(
+                    database,
+                    rd,
+                    title="t",
+                    repo=str(tmp_path),
+                    chain=chain,
+                    effective_policy=ceiling,
+                    attachments=[{"kind": "plan", "path": "p.md", "source": str(doc)}],
+                )
+            assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []
+            assert not any(rd.attachments.iterdir())
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+    assert filed == []

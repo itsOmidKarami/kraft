@@ -26,6 +26,7 @@ import yaml
 from pydantic import ValidationError
 
 from kraft import skill as _skill
+from kraft.policy import InstancePolicy, PolicyError
 from kraft.templates.models import (
     JUDGE_SEGMENT,
     MAIN_STEP,
@@ -224,9 +225,13 @@ class TemplateLibrary:
         error that says what the author actually referenced."""
         return next((ns for ns in _EXTENDABLE if name in self._components[ns]), None)
 
-    def lint(self) -> list[TemplateIssue]:
+    def lint(self, instance_policy: InstancePolicy | None = None) -> list[TemplateIssue]:
         """Every chain in this library that does not resolve, rather than the
         first (`template-lint-reports-library-validity`).
+
+        Given the `instance_policy`, a chain whose own `policy:` that policy
+        refuses -- past a `maxima:` ceiling -- is an issue too, rather than a
+        refusal the first intake on it finds (Kraft-ib2af).
 
         Over the library already in memory: no file is read and none is written,
         so an edit landing mid-lint cannot be reported against configuration the
@@ -237,8 +242,10 @@ class TemplateLibrary:
         issues = []
         for id, raw in self._chains.items():
             try:
-                self.resolve_chain(id)
-            except TemplateLibraryError as exc:
+                resolved = self.resolve_chain(id)
+                if instance_policy is not None and resolved.chain.policy is not None:
+                    instance_policy.apply_template_override(resolved.chain.policy)
+            except (TemplateLibraryError, PolicyError) as exc:
                 issues.append(TemplateIssue(file=raw.source.file, chain=id, message=str(exc)))
         return issues
 

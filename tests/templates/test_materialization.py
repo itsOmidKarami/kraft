@@ -509,3 +509,29 @@ def test_the_snapshot_does_not_carry_fork_lineage():
 def test_a_stored_snapshot_that_is_not_a_materialized_chain_is_an_error():
     with pytest.raises(TemplateLibraryError, match="not a materialized chain"):
         MaterializedChain.from_json('{"chain": {"nodes": []}}')
+
+
+def test_lint_reports_a_chain_policy_the_instance_ceiling_refuses(tmp_path):
+    """Kraft-ib2af: a chain `policy:` past the instance maxima is an authoring
+    error lint names, not a 500 the first intake finds."""
+    library = write(
+        tmp_path,
+        {"tasks": {"base": agent_task()}},
+        {
+            "wide": {
+                "policy": {"allowed_tools": ["git", "rm_rf"]},
+                "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+            },
+            "fine": {
+                "policy": {"allowed_tools": ["git"]},
+                "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "base"}]}],
+            },
+        },
+    )
+
+    assert library.lint() == []  # no ceiling given: nothing to exceed
+    issues = library.lint(instance_policy=policy(allowed_tools=["git"]))
+
+    assert [i.chain for i in issues] == ["wide"]
+    assert issues[0].file == tmp_path / CHAINS_DIR / "wide.yaml"
+    assert "rm_rf" in issues[0].message

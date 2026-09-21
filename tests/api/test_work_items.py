@@ -938,3 +938,43 @@ def test_trigger_refuses_with_503_when_policy_is_invalid(tmp_path, monkeypatch):
         r = client.post("/api/triggers", json={"title": "t", "repo": str(repo)})
         assert r.status_code == 503
         assert "policy config invalid" in r.json()["detail"]
+
+
+def _policy_chains(tmp_path):
+    """Three chains over one fake task, and an instance ceiling of
+    `allowed_tools: [git, shell, editor]` (Kraft-ib2af, Kraft-yaq99)."""
+    templates_dir = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
+    node = (
+        "nodes:\n"
+        "  - id: implementation\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - { id: run, kind: agent, harness: fake, prompt: go }\n"
+    )
+    chains = {
+        "a": "policy: { allowed_tools: [git], timeout_minutes: 5 }\n",
+        "b": "policy: { allowed_tools: [git, shell] }\n",
+        "c": "",
+        "wide": "policy: { allowed_tools: [git, rm_rf] }\n",
+    }
+    for id, policy in chains.items():
+        (templates_dir / "chains" / f"{id}.yaml").write_text(f"id: {id}\n{policy}{node}")
+    with (templates_dir / "policy.yaml").open("a") as f:
+        f.write("maxima:\n  allowed_tools: [git, shell, editor]\n")
+    return templates_dir
+
+
+def _snapshot_policy(client, wid):
+    return json.loads(client.get(f"/api/work-items/{wid}").json()["materialized_chain"])["policy"]
+
+
+def test_a_chain_policy_past_the_ceiling_is_a_422_at_intake_not_a_500(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, templates_dir=_policy_chains(tmp_path))
+    with client:
+        repo = make_repo(tmp_path)
+        r = client.post(
+            "/api/work-items",
+            json={"title": "t", "repo": str(repo), "chain_template": "wide", "autostart": False},
+        )
+        assert r.status_code == 422, r.text
+        assert "rm_rf" in r.json()["detail"]
