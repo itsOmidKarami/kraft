@@ -165,6 +165,7 @@ origin: src/kraft/executor/prompts.py §previous_review_note -- parked under V1 
 When a manual escalation resumes an existing escalation session, it SHALL use
 that session's original harness and runtime options. Changing them SHALL
 require a new escalation session.
+enforced-by: tests/test_escalate.py::test_a_resumed_escalation_keeps_its_original_runtime[resumed]
 
 ## REQ builtin-task-references-code-owned-actions
 
@@ -307,61 +308,73 @@ enforced-by: tests/templates/test_materialization.py::test_materialization_freez
 
 An operator MAY provide distinct steering instructions to selected paused agent
 tasks. A steer SHALL NOT target a non-agent task.
+enforced-by: tests/executor/test_steer_targets.py::test_a_task_addressed_individually_gets_its_own_steer, tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[non-agent], tests/executor/test_steer_targets.py::test_a_steer_that_cannot_land_is_refused_naming_its_task[not-paused], tests/test_pause_resume.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[individual], tests/test_pause_resume.py::test_a_steer_aimed_at_a_non_agent_task_is_refused_naming_it
 
 ## REQ steer-defaults-to-all-paused-agent-tasks
 
 When an operator resumes paused work with one unqualified steer, the system
 SHALL deliver that instruction to every paused agent task; selected tasks MAY
 instead receive individual instructions.
+enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_paused_agent_task, tests/executor/test_steer_targets.py::test_a_task_that_was_not_paused_gets_no_default_steer, tests/test_pause_resume.py::test_resume_addresses_its_steer_to_the_paused_agent_tasks[one-steer-for-every-paused-agent]
 
 ## REQ resumed-agent-task-preserves-its-session-when-possible
 
 When resuming a paused agent task, the system SHALL resume its durable session
 when available, and otherwise restart that task with its original instruction
 and any supplied steer.
+enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry]
 
 ## REQ pause-is-a-work-item-control
 
 An operator MAY pause a work item. The system SHALL NOT expose pause as a
 task, step, or node control.
+enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_only
 
 ## REQ resume-preserves-completed-work
 
 Resuming paused work SHALL continue from its saved execution point and SHALL
 not rerun work that completed before the pause.
+enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[plain], tests/executor/test_entry_paths.py::test_a_walk_given_no_position_starts_at_the_items_cursor[fix-loop], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[plain], tests/executor/test_entry_paths.py::test_crash_resume_keeps_the_steps_that_completed[fix-loop], tests/test_pause_resume.py::test_resume_leaves_the_position_to_the_walk, tests/test_rate_limit_retry.py::test_a_rate_limit_relaunch_leaves_the_position_to_the_walk, tests/test_ci_wait.py::test_a_ci_wait_reentry_resumes_at_the_waiting_group
 
 ## REQ task-retry-reruns-that-task-and-later-work
 
 Retrying a task SHALL rerun that task, preserve completed sibling tasks in its
 concurrent step, and rerun subsequent steps and nodes.
+enforced-by: tests/executor/test_retry_scopes.py::test_task_retry_reruns_only_task_then_later_work, tests/templates/test_forks.py::test_a_task_retry_preserves_its_step_siblings_and_nothing_wider
 
 ## REQ step-retry-reruns-that-step-and-later-work
 
 Retrying a step SHALL rerun every task in that step and rerun subsequent steps
 and nodes.
+enforced-by: tests/executor/test_retry_scopes.py::test_step_retry_reruns_all_step_tasks_then_later_work, tests/executor/test_retry_scopes.py::test_a_later_step_retry_keeps_the_steps_before_it
 
 ## REQ node-retry-reruns-that-node-and-later-work
 
 Retrying an execution node SHALL rerun that node and every subsequent node.
+enforced-by: tests/executor/test_retry_scopes.py::test_node_retry_reruns_that_node_and_later_work
 
 ## REQ work-item-restart-reruns-the-complete-chain
 
 Restarting a work item SHALL rerun its chain from the first node.
+enforced-by: tests/executor/test_retry_scopes.py::test_work_item_restart_reruns_the_complete_chain, tests/api/test_retry_paths.py::test_a_retry_hands_its_target_to_the_fork[restart]
 
 ## REQ retry-can-target-completed-work
 
 An operator MAY retry a task, step, or execution node that completed earlier
 in the work item's run.
+enforced-by: tests/executor/test_retry_scopes.py::test_retry_can_target_completed_work, tests/api/test_retry_paths.py::test_a_retry_hands_its_target_to_the_fork[completed-node], tests/store/test_forks.py::test_a_rerun_node_completes_again_in_its_fork
 
 ## REQ retry-creates-an-immutable-run-fork
 
 A retry SHALL preserve prior run data and create a new immutable run fork for
 the retried work and its invalidated downstream work.
+enforced-by: tests/store/test_forks.py::test_retry_creates_a_fork_and_preserves_prior_run_data, tests/store/test_forks.py::test_a_run_fork_is_immutable[update], tests/store/test_forks.py::test_a_run_fork_is_immutable[delete], tests/test_db_migrations.py::test_a_fresh_schema_and_a_fully_migrated_one_agree, tests/executor/test_retry_scopes.py::test_every_retry_is_its_own_fork, tests/store/test_forks.py::test_the_item_runs_its_forks_copy_of_the_chain
 
 ## REQ retry-reopens-invalidated-gates
 
 A retry SHALL reopen every gate in its invalidated downstream scope. Gate
 decisions before the retry target SHALL remain in effect.
+enforced-by: tests/store/test_forks.py::test_retry_reopens_downstream_gates_only, tests/executor/test_retry_scopes.py::test_node_retry_reruns_that_node_and_later_work, tests/executor/test_retry_scopes.py::test_a_retry_after_a_gate_keeps_its_decision
 
 ## REQ retry-overrides-are-policy-bounded
 
@@ -375,34 +388,40 @@ origin: src/kraft/templates/retry.py §validate_retry_override -- the validation
 
 An operator MAY skip a task, step, or node unless that component explicitly
 disallows skipping.
+enforced-by: tests/templates/test_forks.py::test_every_component_is_skippable_unless_it_says_otherwise[build.compile.lint-True], tests/templates/test_forks.py::test_every_component_is_skippable_unless_it_says_otherwise[build.compile.cc-False], tests/api/test_skip.py::test_skipping_a_task_or_step_records_it_and_walks_on_from_the_cursor[task], tests/api/test_skip.py::test_a_node_that_disallows_skipping_is_not_skipped[current-node], tests/api/test_skip.py::test_a_task_that_disallows_skipping_is_not_skipped
 
 ## REQ skip-stops-only-the-selected-scope
 
 Before applying a skip, the system SHALL stop active work only within the
 selected task, step, or node. Skipping a task SHALL NOT skip its sibling
 tasks; an operator MAY skip the step when they intend to skip the group.
+enforced-by: tests/executor/test_skip_scopes.py::test_skip_task_does_not_skip_sibling, tests/api/test_skip.py::test_skipping_a_task_stops_only_its_own_session
 
 ## REQ manual-completion-is-an-explicit-work-item-terminal-action
 
 An operator MAY explicitly mark a work item complete. The action SHALL require
 a reason, stop active work, record an audit event, and prevent further chain
 execution.
+enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-complete], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[complete], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[complete], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[complete]
 
 ## REQ manual-cancellation-is-an-explicit-work-item-terminal-action
 
 An operator MAY explicitly cancel a work item. The action SHALL require a
 reason, stop active work, record an audit event, and prevent further chain
 execution.
+enforced-by: tests/api/test_terminal_actions.py::test_a_terminal_action_requires_a_reason[missing-cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_ends_the_item_and_records_why[cancel], tests/api/test_terminal_actions.py::test_a_terminal_action_stops_active_work[cancel], tests/test_operator_surface.py::test_a_terminal_action_is_a_work_item_action_that_needs_a_reason[cancel]
 
 ## REQ manual-escalation-reuses-context-by-default
 
 Manual escalation SHALL resume its previous escalation session by default so
 the escalation agent retains the work item's prior context.
+enforced-by: tests/test_escalate.py::test_dispatch_resumes_an_existing_thread, tests/test_escalate.py::test_a_resumed_escalation_keeps_its_original_runtime[resumed]
 
 ## REQ manual-escalation-may-start-fresh
 
 An operator MAY request that a manual escalation start a new session instead
 of resuming its prior one.
+enforced-by: tests/test_escalate.py::test_dispatch_new_thread_starts_fresh_and_bumps_thread_number, tests/test_escalate.py::test_a_resumed_escalation_keeps_its_original_runtime[fresh]
 
 ## REQ exec-node-runs-then-advances
 
@@ -615,7 +634,7 @@ enforced-by: tests/templates/test_failure_controls.py::test_a_restart_target_mus
 The system SHALL attempt automatic rebase-conflict resolution only when the
 relevant execution node's `on_base_changed` configuration declares an explicit
 `on_conflict` handler.
-enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure, tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span
+enforced-by: tests/executor/test_base_change.py::test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure, tests/executor/test_base_change.py::test_a_conflict_handler_that_rebases_restarts_the_declared_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_with_no_handler_stops_for_a_human, tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[retry], tests/api/test_retry_paths.py::test_a_refresh_conflict_at_the_door_is_handed_to_the_walk[resume]
 
 ## REQ resolved-conflict-restarts-from-base-change-target
 
@@ -795,15 +814,18 @@ origin: src/kraft/skills/work-brief/SKILL.md -- Ruling 87 (Omid). The artifact k
 When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
 and reviewed again before the chain goes on.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-passes], tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-reopens], tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
 origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `chain_review`.
 
 ## REQ base-change-restart-passes-an-approved-gate
 
-A base-change restart SHALL NOT reopen a gate in its span that was already
-approved; the restarted walk SHALL pass over it.
-enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head[approved-gate-passes]
-origin: src/kraft/executor/walk.py §RESTART_REOPENS_APPROVED_GATES -- the default while the question is open with Omid (Ruling 87, Kraft-bjw6a); flipping the flag reopens the gate, and that side is pinned by the `[approved-gate-reopens]` case. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
+A base-change restart after a clean rebase SHALL NOT reopen a gate in its span
+that was already approved; the restarted walk SHALL pass over it. A restart
+after an explicit conflict handler resolved a rebase conflict SHALL reopen every
+approved gate in its span, whether the conflict arose inside the walk or when
+`/retry` or `/resume` refreshed the worktree.
+enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
+origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision (Ruling 162): a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
 
