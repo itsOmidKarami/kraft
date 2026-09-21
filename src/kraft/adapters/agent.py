@@ -556,6 +556,38 @@ def build_context(
     return ctx
 
 
+#: The most of a task's instruction that rides in the launch argv. The
+#: instruction is the prompt argument *and* part of the context argument, and
+#: much of it is runtime-grown with no bound of its own: the steer and
+#: rejection note, the work item's description, carried and deferred findings,
+#: a fix cycle's findings and round history, the judge's history. Linux refuses
+#: any single argument over 128 KiB and macOS a whole argv over 1 MiB, so an
+#: instruction past this is written to a file and the argv carries its head and
+#: the file's path instead (Kraft-rmz4g).
+INSTRUCTION_MAX_BYTES = 24 * 1024
+
+
+def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
+    """`task_instruction`, or its head plus where the whole of it is written.
+
+    One place for every note an agent is launched with, because
+    `run_agent_task` is the one door into `harness.build_argv`: no caller has
+    to know which of its notes might grow."""
+    raw = task_instruction.encode()
+    if len(raw) <= INSTRUCTION_MAX_BYTES:
+        return task_instruction
+    path = run_dirs.results / f"{session_id}.instruction.md"
+    path.write_text(task_instruction)
+    head = raw[:INSTRUCTION_MAX_BYTES].decode(errors="ignore")
+    head = head[: head.rfind("\n")] if "\n" in head else head
+    return (
+        f"{head}\n\n[Kraft cut this instruction at {len(head.encode())} of {len(raw)} "
+        f"bytes to keep the launch within the OS argument limit. The whole instruction, "
+        f"including everything after this point, is at {path}. Read that file before "
+        f"you start: the part cut here is as much your task as the part above.]"
+    )
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -609,6 +641,7 @@ async def run_agent_task(
             f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
         ) from None
 
+    task_instruction = _bounded_instruction(run_dirs, session_id, task_instruction)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,

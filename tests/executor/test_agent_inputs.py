@@ -183,3 +183,48 @@ async def test_a_blind_agent_failure_is_not_described_by_its_own_prompt(item_on)
 
     assert "the whole prompt" not in finding.message
     assert "Confirm the fix with" not in finding.message
+
+
+async def test_a_huge_carried_findings_list_cannot_break_the_launch(item_on, fake_agent, run_dirs):
+    """Kraft-rmz4g. No agent input may grow a launch past the OS argv limit
+    (one argument is capped at 128 KiB on Linux; the whole argv at 1 MiB on
+    macOS). A reviewer carried two thousand verbose findings still launches:
+    its prompt is bounded, and it is told where the whole instruction is."""
+    from kraft.adapters import agent as agent_mod
+    from kraft.findings import Finding
+
+    it = await item_on(_node(inputs=["carried_findings"]))
+    last = Finding("important", "the last finding in the list", "z.py", 9, "judge")
+    many = [Finding("minor", f"finding {i}: " + "x" * 400, "a.py", i, "judge") for i in range(2000)]
+    await _measured_many(it, "review", [*many, last])
+
+    await _run(it)
+
+    [argv] = fake_agent.argv()
+    assert max(len(a.encode()) for a in argv) < 128 * 1024
+    [prompt] = fake_agent.prompts()
+    assert len(prompt.encode()) <= agent_mod.INSTRUCTION_MAX_BYTES + 1024
+    [session] = it.sessions("review")
+    full = run_dirs.results / f"{session['id']}.instruction.md"
+    assert str(full) in prompt
+    assert "the last finding in the list" in full.read_text()
+
+
+async def _measured_many(it, node_id: str, findings) -> None:
+    from dataclasses import asdict
+
+    from kraft import events
+
+    await it.database.write(
+        lambda c: events.append(
+            c,
+            it.id,
+            "findings_measured",
+            {
+                "node_id": node_id,
+                "cycle": 0,
+                "head_sha": None,
+                "findings": [asdict(f) for f in findings],
+            },
+        )
+    )
