@@ -9,6 +9,7 @@ from support.harness import (
     make_repo,
     make_repo_with_engineering,
     make_repo_with_submodule,
+    v1_resolved,
 )
 
 from kraft import builtins as kraft_builtins
@@ -1104,7 +1105,6 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
     from kraft import executor
     from kraft.api.routes import lifecycle
     from kraft.executor import dispatch
-    from kraft.templates import Registry, Template
 
     repo = make_repo(tmp_path)
     tracker = isolated_bd(tmp_path)
@@ -1125,14 +1125,16 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
                 rd,
                 title="Teach probe_repo about worktrees",
                 repo=str(repo),
-                template=Template(
-                    id="one-forge-node",
-                    nodes=[{"id": "open_mr", "tasks": ["on.mr.open"], "gate_after": None}],
+                chain=v1_resolved(
+                    [
+                        {
+                            "id": "open_mr",
+                            "kind": "exec",
+                            "tasks": [{"id": "open", "kind": "forge", "target": "mr.open_draft"}],
+                        }
+                    ]
                 ),
                 bd_cwd=str(tracker),
-            )
-            registry = Registry(
-                hooks={"on.mr.open": {"kind": "forge", "handler": "open_mr", "backend": "fake"}}
             )
             launch = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
             # one node, no gate: the chain completes and closes its own bead in
@@ -1141,7 +1143,7 @@ def test_the_worktree_and_the_forge_agree_on_the_branch(tmp_path, monkeypatch):
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
+                registry=None,
                 bd_cwd=str(tracker),
                 launch=launch,
             )
