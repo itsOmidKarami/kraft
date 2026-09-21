@@ -148,6 +148,20 @@ def main() -> int:
     PORT = resolve_port()
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kraft-e2e-"))
+    # Pinned *before* the fixtures are built, and inherited by the child below.
+    # `seed_v1_library` writes the `fake`/`claude` harness overlays into
+    # `$KRAFT_HOME/templates/harnesses`, which is the only place
+    # `paths.default_harnesses_dir()` looks -- so whatever this process seeds
+    # against and whatever the daemon reads have to be the same home, or every
+    # V1 agent task dies with "harness 'fake' is not available". Two ways that
+    # went wrong before this line existed: unset (CI) seeded into
+    # `templates_dir/harnesses` while the daemon read `~/.kraft`, and set (a
+    # developer's shell) seeded into the operator's real `~/.kraft` -- writing
+    # fixture overlays into a live install (Kraft-261at) *and* diverging from
+    # CI in the opposite direction. `tmp/templates` is where
+    # `fake_templates_dir(tmp, ...)` puts the config anyway, so pinning
+    # `KRAFT_HOME=tmp` makes the two coincide by construction.
+    os.environ["KRAFT_HOME"] = str(tmp)
     # .engineering/ content so the indexer has something to find: the search
     # overlay spec needs real documents, not just a failing test (Kraft-bj9.6).
     repo = make_repo_with_engineering(
