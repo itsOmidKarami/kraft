@@ -1071,6 +1071,7 @@ async def run_task(
             status=status,
             log=log,
             unobserved=unobserved,
+            session_id=session_id,
         )
     return await _builtins.finish_session(
         db,
@@ -1095,6 +1096,7 @@ async def _observed(
     status: str,
     log: str,
     unobserved: str | None,
+    session_id: str,
 ) -> tuple[str, str]:
     """Record one wait observation; return the session's status and log.
 
@@ -1125,6 +1127,7 @@ async def _observed(
             condition=condition,
             state=state,
             result=result,
+            session_id=session_id,
         )
     )
     if outcome == "timed_out":

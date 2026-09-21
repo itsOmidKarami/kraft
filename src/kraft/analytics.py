@@ -27,7 +27,7 @@ import sqlite3
 import statistics
 from datetime import UTC, datetime, timedelta
 
-from kraft.store._common import session_wall_ms
+from kraft.store._common import session_wall_ms, wait_timed_out_sessions
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
@@ -317,6 +317,7 @@ def compute(
         "cost_complete": True,
         "rounds": 0,
         "capped_out": 0,
+        "wait_timed_out": 0,
         "completed": 0,
         "median_lead_ms": 0,
         "human_wait_pct": 0,
@@ -370,12 +371,15 @@ def compute(
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
     holes = ",".join("?" * len(ids))
     sessions = conn.execute(
-        f"SELECT work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, "
+        f"SELECT id, work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, "
         f"status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
         ids,
     ).fetchall()
     repo_of = {r["id"]: r["repo"] for r in items}
+    # A wait that ran out also exits `capped_out`; it is counted on its own,
+    # never as a fix loop's cap (Kraft-uwbc8).
+    timed_out = wait_timed_out_sessions(conn, ids)
     node_rounds: dict[str, set[tuple[str, int]]] = {}
     item_node_rounds: dict[str, set[tuple[str, int]]] = {}
     node_capped_items: dict[str, set[str]] = {}
@@ -392,6 +396,7 @@ def compute(
                 "cost_complete": True,
                 "rounds": 0,
                 "capped_out": 0,
+                "wait_timed_out": 0,
             },
         )
         tok = (s["tokens_in"] or 0) + (s["tokens_out"] or 0)
@@ -404,8 +409,11 @@ def compute(
         node["wall_ms"] += wall
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
-        node["capped_out"] += 1 if s["status"] == "capped_out" else 0
-        if s["status"] == "capped_out":
+        waited_out = s["id"] in timed_out
+        capped = s["status"] == "capped_out" and not waited_out
+        node["capped_out"] += 1 if capped else 0
+        node["wait_timed_out"] += 1 if waited_out else 0
+        if capped:
             node_capped_items.setdefault(s["node_id"], set()).add(s["work_item_id"])
         if s["cost_usd"] is None and tok:
             node["cost_complete"] = False
@@ -418,7 +426,8 @@ def compute(
         totals["tokens_out"] += s["tokens_out"] or 0
         totals["cost_usd"] += s["cost_usd"] or 0.0
         totals["wall_ms"] += wall
-        totals["capped_out"] += 1 if s["status"] == "capped_out" else 0
+        totals["capped_out"] += 1 if capped else 0
+        totals["wait_timed_out"] += 1 if waited_out else 0
 
         rr = by_repo[repo_of[s["work_item_id"]]]
         rr["tokens"] += tok

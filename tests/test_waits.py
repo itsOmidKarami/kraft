@@ -203,6 +203,31 @@ async def test_wait_timeout_stops_for_human_and_is_not_a_code_failure(walk, item
     assert _trail(it, "ci.main.ci")[-1] == ("external_wait_ended", "timed_out")
 
 
+async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, wait_clock):
+    """Kraft-uwbc8: both sessions end `capped_out` (no migration), but a wait
+    that ran out is not a fix loop that ran out. Usage and analytics count
+    them apart, from the wait's own `external_wait_ended` record."""
+    from kraft import analytics
+
+    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m", initial="1m"))])
+    fake = forge.FakeForge(ci_states=["pending"])
+    assert await walk(fake, it) == "waiting"
+    wait_clock.advance(60)
+    assert await walk(fake, it) == "needs_human"
+    # A fix-loop breach marks the node's measuring sessions the same way.
+    await it.session("s-loop", "ci.main.ci", "capped_out")
+
+    (node,) = it.database.read(lambda c: store.usage_rollup(c, it.id))["by_node"]
+    ci = next(
+        n
+        for n in it.database.read(lambda c: analytics.compute(c, range_="all"))["by_node"]
+        if n["node"] == "ci"
+    )
+
+    for rollup in (node, ci):
+        assert (rollup["capped_out"], rollup["wait_timed_out"]) == (1, 1), rollup
+
+
 # --- one scheduler, every wait kind --------------------------------------------
 
 

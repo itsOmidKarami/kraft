@@ -110,6 +110,7 @@ def observe(
     condition: str,
     state: State,
     result: str,
+    session_id: str | None = None,
 ) -> Literal["pending", "settled", "timed_out", "error"]:
     """Record one observation of `task`'s wait, in the caller's transaction,
     and say what it amounts to. `state` is what the forge saw: `pending`,
@@ -117,7 +118,8 @@ def observe(
     not the wait's), or `error` when the observation itself could not be
     made. A pending observation at or past the deadline is `timed_out`
     (`external-wait-timeout-needs-human`). `bounds` apply to a new instance
-    only; an open one keeps the bounds it started with."""
+    only; an open one keeps the bounds it started with. `session_id` is the
+    session the observation ran in, recorded on the outcome."""
     now = datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
@@ -140,7 +142,16 @@ def observe(
             conn,
             work_item_id,
             ENDED,
-            {**ids, "outcome": outcome, "result": result, "observations": n},
+            {
+                **ids,
+                "outcome": outcome,
+                "result": result,
+                "observations": n,
+                # Which session the wait ended in: a `timed_out` one exits
+                # `capped_out`, and this is how usage tells it from a fix
+                # loop's cap (`store.wait_timed_out_sessions`).
+                "session_id": session_id,
+            },
         )
 
     if state == "error":
