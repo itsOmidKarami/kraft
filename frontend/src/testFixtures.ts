@@ -1,10 +1,19 @@
-import type { ChainNode, KraftEvent, WorkerSession, WorkItem } from "../../../types";
+import { vi } from "vitest";
+import type { ChainNode, KraftEvent, WorkerSession, WorkItem } from "./types";
 
-/** Shared `WorkItem`/`WorkerSession`/`KraftEvent` factories for the
- *  ActionBar test suite — not a `.test.*` file itself so importing it
- *  doesn't re-run another file's `describe` blocks. */
+/** Shared test factories and stubs — not a `.test.*` file itself so
+ *  importing it doesn't re-run another file's `describe` blocks. Each
+ *  factory takes overrides; a test that depends on a value passes it. */
 
-const NODES: ChainNode[] = [
+/** Forces `usePhone()`/every media query to `matches` for the test. */
+export function setPhoneWidth(matches = true) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({ matches, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  );
+}
+
+export const NODES: ChainNode[] = [
   { id: "spec", tasks: ["on.spec.requested"], gate_after: "spec_approval" },
   { id: "plan", tasks: ["on.plan.requested"], gate_after: "plan_approval" },
   { id: "verify", tasks: ["on.test.run"], gate_after: null },
@@ -24,6 +33,30 @@ export const item = (over: Partial<WorkItem> = {}): WorkItem =>
     updated_at: "t",
     ...over,
   }) as WorkItem;
+
+/** The quick-task chain (plan → verify) the board-side tests use. */
+export const QUICK: Partial<WorkItem> = {
+  chain_template: "quick-task",
+  chain_definition: {
+    template_id: "quick-task",
+    nodes: [
+      { id: "plan", tasks: ["a"], gate_after: "plan_approval" },
+      { id: "verify", tasks: ["b"], gate_after: null },
+    ],
+  },
+};
+
+/** What the item page's store holds once hydrated: completed nodes, the
+ *  effective chain, overrides and a budget. */
+export const detailItem = (over: Partial<WorkItem> = {}): WorkItem =>
+  item({
+    completedNodes: ["spec", "plan"],
+    node_overrides: {},
+    node_overrides_count: 0,
+    effective_chain: { template_id: "default", nodes: NODES },
+    budget_cap: { cap_usd: 10, source: "policy", spent_usd: 1 },
+    ...over,
+  });
 
 export const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
   ({

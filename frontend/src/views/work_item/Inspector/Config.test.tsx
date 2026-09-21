@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { ChainNode, WorkItem } from "../../../types";
+import type { ChainNode } from "../../../types";
 import { Config } from "./Config";
+import { item as baseItem } from "../../../testFixtures";
 
 const NODES: ChainNode[] = [
   {
@@ -12,12 +13,7 @@ const NODES: ChainNode[] = [
   },
 ];
 
-const item = {
-  id: "w1", title: "T", repo: "/r", status: "active", chain_template: "default",
-  chain_definition: { template_id: "default", nodes: NODES },
-  effective_chain: { template_id: "default", nodes: NODES },
-  current_node_id: "verify", bead_id: "B", created_at: "t", updated_at: "t",
-} as unknown as WorkItem;
+const item = baseItem({ chain_definition: { template_id: "default", nodes: NODES }, effective_chain: { template_id: "default", nodes: NODES } });
 
 describe("Config tab · a stepped node (Kraft-1y9ae)", () => {
   it("shows the groups in order instead of one comma list", () => {

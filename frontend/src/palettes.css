@@ -16,7 +16,7 @@
       AFTER the ramp blocks: `--color-accent`/`--color-accent-2` are set
       in both the ramp blocks and here, and both selectors have equal
       specificity (`:root` + one attribute) — source order breaks the
-      tie, and light mode's override has to win. palettes.order.test.ts
+      tie, and light mode's override has to win. css.contract.test.ts
       pins this.
    3. Role blocks (`[data-palette="X"][data-mode="Y"]`) — literal values
       per (palette, mode). Two attributes beats one, so these always win

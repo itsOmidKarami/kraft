@@ -31,7 +31,7 @@ describe("Changes tab · tree row alignment (Kraft-02ob)", () => {
   });
 
   it("declares the tree row's grid with the caret's auto track first, not the stretching one", () => {
-    // jsdom has no CSS cascade to speak of (styles.order.test.ts's own
+    // jsdom has no CSS cascade to speak of (css.contract.test.ts's own
     // rationale) -- pinned against the source, same as that file does.
     const css = readFileSync(join(here, "../work_item.css"), "utf-8");
     const rule = css.split(".tree-row {")[1]?.split("}")[0] ?? "";

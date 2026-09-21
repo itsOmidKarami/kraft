@@ -2,6 +2,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { ChainNode, WorkerSession, WorkItem } from "../../../types";
 import { Tasks } from "./Tasks";
+import { item as baseItem, session as baseSession } from "../../../testFixtures";
 
 const NODES: ChainNode[] = [
   { id: "verify", tasks: ["on.test.run", "on.review.local.run"], gate_after: null },
@@ -9,22 +10,10 @@ const NODES: ChainNode[] = [
 ];
 
 const item = (over: Partial<WorkItem> = {}): WorkItem =>
-  ({
-    id: "w1", title: "T", repo: "/r", status: "active", chain_template: "default",
-    chain_definition: { template_id: "default", nodes: NODES },
-    effective_chain: { template_id: "default", nodes: NODES },
-    current_node_id: "verify", bead_id: "B", created_at: "t", updated_at: "t",
-    ...over,
-  }) as WorkItem;
+  baseItem({ chain_definition: { template_id: "default", nodes: NODES }, effective_chain: { template_id: "default", nodes: NODES }, ...over });
 
 const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
-  ({
-    id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
-    status: "done", attempt: 1, thread: 1, round: 0,
-    created_at: "2026-09-18T10:00:00", started_at: null, exited_at: null,
-    tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null,
-    ...over,
-  }) as WorkerSession;
+  baseSession({ status: "done", created_at: "2026-09-18T10:00:00", started_at: null, model: undefined, head_sha: undefined, ...over });
 
 function renderTasks(over: { sessions?: WorkerSession[]; nodeId?: string | null } = {}) {
   return render(

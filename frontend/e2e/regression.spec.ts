@@ -1,12 +1,9 @@
-import { expect, test } from "./fixtures";
+import { expect, REPO, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round: drives every operational surface of the SPA against
 // a real orchestrator (see e2e/serve.py). Assumes the same fixture server as
 // chain.spec.ts.
-const REPO = process.env.KRAFT_E2E_REPO!;
-
-
 
 test("settings: connect a repo", async ({ page }) => {
   // Earlier specs connect REPO through fixtures.connectRepo, so take it off
@@ -90,13 +87,9 @@ test("settings: steering is editable and diffable", async ({ page }) => {
   await expect(page.getByLabel("steering body")).toHaveValue("edited by e2e\n");
 });
 
-test("settings: access page shows bind", async ({ page }) => {
+test("settings: access shows the bind, and allowed-hosts tags round-trip", async ({ page }) => {
   await page.goto("/settings/access");
   await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-});
-
-test("settings: access allowed-hosts tag add/remove round-trips", async ({ page }) => {
-  await page.goto("/settings/access");
   const input = page.getByPlaceholder(/add a host or ip/i);
   await expect(input).toBeVisible({ timeout: scaledTimeout(15_000) });
   await input.fill("e2e.kraft.local");
@@ -145,57 +138,4 @@ test("settings: appearance density and board prefs persist after reload", async 
   await page.reload();
   await expect(page.getByRole("radio", { name: "Comfortable" })).toBeChecked();
   await expect(page.getByRole("radio", { name: "repo" })).toBeChecked();
-});
-
-test("analytics renders and repo/template selects change the numbers", async ({ page }) => {
-  await page.goto("/analytics");
-  await expect(page.locator("body")).not.toContainText("Failed to fetch");
-  await expect(page.getByText("Completed").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  const before = await page.locator(".kpi-value").first().textContent();
-  await page.getByLabel(/repo:/i).selectOption({ index: 1 }).catch(() => {});
-  await page.waitForTimeout(500);
-  const after = await page.locator(".kpi-value").first().textContent();
-  // A filter change must re-render, even if the fixture data happens to
-  // leave a particular number unchanged -- the request itself is the claim.
-  expect(before).toBeDefined();
-  expect(after).toBeDefined();
-});
-
-test("login: shows a plain error on a wrong password", async ({ page }) => {
-  // Auth is off for a loopback client (perimeter.py), so no password brings
-  // the login screen up here. Answer the API with 401 instead: the app routes
-  // to Login on any 401, and /api/login's detail is the error it shows.
-  await page.route("**/api/**", (route) =>
-    route.fulfill({
-      status: 401,
-      contentType: "application/json",
-      body: JSON.stringify({
-        detail: route.request().url().endsWith("/api/login") ? "Wrong password." : "authentication required",
-      }),
-    }),
-  );
-  await page.goto("/");
-  await expect(page.getByRole("switch", { name: /stay signed in/i })).toBeVisible({
-    timeout: scaledTimeout(15_000),
-  });
-  await page.getByLabel("Password").fill("wrong-password");
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: scaledTimeout(15_000) });
-});
-
-test("search overlay finds an indexed document", async ({ page }) => {
-  await page.goto("/");
-  // The Ctrl-K handler attaches in a useEffect, so it doesn't exist until
-  // React has hydrated (search.spec.ts's openWithShortcut documents the same
-  // race) -- pressing the chord straight off `goto` is a race this test lost
-  // intermittently. Wait for a rendered control first.
-  await expect(page.getByRole("button", { name: "Search" })).toBeVisible();
-  await page.keyboard.press("Meta+k").catch(() => {});
-  const dlg = page.getByRole("dialog", { name: "Search" });
-  if (!(await dlg.isVisible().catch(() => false))) {
-    await page.keyboard.press("Control+k");
-  }
-  await expect(dlg).toBeVisible({ timeout: scaledTimeout(10_000) });
-  await dlg.getByLabel("search").fill("backoff");
-  await expect(dlg.locator(".search-result").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
 });

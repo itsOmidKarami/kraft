@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildItem } from "../../../sweep/fixtures";
 import { streamRows } from "./RightPane/Events";
