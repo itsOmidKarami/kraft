@@ -345,8 +345,9 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
 
 
 def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client):
-    """A rebase conflict at `/resume` stops the item for a human, and
-    auto-escalation (armed by default) follows.
+    """A rebase conflict at `/resume` with no handler stops the item for a
+    human. It is not in the stuck set, so auto-escalation (armed by default)
+    does not follow it (Ruling 176).
 
     Kraft-s7c04.23 dispatched a rebase-conflict *resolver* agent first; that
     resolver (`walk.resolve_rebase_conflict`) was deleted with the legacy
@@ -416,16 +417,14 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
     # builtins.py's own literal, version-independent of git's message.
     assert needs_human and "rebase failed for" in needs_human[-1]["payload"]["reason"].lower()
 
-    sessions = _wait(
-        lambda: (lambda rows: rows if any(s["hook_point"] == "escalation" for s in rows) else None)(
-            client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
-        ),
-        "the escalation session",
-    )
+    from kraft.api import deps
+
+    # The walk that recorded the stop has finished, auto_escalate_stuck included.
+    _wait(lambda: not deps.task_is_live(client.app, wid), "the walk to finish")
+    sessions = client.get(f"/api/work-items/{wid}").json()["worker_sessions"]
     # The implementer ran once, before the pause, and nothing re-ran it.
     assert [s["hook_point"] for s in sessions].count(_IMPLEMENT) == 1
-    escalation_sessions = [s for s in sessions if s["hook_point"] == "escalation"]
-    assert len(escalation_sessions) == 1, "escalation did not follow the conflict stop"
+    assert not [s for s in sessions if s["hook_point"] == "escalation"]
     # fake-claude.sh writes its own session summary under
     # `.engineering/sessions/` -- an untracked directory left behind by
     # that, not evidence of anything left uncommitted.
