@@ -1168,3 +1168,69 @@ def test_identity_mismatch_reason_never_reports_this_process(monkeypatch):
     assert reattach._identity_mismatch_reason(None, 123.0) == "no pid recorded"
     # The pid-less case wins over the start-time case, and neither touches psutil.
     assert reattach._identity_mismatch_reason(None, None) == "no pid recorded"
+
+
+def _adopt_finished(tmp_path, hook_point, node):
+    """A V1 item with a subprocess and an agent task in `node`, and one
+    session on `hook_point` whose process already exited 0 without writing a
+    result file -- then adopted, the way a restart finds it."""
+    from support.harness import v1_chain, v1_item
+
+    chain = v1_chain([node], repo=tmp_path)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            await v1_item(database, chain, repo=tmp_path)
+            await database.write(
+                lambda c: store.create_session(
+                    c,
+                    id="s1",
+                    work_item_id="w1",
+                    node_id=node["id"],
+                    hook_point=hook_point,
+                    log_path=str(rd.logs / "s1.log"),
+                    result_path=str(rd.results / "s1.json"),
+                )
+            )
+            (rd.results / "s1.exit").write_text("0")
+            proc = subprocess.Popen(["true"])
+            proc.wait()
+            await reattach._adopt(database, "s1", proc.pid, poll_s=0.01, registry=_REG)
+            return database.read(
+                lambda c: c.execute("SELECT status FROM worker_sessions WHERE id = 's1'").fetchone()
+            )["status"]
+        finally:
+            await database.close()
+
+    return asyncio.run(scenario())
+
+
+_V1_NODE = {
+    "id": "verify",
+    "kind": "exec",
+    "tasks": [
+        {"id": "check", "kind": "subprocess", "command": "true"},
+        {"id": "review", "kind": "agent", "harness": "fake", "prompt": "Review it."},
+    ],
+}
+
+
+def test_an_adopted_v1_subprocess_task_reads_its_exit_code(tmp_path):
+    """Kraft-hwrks's invariant, the reattach reader: whether an adopted session
+    is an agent was looked up in the legacy registry by `hook_point`, which on
+    V1 is a task path no registry hook has -- so every V1 subprocess session
+    read as an agent, and a green run adopted across a restart was recorded
+    `failed` and fed the fix loop (the b5afe84c bug, back for V1)."""
+    assert _adopt_finished(tmp_path, "verify.main.check", _V1_NODE) == "done"
+
+
+def test_an_adopted_v1_agent_task_still_needs_its_result_file(tmp_path):
+    assert _adopt_finished(tmp_path, "verify.main.review", _V1_NODE) == "failed"
+
+
+def test_an_adopted_v1_session_outside_the_chain_is_treated_as_an_agent(tmp_path):
+    """The conservative direction stays: an escalation turn is no chain task,
+    and a clean exit without its result file must not read as done."""
+    assert _adopt_finished(tmp_path, "escalation", _V1_NODE) == "failed"
