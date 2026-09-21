@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useStore } from "./store";
@@ -28,6 +29,21 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Search" })).toBeNull();
+  });
+
+  // Kraft-utvg3 / Kraft-ica3: the chord must work the moment the app's DOM is
+  // committed. A listener attached in a passive effect misses a press that
+  // lands between commit and the scheduler's later effect flush (a real
+  // window under CPU load). A sibling's layout effect runs in that window.
+  it("Ctrl-K pressed as soon as the DOM commits still opens search", () => {
+    const PressOnCommit = () => {
+      useLayoutEffect(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+      }, []);
+      return null;
+    };
+    render(<><App /><PressOnCommit /></>);
+    expect(screen.getByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
   it("opens the search overlay from the header button", async () => {
