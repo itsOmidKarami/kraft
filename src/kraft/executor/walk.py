@@ -16,6 +16,7 @@ from kraft.executor.context import (
     BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
+    CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
     WAITING,
@@ -484,28 +485,16 @@ async def _escalate_stuck(
     )
 
 
-def _conflicted(
-    db, work_item_id: str, node: ResolvedNode, failed: list[ResolvedTask], excs
-) -> tuple[list[ResolvedTask], str]:
-    """The failed tasks a rebase conflict stopped, and what git said -- empty
-    unless the node declares an explicit conflict handler, which is the only
-    thing that may act on one (`rebase-conflict-requires-explicit-handler`)."""
-    if not node.on_conflict:
-        return [], ""
-    raised = [e for e in excs if isinstance(e, _builtins.RebaseConflict)]
-    hit = [
-        t
-        for t in failed
-        if (s := dispatch._latest_session(db, work_item_id, node, t)) is not None
-        and s["status"] == "conflict"
-    ]
-    if raised and not hit:
-        hit = list(failed)
-    detail = "; ".join(
-        [str(e) for e in raised]
-        + [c for t in hit if (c := _task_cause(db, work_item_id, node, t, "conflict"))]
+def _conflict_detail(db, work_item_id: str, node: ResolvedNode, conflicted, excs) -> str:
+    """What git said about a conflict: a raised `RebaseConflict`'s message, or
+    the first line of the conflicted task's own log."""
+    return (
+        "; ".join(
+            [str(e) for e in excs if isinstance(e, _builtins.RebaseConflict)]
+            + [c for t in conflicted if (c := _task_cause(db, work_item_id, node, t, CONFLICT))]
+        )
+        or "a rebase conflict"
     )
-    return hit, detail or "a rebase conflict"
 
 
 async def _resolve_conflict(
@@ -576,7 +565,7 @@ async def _resolve_conflict(
             )
             is not None
         )
-        if moved:
+        if moved and new_base != old_base:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
             return BASE_MOVED
         reason = (
@@ -727,27 +716,26 @@ async def _walk_node_once(
         stop = await _sentinel_stop(db, work_item_id, node, verdict, failed, budget)
         if stop is not None:
             return stop
+        if verdict == CONFLICT:
+            resolved = await _resolve_conflict(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                worktree,
+                failed,
+                _conflict_detail(db, work_item_id, node, failed, excs),
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=0,
+                loop_severities=loop_severities,
+            )
+            if resolved == BASE_MOVED:
+                return await _moved_base(db, work_item_id, node)
+            return resolved
         if verdict == "failed":
-            conflicted, detail = _conflicted(db, work_item_id, node, failed, excs)
-            if conflicted:
-                resolved = await _resolve_conflict(
-                    db,
-                    run_dirs,
-                    work_item_id,
-                    node,
-                    row,
-                    worktree,
-                    conflicted,
-                    detail,
-                    steer=steer,
-                    launch=launch,
-                    budget=budget,
-                    round=0,
-                    loop_severities=loop_severities,
-                )
-                if resolved == BASE_MOVED:
-                    return await _moved_base(db, work_item_id, node)
-                return resolved
             question = dispatch.needs_context_question(db, work_item_id, node, round=0)
             recovered = False
             repaired = bool(spent)
@@ -875,27 +863,25 @@ async def _walk_node_once(
         if stop is not None:
             return stop
 
-        if verdict == "failed":
-            conflicted, detail = _conflicted(db, work_item_id, node, failed, excs)
-            if conflicted:
-                resolved = await _resolve_conflict(
-                    db,
-                    run_dirs,
-                    work_item_id,
-                    node,
-                    row,
-                    worktree,
-                    conflicted,
-                    detail,
-                    steer=steer,
-                    launch=launch,
-                    budget=budget,
-                    round=round,
-                    loop_severities=loop_severities,
-                )
-                if resolved == BASE_MOVED:
-                    return await _moved_base(db, work_item_id, node)
-                return resolved
+        if verdict == CONFLICT:
+            resolved = await _resolve_conflict(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                worktree,
+                failed,
+                _conflict_detail(db, work_item_id, node, failed, excs),
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=round,
+                loop_severities=loop_severities,
+            )
+            if resolved == BASE_MOVED:
+                return await _moved_base(db, work_item_id, node)
+            return resolved
 
         if (
             verdict == "failed"

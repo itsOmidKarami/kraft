@@ -43,6 +43,12 @@ _ADVANCING = ("done", "done_with_concerns")
 #: base-ref comparison does the bounce.
 BASE_MOVED = "base_moved"
 
+#: A task could not rebase: the forge's `conflict` status, or a raised
+#: `builtins.RebaseConflict`. A task failure like any other -- unless its node
+#: declares `on_base_changed.on_conflict`, in which case `measure_node` answers
+#: this for the node and `walk` hands it to that handler.
+CONFLICT = "conflict"
+
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
 #: forge, up to a small cap; this is what it returns once retries are
@@ -66,7 +72,7 @@ SCOPE: dict[str, str] = {
     "done_with_concerns": "advance",
     "failed": "task",
     "needs_context": "task",
-    "conflict": "task",  # RebaseConflict has its own resolver, but a task still fails on it
+    CONFLICT: "task",  # a failure, unless the node declares an explicit on_conflict handler
     "paused": "stop",  # a human's own SIGTERM
     BUDGET: "stop",  # nothing ran; a fix cycle would only spend more
     RATE_LIMITED: "stop",

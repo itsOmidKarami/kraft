@@ -50,7 +50,8 @@ def fake_agent(tmp_path, monkeypatch) -> FakeAgent:
 class Script:
     """`dispatch.dispatch_node`, scripted per task id. `plan[id]` is the
     statuses that task answers in turn (the last one repeats; `done` when
-    unplanned); a task id in `real` runs the real dispatch instead. `log` is
+    unplanned); a task id in `real` runs the real dispatch instead, and
+    `effects[id]` is awaited with the work item's row before it answers. `log` is
     every `("start"|"end", id)` in the order it happened, `steers[id]` the
     steer each launch was handed and `instructions[id]` its override."""
 
@@ -59,6 +60,7 @@ class Script:
         self.real: set[str] = set()
         self.plan: dict[str, list[str]] = {}
         self.delay: dict[str, float] = {}
+        self.effects: dict = {}
         self.log: list[tuple[str, str]] = []
         self.steers: dict[str, list] = {}
         self.instructions: dict[str, list] = {}
@@ -78,6 +80,8 @@ class Script:
         if tid in self.real:
             status = await self._real(db_, run_dirs_, task, node, row_, wt, **kw)
         else:
+            if tid in self.effects:
+                await self.effects[tid](row_)
             await asyncio.sleep(self.delay.get(tid, 0))
             seq = self.plan.get(tid, ["done"])
             status = seq.pop(0) if len(seq) > 1 else seq[0]

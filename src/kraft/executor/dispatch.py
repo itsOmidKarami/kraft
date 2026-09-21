@@ -28,6 +28,7 @@ from kraft.executor.context import (
     BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
+    CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
     SCOPE,
@@ -851,6 +852,16 @@ async def measure_node(
     # on_failure repair. The node stopped on purpose.
     if any(r == BASE_MOVED for r in results):
         return BASE_MOVED, [], []
+    # A rebase conflict, in a node that declares the handler for one
+    # (`rebase-conflict-requires-explicit-handler`): that handler, not a
+    # recovery or a fix cycle, answers it. Without one it is a task failure
+    # like any other, below.
+    if own and node.on_conflict:
+        conflicted = [
+            t for t, r in outcomes if r == CONFLICT or isinstance(r, _builtins.RebaseConflict)
+        ]
+        if conflicted:
+            return CONFLICT, conflicted, [r for r in results if isinstance(r, BaseException)]
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
@@ -896,11 +907,12 @@ def _recoverable(result: object, node: ResolvedNode) -> bool:
     (Kraft-rv6i). A rebase `conflict` belongs to the node's explicit conflict
     handler when it declares one (`rebase-conflict-requires-explicit-
     handler`), so no recovery handler spends itself on it first."""
-    if isinstance(result, BaseException):
+    if isinstance(result, BaseException) and not isinstance(result, _builtins.RebaseConflict):
         return True
     if result in _ADVANCING or result in _STOPS or result == "needs_context":
         return False
-    return not (result == "conflict" and node.on_conflict)
+    conflict = result == CONFLICT or isinstance(result, _builtins.RebaseConflict)
+    return not (conflict and node.on_conflict)
 
 
 def _latest_session(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask):
