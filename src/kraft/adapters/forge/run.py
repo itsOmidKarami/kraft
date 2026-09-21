@@ -1001,7 +1001,24 @@ async def run_task(
             # -- whether or not root itself has anything to publish.
             covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
             await git._assert_submodules_covered(repo, covered)
-        for row_id, target_repo, _role in targets:
+        for row_id, target_repo, role in targets:
+            if multi and role == "root" and handler == "mark_ready":
+                # The root's own merge request waits for its members: it is
+                # marked ready by `merge`, once they have landed and it names
+                # their merged revisions (`root-source-merge-request-
+                # readiness-waits-for-child-merges`).
+                log += f"[{target_repo.name}] stays a draft until its members merge\n"
+                continue
+            if multi and role == "root" and handler == "merge":
+                # Reached only once every member merged: the loop stops at the
+                # first one that does not.
+                log += await _ready_root_at_merged_members(
+                    live_forge,
+                    rows,
+                    root_repo=target_repo,
+                    branch=branch,
+                    work_item_id=work_item_id,
+                )
             one_log, one_status, one_findings = await _run_one(
                 live_forge,
                 db,
@@ -1057,40 +1074,13 @@ async def run_task(
             and not root_has_changes
             and status == "done"
         ):
-            # `multi` guarantees `rows` is non-empty here, so this is always
-            # the root row's own path, not `repo` (the worktree root is the
-            # same thing, but the row is the one source of truth).
-            root_repo = Path(next(r["repo_path"] for r in rows if r["role"] == "root"))
-            bumped = []
-            for r in rows:
-                if r["role"] != "submodule":
-                    continue
-                sub_path = Path(r["repo_path"])
-                default = await git.default_branch(sub_path)
-                await git.run_git(sub_path, ["git", "fetch", "origin", default])
-                merged_sha = (
-                    await git.run_git(sub_path, ["git", "rev-parse", f"origin/{default}"])
-                ).strip()
-                await git.run_git(sub_path, ["git", "checkout", merged_sha])
-                rel = str(sub_path.relative_to(root_repo))
-                await git.run_git(root_repo, ["git", "add", "--", rel])
-                bumped.append(rel)
-            if (
-                bumped
-                and (
-                    await git.run_git(root_repo, ["git", "status", "--porcelain", "--cached"])
-                ).strip()
-            ):
-                await git.run_git(
-                    root_repo,
-                    ["git", "commit", "-m", f"chore: bump submodule pointers for {work_item_id}"],
-                )
-                root_default = await git.default_branch(root_repo)
-                await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{root_default}"])
-                log += (
-                    f"bumped {', '.join(bumped)} directly on {root_default}, "
-                    "no root merge request\n"
-                )
+            # Every member merged (a failure stopped the loop above, leaving
+            # the root untouched -- `blocked-child-merge-leaves-parent-
+            # unchanged`), so the pointers can name what landed
+            # (`child-merge-precedes-parent-pointer-update`).
+            log += await _bump_pointer_only_root(
+                live_forge, db, rows, branch=branch, title=title, work_item_id=work_item_id
+            )
         if status == "rebased":
             # Internal-only marker (worker_sessions.status has no "rebased"
             # value, and the walk's own bounce -- keyed off base_ref moving,
@@ -1178,3 +1168,83 @@ async def _observed(
             "nothing about the code failed\n"
         )
     return ("waiting" if state == "pending" else status), log
+
+
+async def _point_at_merged_members(rows, root_repo: Path, work_item_id: str) -> list[str]:
+    """Move each member's pointer in `root_repo` to the revision its origin's
+    default branch has now -- what its merge landed -- and commit them.
+    Returns the mount paths that moved."""
+    bumped = []
+    for r in rows:
+        if r["role"] != "submodule":
+            continue
+        sub_path = Path(r["repo_path"])
+        default = await git.default_branch(sub_path)
+        await git.run_git(sub_path, ["git", "fetch", "origin", default])
+        merged_sha = (
+            await git.run_git(sub_path, ["git", "rev-parse", f"origin/{default}"])
+        ).strip()
+        await git.run_git(sub_path, ["git", "checkout", merged_sha])
+        rel = str(sub_path.relative_to(root_repo))
+        await git.run_git(root_repo, ["git", "add", "--", rel])
+        bumped.append(rel)
+    staged = await git.run_git(root_repo, ["git", "diff", "--cached", "--name-only"])
+    if not staged.strip():
+        return []
+    await git.run_git(
+        root_repo, ["git", "commit", "-m", f"chore: bump submodule pointers for {work_item_id}"]
+    )
+    return bumped
+
+
+async def _ready_root_at_merged_members(
+    forge: Forge, rows, *, root_repo: Path, branch: str, work_item_id: str
+) -> str:
+    """A root with source changes of its own, once its members merged: point
+    it at their merged revisions, push, and only now mark its merge request
+    ready (`root-source-merge-request-readiness-waits-for-child-merges`)."""
+    bumped = await _point_at_merged_members(rows, root_repo, work_item_id)
+    await forge.push(repo=root_repo, branch=branch)
+    existing = await forge.find_mr(repo=root_repo, branch=branch)
+    await forge.mark_ready(
+        repo=root_repo, branch=branch, mr=MR(number=existing.number if existing else 0, url="")
+    )
+    moved = f"pointed {', '.join(bumped)} at the merged revisions, " if bumped else ""
+    return f"[{root_repo.name}] {moved}marked ready now that its members merged\n"
+
+
+async def _bump_pointer_only_root(
+    forge: Forge, db, rows, *, branch: str, title: str, work_item_id: str
+) -> str:
+    """A requested bump of a root with no source changes: straight onto the
+    root's default branch when it takes the push
+    (`workspace-pointer-bump-prefers-direct-push`), otherwise as a merge
+    request from the item's branch in the root
+    (`workspace-pointer-bump-falls-back-to-merge-request`)."""
+    root = next(r for r in rows if r["role"] == "root")
+    root_repo = Path(root["repo_path"])
+    bumped = await _point_at_merged_members(rows, root_repo, work_item_id)
+    if not bumped:
+        return "every member pointer already names its merged revision\n"
+    root_default = await git.default_branch(root_repo)
+    try:
+        await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{root_default}"])
+        return f"bumped {', '.join(bumped)} directly on {root_default}, no root merge request\n"
+    except ForgeError as exc:
+        refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
+    await forge.push(repo=root_repo, branch=branch)
+    mr = await forge.open_mr(
+        repo=root_repo,
+        branch=branch,
+        title=f"chore: bump submodule pointers for {title}",
+        body=f"Moves {', '.join(bumped)} to the revisions merged for work item {work_item_id}.",
+    )
+    await db.write(
+        lambda c: store.update_repo_state(
+            c, root["id"], merge_state="open", mr_ref={"number": mr.number, "url": mr.url}
+        )
+    )
+    return (
+        f"{root_default} refused the direct push ({refused}); opened !{mr.number} "
+        f"to bump {', '.join(bumped)}\n"
+    )
