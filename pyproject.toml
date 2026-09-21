@@ -78,6 +78,11 @@ testpaths = ["tests", "plugins/kraft-lite/tests"]
 # current. A thread-based timeout dumps every stack and kills the process.
 timeout = 120
 timeout_method = "thread"
+# `async def test_*` runs under anyio's plugin (a transitive dependency, already
+# installed) without a marker on each test; `tests/conftest.py` pins the
+# backend to asyncio and provides the async `database` fixture. The older
+# `asyncio.run(scenario())` style inside a sync test still works unchanged.
+anyio_mode = "auto"
 markers = [
     "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
     "beads_adapter: tests of kraft.adapters.beads itself; keeps the real adapter, with bd stubbed, instead of the suite's in-memory fake",

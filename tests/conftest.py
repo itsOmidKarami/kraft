@@ -11,7 +11,8 @@ from support import harness
 from support.fake_beads import FakeBeads
 from support.harness import fake_templates_dir, isolated_bd
 
-from kraft import client
+from kraft import client, db
+from kraft.paths import RunDirs
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -266,6 +267,49 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     # Tests that specifically exercise the redirect delenv this and wrap the
     # call in `capfd.disabled()`.
     monkeypatch.setenv("KRAFT_LOG_REDIRECTED", "1")
+
+
+@pytest.fixture
+def anyio_backend():
+    """Every `async def` test runs once, on asyncio.
+
+    `anyio_mode = "auto"` (pyproject) hands every `async def test_*` to anyio's
+    plugin, whose own `anyio_backend` is parametrized over each installed
+    backend. That would rename every async test to `test_x[asyncio]` (breaking
+    intent pins) and run it again on trio the day trio is installed. Kraft is
+    asyncio-only, so pin it here, unparametrized."""
+    return "asyncio"
+
+
+@pytest.fixture
+def run_dirs(tmp_path) -> RunDirs:
+    """`tmp_path/run` as a `RunDirs`, directories created: what the executor
+    and every `store` reader take alongside `database`."""
+    return RunDirs(tmp_path / "run").ensure()
+
+
+@pytest.fixture
+async def database(run_dirs):
+    """An open, migrated `db.Database` at `run_dirs.db`, closed after the test.
+
+    Replaces the `async def scenario(): open / try / finally close` +
+    `asyncio.run(scenario())` block. Write the test as `async def` and take
+    the fixture; anyio runs the fixture and the test on one event loop, which
+    the `Database` writer task needs (it is bound to the loop that opened it):
+
+        async def test_x(database):
+            await mk_item(database)
+            await database.write(lambda c: store.create_session(c, ...))
+            assert database.read(lambda c: ...) == ...
+
+    A test that also needs the logs/results/worktrees dirs takes `run_dirs`:
+    it is the same `RunDirs` this database lives in.
+    """
+    database = await db.Database.open(run_dirs.db)
+    try:
+        yield database
+    finally:
+        await database.close()
 
 
 @pytest.fixture
