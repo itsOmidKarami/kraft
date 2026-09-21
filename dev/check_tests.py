@@ -21,19 +21,28 @@ Four checks:
   (c) a per-file line budget for tests/**. A file already over budget when
       this check was written is allowlisted at its current size -- it may
       shrink, never grow past that, and a new file starts at the same
-      budget as everything else.
+      budget as everything else. Two more rules keep that allowlist itself
+      honest rather than a one-way ratchet that only ever loosens: an entry
+      for a file that has shrunk to LINE_BUDGET or under is stale (remove
+      it), and an entry whose recorded ceiling sits more than
+      STALE_ALLOWLIST_MARGIN lines above the file's real current size is
+      also stale (tighten it) -- otherwise nothing stops a file shrinking
+      once and then quietly regrowing most of the way back up under a
+      ceiling nobody revisited.
   (d) every `def test_*`/`async def test_*` has an `assert`, a
       `pytest.raises`/`pytest.warns`/`pytest.deprecated_call`, an
       `assert*`-named call, or delegates to a same-module helper function
-      that does. Measured against this tree at write time: 2613 test
-      functions, 9 flagged without one of the above, all the same
-      legitimate shape (a paired positive case proving a call does *not*
-      raise, e.g. `test_a_free_port_is_accepted` beside
-      `test_an_occupied_port_is_refused`). Kept, not dropped: 9 is a named,
-      reviewed list, not noise, and an allowlisted test still has to be one
-      the module's negative-path test faces off against, not a silent
-      no-op. See EXPECTATION_ALLOWLIST below -- add to it only with the same
-      justification.
+      that does. Measured against this tree: 9 tests flagged without one of
+      the above; two are genuinely unassertable beyond "did not raise" (a
+      swallow-and-return-None guard with no observable side effect) and
+      stay in EXPECTATION_ALLOWLIST, each with an inline note saying so.
+      The other seven got an explicit assertion instead of an allowlist
+      entry once one was possible -- one of them (`test_shipped_default_
+      chain_validates`) had been calling a function that *returns* error
+      strings rather than raising, and discarding the result, which this
+      rule caught as a real bug, not a false positive. An allowlisted test
+      id that no longer exists (renamed, deleted, moved) is also a
+      violation -- nothing here says the omission was re-earned.
 
 A file this script cannot parse is a failure, not a skip: a checker that
 reads a parse error as "nothing to check here" is the exact bug this
@@ -54,24 +63,32 @@ TESTS = ROOT / "tests"
 
 LINE_BUDGET = 800
 
-#: Files already over LINE_BUDGET when this check was written (`wc -l`,
-#: 2026-09-21, tip of claude/v1-test-guideline after merging #92). A file
-#: here may shrink -- and should, over time -- but must never grow past the
-#: number recorded. A file that isn't here has never earned an exception:
-#: it is held to LINE_BUDGET from the day it's added.
+#: Files already over LINE_BUDGET when this check was last regenerated
+#: (`wc -l`, 2026-09-21, tip of claude/v1-test-guideline after merging #92
+#: and #93). A file here may shrink -- and should, over time -- but must
+#: never grow past the number recorded, and `check_line_budget_allowlist_
+#: is_current` fails the build if the recorded ceiling drifts more than
+#: STALE_ALLOWLIST_MARGIN lines above the file's real size, or if the file
+#: has shrunk to LINE_BUDGET or under (the entry is then dead weight, not a
+#: ceiling). A file that isn't here has never earned an exception: it is
+#: held to LINE_BUDGET from the day it's added.
 LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/api/test_work_items.py": 811,
     "tests/support/harness.py": 837,
+    "tests/adapters/test_agent.py": 856,
     "tests/executor/test_gates.py": 903,
     "tests/executor/test_dispatch.py": 930,
-    "tests/adapters/forge/test_glab.py": 970,
-    "tests/worker/test_reattach.py": 1236,
     "tests/executor/test_walk.py": 1335,
-    "tests/adapters/test_agent.py": 1468,
-    "tests/adapters/test_subprocess.py": 1484,
-    "tests/templates/test_legacy.py": 2400,
-    "tests/adapters/forge/test_run.py": 2842,
+    "tests/templates/test_legacy.py": 2407,
 }
+
+#: How far an allowlisted ceiling may sit above the file's real current size
+#: before the check demands it be tightened down to match. Not zero: a
+#: one-line edit to an allowlisted file shouldn't force an allowlist edit in
+#: the same commit. Not large either -- the whole point of a ratchet is that
+#: it only ever tightens, so a wide margin is just a slower version of the
+#: rot this exists to catch. 20 lines is under a screenful either way.
+STALE_ALLOWLIST_MARGIN = 20
 
 #: The real CLIs a unit-tier test may not shell out to. Not `git`: `git` is
 #: real everywhere on purpose (worktrees, rebases and submodules are the
@@ -81,18 +98,22 @@ GUARDED_BINARIES = {"bd", "claude", "gh", "glab"}
 _SUBPROCESS_CALL_NAMES = {"run", "Popen", "call", "check_call", "check_output"}
 
 #: `path::qualname` pairs for a `def test_` with no assert/raises/warns
-#: anywhere in its own body or a same-module helper it calls, each an
-#: intentional "this must not raise" contract test with a sibling test
-#: proving the negative path does raise. See the module docstring's (d).
+#: anywhere in its own body or a same-module helper it calls. Each entry
+#: earns its place with a one-line reason: the function under test returns
+#: nothing and has no observable side effect, so "it did not raise" is the
+#: only honest thing left to assert, and a sibling test elsewhere proves the
+#: negative path does raise. Every other test that used to have this shape
+#: got a real assertion instead -- see the module docstring's (d).
+#: `check_expectation_allowlist_is_current` fails the build if an entry's
+#: test id no longer exists.
 EXPECTATION_ALLOWLIST: set[str] = {
-    "tests/test_distribution_surface.py::test_install_script_is_valid_shell",
-    "tests/test_e2e_serve.py::test_a_free_port_is_accepted",
-    "tests/test_e2e_serve.py::test_checking_a_port_twice_does_not_leak_the_probe_socket",
+    # lifecycle._terminate(pid) swallows ProcessLookupError/PermissionError
+    # and returns None either way -- no return value, no state it touches
+    # that the test could inspect instead.
     "tests/test_pause_resume.py::test_terminate_still_swallows_a_process_that_is_already_gone",
-    "tests/test_policy.py::test_the_shipped_policy_yaml_has_no_unknown_key",
-    "tests/api/test_deps.py::test_cancel_on_an_absent_or_already_done_task_is_a_noop",
-    "tests/templates/test_legacy.py::test_shipped_default_chain_validates",
-    "tests/worker/test_steering.py::test_validate_accepts_a_total_exactly_at_the_budget",
+    # sandbox.validate(...) -> None: raises SandboxError on a bad shape,
+    # returns nothing on a good one. Nothing downstream to assert on without
+    # testing a second function's behaviour instead of this one's.
     "tests/worker/test_sandbox.py::test_validate_accepts_a_well_formed_sandbox",
 }
 
@@ -292,8 +313,12 @@ def check_no_real_cli_outside_e2e(tree: ast.Module, relpath: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _line_count(path: Path) -> int:
+    return sum(1 for _ in path.open(encoding="utf-8", errors="surrogateescape"))
+
+
 def check_line_budget(path: Path, relpath: str) -> list[str]:
-    lines = sum(1 for _ in path.open(encoding="utf-8", errors="surrogateescape"))
+    lines = _line_count(path)
     budget = LINE_BUDGET_ALLOWLIST.get(relpath, LINE_BUDGET)
     if lines > budget:
         if relpath in LINE_BUDGET_ALLOWLIST:
@@ -306,6 +331,33 @@ def check_line_budget(path: Path, relpath: str) -> list[str]:
             f"or add it to LINE_BUDGET_ALLOWLIST in dev/check_tests.py with a reason"
         ]
     return []
+
+
+def check_line_budget_allowlist_is_current(actual_lines: dict[str, int]) -> list[str]:
+    """The ratchet only tightens: an allowlisted file that no longer exists,
+    has shrunk to the ordinary budget or under, or has shrunk further than
+    its recorded ceiling admits is stale, not merely generous."""
+    violations = []
+    for relpath, ceiling in LINE_BUDGET_ALLOWLIST.items():
+        actual = actual_lines.get(relpath)
+        if actual is None:
+            violations.append(
+                f"LINE_BUDGET_ALLOWLIST names {relpath!r}, which no longer exists in "
+                f"tests/ -- remove the entry from dev/check_tests.py"
+            )
+        elif actual <= LINE_BUDGET:
+            violations.append(
+                f"LINE_BUDGET_ALLOWLIST[{relpath!r}] = {ceiling} is stale: the file is "
+                f"now {actual} lines, at or under the {LINE_BUDGET}-line budget -- "
+                f"remove the entry"
+            )
+        elif ceiling - actual > STALE_ALLOWLIST_MARGIN:
+            violations.append(
+                f"LINE_BUDGET_ALLOWLIST[{relpath!r}] = {ceiling} sits {ceiling - actual} "
+                f"lines above the file's real {actual} -- tighten it to {actual} "
+                f"(margin is {STALE_ALLOWLIST_MARGIN} lines)"
+            )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -364,21 +416,49 @@ def check_every_test_has_an_expectation(tree: ast.Module, relpath: str) -> list[
     return violations
 
 
+def _test_qualnames(tree: ast.Module, relpath: str) -> set[str]:
+    return {
+        f"{relpath}::{n.name}"
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+    }
+
+
+def check_expectation_allowlist_is_current(all_test_ids: set[str]) -> list[str]:
+    """An allowlisted id that isn't a real test any more -- renamed, deleted,
+    moved to another file -- is an exception nobody re-earned. Its absence
+    should have deleted the entry; failing here says so instead of the
+    allowlist quietly protecting nothing."""
+    return [
+        f"EXPECTATION_ALLOWLIST names {qualname!r}, which no longer exists -- "
+        f"remove the entry from dev/check_tests.py"
+        for qualname in sorted(EXPECTATION_ALLOWLIST)
+        if qualname not in all_test_ids
+    ]
+
+
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
     violations: list[str] = []
+    actual_lines: dict[str, int] = {}
+    all_test_ids: set[str] = set()
     for path in _test_files():
         relpath = path.relative_to(ROOT).as_posix()
+        actual_lines[relpath] = _line_count(path)
         violations.extend(check_line_budget(path, relpath))
         tree, error = _parse(path)
         if error is not None:
             violations.append(error)
             continue
+        all_test_ids |= _test_qualnames(tree, relpath)
         violations.extend(check_e2e_names_cli(tree, relpath))
         violations.extend(check_no_real_cli_outside_e2e(tree, relpath))
         violations.extend(check_every_test_has_an_expectation(tree, relpath))
+
+    violations.extend(check_line_budget_allowlist_is_current(actual_lines))
+    violations.extend(check_expectation_allowlist_is_current(all_test_ids))
 
     if violations:
         for v in violations:

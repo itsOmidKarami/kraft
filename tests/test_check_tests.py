@@ -1,8 +1,9 @@
 """`dev/check_tests.py` is itself unexercised by the suite it checks -- these
-pin its four rules against a deliberately bad file each, plus the "a parse
-failure is a failure" rule the project keeps re-learning the hard way (a
-checker that reads an error as "nothing to check" is the same bug class as a
-chain step that swallows an exception into "done").
+pin its four rules against a deliberately bad file each, the two allowlist-
+staleness rules that keep (c) and (d) from rotting into a one-way ratchet,
+plus the "a parse failure is a failure" rule the project keeps re-learning
+the hard way (a checker that reads an error as "nothing to check" is the
+same bug class as a chain step that swallows an exception into "done").
 
 Most of the checker's functions take a tree and a `relpath` string
 directly, so a case only needs a parsed module, not a file on disk under
@@ -117,6 +118,67 @@ class TestLineBudget:
         violations = ct.check_line_budget(path, relpath)
         assert len(violations) == 1
         assert "allowlisted ceiling" in violations[0]
+
+
+class TestLineBudgetAllowlistIsCurrent:
+    def test_an_entry_for_a_missing_file_is_flagged(self, ct):
+        violations = ct.check_line_budget_allowlist_is_current({})
+        assert len(violations) == len(ct.LINE_BUDGET_ALLOWLIST)
+        assert all("no longer exists" in v for v in violations)
+
+    def _all_present(self, ct) -> dict[str, int]:
+        """Every allowlisted entry present, at exactly its recorded ceiling --
+        a baseline that passes on its own, so a test can override just the
+        one entry it's exercising without the others reporting `None` (a
+        `check_line_budget_allowlist_is_current({relpath: N})` call would
+        otherwise "discover" every unlisted entry missing)."""
+        return dict(ct.LINE_BUDGET_ALLOWLIST)
+
+    def test_an_entry_at_or_under_budget_is_stale(self, ct):
+        relpath = next(iter(ct.LINE_BUDGET_ALLOWLIST))
+        actual = self._all_present(ct)
+        actual[relpath] = ct.LINE_BUDGET
+        violations = ct.check_line_budget_allowlist_is_current(actual)
+        assert len(violations) == 1
+        assert "stale" in violations[0]
+
+    def _biggest_entry(self, ct) -> str:
+        """A ceiling with enough headroom above LINE_BUDGET that subtracting
+        the margin still lands well clear of the "at or under budget" branch
+        -- so this test exercises the margin rule specifically, not the
+        stale-budget one above it."""
+        return max(ct.LINE_BUDGET_ALLOWLIST, key=ct.LINE_BUDGET_ALLOWLIST.get)
+
+    def test_a_ceiling_too_far_above_actual_is_flagged(self, ct):
+        relpath = self._biggest_entry(ct)
+        ceiling = ct.LINE_BUDGET_ALLOWLIST[relpath]
+        actual = self._all_present(ct)
+        actual[relpath] = ceiling - ct.STALE_ALLOWLIST_MARGIN - 1
+        violations = ct.check_line_budget_allowlist_is_current(actual)
+        assert len(violations) == 1
+        assert "tighten it" in violations[0]
+
+    def test_a_ceiling_within_the_margin_is_not_flagged(self, ct):
+        relpath = self._biggest_entry(ct)
+        ceiling = ct.LINE_BUDGET_ALLOWLIST[relpath]
+        actual = self._all_present(ct)
+        actual[relpath] = ceiling - ct.STALE_ALLOWLIST_MARGIN
+        assert ct.check_line_budget_allowlist_is_current(actual) == []
+
+    def test_every_real_entry_passes_today(self, ct):
+        """The live-fire version: today's allowlist against today's tree."""
+        actual = {p: ct._line_count(ct.ROOT / p) for p in ct.LINE_BUDGET_ALLOWLIST}
+        assert ct.check_line_budget_allowlist_is_current(actual) == []
+
+
+class TestExpectationAllowlistIsCurrent:
+    def test_a_missing_test_id_is_flagged(self, ct):
+        violations = ct.check_expectation_allowlist_is_current(set())
+        assert len(violations) == len(ct.EXPECTATION_ALLOWLIST)
+        assert all("no longer exists" in v for v in violations)
+
+    def test_every_real_entry_is_present_today(self, ct):
+        assert ct.check_expectation_allowlist_is_current(ct.EXPECTATION_ALLOWLIST) == []
 
 
 class TestEveryTestHasAnExpectation:
