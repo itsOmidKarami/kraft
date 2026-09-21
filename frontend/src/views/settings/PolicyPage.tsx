@@ -67,7 +67,7 @@ export function PolicyPage() {
 
   const addLoop = () => {
     if (!policy) return;
-    const name = window.prompt("Loop key (the node's own `fix_loop`, e.g. `verify_fix_loop`)");
+    const name = window.prompt("Loop key (the node's own `fix_loop`, e.g. `verification.fix_loop`)");
     if (!name || policy.loops[name]) return;
     setDraft({ ...policy, loops: { ...policy.loops, [name]: { ...policy.default } } });
   };

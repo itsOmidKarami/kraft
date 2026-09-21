@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from kraft.templates.library import TemplateLibrary, TemplateLibraryError
-from kraft.templates.models import AgentTask, BuiltinAction, ForgeAction, GateNode
+from kraft.templates.models import AgentInput, AgentTask, BuiltinAction, ForgeAction, GateNode
 
 #: The design document's "Library components" and "Chain example" YAML,
 #: copied verbatim -- the acceptance target for resolution.
@@ -94,11 +94,12 @@ def test_an_unknown_chain_is_rejected(design):
 def test_the_design_chain_resolves_to_its_documented_canonical_paths(design):
     paths = design.resolve_chain("default").task_paths
     assert set(paths) >= {
-        "implementation.verification.test_changed_scopes",
+        "verification.tests.test_changed_scopes",
+        "verification.review.code_review",
         "spec.main.author",
         "merge_request_feedback.on_failure.repair.repair_feedback",
         "merge_request_feedback.fix_loop.repair.repair",
-        "implementation.fix_loop.main.repair",
+        "verification.fix_loop.main.repair",
         "merge_request_feedback.fix_loop.judge",
     }
     assert len(set(paths)) == len(paths)
@@ -119,7 +120,7 @@ def test_resolution_types_every_task_in_the_design_chain(design):
     assert by_path["spec.main.author"].produces == "spec"
     assert by_path["spec.main.author"].skill == "kraft:spec"
     assert (
-        by_path["implementation.verification.test_changed_scopes"].ref
+        by_path["verification.tests.test_changed_scopes"].ref
         is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
     )
     assert by_path["draft_merge_request.main.open"].target is ForgeAction.MR_OPEN_DRAFT
@@ -135,8 +136,7 @@ def test_resolution_types_every_task_in_the_design_chain(design):
 def test_extends_expands_a_library_node_into_the_chain(design):
     chain = design.resolve_chain("default")
     node = next(n for n in chain.nodes if n.id == "implementation")
-    assert [s.id for s in node.steps] == ["implementation", "verification"]
-    assert node.node.fix_loop.max_attempts == 2
+    assert [s.id for s in node.steps] == ["main"]
     implement = node.steps[0].tasks[0].task
     assert isinstance(implement, AgentTask)
     # Inherited from the `implementer` task, with the local id kept.
@@ -145,6 +145,45 @@ def test_extends_expands_a_library_node_into_the_chain(design):
         "high",
         "Implement the approved plan.",
     )
+
+
+# ── the default chain's shape (Ruling 87): implement once, then a verification
+# node whose fix loop re-runs tests and review, then a work brief the pre-draft
+# gate shows ──
+
+
+def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(design):
+    chain = design.resolve_chain("default")
+    ids = [n.id for n in chain.nodes]
+    assert ids[ids.index("plan_approval") + 1 : ids.index("draft_merge_request")] == [
+        "implementation",
+        "verification",
+        "work_brief",
+        "local_review",
+    ]
+    nodes = {n.id: n for n in chain.nodes}
+    # Implementing has no fix loop: a repair re-runs verification, not the
+    # implementer (`fix-loop-remeasures-the-whole-node` reruns a node from step 0).
+    assert nodes["implementation"].node.fix_loop is None
+    verification = nodes["verification"]
+    # Review is its own step after the tests, so it runs only on green.
+    assert [[t.path for t in s.tasks] for s in verification.steps] == [
+        ["verification.tests.test_changed_scopes"],
+        ["verification.review.code_review"],
+    ]
+    review = verification.steps[1].tasks[0].task
+    assert (review.skill, review.inputs) == ("kraft:code-review", [AgentInput.REVIEW_PACKAGE])
+    assert verification.node.fix_loop.max_attempts == 2
+    assert verification.judge.task.inputs == [AgentInput.REVIEW_PACKAGE]
+    # The pre-draft gate shows the document the node before it produces.
+    assert nodes["work_brief"].produces() == frozenset({"work_brief"})
+    assert nodes["local_review"].node.artifact == "work_brief"
+    # A rejection carries a human's note, and only the implementer acts on one.
+    assert nodes["local_review"].node.reject_to == "implementation"
+    assert nodes["chain_review"].node.reject_to == "implementation"
+    # A CI-conflict rebase in post-draft feedback re-tests and re-reviews the
+    # rebased head (Kraft-bjw6a).
+    assert nodes["merge_request_feedback"].node.on_base_changed.restart_from == "verification"
 
 
 def only_task(library: TemplateLibrary):

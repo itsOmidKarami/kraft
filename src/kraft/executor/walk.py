@@ -27,9 +27,9 @@ from kraft.executor.context import (
 from kraft.store import _now as _now
 from kraft.templates import Registry
 from kraft.templates.models import (
-    BuiltinTask,
     ExecNode,
     ForgeTask,
+    GateNode,
     MaterializedChain,
     ResolvedNode,
     ResolvedTask,
@@ -58,8 +58,12 @@ def chain_of(row) -> MaterializedChain:
 #: fix agent makes in its worktree can change what executes (Kraft-s7c04.24).
 #: A subprocess task is deliberately absent: it runs the worktree's own
 #: command, which is exactly what a fix commit changes. An agent task is the
-#: worker itself.
-_IN_PROCESS_KINDS = (BuiltinTask, ForgeTask)
+#: worker itself. So is a builtin: V1's one builtin action,
+#: `kraft.verify_changed_test_scopes`, runs the repository's own test commands
+#: in the worktree (legacy's `on.test.run` was a subprocess), and counting it
+#: here stopped every red test in a fix-loop node with "reinstall and restart"
+#: instead of repairing it.
+_IN_PROCESS_KINDS = (ForgeTask,)
 
 
 def _in_process(task: ResolvedTask) -> bool:
@@ -300,9 +304,10 @@ def _task_cause(
 def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
     """ " — cause; cause" for the failed tasks Kraft runs itself, or "".
 
-    A forge or builtin task's log is Kraft's own one-line account of why it
-    failed, so it belongs on the card. An agent's or a subprocess's log is that
-    tool's output -- the card names the task and the log button opens it."""
+    A forge task's log is Kraft's own one-line account of why it failed, so it
+    belongs on the card. An agent's, a subprocess's or the test-scope builtin's
+    log is that tool's output -- the card names the task and the log button
+    opens it."""
     causes = [
         c
         for t in failed
@@ -1343,6 +1348,15 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
         )
 
 
+#: Whether a base-change restart reopens a gate inside its span that was
+#: already approved. The one decision point for it, and pending with Omid
+#: (Ruling 87, Kraft-bjw6a): until he decides, an approved gate stays approved
+#: and the restarted walk passes over it (`gates.maybe_gate`). True reopens it,
+#: so the walk stops there again. Both sides are pinned in
+#: tests/executor/test_default_chain.py.
+RESTART_REOPENS_APPROVED_GATES = False
+
+
 async def _restart_for_base_change(
     db, work_item_id: str, nodes, index: int, restart_from: str, policy: _policy.Policy | None
 ) -> int | None:
@@ -1374,6 +1388,14 @@ async def _restart_for_base_change(
         return None
     target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
     span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
+    if RESTART_REOPENS_APPROVED_GATES:
+        for gate in nodes[target:index]:
+            if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
+                await db.write(
+                    lambda c, g=gate.id: events.append(
+                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "base_change"}
+                    )
+                )
     for n in span:
         await db.write(
             lambda c, n=n: store.clear_loop_counters(

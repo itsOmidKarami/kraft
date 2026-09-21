@@ -24,7 +24,6 @@ const V1_NODES: ChainNode[] = [
     kind: "exec",
     tasks: ["implementation.main.implement"],
     gate_after: null,
-    fix_loop: "implementation.fix_loop",
   },
 ];
 

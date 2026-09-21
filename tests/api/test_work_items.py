@@ -243,10 +243,7 @@ def test_patch_switches_chain_template_before_the_chain_starts(client, repo):
     wid = _paused(client, repo, chain_template="quick-task")
     before = client.get(f"/api/work-items/{wid}").json()
     # V1 quick-task: `env_setup` is implicit preparation, not a node.
-    assert [n["id"] for n in before["chain_definition"]["nodes"]] == [
-        "implementation",
-        "verify",
-    ]
+    assert [n["id"] for n in before["chain_definition"]["nodes"]] == ["implementation", "verify"]
 
     r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
     assert r.status_code == 200, r.text
@@ -261,6 +258,8 @@ def test_patch_switches_chain_template_before_the_chain_starts(client, repo):
         "plan",
         "plan_approval",
         "implementation",
+        "verification",
+        "work_brief",
         "local_review",
         "draft_merge_request",
         "merge_request_feedback",

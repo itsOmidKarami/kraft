@@ -105,7 +105,7 @@ def test_the_seeded_library_resolves_its_default_chain():
     resolved = library.resolve_chain("default")
     # The paths docs/templates-v1-design.md "Resolution and execution" names.
     assert "spec.main.author" in resolved.task_paths
-    assert "implementation.verification.test_changed_scopes" in resolved.task_paths
+    assert "verification.tests.test_changed_scopes" in resolved.task_paths
     assert "merge_request_feedback.fix_loop.judge" in resolved.task_paths
 
 
