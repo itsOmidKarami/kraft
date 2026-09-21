@@ -2,10 +2,10 @@
 
 Always on, unlike `intake.py`'s poller: waiting out a rate limit is not
 optional behaviour a human opts into, it is what the rest of this feature
-promises. Ticks on a fixed interval and relaunches through the exact code
-path `POST /work-items/{id}/retry` uses -- `store.retry_after_cap` plus
-`executor.run(start_index=...)` -- so a rate-limited item and a manually
-retried one are put back to work the same way.
+promises. Ticks on a fixed interval, clears the counters the way
+`store.retry_after_cap` does, and relaunches through `executor.run` with no
+position: the walk resumes at the item's own cursor, like every door that
+resumes an item (Kraft-c3dab).
 """
 
 from __future__ import annotations
@@ -119,8 +119,7 @@ async def _retry_one(app, row) -> bool:
         # Same as `ci_wait`'s: over `store.node_index` so a V1 row's `"{}"`
         # `chain_definition` cannot raise, and a node that is not in this item's
         # chain stops rather than silently relaunching it at node zero.
-        start = store.node_index(row, node_id)
-        if start is None:
+        if store.node_index(row, node_id) is None:
             # `return False`, not a bare `return`: this function's contract is
             # "did I relaunch it". The bracket above turns the claim into a stop.
             logger.warning(
@@ -142,7 +141,8 @@ async def _retry_one(app, row) -> bool:
                         work_item_id=wid,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
+                        # No position: the walk resumes at the item's own
+                        # cursor, the step the rate limit stopped (Kraft-c3dab).
                         policy=st.policy,
                         steer=RESUME_PROMPT,
                         launch=deps.launch(st, row["repo"]),

@@ -594,11 +594,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
         await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
 
-        # `store.node_index`, never `chain["nodes"]`: this runs *after*
-        # `resume_work_item` has already claimed the row, so a raise here leaves the
-        # item `active` with no walk behind it. `default=0` because an item that
-        # never reached a node resumes at the start of its chain.
-        start = store.node_index(row, row["current_node_id"], default=0)
         try:
             deps.spawn(
                 request.app,
@@ -612,7 +607,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         work_item_id=wid,
                         registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=start,
+                        # No position: the walk resumes at the item's own
+                        # cursor, so work that completed before the pause is
+                        # not rerun (Kraft-c3dab). An item that never started
+                        # stands at the start of its chain.
                         policy=st.policy,
                         steer=steer,
                         launch=deps.launch(st, row["repo"]),

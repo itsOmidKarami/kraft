@@ -351,20 +351,24 @@ async def test_a_resume_at_an_approved_gate_continues_past_it(item_on):
         "spec.main.write",
         "implementation.main.build",
     ]
-    # `resume_once` advances *past* the cleared gate before it reconciles, so the
-    # gate is not handed to `reconcile_current_node` -- which, for a node with no
-    # steps and no sessions, re-enters `walk_node` and stamps a second
-    # `node_started` on a gate the item already answered. Cosmetic in effect and
-    # a lie in the timeline: the board would show the approved gate entered twice.
+    # The walk passes *over* the cleared gate rather than entering it: entering
+    # it again stamps a second `node_started` on a gate the item already
+    # answered. Cosmetic in effect and a lie in the timeline: the board would
+    # show the approved gate entered twice.
     started = [e["payload"]["node_id"] for e in it.events("node_started")]
     assert started.count("spec_approval") == 1
 
 
 async def test_a_resume_at_an_unanswered_gate_re_requests_it(item_on):
     """The other half of the same branch: a gate that was *not* cleared before
-    the crash reopens rather than being walked past."""
+    the crash reopens rather than being walked past. Crash resume only picks up
+    an `active` item (`reattach`), so the item is left active as a crash in the
+    window before `request_gate` would leave it."""
     it = await item_on(_spec_gate())
     await _walk(it)
+    await it.database.write(
+        lambda c: c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (it.id,))
+    )
 
     assert await _resume(it) == "awaiting_gate"
     # The node after the gate still has not run.

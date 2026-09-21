@@ -648,3 +648,29 @@ def test_terminate_still_swallows_a_process_that_is_already_gone(monkeypatch):
 
     lifecycle._terminate(4242)  # must not raise
     lifecycle._terminate(None)  # must not raise
+
+
+def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):
+    """Kraft-c3dab: `/resume` relaunched at the paused node's first step, so a
+    pause during verification reran the implementer. It hands the walk no
+    position now; `walk.run_once` resumes at the item's cursor
+    (tests/executor/test_entry_paths.py)."""
+    from kraft import executor, store
+
+    seen = {}
+
+    async def fake_run(*args, **kw):
+        seen.update(kw)
+        return "completed"
+
+    monkeypatch.setattr(executor, "run", fake_run)
+    _seed_waiting(client, repo)
+    assert client.post("/api/work-items/w1/pause", json={}).status_code == 200
+    client.portal.call(
+        lambda: client.app.state.db.write(lambda c: store.set_current_step(c, "w1", 1))
+    )
+
+    assert client.post("/api/work-items/w1/resume", json={}).status_code == 200
+    _wait(lambda: seen, "the resumed walk")
+    assert "start_index" not in seen and "start_step" not in seen
+    assert seen["work_item_id"] == "w1"

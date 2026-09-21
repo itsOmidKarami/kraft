@@ -219,3 +219,29 @@ async def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging
     assert await rate_limit_retry.tick(app) == []
     result = _status_of(app)
     assert result == "needs_human"
+
+
+async def test_a_rate_limit_relaunch_leaves_the_position_to_the_walk(
+    tmp_path, monkeypatch, repo, stub_app
+):
+    """Kraft-c3dab: the poller relaunched at the node's first step, rerunning
+    the steps that had completed before the rate limit. It hands the walk no
+    position now; `walk.run_once` resumes at the item's cursor
+    (tests/executor/test_entry_paths.py)."""
+    from kraft import executor
+
+    seen = {}
+
+    async def fake_run(*args, **kw):
+        seen.update(kw)
+        return "completed"
+
+    monkeypatch.setattr(executor, "run", fake_run)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    await app.state.db.write(lambda c: store.set_current_step(c, "w1", 2))
+
+    assert await rate_limit_retry.tick(app) == ["w1"]
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    assert "start_index" not in seen and "start_step" not in seen
+    assert seen["work_item_id"] == "w1"

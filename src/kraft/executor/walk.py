@@ -1447,6 +1447,20 @@ async def _restart_for_base_change(
     return target
 
 
+def _cursor(row, nodes) -> tuple[int, int]:
+    """Where the item stands: its current node's index and the step group that
+    node last began. An item that never reached a node stands at the start."""
+    current = row["current_node_id"]
+    if current is None:
+        return 0, 0
+    index = next((i for i, n in enumerate(nodes) if n.id == current), None)
+    if index is None:
+        raise LookupError(
+            f"work item {row['id']!r} stands on node {current!r}, which its chain does not have"
+        )
+    return index, row["current_step"]
+
+
 async def run_once(
     db,
     run_dirs,
@@ -1454,13 +1468,26 @@ async def run_once(
     work_item_id: str,
     registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
     launch: LaunchContext | None = None,
 ) -> str:
+    """The one way into the walk.
+
+    Every door that *resumes* an item -- `/resume`, crash resume
+    (`resuming.resume`), the rate-limit and CI-wait pollers -- passes no
+    position: the walk starts at the item's own cursor, `current_node_id` and
+    the step group `current_step` last began, so work that completed before the
+    stop is not rerun (`resume-preserves-completed-work`, Kraft-c3dab). A door
+    that *moves* the item -- a retry, a skip, a gate decision -- passes
+    `start_index` (and `start_step`) to say where it moved it to.
+
+    The item's status is read before every node: a walk only runs an `active`
+    item, and every result is returned as it is, never remapped (Kraft-z0hah).
+    """
     # the note is good for one agent launch, whichever task gets there first
     carried = Steer(steer, source=steer_source)
     row = db.read(
@@ -1469,6 +1496,11 @@ async def run_once(
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
     nodes = chain_of(row).chain.nodes
+    if start_index is None:
+        start_index, cursor_step = _cursor(row, nodes)
+        start_step = cursor_step if start_step is None else start_step
+    elif start_step is None:
+        start_step = 0
     # Record the chain as loaded before touching the filesystem: this is
     # bookkeeping about the item, not about the worktree, and a work item
     # whose worktree can never be created (bad repo, git failure) must still
@@ -1592,6 +1624,13 @@ async def run_once(
         if await gates.maybe_gate(db, work_item_id, node):
             await _report_if_undelivered(db, work_item_id, carried)
             return "awaiting_gate"
+        if isinstance(node.node, GateNode):
+            # Cleared: its approval already completed it (`store.approve_gate`),
+            # and entering it again would stamp a second `node_started` on a
+            # decision the item already has.
+            i += 1
+            step = 0
+            continue
         base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
         pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         result = await walk_node(
@@ -1664,8 +1703,8 @@ async def run(
     work_item_id: str,
     registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
