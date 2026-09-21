@@ -79,7 +79,7 @@ LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/executor/test_gates.py": 903,
     "tests/executor/test_dispatch.py": 930,
     "tests/executor/test_walk.py": 1335,
-    "tests/templates/test_legacy.py": 2407,
+    "tests/templates/test_legacy.py": 2412,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size
@@ -125,10 +125,12 @@ def _test_files() -> list[Path]:
 def _parse(path: Path) -> tuple[ast.Module | None, str | None]:
     """`(tree, None)` on success, `(None, message)` on a parse failure --
     never silently `None, None`: a caller that gets a failure must count it,
-    not skip the file."""
+    not skip the file. `OSError` (permission denied, gone between listing
+    and reading) counts the same as a syntax error or a bad encoding: every
+    one of them is "could not check this file", not "nothing to check"."""
     try:
         return ast.parse(path.read_text(), filename=str(path)), None
-    except (SyntaxError, UnicodeDecodeError) as exc:
+    except (SyntaxError, UnicodeDecodeError, OSError) as exc:
         return None, f"{path.relative_to(ROOT)}: could not parse ({exc})"
 
 
@@ -214,7 +216,14 @@ def check_e2e_names_cli(tree: ast.Module, relpath: str) -> list[str]:
 
 
 def _decorator_list_is_e2e(decorator_list: list[ast.AST]) -> bool:
-    return any(_e2e_sites(dec) for dec in decorator_list)
+    # `_e2e_sites` is a generator function: `_e2e_sites(dec)` alone is a
+    # generator *object*, always truthy regardless of what it yields, so
+    # `any(_e2e_sites(dec) for dec in ...)` checked the objects' truthiness,
+    # never their contents -- any decorator at all (`@pytest.mark.
+    # parametrize`, `@pytest.fixture`, ...) made this return True. Consuming
+    # each one via `list(...)` first (as every other caller of `_e2e_sites`
+    # already does) fixes it.
+    return any(list(_e2e_sites(dec)) for dec in decorator_list)
 
 
 def _module_pytestmark_is_e2e(tree: ast.Module) -> bool:
@@ -313,12 +322,21 @@ def check_no_real_cli_outside_e2e(tree: ast.Module, relpath: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _line_count(path: Path) -> int:
-    return sum(1 for _ in path.open(encoding="utf-8", errors="surrogateescape"))
+def _line_count(path: Path) -> int | None:
+    """None on an unreadable file (permission denied, gone between listing
+    and reading) rather than letting `OSError` crash the script -- `_parse`'s
+    call on the same path is what reports the violation naming the file."""
+    try:
+        with path.open(encoding="utf-8", errors="surrogateescape") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return None
 
 
 def check_line_budget(path: Path, relpath: str) -> list[str]:
     lines = _line_count(path)
+    if lines is None:
+        return []  # unreadable -- _parse reports this file's violation instead
     budget = LINE_BUDGET_ALLOWLIST.get(relpath, LINE_BUDGET)
     if lines > budget:
         if relpath in LINE_BUDGET_ALLOWLIST:
@@ -446,7 +464,9 @@ def main() -> int:
     all_test_ids: set[str] = set()
     for path in _test_files():
         relpath = path.relative_to(ROOT).as_posix()
-        actual_lines[relpath] = _line_count(path)
+        lines = _line_count(path)
+        if lines is not None:
+            actual_lines[relpath] = lines
         violations.extend(check_line_budget(path, relpath))
         tree, error = _parse(path)
         if error is not None:

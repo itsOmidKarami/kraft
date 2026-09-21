@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,23 @@ class TestNoRealCliOutsideE2e:
             '    subprocess.run(["git", "init"], check=True)\n'
         )
         assert ct.check_no_real_cli_outside_e2e(tree, "test_ok.py") == []
+
+    def test_a_test_decorated_with_an_unrelated_marker_is_still_flagged(self, ct):
+        """Regression: `_decorator_list_is_e2e` used to call `_e2e_sites`
+        (a generator function) directly inside `any(...)`, checking the
+        truthiness of the generator *objects* it produced rather than what
+        they yielded -- a generator object is always truthy, so any
+        decorated test at all, `@pytest.mark.parametrize` included, read as
+        e2e-exempt regardless of what the decorator actually was."""
+        tree = _tree(
+            "import subprocess\nimport pytest\n\n"
+            '@pytest.mark.parametrize("x", [1, 2])\n'
+            "def test_x(x):\n"
+            '    subprocess.run(["bd", "status"])\n'
+        )
+        violations = ct.check_no_real_cli_outside_e2e(tree, "test_bad.py")
+        assert len(violations) == 1
+        assert "bd" in violations[0]
 
     def test_support_helpers_are_out_of_scope_by_filename(self, ct):
         """tests/support/** is fixture infrastructure, not a collected test
@@ -217,6 +235,60 @@ class TestParseFailureIsAFailure:
         monkeypatch.setattr(ct, "ROOT", tmp_path)
         monkeypatch.setattr(ct, "TESTS", tmp_path)
         assert ct.main() == 1
+
+
+class TestUnreadableFileIsAFailure:
+    """A permission-denied file used to raise a raw `PermissionError` out of
+    `_line_count` (called before `_parse` in `main()`'s loop) -- a crash with
+    a traceback, not the intended violation line. `OSError` covers
+    `PermissionError` and a file that vanishes between listing and reading
+    alike."""
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
+    def test_line_count_returns_none_rather_than_raising(self, ct, tmp_path):
+        path = tmp_path / "test_unreadable.py"
+        path.write_text("def test_x():\n    assert True\n")
+        path.chmod(0o000)
+        try:
+            assert ct._line_count(path) is None
+        finally:
+            path.chmod(0o644)
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
+    def test_check_line_budget_does_not_crash_on_an_unreadable_file(self, ct, tmp_path):
+        path = tmp_path / "test_unreadable.py"
+        path.write_text("def test_x():\n    assert True\n")
+        path.chmod(0o000)
+        try:
+            assert ct.check_line_budget(path, "tests/test_unreadable.py") == []
+        finally:
+            path.chmod(0o644)
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
+    def test_parse_reports_it_as_a_violation_naming_the_file(self, ct, tmp_path, monkeypatch):
+        monkeypatch.setattr(ct, "ROOT", tmp_path)
+        path = tmp_path / "test_unreadable.py"
+        path.write_text("def test_x():\n    assert True\n")
+        path.chmod(0o000)
+        try:
+            tree, error = ct._parse(path)
+            assert tree is None
+            assert error is not None
+            assert "test_unreadable.py" in error
+        finally:
+            path.chmod(0o644)
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
+    def test_main_fails_rather_than_crashing_on_an_unreadable_file(self, ct, tmp_path, monkeypatch):
+        path = tmp_path / "test_unreadable.py"
+        path.write_text("def test_x():\n    assert True\n")
+        path.chmod(0o000)
+        monkeypatch.setattr(ct, "ROOT", tmp_path)
+        monkeypatch.setattr(ct, "TESTS", tmp_path)
+        try:
+            assert ct.main() == 1
+        finally:
+            path.chmod(0o644)
 
 
 class TestSelfCheck:
