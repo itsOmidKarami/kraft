@@ -381,6 +381,13 @@ def client(request, tmp_path, monkeypatch, templates_dir):
     # `templates_dir` before the lifespan reads it.
     if edit_templates := options.pop("edit_templates", None):
         edit_templates(templates_dir)
+    # A test that also lists `dist` needs KRAFT_FRONTEND_DIST set before this
+    # fixture's lifespan starts. Pulling it here — rather than relying on
+    # pytest's argument-order setup — means listing `dist` after `client` in a
+    # test's signature still works instead of silently building a client with
+    # no SPA shell.
+    if "dist" in request.fixturenames:
+        request.getfixturevalue("dist")
     with api_support._client(
         tmp_path, monkeypatch, templates_dir=templates_dir, **options
     ) as test_client:

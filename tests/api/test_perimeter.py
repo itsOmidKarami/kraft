@@ -196,14 +196,21 @@ def test_a_rebound_host_is_refused_for_a_browser_request(client):
     assert client.get("/api/work-items", headers=nav).status_code == 403
 
 
-def test_the_perimeter_runs_before_the_spa_shell_middleware(dist, client):
+def test_the_perimeter_runs_before_the_spa_shell_middleware(client, dist):
     """Starlette enters the last-added middleware first, so `_perimeter` has to be
     declared *below* `_authenticate` and `_spa_navigation`. Declared above, this
     rebound navigation gets the SPA shell instead of a 403.
 
     A client-side route, not an /api/ one: that prefix is excluded from the
     shell-diversion branches entirely now, so it would pass even with the
-    middleware in the wrong order and prove nothing about ordering."""
+    middleware in the wrong order and prove nothing about ordering.
+
+    `client` is listed before `dist` deliberately, the reverse of every other
+    test here: `client` now pulls `dist` itself before its lifespan starts
+    (tests/conftest.py), so declaration order no longer decides whether this
+    test exercises anything. Do not use this as a template — list `dist`
+    before `client` as usual; this ordering only proves the fixture no longer
+    depends on it."""
     r = client.get(
         "/work-items",
         headers={
