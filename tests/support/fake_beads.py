@@ -8,14 +8,21 @@ implementation of bd's CLI to keep in step. What bd's CLI actually does is
 pinned by the `e2e` tests that opt out of this fake and run the real binary.
 
 It remembers enough for callers to work: unique ids, intake/complete per
-workspace (`cwd`), and `search`/`ready`/`blocked_by` answered from that state.
+workspace, and `search`/`ready`/`blocked_by` answered from that state.
 `block()` adds an edge for a unit test that wants a blocked bead.
+
+A workspace is found the way bd finds one: the nearest `.beads/` at or above
+`cwd`. Where there is none, `intake` fails the way `bd create` does, and the
+readers answer `[]` the way the adapter does when bd exits non-zero -- so a
+unit test cannot pass on a bead bd would never have filed.
+`tests/test_support_harness.py` runs one scenario against this and real bd.
 """
 
 from __future__ import annotations
 
 import itertools
 import os
+from pathlib import Path
 
 
 class FakeBeads:
@@ -24,8 +31,15 @@ class FakeBeads:
         #: workspace (realpath of cwd) -> bead id -> bead
         self.workspaces: dict[str, dict[str, dict]] = {}
 
+    @staticmethod
+    def _root(cwd: str | None) -> str | None:
+        """The directory holding the nearest `.beads/` at or above `cwd`."""
+        here = Path(os.path.realpath(cwd or os.getcwd()))
+        return next((str(d) for d in (here, *here.parents) if (d / ".beads").is_dir()), None)
+
     def _ws(self, cwd: str | None) -> dict[str, dict]:
-        return self.workspaces.setdefault(os.path.realpath(cwd or os.getcwd()), {})
+        root = self._root(cwd)
+        return self.workspaces.setdefault(root, {}) if root else {}
 
     def all(self) -> dict[str, dict]:
         """Every bead, whichever workspace it was filed in."""
@@ -34,6 +48,9 @@ class FakeBeads:
     async def intake(
         self, title: str, *, description: str | None = None, cwd: str | None = None
     ) -> str:
+        if self._root(cwd) is None:
+            # What the adapter raises for bd's own refusal (Kraft-ibwj).
+            raise RuntimeError("bd create failed (exit 1): Error: no beads database found")
         bead_id = f"TEST-fake{next(self._ids)}"
         self._ws(cwd)[bead_id] = {
             "id": bead_id,

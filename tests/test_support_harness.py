@@ -39,7 +39,8 @@ def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
 def test_the_beads_fake_and_real_bd_agree(backend, fake_beads, tmp_path):
     """One scenario, run against the autouse fake (tests/support/fake_beads.py)
     and against real bd: filing, blocking, closing, `ready`, `blocked_by` and
-    `search` must answer the same from both, per workspace. The `bd` case is
+    `search` must answer the same from both, per workspace, and both must
+    refuse to file a bead where there is no workspace. The `bd` case is
     what keeps the fake from drifting from bd -- if bd's answers change, this
     test fails there, next to the fake it has to change with."""
     from kraft.adapters import beads
@@ -75,5 +76,13 @@ def test_the_beads_fake_and_real_bd_agree(backend, fake_beads, tmp_path):
         assert [(h["id"], h["status"]) for h in await beads.search("blocker", cwd=ws)] == [
             (a, "closed")
         ]
+        # No `.beads/` at or above cwd: bd refuses to file, and the readers
+        # answer nothing rather than raise.
+        nowhere = tmp_path / "nowhere"
+        nowhere.mkdir()
+        with pytest.raises(RuntimeError, match="no beads database found"):
+            await beads.intake("filed nowhere", cwd=str(nowhere))
+        assert await beads.ready(cwd=str(nowhere)) == []
+        assert await beads.search("blocker", cwd=str(nowhere)) == []
 
     asyncio.run(scenario())
