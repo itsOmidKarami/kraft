@@ -963,6 +963,56 @@ def test_resume_after_escalation_drops_a_self_retry_on_a_moved_item(tmp_path):
     assert "work_item_retried" not in types
 
 
+def test_resume_after_escalation_does_not_stop_an_item_a_walk_already_owns(tmp_path):
+    """The same drop, with the one status that makes the bracket dangerous.
+
+    A claim out of `needs_human` fails whatever the status moved to, and one
+    thing it can have moved to is `active` -- a human resumed the item during the
+    escalation turn. This site awaits its walk inline, so it has no
+    `task_is_live` callback, and `stops.claimed_or_stopped` would therefore see
+    `active` on the way out of the drop and stamp `needs_human` over an item
+    somebody else's walk owns: the exact opposite of what
+    `work_item_self_retry_dropped` means. The bracket covers only the claim this
+    call made, which is what `handed_off=lambda: not claimed` says.
+    """
+    from kraft.paths import RunDirs
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await db.Database.open(rd.db)
+        try:
+            wid = "w1"
+            await _seed_stuck(database, wid, reason="git rebase failed")
+            cursor = database.read(lambda c: events.read_after(c, 0, wid))[-1]["seq"]
+            await database.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "work_item_self_retry_requested",
+                    {"node_id": "implementation", "key": None, "gate_key": None, "steer": None},
+                )
+            )
+            await database.write(
+                lambda c: c.execute("UPDATE work_items SET status = 'active' WHERE id = ?", (wid,))
+            )
+            status = await gates_module.resume_after_escalation(
+                database, rd, work_item_id=wid, cursor=cursor, registry=None
+            )
+            row = database.read(
+                lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+            )
+            evs = database.read(lambda c: events.read_after(c, 0, wid))
+            return status, row["status"], [e["type"] for e in evs]
+        finally:
+            await database.close()
+
+    status, final, types = asyncio.run(scenario())
+    assert status == "active"
+    assert final == "active", "the bracket stopped an item this call never claimed"
+    assert types.count("work_item_self_retry_dropped") == 1
+    assert "work_item_retried" not in types
+
+
 def _evt(t, **payload):
     return {"type": t, "payload": payload, "created_at": "2026-09-12T00:00:00+00:00"}
 

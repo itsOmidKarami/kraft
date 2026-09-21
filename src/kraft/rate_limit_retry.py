@@ -91,9 +91,11 @@ async def _retry_one(app, row) -> bool:
     # `status = 'rate_limited'`, so an exit from here that neither spawns a walk nor
     # moves the status again leaves the item claimed and unowned, and *no later tick
     # will ever select it again*. The failed-claim `return False` is inside it
-    # deliberately: harmless (the status is not `active`, so the bracket does
-    # nothing) and one less row for `dev/check_claim_handoff.py` to make a human
-    # adjudicate.
+    # deliberately, and is nearly inert rather than inert: the claim failed because
+    # the status left `rate_limited`, and if what it left for was `active` with no
+    # walk behind it, the bracket writes `needs_human` on the way out. Right answer
+    # for an orphan, and not nothing -- `handed_off` covers the case where a walk
+    # really does own it.
     async with stops.claimed_or_stopped(
         st.db,
         wid,

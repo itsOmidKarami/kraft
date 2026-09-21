@@ -590,10 +590,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # status a selector re-picks would leave it claimed and unowned.
     # `stops.claimed_or_stopped` performs that stop once, for every exit --
     # including the ones no static sweep can enumerate, and including the
-    # failed-claim 409s below, which are harmless inside it (the status is not
-    # `active`, so the bracket does nothing) and which
-    # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
-    # hand.
+    # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+    # either because no slot was free -- and then the status is still one
+    # `from_statuses` names, which the bracket ignores -- or because the status is
+    # not one it claims from, and that one *can* be `active`, for an item a restart
+    # left claimed with no walk behind it. In that case the bracket writes
+    # `needs_human` on the way out of the 409, which is the right answer for an
+    # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+    # is a refusal path that now moves the status. The comment this replaces said it
+    # could not.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -884,10 +889,15 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     # status a selector re-picks would leave it claimed and unowned.
     # `stops.claimed_or_stopped` performs that stop once, for every exit --
     # including the ones no static sweep can enumerate, and including the
-    # failed-claim 409s below, which are harmless inside it (the status is not
-    # `active`, so the bracket does nothing) and which
-    # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
-    # hand.
+    # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+    # either because no slot was free -- and then the status is still one
+    # `from_statuses` names, which the bracket ignores -- or because the status is
+    # not one it claims from, and that one *can* be `active`, for an item a restart
+    # left claimed with no walk behind it. In that case the bracket writes
+    # `needs_human` on the way out of the 409, which is the right answer for an
+    # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+    # is a refusal path that now moves the status. The comment this replaces said it
+    # could not.
     async with stops.claimed_or_stopped(
         st.db,
         wid,
@@ -1094,10 +1104,15 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         # status a selector re-picks would leave it claimed and unowned.
         # `stops.claimed_or_stopped` performs that stop once, for every exit --
         # including the ones no static sweep can enumerate, and including the
-        # failed-claim 409s below, which are harmless inside it (the status is not
-        # `active`, so the bracket does nothing) and which
-        # `dev/check_claim_handoff.py` would otherwise have had to adjudicate by
-        # hand.
+        # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+        # either because no slot was free -- and then the status is still one
+        # `from_statuses` names, which the bracket ignores -- or because the status is
+        # not one it claims from, and that one *can* be `active`, for an item a restart
+        # left claimed with no walk behind it. In that case the bracket writes
+        # `needs_human` on the way out of the 409, which is the right answer for an
+        # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+        # is a refusal path that now moves the status. The comment this replaces said it
+        # could not.
         async with stops.claimed_or_stopped(
             st.db,
             wid,

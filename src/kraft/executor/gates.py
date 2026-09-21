@@ -924,20 +924,28 @@ async def resume_after_escalation(
     # A failed claim means a human abandoned, paused or otherwise moved the
     # item during the minutes the escalation turn ran: the deferred request
     # is dropped rather than resurrecting a stop it is no longer on.
-    # Bracketed from *before* the claim to the hand-off. No `handed_off`
-    # callback -- this site awaits its walk inline rather than registering a
-    # task, so by the time the bracket's `finally` runs a successful walk has
-    # already set its own terminal status and the bracket's `active` test is
-    # false. `walk.chain_of` raises `LookupError` on a legacy row and
+    # Bracketed from *before* the claim to the hand-off. There is no
+    # `task_is_live` callback -- this site awaits its walk inline rather than
+    # registering a task, so by the time the bracket's `finally` runs a successful
+    # walk has already set its own terminal status and the bracket's `active` test
+    # is false. `walk.chain_of` raises `LookupError` on a legacy row and
     # `store.node_index` answers `None` for a node this chain does not have;
-    # both used to leave the item claimed. The dropped-self-retry return is
-    # inside it deliberately: the claim failed there, so the status is not
-    # `active` and the bracket does nothing.
+    # both used to leave the item claimed.
+    #
+    # `handed_off=lambda: not claimed` is what keeps the dropped-self-retry return
+    # inside the bracket honest. A claim out of `needs_human` fails when the status
+    # has moved, and one thing it can have moved to is `active` -- a human resumed
+    # the item during the minutes the escalation turn ran. Without this callback the
+    # bracket would stamp `needs_human` over an item a walk owns, which is the exact
+    # opposite of what `work_item_self_retry_dropped` means. The bracket covers only
+    # the claim *this* call made; whoever else set the status owns it.
+    claimed = False
     async with stops.claimed_or_stopped(
         db,
         work_item_id,
         node_id,
         reason="the escalation retry claimed this item but could not start a walk",
+        handed_off=lambda: not claimed,
     ):
         claimed = await db.write(
             lambda c: store.claim_for_run(c, work_item_id, from_statuses=["needs_human"])
