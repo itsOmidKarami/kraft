@@ -21,7 +21,12 @@ from fastapi import FastAPI, HTTPException
 
 from kraft import config as config_mod
 from kraft import executor, harness, store
-from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
+from kraft.policy import (
+    InstancePolicy,
+    InstancePolicyInput,
+    PolicyError,
+    TemplatePolicyOverride,
+)
 from kraft.templates import load_registry, load_templates
 from kraft.templates.environment import (
     RootPointerPolicy,
@@ -343,24 +348,23 @@ def workspace_target(
         raise HTTPException(422, str(exc)) from exc
 
 
-def item_policy(st, repo: str) -> InstancePolicy:
-    """The policy a work item filed in `repo` starts from: the instance policy
-    with that repository's layer on top (`config.repository_override`), which
-    may only tighten it (`repository-policy-cannot-relax-instance-safety`).
-    Every intake door materializes from this, so the layer is frozen into every
-    item filed in the repository.
-
-    Unlike `launch`, this raises: a `repos.yaml` that cannot be read has
-    restrictions nobody can see, and filing an item without them is exactly
-    the relaxation the layer exists to prevent. A `PolicyError`, so each door
-    answers it the way it answers a chain policy past a ceiling."""
-    base = getattr(st, "instance_policy", None) or InstancePolicy.from_input(InstancePolicyInput())
+def _repository_layers(st, repo: str, target: WorkItemTarget | None) -> list[tuple[str, dict]]:
+    """`(repository id, entry)` for every repository whose layer binds an item
+    filed in `repo`: its own entry, or for a workspace target the root's and
+    each selected member's. Raises `PolicyError` on an unreadable file."""
     try:
         repos = config_mod.load_repos(repos_path(st), validate_steering=False)
     except config_mod.ConfigError as exc:
         raise PolicyError(f"cannot read the repository policy layer: {exc}") from exc
-    entry = _connected(repos, repo)
-    override = config_mod.repository_override(entry) if entry is not None else None
+    if target is None or target.kind != "workspace":
+        entry = _connected(repos, repo)
+        return [(entry.get("id") or "", entry)] if entry is not None else []
+    by_id = {r["id"]: r for r in repos if r.get("id")}
+    return [(rid, by_id[rid]) for rid in target.repositories() if rid in by_id]
+
+
+def _layered(base: InstancePolicy, entry: dict) -> InstancePolicy:
+    override = config_mod.repository_override(entry)
     if override is None:
         return base
     try:
@@ -369,9 +373,60 @@ def item_policy(st, repo: str) -> InstancePolicy:
         raise PolicyError(f"repos.yaml: {entry['path']}: {exc}", field=exc.field) from exc
 
 
-def item_policy_or_422(st, repo: str) -> InstancePolicy:
+def _instance(st) -> InstancePolicy:
+    return getattr(st, "instance_policy", None) or InstancePolicy.from_input(InstancePolicyInput())
+
+
+def item_policy(st, repo: str, target: WorkItemTarget | None = None) -> InstancePolicy:
+    """The policy a work item filed in `repo` starts from: the instance policy
+    with that repository's layer on top (`config.repository_override`), which
+    may only tighten it (`repository-policy-cannot-relax-instance-safety`).
+    Every intake door materializes from this, so the layer is frozen into every
+    item filed in the repository.
+
+    A workspace `target` runs its ordinary tasks in an assembled checkout that
+    holds every selected repository at once, so its layer is the meet of all
+    of theirs -- each checked on its own first, so a refusal names the
+    repository (Kraft-jc39p; `repository_policies` has each one alone).
+
+    Unlike `launch`, this raises: a `repos.yaml` that cannot be read has
+    restrictions nobody can see, and filing an item without them is exactly
+    the relaxation the layer exists to prevent. A `PolicyError`, so each door
+    answers it the way it answers a chain policy past a ceiling."""
+    base = _instance(st)
+    layers = _repository_layers(st, repo, target)
+    for _rid, entry in layers:
+        _layered(base, entry)
+    overrides = [o for _rid, e in layers if (o := config_mod.repository_override(e)) is not None]
+    if not overrides:
+        return base
+    return base.apply_template_override(TemplatePolicyOverride.meet(overrides))
+
+
+def repository_policies(st, target: WorkItemTarget | None) -> dict[str, InstancePolicy]:
+    """A workspace item's starting policy per selected repository id -- the
+    instance policy with that repository's own layer -- which a task fanned
+    out to it runs under (Kraft-jc39p). Empty for a single-repository item,
+    whose one repository's layer is already `item_policy`'s."""
+    if target is None or target.kind != "workspace":
+        return {}
+    base = _instance(st)
+    by_id = dict(_repository_layers(st, "", target))
+    return {
+        rid: _layered(base, by_id[rid]) if rid in by_id else base for rid in target.repositories()
+    }
+
+
+def item_policy_or_422(st, repo: str, target: WorkItemTarget | None = None) -> InstancePolicy:
     try:
-        return item_policy(st, repo)
+        return item_policy(st, repo, target)
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def repository_policies_or_422(st, target: WorkItemTarget | None) -> dict[str, InstancePolicy]:
+    try:
+        return repository_policies(st, target)
     except PolicyError as exc:
         raise HTTPException(422, str(exc)) from exc
 

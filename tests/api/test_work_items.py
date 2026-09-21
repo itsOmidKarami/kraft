@@ -505,6 +505,7 @@ def test_a_workspace_intake_freezes_its_selected_members_and_pointer_policy(
         "kind": "workspace",
         "repository": None,
         "workspace": "ws",
+        "root": "ws",
         "members": ["a"],
         "mounts": {"a": {"repository": "a", "path": "libs/a"}},
         "include_root": True,

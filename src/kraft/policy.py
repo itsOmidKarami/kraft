@@ -563,6 +563,43 @@ class TemplatePolicyOverride(TaskPolicyOverride):
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
 
+    @classmethod
+    def meet(cls, overrides: Iterable[TaskPolicyOverride]) -> TemplatePolicyOverride:
+        """The one layer as tight as every one of `overrides` at once, field
+        by field: allowlists intersect, deny lists union, numbers take their
+        minimum. What binds a task in a workspace's assembled checkout, which
+        holds every selected repository at once (Kraft-jc39p). Two different
+        sandboxes have no meet -- no process runs in both -- so that refuses."""
+        overrides = list(overrides)
+
+        def present(name: str) -> list:
+            return [v for o in overrides if (v := getattr(o, name, None)) is not None]
+
+        def common(name: str) -> list[str] | None:
+            lists = present(name)
+            return (
+                [t for t in lists[0] if all(t in other for other in lists[1:])] if lists else None
+            )
+
+        sandboxes = list(dict.fromkeys(present("sandbox")))
+        if len(sandboxes) > 1:
+            raise PolicyError(
+                f"'sandbox': the repositories set different sandboxes "
+                f"{[s.model_dump() for s in sandboxes]}, and a task cannot run in all of them",
+                field="sandbox",
+            )
+        deny = [t for tools in present("deny_tools") for t in tools]
+        return cls(
+            allowed_tools=common("allowed_tools"),
+            allowed_harnesses=common("allowed_harnesses"),
+            deny_tools=list(dict.fromkeys(deny)) or None,
+            sandbox=sandboxes[0] if sandboxes else None,
+            **{
+                n: min(values) if (values := present(n)) else None
+                for n in ("token_budget", "timeout_minutes", "max_attempts")
+            },
+        )
+
 
 @dataclass(frozen=True)
 class InstancePolicy:

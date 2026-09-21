@@ -563,3 +563,26 @@ def test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling(tmp
 
     assert [i.chain for i in issues] == ["narrow"]
     assert issues[0].message.startswith("n.main.t: 'allowed_tools'"), issues[0].message
+
+
+def test_a_task_fanned_out_to_a_repository_runs_under_that_repositorys_policy():
+    """Kraft-jc39p: each selected repository's own policy is frozen with the
+    snapshot, the chain's layer and the task's scopes applied over it exactly
+    as over the assembled checkout's."""
+    resolved = TemplateLibrary.from_yaml_dir(SEEDED).resolve_chain("default")
+    assembled = policy().apply_template_override({"deny_tools": ["WebFetch"]})
+    member = policy().apply_template_override({"deny_tools": ["Bash"]})
+
+    materialized = MaterializedChain.from_json(
+        resolved.materialize(
+            target=workspace_target(),
+            effective_policy=assembled,
+            repository_policies={"api": member},
+        ).to_json()
+    )
+    task = next(iter(materialized.chain.nodes[0].tasks()))
+
+    assert materialized.policy_for(task).deny_tools == ("WebFetch",)
+    assert materialized.policy_for(task, repository="api").deny_tools == ("Bash",)
+    with pytest.raises(LookupError, match="nope"):
+        materialized.policy_for(task, repository="nope")

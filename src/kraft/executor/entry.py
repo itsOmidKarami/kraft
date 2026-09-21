@@ -60,6 +60,10 @@ async def intake(
     #: The item's immutable target (`deps.workspace_target` for a workspace
     #: item); None is a single-repository target on `repo`.
     target: WorkItemTarget | None = None,
+    #: A workspace item's policy per selected repository id
+    #: (`deps.repository_policies`); `effective_policy` is then the assembled
+    #: checkout's.
+    repository_policies: dict[str, InstancePolicy] | None = None,
     attachments: list[dict] | None = None,
     status: str = "active",
     #: When given, `status="active"` is downgraded to `"paused"` if
@@ -126,6 +130,7 @@ async def intake(
         # caller that can make them disagree.
         attachment_kinds=frozenset(a["kind"] for a in attachments or []),
         skip_nodes=skip_nodes,
+        repository_policies=repository_policies,
     )
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused

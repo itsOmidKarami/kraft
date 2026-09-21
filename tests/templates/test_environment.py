@@ -104,6 +104,8 @@ def test_workspace_target_captures_selected_members(workspace):
     # and-immutable`): a later edit to the workspace moves nothing under a
     # running item.
     assert target.mounts == {"api": te.WorkspaceMember(repository="api", path="services/api")}
+    # Every repository whose policy binds the item, root first (Kraft-jc39p).
+    assert target.repositories() == ("product_root", "api")
 
 
 def test_a_workspace_target_mounts_exactly_its_selected_members():
@@ -119,6 +121,8 @@ def test_a_workspace_target_mounts_exactly_its_selected_members():
         te.WorkItemTarget(kind="workspace", workspace="product", members=(), mounts=mount)
     with pytest.raises(ValidationError, match="no workspace or members"):
         te.WorkItemTarget(kind="repository", repository="api", mounts=mount)
+    with pytest.raises(ValidationError, match="no workspace or members"):
+        te.WorkItemTarget(kind="repository", repository="api", root="api")
 
 
 def test_workspace_target_rejects_an_unmounted_member(workspace):

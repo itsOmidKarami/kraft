@@ -211,11 +211,13 @@ async def create_work_item(body: NewWorkItem, request: Request):
         members=body.members,
         root_pointer_policy=body.root_pointer_policy,
     )
-    policy = deps.item_policy_or_422(st, body.repo)
+    policy = deps.item_policy_or_422(st, body.repo, target)
+    per_repository = deps.repository_policies_or_422(st, target)
     try:
         chain.materialize(
             target=target or entry.single_repo_target(body.repo),
             effective_policy=policy,
+            repository_policies=per_repository,
             attachment_kinds=attachment_kinds,
             skip_nodes=frozenset(body.skip_nodes),
         )
@@ -244,6 +246,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
             target=target,
+            repository_policies=per_repository,
             attachments=attachments,
             status="active" if body.autostart else "paused",
             # Folded into intake's own INSERT transaction, not a separate
@@ -511,7 +514,12 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     # chain's own override, and layering the new chain's on
                     # top of it stacks the two (Kraft-yaq99). Filing on the
                     # new chain would start here.
-                    effective_policy=deps.item_policy(st, row["repo"]),
+                    effective_policy=deps.item_policy(
+                        st, row["repo"], previous.target if previous is not None else None
+                    ),
+                    repository_policies=deps.repository_policies(
+                        st, previous.target if previous is not None else None
+                    ),
                     attachment_kinds=frozenset(
                         a.get("kind") for a in json.loads(row["attachments"] or "[]")
                     )

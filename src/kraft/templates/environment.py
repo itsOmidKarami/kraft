@@ -209,6 +209,9 @@ class WorkItemTarget(BaseModel):
     kind: Literal["repository", "workspace"]
     repository: Identifier | None = None
     workspace: Identifier | None = None
+    #: A workspace target's root repository id: with each mount's repository,
+    #: the repositories whose policy binds the item (Kraft-jc39p).
+    root: Identifier | None = None
     #: `strict=False` here only: pydantic's strict mode never coerces a plain
     #: (decoded-JSON) list into a tuple, so a frozen target rehydrated as a
     #: dict -- the path `model_validate_json` skips but `json.loads()` then
@@ -235,7 +238,7 @@ class WorkItemTarget(BaseModel):
         if self.kind == "repository":
             if self.repository is None:
                 raise ValueError("a repository target must name a repository")
-            if self.workspace is not None or self.members or self.mounts:
+            if self.workspace is not None or self.members or self.mounts or self.root:
                 raise ValueError("a repository target has no workspace or members")
             if self.include_root:
                 raise ValueError("a repository target has no root to include")
@@ -250,6 +253,12 @@ class WorkItemTarget(BaseModel):
                     f"{sorted(self.members)}, mounted {sorted(self.mounts)}"
                 )
         return self
+
+    def repositories(self) -> tuple[str, ...]:
+        """Every repository id a workspace target selects, root first: the
+        root (whose checkout the item assembles in) and each member's."""
+        members = tuple(m.repository for m in self.mounts.values())
+        return ((self.root,) if self.root else ()) + members
 
     @classmethod
     def for_repository(cls, repository: Repository) -> WorkItemTarget:
@@ -275,6 +284,7 @@ class WorkItemTarget(BaseModel):
         return cls(
             kind="workspace",
             workspace=workspace.id,
+            root=workspace.root,
             members=tuple(members),
             mounts={m: workspace.members[m] for m in members},
             include_root=include_root,
