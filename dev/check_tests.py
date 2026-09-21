@@ -78,7 +78,7 @@ LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/adapters/test_agent.py": 856,
     "tests/executor/test_gates.py": 903,
     "tests/executor/test_dispatch.py": 930,
-    "tests/executor/test_walk.py": 1335,
+    "tests/executor/test_walk.py": 1287,
     "tests/templates/test_legacy.py": 2412,
 }
 

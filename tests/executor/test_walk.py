@@ -20,7 +20,7 @@ from kraft.adapters import forge as _forge
 from kraft.api import deps
 from kraft.config import ConfigError
 from kraft.executor import dispatch, walk
-from kraft.executor.context import BASE_MOVED, Steer
+from kraft.executor.context import Steer
 
 #: A repo that deliberately needs no preparation. Most tests here are about
 #: chain walking, not environments.
@@ -799,34 +799,6 @@ async def test_on_failure_repair_still_fires_on_a_resumed_entry(item_on, monkeyp
     assert repaired == [walk._REPAIR_ROUND], "on_failure repair did not run on the resumed entry"
 
 
-async def test_walk_node_completes_on_a_moved_base(item_on, tmp_path, monkeypatch):
-    """`BASE_MOVED` is not a failure: the node stopped on purpose and completes
-    like a clean pass. The restart span a base change re-enters is Task 7's
-    (`base-change-restarts-a-declared-chain-span`); the legacy bounce this used
-    to hand off to is gone."""
-
-    async def fake_measure(*a, **kw):
-        return BASE_MOVED, [], []
-
-    monkeypatch.setattr(dispatch, "measure_node", fake_measure)
-    it = await item_on(
-        [
-            {
-                "id": "open_mr",
-                "kind": "exec",
-                "steps": [
-                    {"id": "sync", "tasks": [_forge_task("sync", "mr.sync")]},
-                    {"id": "open", "tasks": [_forge_task("open", "mr.open_draft")]},
-                ],
-            }
-        ],
-        repo="/r",
-    )
-
-    node = it.chain.chain.nodes[0]
-    assert await walk.walk_node(it.database, it.run_dirs, it.id, node, it.row(), tmp_path) == "ok"
-
-
 @pytest.fixture
 def dispatched(monkeypatch):
     """Every task id `dispatch_node` is asked to run, in order; the real
@@ -879,29 +851,6 @@ async def test_a_fix_loop_attempt_remeasures_the_node_from_its_first_step(
 
     assert await _walk(it, policy=_loop_policy(tmp_path)) == "completed"
     assert dispatched.calls == ["prep", "test", "fix", "prep", "test"]
-
-
-async def test_a_fix_loop_node_stops_at_a_moved_base_without_spending_a_cycle(
-    item_on, tmp_path, dispatched
-):
-    dispatched.answer = lambda task_id: BASE_MOVED if task_id == "sync" else "done"
-    it = await item_on(
-        [
-            {
-                "id": "verify",
-                "kind": "exec",
-                "steps": [
-                    {"id": "sync", "tasks": [_forge_task("sync", "mr.sync")]},
-                    {"id": "check", "tasks": [_sub("test", ["true"])]},
-                ],
-                "fix_loop": {"tasks": [_sub("fix", ["true"])]},
-            }
-        ]
-    )
-
-    assert await _walk(it, policy=_loop_policy(tmp_path)) == "completed"
-    assert dispatched.calls == ["sync"]
-    assert _counter(it, "verify.fix_loop") is None
 
 
 async def test_fix_cycle_dispatch_gets_the_same_launch_context(

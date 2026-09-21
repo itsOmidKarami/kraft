@@ -6,6 +6,7 @@ attempt; and a rebase conflict is resolved only by the node's explicit
 import shlex
 import subprocess
 
+import pytest
 from support.harness import _git
 
 from kraft import executor, store
@@ -104,13 +105,18 @@ async def test_a_moved_base_restarts_the_declared_span_and_spends_no_attempt(ite
     assert "rebased onto a newer" in undelivered["payload"]["steer"]
 
 
-async def test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart(item_on, script):
-    it = await item_on(_chain(**RESTART))
+@pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
+async def test_a_base_moved_stop_skips_the_nodes_later_steps_until_the_restart(
+    item_on, script, fix_loop
+):
+    loop = {"fix_loop": {"tasks": [_sub("rebase_fix")]}} if fix_loop else {}
+    it = await item_on(_chain(**RESTART, **loop))
     script.plan = {"sync": [BASE_MOVED, "done"]}
     script.effects = {"sync": _moves_base(it)}
 
     assert await _walk(it) == "completed"
     assert script.calls == ["check", "sync", "check", "sync", "open", "publish"]
+    assert not it.events("fix_cycle_started")
     # Restarted, not completed: `rebase` only completes on the pass that ran
     # its later step.
     order = [
@@ -133,6 +139,22 @@ async def test_no_movement_and_no_declaration_mean_no_restart(item_on, script):
     assert await _walk(undeclared) == "completed"
     assert _starts(undeclared) == ["verify", "rebase", "publish"]
     assert not undeclared.events("base_change_restart")
+
+
+@pytest.mark.parametrize("fix_loop", [False, True], ids=["loopless", "fix-loop"])
+async def test_a_base_moved_stop_on_an_undeclared_node_completes_it_and_spends_nothing(
+    item_on, script, fix_loop
+):
+    """Only a node declaring `on_base_changed` restarts; any other completes
+    where it stopped, as a clean pass -- never a failure for a fix cycle."""
+    loop = {"fix_loop": {"tasks": [_sub("rebase_fix")]}} if fix_loop else {}
+    it = await item_on(_chain(**loop))
+    script.plan = {"sync": [BASE_MOVED]}
+
+    assert await _walk(it) == "completed"
+    assert script.calls == ["check", "sync", "publish"]
+    assert not it.events("fix_cycle_started")
+    assert it.database.read(lambda c: store.read_counter(c, it.id, "rebase.fix_loop")) is None
 
 
 async def test_restarts_are_bounded_by_the_nodes_own_counter(item_on, script):

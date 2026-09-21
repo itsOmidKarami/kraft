@@ -168,3 +168,12 @@ def test_library_components_extend_inside_step_task_and_conflict_handlers(tmp_pa
     node = TemplateLibrary.from_yaml_dir(tmp_path).resolve_chain("default").nodes[0]
     handlers = [node.steps[0].tasks[0].on_failure, node.steps[0].on_failure, node.on_conflict]
     assert [h[0].tasks[0].task.command for h in handlers] == ["make fix"] * 3
+
+
+def test_a_fix_loop_is_an_execution_node_control_naming_its_fixing_tasks():
+    """`fix-loop-is-an-exec-node-control`: a gate cannot carry one, and a
+    fix loop with only a judge names no fixing task."""
+    with pytest.raises(ValidationError, match="fix_loop"):
+        tm.GateNode.model_validate({"id": "g", "kind": "gate", "fix_loop": plan(sub("fix"))})
+    with pytest.raises(ValidationError, match="exactly one of 'tasks' or 'steps'"):
+        tm.FixLoop.model_validate({"judge": sub("judge")})
