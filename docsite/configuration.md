@@ -187,7 +187,7 @@ repos:
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `managed` | `true` | Keeps a human-connected repo out of Settings' "Detected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
-| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
+| `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
 | `default_model` | `null` | Overrides the agent model for every hook on this repo, where set. |
 | `test_command` | `null` (falls back to the registry's `on.test.run`) | The command CI actually runs for this repo — lets `verify`'s local test run and CI's differ deliberately, rather than drift apart by accident. |

@@ -103,6 +103,24 @@ def test_auto_resolves_to_gh_for_a_github_repo():
     assert forge.backend_for("auto", "github") == "gh"
 
 
+def test_auto_resolves_to_the_fake_forge_for_a_dev_repo():
+    """Ruling 147: `forge: fake` is the dev-only repo value `just dev` uses to
+    reach the merge-request half of a chain without a real forge."""
+    assert forge.backend_for("auto", "fake") == "fake"
+    assert isinstance(forge.resolve(forge.backend_for("auto", "fake")), forge.FakeForge)
+
+
+def test_a_repo_with_no_forge_is_told_the_remedy_v1_actually_reads():
+    """V1 dispatch always passes `backend: auto`, so a registry `backend:` pin
+    is never read -- naming it sends an operator to a file that changes
+    nothing. The remedy is the repo's own `forge`, and `fake` is for dev."""
+    with pytest.raises(forge.ForgeError) as err:
+        forge.backend_for("auto", None)
+    message = str(err.value)
+    assert "registry.yaml" not in message
+    assert "`forge: fake`" in message and "dev" in message
+
+
 def test_an_explicit_backend_ignores_the_repo_forge():
     """A registry that pins a backend wins over the repo entry — that is the
     escape hatch for a self-hosted host `config._FORGES` cannot recognise."""

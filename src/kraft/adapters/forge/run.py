@@ -92,7 +92,10 @@ def resolve(name: str) -> Forge:
 #: repos.yaml's `forge` (config._FORGES) -> the CLI that talks to it. Two
 #: vocabularies on purpose: `forge` is a fact about the remote, the backend is
 #: a fact about this machine, and a self-hosted GitLab is `gitlab` with `glab`.
-_FORGE_CLI = {"gitlab": "glab", "github": "gh"}
+#: `fake` is dev-only (Ruling 147): the in-process `FakeForge`, so `just dev`
+#: reaches the merge-request half of a chain. It opens nothing anywhere, and
+#: each call gets a fresh instance -- no MR survives from one node to the next.
+_FORGE_CLI = {"gitlab": "glab", "github": "gh", "fake": "fake"}
 
 
 def backend_for(backend: str, repo_forge: str | None) -> str:
@@ -110,7 +113,8 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
         raise ForgeError(
             "backend: auto, but no forge is recorded for this repo — set "
             "`forge: gitlab` or `forge: github` on it in Settings → Repos "
-            "(or repos.yaml), or pin a `backend:` in registry.yaml"
+            "(or repos.yaml); `forge: fake` is a dev-only in-process forge "
+            "that opens nothing"
         )
     return cli
 

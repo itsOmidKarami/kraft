@@ -91,21 +91,11 @@ def test_walk_stops_at_first_gate(tmp_path):
     asyncio.run(scenario())
 
 
-def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_node(
-    tmp_path, monkeypatch
-):
-    """Was `test_approving_all_four_gates_completes_chain`. The V1 `default`
-    chain cannot complete yet, and this pins exactly where it stops rather than
-    pretending otherwise: its `merge_request_feedback` node waits on
-    `mr.automated_review`, which has no handler until Task 9 and stops for a
-    human (`forge.run._UNIMPLEMENTED_TARGETS`). Everything before it -- both
-    planning gates, implementation, `local_review`, the draft merge request and
-    its CI -- walks for real."""
+def _walk_default_chain_approving_every_gate(tmp_path, launch):
+    """Walk the shipped `default` chain, approving each gate as it opens, to
+    wherever it first stops. Returns what a test asserts on."""
     tracker = isolated_bd(tmp_path)
     repo = make_repo(tmp_path)
-    fake = _forge.FakeForge(ci_states=["success"])
-    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
-    launch = _launch(tmp_path, setup_command="", forge="github")
     chain = _default_template(tmp_path)
 
     async def scenario():
@@ -146,24 +136,60 @@ def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_
                     policy=pol,
                     launch=launch,
                 )
-            assert result == "needs_human"
             row = database.read(
                 lambda c: c.execute(
                     "SELECT status, current_node_id, bead_id FROM work_items WHERE id=?", (wid,)
                 ).fetchone()
             )
-            assert row["current_node_id"] == "merge_request_feedback"
-            assert _bd_status(tracker, row["bead_id"]) != "closed"
-            reason = _payloads(database, wid, "work_item_needs_human")[-1]["reason"]
-            assert "await_review" in reason
-            types = _events(database, wid)
-            assert types.count("gate_requested") == 3
-            assert types.count("gate_approved") == 3
-            assert fake.opened, "the draft merge request was never opened"
+            return {
+                "result": result,
+                "node": row["current_node_id"],
+                "bead_status": _bd_status(tracker, row["bead_id"]),
+                "reason": _payloads(database, wid, "work_item_needs_human")[-1]["reason"],
+                "types": _events(database, wid),
+                "completed": [p["node_id"] for p in _payloads(database, wid, "node_completed")],
+            }
         finally:
             await database.close()
 
-    asyncio.run(scenario())
+    return asyncio.run(scenario())
+
+
+def test_approving_the_gates_walks_the_default_chain_to_its_first_unimplemented_node(
+    tmp_path, monkeypatch
+):
+    """Was `test_approving_all_four_gates_completes_chain`. The V1 `default`
+    chain cannot complete yet, and this pins exactly where it stops rather than
+    pretending otherwise: its `merge_request_feedback` node waits on
+    `mr.automated_review`, which has no handler until Task 9 and stops for a
+    human (`forge.run._UNIMPLEMENTED_TARGETS`). Everything before it -- both
+    planning gates, implementation, `local_review`, the draft merge request and
+    its CI -- walks for real."""
+    fake = _forge.FakeForge(ci_states=["success"])
+    monkeypatch.setattr(_forge.run, "resolve", lambda name: fake)
+    walked = _walk_default_chain_approving_every_gate(
+        tmp_path, _launch(tmp_path, setup_command="", forge="github")
+    )
+    assert walked["result"] == "needs_human"
+    assert walked["node"] == "merge_request_feedback"
+    assert walked["bead_status"] != "closed"
+    assert "await_review" in walked["reason"]
+    assert walked["types"].count("gate_requested") == 3
+    assert walked["types"].count("gate_approved") == 3
+    assert fake.opened, "the draft merge request was never opened"
+
+
+def test_a_repo_on_the_fake_forge_walks_the_default_chain_to_the_same_stop(tmp_path):
+    """Ruling 147: `forge: fake` on a repo is how `just dev` reaches the merge-
+    request half of the default chain. Nothing is monkeypatched here -- the real
+    `backend_for`/`resolve` pair has to turn the repo's `fake` into `FakeForge`,
+    or the walk stops at `draft_merge_request` for want of a forge."""
+    walked = _walk_default_chain_approving_every_gate(
+        tmp_path, _launch(tmp_path, setup_command="", forge="fake")
+    )
+    assert "draft_merge_request" in walked["completed"], walked["reason"]
+    assert walked["node"] == "merge_request_feedback"
+    assert "await_review" in walked["reason"]
 
 
 def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):

@@ -167,6 +167,24 @@ def test_doctor_reports_the_resolved_forge_cli(app, tmp_path, monkeypatch):
     assert row["detail"] == "gitlab · glab"
 
 
+def test_doctor_passes_a_dev_repo_on_the_fake_forge(app, tmp_path):
+    """Ruling 147: `forge: fake` resolves to the in-process `FakeForge`, so
+    there is no `fake` binary to look for on PATH -- failing the check for one
+    would tell a `just dev` user their forge is broken when it is not."""
+    repo = make_repo(tmp_path, name="devforge")
+    asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    next(r for r in data["repos"] if r["name"] == "devforge")["forge"] = "fake"
+    path.write_text(yaml.safe_dump(data))
+    _bind_auto_forge(tmp_path)
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "forge devforge")
+
+    assert row["ok"], row["detail"]
+    assert "fake" in row["detail"] and "dev" in row["detail"]
+
+
 def test_no_forge_check_when_nothing_is_bound_to_auto(app, tmp_path):
     """The check is about a binding the operator actually has: a registry with
     no `auto` forge hook must not grow a row per repo telling them to fix

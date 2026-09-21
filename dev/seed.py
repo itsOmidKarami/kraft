@@ -117,7 +117,18 @@ def main() -> int:
     except httpx.HTTPError as exc:
         sys.exit(f"seed: no dev server on {BASE} ({exc}). Start one with `just dev`.")
 
-    resp = client.post("/repos", json={"path": str(REPO), "setup_command": ""})
+    # The default chain's verification refuses to guess a test command, and its
+    # merge-request half needs a forge: `fake` is the dev-only in-process one
+    # (Ruling 147). `uv run` finds this checkout's venv above `.dev/`.
+    resp = client.post(
+        "/repos",
+        json={
+            "path": str(REPO),
+            "setup_command": "",
+            "test_command": "uv run pytest -q",
+            "forge": "fake",
+        },
+    )
     if resp.status_code not in (201, 409):
         resp.raise_for_status()
 

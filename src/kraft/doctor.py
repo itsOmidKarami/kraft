@@ -586,6 +586,8 @@ def _forge_check(repo: dict) -> dict:
         cli = forge.backend_for("auto", repo.get("forge"))
     except forge.ForgeError as exc:
         return _check(name, False, str(exc))
+    if cli == "fake":
+        return _check(name, True, "fake · in-process, dev only")
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
     return _check(name, True, f"{repo['forge']} · {cli}")

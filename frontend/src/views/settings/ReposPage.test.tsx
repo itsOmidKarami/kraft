@@ -60,6 +60,22 @@ describe("Settings · repos (5a)", () => {
     expect(screen.getAllByRole("switch").length).toBeGreaterThan(0);
   });
 
+  it("shows a dev repo's fake forge as selected", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo({ forge: "fake" })] });
+    renderAt("/settings/repos");
+    await userEvent.click(await screen.findByText("repo-a"));
+    const forge = await screen.findByRole("radiogroup", { name: "forge" });
+    expect(within(forge).getByRole("radio", { name: /fake \(dev only\)/ })).toBeChecked();
+  });
+
+  it("does not offer the dev-only fake forge to a real repo", async () => {
+    renderAt("/settings/repos");
+    await userEvent.click(await screen.findByText("repo-a"));
+    const forge = await screen.findByRole("radiogroup", { name: "forge" });
+    expect(within(forge).queryByRole("radio", { name: /fake/ })).toBeNull();
+    expect(within(forge).getByRole("radio", { name: "github" })).toBeChecked();
+  });
+
   it("clicking a row selects it into the URL and opens the detail pane", async () => {
     renderAt("/settings/repos");
     await userEvent.click(await screen.findByText("repo-a"));
