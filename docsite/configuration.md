@@ -28,7 +28,7 @@ Four sections, each a map of name to definition, which any chain takes with
 | `tasks` | Reusable tasks of any kind — `agent`, `subprocess`, `builtin`, `forge`. |
 | `steps` | Reusable ordered groups of tasks. A step may set `read_only: true` ([Concepts](concepts.md#node)). |
 | `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
-| `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
+| `steering` | Named guidance, `{instructions: "..."}`, that an agent task selects with `steering: [name]` and a repository with its `repos.yaml` `steering:`. The only steering store. |
 
 `kraft admin templates library` lists every component as `<section>.<name>`
 (`tasks.implementer`) with the chains that use it — through `extends`, directly
@@ -404,28 +404,40 @@ repos:
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist doesn't cover. |
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
-| `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent task on this repo, beside the task's own library steering. |
+| `steering` | `[]` | Names of `library.yaml` steering profiles given to every agent launch on this repo, before the task's own steering. Frozen into each work item when it is filed. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `allowed_harnesses`, `timeout_minutes`, `max_attempts` and the four caps (`time_cap_minutes`, `total_time_cap_minutes`, `token_budget`, `budget_usd`, each the work item's own, within `maxima.work_item`), applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
 | `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for, named exactly one way. `bot: <login>` settles when that forge login has reviewed the merge request's current head: on GitHub, changes requested or any inline comment is actionable (one finding per comment) and anything else is clean; on GitLab, the bot's unresolved discussions are actionable and its approval is clean. `check: <name>` settles when that check run or commit status on the head completes: success is clean, failure is actionable with its output as the finding. Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for a person rather than spending a repair. A dismissed GitHub review doesn't count. Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet. On GitLab an approval isn't tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push. |
 
 No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed.
 
-#### Steering files
+#### Repository steering
 
-A steering file is one `<name>.md` under `$KRAFT_HOME/templates/steering/`,
-authored by the Kraft operator (edited from the Settings screen or by hand),
-never by the repo it's attached to. `repos.yaml`'s `steering: [name, ...]` and
-a library task's own `steering:` both resolve to files there; every name that
-applies to a launch is read at dispatch time and concatenated into the
-agent's system prompt under a `## Project standards` heading
-(`src/kraft/worker/steering.py`).
+`repos.yaml`'s `steering: [name, ...]` names steering profiles in
+`library.yaml`, the same ones a task's `steering:` selects (see the library
+table above). There is no other steering store. When a work item is filed,
+Kraft resolves each name to its profile's `instructions` and freezes the text
+into the item, so editing a profile reaches items filed afterwards and never
+one already filed. Every launch gets the repository's profiles first, then
+the task's, in the agent's system prompt under a `## Project standards`
+heading, 8 KB at most together (`src/kraft/worker/steering.py`).
+
+A name the library doesn't define is refused when the repository is saved
+(Settings → Repos, `POST`/`PATCH /api/repos`) and when an item is filed, and a
+library save that removes a profile a repository still names is refused too.
+Profiles are written on Settings → Library, which edits `library.yaml`.
+
+Upgrading from a release that kept `$KRAFT_HOME/templates/steering/*.md`: the
+first start adds each file to `library.yaml` as the profile of the same name
+(unless the library already has that name) and moves the directory to
+`templates/steering.pre-1.0/`, so nothing is lost and `repos.yaml` is
+unchanged. If the new text can't be inserted without disturbing the file's
+layout, `library.yaml` is rewritten whole and the original is kept as
+`library.yaml.pre-1.0`.
 
 This is not a place for target-repo files: Kraft never reads `CLAUDE.md`,
 `AGENTS.md`, or anything else from inside the repo being worked on as a
-source of process context. The product ships no file in `templates/steering/`
-— an empty picker is the default, and every entry an operator sees there is
-one they wrote.
+source of process context.
 
 `kraft repo connect` probes a `setup_command` and a test command from the repo's
 markers (a justfile with a `test` recipe proposes `just test` ahead of any

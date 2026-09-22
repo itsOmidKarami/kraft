@@ -132,7 +132,7 @@ A **task** is one unit of execution, of one of four kinds:
 - **`agent`** (`src/kraft/adapters/agent.py`) — runs a headless coding agent in
   the item's worktree on a [harness profile](harnesses.md) (`harness:
   codex`), with its own `prompt`, and optionally one `skill`, the
-  `steering` profiles it reads, the document it `produces`, and the `inputs`
+  `steering` profiles it reads (after its repository's), the document it `produces`, and the `inputs`
   Kraft hands it. Its model comes from an [agent profile](harnesses.md#agent-profiles)
   (`profile: strong`, a named tier spelled per provider) or from its own
   `model:`/`effort:`, never both.

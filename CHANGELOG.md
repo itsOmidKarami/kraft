@@ -25,6 +25,15 @@ agent, decides whether to skip, abandon, or give more room.
     `repos.yaml`, `intake.yaml`, `steering/`, `harnesses/`.
   - `policy.yaml` keeps your value for every key V1 still has, and prints every
     key it drops.
+- **Steering files become library steering profiles.** On its first start,
+  1.0 adds each `templates/steering/<name>.md` to `library.yaml` as
+  `steering: {<name>: {instructions: <the file's text>}}` and moves the
+  directory to `templates/steering.pre-1.0/`. `repos.yaml`'s `steering:` names
+  keep working. A name `library.yaml` already defines keeps the library's
+  text; that file (and any empty one) is only in the moved-aside copy, and the
+  log says so. An item already in flight keeps its steering: it reads its
+  repository's names against the library at each launch, as it read the
+  files before.
 - **Harness profiles are renamed:** `codex_default` → `codex`, `claude_review`
   → `claude`. A chain or policy that names an old profile must be updated.
 - **Chain API routes moved** from `/api/templates/{id}` to
@@ -89,8 +98,7 @@ agent, decides whether to skip, abandon, or give more room.
   work-brief skills apply it.
 - `kraft view show` prints a usage line with cached and uncached tokens apart.
 - `kraft admin doctor` checks for a shadowing `kraft` on PATH.
-- The Library shows a steering profile's text, and the Library and Steering
-  pages each say which kind of steering they hold and link to the other.
+- The Library shows a steering profile's text as text.
 - One node of a not-yet-started item can get its own `model`, `effort` and an
   `extra_prompt` appended to each of its agent tasks (`kraft item
   set-node-override`, `--node-override`, MCP `set_node_overrides`). The node's
@@ -119,6 +127,13 @@ agent, decides whether to skip, abandon, or give more room.
 - Every shipped agent task runs on the `claude` harness profile.
 - The never-signal-processes-you-didn't-start rule is built into every agent
   launch instead of seeded as a steering file.
+- **One steering store.** A repository's `steering:` in `repos.yaml` names
+  steering profiles from `library.yaml`, like a task's. The text is frozen into
+  the work item at intake, so editing a profile reaches items filed afterwards.
+  A repository save, an intake, and a library save are each refused when a
+  repository would name a profile the library doesn't define. Steering
+  profiles are created and edited on Settings → Library; the repository
+  steering picker lists them.
 
 ### Fixed
 
@@ -169,6 +184,8 @@ agent, decides whether to skip, abandon, or give more room.
   `total_time_cap_minutes`, with a warning, but it is refused on write.
 - The seeded `steering/README.md` and `steering/never-signal-…` files. An
   existing install keeps its copies.
+- `templates/steering/*.md` as a steering store, the Settings → Steering page
+  (its address opens the Library), and the `/api/steering` routes.
 
 ### Known limits
 
@@ -178,5 +195,3 @@ agent, decides whether to skip, abandon, or give more room.
 - The merge step does not pin the exact head its CI verified (Kraft-vomwx).
 - An auto-review agent approving a chain revision gate is checked against the
   gate's last recorded view, not a view of its own (Kraft-rndd1).
-- Steering lives in two places for now: task steering in the Library, and
-  repository steering files on the Steering page (Kraft-91i6p).

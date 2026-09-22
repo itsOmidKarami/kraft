@@ -334,7 +334,7 @@ describe("Settings · repo detail (5b)", () => {
     );
   });
 
-  it("the steering picker offers the library's steering profiles, not a free-text file name", async () => {
+  it("the steering picker offers the library's steering profiles rather than a free-text file name", async () => {
     const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo());
     renderAt("/settings/repos?repo=/repo-a");
     const picker = await screen.findByRole("combobox", { name: "add steering profile" });

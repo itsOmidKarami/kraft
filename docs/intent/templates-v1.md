@@ -77,6 +77,37 @@ contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
 enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file
 
+## REQ repository-steering-names-library-profiles
+
+A repository's `steering:` names in `repos.yaml` SHALL name steering profiles
+of the template library, the same store a task's `steering:` selects from; no
+other steering store SHALL exist. The system SHALL refuse a repository save,
+an intake, and a library save that would leave a repository naming a profile
+the library does not define, naming the profile and saying where profiles
+live. A launch SHALL inject the repository's steering before the task's.
+enforced-by: tests/test_config_repos.py::test_steering_names_are_checked_against_the_library_profiles_given, tests/api/test_repos.py::test_add_repo_with_a_missing_steering_name_is_refused, tests/api/test_repository_steering.py::test_intake_refuses_a_repository_naming_a_profile_the_library_lacks, tests/api/test_repository_steering.py::test_a_library_save_removing_a_profile_a_repository_names_is_refused, tests/adapters/test_agent.py::test_steering_is_repo_first_then_task, frontend/src/views/settings/ReposPage.test.tsx::the steering picker offers the library's steering profiles rather than a free-text file name, frontend/src/views/settings/LibraryPage.test.tsx::the old Steering page address lands on the Library where steering is edited now
+origin: src/kraft/worker/steering.py -- Kraft-91i6p: 1.0 shipped two steering systems, library profiles frozen at intake and `templates/steering/*.md` files read at each launch; Omid (2026-09-22) kept the library's and removed the files before 1.0, so removing them later would not need another major release.
+
+## REQ repository-steering-is-frozen-at-intake
+
+The system SHALL resolve a work item's repository steering at intake and
+freeze the text into the item's snapshot with its chain, so that editing a
+steering profile or a repository's `steering:` list reaches items filed
+afterwards and never one already filed. A snapshot stored before repository
+steering was frozen SHALL read its repository's names against the current
+library at each launch, and SHALL stop for a human naming a name the library
+does not define.
+enforced-by: tests/api/test_repository_steering.py::test_repository_steering_is_frozen_into_the_snapshot_at_intake, tests/worker/test_steering.py::test_a_frozen_snapshot_answers_whatever_the_live_library_says, tests/api/test_repository_steering.py::test_a_snapshot_from_before_the_freeze_runs_on_the_live_library, tests/worker/test_steering.py::test_a_snapshot_from_before_the_freeze_reads_the_live_library
+
+## REQ pre-1-0-steering-files-become-library-profiles
+
+WHEN the server starts with a `templates/steering/` directory, the system
+SHALL add each non-empty `<name>.md` file to `library.yaml` as the steering
+profile `<name>` with the file's text, unless the library already defines
+`<name>`, and SHALL then move the directory aside unchanged, so that no text
+is lost and a `repos.yaml` naming a file keeps resolving to its text.
+enforced-by: tests/worker/test_steering.py::test_each_steering_file_becomes_a_library_profile_and_the_directory_moves_aside, tests/worker/test_steering.py::test_a_library_with_no_steering_section_gains_one, tests/worker/test_steering.py::test_an_unusual_layout_is_rewritten_whole_with_the_original_kept, tests/worker/test_steering.py::test_an_empty_file_is_skipped_and_kept_aside, tests/api/test_repository_steering.py::test_steering_files_become_library_profiles_at_startup
+
 ## REQ a-document-contract-names-the-chain-that-carries-it-on
 
 WHEN an agent task produces a spec or a plan, the system SHALL state in its

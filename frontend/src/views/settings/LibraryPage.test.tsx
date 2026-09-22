@@ -123,7 +123,7 @@ describe("Settings · library", () => {
     expect(screen.getByRole("link", { name: "Repos" })).toHaveAttribute("href", "/settings/repos");
   });
 
-  it("the old Steering page address lands on the Library, where steering is edited now", async () => {
+  it("the old Steering page address lands on the Library where steering is edited now", async () => {
     renderAt("/settings/steering");
     expect(await screen.findByRole("textbox", { name: "library yaml" })).toBeInTheDocument();
   });
