@@ -4,6 +4,15 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.0.6
+
+- Fix: a gate's agent reviewer no longer approves a chain revision that
+  changed after it read it — its approval is now bound to the digest of
+  what it actually read, the same way a person's approval already is.
+- Fix: a gate whose `auto_review` task selects an agent profile carrying its
+  own `fallback:` list is now refused at launch, naming the profile, instead
+  of silently ignoring the list and leaving a rate-limited review undecided.
+
 ## 1.0.5
 
 - **Fix: a `policy.yaml` cron trigger naming an unconnected repo is now

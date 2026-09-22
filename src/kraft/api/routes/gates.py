@@ -121,16 +121,22 @@ async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str 
     # Bound to what was shown (Kraft-ze1yj): an `add` resolves out of the live
     # library, which may have been edited and reloaded since. A person's
     # approval (`viewer`) carries the digest of the render they read, so a
-    # later render by someone else can't stand in for it (Kraft-ec66w). An
-    # agent's verdict has no render of its own: it is checked against the
-    # gate's last one, and nobody having looked binds nothing.
+    # later render by someone else can't stand in for it (Kraft-ec66w).
     current = revision.digest(revised)
     if viewer and seen is None:
         raise revision.StaleRevision(
             f"{gate}: approving a chain revision needs the digest of the one you reviewed;"
             " read it with `kraft view artifact` and approve with the digest it prints"
         )
-    if not viewer:
+    # An agent's verdict carries its own `seen` now, captured at the moment
+    # its reviewer read the artifact (`kraft.executor.gates.review_gates`,
+    # Kraft-rndd1) -- the same binding a person's `viewer` approval has, just
+    # supplied a different way. Only fall back to whatever a person last
+    # rendered when the caller supplied nothing at all: a launch built with
+    # no live template library to capture its own digest with
+    # (`LaunchContext.chain_revision_digest` is None), which is the one case
+    # this fix cannot improve on the old behaviour for.
+    if not viewer and seen is None:
         seen = st.db.read(lambda c: store.shown_revision(c, row["id"], gate))
     if seen is not None and seen != current:
         raise revision.StaleRevision(

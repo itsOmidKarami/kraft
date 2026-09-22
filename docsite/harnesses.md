@@ -271,9 +271,10 @@ What carries over and what does not:
 
 It is opt-in. A task with no list (none of its own, and none on its profile,
 or `fallback: []`) launches, parks and stops exactly as it would without it,
-and never consults the memory. No shipped task or profile declares one. A gate's `auto_review` task cannot declare a `fallback:` list of its own. A list it
-inherits from its agent profile is ignored, because a gate review launches once
-(tracked as Kraft-t4y8g).
+and never consults the memory. No shipped task or profile declares one. A gate's `auto_review` task cannot declare a `fallback:` list of its own, and is
+refused the same way — at its own launch, naming the gate and the profile —
+when its `profile:` carries one: a gate review launches once and never walks
+either list.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
 rate limit, which today is `claude`. `codex` and `gemini` can be fallback

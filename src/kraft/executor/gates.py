@@ -14,6 +14,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
 from kraft.templates import revision
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
+from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,42 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
     return True
 
 
+#: `kraft.api.routes.artifacts.DIFF_MAX_BYTES`'s twin: the executor layer has
+#: no reason to import the API layer just to share one number.
+_ARTIFACT_MAX_BYTES = 1_000_000
+
+
+def _chain_revision_seen(
+    run_dirs, row, gate: str, node: ResolvedNode, launch: LaunchContext | None
+) -> str | None:
+    """The digest of what `gate`'s chain-revision artifact resolves to right
+    now, captured immediately before its reviewer is dispatched (Kraft-rndd1):
+    the earliest point this module can call "what the agent read", so its own
+    approval can be checked against it later, the same way a person's is
+    checked against what `GET .../artifact` rendered for them.
+
+    `None` for anything but a chain-revision gate (nothing to bind), when
+    `launch` carries no live template library to resolve it with (a launch
+    built with no `st.library` in hand, or one that predates this field --
+    `apply_approval`'s existing fallback to `store.shown_revision` still
+    applies, unchanged), or when there is nothing on disk to read yet.
+    """
+    if node.node.artifact != revision.CHAIN_REVISION:
+        return None
+    if launch is None or launch.chain_revision_digest is None:
+        return None
+    rel = gate_artifact(run_dirs, row, gate)
+    if rel is None:
+        return None
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        return None
+    result, _reason = read_worktree_file(run_dirs.worktrees / row["id"], rel, _ARTIFACT_MAX_BYTES)
+    if result is None:
+        return None
+    return launch.chain_revision_digest(chain, gate, result.text)
+
+
 async def review_gates(
     status: str,
     db,
@@ -302,6 +339,11 @@ async def review_gates(
             )
             return status
 
+        # Captured now, right before the reviewer is dispatched -- the
+        # earliest this module can call "what it read" (Kraft-rndd1). An
+        # artifact edited, or shown to a person, between this line and the
+        # approval below is exactly the race `seen` exists to catch.
+        seen = _chain_revision_seen(run_dirs, row, gate, node, launch)
         verdict, note = await gate_review.review(
             db,
             run_dirs,
@@ -363,7 +405,14 @@ async def review_gates(
                 # cleared with half of them (Kraft-zr3s).
                 if on_approve is None:
                     return status
-                approved, reason = await on_approve(row, gate)
+                try:
+                    approved, reason = await on_approve(row, gate, seen=seen)
+                except revision.StaleRevision as exc:
+                    # The same refusal a person's stale approval gets
+                    # (`kraft.api.routes.gates.approve_gate`'s 409), applied
+                    # the same way an ordinary refused approval already is
+                    # here: the gate is left for a person, not retried.
+                    approved, reason = None, str(exc)
                 if approved is None:
                     await db.write(
                         lambda c, reason=reason, node=row["current_node_id"]: (

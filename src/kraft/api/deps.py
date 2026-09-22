@@ -34,6 +34,7 @@ from kraft.policy import (
     PolicyInput,
     TemplatePolicyOverride,
 )
+from kraft.templates import revision
 from kraft.templates.environment import (
     RootPointerPolicy,
     TemplateEnvironmentError,
@@ -658,8 +659,14 @@ def launch(st, repo: str) -> executor.LaunchContext:
 
     The live library's steering profiles ride along for an item filed before
     repository steering was frozen into its snapshot
-    (`steering.for_repository`); every other launch reads its snapshot's."""
+    (`steering.for_repository`); every other launch reads its snapshot's.
+
+    `chain_revision_digest` rides along too (Kraft-rndd1): `st.library` bound
+    into `revision.artifact_digest`, so a gate's own agent review can capture
+    what its artifact resolves to before dispatching, the same way `GET
+    .../artifact` does for a person."""
     steering = library_steering(st) or {}
+    digest = functools.partial(revision.artifact_digest, library=getattr(st, "library", None))
     try:
         repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
@@ -671,10 +678,12 @@ def launch(st, repo: str) -> executor.LaunchContext:
             skills_dir=st.skills_dir,
             repositories=cast("dict[str, RepoEntry]", _PoisonedRepoEntry(exc)),
             library_steering=steering,
+            chain_revision_digest=digest,
         )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),
         skills_dir=st.skills_dir,
         repositories={r.id: r for r in repos if r.id},
         library_steering=steering,
+        chain_revision_digest=digest,
     )
