@@ -134,9 +134,10 @@ the chain authored. `allowed_tools`, `deny_tools` and `sandbox` only
 tighten: a list intersects with what each task already allows. The caps --
 `time_cap_minutes`, `total_time_cap_minutes`, `token_budget` and
 `budget_usd` -- are the work item's own item-wide: raising one above the
-chain's, up to the administrator maximum, is how a person unsticks a capped
-item before a retry (Ruling 198). On a path they only tighten, and are
-refused, naming both scopes, above the cap that scope already has (a wait
+chain's, up to the administrator `maxima.work_item`, is how a person unsticks
+a capped item before a retry (Rulings 198, 211). On a path one may pass that
+scope's level default, up to its level's maximum, but is refused, naming both
+scopes, above what the chain or the item already gives that scope (a wait
 task's total cap is its timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
 `total_time_cap_minutes`. An operational value past its maximum, a path
 the chain does not have, or a key that is not a policy field is refused,

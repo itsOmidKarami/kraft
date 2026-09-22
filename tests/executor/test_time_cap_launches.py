@@ -1,6 +1,6 @@
 """Time caps at the doors outside `dispatch_node` (Kraft-8en38, Kraft-kx2fs,
-Kraft-l5fl2), and a default cap that is a default, not a ceiling, at runtime
-(Ruling 198). The dispatch door itself is tests/executor/test_time_caps.py."""
+Kraft-l5fl2), and each level's default cap binding every scope of its kind at
+runtime (Ruling 211). The dispatch door itself is tests/executor/test_time_caps.py."""
 
 from __future__ import annotations
 

@@ -941,10 +941,10 @@ class WorkItemPolicy(TemplatePolicyOverride):
         never refused because a narrower scope already narrowed it.
 
         A time cap is the item's own at its level (Ruling 198): item-wide it
-        is the work item's cap, replacing the one the instance, repository or
-        chain gave it for every scope in `scopes` -- the chain's layers over
-        `path` -- that set none, and meeting any scope's own; on a path it
-        only tightens."""
+        is the work item's cap, replacing the one the repository or chain
+        gave it -- and so every level's default (Ruling 211) -- for every
+        scope in `scopes`, the chain's layers over `path`, that set none, and
+        meeting any scope's own; on a path it only tightens."""
         own = {n for n in SCOPE_CAP_FIELDS if any(getattr(s, n) is not None for s in scopes)}
         for where, layer in self.layers_at(path):
             if where == "policy":
