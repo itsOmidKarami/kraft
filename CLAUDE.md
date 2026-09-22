@@ -50,7 +50,8 @@ surface. `--json` on any verb prints the raw API payload.
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate]  # files it paused
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate] [--autostart]  # files it paused unless --autostart
+kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
@@ -72,7 +73,7 @@ kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
 kraft admin update [--restart] [-y]          # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
-kraft admin reload                           # reread the template library from disk, no restart
+kraft admin reload                           # reread the template library and policy.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
@@ -105,22 +106,25 @@ item attachments instead:
 kraft item create "title" --spec PATH --plan PATH
 ```
 
-**An attachment is snapshotted at intake, and frozen.** Intake copies the file
-into `~/.kraft/run/attachments/<work-item-id>/`, and that copy — not the path
-you passed — is what `builtins.ensure_worktree` reads into the worker's
-worktree when the item runs. A source that has gone missing raises rather than
-skipping silently, so an item can no longer run with its gates trimmed and no
-document.
+**An attachment is snapshotted at intake.** Intake copies the file into
+`~/.kraft/run/attachments/<work-item-id>/`, and that copy, not the path you
+passed, is what `builtins.ensure_worktree` copies into the worker's worktree
+when the item runs. A stored copy that has gone missing fails the item before
+its worktree is made, so it never runs with its gates trimmed and no document.
 
-Two consequences worth remembering:
+Editing the original after filing changes nothing on its own. To revise a spec
+or plan before the item starts, re-attach it in place instead of abandoning and
+re-filing:
 
-- Editing the original after filing changes nothing. The worker reads the
-  snapshot, and no endpoint refreshes it.
-- Revising an attached spec or plan therefore means abandoning the item and
-  re-filing it. There is a bead open for patching an attachment in place; until
-  it lands, re-filing is the whole mechanism. Get the document right before you
-  attach it — not because the file might vanish, but because changing it
-  afterwards is a no-op that looks like it worked.
+```bash
+kraft item set-attachments [ID] --spec PATH   # copied again; --plan likewise
+kraft item set-attachments [ID] --drop spec   # removes it and puts its gate back
+```
+
+Once the item has started, its documents are fixed (the call answers 409): its
+worktree already holds them, committed on its branch. `kraft item create` warns
+when an open item in the same repo has the same title or implements a bead you
+named; read that warning before filing twice.
 
 ### The test tree mirrors the source tree
 
