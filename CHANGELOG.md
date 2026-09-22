@@ -4,6 +4,12 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.0.1
+
+- Fix: the Appearance settings page's palette, mode, density and board
+  controls now show as disabled while your theme is still loading, instead of
+  silently doing nothing if you clicked one in that window.
+
 ## 1.0.0
 
 Kraft 1.0 makes the chain a piece of data you can read, lint, and reason
