@@ -85,8 +85,19 @@ def test_a_huge_log_returns_its_tail_behind_a_truncation_marker(tmp_path, monkey
         "".join(json.dumps({"n": n, "t": f"t{n}"}) + "\n" for n in range(20))
     )
 
+    peak = [0]
+    real_stamp = logs._stamp
+
+    def stamp(line, times, first):
+        real_stamp(line, times, first)
+        peak[0] = max(peak[0], len(times))
+
+    monkeypatch.setattr(logs, "_stamp", stamp)
+
     rows = list(logs.jsonl(log))
     marker, shown = rows[0], rows[1:]
+    # the skipped lines' stamps are never held, even for the length of a read
+    assert peak[0] == len(shown)
     # 160 bytes, the last 40 of them kept: the window opens on line 15's
     # boundary exactly, so nothing is cut mid-line
     assert [r["n"] for r in shown] == [15, 16, 17, 18, 19]
