@@ -20,6 +20,7 @@ async def create_work_item(
     auto_gate: bool = True,
     implements_beads: list[str] | None = None,
     policy: dict | None = None,
+    base_branch: str | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
 
@@ -36,6 +37,9 @@ async def create_work_item(
     Kraft worktree and not the registered repo (Kraft-85wk). It is sent only
     when there is a path to resolve: a call with no attachments names no file,
     so it hands over no directory either.
+
+    `base_branch` is the branch the work starts from and its merge request
+    targets; unset, the repo's default branch (Kraft-v9gbi).
     """
     if repo is None:
         work_item_id, _origin = context.resolve_context()
@@ -58,6 +62,7 @@ async def create_work_item(
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
             **({"policy": policy} if policy else {}),
+            **({"base_branch": base_branch} if base_branch else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },

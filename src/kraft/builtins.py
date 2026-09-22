@@ -642,6 +642,19 @@ async def base_branch(db, work_item_id: str, repo: Path, *, member: bool = False
     return frozen or await git.default_branch(repo)
 
 
+def promptless_git_env(repo: Path) -> dict[str, str]:
+    """The process env for a git call that talks to origin from the daemon:
+    no prompt may reach a foreground `kraft`'s terminal. `GIT_TERMINAL_PROMPT=0`
+    for git's own, ssh `BatchMode` for passphrases and unknown hosts -- unless
+    the user already chose an ssh command, which an env var would override."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    if "GIT_SSH_COMMAND" not in env and not git_read(
+        repo, "config", "core.sshCommand", expected_failure=True
+    ):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    return env
+
+
 async def upstream_head(repo: Path, branch: str) -> str | None:
     """The tip of origin's `branch` -- the item's `base_branch` -- fetched now;
     the last fetched tip when the fetch fails; `repo`'s own HEAD only when there is no `origin`
@@ -658,17 +671,11 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
 
     The refspec is explicit because a `--single-branch` clone's configured
     one may not cover the base branch, leaving its ref unmoved. No prompt
-    may reach a foreground `kraft`'s terminal: `GIT_TERMINAL_PROMPT=0` for
-    git's own, ssh `BatchMode` for passphrases and unknown hosts -- unless the
-    user already chose an ssh command, which an env var would override.
+    may reach a foreground `kraft`'s terminal (`promptless_git_env`).
     """
     if git_read(repo, "remote", "get-url", "origin", expected_failure=True):
         ref = f"refs/remotes/origin/{branch}"
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-        if "GIT_SSH_COMMAND" not in env and not git_read(
-            repo, "config", "core.sshCommand", expected_failure=True
-        ):
-            env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+        env = promptless_git_env(repo)
         try:
             done = await asyncio.to_thread(
                 subprocess.run,

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
-def single_repo_target(repo: str) -> WorkItemTarget:
+def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItemTarget:
     """The immutable target of an item filed against one repository.
 
     The id is the constant `"target"`, not the repository's own configured id:
@@ -37,7 +37,7 @@ def single_repo_target(repo: str) -> WorkItemTarget:
     materialization before it files a bead -- two copies of this would let the
     dry run and the real one disagree about what gets trimmed.
     """
-    return WorkItemTarget.for_repository("target")
+    return WorkItemTarget.for_repository("target", base_branch=base_branch)
 
 
 async def intake(
