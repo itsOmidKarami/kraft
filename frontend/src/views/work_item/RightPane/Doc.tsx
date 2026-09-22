@@ -61,6 +61,7 @@ type Viewed = {
   origin?: string;
   source_kind?: string;
   links?: DocumentLink[];
+  digest?: string;
 };
 
 const KIND_WORDS: Record<string, string> = { specs: "spec", plans: "plan", reviews: "review", sessions: "session" };
@@ -109,6 +110,7 @@ export function Doc({
               path: a.path,
               content: a.content,
               truncated: a.truncated,
+              digest: a.digest,
             }),
           );
     p.then((v) => live && setDoc(v)).catch(
@@ -261,7 +263,7 @@ export function Doc({
               <button
                 className="btn btn-primary"
                 disabled={gateBusy}
-                onClick={() => runGate(() => api.approveGate(item.id, gate!), "Approved — chain continues")}
+                onClick={() => runGate(() => (doc?.digest ? api.approveGate(item.id, gate!, doc.digest) : api.approveGate(item.id, gate!)), "Approved — chain continues")}
               >
                 <Check size={14} /> Approve
               </button>

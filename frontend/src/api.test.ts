@@ -69,6 +69,15 @@ describe("api", () => {
     );
   });
 
+  it("approveGate sends a chain revision's digest back, and no body otherwise", async () => {
+    const f = mockFetch(200, {});
+    vi.stubGlobal("fetch", f);
+    await api.approveGate("id1", "chain_revision_approval", "d1");
+    await api.approveGate("id1", "spec_approval");
+    expect(f.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify({ digest: "d1" }) }));
+    expect(f.mock.calls[1][1].body).toBeUndefined();
+  });
+
   it("logUrl builds the log path", () => {
     expect(api.logUrl("s9")).toBe("/worker-sessions/s9/log");
   });
