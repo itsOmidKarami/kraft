@@ -450,7 +450,8 @@ def test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted(
     shutil.copytree(SHIPPED, home)
     shutil.copy(RC / "harnesses.yaml", home / "harnesses.yaml")
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
-    failed = [r for r in doctor._agent_checks() if not r["ok"]]
+    # Only the profile rows: whether `claude` is on this machine's PATH is not the point.
+    failed = [r for r in doctor._agent_checks() if not r["ok"] and r["name"].startswith("profile")]
     assert [r["name"] for r in failed] == ["profile: strong"]
     assert "profile 'strong' is not defined in harnesses.yaml" in failed[0]["detail"]
 
