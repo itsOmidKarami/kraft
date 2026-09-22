@@ -778,11 +778,11 @@ describe("WorkItemDetail (item page)", () => {
     expect(within(head).getByText("not indexed yet — read from the worktree")).toBeInTheDocument();
   });
 
-  it("approves the gate from the artifact pane", async () => {
+  it.each([[{}, []], [{ digest: "d1" }, ["d1"]]])("approves the gate from the artifact pane, echoing a revision digest (Kraft-ec66w) %o", async (extra, echoed) => {
     vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
     vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
       work_item_id: "w1", path: "docs/spec.md", title: "The spec",
-      content: "body", truncated: false, artifact_max_bytes: 1_000_000,
+      content: "body", truncated: false, artifact_max_bytes: 1_000_000, ...extra,
     });
     const approve = vi.spyOn(api, "approveGate").mockResolvedValue(undefined as never);
 
@@ -792,24 +792,7 @@ describe("WorkItemDetail (item page)", () => {
     await userEvent.click(within(pane).getByRole("button", { name: /^Approve$/ }));
 
     expect(approve).toHaveBeenCalledTimes(1);
-    expect(approve).toHaveBeenCalledWith("w1", "spec_approval");
-  });
-
-  it("echoes a chain revision's digest when approving from the artifact pane", async () => {
-    // Kraft-ec66w: the approval is bound to the render this pane showed.
-    vi.spyOn(api, "getWorkItemDocuments").mockResolvedValue({ work_item_id: "w1", documents: [] });
-    vi.spyOn(api, "getWorkItemArtifact").mockResolvedValue({
-      work_item_id: "w1", path: "docs/rev.md", title: "The revision",
-      content: "body", truncated: false, artifact_max_bytes: 1_000_000, digest: "d1",
-    });
-    const approve = vi.spyOn(api, "approveGate").mockResolvedValue(undefined as never);
-
-    renderDetailAtGate();
-    await userEvent.click(await screen.findByRole("tab", { name: /documents/i }));
-    const pane = await screen.findByTestId("right-pane-doc");
-    await userEvent.click(within(pane).getByRole("button", { name: /^Approve$/ }));
-
-    expect(approve).toHaveBeenCalledWith("w1", "spec_approval", "d1");
+    expect(approve).toHaveBeenCalledWith("w1", "spec_approval", ...echoed);
   });
 
   it("upgrades from the artifact to the indexed document once it lands", async () => {
