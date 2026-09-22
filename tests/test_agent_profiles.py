@@ -15,6 +15,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 from support.harness import entry_of, v1_chain, v1_walk, write_harness_profiles
+from support.launches import agent_launches
 
 from kraft import doctor
 from kraft import harness as _harness
@@ -69,18 +70,10 @@ def _launches(templates: Path, monkeypatch) -> list[tuple]:
     """(chain, task path, harness, model, effort, permission_mode) for every
     agent task of every chain in `templates`, resolved the way a launch does."""
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
-    library = TemplateLibrary.from_yaml_dir(templates)
-    out = []
-    for cid in library.chain_ids:
-        chain = library.resolve_chain(cid)
-        for node in chain.nodes:
-            for t in node.tasks():
-                if isinstance(t.task, AgentTask):
-                    inv = agent.resolve_agent_task(t.task, None, None, steering=chain.steering)
-                    out.append(
-                        (cid, t.path, inv.harness, inv.model, inv.effort, inv.permission_mode)
-                    )
-    return out
+    return [
+        (cid, path, inv.harness, inv.model, inv.effort, inv.permission_mode)
+        for cid, path, inv in agent_launches(templates)
+    ]
 
 
 # ── the profile table ──
