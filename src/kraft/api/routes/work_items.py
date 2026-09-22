@@ -15,7 +15,11 @@ from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
 from kraft.api.routes import board, gates
 from kraft.executor import entry
-from kraft.overrides import validate_agent_overrides, validate_node_override_fields
+from kraft.overrides import (
+    harness_refusal,
+    validate_agent_overrides,
+    validate_node_override_fields,
+)
 from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import MaterializedChain, ResolvedChain
@@ -251,7 +255,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
     _check_node_overrides(
         body.node_overrides,
         node_ids,
-        {n.id: n.auto_review for n in chain.nodes},
+        {n.id: n for n in chain.nodes},
         deps.instance_policy(st).maxima,
     )
     # Read before this item exists, so it cannot find itself. Warned, not
@@ -477,14 +481,15 @@ class WorkItemPatch(BaseModel):
 def _check_node_overrides(
     overrides: dict[str, dict],
     node_ids: set[str],
-    reviewers: dict[str, object] | None,
+    nodes: dict | None,
     maxima: PolicyMaximaInput | None = None,
 ) -> None:
-    """422 on an override naming no node of the chain, an unknown field, or an
+    """422 on an override naming no node of the chain, an unknown field, a
+    model/effort a node's harness refuses (`overrides.harness_refusal`), or an
     `auto_escalate: true` on a gate declaring no `auto_review`. One check for
     intake and `PATCH`, so the two doors cannot answer differently (review E
-    #3). `reviewers` maps node id to its declared reviewer; `None` (a legacy
-    row, with no typed chain) skips that last check.
+    #3). `nodes` maps node id to its `ResolvedNode`; `None` (a legacy row, with
+    no typed chain) skips the last two checks.
 
     Said in the error, because that is what the caller reads. The override
     *permits or suppresses* a reviewing task the chain declares; it does not
@@ -498,6 +503,8 @@ def _check_node_overrides(
         field_errs = validate_node_override_fields(fields)
         if field_errs:
             raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        if nodes is not None and (why := harness_refusal(nodes[node_id], fields)):
+            raise HTTPException(422, f"node {node_id!r}: {why}")
         # A per-item fix-loop bound is an operational value, held to the
         # administrator maximum like the item's own policy override is
         # (Kraft-3br6j): the two doors must not bound it differently.
@@ -517,9 +524,9 @@ def _check_node_overrides(
                     f"maximum {name} {ceiling}",
                 )
         if (
-            reviewers is not None
+            nodes is not None
             and fields.get("auto_escalate") is True
-            and reviewers.get(node_id) is None
+            and nodes[node_id].auto_review is None
         ):
             raise HTTPException(
                 422,
@@ -535,17 +542,17 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     has started at all -- point 2, "only allowed on unstarted nodes".
     """
     # Node ids come from the shared reader, which answers for either chain shape
-    # and never raises; only `reviewers` needs the typed snapshot, because
-    # `auto_review` has no legacy equivalent.
+    # and never raises; only `nodes` needs the typed snapshot, because
+    # `auto_review` and a task's harness have no legacy equivalent.
     node_ids = set(store.chain_node_ids(row))
     v1 = store.materialized_chain_of(row)
-    reviewers = {n.id: n.auto_review for n in v1.chain.nodes} if v1 is not None else None
+    nodes = {n.id: n for n in v1.chain.nodes} if v1 is not None else None
     if not patch:
         if row["current_node_id"] is not None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
         return
 
-    _check_node_overrides(patch, node_ids, reviewers, deps.instance_policy(st).maxima)
+    _check_node_overrides(patch, node_ids, nodes, deps.instance_policy(st).maxima)
 
     def check(c):
         for node_id in patch:

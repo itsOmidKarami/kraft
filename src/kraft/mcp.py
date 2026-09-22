@@ -275,12 +275,18 @@ def build() -> MCPServer:
         auto_escalate: bool | None = None,
         auto_escalate_stuck: bool | None = None,
         auto_escalate_delay_s: int | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        extra_prompt: str | None = None,
         clear: bool = False,
         work_item_id: str | None = None,
     ) -> dict:
-        """Set or clear one node's per-item auto-escalate override on a Kraft
-        work item, without touching the Policy screen's system defaults or the
-        chain template everyone else uses. `clear` resets this node back to
+        """Set or clear one node's per-item override on a Kraft work item --
+        its auto-escalate settings, the `model`/`effort` its agent tasks launch
+        with (above the item-wide `set_agent_overrides`), and an `extra_prompt`
+        appended to each of their instructions -- without touching the Policy
+        screen's system defaults or the chain template everyone else uses. A
+        model/effort the node's harness refuses is refused here. `clear` resets this node back to
         the template's own binding; naming a field replaces the whole stored
         override for that node rather than merging with it. 409s once the
         node has started."""
@@ -289,6 +295,9 @@ def build() -> MCPServer:
             auto_escalate,
             auto_escalate_stuck,
             auto_escalate_delay_s,
+            model=model,
+            effort=effort,
+            extra_prompt=extra_prompt,
             clear=clear,
             work_item_id=work_item_id,
         )

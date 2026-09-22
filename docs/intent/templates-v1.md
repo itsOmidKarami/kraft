@@ -158,6 +158,36 @@ An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
 enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults, tests/templates/test_policy_scopes.py::test_materialization_refuses_an_agent_task_on_a_harness_its_policy_disallows[task-scope], tests/executor/test_policy_enforcement.py::test_a_harness_its_policy_disallows_never_launches
 
+## REQ node-override-extra-prompt-is-appended
+
+A work item's per-node override MAY carry an `extra_prompt`. The system SHALL
+append it to the instruction of every agent task that node dispatches (its
+steps, `on_failure`, `fix_loop`, judge and stuck escalation), after the task's
+own prompt, and SHALL NOT replace that prompt or reach another node's tasks, a
+gate's `auto_review`, or the item-scoped interactive escalation turn. Like the
+rest of the node override, it SHALL be refused once the node has started.
+enforced-by: tests/executor/test_node_extra_prompt.py::test_extra_prompt_reaches_every_agent_task_of_its_node_only, tests/test_overrides.py::test_node_override_takes_an_extra_prompt_string_and_nothing_else, tests/test_item_overrides.py::test_patch_sets_a_node_extra_prompt_and_409s_once_the_node_started, tests/cli/test_verbs.py::test_a_node_gets_its_model_effort_and_extra_prompt_from_the_terminal, tests/test_mcp.py::test_set_node_overrides_forwards_model_effort_and_extra_prompt
+origin: src/kraft/overrides.py §extra_prompt_note -- Kraft-a7ers. Appended in `executor/dispatch.py` §_dispatch_task after the instruction is built, so a fix loop's or recovery's own instruction gets it too; a gate's `auto_review` is dispatched by `gate_review` and takes item-wide overrides only. Stored on the item (`work_items.node_overrides`), not a chain edit, so the frozen chain is untouched.
+
+## REQ node-override-model-effort-checked-against-its-harness
+
+The system SHALL refuse a per-node override's `model`, `escalate_model` or
+`effort` when it is set (at intake or on a patch) if the harness of any of that
+node's agent tasks does not declare the capability or does not accept the
+value, naming the harness and the task. It SHALL NOT defer that refusal to the
+launch.
+enforced-by: tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[effort], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[model], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[escalate_model], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[accepted]
+origin: src/kraft/overrides.py §harness_refusal -- Kraft-a7ers. Called from `api/routes/work_items.py` §_check_node_overrides, which both intake and PATCH go through. Each task's profile is resolved to its provider (`adapters/agent.py` §harness_profile) and held to `Harness.supports`/`value_ok`; a profile that cannot be resolved is left to the launch, which stops on it already.
+
+## REQ node-override-beats-item-override-beats-the-task
+
+An agent task's model, escalate model and effort SHALL come from its node's
+per-item override when one is set. Otherwise they SHALL come from the work
+item's own item-wide override, and only then from the task's own binding and
+the defaults beneath it.
+enforced-by: tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[model], tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[effort], tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[escalate_model]
+origin: src/kraft/executor/dispatch.py §_dispatch_task -- the node override's model/effort keys are merged over the item's `agent_overrides` and handed to `adapters/agent.py` §resolve_agent_task as the one item override, which beats the task's binding, the repository's `models:` and the profile's `defaults:` (Kraft-df4tc, Kraft-a7ers).
+
 ## REQ unavailable-selected-harness-needs-human
 
 When a selected harness profile is unavailable at runtime, the task SHALL stop
@@ -480,6 +510,37 @@ Before applying a skip, the system SHALL stop active work only within the
 selected task, step, or node. Skipping a task SHALL NOT skip its sibling
 tasks; an operator MAY skip the step when they intend to skip the group.
 enforced-by: tests/executor/test_skip_scopes.py::test_skip_task_does_not_skip_sibling, tests/api/test_skip.py::test_skipping_a_task_stops_only_its_own_session, tests/store/test_forks.py::test_the_sessions_under_a_path_stop_at_its_separator
+
+## REQ read-only-step-or-node-is-verified
+
+A step or execution node MAY declare `read_only: true`. The system SHALL
+record the worktree of every repository in the checkout (HEAD, status without
+ignored files, and a hash of the diff against HEAD) before the step's tasks, or
+the node's own steps, run and SHALL compare after they settle. Any change SHALL
+stop the work item for a human, naming the changed files, and SHALL NOT count
+as a task failure that recovery or a fix loop spends on.
+enforced-by: tests/executor/test_read_only.py::test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it, tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[untracked], tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[ignored], tests/executor/test_read_only.py::test_a_step_that_is_not_read_only_is_not_checked, tests/executor/test_read_only.py::test_a_read_only_node_is_checked_around_all_of_its_steps, tests/executor/test_read_only.py::test_a_read_only_step_over_workspace_members_names_the_member_file, tests/executor/test_read_only.py::test_a_sandboxed_read_only_step_that_plants_a_repository_is_not_read_by_host_git
+origin: src/kraft/executor/read_only.py (Kraft-q2zvw)
+
+## REQ read-only-is-refused-on-a-task
+
+A task SHALL NOT declare `read_only`. The refusal SHALL point to the step:
+tasks in a step share one worktree, so a task-level check would fail on a
+sibling's writes.
+enforced-by: tests/executor/test_read_only.py::test_a_task_level_read_only_is_refused_pointing_at_the_step
+
+## REQ read-only-is-refused-with-a-fix-loop
+
+An execution node that declares a `fix_loop` SHALL NOT be `read_only`, and no
+step inside a recovery plan or a fix loop MAY be `read_only`: both write by
+design.
+enforced-by: tests/executor/test_read_only.py::test_a_node_with_a_fix_loop_cannot_be_read_only, tests/executor/test_read_only.py::test_a_recovery_or_fix_loop_step_cannot_be_read_only[on_failure], tests/executor/test_read_only.py::test_a_recovery_or_fix_loop_step_cannot_be_read_only[fix_loop]
+
+## REQ on-failure-runs-outside-the-read-only-check
+
+An `on_failure` handler SHALL run outside a read_only step's check. The retry
+of the step's tasks that follows a recovery SHALL be checked again.
+enforced-by: tests/executor/test_read_only.py::test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_inside_it
 
 ## REQ manual-completion-is-an-explicit-work-item-terminal-action
 

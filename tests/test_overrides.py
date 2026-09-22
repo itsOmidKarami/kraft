@@ -40,3 +40,11 @@ def test_node_override_schema_rejects_explicit_invalid_bounds():
 
 def test_node_override_accepts_explicit_nulls_for_the_model_fields():
     assert overrides.validate_node_override_fields({"model": None, "effort": "high"}) == []
+
+
+def test_node_override_takes_an_extra_prompt_string_and_nothing_else():
+    """Kraft-a7ers."""
+    assert overrides.validate_node_override_fields({"extra_prompt": "Mind the migration."}) == []
+    assert overrides.validate_node_override_fields({"extra_prompt": 3}) == [
+        "'extra_prompt' must be a string or null"
+    ]

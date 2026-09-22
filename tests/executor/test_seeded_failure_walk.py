@@ -116,7 +116,7 @@ async def test_the_judge_launches_on_its_own_runtime_not_the_fixers(failed_walk)
     repairs = [a for a in launches if prompt(a).startswith(f"The checks in node {NODE} failed")]
     assert judges and repairs
     assert {(_option(a, "--model"), _option(a, "--effort")) for a in judges} == {("sonnet", "high")}
-    assert {_option(a, "--model") for a in repairs} == {"gpt-5.6-terra"}
+    assert {_option(a, "--model") for a in repairs} == {"sonnet"}
 
 
 async def test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer(
