@@ -133,7 +133,9 @@ A **task** is one unit of execution, of one of four kinds:
   the item's worktree on a [harness profile](harnesses.md) (`harness:
   codex`), with its own `prompt`, and optionally one `skill`, the
   `steering` profiles it reads, the document it `produces`, and the `inputs`
-  Kraft hands it.
+  Kraft hands it. Its model comes from an [agent profile](harnesses.md#agent-profiles)
+  (`profile: strong`, a named tier spelled per provider) or from its own
+  `model:`/`effort:`, never both.
 - **`subprocess`** (`src/kraft/adapters/subprocess.py`) — runs a literal
   `command`.
 - **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself, named by a
