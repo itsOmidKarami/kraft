@@ -195,6 +195,23 @@ describe("Settings · repos (5a)", () => {
     expect(screen.getByText("a")).toBeInTheDocument();
   });
 
+  it("reads a repo with no `enabled` key at all as enabled (Ruling 212)", async () => {
+    // An absent `enabled` -- the shape `model_dump_repo` writes for an entry
+    // that never set one -- must read as on, not as the falsy default a plain
+    // `r.enabled` check would give it.
+    const noKey: Partial<import("../../types").Repo> = repo({ path: "/ws", name: "ws" });
+    delete noKey.enabled;
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [noKey as import("../../types").Repo],
+    });
+    renderAt("/settings/repos");
+    expect(await screen.findByText("ws")).toBeInTheDocument();
+    expect(screen.queryByText(/Detected/)).toBeNull();
+    const row = screen.getByText("ws").closest("[data-repo]")!;
+    expect(within(row as HTMLElement).getByRole("switch")).toBeChecked();
+    expect(within(row as HTMLElement).getByText("enabled")).toBeInTheDocument();
+  });
+
   it("keeps a disabled but managed repo in the main list", async () => {
     // "a human turned this off" is a decision, and must not read as noise
     vi.spyOn(api, "getRepos").mockResolvedValue({

@@ -394,6 +394,23 @@ describe("IntakeModal", () => {
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
+  it("offers a member whose repository never set an `enabled` key at all (Ruling 212)", async () => {
+    const member: Record<string, unknown> = {
+      ...REPO_A,
+      id: "lib-a",
+      path: "/a/libs/a",
+      name: "libs-a",
+    };
+    delete member.enabled;
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [{ ...REPO_A, id: "a" }, member] as unknown as (typeof REPO_A)[],
+      workspaces: { ws: workspace({ "lib-a": "libs/a" }) },
+    });
+    renderModal();
+    await selectRepo();
+    expect(await screen.findByRole("button", { name: /cross-repo/ })).toBeInTheDocument();
+  });
+
   // Both defaults: a fixture of only one lets a hardcoded default of the
   // same value pass (Kraft-3f4kb).
   it.each(["bump", "ignore"] as const)("sends the workspace with its picked members and the workspace's root pointer policy by default: %s", async (pointer) => {

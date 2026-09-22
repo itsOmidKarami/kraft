@@ -524,7 +524,7 @@ def _forge_check(repo: config.RepoEntry) -> dict:
 
 
 def _label(repo: config.RepoEntry) -> str:
-    return getattr(repo, "name", None) or repo.path
+    return repo.name or repo.path
 
 
 async def _repo_checks() -> list[dict]:

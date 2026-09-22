@@ -171,6 +171,11 @@ class RepoEntry(BaseModel):
     #: below the list). Optional: only a workspace's root and members need
     #: one, and `kraft repo connect` writes it for them.
     id: Annotated[str, Field(pattern=_PROFILE_ID)] | None = None
+    #: A display name; None falls back to `path` wherever this entry is shown.
+    name: str | None = None
+    #: Which node-8 chain a new item against this repo resolves, when the item
+    #: doesn't say. None falls back to `"default"`.
+    default_chain_template: str | None = None
     forge: str | None = None
     project: str | None = None
     # True, not False: every entry that predates this field was connected by a
@@ -227,6 +232,9 @@ class RepoEntry(BaseModel):
     policy: TemplatePolicyOverride | None = None
     #: The automated reviewer `mr.automated_review` waits for (Ruling 171).
     automated_review: AutomatedReview | None = None
+    #: An absent key is enabled (Ruling 212): every existing entry that
+    #: predates this field connected a repo a human meant to run against.
+    enabled: bool = True
 
     @model_validator(mode="before")
     @classmethod
@@ -369,11 +377,25 @@ class RepoEntry(BaseModel):
             block["sandbox"] = self.sandbox
         return TemplatePolicyOverride.model_validate(block) if block else None
 
+    #: `enabled`, `name` and `default_chain_template` carry a typed default
+    #: so every reader can use the attribute, but an entry that never set one
+    #: must not have it reappear at its default the next time this entry is
+    #: written out (a save, or `GET /repos`) -- an absent `enabled` means
+    #: enabled (Ruling 212), not "enabled, and now written down as such".
+    _DEFAULTED_ON_ABSENCE: ClassVar[tuple[str, ...]] = (
+        "enabled",
+        "name",
+        "default_chain_template",
+    )
 
-#: Keys a `repos.yaml` entry carries that `RepoEntry` does not type but Kraft
-#: itself writes on connect and reads elsewhere (`api/routes/repos.py`,
-#: `intake.py`, `cli/repo.py`). Every other untyped key is unrecognised.
-_UNTYPED_KEYS = frozenset({"name", "enabled", "default_chain_template"})
+    def model_dump_repo(self, **kwargs: Any) -> dict:
+        """`model_dump`, keeping a `_DEFAULTED_ON_ABSENCE` field absent when
+        this entry never set it, rather than filling in its default."""
+        data = self.model_dump(**kwargs)
+        for key in self._DEFAULTED_ON_ABSENCE:
+            if key not in self.model_fields_set:
+                data.pop(key, None)
+        return data
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -390,15 +412,13 @@ def unrecognised_repo_keys(entry: dict) -> list[str]:
     """The keys of one `repos.yaml` entry that nothing in Kraft reads
     (Kraft-4hn34). The loader warns about each one and `kraft admin doctor`
     fails on them; one definition serves both."""
-    known = set(RepoEntry.model_fields) | _UNTYPED_KEYS
+    known = set(RepoEntry.model_fields)
     return sorted(k for k in entry if k not in known)
 
 
 def _near_miss(key: str) -> str | None:
     """The field `key` is most likely a typo of: within edit distance 2."""
-    distance, field = min(
-        (_edit_distance(key, f), f) for f in (*RepoEntry.model_fields, *_UNTYPED_KEYS)
-    )
+    distance, field = min((_edit_distance(key, f), f) for f in RepoEntry.model_fields)
     return field if distance <= 2 else None
 
 
