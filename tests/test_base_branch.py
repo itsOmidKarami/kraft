@@ -3,6 +3,7 @@ that branch, rebases onto it, and a base change is movement on it -- never on
 the repository's default branch, which is what every item used before."""
 
 import subprocess
+import sys
 
 import pytest
 from support import worktree as wtree
@@ -130,3 +131,66 @@ def test_the_ignore_rules_come_from_the_items_base_branch(origin):
     assert rules == "release-only/\n"
     with base_ignore_args(repo, "main") as args:
         assert args == []
+
+
+@pytest.mark.parametrize("door, stopped", [("retry", "needs_human"), ("resume", "paused")])
+def test_a_door_rebases_a_stopped_item_onto_its_base_branch(
+    client, origin, monkeypatch, door, stopped
+):
+    """`/retry` and `/resume` rebase the worktree before the walk: onto the
+    item's base branch, like every other rebase."""
+    from support.api import _force_node
+
+    from kraft import executor
+
+    repo, _other = origin
+    bases = []
+
+    async def refresh(*_args, base, **_kwargs):
+        bases.append(base)
+
+    async def walk(*_args, **_kwargs):
+        return "completed"
+
+    monkeypatch.setattr(kraft_builtins, "refresh_worktree_base", refresh)
+    monkeypatch.setattr(executor, door if door == "retry" else "run", walk)
+    r = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "autostart": False, "base_branch": "release"},
+    )
+    _force_node(r.json()["id"], "spec", stopped)
+
+    assert client.post(f"/api/work-items/{r.json()['id']}/{door}", json={}).status_code == 200
+    assert bases == ["release"]
+
+
+async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
+    item_on, run_dirs, repo, monkeypatch
+):
+    from kraft import events, store
+    from kraft.executor import gates
+
+    bases = []
+
+    async def refresh(*_args, base, **_kwargs):
+        bases.append(base)
+
+    async def walk(*_args, **_kwargs):
+        return "completed"
+
+    monkeypatch.setattr(kraft_builtins, "refresh_worktree_base", refresh)
+    # The module, not `kraft.executor.retry`, which the package rebinds to
+    # the function.
+    monkeypatch.setattr(sys.modules["kraft.executor.retry"], "retry", walk)
+    target = WorkItemTarget.for_repository("target", base_branch="release")
+    it = await item_on(_ONE_NODE, "n", target=target)
+    await it.database.write(lambda c: store.mark_needs_human(c, it.id, "n", "stuck", stuck=True))
+    cursor = it.events()[-1]["seq"]
+    request = {"node_id": "n", "key": None, "gate_key": None, "steer": None}
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
+    )
+
+    await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
+
+    assert bases == ["release"]
