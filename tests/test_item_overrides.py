@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import yaml
 from support.harness import isolated_bd, v1_seeded_chain
 
 from kraft import events, executor, policy, store
@@ -283,7 +284,7 @@ def test_intake_node_overrides_and_budget_round_trip(client, repo):
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
-            "node_overrides": {"plan": {"auto_escalate": True}},
+            "node_overrides": {"plan": {"auto_escalate_stuck": False}},
             "budget_usd": 7.5,
             "autostart": False,
         },
@@ -291,7 +292,7 @@ def test_intake_node_overrides_and_budget_round_trip(client, repo):
     assert r.status_code == 201, r.text
     wid = r.json()["id"]
     detail = client.get(f"/api/work-items/{wid}").json()
-    assert detail["node_overrides"] == {"plan": {"auto_escalate": True}}
+    assert detail["node_overrides"] == {"plan": {"auto_escalate_stuck": False}}
     assert detail["budget_cap"] == {"cap_usd": 7.5, "source": "item", "spent_usd": 0.0}
 
 
@@ -532,3 +533,52 @@ def test_patch_budget_usd_sets_and_clears_the_cap(client, repo):
     assert r2.status_code == 200, r2.text
     detail2 = client.get(f"/api/work-items/{wid}").json()
     assert detail2["budget_cap"] == {"cap_usd": None, "source": "item", "spent_usd": 0.0}
+
+
+def _reviewed_chain(tdir):
+    """A chain whose `approve` gate declares a reviewer and whose `hold` gate
+    declares none."""
+    work = {
+        "id": "work",
+        "kind": "exec",
+        "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
+    }
+    reviewer = {"id": "r", "kind": "agent", "harness": "codex_default", "prompt": "review"}
+    (tdir / "chains" / "reviewed.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "reviewed",
+                "nodes": [
+                    work,
+                    {"id": "approve", "kind": "gate", "auto_review": reviewer},
+                    {"id": "hold", "kind": "gate"},
+                ],
+            }
+        )
+    )
+
+
+@pytest.mark.api_client(edit_templates=_reviewed_chain)
+def test_intake_refuses_auto_escalate_on_a_gate_with_no_reviewer(client, repo):
+    """Review E #3: intake accepted `auto_escalate: true` on a gate declaring
+    no `auto_review`, returned 201, and nothing ever reviewed it. The same 422
+    `PATCH` gives, from the same check; arming a declared reviewer, or
+    suppressing one nobody declared, is still accepted."""
+
+    def file(overrides):
+        return client.post(
+            "/api/work-items",
+            json={
+                "title": "t",
+                "repo": str(repo),
+                "chain_template": "reviewed",
+                "autostart": False,
+                "node_overrides": overrides,
+            },
+        )
+
+    r = file({"hold": {"auto_escalate": True}})
+    assert r.status_code == 422, r.text
+    assert "node 'hold' declares no 'auto_review' task" in r.json()["detail"]
+    assert file({"approve": {"auto_escalate": True}}).status_code == 201
+    assert file({"hold": {"auto_escalate": False}}).status_code == 201

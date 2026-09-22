@@ -325,7 +325,12 @@ describe("IntakeModal", () => {
       {
         id: "default",
         gates: 1,
-        nodes: [{ id: "plan", tasks: [], gate_after: "plan_approval" }],
+        // Only a gate declaring a reviewer (`auto_escalate: true`) can be
+        // armed; the server refuses the switch on one that declares none.
+        nodes: [
+          { id: "plan", tasks: [], gate_after: "plan_approval", auto_escalate: true },
+          { id: "hold", tasks: [], gate_after: "hold", auto_escalate: false },
+        ],
       },
     ]);
     const create = vi

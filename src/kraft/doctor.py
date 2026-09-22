@@ -19,7 +19,13 @@ import yaml
 
 from kraft import auth, capabilities, client, config, harness
 from kraft.adapters import forge
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import (
+    BUNDLED,
+    RunDirs,
+    default_run_dir,
+    default_skills_dir,
+    default_templates_dir,
+)
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
@@ -114,6 +120,7 @@ def _config_checks() -> list[dict]:
                 "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
             ),
             _chain_templates_check(),
+            _check("chains", True, "skipped: no templates dir", skipped=True),
             _capabilities_check(),
             _token_check(),
         ]
@@ -124,6 +131,7 @@ def _config_checks() -> list[dict]:
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
     checks.append(_chain_templates_check())
+    checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     return checks
@@ -214,6 +222,18 @@ def _chain_templates_check() -> dict:
         f"{'; '.join(parts)} in {live_dir}, but shipped in this version's defaults — "
         "Settings → Chains, or edit those files",
     )
+
+
+def _chains_check(templates: Path) -> dict:
+    """Every chain of the live library that does not resolve, by id and with
+    the resolver's own message (Kraft-n1zp9) -- `admin templates lint`'s pass,
+    read from disk so it answers with no server running. A chain that does
+    not resolve otherwise only shows up as the next intake on it failing."""
+    skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
+    report = TemplateLibrary.lint_dir(templates, skills_dir=skills)
+    if report.valid:
+        return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
+    return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
 
 
 def _capabilities_check() -> dict:

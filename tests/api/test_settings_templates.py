@@ -216,3 +216,68 @@ def test_every_door_names_the_broken_file_rather_than_the_chain_id(client, repo,
     }
     assert named == {"kraft.intake", "kraft.triggers"}, caplog.text
     assert not any("unknown chain template" in r.getMessage() for r in caplog.records), caplog.text
+
+
+def _unresolvable_chain(tdir):
+    """Parses, so the library loads -- and does not resolve."""
+    (tdir / "chains" / "broken.yaml").write_text(
+        yaml.safe_dump({"id": "broken", "nodes": [{"id": "n", "extends": "no_such_node"}]})
+    )
+
+
+@pytest.mark.api_client(edit_templates=_unresolvable_chain)
+def test_a_chain_that_does_not_resolve_is_visible_everywhere(client, repo):
+    """Kraft-n1zp9: the library loads, so nothing used to say the one chain is
+    broken until an intake on it got a bare "unknown or invalid template".
+    `/health` degrades naming the chain, reload reports it, intake on it carries
+    the resolver's own message -- and every other chain still runs."""
+    health = client.get("/api/health").json()
+    assert health["status"] == "degraded"
+    assert "no_such_node" in health["invalid_templates"]["chain broken"]
+
+    reload = client.post("/api/templates/reload").json()
+    assert "no_such_node" in reload["invalid_templates"]["chain broken"]
+    assert "broken" not in reload["valid"] and "default" in reload["valid"]
+
+    r = client.post(
+        "/api/work-items", json={"title": "t", "repo": str(repo), "chain_template": "broken"}
+    )
+    assert r.status_code == 422, r.text
+    assert "no_such_node" in r.json()["detail"]
+
+    ok = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    )
+    assert ok.status_code == 201, ok.text
+
+
+def test_reload_notices_a_chain_that_stopped_resolving(client, templates_dir):
+    assert client.get("/api/health").json()["invalid_templates"] == {}
+    _unresolvable_chain(templates_dir)
+    assert "chain broken" in client.post("/api/templates/reload").json()["invalid_templates"]
+    assert client.get("/api/health").json()["status"] == "degraded"
+
+
+def _capped_chain(tdir):
+    """Resolves under the default policy; past a `maxima: {max_attempts: 2}`."""
+    sub = {"kind": "subprocess", "command": "true"}
+    node = {
+        "id": "n",
+        "kind": "exec",
+        "tasks": [{"id": "t", **sub}],
+        "fix_loop": {"tasks": [{"id": "f", **sub}], "max_attempts": 5},
+    }
+    (tdir / "chains" / "capped.yaml").write_text(yaml.safe_dump({"id": "capped", "nodes": [node]}))
+
+
+@pytest.mark.api_client(edit_templates=_capped_chain)
+def test_a_policy_save_that_strands_a_chain_degrades_health(client):
+    """A chain past a `maxima:` ceiling is one of lint's issues, so a
+    `policy.yaml` save that lowers the ceiling re-lints what is loaded."""
+    assert client.get("/api/health").json()["invalid_templates"] == {}
+    body = client.get("/api/policy").json()
+    body["maxima"] = {"max_attempts": 2}
+    assert client.put("/api/policy", json=body).status_code == 200
+    invalid = client.get("/api/health").json()["invalid_templates"]
+    assert "max_attempts" in invalid["chain capped"]

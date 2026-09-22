@@ -1,9 +1,8 @@
 """Which automated reviewer a repository expects (Ruling 171).
 
-Its own module because both readers of a repository entry need it -- the typed
-V1 `Repository` (`templates.environment`) and the `repos.yaml` entry the daemon
-reads today (`config.RepoEntry`) -- and `kraft.templates` imports `kraft.config`,
-so neither can own it without an import cycle.
+Read on a `repos.yaml` entry (`config.RepoEntry`) and by the forge probes
+that wait on it; its own module so the forge adapters need not import the
+config loader to name the type.
 """
 
 from __future__ import annotations

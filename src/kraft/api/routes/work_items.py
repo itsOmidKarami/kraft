@@ -220,12 +220,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    for node_id, fields in body.node_overrides.items():
-        if node_id not in node_ids:
-            raise HTTPException(422, f"unknown node id {node_id!r}")
-        field_errs = validate_node_override_fields(fields)
-        if field_errs:
-            raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+    _check_node_overrides(body.node_overrides, node_ids, {n.id: n.auto_review for n in chain.nodes})
     try:
         wid = await executor.intake(
             st.db,
@@ -409,6 +404,40 @@ class WorkItemPatch(BaseModel):
     budget_usd: float | None = None
 
 
+def _check_node_overrides(
+    overrides: dict[str, dict], node_ids: set[str], reviewers: dict[str, object] | None
+) -> None:
+    """422 on an override naming no node of the chain, an unknown field, or an
+    `auto_escalate: true` on a gate declaring no `auto_review`. One check for
+    intake and `PATCH`, so the two doors cannot answer differently (review E
+    #3). `reviewers` maps node id to its declared reviewer; `None` (a legacy
+    row, with no typed chain) skips that last check.
+
+    Said in the error, because that is what the caller reads. The override
+    *permits or suppresses* a reviewing task the chain declares; it does not
+    name one (`store.effective_nodes`). Accepting `auto_escalate: true` on a
+    gate with no `auto_review` would persist a switch, answer 2xx, and change
+    nothing -- the shape a human reads as "I turned it on".
+    """
+    for node_id, fields in overrides.items():
+        if node_id not in node_ids:
+            raise HTTPException(422, f"unknown node id {node_id!r}")
+        field_errs = validate_node_override_fields(fields)
+        if field_errs:
+            raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        if (
+            reviewers is not None
+            and fields.get("auto_escalate") is True
+            and reviewers.get(node_id) is None
+        ):
+            raise HTTPException(
+                422,
+                f"node {node_id!r} declares no 'auto_review' task, so agent gate review "
+                f"cannot be switched on for it: an override permits or suppresses the "
+                f"reviewer its chain declares, it cannot supply one",
+            )
+
+
 def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     """422 on an unknown node id or field, 409 on a node that has started
     (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
@@ -425,30 +454,10 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
         return
 
+    _check_node_overrides(patch, node_ids, reviewers)
+
     def check(c):
-        for node_id, fields in patch.items():
-            if node_id not in node_ids:
-                raise HTTPException(422, f"unknown node id {node_id!r}")
-            field_errs = validate_node_override_fields(fields)
-            if field_errs:
-                raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
-            # Said in the error, because that is what this caller reads. The
-            # override *permits or suppresses* a reviewing task the chain
-            # declares; it does not name one (`store.effective_nodes`). Accepting
-            # `auto_escalate: true` on a gate with no `auto_review` would persist
-            # a switch, return 200, and change nothing -- the shape a human reads
-            # as "I turned it on".
-            if (
-                reviewers is not None
-                and fields.get("auto_escalate") is True
-                and reviewers.get(node_id) is None
-            ):
-                raise HTTPException(
-                    422,
-                    f"node {node_id!r} declares no 'auto_review' task, so agent gate review "
-                    f"cannot be switched on for it: an override permits or suppresses the "
-                    f"reviewer its chain declares, it cannot supply one",
-                )
+        for node_id in patch:
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 

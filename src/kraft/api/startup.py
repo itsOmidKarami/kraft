@@ -160,6 +160,7 @@ async def lifespan(app: FastAPI):
     app.state.invalid_library = invalid_library
     app.state.policy = policy_obj
     app.state.instance_policy = instance_policy
+    deps.lint_loaded(app.state)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
     app.state.access = access

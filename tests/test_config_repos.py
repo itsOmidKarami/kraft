@@ -496,3 +496,22 @@ def test_save_repos_keeps_the_workspaces_section(tmp_path):
     path = _write(tmp_path, _WS_REPOS, workspaces)
     config.save_repos(path, config.load_repos(path))
     assert yaml.safe_load(path.read_text())["workspaces"] == workspaces
+
+
+def test_a_top_level_repositories_key_fails_loudly(tmp_path):
+    """Kraft-iep21 (Ruling 177): `repositories:` is not read, and a file keyed
+    that way used to load 0 repositories without a word -- then blame a
+    workspace for naming a repository that was right there."""
+    path = tmp_path / "repos.yaml"
+    path.write_text("repositories:\n  api: { path: /r }\n")
+    with pytest.raises(config.ConfigError, match="did you mean 'repos:'"):
+        config.load_repos(path)
+    with pytest.raises(config.ConfigError, match="did you mean 'repos:'"):
+        config.load_workspaces(path)
+
+
+def test_the_seeded_repos_yaml_connects_nothing():
+    """Kraft-tsh75: a fresh install starts with no repository, not a phantom
+    smoke-test one at a path that does not exist on the machine."""
+    seeded = Path(__file__).resolve().parents[1] / "templates" / "repos.yaml"
+    assert config.load_repos(seeded) == []

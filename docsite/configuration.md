@@ -116,9 +116,13 @@ defaults:
 maxima:
   timeout_minutes: 180
   token_budget: 2000000
-  allowed_tools: [git, shell, editor]
   allowed_harnesses: [codex_default, claude_review]
 ```
+
+The example sets no `maxima.allowed_tools`, on purpose: a safety field set
+only in `maxima` binds every task, and codex and gemini cannot enforce a tool
+list, so they refuse to launch under one — every `codex_default` task on the
+shipped chain would stop.
 
 | Key | Means |
 |---|---|

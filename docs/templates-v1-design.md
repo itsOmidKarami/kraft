@@ -85,42 +85,45 @@ fragments or result-parser definitions.
 
 ## Repositories, workspaces, and areas
 
-`repositories` names real Git repositories. Only a repository can own a forge
-merge request. `workspaces` describe a virtual monorepo made from a root
-repository and mounted child repositories. `areas` are path-scoped execution
-contexts inside one real repository; they are never forge targets.
+`repos` lists the real Git repositories, one entry each, found by `path`; an
+entry that a workspace references also carries an `id`. Only a repository can
+own a forge merge request. `workspaces` describe a virtual monorepo made from a
+root repository and mounted child repositories, naming each by that `id`.
+`areas` are path-scoped execution contexts inside one real repository; they are
+never forge targets. A top-level `repositories:` key is refused rather than
+read: the list is `repos:`.
 
 ```yaml
 # repos.yaml
-repositories:
-  product_root:
+repos:
+  - id: product_root
     path: /work/product
     enabled: true
-    default_chain: default
-    forge: { kind: github, project: acme/product }
+    default_chain_template: default
+    forge: github
+    project: acme/product
 
-  api:
+  - id: api
     path: /work/product/services/api
     enabled: true
-    forge: { kind: github, project: acme/api }
-    worktree:
-      setup: just setup
-      local_files: [.env.test]
-      environment:
-        set: { CI: "1" }
-        pass_through: [NPM_TOKEN]
-    verification:
-      test_scopes:
-        - paths: [src/**, tests/**]
-          command: just test
+    forge: github
+    project: acme/api
+    setup_command: just setup
+    local_files: [.env.test]
+    env: { CI: "1" }
+    env_passthrough: [NPM_TOKEN]
+    test_scopes:
+      - paths: [src/**, tests/**]
+        command: just test
     steering: [project-standards]
     policy:
       allowed_harnesses: [codex_default, claude_review]
 
-  platform:
+  - id: platform
     path: /work/platform
     enabled: true
-    forge: { kind: github, project: acme/platform }
+    forge: github
+    project: acme/platform
     areas:
       python_api:
         paths: [services/api/**]
