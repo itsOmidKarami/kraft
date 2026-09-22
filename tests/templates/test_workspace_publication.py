@@ -674,3 +674,43 @@ async def test_blocked_child_merge_leaves_the_root_unchanged(
     assert fake.order == landed
     assert _git_out(origin, "rev-parse", "main") == before
     assert _repos(database, row)["root"] != "merged"
+
+
+@pytest.mark.parametrize(
+    ("pointer", "root_source", "root_denies_push"),
+    [("ignore", True, False), ("bump", False, True)],
+    ids=["root", "fallback-pointer"],
+)
+async def test_a_restart_mid_the_root_merge_asks_the_forge_to_merge_it_once(
+    database, run_dirs, tmp_path, monkeypatch, pointer, root_source, root_denies_push
+):
+    """Kraft-l98h6, for the root's own merge request and for a fallback
+    pointer merge request: a restart after the root's merge was asked for
+    reads the queued merge off the forge. Nothing asks again, and nothing
+    readies or pushes the root again either."""
+    row, worktree, _ = await _publishable(
+        database,
+        run_dirs,
+        tmp_path,
+        pointer=pointer,
+        root_source=root_source,
+        root_denies_push=root_denies_push,
+    )
+    root = row["id"]
+    fake = _LandingForge(merge_delay=3)
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+    for _ in range(5):  # the member lands, then the root is asked for
+        assert (
+            await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "waiting"
+        )
+        if ("merge", root) in fake.order:
+            break
+    await database.write(lambda c: events.append(c, root, "work_item_retried", {}))
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "waiting"
+
+    assert fake.order.count(("merge", root)) == 1 and fake.order[-1] == ("merge", root)
+    for _ in range(5):
+        if await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done":
+            break
+    assert fake.order.count(("merge", root)) == 1 and _repos(database, row)["root"] == "merged"
