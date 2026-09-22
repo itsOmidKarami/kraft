@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
 
 from client.test_read import run_with_app
 from kraft import client
@@ -38,7 +38,7 @@ def wired(tmp_path, monkeypatch):
 
 
 def test_create_work_item_never_starts_it(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("from an agent", repo=str(repo))
@@ -52,7 +52,7 @@ def test_create_work_item_never_starts_it(wired, tmp_path):
 
 
 def test_create_work_item_sends_the_description(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item(
@@ -64,7 +64,7 @@ def test_create_work_item_sends_the_description(wired, tmp_path):
 
 
 def test_create_work_item_without_a_description_stores_none(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("short label", repo=str(repo))
@@ -97,7 +97,7 @@ def test_ensure_repo_registers_a_repo_kraft_has_not_seen(wired, tmp_path):
 
 def test_ensure_repo_is_idempotent(wired, tmp_path):
     """A 409 from POST /repos means 'already connected', which is the goal state."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         await client.ensure_repo(str(repo))

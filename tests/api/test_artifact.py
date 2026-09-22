@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from support.harness import fake_templates_dir, make_repo, v1_named_chain
+from support.harness import connected_repo, fake_templates_dir, v1_named_chain
 
 from kraft import api
 from kraft.api.routes import board
@@ -81,7 +81,7 @@ def _await_gate(client, wid, gate, timeout=60):
 
 @pytest.fixture
 def item_at_spec_gate(client, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"repo": str(repo), "title": "add a flag", "chain_template": "spec-only"},

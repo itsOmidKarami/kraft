@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from support.harness import e2e_templates_dir, isolated_bd, make_repo
+from support.harness import connect_repo, e2e_templates_dir, isolated_bd, make_repo
 from support.server import running_server
 
 pytestmark = pytest.mark.e2e("claude", "bd")
@@ -27,7 +27,7 @@ def test_e2e_happy_path(tmp_path):
     run_dir = tmp_path / "run"
     templates = e2e_templates_dir(tmp_path)
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
+    repo = connect_repo(make_repo(tmp_path), templates)
     claude_md = repo / "CLAUDE.md"
     claude_md_before = claude_md.read_text() if claude_md.exists() else None
 

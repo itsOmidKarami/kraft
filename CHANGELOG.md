@@ -134,6 +134,9 @@ agent, decides whether to skip, abandon, or give more room.
   `kraft admin reload`) fires without a restart.
 - `kraft admin doctor` fails when the embeddings extra is installed but its
   model will not load or encode; `/health` reports the last such failure.
+- Filing a work item (`POST /work-items`, `POST /triggers`, `kraft item create`,
+  MCP `create_work_item`) against a repo that isn't connected is refused with a
+  422 that names `kraft repo connect`, instead of accepting any directory.
 
 ### Removed
 

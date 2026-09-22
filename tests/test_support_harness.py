@@ -82,6 +82,7 @@ def test_a_bd_call_from_a_server_child_shows_in_the_test_result(tmp_path):
 
     repo = make_repo(tmp_path)
     templates = harness.fake_templates_dir(tmp_path, "true")
+    harness.connect_repo(repo, templates)
     with pytest.warns(BdStubRefused, match="create --json --title filed from a child"):
         with running_server(
             run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=isolated_bd(tmp_path)

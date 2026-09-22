@@ -203,6 +203,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
@@ -389,6 +390,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)

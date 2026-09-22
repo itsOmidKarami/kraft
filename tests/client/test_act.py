@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import connected_repo, fake_templates_dir, isolated_bd
 
 from client.test_read import run_with_app
 from kraft import client
@@ -40,7 +40,7 @@ def wired(tmp_path, monkeypatch):
 
 def test_resume_starts_a_paused_item(wired, tmp_path):
     """A created-paused item is the phase 2 output; resume is how it begins."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("drive me", repo=str(repo))
@@ -52,7 +52,7 @@ def test_resume_starts_a_paused_item(wired, tmp_path):
 
 
 def test_pause_refuses_an_item_that_is_not_running(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("already paused", repo=str(repo))
@@ -63,7 +63,7 @@ def test_pause_refuses_an_item_that_is_not_running(wired, tmp_path):
 
 
 def test_approving_a_gate_that_is_not_pending_is_refused(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("no gate yet", repo=str(repo))
@@ -74,7 +74,7 @@ def test_approving_a_gate_that_is_not_pending_is_refused(wired, tmp_path):
 
 
 def test_an_unknown_gate_name_is_refused(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("bad gate", repo=str(repo))
@@ -86,7 +86,7 @@ def test_an_unknown_gate_name_is_refused(wired, tmp_path):
 
 def test_rejecting_without_a_note_is_refused_before_the_request(wired, tmp_path):
     """A rejection with no reason strands whoever picks the work up next."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("no note", repo=str(repo))
@@ -98,7 +98,7 @@ def test_rejecting_without_a_note_is_refused_before_the_request(wired, tmp_path)
 
 def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
     """Naming the gate is the caller repeating what the item already knows."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("default gate", repo=str(repo))
@@ -123,7 +123,7 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
 def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, monkeypatch, call):
     """The guard has to be wired into all four, not just the one that was
     written first — a single unguarded act function is the whole hole."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("mine", repo=str(repo))
@@ -138,7 +138,7 @@ def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path)
     """A 409 proves the route resolved: a wrong URL would be a 404. `/retry` is
     the only door back onto a `needs_human` stop — resume wants `paused`, pause
     wants `running`, approve/reject want a pending gate (Kraft-5lpl)."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("not stopped", repo=str(repo))
@@ -149,7 +149,7 @@ def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path)
 
 
 def test_skip_on_an_item_that_has_not_started_is_a_readable_409(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("not started", repo=str(repo))
@@ -160,7 +160,7 @@ def test_skip_on_an_item_that_has_not_started_is_a_readable_409(wired, tmp_path)
 
 
 def test_escalate_refuses_an_item_that_is_not_needs_human(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("not stuck", repo=str(repo))
@@ -173,7 +173,7 @@ def test_escalate_refuses_an_item_that_is_not_needs_human(wired, tmp_path):
 def test_escalate_on_a_needs_human_item_schedules_a_turn(wired, tmp_path):
     from kraft import store
 
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         created = await client.create_work_item("stuck", repo=str(repo))

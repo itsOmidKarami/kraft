@@ -84,6 +84,30 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
     return dest
 
 
+def connect_repo(repo: Path | str, templates_dir: Path | None = None, **fields) -> Path:
+    """Connect `repo` to the instance under test: both intake doors file only
+    against a connected repo (Kraft-ta8nv). Appended to its `repos.yaml`
+    (`templates_dir`, else `$KRAFT_TEMPLATES_DIR`, which every in-process app
+    fixture sets) with the path
+    resolved, as `POST /repos` stores git's `--show-toplevel`. Intake reads the
+    file per request, so this works before or after the app starts.
+
+    `setup_command: ""` unless `fields` say otherwise: what dispatch did with
+    no entry at all, so connecting changes nothing but intake's answer."""
+    repos_yaml = Path(templates_dir or os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    data = (yaml.safe_load(repos_yaml.read_text()) if repos_yaml.exists() else None) or {}
+    data.setdefault("repos", []).append(
+        {"path": str(Path(repo).resolve()), "setup_command": "", **fields}
+    )
+    repos_yaml.write_text(yaml.safe_dump(data))
+    return Path(repo)
+
+
+def connected_repo(tmp_path: Path, name: str = "sample") -> Path:
+    """`make_repo`, connected (`connect_repo`)."""
+    return connect_repo(make_repo(tmp_path, name))
+
+
 def make_repo_with_submodule(
     tmp_path: Path, *, submodule_path: str = "repos/pkg"
 ) -> tuple[Path, Path]:
