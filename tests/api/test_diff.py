@@ -13,8 +13,9 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import make_repo, v1_chain, v1_item
 
+from kraft import store
 from kraft.paths import RunDirs
 
 #: No default repo entry for an unconnected repo, as before this used the shared client.
@@ -253,3 +254,52 @@ def test_diff_degrades_gracefully_when_base_ref_is_null_and_worktree_is_gone(
 
 def test_gate_artifact_is_none_without_a_pending_gate(client, seeded_item):
     assert client.get(f"/api/work-items/{seeded_item}").json()["gate_artifact"] is None
+
+
+# -- Kraft-69rwp (a) at the endpoint: no host git while a sandboxed session runs --
+
+
+@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
+def test_diff_waits_for_a_live_sandboxed_session(client, tmp_path, sandboxed):
+    """A sandboxed item with a session still running answers 409 naming the
+    wait, and never reads the worktree; unsandboxed, the same item's diff is
+    read. Kraft-pa1i8: `stops.refuse_live_sandboxed_session` at its call site."""
+    wid = "w-live"
+    st = client.app.state
+    worktree = make_repo(st.run_dirs.worktrees, name=wid)
+    _write(worktree / "calc.py", "edited\n")
+    policy = {"policy": {"sandbox": {"kind": "docker", "image": "img"}}} if sandboxed else {}
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    chain = v1_chain(
+        [{"id": "implementation", "kind": "exec", "tasks": [task], **policy}], repo=worktree
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=worktree, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    async def seed():
+        await v1_item(st.db, chain, repo=worktree, wid=wid, status="paused")
+        await st.db.write(lambda c: store.set_base_ref(c, wid, head))
+        await st.db.write(
+            lambda c: store.create_session(
+                c,
+                id="live",
+                work_item_id=wid,
+                node_id="implementation",
+                hook_point="implementation.main.t",
+                log_path=str(tmp_path / "live.log"),
+                result_path=str(tmp_path / "live.json"),
+            )
+        )
+        await st.db.write(lambda c: store.session_running(c, "live", 1, 0.0))
+
+    client.portal.call(seed)
+
+    r = client.get(f"/api/work-items/{wid}/diff")
+
+    if sandboxed:
+        assert r.status_code == 409
+        assert "the diff is available once work item w-live" in r.json()["detail"]
+    else:
+        assert r.status_code == 200, r.text
+        assert "calc.py" in r.json()["files"][0]["path"]
