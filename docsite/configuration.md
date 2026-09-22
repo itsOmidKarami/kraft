@@ -70,6 +70,9 @@ An `agent` task's keys:
 | `policy` | This task's own policy layer. |
 | `skippable` | `false` to refuse an operator's skip. |
 
+A task takes no `read_only`: set it on the step (or the node) instead, which
+checks all of its tasks together ([Concepts](concepts.md#node)).
+
 A recovery that concludes no repair can help reports `failed` with
 `"suggested_action": {"action": "skip" | "retry" | "abandon", "reason": "..."}`
 in its result file. The stop that follows carries it: `GET /api/work-items/{id}`

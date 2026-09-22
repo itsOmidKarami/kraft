@@ -92,6 +92,24 @@ behind. A node declares one key or the other, never both. Its other keys:
 | `on_base_changed` | What to re-run when this node's rebase moves the base: `restart_from` names an earlier node, and `on_conflict` the task that resolves a conflicting rebase. |
 | `policy` | This node's layer of the [policy](configuration.md#policyyaml-caps-budget-archiving) — safety only tightens, operational values stay within the administrator's maxima. |
 | `skippable` | `false` to refuse an operator's skip. |
+| `read_only` | `true` to have Kraft verify the node's own steps leave the worktree as they found it. See below. Refused on a node with a `fix_loop`. |
+
+**`read_only`** goes on a step or an exec node, never on a task: tasks in a
+step share one worktree, so a task-level check would fail on a sibling's
+writes, and a task that sets it is refused at load. A read_only step records
+each repository of the checkout (the root and every workspace member) before
+its first task launches — HEAD, `git status --porcelain=v1 -z` (ignored files
+stay out) and a hash of `git diff HEAD` — and reads them again after its last
+task exits; a read_only node does the same around all of its own steps. Any
+difference, an untracked file included and a commit included, stops the item
+for a person with a `read_only_violated` event and a stop reason naming the
+changed files. It is not a task failure: no recovery, fix loop or attempt is
+spent on it. Recovery and fix loops write by design, so they run outside the
+check (a recovery's retry of the step's tasks is checked again), and a step
+inside an `on_failure` or a `fix_loop` refuses `read_only`. On a sandboxed item
+Kraft runs no host git in a worktree that gained a repository it did not
+create; that repository is the reported change. It is opt-in: no shipped chain
+sets it. Setting it on both a node and its steps is allowed and redundant.
 
 A **gate** node names its `message`, the `artifact` it asks a person to decide
 on, and `reject_to` — the node a rejection re-enters with the reviewer's note.
