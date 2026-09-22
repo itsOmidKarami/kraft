@@ -281,3 +281,37 @@ def test_a_policy_save_that_strands_a_chain_degrades_health(client):
     assert client.put("/api/policy", json=body).status_code == 200
     invalid = client.get("/api/health").json()["invalid_templates"]
     assert "max_attempts" in invalid["chain capped"]
+
+
+#: A chain saved with a wait's timeout where Ruling 196 retired it.
+RETIRED_WAIT = """id: scratch
+nodes:
+  - id: feedback
+    kind: exec
+    tasks:
+      - {id: ci, kind: forge, target: mr.ci, wait: {timeout: 90m}}
+"""
+
+
+def test_a_chain_saved_with_a_retired_wait_timeout_is_refused_naming_its_replacement(
+    client, templates_dir
+):
+    """It still reads from a file already on disk (Ruling 196); a save that
+    writes one is refused, so no new file carries it."""
+    refused = client.put("/api/templates/scratch", json={"text": RETIRED_WAIT})
+
+    assert refused.status_code == 422
+    assert "nodes[0].tasks[0].wait.timeout is retired" in refused.json()["detail"]
+    assert "total_time_cap_minutes" in refused.json()["detail"]
+    assert not (templates_dir / "chains" / "scratch.yaml").exists()
+
+
+def test_a_policy_save_writes_a_retired_wait_maximum_under_its_new_name(client, templates_dir):
+    body = client.get("/api/policy").json()
+    body["maxima"] = {"wait_timeout_minutes": 600}
+
+    assert client.put("/api/policy", json=body).status_code == 200
+
+    saved = yaml.safe_load((templates_dir / "policy.yaml").read_text())["maxima"]
+    assert saved == {"total_time_cap_minutes": 600}
+    assert client.app.state.instance_policy.maxima.total_time_cap_minutes == 600

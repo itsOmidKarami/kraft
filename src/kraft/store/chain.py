@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import sqlite3
 
 from kraft import events
+from kraft.policy import RETIRED_WAIT_TIMEOUT
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
+
+logger = logging.getLogger(__name__)
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -209,10 +213,45 @@ def policy_override_of(row):
     from kraft.policy import FROZEN, WorkItemPolicy
 
     raw = row["policy_override"] if "policy_override" in row.keys() else None
+    if not raw:
+        return None
+    data = json.loads(raw)
+    if isinstance(data, dict) and data.get(RETIRED_WAIT_TIMEOUT) is not None:
+        data = _spread_retired_wait_timeout(row, data)
     # Read back leniently, like a snapshot (Kraft-9ct4q): an override stored
     # before tool names were checked must still load. The write doors refuse
     # a rule; a launch refuses one that is already stored.
-    return WorkItemPolicy.model_validate_json(raw, context=FROZEN) if raw else None
+    return WorkItemPolicy.model_validate(data, context=FROZEN)
+
+
+def _spread_retired_wait_timeout(row, data: dict) -> dict:
+    """An item-wide `wait_timeout_minutes` stored before Ruling 196 meant
+    "every wait this item runs": it becomes each wait task's own
+    `total_time_cap_minutes`, never a cap on the whole item. A path that
+    already sets one keeps it."""
+    from kraft.templates.models import MaterializedChain
+
+    logger.warning(
+        "%s: an item-wide %s is deprecated (Ruling 196); read as each wait task's "
+        "total_time_cap_minutes",
+        row["id"] if "id" in row.keys() else "a work item",
+        RETIRED_WAIT_TIMEOUT,
+    )
+    value = data[RETIRED_WAIT_TIMEOUT]
+    data = {k: v for k, v in data.items() if k != RETIRED_WAIT_TIMEOUT}
+    raw_chain = (row["run_chain"] if "run_chain" in row.keys() else None) or (
+        row["materialized_chain"] if "materialized_chain" in row.keys() else None
+    )
+    if not raw_chain:
+        return data
+    paths = dict(data.get("paths") or {})
+    for node in MaterializedChain.from_json(raw_chain).chain.nodes:
+        for task in node.tasks():
+            if getattr(task.task, "target", None) is not None and task.task.target.waits:
+                layer = dict(paths.get(task.path) or {})
+                layer.setdefault("total_time_cap_minutes", value)
+                paths[task.path] = layer
+    return {**data, "paths": paths}
 
 
 def set_policy_override(conn: sqlite3.Connection, work_item_id: str, override) -> None:

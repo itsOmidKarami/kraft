@@ -25,7 +25,7 @@ from kraft.templates.library import (
     TemplateLibrary,
     TemplateLibraryError,
 )
-from kraft.templates.models import ResolvedChain
+from kraft.templates.models import ResolvedChain, retired_keys
 from kraft.worker import steering as steering_mod
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
@@ -222,6 +222,12 @@ async def put_template(tid: str, body: ChainText, request: Request):
         raise HTTPException(422, "a chain file is a mapping")
     if chain.get("id", tid) != tid:
         raise HTTPException(422, f"the file declares id {chain['id']!r}, not {tid!r}")
+    if retired := retired_keys(chain):
+        raise HTTPException(
+            422,
+            f"{retired[0]} is retired (Ruling 196): a wait's timeout is its task's own "
+            "policy.total_time_cap_minutes",
+        )
     try:
         candidate, _ = library.with_chain(path, {**chain, "id": tid})
     except TemplateLibraryError as exc:
@@ -318,6 +324,13 @@ async def put_policy(body: PolicyBody, request: Request):
         else:
             data[key] = value
     data.setdefault("max_concurrent", body.max_concurrent)
+    # A file written before Ruling 196 is saved under the name that replaced
+    # its retired key, so a save never writes it back.
+    maxima = data.get("maxima")
+    if isinstance(maxima, dict) and policy_mod.RETIRED_WAIT_TIMEOUT in maxima:
+        value = maxima.pop(policy_mod.RETIRED_WAIT_TIMEOUT)
+        if value is not None:
+            maxima.setdefault("total_time_cap_minutes", value)
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

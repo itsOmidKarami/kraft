@@ -462,9 +462,9 @@ def test_serialization_is_deterministic():
 
 
 def test_the_stored_form_keeps_durations_in_their_authored_units():
-    """A `timeout: 90m` that came back as `PT1H30M` would not re-read: the
-    template duration grammar is whole s/m/h/d. Round-tripping through the
-    authored form is what makes the column re-readable."""
+    """A polling `max_interval: 5m` that came back as `PT5M` would not
+    re-read: the template duration grammar is whole s/m/h/d. Round-tripping
+    through the authored form is what makes the column re-readable."""
     stored = (
         TemplateLibrary.from_yaml_dir(SEEDED)
         .resolve_chain("default")
@@ -472,7 +472,7 @@ def test_the_stored_form_keeps_durations_in_their_authored_units():
         .to_json()
     )
 
-    assert '"90m"' in stored
+    assert '"5m"' in stored
     assert "PT" not in stored
 
 

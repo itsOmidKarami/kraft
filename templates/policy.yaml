@@ -2,10 +2,10 @@
 # Tune against real runs.
 #
 # External waits -- a pipeline, an automated review, an approval, a merge
-# landing -- are not loops and have no key here: each wait's timeout and
-# polling are its task's own `wait:` in library.yaml, bounded by
-# `maxima.wait_timeout_minutes` below. The old `ci_wait` key is gone with
-# the poller that read it.
+# landing -- are not loops and have no key here: each wait's timeout is its
+# task's own `policy: total_time_cap_minutes` in library.yaml (Ruling 196) and
+# its polling its `wait:`, bounded by `maxima.total_time_cap_minutes` below.
+# The old `ci_wait` key is gone with the poller that read it.
 #
 # Nothing else is named here on purpose (Ruling 57/88). A `loops:` key that
 # names no live loop is *silently* unused -- `Policy.cap_for` is
@@ -55,7 +55,7 @@ rate_limit_retries: 5
 
 # Seconds one forge CLI call (gh/glab/git) may run before it is killed and
 # reported as a forge error. Bounds a single call, not a wait (that is the
-# task's own `wait:`). Raise it on a slow forge. Read at startup.
+# task's own total_time_cap_minutes). Raise it on a slow forge. Read at startup.
 forge_cli_timeout_s: 120
 
 # Completed/abandoned items older than this get auto-archived (UI v2 · 03).
@@ -101,15 +101,28 @@ archive:
 #   max_attempts       a node's fix-loop attempts, and timeout_minutes its wall
 #   timeout_minutes    clock -- under the loop's own `max_attempts` and an
 #                      operator's per-item node override, over loops:/default:.
-#   wait_timeout_minutes  how long every external wait under a scope waits,
-#                      replacing its own `wait: timeout`. Under `maxima:`,
-#                      the longest any wait may be configured to wait; a
-#                      chain whose `wait: timeout` is longer is refused when
-#                      an item is filed, and a wait with no timeout of its own
-#                      gets 90 minutes or this, whichever is shorter.
+#   time_cap_minutes   a scope's running time: a task's one run, a step's or a
+#                      node's task runs since it started, the work item's
+#                      since it started. Paused, waiting, gate and
+#                      rate-limited time does not count. Hitting it stops the
+#                      running process and the item, for a human, naming the
+#                      scope; it is never a code failure (Rulings 194, 195).
+#   total_time_cap_minutes  the same scope's wall clock: running time plus
+#                      waits, gates and rate limits, less only a manual pause.
+#                      A task's total is its running time, except a wait's:
+#                      that is the wait's timeout (Ruling 196), and a wait with
+#                      none gets 90 minutes or the maximum, whichever is
+#                      shorter.
+#                      Both caps are set on any scope, and each caps its own:
+#                      a child's cannot exceed its parent's, and a layer that
+#                      tries is refused when the item is filed. So a default
+#                      here is every scope's ceiling -- one below the seeded
+#                      approval wait's 7 days (10080) refuses the default
+#                      chain.
 #
 # Last of all, a work item's own override (`kraft item create --policy`,
-# `kraft item set-policy`) binds that one item, within these maxima.
+# `kraft item set-policy`) binds that one item, within these maxima. A time cap
+# there only tightens: it cannot raise one the chain set.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install
@@ -121,7 +134,7 @@ archive:
 #   allowed_harnesses: [codex_default, claude_review]
 # maxima:
 #   timeout_minutes: 180
-#   wait_timeout_minutes: 10080   # a week: the seeded approval wait's 7d
+#   total_time_cap_minutes: 10080   # a week: the seeded approval wait's 7d
 #   token_budget: 2000000
 #   allowed_tools: [git, shell, editor]
 #   allowed_harnesses: [codex_default, claude_review]

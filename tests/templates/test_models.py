@@ -113,11 +113,12 @@ def test_builtin_task_runs_scopes_sequentially_unless_asked():
 
 def test_duration_rejects_zero():
     with pytest.raises(ValidationError, match="positive duration, not zero"):
-        tm.WaitPolicy.model_validate({"timeout": "0s"})
+        tm.PollingPolicy.model_validate({"initial_interval": "0s"})
 
 
 def test_duration_accepts_a_positive_amount():
-    assert tm.WaitPolicy.model_validate({"timeout": "30s"}).timeout.total_seconds() == 30
+    polling = tm.PollingPolicy.model_validate({"initial_interval": "30s"})
+    assert polling.initial_interval.total_seconds() == 30
 
 
 def test_polling_policy_rejects_initial_interval_above_max():

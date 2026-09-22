@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from pydantic import (
 from pydantic.dataclasses import dataclass as model
 
 from kraft.findings import SEVERITIES
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyError(ValueError):
@@ -449,7 +452,37 @@ _SAFETY_NUMERIC_FIELDS = ("token_budget",)
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
 #: `work-item-policy-may-exceed-default-ceilings-within-admin-maximum`).
-_OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts", "wait_timeout_minutes")
+_OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
+#: Per-scope time caps (Rulings 194-196): each scope that sets one caps its own
+#: elapsed time -- `time_cap_minutes` its running time, `total_time_cap_minutes`
+#: its wall clock less a manual pause (`kraft.caps`). A ratchet: a layer may
+#: only lower what it inherits, never raise it, and never past `maxima`.
+CAP_FIELDS = ("time_cap_minutes", "total_time_cap_minutes")
+#: Retired by Ruling 196: a wait's timeout is its task's own
+#: `total_time_cap_minutes`.
+RETIRED_WAIT_TIMEOUT = "wait_timeout_minutes"
+
+
+def _carry_retired(data: object, where: str, replacement: str) -> object:
+    """`data` with a retired `wait_timeout_minutes` read as `replacement`
+    (Ruling 196), warning that it is deprecated. A `None` one -- every snapshot
+    dumped one -- goes quietly."""
+    if not isinstance(data, dict) or RETIRED_WAIT_TIMEOUT not in data:
+        return data
+    data = dict(data)
+    value = data.pop(RETIRED_WAIT_TIMEOUT)
+    if value is not None:
+        logger.warning(
+            "%s.%s is deprecated (Ruling 196) and read as %s.%s; rename it",
+            where,
+            RETIRED_WAIT_TIMEOUT,
+            where,
+            replacement,
+        )
+        data.setdefault(replacement, value)
+    return data
+
+
 #: Same rule as `_OPERATIONAL_NUMERIC_FIELDS`, for a list-valued field: bounded
 #: by `maxima`, not by the current inherited value, so a `defaults:` entry
 #: narrower than `maxima:` doesn't permanently lower the real ceiling. The
@@ -520,6 +553,11 @@ class PolicyDefaultsInput(BaseModel):
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
+    #: The work item's own caps when no layer sets a tighter one. Under the
+    #: ratchet (Ruling 194) a default is every scope's ceiling, so one below a
+    #: seeded wait's own cap (the approval wait's 7 days) refuses that chain.
+    time_cap_minutes: PositiveInt | None = None
+    total_time_cap_minutes: PositiveInt | None = None
 
 
 class PolicyMaximaInput(BaseModel):
@@ -538,11 +576,19 @@ class PolicyMaximaInput(BaseModel):
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
-    #: The longest any external wait may be configured to wait
-    #: (`external-wait-has-configurable-timeout-and-polling`, Kraft-5p69g).
-    #: Separate from `timeout_minutes`, a fix loop's wall clock: the design
-    #: seeds a seven-day approval wait, which no fix-loop ceiling would admit.
-    wait_timeout_minutes: PositiveInt | None = None
+    #: The largest time cap any scope may set. `total_time_cap_minutes` is
+    #: also the longest any external wait may wait (Ruling 196: a wait's
+    #: timeout is its task's total cap), so it replaces the retired
+    #: `wait_timeout_minutes`; the design seeds a seven-day approval wait.
+    time_cap_minutes: PositiveInt | None = None
+    total_time_cap_minutes: PositiveInt | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_wait_timeout(cls, data: object) -> object:
+        """A `policy.yaml` or a snapshot written before Ruling 196 still reads:
+        its `wait_timeout_minutes` is now `total_time_cap_minutes`."""
+        return _carry_retired(data, "maxima", "total_time_cap_minutes")
 
 
 class InstancePolicyInput(BaseModel):
@@ -562,9 +608,7 @@ class InstancePolicyInput(BaseModel):
         escalation -- but `policy-has-defaults-and-administrator-maxima` calls
         maxima non-overridable, and a `defaults:` entry past one is an
         override in all but name. An unset maximum is no bound at all."""
-        for name in _OPERATIONAL_NUMERIC_FIELDS:
-            # `wait_timeout_minutes` has no `defaults:` entry: a wait with no
-            # timeout of its own already has one (`templates.models.DEFAULT_WAIT`).
+        for name in (*_OPERATIONAL_NUMERIC_FIELDS, *CAP_FIELDS):
             value, ceiling = getattr(self.defaults, name, None), getattr(self.maxima, name)
             if value is not None and ceiling is not None and value > ceiling:
                 raise ValueError(f"defaults.{name} {value} exceeds maxima.{name} {ceiling}")
@@ -611,10 +655,25 @@ class TaskPolicyOverride(BaseModel):
     #: Only ever accumulates down the layers.
     deny_tools: ToolNames | None = None
     sandbox: SandboxPolicy | None = None
-    #: How long every external wait under this scope waits, replacing the
-    #: wait's own `wait: timeout` (`ForgeTask.wait_bounds`). Operational:
-    #: bounded by `maxima.wait_timeout_minutes`, never by the inherited value.
-    wait_timeout_minutes: PositiveInt | None = None
+    #: This scope's running time: a task's one run, a step's or node's task
+    #: runs since it started, the work item's since it started (`kraft.caps`).
+    #: Paused, waiting, gate and rate-limited time never counts.
+    time_cap_minutes: PositiveInt | None = None
+    #: This scope's wall clock: its running time plus every wait, gate and
+    #: rate limit, less only a manual pause. For a task other than a wait that
+    #: is its running time; for a wait it is the wait's timeout (Ruling 196).
+    total_time_cap_minutes: PositiveInt | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_wait_timeout(cls, data: object) -> object:
+        """A template or a stored override written before Ruling 196 still
+        reads: a scope's `wait_timeout_minutes` becomes that scope's
+        `total_time_cap_minutes`. A work item's override refuses it on a write
+        and maps its item-wide value itself (`WorkItemPolicy`)."""
+        if issubclass(cls, WorkItemPolicy):
+            return data
+        return _carry_retired(data, "policy", "total_time_cap_minutes")
 
 
 class TemplatePolicyOverride(TaskPolicyOverride):
@@ -658,15 +717,18 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             sandbox=sandboxes[0] if sandboxes else None,
             **{
                 n: min(values) if (values := present(n)) else None
-                for n in ("token_budget", "timeout_minutes", "max_attempts", "wait_timeout_minutes")
+                for n in ("token_budget", "timeout_minutes", "max_attempts", *CAP_FIELDS)
             },
         )
 
 
 #: The safety fields an item layer meets rather than ratchets (Ruling 188):
 #: `deny_tools` already only accumulates and `sandbox` already locks, so those
-#: two go through `apply_template_override` unchanged.
-_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "token_budget")
+#: two go through `apply_template_override` unchanged. A time cap meets too: an
+#: item's cap tightens every scope under it that set a looser one, and an item
+#: cap above the one it lands on is refused where the item is filed
+#: (`ResolvedChain.check_scopes`), never met.
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "token_budget", *CAP_FIELDS)
 
 
 class WorkItemPolicy(TemplatePolicyOverride):
@@ -678,6 +740,42 @@ class WorkItemPolicy(TemplatePolicyOverride):
     scope the chain authored (`apply_to`, Ruling 188)."""
 
     paths: dict[StrictStr, TemplatePolicyOverride] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_wait_timeout_item(cls, data: object, info: ValidationInfo) -> object:
+        """`wait_timeout_minutes` is retired (Ruling 196). A write refuses it,
+        item-wide or on a path, naming what replaced it. A stored override
+        still reads: a path's value becomes that path's
+        `total_time_cap_minutes` (`TaskPolicyOverride`), and the item-wide one
+        -- which meant every wait -- is spread over the item's wait tasks by
+        `store.policy_override_of`, which knows the chain; one still here is
+        dropped with a warning."""
+        if not isinstance(data, dict):
+            return data
+        paths = data.get("paths") if isinstance(data.get("paths"), dict) else {}
+        where = [
+            f"policy.{RETIRED_WAIT_TIMEOUT}" if RETIRED_WAIT_TIMEOUT in data else None,
+            *(
+                f"policy.paths.{p}.{RETIRED_WAIT_TIMEOUT}"
+                for p, layer in paths.items()
+                if isinstance(layer, dict) and RETIRED_WAIT_TIMEOUT in layer
+            ),
+        ]
+        where = [w for w in where if w]
+        if not where:
+            return data
+        if not (info.context or {}).get("frozen"):
+            raise ValueError(
+                f"{where[0]} is retired (Ruling 196): a wait's timeout is its task's own "
+                "total_time_cap_minutes, so set that on the wait task's path"
+            )
+        if RETIRED_WAIT_TIMEOUT in data:
+            data = {k: v for k, v in data.items() if k != RETIRED_WAIT_TIMEOUT}
+            logger.warning(
+                "dropped an item-wide %s it had no chain to spread over", RETIRED_WAIT_TIMEOUT
+            )
+        return data
 
     def apply_to(self, policy: InstancePolicy, path: str) -> InstancePolicy:
         """`policy` -- a scope's, every authored layer already applied -- with
@@ -701,14 +799,12 @@ class WorkItemPolicy(TemplatePolicyOverride):
                         if t in layer.allowed_tools
                     ),
                 )
-            if layer.token_budget is not None:
-                budget = policy.token_budget
-                policy = dataclasses.replace(
-                    policy,
-                    token_budget=min(budget, layer.token_budget)
-                    if budget is not None
-                    else layer.token_budget,
-                )
+            for name in ("token_budget", *CAP_FIELDS):
+                value, current = getattr(layer, name), getattr(policy, name)
+                if value is not None:
+                    policy = dataclasses.replace(
+                        policy, **{name: min(current, value) if current is not None else value}
+                    )
         return policy
 
     def layers_at(self, path: str) -> tuple[tuple[str, TaskPolicyOverride], ...]:
@@ -751,9 +847,8 @@ class InstancePolicy:
     #: so both start empty and only a repository or narrower layer adds them.
     deny_tools: tuple[str, ...] = ()
     sandbox: SandboxPolicy | None = None
-    #: Set only by an override (`TaskPolicyOverride.wait_timeout_minutes`);
-    #: None leaves each wait its own timeout.
-    wait_timeout_minutes: int | None = None
+    time_cap_minutes: int | None = None
+    total_time_cap_minutes: int | None = None
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -771,6 +866,11 @@ class InstancePolicy:
             token_budget=m.token_budget,
             allowed_tools=tuple(m.allowed_tools) if m.allowed_tools is not None else None,
             maxima=m,
+            # A ratchet: an unset default starts at the maximum, as a safety
+            # field does, since nothing below may raise it.
+            **{
+                n: getattr(d, n) if getattr(d, n) is not None else getattr(m, n) for n in CAP_FIELDS
+            },
         )
 
     def layered(self, overrides: Iterable[TaskPolicyOverride]) -> InstancePolicy:
@@ -848,6 +948,24 @@ class InstancePolicy:
             if admin_max is not None and value > admin_max:
                 raise PolicyError(
                     f"'{field_name}' cannot exceed the administrator maximum {admin_max}",
+                    field=field_name,
+                )
+            updates[field_name] = value
+
+        for field_name in CAP_FIELDS:
+            value = getattr(override, field_name)
+            if value is None:
+                continue
+            admin_max, inherited = getattr(self.maxima, field_name), getattr(self, field_name)
+            if admin_max is not None and value > admin_max:
+                raise PolicyError(
+                    f"'{field_name}' {value} cannot exceed the administrator maximum {admin_max}",
+                    field=field_name,
+                )
+            if inherited is not None and value > inherited:
+                raise PolicyError(
+                    f"'{field_name}' {value} cannot exceed its parent scope's {inherited}: "
+                    "a scope's time cap only ever lowers the one it sits in (Ruling 194)",
                     field=field_name,
                 )
             updates[field_name] = value

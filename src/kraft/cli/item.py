@@ -15,7 +15,7 @@ from kraft.cli import common
 _POLICY_HELP = (
     "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
     "node, step or task by canonical path (repeatable), e.g. "
-    "merge_request_feedback.ci.await_ci.wait_timeout_minutes=180 or max_attempts=4"
+    "merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 or max_attempts=4"
 )
 
 
