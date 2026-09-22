@@ -26,7 +26,7 @@ Four sections, each a map of name to definition, which any chain takes with
 | Section | Holds |
 |---|---|
 | `tasks` | Reusable tasks of any kind — `agent`, `subprocess`, `builtin`, `forge`. |
-| `steps` | Reusable ordered groups of tasks. |
+| `steps` | Reusable ordered groups of tasks. A step may set `read_only: true` ([Concepts](concepts.md#node)). |
 | `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
 | `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
 
