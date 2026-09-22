@@ -5,6 +5,7 @@ import pytest
 from support import worktree as wtree
 from support.harness import (
     _git,
+    entry_of,
     isolated_bd,
     make_repo_with_engineering,
     make_repo_with_submodule,
@@ -367,7 +368,7 @@ async def test_ensure_worktree_runs_the_declared_setup_command(
     """The repo's `setup_command` runs in the new worktree; an undeclared one
     and a failing one both raise, naming why."""
     await wtree.make_item(database, repo)
-    entry = {} if setup_command is None else {"setup_command": setup_command}
+    entry = entry_of({} if setup_command is None else {"setup_command": setup_command})
     if raises:
         with pytest.raises(RuntimeError, match=raises):
             await wtree.ensure(database, run_dirs, repo, repo_entry=entry)
@@ -384,11 +385,13 @@ async def test_a_failed_setup_leaves_no_worktree_so_retry_reruns_it(database, ru
     item -- skip setup entirely and dispatch into the broken environment."""
     await wtree.make_item(database, repo)
     with pytest.raises(RuntimeError):
-        await wtree.ensure(database, run_dirs, repo, repo_entry={"setup_command": "exit 1"})
+        await wtree.ensure(
+            database, run_dirs, repo, repo_entry=entry_of({"setup_command": "exit 1"})
+        )
     assert not (run_dirs.worktrees / "w1").exists()
 
     wt = await wtree.ensure(
-        database, run_dirs, repo, repo_entry={"setup_command": "touch recovered.txt"}
+        database, run_dirs, repo, repo_entry=entry_of({"setup_command": "touch recovered.txt"})
     )
     assert (wt / "recovered.txt").exists()
 
@@ -610,7 +613,7 @@ async def test_worktree_preparation_reruns_the_setup_command_on_every_entry(
     """A rebase can land a new lockfile (Kraft-zlsuk), so preparation re-runs on
     every entry into the walk rather than only at worktree creation."""
     marker = tmp_path / "setup-runs"
-    entry = {**wtree.NO_SETUP, "setup_command": f"echo run >> {marker}"}
+    entry = entry_of({"setup_command": f"echo run >> {marker}"})
 
     await wtree.make_item(database, repo)
     await kraft_builtins.ensure_worktree(

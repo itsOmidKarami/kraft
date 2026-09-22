@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import psutil
 
@@ -21,6 +22,9 @@ from kraft import caps, events, logs, store
 from kraft import usage as _usage
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
+
+if TYPE_CHECKING:
+    from kraft.config import RepoEntry
 
 logger = logging.getLogger(__name__)
 
@@ -458,7 +462,7 @@ async def run_task(
     #: sets this; a subprocess-kind hook a template binds directly has no such
     #: contract.
     require_result_file: bool = False,
-    repo_entry: dict | None = None,
+    repo_entry: RepoEntry | None = None,
     #: The tightest time cap over this launch (`caps.at_launch`): past its
     #: deadline the process group, and a sandbox's container, is killed and
     #: the session exits `capped_out` with `caps.REACHED` naming the scope.
@@ -505,7 +509,7 @@ async def run_task(
             cwd,
             sandbox,
             run_dirs.results,
-            env={**((repo_entry or {}).get("env") or {}), **(env or {})},
+            env={**(repo_entry.env if repo_entry is not None else {}), **(env or {})},
             name=_sandbox.container_name(session_id),
             result_path=result_path,
             cidfile=cidfile,

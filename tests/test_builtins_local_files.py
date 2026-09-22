@@ -4,7 +4,7 @@ pin, say) from the developer's checkout into a new worktree (Kraft-gxcmy)."""
 import subprocess
 
 from support import worktree as wtree
-from support.harness import _git
+from support.harness import _git, entry_of
 
 from kraft import builtins as kraft_builtins
 from kraft.config import git_read
@@ -30,10 +30,12 @@ async def test_setup_runs_after_local_files_are_carried(database, run_dirs, repo
         run_dirs,
         repo=str(repo),
         work_item_id="w1",
-        repo_entry={
-            "setup_command": "cp .python-version seen-by-setup.txt",
-            "local_files": [".python-version"],
-        },
+        repo_entry=entry_of(
+            {
+                "setup_command": "cp .python-version seen-by-setup.txt",
+                "local_files": [".python-version"],
+            }
+        ),
     )
     assert (wt / "seen-by-setup.txt").read_text().strip() == "3.11"
 
@@ -187,10 +189,12 @@ async def test_the_preparation_report_names_a_refused_entry_apart_from_noise(
         database,
         run_dirs,
         repo,
-        repo_entry={
-            "setup_command": "",
-            "local_files": [".python-version", "config/secrets.local.json"],
-        },
+        repo_entry=entry_of(
+            {
+                "setup_command": "",
+                "local_files": [".python-version", "config/secrets.local.json"],
+            }
+        ),
     )
 
     refused, _, noise = report.partition("untracked root-level files")

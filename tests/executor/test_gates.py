@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from support.harness import fake_harness_home, v1_chain, v1_resolved, v1_walk
+from support.harness import entry_of, fake_harness_home, v1_chain, v1_resolved, v1_walk
 
 from kraft import events, executor, store
 from kraft import policy as _policy
@@ -19,7 +19,7 @@ from kraft.executor import resuming
 from kraft.executor.context import LaunchContext
 from kraft.templates.models import MaterializedChain
 
-NO_SETUP = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 
 
 def _exec(node_id, task_id="run"):

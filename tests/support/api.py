@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from support.harness import fake_templates_dir, isolated_bd
+from support.harness import entry_of, fake_templates_dir, isolated_bd
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -79,7 +79,7 @@ def _client(
         real_connected = deps._connected
 
         def _connected_or_default(repos, path):
-            return real_connected(repos, path) or {"setup_command": ""}
+            return real_connected(repos, path) or entry_of({"path": path, "setup_command": ""})
 
         monkeypatch.setattr(deps, "_connected", _connected_or_default)
 

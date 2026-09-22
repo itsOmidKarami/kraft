@@ -10,6 +10,7 @@ from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import subprocess as _subprocess
+from kraft.config import RepoEntry
 from kraft.paths import default_templates_dir
 from kraft.policy import InstancePolicy
 from kraft.templates.environment import (
@@ -181,7 +182,7 @@ class Invocation(NamedTuple):
 
 def resolve_invocation(
     binding: dict,
-    repo_entry: dict | None,
+    repo_entry: RepoEntry | None,
     steering_dir: Path | None,
     *,
     skills_dir: Path | None = None,
@@ -207,14 +208,12 @@ def resolve_invocation(
     Precedence lives here and only here. Spelling it out at each call site is how
     three features that touch the same twenty lines end up disagreeing.
     """
-    repo = repo_entry or {}
     io = item_override or {}
     pd = profile_defaults or {}
-    deny: list[str] = []
-    for name in (*repo.get("deny_tools", ()), *binding.get("deny_tools", ())):
-        if name not in deny:
-            deny.append(name)
-    names = [*repo.get("steering", ()), *binding.get("steering", ())]
+    repo_deny = repo_entry.deny_tools if repo_entry else []
+    deny = list(dict.fromkeys([*repo_deny, *binding.get("deny_tools", ())]))
+    repo_steering = repo_entry.steering if repo_entry else []
+    names = [*repo_steering, *binding.get("steering", ())]
     if names and steering_dir is None:
         # A configured `steering:` key evaporating silently is worse than a
         # raise — unreachable in production (every real caller resolves a
@@ -255,7 +254,7 @@ def resolve_invocation(
         # model: an unset `escalate_model` falls through to the ordinary chain.
         model=(eff_escalate_model if escalate else None)
         or eff_model
-        or ((repo.get("models") or {}).get(profile) if profile else None)
+        or (repo_entry.models.get(profile) if profile and repo_entry is not None else None)
         or pd.get("model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
@@ -336,7 +335,7 @@ def select_profile(profiles: dict[str, HarnessProfile], pid: str, path: Path) ->
 
 def resolve_agent_task(
     task: AgentTask,
-    repo_entry: dict | None,
+    repo_entry: RepoEntry | None,
     steering_dir: Path | None,
     *,
     skills_dir: Path | None = None,
@@ -678,7 +677,7 @@ async def run_agent_task(
     identify_as_worker: bool = True,
     head_sha: str | None = None,
     thread: int = 1,
-    repo_entry: dict | None = None,
+    repo_entry: RepoEntry | None = None,
     time_cap=None,
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
@@ -708,7 +707,7 @@ async def run_agent_task(
         artifact=artifact,
         review_package=review_package,
         method_text=method_text,
-        intent_dir=(repo_entry or {}).get("intent_dir"),
+        intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
     )
     options = {

@@ -12,11 +12,12 @@ import shutil
 import subprocess
 
 import pytest
-from support.harness import fake_docker_bin, v1_chain, v1_walk
+from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
 
 from kraft import builtins as kraft_builtins
 from kraft import config as _config
 from kraft import executor
+from kraft.api import deps
 from kraft.executor import dispatch
 from kraft.policy import SandboxPolicy
 from kraft.worker.env import worker_env
@@ -41,7 +42,7 @@ def _record_run(monkeypatch) -> list[dict]:
 
 
 async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monkeypatch):
-    entry = {"setup_command": _SETUP, "env": {"SETUP_FLAVOUR": "benign"}}
+    entry = entry_of({"setup_command": _SETUP, "env": {"SETUP_FLAVOUR": "benign"}})
     calls = _record_run(monkeypatch)
 
     await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry, sandbox=_SANDBOX)
@@ -57,7 +58,7 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
 
 
 async def test_an_unsandboxed_setup_command_still_runs_on_the_host(tmp_path, monkeypatch):
-    entry = {"setup_command": _SETUP}
+    entry = entry_of({"setup_command": _SETUP})
     calls = _record_run(monkeypatch)
 
     await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry)
@@ -86,7 +87,7 @@ async def test_a_sandboxed_setup_command_really_runs_in_the_container(tmp_path, 
     await kraft_builtins.run_setup_command(
         worktree,
         tmp_path,
-        {"setup_command": _SETUP, "env_passthrough": ["FAKE_DOCKER_CALLED"]},
+        entry_of({"setup_command": _SETUP, "env_passthrough": ["FAKE_DOCKER_CALLED"]}),
         sandbox=_SANDBOX,
     )
 
@@ -127,7 +128,7 @@ async def test_no_docker_means_no_setup_never_a_host_fallback(tmp_path, monkeypa
 
     with pytest.raises(RuntimeError, match="must run in its sandbox.*'docker'"):
         await kraft_builtins.run_setup_command(
-            worktree, tmp_path, {"setup_command": _SETUP}, sandbox=_SANDBOX
+            worktree, tmp_path, entry_of({"setup_command": _SETUP}), sandbox=_SANDBOX
         )
 
     assert [s["args"][0] for s in spawned] == ["docker"]
@@ -146,14 +147,6 @@ def _item_policy_sandboxed(repo):
     snapshot = v1_chain([{"id": "work", "kind": "exec", "tasks": [_agent()]}], repo=repo)
     policy = dataclasses.replace(snapshot.policy, sandbox=SandboxPolicy(**_SANDBOX))
     return dataclasses.replace(snapshot, policy=policy)
-
-
-class _Poisoned(dict):
-    def __init__(self):
-        super().__init__(_poisoned=True)
-
-    def get(self, *_a, **_kw):
-        raise _config.ConfigError("repos.yaml: broken")
 
 
 @pytest.mark.parametrize(
@@ -193,14 +186,17 @@ async def test_the_item_sandbox_is_whatever_sandboxes_any_of_it(
     item_on, repo, chain, entry, expected
 ):
     it = await item_on(_item_policy_sandboxed(repo) if chain == "item-policy" else chain)
-    launch = executor.LaunchContext(repo_entry={"setup_command": "", **entry}, steering_dir=None)
+    launch = executor.LaunchContext(
+        repo_entry=entry_of({"setup_command": "", **entry}), steering_dir=None
+    )
 
     assert dispatch.item_sandbox(it.row(), launch) == expected
 
 
 async def test_an_unreadable_repos_yaml_is_never_read_as_no_sandbox(item_on):
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
-    launch = executor.LaunchContext(repo_entry=_Poisoned(), steering_dir=None)
+    poisoned = deps._PoisonedRepoEntry(_config.ConfigError("repos.yaml: broken"))
+    launch = executor.LaunchContext(repo_entry=poisoned, steering_dir=None)
 
     with pytest.raises(RuntimeError, match="cannot tell whether .* runs sandboxed"):
         dispatch.item_sandbox(it.row(), launch)
@@ -236,7 +232,7 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
         tmp_path,
         v1_chain(_SUBPROCESS, repo=repo),
         repo=repo,
-        repo_entry={"setup_command": _SETUP, **entry},
+        repo_entry=entry_of({"setup_command": _SETUP, **entry}),
     )
 
     assert status == "completed"
@@ -253,7 +249,7 @@ async def test_a_sandboxed_item_without_docker_stops_for_a_human(tmp_path, repo,
         tmp_path,
         v1_chain(_SUBPROCESS, repo=repo),
         repo=repo,
-        repo_entry={"setup_command": _SETUP, "sandbox": _SANDBOX},
+        repo_entry=entry_of({"setup_command": _SETUP, "sandbox": _SANDBOX}),
     )
 
     assert status == "needs_human"
@@ -278,17 +274,20 @@ async def test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox(
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
     builtin = {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
     it = await item_on([{"id": "verify", "kind": "exec", "tasks": [builtin]}])
-    repo_entry = {
-        "setup_command": "",
-        "test_scopes": [{"paths": ["**"], "command": "true root"}],
-        "areas": {
-            "ui": {
-                "setup": "true ui-setup",
-                "verification": {"test_scopes": [{"paths": ["**"], "command": "true ui"}]},
-            }
-        },
-        **entry,
-    }
+    repo_entry = entry_of(
+        {
+            "setup_command": "",
+            "test_scopes": [{"paths": ["**"], "command": "true root"}],
+            "areas": {
+                "ui": {
+                    "paths": ["**"],
+                    "setup": "true ui-setup",
+                    "verification": {"test_scopes": [{"paths": ["**"], "command": "true ui"}]},
+                }
+            },
+            **entry,
+        }
+    )
     node = it.chain.chain.nodes[0]
 
     status = await dispatch.dispatch_node(
@@ -312,9 +311,9 @@ async def test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox(
 async def test_repositories_with_different_live_sandboxes_stop_rather_than_pick_one(item_on):
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
     launch = executor.LaunchContext(
-        repo_entry={"setup_command": "", "sandbox": _SANDBOX},
+        repo_entry=entry_of({"setup_command": "", "sandbox": _SANDBOX}),
         steering_dir=None,
-        repositories={"pkg": {"sandbox": {"kind": "docker", "image": "member:2"}}},
+        repositories={"pkg": entry_of({"sandbox": {"kind": "docker", "image": "member:2"}})},
     )
 
     with pytest.raises(RuntimeError, match="different sandboxes"):
@@ -324,9 +323,9 @@ async def test_repositories_with_different_live_sandboxes_stop_rather_than_pick_
 async def test_a_members_live_sandbox_wraps_the_item(item_on):
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
     launch = executor.LaunchContext(
-        repo_entry={"setup_command": ""},
+        repo_entry=entry_of({"setup_command": ""}),
         steering_dir=None,
-        repositories={"pkg": {"sandbox": _SANDBOX}},
+        repositories={"pkg": entry_of({"sandbox": _SANDBOX})},
     )
 
     assert dispatch.item_sandbox(it.row(), launch) == _SANDBOX

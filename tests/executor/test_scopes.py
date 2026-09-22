@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import _git, v1_chain, v1_walk
+from support.harness import _git, entry_of, v1_chain, v1_walk
 
 from kraft import executor, store
 from kraft.config import git_read
@@ -43,7 +43,13 @@ async def _on_a_branch(item_on, repo):
 
 def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
     to_run = dispatch._select_scopes(
-        it.database, it.id, it.repo, "verify", "verify.main.t", round, {"test_scopes": list(scopes)}
+        it.database,
+        it.id,
+        it.repo,
+        "verify",
+        "verify.main.t",
+        round,
+        entry_of({"test_scopes": list(scopes)}),
     )
     return [tuple(s["cmd"]) for s in to_run]
 
@@ -61,7 +67,8 @@ async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wi
         it.row(),
         it.repo,
         launch=executor.LaunchContext(
-            repo_entry={"setup_command": "", "test_scopes": test_scopes}, steering_dir=None
+            repo_entry=entry_of({"setup_command": "", "test_scopes": test_scopes}),
+            steering_dir=None,
         ),
     )
     return status, it
@@ -71,7 +78,7 @@ async def test_a_repo_that_declares_no_test_command_stops_naming_what_to_configu
     """Kraft-r19n0: quick-task and `default` both verify with this builtin. A
     repo declaring neither `test_scopes` nor `test_command` stops for a human
     at verify, naming both keys, rather than having a command guessed for it."""
-    status, it = await _dispatch(item_on, test_scopes=[])
+    status, it = await _dispatch(item_on, test_scopes=None)
 
     [session] = it.sessions()
     assert (status, session["status"]) == ("config_error", "config_error")
@@ -298,11 +305,13 @@ async def test_the_repos_declared_env_reaches_a_test_scopes_run_task(tmp_path, r
         tmp_path,
         v1_chain(_verify(), repo=repo),
         repo=repo,
-        repo_entry={
-            "test_command": f'{sys.executable} -c "import os; {dump}"',
-            "setup_command": "",
-            "env": {"MY_REPO": "1"},
-        },
+        repo_entry=entry_of(
+            {
+                "test_command": f'{sys.executable} -c "import os; {dump}"',
+                "setup_command": "",
+                "env": {"MY_REPO": "1"},
+            }
+        ),
     )
 
     child = ast.literal_eval(dumped.read_text())

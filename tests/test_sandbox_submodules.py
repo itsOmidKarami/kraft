@@ -16,10 +16,11 @@ import dataclasses
 
 import pytest
 import yaml
-from support.harness import make_repo_with_submodule, v1_chain, v1_walk
+from support.harness import entry_of, make_repo_with_submodule, v1_chain, v1_walk
 from support.workspace import workspace_target
 
 from kraft import client, config, doctor, events, executor, store
+from kraft.api import deps
 from kraft.executor import gates, stops
 from kraft.executor.context import LaunchContext
 from kraft.policy import (
@@ -93,7 +94,7 @@ def test_a_sandbox_without_submodule_members_still_loads(tmp_path):
         {"ws": {"root": "ws"}},
     )
     assert set(config.load_workspaces(path)) == {"ws"}
-    assert config.load_repos(path)[0]["sandbox"] == SANDBOX
+    assert config.load_repos(path)[0].sandbox == SANDBOX
 
 
 def _repos_yaml(tmp_path):
@@ -242,7 +243,7 @@ async def test_an_in_flight_item_stops_for_a_human_before_its_worktree_is_touche
         tmp_path,
         chain,
         repo=root,
-        repo_entry={"path": str(root), "setup_command": "", **entry},
+        repo_entry=entry_of({"path": str(root), "setup_command": "", **entry}),
         **item,
     )
 
@@ -258,7 +259,7 @@ async def test_an_unsandboxed_item_with_submodules_is_not_stopped(tmp_path):
         tmp_path,
         v1_chain(_NODES, repo="/r"),
         repo=root,
-        repo_entry={"path": str(root), "setup_command": ""},
+        repo_entry=entry_of({"path": str(root), "setup_command": ""}),
         submodules=["repos/pkg"],
         root_merge_policy="bump",
     )
@@ -324,7 +325,9 @@ async def test_an_escalations_self_retry_stops_before_it_refreshes_the_worktree(
     await it.database.write(
         lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
     )
-    launch = LaunchContext(repo_entry={"path": "/r", "sandbox": SANDBOX}, steering_dir=None)
+    launch = LaunchContext(
+        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}), steering_dir=None
+    )
 
     status = await gates.resume_after_escalation(
         it.database, run_dirs, work_item_id=it.id, cursor=cursor, launch=launch
@@ -340,7 +343,9 @@ def test_the_guard_lets_a_sandboxed_item_without_submodules_through():
     ordinary sandboxed run."""
     row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
     row["submodules"] = None
-    launch = LaunchContext(repo_entry={"path": "/r", "sandbox": SANDBOX}, steering_dir=None)
+    launch = LaunchContext(
+        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}), steering_dir=None
+    )
     assert stops.refuse_sandboxed_submodules(row, launch) is None
 
 
@@ -348,12 +353,9 @@ def test_the_guard_reads_an_unreadable_repos_yaml_as_a_stop_not_as_no_sandbox():
     """A poisoned entry (`deps._PoisonedRepoEntry`) must not read as "no
     sandbox" and wave the item through."""
 
-    class Poisoned(dict):
-        def get(self, *_a, **_k):
-            raise config.ConfigError("repos.yaml: broken")
-
     row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
     row["submodules"] = '["repos/pkg"]'
-    launch = LaunchContext(repo_entry=Poisoned(x=1), steering_dir=None)
+    poisoned = deps._PoisonedRepoEntry(config.ConfigError("repos.yaml: broken"))
+    launch = LaunchContext(repo_entry=poisoned, steering_dir=None)
     with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
         stops.refuse_sandboxed_submodules(row, launch)

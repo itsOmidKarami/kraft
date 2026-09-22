@@ -3,9 +3,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kraft.caps import TIME_CAPPED
+
+if TYPE_CHECKING:
+    from kraft.config import RepoEntry
 
 #: `_dispatch` returned without launching because a spend cap was already over.
 #: It is not "failed" — the agent never ran, so nothing about it failed — and it
@@ -128,13 +131,13 @@ class LaunchContext:
     `None` means the packaged copies only.
     """
 
-    repo_entry: dict | None
+    repo_entry: RepoEntry | None
     steering_dir: Path | None
     skills_dir: Path | None = None
     #: Every connected repository entry with an `id`, by that id: what a task
     #: fanned out to a workspace member reads instead of `repo_entry` (its
     #: setup, test scopes, sandbox). Empty when nothing has an id.
-    repositories: Mapping[str, dict] = field(default_factory=dict)
+    repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
 
 
 class Steer:

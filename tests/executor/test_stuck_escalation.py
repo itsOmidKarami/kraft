@@ -10,12 +10,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from support.harness import entry_of
 
 from kraft import events, executor, rate_limit_retry, store
 from kraft import policy as _policy
 from kraft.executor import dispatch, gates
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 LAUNCH = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
 
 

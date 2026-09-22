@@ -73,9 +73,9 @@ async def tick(app) -> list[str]:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
         return []
     wanted = set(cfg.get("repos") or [])
-    # `enabled` defaults to True here because `load_repos` does not default it and
+    # `enabled` defaults to True here because `RepoEntry` does not type it and
     # the API's own `RepoBody` does — an entry hand-written without it is on.
-    repos = [r for r in repos if r.get("enabled", True) and (not wanted or r["path"] in wanted)]
+    repos = [r for r in repos if getattr(r, "enabled", True) and (not wanted or r.path in wanted)]
     # `repos.yaml` paths are stored as written, so a `~` or a trailing slash in
     # the filter matches nothing and the poller ticks forever picking nothing up.
     if wanted and not repos:
@@ -87,7 +87,7 @@ async def tick(app) -> list[str]:
     for repo in repos:
         if slots <= 0:
             break
-        for row in await beads.ready(cwd=repo["path"]):
+        for row in await beads.ready(cwd=repo.path):
             if slots <= 0:
                 break
             if row["id"] in known or not isinstance(row.get("priority"), int):
@@ -109,7 +109,7 @@ async def tick(app) -> list[str]:
     return started
 
 
-async def _start(app, repo: dict, row: dict) -> str | None:
+async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     from kraft.api import deps
 
     st = app.state
@@ -122,9 +122,9 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
         )
         return None
-    chain = deps.resolve_chain(st, repo.get("default_chain_template") or "default")
+    chain = deps.resolve_chain(st, getattr(repo, "default_chain_template", None) or "default")
     if chain is None:
-        logger.warning("auto-intake: %s has no valid chain template, skipping", repo["path"])
+        logger.warning("auto-intake: %s has no valid chain template, skipping", repo.path)
         return None
     # Spec §5 is "an auto-started item passes no gate automatically". A template
     # with no gate at all satisfies that by having nothing to pass, which is the
@@ -137,7 +137,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
         logger.warning(
             "auto-intake: %s uses %r, which has no gate — refusing to start it "
             "unattended; a person can start it from the board",
-            repo["path"],
+            repo.path,
             chain.id,
         )
         return None
@@ -147,14 +147,14 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             st.run_dirs,
             title=row["title"],
             description=row.get("description"),
-            repo=repo["path"],
+            repo=repo.path,
             chain=chain,
-            effective_policy=deps.item_policy(st, repo["path"]),
+            effective_policy=deps.item_policy(st, repo.path),
             bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the
             # repo's own .beads and can only be closed there.
-            bead_cwd=repo["path"],
+            bead_cwd=repo.path,
             source="auto_intake",
             bead_priority=row.get("priority"),
         )
@@ -175,7 +175,7 @@ async def _start(app, repo: dict, row: dict) -> str | None:
                     work_item_id=wid,
                     bd_cwd=deps.bd_cwd(),
                     policy=st.policy,
-                    launch=deps.launch(st, repo["path"]),
+                    launch=deps.launch(st, repo.path),
                 ),
             ),
         )

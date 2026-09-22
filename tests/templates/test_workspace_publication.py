@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import _git
+from support.harness import _git, entry_of
 from support.workspace import workspace_item
 
 from kraft import events, store
@@ -20,7 +20,7 @@ from kraft.adapters import forge
 from kraft.executor.context import LaunchContext
 from kraft.templates.models import DEFAULT_WAIT
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _task(id, **fields):
@@ -421,7 +421,9 @@ async def _walk(database, run_dirs, row, fake, monkeypatch) -> str:
         run_dirs,
         work_item_id=row["id"],
         policy=None,
-        launch=LaunchContext(repo_entry={**NO_SETUP, "forge": "github"}, steering_dir=None),
+        launch=LaunchContext(
+            repo_entry=entry_of({"setup_command": "", "forge": "github"}), steering_dir=None
+        ),
     )
 
 
