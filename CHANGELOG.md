@@ -138,6 +138,12 @@ agent, decides whether to skip, abandon, or give more room.
 - Filing a work item (`POST /work-items`, `POST /triggers`, `kraft item create`,
   MCP `create_work_item`) against a repo that isn't connected is refused with a
   422 that names `kraft repo connect`, instead of accepting any directory.
+- Chain revision:
+  - approving one applies the revision you read. The approval sends back the
+    digest `kraft view artifact` prints (`kraft item approve --digest`), and a
+    revision that changed since is refused with 409;
+  - a revision can't skip a node whose only merge request work is in its
+    recovery steps.
 
 ### Removed
 
