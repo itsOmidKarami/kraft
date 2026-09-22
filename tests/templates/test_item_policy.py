@@ -174,3 +174,16 @@ def test_a_retry_is_bounded_by_the_items_own_layer():
     assert validate_retry_override(item, "verification").chain.item_policy == WorkItemPolicy(
         allowed_tools=["Read"]
     )
+
+
+def test_a_retry_whose_fork_the_items_layer_cannot_resolve_is_refused():
+    """The item's layer comes last, so a retry narrowing a task below the
+    item's own allowlist leaves that layer widening it. Refused when the
+    retry is asked for, rather than forked into a chain whose task cannot
+    resolve a policy when it launches."""
+    item = _chain().with_item_policy({"allowed_tools": ["Read", "Edit"]})
+
+    with pytest.raises(RetryOverrideError) as refused:
+        validate_retry_override(item, "verification.check.test", policy={"allowed_tools": ["Read"]})
+
+    assert refused.value.field == "policy.allowed_tools"
