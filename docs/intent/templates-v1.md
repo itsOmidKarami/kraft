@@ -831,7 +831,7 @@ enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge
 The system MAY create a draft merge request before final-gate approval so CI
 and automated merge-request review can run. A draft merge request SHALL NOT be
 marked ready or merged before that approval.
-enforced-by: tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
+enforced-by: tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
 
 ## REQ default-chain-verification-does-not-rerun-the-implementer
 
@@ -882,13 +882,13 @@ origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision
 A chain MAY declare a gate before draft merge-request creation. Until that gate
 is approved, the work item SHALL remain local and SHALL NOT create a merge
 request.
-enforced-by: tests/templates/test_workspace_publication.py::test_a_pre_draft_gate_keeps_the_work_local
+enforced-by: tests/templates/test_publication_chain_order.py::test_a_pre_draft_gate_keeps_the_work_local
 
 ## REQ final-gate-governs-merge-request-readiness
 
 After final-gate approval, the system SHALL mark the draft merge request ready
 for external approval and merge.
-enforced-by: tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
+enforced-by: tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
 
 ## REQ external-wait-has-configurable-timeout-and-polling
 
@@ -949,7 +949,7 @@ declared automated-review task, address CI failures and actionable feedback,
 produce a work-item summary and review, and then request final-gate approval.
 After approval, it SHALL mark the merge request ready, await external approval,
 and merge.
-enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order
+enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 
