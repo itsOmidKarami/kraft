@@ -79,8 +79,9 @@ archive:
 # `defaults:` are inheritable starting points with no safety meaning of their
 # own; a repository, work item, chain or execution node may move them in
 # either direction. `maxima:` bounds those overrides — a safety field listed
-# only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can
-# only ever be narrowed. Read by the same loader as everything above:
+# only here (`allowed_tools`) starts *at* its maximum and can only ever be
+# narrowed; a cap (the time caps, `token_budget`, `budget_usd`) with no default
+# starts at its maximum too, and any scope may set its own up to it. Read by the same loader as everything above:
 # `policy.yaml` has one reader.
 #
 # A work item freezes its policy when it is filed: this file, then the
@@ -98,8 +99,13 @@ archive:
 #                      spend before the next agent task there is refused --
 #                      that scope's own spend, not the whole item's (Ruling
 #                      195). Set on any scope; a child's cannot exceed its
-#                      parent's. Checked like budget.work_item_usd, which with
-#                      budget.daily_usd stays the outer ceiling.
+#                      parent's. A default here binds each task's own
+#                      launches where nothing more specific is set, not a
+#                      ceiling (Ruling 198). Checked like budget.work_item_usd,
+#                      which with budget.daily_usd stays the outer ceiling.
+#                      Launches that start together in one scope each pass
+#                      the check before any has spent, so a shared cap can be
+#                      overshot by their cost.
 #   budget_usd         the same, in dollars. A launch whose harness reported
 #                      no cost is unknown spend, never free: a scope with some
 #                      stops for a human rather than pass its dollar cap.

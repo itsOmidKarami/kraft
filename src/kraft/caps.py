@@ -258,7 +258,7 @@ def _explicit(snapshot):
                 if chain_own is not None and getattr(chain_own, n) is not None
                 else getattr(snapshot.policy.maxima, n)
             )
-            for n in CAP_FIELDS
+            for n in (*CAP_FIELDS, *BUDGET_FIELDS)
         },
     )
     return dataclasses.replace(snapshot, policy=base)
@@ -399,7 +399,17 @@ def budget_breach(conn, row, path: str) -> dict | None:
     never counted as free: a scope with any is refused under a dollar cap,
     and the stop says why. A launch still running reports its cost when it
     exits, so it is not unknown yet; the overshoot is one launch, as with
-    `budget.work_item_usd`."""
+    `budget.work_item_usd`.
+
+    Concurrent launches in one scope (a parallel step's tasks) each pass this
+    check before any of them has spent, so a shared scope's cap can be
+    overshot by up to the cost of the launches that started together
+    (Kraft-ib2sn). Nothing is reserved ahead of a launch.
+
+    An escalation turn's session is its node's spend (Kraft-h8n21). An
+    instance or repository budget is a default (Ruling 198): it binds a
+    task's own launches where nothing more specific is set, never an
+    enclosing scope."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
         return None
@@ -409,14 +419,26 @@ def budget_breach(conn, row, path: str) -> dict | None:
         "",
         *(p for i in range(1, len(segments) + 1) if (p := ".".join(segments[:i])) in kinds),
     ]
-    sessions = conn.execute(
-        "SELECT hook_point, status, tokens_in, tokens_out, cost_usd FROM worker_sessions "
-        "WHERE work_item_id = ?",
-        (row["id"],),
-    ).fetchall()
+    sessions = [
+        {
+            **dict(s),
+            "hook_point": s["node_id"] if s["hook_point"] == "escalation" else s["hook_point"],
+        }
+        for s in conn.execute(
+            "SELECT node_id, hook_point, status, tokens_in, tokens_out, cost_usd "
+            "FROM worker_sessions WHERE work_item_id = ?",
+            (row["id"],),
+        ).fetchall()
+    ]
+    explicit = _explicit(snapshot)
     above = dict.fromkeys(BUDGET_FIELDS)
     for level in levels:
-        policy = _root_policy(snapshot) if not level else snapshot.policy_at(level)
+        if not level:
+            policy = _root_policy(explicit)
+        elif level == path and kinds[level] == "task":
+            policy = snapshot.policy_at(level)
+        else:
+            policy = explicit.policy_at(level)
         under = [
             s
             for s in sessions

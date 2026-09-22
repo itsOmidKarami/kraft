@@ -447,7 +447,9 @@ def check(*, count: int, started_at: str, cap: Cap, now: str) -> str:
 #: widen it (`template-policy-cannot-relax-safety-ceilings`: "budgets,
 #: allowed tools, permissions, and repository access" -- not harnesses).
 _SAFETY_LIST_FIELDS = ("allowed_tools",)
-_SAFETY_NUMERIC_FIELDS = ("token_budget", "budget_usd")
+#: None since Ruling 198: a budget is a scope's own cap, bounded by `maxima`
+#: here and kept under its parent scope's by `ResolvedChain._check_caps`.
+_SAFETY_NUMERIC_FIELDS: tuple[str, ...] = ()
 #: Fields that may move freely in either direction, bounded only by an
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
@@ -579,6 +581,10 @@ class PolicyDefaultsInput(BaseModel):
     #: up to `maxima`.
     time_cap_minutes: PositiveInt | None = None
     total_time_cap_minutes: PositiveInt | None = None
+    #: Budgets are defaults too (Ruling 198): a task's own spend where nothing
+    #: more specific is set.
+    token_budget: PositiveInt | None = None
+    budget_usd: PositiveUsd | None = None
 
 
 class PolicyMaximaInput(BaseModel):
@@ -631,7 +637,7 @@ class InstancePolicyInput(BaseModel):
         escalation -- but `policy-has-defaults-and-administrator-maxima` calls
         maxima non-overridable, and a `defaults:` entry past one is an
         override in all but name. An unset maximum is no bound at all."""
-        for name in (*_OPERATIONAL_NUMERIC_FIELDS, *CAP_FIELDS):
+        for name in (*_OPERATIONAL_NUMERIC_FIELDS, *SCOPE_CAP_FIELDS):
             value, ceiling = getattr(self.defaults, name, None), getattr(self.maxima, name)
             if value is not None and ceiling is not None and value > ceiling:
                 raise ValueError(f"defaults.{name} {value} exceeds maxima.{name} {ceiling}")
@@ -823,10 +829,10 @@ class WorkItemPolicy(TemplatePolicyOverride):
         chain gave it for every scope in `scopes` -- the chain's layers over
         `path` -- that set none, and meeting any scope's own; on a path it
         only tightens."""
-        own = {n for n in CAP_FIELDS if any(getattr(s, n) is not None for s in scopes)}
+        own = {n for n in SCOPE_CAP_FIELDS if any(getattr(s, n) is not None for s in scopes)}
         for where, layer in self.layers_at(path):
             if where == "policy":
-                for name in CAP_FIELDS:
+                for name in SCOPE_CAP_FIELDS:
                     value = getattr(layer, name)
                     if value is not None and name not in own:
                         policy = dataclasses.replace(policy, **{name: value})
@@ -875,8 +881,10 @@ class InstancePolicy:
     """One resolved policy state: the effective value of every field, plus
     the untouched administrator maxima every later `apply_template_override`
     call must still respect. A ratchet-only safety field with no `defaults:`
-    entry (`allowed_tools`, `token_budget`) starts *at* its maximum -- there
-    is nothing to narrow it from until the first override does.
+    entry (`allowed_tools`) starts *at* its maximum -- there is nothing to
+    narrow it from until the first override does. A cap (`SCOPE_CAP_FIELDS`)
+    starts at its default, else its maximum, and any scope may set its own up
+    to the maximum (Ruling 198).
     `allowed_harnesses` is different: it is operational-with-a-maximum, not
     ratchet-only, so its bound for widening is always `maxima`, never the
     current inherited value (see `_OPERATIONAL_LIST_FIELDS`)."""
@@ -908,14 +916,13 @@ class InstancePolicy:
                 if d.allowed_harnesses is not None
                 else (tuple(m.allowed_harnesses) if m.allowed_harnesses is not None else None)
             ),
-            token_budget=m.token_budget,
-            budget_usd=m.budget_usd,
             allowed_tools=tuple(m.allowed_tools) if m.allowed_tools is not None else None,
             maxima=m,
-            # A ratchet: an unset default starts at the maximum, as a safety
-            # field does, since nothing below may raise it.
+            # A cap's default, else its maximum (Ruling 198): a default any
+            # scope may exceed up to the maximum.
             **{
-                n: getattr(d, n) if getattr(d, n) is not None else getattr(m, n) for n in CAP_FIELDS
+                n: getattr(d, n) if getattr(d, n) is not None else getattr(m, n)
+                for n in SCOPE_CAP_FIELDS
             },
         )
 
@@ -998,7 +1005,7 @@ class InstancePolicy:
                 )
             updates[field_name] = value
 
-        for field_name in CAP_FIELDS:
+        for field_name in SCOPE_CAP_FIELDS:
             value = getattr(override, field_name)
             if value is None:
                 continue

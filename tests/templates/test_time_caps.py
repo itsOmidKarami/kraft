@@ -367,10 +367,28 @@ def test_a_child_budget_above_its_parents_is_refused_naming_both(field, big, sma
 @pytest.mark.parametrize(
     ("field", "big", "small"), [("token_budget", 20, 10), ("budget_usd", 2.5, 1)]
 )
-def test_an_items_budget_above_the_chains_is_refused(field, big, small):
-    chain = _materialize(_nodes(chain={field: small}))
+def test_an_item_may_raise_its_own_budget_above_the_chains_up_to_the_maximum(field, big, small):
+    """Ruling 198: the item is the outer scope; its own budget may exceed the
+    chain's, up to `maxima`, and is refused above it."""
+    chain = _materialize(_nodes(chain={field: small}), maxima={field: big * 2})
 
+    raised = chain.with_item_policy({field: big})
+
+    assert getattr(raised.policy_for(raised.chain.nodes[0]), field) == big
     with pytest.raises(PolicyError) as refused:
-        chain.with_item_policy({field: big})
-
+        chain.with_item_policy({field: big * 3})
     assert refused.value.field == f"policy.{field}"
+
+
+@pytest.mark.parametrize(("field", "value"), [("token_budget", 900), ("budget_usd", 9)])
+def test_a_budget_may_be_raised_above_the_default_up_to_the_maximum(field, value):
+    """Ruling 198: a `defaults:` budget is a default, not a ceiling."""
+    chain = _materialize(
+        _nodes(node={field: value}),
+        defaults={field: 100 if field == "token_budget" else 1},
+        maxima={field: value},
+    )
+
+    assert getattr(chain.policy_for(chain.chain.nodes[0]), field) == value
+    with pytest.raises(PolicyError, match="administrator maximum"):
+        _materialize(_nodes(node={field: value * 2}), maxima={field: value})
