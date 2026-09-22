@@ -133,9 +133,12 @@ settings and `attempts`/`wall_clock_s`, it takes:
   (model only), the harness profile's `defaults:`. A value the node's harness refuses (its
   `values:`, or a capability it does not declare) is refused here, not at
   launch. A gate's `auto_review` keeps the item-wide values only.
-- `--extra-prompt TEXT`: appended to every agent task's instruction in the
-  node, after the task's own prompt and brief. It never replaces them. At
-  intake, `N.extra_prompt=...` is taken as written, not read as YAML.
+- `--extra-prompt TEXT`: appended to the instruction of every agent task the
+  node runs (its steps, `on_failure`, `fix_loop`, judge and stuck
+  escalation), after the task's own prompt and brief. It never replaces them.
+  It does not reach a gate's `auto_review`, or the interactive escalation turn
+  (`kraft item escalate`), which belongs to the whole item. At intake,
+  `N.extra_prompt=...` is taken as written, not read as YAML.
 
 The node override is stored on the item. It is not a chain edit, so the frozen
 chain and its policy are unchanged.
