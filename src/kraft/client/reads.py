@@ -123,6 +123,8 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
     )
     return {
         **{k: item[k] for k in keep if k in item},
+        # what it has spent, each kind of token apart (Ruling 211)
+        **({"usage": item["usage"]["total"]} if item.get("usage") else {}),
         # The item's own policy override (Kraft-ab1bh), only when it has one.
         **({"policy_override": item["policy_override"]} if item.get("policy_override") else {}),
         "next_node_id": _next_node_id(item),

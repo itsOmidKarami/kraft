@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 
-from kraft import client, render
+from kraft import client, render, usage
 from kraft.cli import common
 
 _LIST_COLUMNS = [
@@ -54,9 +54,29 @@ def _suggestion_text(item: dict) -> str:
     return f"{head}\nrun: kraft item {_SUGGESTED_VERBS[s['action']]} {item['id']}"
 
 
+def _usage_text(u: dict) -> str:
+    """Every kind of token apart (Ruling 211). A session from before the split
+    counts its cache use under `in`, and the line says so."""
+    total = sum(u.get(k, 0) for k in usage.KINDS)
+    parts = [
+        f"{total:,} tokens",
+        f"{u['tokens_in']:,} in"
+        + ("" if u.get("split_complete", True) else " (cache not split on older sessions)"),
+        f"{u.get('tokens_cache_write', 0):,} cache write",
+        f"{u.get('tokens_cache_read', 0):,} cache read",
+        f"{u['tokens_out']:,} out",
+    ]
+    if u.get("cost_usd"):
+        cost = f"${u['cost_usd']:.2f}"
+        parts.append(cost if u.get("cost_complete", True) else f"at least {cost}")
+    return " · ".join(parts)
+
+
 def _show_value(item: dict, key: str, value) -> str:
     if key == "progress" and value:
         return _progress_text(value)
+    if key == "usage" and value:
+        return _usage_text(value)
     if key == "suggested_action" and value:
         return _suggestion_text(item)
     return str(value)

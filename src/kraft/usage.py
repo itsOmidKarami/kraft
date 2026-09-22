@@ -29,18 +29,40 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Usage:
+    #: Uncached input only. Cache writes and reads were billed as input too,
+    #: and are kept apart so a run's cache share is visible (Ruling 211);
+    #: `total` is what every budget counts (Decision 18).
     tokens_in: int = 0
     tokens_out: int = 0
     #: None means "this agent did not report a cost", never "it was free".
     cost_usd: float | None = None
     model: str | None = None
+    tokens_cache_write: int = 0
+    tokens_cache_read: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.tokens_in + self.tokens_cache_write + self.tokens_cache_read + self.tokens_out
+
+
+#: The token columns a `worker_sessions` row carries, in `Usage`'s names.
+KINDS = ("tokens_in", "tokens_cache_write", "tokens_cache_read", "tokens_out")
+
+
+def spent(row) -> int:
+    """Every token a session row (or rollup) records: uncached input, cache
+    writes, cache reads and output. What a `token_budget` counts, and what
+    "tokens" means wherever one number is shown (Decision 18). A row written
+    before the split has NULL cache kinds and its whole input in `tokens_in`,
+    so this is the same total either way."""
+    return sum(row[k] or 0 for k in KINDS)
 
 
 def _int(v: object) -> int:
@@ -51,15 +73,20 @@ def _from_usage_block(block: object, model: object) -> Usage | None:
     """One ``usage`` mapping, in either the agent's or Kraft's own field names."""
     if not isinstance(block, dict):
         return None
-    tokens_in = _int(block.get("input_tokens", block.get("tokens_in")))
-    tokens_out = _int(block.get("output_tokens", block.get("tokens_out")))
-    # Cache reads and writes are input tokens that were billed; leaving them out
-    # would under-report a long agent run by most of its input.
-    tokens_in += _int(block.get("cache_creation_input_tokens"))
-    tokens_in += _int(block.get("cache_read_input_tokens"))
-    if not tokens_in and not tokens_out:
-        return None
-    return Usage(tokens_in, tokens_out, None, model if isinstance(model, str) else None)
+    u = Usage(
+        tokens_in=_int(block.get("input_tokens", block.get("tokens_in"))),
+        tokens_out=_int(block.get("output_tokens", block.get("tokens_out"))),
+        model=model if isinstance(model, str) else None,
+        # Cache writes and reads are input tokens that were billed; leaving
+        # them out would under-report a long agent run by most of its input.
+        tokens_cache_write=_int(
+            block.get("cache_creation_input_tokens", block.get("tokens_cache_write"))
+        ),
+        tokens_cache_read=_int(
+            block.get("cache_read_input_tokens", block.get("tokens_cache_read"))
+        ),
+    )
+    return u if u.total else None
 
 
 #: The per-model token counts `modelUsage` carries, in the agent CLI's own
@@ -92,36 +119,25 @@ def _dominant(by_model: dict) -> str | None:
 
 
 def _from_model_usage(by_model: object, model: str | None) -> Usage | None:
-    """Tokens from `modelUsage`, for an envelope whose `usage` block is empty.
-
-    An agent interrupted mid-turn flushes a result envelope whose `usage` block
-    is all zeroes -- there is no completed request for it to describe -- with
-    the session's real counts only under `modelUsage` (measured against claude
-    2.1.273). `_from_usage_block` returns None for that, and `from_envelope`
-    returns before it ever reaches `total_cost_usd`, so the one cost figure
-    Kraft will ever have for a paused session was thrown away with it
-    (Kraft-s7c04.18).
+    """Tokens from `modelUsage`: the whole CLI session's, every model summed.
 
     Sums across models rather than picking one: this is "what did this session
     spend", not "which model did the work" -- that second question is
     `_model_of`/`_dominant`'s and is deliberately left alone (Kraft-s7c04.15).
-
-    Cache reads and writes count as input for the same reason they do in
-    `_from_usage_block`: they were billed that way.
+    None when it reports nothing, so a task that spent nothing is not a
+    zero-token run.
     """
     if not isinstance(by_model, dict):
         return None
-    tokens_in = tokens_out = 0
-    for stats in by_model.values():
-        if not isinstance(stats, dict):
-            continue
-        tokens_in += _int(stats.get("inputTokens"))
-        tokens_in += _int(stats.get("cacheReadInputTokens"))
-        tokens_in += _int(stats.get("cacheCreationInputTokens"))
-        tokens_out += _int(stats.get("outputTokens"))
-    if not tokens_in and not tokens_out:
-        return None
-    return Usage(tokens_in, tokens_out, None, model)
+    stats = [s for s in by_model.values() if isinstance(s, dict)]
+    u = Usage(
+        tokens_in=sum(_int(s.get("inputTokens")) for s in stats),
+        tokens_out=sum(_int(s.get("outputTokens")) for s in stats),
+        model=model,
+        tokens_cache_write=sum(_int(s.get("cacheCreationInputTokens")) for s in stats),
+        tokens_cache_read=sum(_int(s.get("cacheReadInputTokens")) for s in stats),
+    )
+    return u if u.total else None
 
 
 def _model_of(envelope: dict) -> str | None:
@@ -150,18 +166,21 @@ def from_envelope(envelope: object) -> Usage | None:
     """Usage from a decoded agent result envelope, or None if it carries none."""
     if not isinstance(envelope, dict):
         return None
-    u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
+    # `modelUsage` first (Kraft-s7c04.65): it is cumulative over the session,
+    # Task-tool sub-agents and any turn killed before its result included, and
+    # it is what `total_cost_usd` paid for. The `usage` block is the main
+    # agent's last turn only (193475c9 read 1.80M input tokens of the 2.11M
+    # billed). An interrupted envelope zeroes `usage` and reports only here
+    # (Kraft-s7c04.18). `usage` stays the read for a result file, or any
+    # envelope with no `modelUsage` to read.
+    u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
     if u is None:
-        # An interrupted envelope zeroes `usage` and reports only in
-        # `modelUsage` (Kraft-s7c04.18). Tried second, never first: a normal
-        # envelope's `usage` block is the authority and this must not change
-        # what it produces.
-        u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
+        u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
     if u is None:
         return None
     cost = envelope.get("total_cost_usd", envelope.get("cost_usd"))
     if isinstance(cost, int | float) and not isinstance(cost, bool):
-        u = Usage(u.tokens_in, u.tokens_out, float(cost), u.model)
+        u = replace(u, cost_usd=float(cost))
     return u
 
 
@@ -219,17 +238,21 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
         seen[key] = u
     if not seen:
         return None
-    return Usage(
-        sum(u.tokens_in for u in seen.values()),
-        sum(u.tokens_out for u in seen.values()),
-        None,
+    return replace(
+        _sum(seen.values()),
         # The FIRST model seen, deliberately -- not `_model_of`'s dominant-by-
         # tokens read (Kraft-s7c04.15). `_INIT_KEY` is seeded from the
         # `system`/`init` line above and inserted before any `assistant` line,
         # and that line names the session's real model. This is already right
         # and must not be "fixed" to match the envelope path.
-        next((u.model for u in seen.values() if u.model), None),
+        model=next((u.model for u in seen.values() if u.model), None),
     )
+
+
+def _sum(usages: Iterable[Usage]) -> Usage:
+    """Each kind of token summed; no cost and no model, which do not add."""
+    usages = list(usages)
+    return Usage(**{k: sum(getattr(u, k) for u in usages) for k in KINDS})
 
 
 def _combine(envelopes: list[dict]) -> dict:
@@ -255,17 +278,18 @@ def _combine(envelopes: list[dict]) -> dict:
     groups: dict[object, list[dict]] = {}
     for envelope in envelopes:
         groups.setdefault(envelope.get("session_id"), []).append(envelope)
-    tokens_in = tokens_out = 0
+    parts: list[Usage] = []
     cost: float | None = 0.0
     for group in groups.values():
         last = group[-1]
         total = _from_model_usage(last.get("modelUsage"), None)
-        for u in [total] if total is not None else [from_envelope(e) for e in group]:
-            tokens_in, tokens_out = tokens_in + u.tokens_in, tokens_out + u.tokens_out
+        parts += [total] if total is not None else [from_envelope(e) for e in group]
         last_cost = (from_envelope(last) or Usage()).cost_usd
         cost = None if cost is None or last_cost is None else cost + last_cost
+    u = _sum(parts)
     combined: dict = {
-        "usage": {"input_tokens": tokens_in, "output_tokens": tokens_out},
+        # In Kraft's own names, which `_from_usage_block` reads as well.
+        "usage": {k: getattr(u, k) for k in KINDS},
         "model": _model_of(envelopes[-1]),
     }
     if cost is not None:
@@ -366,11 +390,7 @@ def _cumulative(log_path: Path, cli: str) -> Usage | None:
                     last = obj if obj.get("session_id") in (cli, None) else last
     except OSError:
         return None
-    own = from_envelope(last)
-    if own is None:
-        return None
-    tokens = _from_model_usage(last.get("modelUsage"), None) or own
-    return Usage(tokens.tokens_in, tokens.tokens_out, own.cost_usd, own.model)
+    return from_envelope(last)
 
 
 def net_of_earlier(own: Usage, log_path: Path, earlier_log: Path, cli: str) -> Usage:
@@ -383,17 +403,16 @@ def net_of_earlier(own: Usage, log_path: Path, earlier_log: Path, cli: str) -> U
     if mine is None:
         return own
     if before is None:
-        return Usage(own.tokens_in, own.tokens_out, None, own.model)
+        return replace(own, cost_usd=None)
     cost = (
         None
         if mine.cost_usd is None or before.cost_usd is None
         else max(mine.cost_usd - before.cost_usd, 0.0)
     )
     return Usage(
-        max(mine.tokens_in - before.tokens_in, 0),
-        max(mine.tokens_out - before.tokens_out, 0),
-        cost,
-        own.model,
+        **{k: max(getattr(mine, k) - getattr(before, k), 0) for k in KINDS},
+        cost_usd=cost,
+        model=own.model,
     )
 
 

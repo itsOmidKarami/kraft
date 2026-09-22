@@ -48,7 +48,8 @@ def _session(conn, sid, wid, node, *, round=0, status="done", u: Usage | None = 
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
         "result_path, status, attempt, created_at, round, tokens_in, tokens_out, cost_usd, "
-        "wall_ms) VALUES (?, ?, ?, ?, 'l', 'r', ?, 1, ?, ?, ?, ?, ?, ?)",
+        "wall_ms, tokens_cache_write, tokens_cache_read) "
+        "VALUES (?, ?, ?, ?, 'l', 'r', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             sid,
             wid,
@@ -61,6 +62,8 @@ def _session(conn, sid, wid, node, *, round=0, status="done", u: Usage | None = 
             u.tokens_out if u else None,
             u.cost_usd if u else None,
             wall_ms,
+            u.tokens_cache_write if u else None,
+            u.tokens_cache_read if u else None,
         ),
     )
 
@@ -154,6 +157,29 @@ def test_totals_group_by_status_and_sum_usage(conn):
     assert t["wall_ms"] == 60_000 + 30_000 + 1_000 + 10_000
     # w1's verify looped once; w2 never looped
     assert t["rounds"] == 1
+
+
+def test_cache_tokens_are_summed_apart_and_still_counted(tmp_path):
+    """Ruling 211: the totals sum each kind of input apart, and every
+    "tokens" figure (per node, per repo) still counts cache reads and writes
+    -- including a row written before the split, whose NULL cache kinds leave
+    its `tokens_in` the whole input and the split marked incomplete."""
+    c = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(c)
+    _item(c, "w1", created=_at(1))
+    _session(c, "new", "w1", "verify", u=Usage(10, 5, 0.1, None, 20, 300))
+    _session(c, "old", "w1", "verify", u=Usage(1000, 1, 0.1))
+    c.execute(
+        "UPDATE worker_sessions SET tokens_cache_write = NULL, tokens_cache_read = NULL "
+        "WHERE id = 'old'"
+    )
+    a = analytics.compute(c, range_="7d", now=NOW)
+    c.close()
+    t = a["totals"]
+    assert (t["tokens_in"], t["tokens_cache_write"], t["tokens_cache_read"]) == (1010, 20, 300)
+    assert t["split_complete"] is False
+    assert a["by_node"][0]["tokens"] == 10 + 20 + 300 + 5 + 1000 + 1
+    assert a["by_repo"][0]["tokens"] == 10 + 20 + 300 + 5 + 1000 + 1
 
 
 def test_a_merge_is_a_completed_node_that_ran_on_merge(conn):

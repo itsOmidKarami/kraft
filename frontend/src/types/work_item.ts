@@ -252,6 +252,9 @@ export interface WorkerSession {
   exited_at: string | null;
   tokens_in: number | null;
   tokens_out: number | null;
+  /** Cache kinds apart from tokens_in (Ruling 211); null on a row from before. */
+  tokens_cache_write?: number | null;
+  tokens_cache_read?: number | null;
   cost_usd: number | null;
   wall_ms: number | null;
   model: string | null;
@@ -275,6 +278,10 @@ export interface KraftEvent {
 export interface UsageRollup {
   tokens_in: number;
   tokens_out: number;
+  tokens_cache_write?: number;
+  tokens_cache_read?: number;
+  /** False when some session predates the split: its cache use is in tokens_in. */
+  split_complete?: boolean;
   cost_usd: number;
   /** False when a session spent tokens but reported no cost — the sum is a floor. */
   cost_complete: boolean;

@@ -41,6 +41,12 @@ describe("Tasks tab · a node's own tasks (Kraft-04fmo)", () => {
     ).toBeTruthy();
   });
 
+  it("counts a run's cache tokens in its token figure (Ruling 211)", () => {
+    const kinds = { tokens_in: 7, tokens_cache_write: 40, tokens_cache_read: 900, tokens_out: 3 };
+    renderTasks({ sessions: [session({ id: "s1", ...kinds })] });
+    expect(document.querySelector('[data-testid="task-row-s1"]')?.textContent).toContain("950 tokens");
+  });
+
   it("marks a task with no session as not started", () => {
     renderTasks({ sessions: [] });
     const row = document.querySelector('[data-testid="node-task-on.test.run"]');

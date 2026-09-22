@@ -181,6 +181,8 @@ export const useStore = create<State>((set, get) => ({
                   model: p.model ?? null,
                   tokens_in: p.tokens_in ?? null,
                   tokens_out: p.tokens_out ?? null,
+                  tokens_cache_write: p.tokens_cache_write ?? null,
+                  tokens_cache_read: p.tokens_cache_read ?? null,
                   cost_usd: p.cost_usd ?? null,
                 }
               : { status };

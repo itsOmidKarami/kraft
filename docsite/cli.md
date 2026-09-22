@@ -28,6 +28,12 @@ kraft item retry                     # re-run the node a stopped item stopped on
 kraft view search "retry policy"
 ```
 
+`kraft view show` includes what the item has spent, each kind of token on its
+own: uncached input, cache writes, cache reads and output, then the cost. A
+session recorded before cache tokens were split out has only one input figure;
+it is counted under `in`, and the line says `(cache not split on older
+sessions)`. A `token_budget` counts all four kinds.
+
 ### Addressing work by path
 
 Retry, skip and resume address chain work by its canonical path: `node`,

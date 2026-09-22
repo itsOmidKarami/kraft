@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLineDown, ArrowsOutSimple, Copy } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { clock, elapsed, logLineText, tokens, usd } from "../../../format";
+import { clock, elapsed, logLineText, tokenTotal, tokens, usd } from "../../../format";
 import { findSession, useStore } from "../../../store";
 import type { LogLine } from "../../../types";
 import { StatusGlyph } from "../../../components/ui";
@@ -149,7 +149,7 @@ export function Log({
     meta.push(span ? `${session.status} · ${span}` : session.status);
     meta.push(session.round > 0 ? `${session.node_id} · cycle ${session.round}` : session.node_id);
     if (session.tokens_in != null) {
-      const total = (session.tokens_in ?? 0) + (session.tokens_out ?? 0);
+      const total = tokenTotal(session);
       meta.push(
         session.cost_usd != null
           ? `${tokens(total)} tokens · ${usd(session.cost_usd)}`

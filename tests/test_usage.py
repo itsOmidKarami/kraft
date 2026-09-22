@@ -13,8 +13,10 @@ from kraft.usage import Usage
 # ── parsing ──────────────────────────────────────────────────────────────────
 
 
-def test_agent_envelope_counts_cache_tokens_as_input():
-    """Cache reads and writes were billed as input; dropping them under-reports."""
+def test_agent_envelope_keeps_cache_tokens_apart_from_uncached_input():
+    """Cache reads and writes were billed as input, and dropping them
+    under-reports; summed into `tokens_in` they hid how much of a run was
+    cache (Ruling 211). Each kind is kept on its own."""
     u = usage.from_envelope(
         {
             "usage": {
@@ -27,7 +29,15 @@ def test_agent_envelope_counts_cache_tokens_as_input():
             "total_cost_usd": 1.25,
         }
     )
-    assert u == Usage(tokens_in=4400, tokens_out=20, cost_usd=1.25, model="claude-opus-5")
+    assert u == Usage(
+        tokens_in=100,
+        tokens_out=20,
+        cost_usd=1.25,
+        model="claude-opus-5",
+        tokens_cache_write=300,
+        tokens_cache_read=4000,
+    )
+    assert u.total == 4420
 
 
 def test_result_file_field_names_are_accepted_too():
@@ -343,6 +353,8 @@ async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database
     assert rollup["by_node"] == []
     assert rollup["total"] == {
         "tokens_in": 0,
+        "tokens_cache_write": 0,
+        "tokens_cache_read": 0,
         "tokens_out": 0,
         "cost_usd": 0,
         "wall_ms": 0,
@@ -353,6 +365,7 @@ async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database
         "rounds": 0,
         # nothing ran, so nothing is missing
         "cost_complete": True,
+        "split_complete": True,
     }
 
 
@@ -450,9 +463,9 @@ def test_an_interrupted_envelope_reports_through_model_usage():
     assert u.model == "claude-haiku-4-5-20251001"
 
 
-def test_model_usage_cache_tokens_count_as_input_in_the_fallback_too():
+def test_model_usage_keeps_cache_tokens_apart_too():
     """Same rule as `_from_usage_block`: cache reads and writes were billed as
-    input, and leaving them out under-reports a long run by most of its input."""
+    input, and are kept, each kind on its own."""
     u = usage.from_envelope(
         {
             "usage": {},
@@ -466,7 +479,12 @@ def test_model_usage_cache_tokens_count_as_input_in_the_fallback_too():
             },
         }
     )
-    assert (u.tokens_in, u.tokens_out) == (1050, 10)
+    assert (u.tokens_in, u.tokens_cache_write, u.tokens_cache_read, u.tokens_out) == (
+        100,
+        50,
+        900,
+        10,
+    )
 
 
 def test_the_fallback_does_not_invent_usage_from_an_empty_model_usage():
@@ -589,3 +607,124 @@ def test_a_log_with_several_result_envelopes_counts_every_invocation(tmp_path, l
     log = tmp_path / "s.log"
     log.write_text("\n".join(lines) + "\n" + json.dumps({"type": "system"}) + "\n")
     assert usage.read(log, tmp_path / "none.json", "claude-stream-json") == expected
+
+
+def test_a_single_result_reads_its_cumulative_model_usage():
+    """Kraft-s7c04.65: a result's `usage` block is the main agent's last turn
+    only; `modelUsage` is the whole session's, Task-tool sub-agents and any
+    turn killed before its result included, and it is what `total_cost_usd`
+    paid for (193475c9 read 1.80M input tokens where 2.11M were billed)."""
+    u = usage.from_envelope(
+        {
+            "type": "result",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 40},
+            "modelUsage": {
+                "claude-haiku-4-5-20251001": {"inputTokens": 12, "outputTokens": 3},
+                "claude-opus-5": {
+                    "inputTokens": 100,
+                    "outputTokens": 30,
+                    "cacheReadInputTokens": 1000,
+                    "cacheCreationInputTokens": 50,
+                },
+            },
+            "total_cost_usd": 2.5,
+        }
+    )
+    assert u == Usage(112, 33, 2.5, "claude-opus-5", tokens_cache_write=50, tokens_cache_read=1000)
+
+
+def test_stream_usage_keeps_cache_tokens_apart():
+    """The live count splits the way the envelope does, or a running row would
+    read one shape and the finished one another."""
+    line = json.dumps(
+        {
+            "type": "assistant",
+            "request_id": "req_1",
+            "message": {
+                "model": "claude-opus-5",
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                    "cache_creation_input_tokens": 20,
+                    "cache_read_input_tokens": 700,
+                },
+            },
+        }
+    )
+    u = usage.from_stream([line, line], {})
+    assert (u.tokens_in, u.tokens_cache_write, u.tokens_cache_read, u.tokens_out) == (3, 20, 700, 2)
+
+
+def test_several_result_envelopes_keep_cache_tokens_apart(tmp_path):
+    """`_combine` stands one envelope in for a log's invocations; the kinds
+    survive it, in both the cumulative and the per-invocation read."""
+
+    def result(sid, cached, cost=1.0):
+        return json.dumps(
+            {
+                "type": "result",
+                "session_id": sid,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "modelUsage": {
+                    "m": {
+                        "inputTokens": 5,
+                        "outputTokens": 2,
+                        "cacheReadInputTokens": cached,
+                        "cacheCreationInputTokens": 7,
+                    }
+                },
+                "total_cost_usd": cost,
+            }
+        )
+
+    log = tmp_path / "s.log"
+    log.write_text("\n".join([result("a", 100), result("a", 300, 2.0), result("b", 50)]) + "\n")
+    u = usage.read(log, tmp_path / "none.json", "claude-stream-json")
+    assert u == Usage(10, 4, 3.0, "m", tokens_cache_write=14, tokens_cache_read=350)
+    plain = tmp_path / "p.log"
+    block = {"input_tokens": 1, "output_tokens": 1}
+    plain.write_text(
+        "\n".join(json.dumps({"usage": block | {"cache_read_input_tokens": n}}) for n in (10, 20))
+        + "\n"
+    )
+    assert usage.read(plain, tmp_path / "none.json", "claude-stream-json").tokens_cache_read == 30
+
+
+async def test_rollup_sums_each_kind_and_says_when_the_split_is_unknown(database):
+    """Ruling 211: the rollup sums uncached input, cache writes and cache reads
+    apart. A row written before the split has its cache kinds NULL, its
+    `tokens_in` the old total: still counted in full, but the rollup says the
+    split is incomplete rather than calling all of it uncached."""
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, chain_definition, "
+            "status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+    split = Usage(10, 5, 0.5, "m", tokens_cache_write=20, tokens_cache_read=300)
+    await database.write(lambda c: _session(c, "new", "verify", u=split))
+    await database.write(lambda c: _session(c, "free", "env_setup"))
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
+    verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
+    assert (verify["tokens_in"], verify["tokens_cache_write"], verify["tokens_cache_read"]) == (
+        10,
+        20,
+        300,
+    )
+    assert rollup["total"]["split_complete"] is True
+
+    await database.write(lambda c: _session(c, "old", "verify", u=Usage(1000, 1)))
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE worker_sessions SET tokens_cache_write = NULL, tokens_cache_read = NULL "
+            "WHERE id = 'old'"
+        )
+    )
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
+    verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
+    env = next(n for n in rollup["by_node"] if n["node"] == "env_setup")
+    assert verify["tokens_in"] == 1010
+    assert verify["split_complete"] is False
+    assert env["split_complete"] is True  # no tokens, nothing to split
+    assert rollup["total"]["split_complete"] is False

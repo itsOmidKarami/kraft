@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { ago, cleanTitle, docBody, docTitle, elapsed, runLabel, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokens, until, usd } from "./format";
+import { ago, cleanTitle, docBody, docTitle, elapsed, runLabel, elapsedBetween, logLineText, nodeRunSpan, shortId, statusWord, tokenSplit, tokenTotal, tokens, until, usd } from "./format";
 import type { KraftEvent, LogLine, WorkerSession } from "./types/work_item";
 
 const logLine = (over: Partial<LogLine>): LogLine => ({
@@ -115,6 +115,28 @@ describe("tokens / usd", () => {
     expect(usd(0.0125)).toBe("$0.013");
     // an incomplete sum is a floor, and says so
     expect(usd(2.415, false)).toBe("$2.42+");
+  });
+});
+
+describe("tokenTotal / tokenSplit (Ruling 211)", () => {
+  const split = { tokens_in: 1_200, tokens_cache_write: 3_000, tokens_cache_read: 80_000, tokens_out: 11_000 };
+
+  it("counts every kind, the cache included, in the one number shown", () => {
+    expect(tokenTotal(split)).toBe(95_200);
+    expect(tokenTotal({ tokens_in: null, tokens_out: null })).toBe(0);
+  });
+
+  it("names each kind apart", () => {
+    expect(tokenSplit(split)).toBe("1.2k in · 3k cache write · 80k cache read · 11k out");
+  });
+
+  it.each([
+    ["an older session, its cache kinds null", { tokens_in: 5_000, tokens_cache_write: null, tokens_cache_read: null, tokens_out: 10 }],
+    ["an older session, from before the fields", { tokens_in: 5_000, tokens_out: 10 }],
+    ["a rollup holding older sessions", { ...split, tokens_in: 5_000, tokens_out: 10, split_complete: false }],
+  ])("says so when the split is unknown: %s", (_name, r) => {
+    expect(tokenSplit(r)).toMatch(/^5k in \(cache not split on older sessions\) · /);
+    expect(tokenSplit(r)).toMatch(/ · 10 out$/);
   });
 });
 

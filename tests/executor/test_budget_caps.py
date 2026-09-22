@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from kraft import events
+from kraft import events, store, usage
 from kraft import policy as _policy
 from kraft.executor import stops
 from kraft.policy import InstancePolicy, InstancePolicyInput
@@ -123,6 +123,39 @@ async def test_a_budget_usd_caps_its_own_scopes_spend(item_on, level):
     breach = _breach(it)
     assert (breach["scope"], breach["path"], breach["spent_usd"]) == ("usd", _NAMED[level], 2.0)
     assert "budget_usd reached: $2.00 spent" in stops.budget_reason(breach)
+
+
+@pytest.mark.parametrize(
+    "budget", [{"token_budget": 1000}, {"budget_usd": 1}], ids=["tokens", "usd"]
+)
+async def test_cache_tokens_still_count_against_a_budget(item_on, budget):
+    """Decision 18: splitting cache tokens out of `tokens_in` (Ruling 211) does
+    not loosen a budget. A launch whose spend is nearly all cache reads trips
+    the same `token_budget` it tripped when they were summed into `tokens_in`,
+    and a cache-only launch with no reported cost is still unknown spend. Read
+    through the real envelope parser and session writer."""
+    it = await item_on(_chain("node", budget))
+    await it.session("s", "build.run.other")
+    cost = {"total_cost_usd": 0.5} if "token_budget" in budget else {}
+    envelope = {
+        "usage": {
+            "input_tokens": 10 if cost else 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 40,
+            "cache_read_input_tokens": 950,
+        },
+        **cost,
+    }
+    await it.database.write(
+        lambda c: store.session_exited(c, "s", "done", None, usage.from_envelope(envelope))
+    )
+
+    breach = _breach(it)
+    assert breach is not None and breach["path"] == "build"
+    if cost:
+        assert breach["spent_tokens"] == 1000
+    else:
+        assert breach["unknown_launches"] == 1
 
 
 async def test_an_enclosing_scopes_cap_refuses_a_launch_its_own_would_allow(item_on):

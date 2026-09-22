@@ -36,8 +36,8 @@ IMPLEMENT = "implementation.main.implement"
 DEAD = (2_000_000_000, 123.0)
 
 #: What a Claude Code worker leaves as its log's last line. Cache reads are
-#: input tokens that were billed, so `usage.read` folds them into tokens_in:
-#: 100 + 300 = 400.
+#: input tokens that were billed, kept apart from the 100 uncached ones
+#: (Ruling 211).
 _ENVELOPE = json.dumps(
     {
         "type": "result",
@@ -82,7 +82,13 @@ def _result(run_dirs, sid, payload='{"status": "done"}'):
 
 def _usage(it, sid="s1"):
     row = next(r for r in it.sessions() if r["id"] == sid)
-    return (row["model"], row["tokens_in"], row["tokens_out"], row["cost_usd"])
+    return (
+        row["model"],
+        row["tokens_in"],
+        row["tokens_cache_read"],
+        row["tokens_out"],
+        row["cost_usd"],
+    )
 
 
 # --- identity ---------------------------------------------------------------------
@@ -297,16 +303,25 @@ async def test_resolved_from_file_carries_concerns_question_and_usage(item, data
     summary, _ = await reattach.reattach(database, run_dirs)
 
     assert summary.resolved_from_file == ["s1"]
-    assert _usage(item) == ("claude-opus-5", 400, 20, 1.25)
+    assert _usage(item) == ("claude-opus-5", 100, 300, 20, 1.25)
     payload = item.events("worker_session_exited")[-1]["payload"]
     assert {
         k: payload[k]
-        for k in ("concerns", "question", "model", "tokens_in", "tokens_out", "cost_usd")
+        for k in (
+            "concerns",
+            "question",
+            "model",
+            "tokens_in",
+            "tokens_cache_read",
+            "tokens_out",
+            "cost_usd",
+        )
     } == {
         "concerns": "the migration is untested",
         "question": "which db?",
         "model": "claude-opus-5",
-        "tokens_in": 400,
+        "tokens_in": 100,
+        "tokens_cache_read": 300,
         "tokens_out": 20,
         "cost_usd": 1.25,
     }
@@ -364,7 +379,7 @@ async def test_an_adopted_session_records_its_usage(item, database, run_dirs):
         await adopted["s1"]
 
     assert summary.adopted == ["s1"]
-    assert _usage(item) == ("claude-opus-5", 400, 20, 1.25)
+    assert _usage(item) == ("claude-opus-5", 100, 300, 20, 1.25)
 
 
 @pytest.mark.parametrize("seam", [None, "read", "write"], ids=["clean", "bad-read", "bad-write"])
@@ -410,7 +425,7 @@ async def test_an_adopted_session_carries_live_tokens_before_it_exits(
         await task
 
     assert live is not None, "tokens_in never appeared on the row before the child exited"
-    assert live[:3] == ("claude-opus-5", 1000, 200)
+    assert live[:4] == ("claude-opus-5", 1000, 0, 200)
     failed = [r for r in caplog.records if "usage progress tick failed" in r.getMessage()]
     assert [r.exc_info[1].args for r in failed] == ([] if seam is None else [("poison tick",)])
 

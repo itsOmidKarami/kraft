@@ -150,6 +150,15 @@ describe("ItemCard (W11 · A)", () => {
     expect(document.querySelector(".item-card-stats")?.textContent).toBe("1 task · 95.4k tokens · $5.01");
   });
 
+  it("counts the item's cache tokens in its total and names each kind on hover", () => {
+    const kinds = { tokens_in: 1_200, tokens_cache_write: 3_000, tokens_cache_read: 80_000, tokens_out: 11_000 };
+    const u = { cost_usd: 5.01, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 };
+    renderCard(item({ usage: { total: { ...kinds, ...u }, by_node: [] } }), [session()]);
+    const stats = document.querySelector(".item-card-stats");
+    expect(stats?.textContent).toBe("1 task · 95.2k tokens · $5.01");
+    expect(stats?.getAttribute("title")).toContain("1.2k in · 3k cache write · 80k cache read · 11k out");
+  });
+
   it("gate: Approve calls the API, and a failure says so", async () => {
     const spy = vi.spyOn(api, "approveGate").mockRejectedValue(new Error("409 gate already resolved"));
     renderCard(gateItem({ pending_gate: "plan_approval", current_node_id: "plan" }));
