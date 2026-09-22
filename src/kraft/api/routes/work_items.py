@@ -15,7 +15,9 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
 from kraft.overrides import validate_agent_overrides, validate_node_override_fields
+from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.templates.environment import RootPointerPolicy
+from kraft.templates.models import MaterializedChain
 
 
 class Attachment(BaseModel):
@@ -71,6 +73,10 @@ class NewWorkItem(BaseModel):
     #: Per-node overrides at intake, same shape and field set as the PATCH
     #: route's `node_overrides` (point 6): `{node_id: {auto_escalate: bool}}`.
     node_overrides: dict[str, dict] = {}
+    #: The item's own policy override (Kraft-ab1bh, `policy.WorkItemPolicy`):
+    #: item-wide policy fields, plus `paths: {canonical path: {field: value}}`
+    #: for one node, step or task. 422 naming the field it refuses.
+    policy: dict | None = None
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -211,16 +217,25 @@ async def create_work_item(body: NewWorkItem, request: Request):
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
     try:
-        chain.materialize(
-            target=target or entry.single_repo_target(body.repo),
-            effective_policy=policy,
-            repository_policies=per_repository,
-            attachment_kinds=attachment_kinds,
-            skip_nodes=frozenset(body.skip_nodes),
+        item_policy = (
+            chain.materialize(
+                target=target or entry.single_repo_target(body.repo),
+                effective_policy=policy,
+                repository_policies=per_repository,
+                attachment_kinds=attachment_kinds,
+                skip_nodes=frozenset(body.skip_nodes),
+            )
+            .with_item_policy(body.policy)
+            .item_policy
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    _check_node_overrides(body.node_overrides, node_ids, {n.id: n.auto_review for n in chain.nodes})
+    _check_node_overrides(
+        body.node_overrides,
+        node_ids,
+        {n.id: n.auto_review for n in chain.nodes},
+        deps.instance_policy(st).maxima,
+    )
     try:
         wid = await executor.intake(
             st.db,
@@ -253,6 +268,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
             budget_set="budget_usd" in body.model_fields_set,
             budget_usd=body.budget_usd,
             node_overrides=body.node_overrides or None,
+            policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
+            if item_policy is not None
+            else None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -402,10 +420,21 @@ class WorkItemPatch(BaseModel):
     #: `model_fields_set` below, because `None` is both "untouched" and a
     #: legal explicit value here.
     budget_usd: float | None = None
+    #: The item's own policy override, as at intake (`NewWorkItem.policy`).
+    #: `None` (default) leaves it alone, `{}` clears it, and a non-empty
+    #: object *replaces* the whole stored override. Accepted on any item that
+    #: has not ended, running or waiting included. A change takes effect at
+    #: the next node the item enters and at the next observation of a wait it
+    #: is parked on: every node entry re-reads the row (`walk.walk_node`), and
+    #: every observation is a fresh entry.
+    policy: dict | None = None
 
 
 def _check_node_overrides(
-    overrides: dict[str, dict], node_ids: set[str], reviewers: dict[str, object] | None
+    overrides: dict[str, dict],
+    node_ids: set[str],
+    reviewers: dict[str, object] | None,
+    maxima: PolicyMaximaInput | None = None,
 ) -> None:
     """422 on an override naming no node of the chain, an unknown field, or an
     `auto_escalate: true` on a gate declaring no `auto_review`. One check for
@@ -425,6 +454,24 @@ def _check_node_overrides(
         field_errs = validate_node_override_fields(fields)
         if field_errs:
             raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        # A per-item fix-loop bound is an operational value, held to the
+        # administrator maximum like the item's own policy override is
+        # (Kraft-3br6j): the two doors must not bound it differently.
+        for key, name, seconds in (
+            ("attempts", "max_attempts", 1),
+            ("wall_clock_s", "timeout_minutes", 60),
+        ):
+            ceiling = getattr(maxima, name, None)
+            if (
+                fields.get(key) is not None
+                and ceiling is not None
+                and fields[key] > ceiling * seconds
+            ):
+                raise HTTPException(
+                    422,
+                    f"node {node_id!r}: {key} {fields[key]} cannot exceed the administrator "
+                    f"maximum {name} {ceiling}",
+                )
         if (
             reviewers is not None
             and fields.get("auto_escalate") is True
@@ -454,7 +501,7 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
         return
 
-    _check_node_overrides(patch, node_ids, reviewers)
+    _check_node_overrides(patch, node_ids, reviewers, deps.instance_policy(st).maxima)
 
     def check(c):
         for node_id in patch:
@@ -462,6 +509,28 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 
     st.db.read(lambda c: check(c))
+
+
+def _item_policy(row, patch: dict | None, new_materialized: str | None):
+    """The item's own policy override after this PATCH, checked against the
+    chain it will run: the new template's on a switch, else its own. A switch
+    re-checks the override already stored, since a path it names may not
+    exist on the new chain. 422 naming the field refused."""
+    if patch is None and new_materialized is None:
+        return None
+    chain = (
+        MaterializedChain.from_json(new_materialized)
+        if new_materialized is not None
+        else store.materialized_chain_of(row)
+    )
+    if chain is None:
+        raise HTTPException(409, "this work item has no V1 chain to hold a policy override")
+    try:
+        # `{}` clears: nothing to check.
+        wanted = store.policy_override_of(row) if patch is None else (patch or None)
+        return chain.with_item_policy(wanted).item_policy
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @api_router.patch("/work-items/{wid}")
@@ -476,12 +545,13 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         and body.chain_template is None
         and body.agent_overrides is None
         and body.node_overrides is None
+        and body.policy is None
         and "budget_usd" not in fields_set
     ):
         raise HTTPException(
             422,
             "nothing to patch: send a title, description, chain_template, agent_overrides, "
-            "node_overrides, or budget_usd",
+            "node_overrides, policy, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
@@ -536,6 +606,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
+    item_policy = _item_policy(row, body.policy, new_materialized)
+
     if body.agent_overrides is not None:
         errs = validate_agent_overrides(body.agent_overrides)
         if errs:
@@ -557,6 +629,8 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             store.set_node_overrides(c, wid, body.node_overrides)
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
+        if body.policy is not None:
+            store.set_policy_override(c, wid, item_policy)
 
     await st.db.write(apply)
     # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:

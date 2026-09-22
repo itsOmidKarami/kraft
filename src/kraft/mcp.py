@@ -57,6 +57,7 @@ def build() -> MCPServer:
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
         implements_beads: list[str] | None = None,
+        policy: dict | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -79,7 +80,10 @@ def build() -> MCPServer:
 
         `implements_beads` are bead ids this item implements; they are closed
         when it completes. Ids mentioned in the description are not parsed —
-        naming a bead in prose promises nothing."""
+        naming a bead in prose promises nothing.
+
+        `policy` is the item's own policy override, as `set_work_item_policy`
+        takes it. Leave it out unless a human asked for one."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -88,6 +92,7 @@ def build() -> MCPServer:
             attachments=attachments,
             auto_gate=auto_gate,
             implements_beads=implements_beads,
+            policy=policy,
         )
 
     @server.tool()
@@ -251,6 +256,24 @@ def build() -> MCPServer:
             clear=clear,
             work_item_id=work_item_id,
         )
+
+    @server.tool()
+    async def set_work_item_policy(
+        policy: dict | None = None, clear: bool = False, work_item_id: str | None = None
+    ) -> dict:
+        """Set or clear a Kraft work item's own policy override, for that item
+        only -- never its chain template or any other item. `policy` holds
+        item-wide fields (`max_attempts`, `timeout_minutes`,
+        `wait_timeout_minutes`, `allowed_harnesses`, and the safety fields
+        `allowed_tools`, `deny_tools`, `token_budget`, `sandbox`, which can
+        only tighten) and `paths`, a map from a canonical path (`node`,
+        `node.step` or `node.step.task`) to the same fields for that scope:
+        `{"paths": {"merge_request_feedback.ci.await_ci":
+        {"wait_timeout_minutes": 180}}}`. It replaces the whole stored
+        override; `clear` removes it. Refused, naming the field, past an
+        administrator maximum. On a running or waiting item it binds from the
+        next node entered and the next observation of a wait."""
+        return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)
 
     @server.tool()
     async def permission_request(

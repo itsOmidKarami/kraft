@@ -156,15 +156,44 @@ def test_create_carries_the_description(app, monkeypatch, capsys, repo):
 def test_item_create_passes_auto_gate(monkeypatch):
     seen = {}
 
-    async def fake_create(
-        title, repo, chain, description, attachments, auto_gate=False, implements_beads=None
-    ):
+    async def fake_create(title, repo, chain, description, attachments, auto_gate=False, **_rest):
         seen["auto_gate"] = auto_gate
         return {"id": "w1"}
 
     monkeypatch.setattr("kraft.client.create_work_item", fake_create)
     cli.main(["item", "create", "t", "--repo", "/r", "--auto-gate"])
     assert seen["auto_gate"] is True
+
+
+def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
+    app, monkeypatch, capsys, repo
+):
+    """Kraft-ab1bh: `--policy FIELD=VALUE` item-wide, `PATH.FIELD=VALUE` for
+    one scope, a value read as YAML; `set-policy` replaces the whole override
+    and `--clear` drops it."""
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    ci = "merge_request_feedback.ci.await_ci"
+    cli.main(["item", "create", "t", "--policy", "max_attempts=3",
+              "--policy", f"{ci}.wait_timeout_minutes=180",
+              "--policy", "deny_tools=[WebFetch]", "--json"])  # fmt: skip
+    wid = json.loads(capsys.readouterr().out)["id"]
+
+    def stored():
+        cli.main(["view", "show", wid, "--json"])
+        return json.loads(capsys.readouterr().out).get("policy_override")
+
+    assert stored() == {
+        "max_attempts": 3,
+        "deny_tools": ["WebFetch"],
+        "paths": {ci: {"wait_timeout_minutes": 180}},
+    }
+    cli.main(["item", "set-policy", wid, "--policy", "verification.max_attempts=2", "--json"])
+    capsys.readouterr()
+    assert stored() == {"paths": {"verification": {"max_attempts": 2}}}
+    cli.main(["item", "set-policy", wid, "--clear", "--json"])
+    capsys.readouterr()
+    assert stored() is None
 
 
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):
@@ -299,6 +328,21 @@ def test_a_worker_cannot_act_on_its_own_work_item(app, monkeypatch, capsys, make
         cli.main(["item", "approve"])
     assert caught.value.code == 1
     assert "cannot act on its own work item" in capsys.readouterr().err
+
+
+def test_a_worker_cannot_set_its_own_policy_through_the_cli(
+    app, monkeypatch, capsys, make_item, repo
+):
+    """Kraft-j89jc: `kraft item set-policy` from inside the item's own worker."""
+    wid = make_item(repo, "mine to run, not to loosen")
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["item", "set-policy", "--policy", "max_attempts=9"])
+    assert caught.value.code == 1
+    assert "cannot act on its own work item" in capsys.readouterr().err
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
+    cli.main(["view", "show", wid, "--json"])
+    assert "policy_override" not in json.loads(capsys.readouterr().out)
 
 
 def test_resume_starts_a_paused_item(app, capsys, make_item, repo):

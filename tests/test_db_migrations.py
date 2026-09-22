@@ -148,6 +148,15 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         replace = (*replace, ("run_chain        TEXT,", "run_fork_parent  TEXT,"))
     if version < 35:
         skip_stmts = (*skip_stmts, "run_forks")
+    if version < 36:
+        drop_lines = (
+            *drop_lines,
+            "policy_override TEXT,",
+            "-- the item's own policy override",
+            "-- JSON, item-wide fields plus `paths`",
+            "-- none. Layered onto the snapshot",
+            "-- (`store.materialized_chain_of`), never written into it.",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -422,6 +431,8 @@ ADDED_COLUMNS = [
     (32, "work_items", ("materialized_chain",), None),
     # the current run fork's materialization; NULL until the item's first retry
     (34, "work_items", ("run_chain",), None),
+    # a work item's own policy override (Kraft-ab1bh); NULL means none
+    (35, "work_items", ("policy_override",), None),
 ]
 
 

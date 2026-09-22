@@ -317,6 +317,8 @@ async def get_work_item(wid: str, request: Request):
         "effective_chain": store.effective_chain(chain, node_overrides),
         "node_overrides": node_overrides,
         "node_overrides_count": len(node_overrides),
+        # The item's own policy override (Kraft-ab1bh), decoded from its column.
+        "policy_override": json.loads(row["policy_override"] or "null"),
         # The Config tab's "$5.00 · $2.41 used" and "policy default" / "item"
         # source line (point 4). Deliberately not `budget` -- that key is
         # `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,

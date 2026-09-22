@@ -101,11 +101,15 @@ archive:
 #   max_attempts       a node's fix-loop attempts, and timeout_minutes its wall
 #   timeout_minutes    clock -- under the loop's own `max_attempts` and an
 #                      operator's per-item node override, over loops:/default:.
-#   wait_timeout_minutes  (maxima only) the longest any external wait may be
-#                      configured to wait; a chain whose `wait: timeout` is
-#                      longer is refused when an item is filed, and a wait
-#                      with no timeout of its own gets 90 minutes or this,
-#                      whichever is shorter.
+#   wait_timeout_minutes  how long every external wait under a scope waits,
+#                      replacing its own `wait: timeout`. Under `maxima:`,
+#                      the longest any wait may be configured to wait; a
+#                      chain whose `wait: timeout` is longer is refused when
+#                      an item is filed, and a wait with no timeout of its own
+#                      gets 90 minutes or this, whichever is shorter.
+#
+# Last of all, a work item's own override (`kraft item create --policy`,
+# `kraft item set-policy`) binds that one item, within these maxima.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install
