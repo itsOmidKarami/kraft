@@ -10,10 +10,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 // fallback answering 200 with index.html, so `res.json()` dies with a
 // SyntaxError about `<` and the screen looks broken for an unrelated reason.
 // Every backend route lives under /api/ (server side: src/kraft/api.py's
-// api_router). `req()` is where most calls end up, but `logStreamUrl` and
-// `getLogText` build a request outside it (EventSource, a plain-text fetch)
-// and are the ones most likely to drift back to a bare path — this checks
-// all three, plus the one call site in ws.ts, still go through /api.
+// api_router). `req()` is where most calls end up, but `logStreamUrl`,
+// `getLogText` and `logTextUrl` build a request outside it (EventSource, a
+// plain-text fetch, a download link) and are the ones most likely to drift
+// back to a bare path — this checks all four, plus the one call site in
+// ws.ts, still go through /api.
 describe("the dev vite proxy", () => {
   it("every fetch/WebSocket call site in api.ts and ws.ts uses /api", () => {
     const apiTs = readFileSync(join(here, "api.ts"), "utf-8");
@@ -21,7 +22,8 @@ describe("the dev vite proxy", () => {
     const viteConfig = readFileSync(join(here, "..", "vite.config.ts"), "utf-8");
 
     expect(apiTs).toMatch(/fetch\(apiUrl\(path\)/); // req()
-    expect([...apiTs.matchAll(/apiUrl\(logUrl\(sessionId\)\)/g)]).toHaveLength(2); // logStreamUrl, getLogText
+    // logStreamUrl, getLogText, logTextUrl
+    expect([...apiTs.matchAll(/apiUrl\(logUrl\(sessionId\)\)/g)]).toHaveLength(3);
     expect(wsTs).toMatch(/\/api\/ws\/events/);
     expect(viteConfig).toMatch(/["']\/api["']/);
   });

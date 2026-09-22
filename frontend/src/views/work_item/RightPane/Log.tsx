@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLineDown, ArrowsOutSimple, Copy } from "@phosphor-icons/react";
+import { ArrowLineDown, ArrowsOutSimple, Copy, DownloadSimple } from "@phosphor-icons/react";
 import * as api from "../../../api";
 import { clock, elapsed, logLineText, tokenTotal, tokens, usd } from "../../../format";
 import { findSession, useStore } from "../../../store";
@@ -124,6 +124,10 @@ export function Log({
     () => (filter === "all" ? lines : lines.filter((l) => l.src === filter)),
     [lines, filter],
   );
+  // The marker row (n: -1) sorts first when the log was too big to read
+  // whole (Kraft-2vvus); a copy past that point would buffer the same file
+  // into the page the marker exists to avoid, so offer a download instead.
+  const truncated = lines[0]?.n === -1 ? lines[0].truncated : undefined;
 
   useEffect(() => {
     if (follow && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
@@ -197,9 +201,20 @@ export function Log({
             <ArrowLineDown size={13} />
             {follow ? "Following" : "Follow"}
           </button>
-          <button className="btn btn-icon btn-ghost" title="Copy log" onClick={copy}>
-            <Copy size={14} />
-          </button>
+          {truncated ? (
+            <a
+              className="btn btn-icon btn-ghost"
+              title="Download the full log"
+              href={api.logTextUrl(sessionId)}
+              download
+            >
+              <DownloadSimple size={14} />
+            </a>
+          ) : (
+            <button className="btn btn-icon btn-ghost" title="Copy log" onClick={copy}>
+              <Copy size={14} />
+            </button>
+          )}
           {onToggleMaximize && (
             <button
               className="btn btn-icon btn-ghost"
@@ -223,13 +238,24 @@ export function Log({
         {lines.length > 0 && shown.length === 0 && !error && (
           <p className="empty">no {filter} lines — this session logged {lines.length}</p>
         )}
-        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) => (
-          <div key={l.n} className="log-line" data-src={l.src}>
-            <span className="log-t">{l.t ? clock(l.t) : ""}</span>
-            <span className="log-src">{l.src}</span>
-            <span className="log-text">{logLineText(l)}</span>
-          </div>
-        ))}
+        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) =>
+          l.n === -1 ? (
+            <div key={l.n} className="log-line log-line-truncated" data-src={l.src}>
+              <span className="log-text">
+                {logLineText(l)}{" "}
+                <a href={api.logTextUrl(sessionId)} download>
+                  download the full log
+                </a>
+              </span>
+            </div>
+          ) : (
+            <div key={l.n} className="log-line" data-src={l.src}>
+              <span className="log-t">{l.t ? clock(l.t) : ""}</span>
+              <span className="log-src">{l.src}</span>
+              <span className="log-text">{logLineText(l)}</span>
+            </div>
+          ),
+        )}
         {capLines && !expanded && shown.length > capLines && (
           <button className="btn btn-ghost log-show-all" onClick={() => setExpanded(true)}>
             Show all {shown.length} lines

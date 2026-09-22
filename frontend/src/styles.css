@@ -1196,6 +1196,14 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 .log-src { color: var(--color-text-muted); }
 .log-line[data-src="agent"] .log-src { color: var(--color-accent-300); }
 .log-text { white-space: pre-wrap; word-break: break-word; }
+/* Marker row (n: -1) for a log too big to read whole (Kraft-2vvus): no
+   timestamp/src columns of its own, just the note and a link to the file. */
+.log-line-truncated {
+  display: block; padding: 6px 0; margin-bottom: 4px;
+  border-bottom: 1px dashed var(--color-neutral-700);
+  font-style: italic;
+}
+.log-line-truncated a { color: var(--color-accent-300); font-style: normal; }
 .detail-description { overflow-wrap: anywhere; }
 .log-following {
   display: flex; align-items: center; gap: 8px; padding: 6px 0 0;

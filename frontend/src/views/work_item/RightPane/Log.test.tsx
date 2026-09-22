@@ -114,6 +114,28 @@ describe("RightPane · Log", () => {
     expect(document.querySelector(".log-head")?.textContent).toContain("950 tokens");
   });
 
+  it("Kraft-qmjk1: renders the truncation marker distinctly with a download link, and swaps Copy for Download", async () => {
+    const marker: LogLine = {
+      n: -1, t: null, src: "sys", text: "… 900 earlier lines (3000000 bytes) not shown",
+      truncated: { lines: 900, bytes: 3_000_000 },
+    };
+    vi.spyOn(api, "getLogLines").mockResolvedValue({
+      session_id: "s1", status: "done", lines: [marker, line(0)],
+    });
+    render(<Log sessionId="s1" />);
+    await screen.findByText("line 0");
+
+    const markerRow = document.querySelector(".log-line-truncated") as HTMLElement;
+    expect(markerRow).toBeTruthy();
+    expect(markerRow.textContent).toContain("900 earlier lines");
+    const link = within(markerRow).getByRole("link", { name: /download the full log/i });
+    expect(link.getAttribute("href")).toBe(api.logTextUrl("s1"));
+
+    expect(screen.queryByRole("button", { name: "Copy log" })).not.toBeInTheDocument();
+    const download = screen.getByRole("link", { name: "Download the full log" });
+    expect(download.getAttribute("href")).toBe(api.logTextUrl("s1"));
+  });
+
   it("renders one header row, with the chips in it and no title block above", async () => {
     vi.spyOn(api, "getLogLines").mockResolvedValue({
       session_id: "s1", status: "done", lines: [line(0)],
