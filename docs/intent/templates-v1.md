@@ -354,7 +354,7 @@ origin: src/kraft/templates/models.py §MaterializedChain -- next to the task's 
 A fallback entry SHALL be refused at load when it names none of harness,
 profile, model and effort, selects a profile and a model or effort together,
 or carries an unknown key, and an agent profile's list SHALL be refused when an
-entry names a profile that is not defined; a gate's review task SHALL NOT declare a
+entry names a profile that is not defined; a gate's review task SHALL NOT declare its own
 fallback list. A harness save SHALL be refused, and `kraft admin doctor` SHALL fail, when a
 fallback entry of a chain's task (from its own list or its profile's) cannot
 pair with its harness, naming the task, the list's source and the entry's
