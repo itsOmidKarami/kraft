@@ -1,4 +1,4 @@
-import { createItem, expect, test } from "./fixtures";
+import { createItem, expect, pauseRunningAgent, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round, part 2: the human-in-the-loop controls on the detail
@@ -12,26 +12,7 @@ test("pause, steer and resume from the detail screen", async ({ page }) => {
   // `item.steerable` true and the steer box this test needs visible
   // (PausedCard, Kraft-bz9b's last unwired caller).
   const id = await createItem(page, "ui pause steer KRAFT_SLOW", "quick-task");
-  // Pause while the slowed implementation agent is actually running. A pause
-  // that lands between nodes finds no session to stop and, today, lets the walk
-  // carry on beside the resumed one (Kraft-e7pm). That race is tracked there;
-  // this test is about pausing a running agent.
-  await expect
-    .poll(
-      async () => {
-        const res = await page.request.get(`/api/work-items/${id}`);
-        const { worker_sessions = [] } = await res.json();
-        return worker_sessions.some(
-          (s: { node_id: string; status: string }) =>
-            s.node_id === "implementation" && s.status === "running",
-        );
-      },
-      { timeout: scaledTimeout(30_000) },
-    )
-    .toBe(true);
-  const pause = page.getByRole("button", { name: /^Pause$/ });
-  await expect(pause).toBeEnabled({ timeout: scaledTimeout(30_000) });
-  await pause.click();
+  await pauseRunningAgent(page, id);
   await expect(page.getByRole("button", { name: /^Steer$/ })).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.getByRole("button", { name: /^Steer$/ }).click();
   await expect(page.getByRole("button", { name: /Resume with this steer/ })).toBeVisible({
