@@ -83,36 +83,49 @@ def _chain_ids(client, wid) -> list[str]:
     ]
 
 
-def test_a_library_change_after_the_gate_was_shown_refuses_the_approval(
-    client, repo, templates_dir
-):
-    """The reviewer's scenario: the gate shows `checked` running `echo safe`;
-    the library is edited and reloaded; approving must not write the node the
-    edited library now resolves to."""
-    wid = _filed(client, repo)
-    shown = client.get(f"/api/work-items/{wid}/artifact").json()["content"]
-    assert "echo safe" in shown
-    _library(templates_dir, "echo something-else")
-    client.app.state.library = TemplateLibrary.from_yaml_dir(templates_dir)
+def _approve(client, wid, digest=None):
+    body = {"digest": digest} if digest is not None else None
+    return client.post(f"/api/work-items/{wid}/gates/revision_approval/approve", json=body)
 
-    r = client.post(f"/api/work-items/{wid}/gates/revision_approval/approve")
 
-    assert r.status_code == 409, r.text
-    assert "review it again" in r.json()["detail"]
+def _unrevised(client, wid) -> None:
     assert _chain_ids(client, wid) == ["revise", "revision_approval", "build"]
     events = client.get(f"/api/work-items/{wid}/events").json()
     assert not [e for e in events if e["type"] == "chain_revised"]
     assert client.get(f"/api/work-items/{wid}").json()["pending_gate"] == "revision_approval"
 
-    # Shown again, it is what gets applied.
-    assert "echo something-else" in client.get(f"/api/work-items/{wid}/artifact").json()["content"]
-    assert client.post(f"/api/work-items/{wid}/gates/revision_approval/approve").status_code == 200
-    assert _chain_ids(client, wid) == ["revise", "revision_approval", "build", "checked"]
 
-
-def test_an_approval_nobody_rendered_applies_what_it_computes(client, repo):
+def test_an_approval_applies_what_its_approver_saw_not_a_later_render(client, repo, templates_dir):
+    """Kraft-ec66w: A views (`echo safe`), the library is edited and reloaded,
+    B views (`echo something-else`). A's approval carries A's digest, so it is
+    refused, not applied as B's view; B's approval goes through."""
     wid = _filed(client, repo)
+    seen_by_a = client.get(f"/api/work-items/{wid}/artifact").json()
+    assert "echo safe" in seen_by_a["content"]
+    _library(templates_dir, "echo something-else")
+    client.app.state.library = TemplateLibrary.from_yaml_dir(templates_dir)
+    seen_by_b = client.get(f"/api/work-items/{wid}/artifact").json()
+    assert "echo something-else" in seen_by_b["content"]
+    assert seen_by_a["digest"] != seen_by_b["digest"]
 
-    assert client.post(f"/api/work-items/{wid}/gates/revision_approval/approve").status_code == 200
+    r = _approve(client, wid, seen_by_a["digest"])
 
+    assert r.status_code == 409, r.text
+    assert "changed since you viewed it; review it again" in r.json()["detail"]
+    _unrevised(client, wid)
+
+    assert _approve(client, wid, seen_by_b["digest"]).status_code == 200
     assert _chain_ids(client, wid) == ["revise", "revision_approval", "build", "checked"]
+
+
+def test_a_revision_approval_that_carries_no_digest_is_refused(client, repo):
+    """Nobody's view is bound by an approval that says nothing about what it
+    saw, so it applies nothing, and says where the digest comes from."""
+    wid = _filed(client, repo)
+    client.get(f"/api/work-items/{wid}/artifact")
+
+    r = _approve(client, wid)
+
+    assert r.status_code == 409, r.text
+    assert "kraft view artifact" in r.json()["detail"]
+    _unrevised(client, wid)

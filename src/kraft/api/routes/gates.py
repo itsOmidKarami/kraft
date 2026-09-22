@@ -35,7 +35,15 @@ class GateReject(BaseModel):
     node: str | None = None
 
 
-async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
+class GateApprove(BaseModel):
+    #: The chain revision's digest, as the artifact the approver read carried
+    #: it (Kraft-ec66w). Other gate kinds need none.
+    digest: str | None = None
+
+
+async def apply_approval(
+    st, row, gate: str, *, viewer: bool = False, seen: str | None = None
+) -> tuple[tuple | None, str | None]:
     """Everything an approval does before the chain is allowed to move, and the
     ordered nodes it may move along -- or `(None, reason)` when it must not move
     at all.
@@ -74,14 +82,14 @@ async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
             f"{gate}: the final review document is missing; the node that owed it did not write one"
         )
     if node.node.artifact == revision.CHAIN_REVISION:
-        reason = await _revise(st, row, gate)
+        reason = await _revise(st, row, gate, viewer=viewer, seen=seen)
         if reason is not None:
             return None, reason
         return gate_nodes(st, deps._work_item_row(st, row["id"])), None
     return nodes, None
 
 
-async def _revise(st, row, gate: str) -> str | None:
+async def _revise(st, row, gate: str, *, viewer: bool, seen: str | None) -> str | None:
     """Apply the chain revision `gate` is about, or say why it cannot be.
 
     Nothing to apply is not a refusal: a revision gate with no document is
@@ -110,13 +118,23 @@ async def _revise(st, row, gate: str) -> str | None:
         return f"{gate}: {exc}"
     if revised is chain:
         return None
-    # Bound to what the gate showed (Kraft-ze1yj): an `add` resolves out of the
-    # live library, which may have been edited and reloaded since. Nobody
-    # having looked binds nothing; the approval applies what it computes.
-    shown = st.db.read(lambda c: store.shown_revision(c, row["id"], gate))
-    if shown is not None and shown != revision.digest(revised):
+    # Bound to what was shown (Kraft-ze1yj): an `add` resolves out of the live
+    # library, which may have been edited and reloaded since. A person's
+    # approval (`viewer`) carries the digest of the render they read, so a
+    # later render by someone else can't stand in for it (Kraft-ec66w). An
+    # agent's verdict has no render of its own: it is checked against the
+    # gate's last one, and nobody having looked binds nothing.
+    current = revision.digest(revised)
+    if viewer and seen is None:
         raise revision.StaleRevision(
-            f"{gate}: the library changed since this revision was shown; review it again"
+            f"{gate}: approving a chain revision needs the digest of the one you reviewed;"
+            " read it with `kraft view artifact` and approve with the digest it prints"
+        )
+    if not viewer:
+        seen = st.db.read(lambda c: store.shown_revision(c, row["id"], gate))
+    if seen is not None and seen != current:
+        raise revision.StaleRevision(
+            f"{gate}: the revision changed since you viewed it; review it again"
         )
     payload = {
         "gate": gate,
@@ -167,7 +185,7 @@ def _decided_by(request: Request) -> str:
 
 
 @api_router.post("/work-items/{wid}/gates/{gate:path}/approve")
-async def approve_gate(wid: str, gate: str, request: Request):
+async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove | None = None):
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
     _gate_or_404(gate_nodes(st, row), gate)
@@ -191,7 +209,9 @@ async def approve_gate(wid: str, gate: str, request: Request):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
     try:
-        nodes, reason = await apply_approval(st, row, gate)
+        nodes, reason = await apply_approval(
+            st, row, gate, viewer=True, seen=body.digest if body else None
+        )
     except revision.StaleRevision as exc:
         # Nothing applied and nothing stopped: the gate is still pending, and
         # reading its document again shows what an approval would now write.

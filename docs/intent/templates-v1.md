@@ -588,9 +588,9 @@ origin: src/kraft/templates/revision.py §_lands -- Kraft-eh5as: without it a re
 
 ## REQ chain-revision-approval-applies-what-was-shown
 
-IF the revision an approval would apply differs from the one its gate last showed, THEN the system SHALL refuse the approval as a conflict and SHALL apply nothing.
-enforced-by: tests/api/test_chain_revision_gate.py::test_a_library_change_after_the_gate_was_shown_refuses_the_approval, tests/api/test_chain_revision_gate.py::test_an_approval_nobody_rendered_applies_what_it_computes
-origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15.
+IF a person's approval of a chain revision carries no digest, or a digest other than that of the revision it would apply, THEN the system SHALL refuse the approval as a conflict and SHALL apply nothing.
+enforced-by: tests/api/test_chain_revision_gate.py::test_an_approval_applies_what_its_approver_saw_not_a_later_render, tests/api/test_chain_revision_gate.py::test_a_revision_approval_that_carries_no_digest_is_refused
+origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15; Kraft-ec66w: the digest is the approver's own, echoed from the artifact they read, not the gate's last render.
 
 ## REQ invalid-chain-revision-never-reaches-the-chain
 
