@@ -341,8 +341,9 @@ def test_a_snapshot_frozen_before_ruling_211_reads_its_flat_maxima_as_the_work_i
     [
         ({"paths": {"build.run": {"{f}": 20}}}, "policy.paths.build.run.{f}"),
         ({"paths": {"build": {"{f}": 5}, "build.run": {"{f}": 8}}}, "policy.paths.build.run.{f}"),
+        ({"{f}": 30, "paths": {"build": {"{f}": 40}}}, "policy.paths.build.{f}"),
     ],
-    ids=["path-over-its-own", "path-over-an-enclosing-override"],
+    ids=["path-over-its-own", "path-over-an-enclosing-override", "path-over-the-items-own"],
 )
 def test_an_items_path_cap_above_the_one_it_lands_on_is_refused(field, override, where):
     """An item's override on a path only tightens that inner scope: inner

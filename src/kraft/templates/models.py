@@ -447,17 +447,14 @@ class ForgeTask(TaskBase):
     def wait_bounds(self, policy: InstancePolicy) -> WaitBounds:
         """This wait's bounds under `policy`, the task's own resolved policy.
         Its timeout is the task's `total_time_cap_minutes` (Ruling 196), which
-        the ratchet already held under every enclosing cap and the maximum; a
-        wait with none anywhere takes `DEFAULT_WAIT`'s, clamped to
-        its level's maximum rather than refusing a chain whose author chose
-        no number."""
+        the ratchet already held under every enclosing cap, and which
+        `InstancePolicy.at_level` already filled from the tasks' default or
+        maximum; a wait with none anywhere takes `DEFAULT_WAIT`'s."""
         wait = self.wait or WaitPolicy()
-        bound = policy.maxima.nearest("tasks", "total_time_cap_minutes")
-        limit = timedelta(minutes=bound[1]) if bound is not None else None
         timeout = (
             timedelta(minutes=policy.total_time_cap_minutes)
             if policy.total_time_cap_minutes is not None
-            else min(DEFAULT_WAIT.timeout, limit or DEFAULT_WAIT.timeout)
+            else DEFAULT_WAIT.timeout
         )
         initial = wait.polling.initial_interval or DEFAULT_WAIT.initial_interval
         maximum = wait.polling.max_interval or max(DEFAULT_WAIT.max_interval, initial)

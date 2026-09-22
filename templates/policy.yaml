@@ -133,8 +133,8 @@ archive:
 #                      waits, gates and rate limits, less only a manual pause.
 #                      A task's total is its running time, except a wait's:
 #                      that is the wait's timeout (Ruling 196), and a wait with
-#                      none gets 90 minutes or the maximum, whichever is
-#                      shorter.
+#                      none set and no tasks default runs to the tasks'
+#                      maximum, or 90 minutes when there is none.
 #                      Both caps are set on any scope, and each caps its own:
 #                      a child's cannot exceed its parent's (chain > node >
 #                      step > task), and a layer that tries is refused when

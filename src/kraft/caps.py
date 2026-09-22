@@ -1,9 +1,11 @@
 """Per-scope time caps (Rulings 194, 195, 196): measuring them, and stopping.
 
-A time cap may sit on the work item (instance, repository, chain or the item's
-own override), a node, a step or a task. Each one caps **its own scope**, and a
-child's may not exceed its parent's (`ResolvedChain._check_caps` refuses that
-when the item is filed). Two clocks:
+A time cap may sit on the work item (its repository, chain or the item's own
+override), a node, a step or a task, and `policy.yaml` gives each level of
+scope a default (Ruling 211). Each scope's cap is resolved by the policy model
+(`MaterializedChain.policy_at`, `.work_item_policy`), never here. Each one caps
+**its own scope**, and a child's may not exceed its parent's
+(`ResolvedChain._check_caps` refuses that when the item is filed). Two clocks:
 
 * `time_cap_minutes` -- running time: the union of the scope's task runs, its
   sessions' spans. So paused, gate, external-wait and rate-limited time never
