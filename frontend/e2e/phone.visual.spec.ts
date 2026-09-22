@@ -264,13 +264,10 @@ test("Chains and Steering are editable on a phone, not an open-on-desktop notice
   await expect(page.getByLabel("chain yaml")).toBeEditable();
   await expect(page.getByText(/open on desktop/i)).toBeHidden();
 
-  await page.goto("/settings/steering");
-  const first = page.locator(".settings-index-row, .facet-opt").first();
-  if ((await first.count()) > 0) {
-    await first.click();
-    await expect(page.getByLabel("steering body")).toBeEditable();
-    await expect(page.getByText(/open on desktop/i)).toBeHidden();
-  }
+  // Steering profiles are library.yaml's (Kraft-91i6p): edited on the Library.
+  await page.goto("/settings/library");
+  await expect(page.getByLabel("library yaml")).toBeEditable();
+  await expect(page.getByText(/open on desktop/i)).toBeHidden();
   await page.screenshot({ path: `${SHOTS}/phone-09-settings.png`, fullPage: true });
 });
 

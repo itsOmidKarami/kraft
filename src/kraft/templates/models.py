@@ -1535,7 +1535,7 @@ class MaterializedChain:
     #: repository's `steering:` list reaches items filed afterwards. `None` is
     #: a snapshot stored before this was frozen, whose launches read the
     #: repository's names against the live library, the way they read the
-    #: steering files they were filed with (`adapters.agent.repo_steering`).
+    #: steering files they were filed with (`worker.steering.for_repository`).
     repository_steering: Mapping[str, Mapping[str, str]] | None = None
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`

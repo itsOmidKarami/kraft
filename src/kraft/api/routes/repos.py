@@ -337,7 +337,7 @@ async def remove_repo(request: Request, path: str):
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]
     # A workspace still naming it would no longer load; refused, not dropped.
-    # Steering is not re-checked: a deleted steering file elsewhere must not
+    # Steering is not re-checked: a profile removed from the library must not
     # block a disconnect.
     _validate_repos(st, kept, steering=False)
     config_mod.save_repos(deps.repos_path(st), kept)

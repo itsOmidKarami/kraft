@@ -96,7 +96,7 @@ class Indexer:
 
         Degrades like `kraft.api.deps.launch` rather than raising: a malformed file must
         not take down a scan of the repos that are still fine. Steering is not
-        validated here — indexing has nothing to do with steering files.
+        validated here — indexing has nothing to do with steering.
         """
         if self._repos_path is None:
             return []
