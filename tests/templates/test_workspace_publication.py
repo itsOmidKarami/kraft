@@ -60,7 +60,15 @@ async def _workspace_item(
         target=None if legacy else workspace_target(mounts, root_pointer_policy=pointer),
     )
     if materialize:
-        chain = chain.chain.materialize(target=chain.target, **materialize)
+        # Built past `materialize`, as an item filed before Ruling 180 froze
+        # it: `materialize` now refuses a sandbox over submodule mounts
+        # (Kraft-dshto), and dispatch's per-repository resolution is what
+        # this pins. The chain declares no policy, so no layer is skipped.
+        chain = dataclasses.replace(
+            chain,
+            policy=materialize["effective_policy"],
+            repository_policies=materialize["repository_policies"],
+        )
     # `legacy`: the shape every item filed before Task 10 has -- a
     # single-repository target, its submodules and pointer policy in columns.
     columns = {"submodules": list(mounts.values()), "root_merge_policy": pointer} if legacy else {}

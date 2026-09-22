@@ -317,6 +317,11 @@ async def repos() -> list[dict]:
     return (await transport._get("/repos")).get("repos", [])
 
 
+async def workspaces() -> dict[str, dict]:
+    """Every declared workspace by id, as `GET /repos` shapes it."""
+    return (await transport._get("/repos")).get("workspaces", {})
+
+
 async def health() -> dict:
     """The server's own view of itself: invalid config, index state, reattach.
 

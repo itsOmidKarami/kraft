@@ -141,16 +141,22 @@ def validate_retry_override(
         raise RetryOverrideError(str(exc), field=field) from exc
 
     effective = scope.get("policy")
+    forked = MaterializedChain(
+        chain=resolved,
+        target=chain.target,
+        policy=chain.policy,
+        repository_policies=chain.repository_policies,
+    )
+    # A retry is a door onto a new snapshot too: a `sandbox` it adds to a
+    # workspace item's task is refused as intake would refuse it (Kraft-dshto).
+    refusal = forked.sandbox_refusal()
+    if refusal is not None:
+        raise RetryOverrideError(refusal, field="policy.sandbox")
     return RetryOverride(
         path=path,
         task_config=task_config,
         policy=shape.model_validate(effective) if effective else None,
-        chain=MaterializedChain(
-            chain=resolved,
-            target=chain.target,
-            policy=chain.policy,
-            repository_policies=chain.repository_policies,
-        ),
+        chain=forked,
     )
 
 

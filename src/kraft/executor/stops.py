@@ -4,11 +4,14 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 
+from kraft import builtins as _builtins
+from kraft import config as _config
 from kraft import events, store, waits
 from kraft import policy as _policy
-from kraft.executor.context import RATE_LIMITED, WAITING
+from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext
 from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
+from kraft.worker import sandbox as _sandbox
 
 
 @asynccontextmanager
@@ -211,3 +214,36 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     )
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
     return "needs_human"
+
+
+def refuse_sandboxed_submodules(row, launch: LaunchContext | None) -> None:
+    """Raise `RuntimeError` naming why, when `row`'s item mounts submodules and
+    would run sandboxed (Kraft-dshto): refused at intake since Ruling 180, but
+    an item filed before that, or one filed before workspaces (Kraft-zvqwl),
+    can still be in flight. Called before any host-side git touches its
+    worktree -- the walk, and every door that refreshes the worktree first --
+    and each caller already turns a `RuntimeError` into a stop for a human.
+
+    Sandboxed means its frozen snapshot sandboxes a task, or a repository
+    entry it launches against sets one live: an item that froze none reads
+    the entry's own (`dispatch._task_sandbox`)."""
+    mounts = _builtins.item_mounts(row)
+    if not mounts:
+        return
+    snapshot = store.materialized_chain_of(row)
+    refusal = snapshot.sandbox_refusal() if snapshot is not None else None
+    if refusal is None and launch is not None:
+        repositories = snapshot.target.repositories() if snapshot is not None else ()
+        try:
+            # A poisoned `repos.yaml` (`deps._PoisonedRepoEntry`) raises on
+            # `.get`: unreadable is never read as "no sandbox".
+            entries = [launch.repo_entry, *(launch.repositories.get(r) for r in repositories)]
+            live = [e["path"] for e in entries if e and _sandbox.resolve({}, e)]
+        except _config.ConfigError as exc:
+            raise RuntimeError(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
+        if live:
+            refusal = _sandbox.submodule_refusal(
+                f"repos.yaml: repository {', '.join(map(repr, dict.fromkeys(live)))}"
+            )
+    if refusal is not None:
+        raise RuntimeError(f"{refusal}. Its submodules: {', '.join(mounts)}")

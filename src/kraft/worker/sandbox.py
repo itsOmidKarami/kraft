@@ -97,6 +97,24 @@ def resolve(binding: dict, repo_entry: dict | None) -> dict | None:
     return sandbox or None
 
 
+def submodule_refusal(who: str) -> str:
+    """Why a sandbox and submodule members are refused together (Kraft-dshto,
+    Ruling 180): one sentence, the same at load, connect, intake, doctor and
+    for an item already in flight. `who` names what set the sandbox.
+
+    A container must write its worktree's gitdir to commit, and a submodule's
+    gitdir lives inside it (`<worktree gitdir>/modules/<sm>`), so a worker can
+    plant a hook, `core.sshCommand` or a filter driver there. `push` runs
+    unhardened, and nothing pins the other two, so host git would run them
+    as the operator."""
+    return (
+        f"{who} sets a sandbox, and a sandboxed item cannot mount submodules: a "
+        "sandboxed worker can write each submodule's gitdir and plant hooks or "
+        "core.sshCommand there, which host git runs as you when Kraft pushes the "
+        "submodule (Kraft-dshto). Drop the sandbox, or work on one repository"
+    )
+
+
 def container_name(session_id: str) -> str:
     """The `--name` a sandboxed session's container runs under.
 
