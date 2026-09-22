@@ -250,3 +250,22 @@ async def test_a_resume_after_an_approved_revision_runs_the_revised_chain(item_o
     )
 
     assert _completed(it) == ["revise", GATE, "build", "checked"]
+
+
+async def test_a_revision_computed_from_a_chain_that_has_since_changed_is_refused(
+    item_on, tmp_path
+):
+    """A compare-and-set, like the attachment PATCH's: the revision is built
+    from the row the approval read, and a write that changed the chain since
+    (here a retry's fork) must not be overwritten by it."""
+    it = await item_on(_chain(tmp_path, PROPOSAL))
+    await _walk(it)
+    stale = it.row()
+    await it.database.write(lambda c: store.fork_run(c, it.id, None))
+    forked = it.row()["run_chain"]
+
+    nodes, reason = await gates_route.apply_approval(_state(it), stale, GATE)
+
+    assert nodes is None and "changed" in reason
+    assert it.row()["run_chain"] == forked
+    assert it.events("chain_revised") == []

@@ -406,3 +406,43 @@ def test_the_quick_task_chain_has_no_revision():
     chain = TemplateLibrary.from_yaml_dir(SHIPPED).resolve_chain("quick-task")
 
     assert revision.CHAIN_REVISION not in {n.covered_by for n in chain.nodes}
+
+
+def test_a_revision_keeps_the_untrimmed_chain_consistent():
+    """`untrimmed` is the chain before its attachment trim (Kraft-s7c04.29). A
+    revision is not a trim, so it applies to both: the attachment's gate stays
+    trimmed, and the untrimmed copy is the revised chain with that gate back."""
+    nodes = [
+        {
+            "id": "plan",
+            "kind": "exec",
+            "tasks": [
+                {"id": "a", "kind": "agent", "harness": "f", "prompt": "p", "produces": "plan"}
+            ],
+        },
+        {"id": "plan_approval", "kind": "gate", "artifact": "plan"},
+        _run("revise"),
+        {"id": GATE, "kind": "gate", "artifact": "chain_revision"},
+        _run("build"),
+        _run("brief"),
+    ]
+    chain = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        attachment_kinds=frozenset({"plan"}),
+    )
+
+    revised = _revise(chain, skip=[_skip("brief")])
+
+    assert [n.id for n in revised.chain.nodes] == ["revise", GATE, "build"]
+    assert [n.id for n in revised.untrimmed.nodes] == [
+        "plan",
+        "plan_approval",
+        "revise",
+        GATE,
+        "build",
+    ]
+
+
+def test_a_chain_with_nothing_attached_stays_without_an_untrimmed_copy():
+    assert _revise(_chain(), skip=[_skip("brief")]).untrimmed is None

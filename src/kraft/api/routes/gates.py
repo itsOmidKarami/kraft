@@ -115,7 +115,13 @@ async def _revise(st, row, gate: str) -> str | None:
         "changes": changes.model_dump(mode="json", exclude_none=True),
         "diff": revision.diff(chain.chain, revised.chain),
     }
-    await st.db.write(lambda c: store.revise_chain(c, row["id"], revised.to_json(), payload))
+    seen = (row["materialized_chain"], row["run_chain"])
+    try:
+        await st.db.write(
+            lambda c: store.revise_chain(c, row["id"], revised.to_json(), payload, seen=seen)
+        )
+    except ValueError as exc:
+        return f"{gate}: {exc}"
     return None
 
 

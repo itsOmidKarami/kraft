@@ -318,6 +318,20 @@ def revise(
         raise RevisionError(f"the revised chain's policy does not resolve: {exc}") from exc
     if (refusal := revised.sandbox_refusal()) is not None:
         raise RevisionError(refusal)
+    if chain.untrimmed is not None:
+        # The chain before its attachment trim (Kraft-s7c04.29) gets the same
+        # change set: a revision is not a trim, so the one invariant that copy
+        # keeps -- it is this chain with the trimmed nodes back -- still holds.
+        # Only nodes before the revision gate are ever trimmed, and a
+        # revision touches none of those, so it applies there unchanged.
+        whole = replace(
+            chain,
+            chain=ResolvedChain.from_chain(chain.untrimmed, steering=chain.chain.steering),
+            untrimmed=None,
+        )
+        revised = replace(
+            revised, untrimmed=revise(whole, changes, gate=gate, library=library).chain.chain
+        )
     return revised
 
 
