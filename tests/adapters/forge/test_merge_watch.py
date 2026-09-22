@@ -93,6 +93,10 @@ async def test_merge_watch_watches_the_items_base_branch(run_forge, item_on, rep
     pipeline is the one its merge can have broken."""
     from kraft.templates.environment import WorkItemTarget
 
+    bare = repo.parent / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:release"], cwd=repo, check=True)
     target = WorkItemTarget.for_repository("target", base_branch="release")
     run_forge.item = await item_on(back_half(), repo=repo, target=target)
     fake = _Watching()

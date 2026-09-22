@@ -342,3 +342,57 @@ async def test_the_straggler_sweep_runs_under_the_items_base_branch(item_on, tmp
 
     assert status == "done"
     assert bases == [("restore", "release"), ("sweep", "release")]
+
+
+@pytest.mark.parametrize("fetched_before", [False, True], ids=["never-fetched", "fetched-before"])
+async def test_a_base_branch_gone_from_origin_is_a_stop_naming_it(
+    database, run_dirs, origin, fetched_before
+):
+    """Kraft-wz6vz: an item can sit paused for days after intake checked its
+    branch. If origin has since lost it, the worktree must not quietly fork
+    from whatever the checkout has on it -- nor from a copy of a branch that
+    no longer exists -- but stop and name the branch."""
+    repo, other = origin
+    if fetched_before:
+        _git(repo, "fetch", "-q", "origin", "release:refs/remotes/origin/release")
+    _git(other, "push", "-q", "origin", "--delete", "release")
+    await _item_on(database, repo, "release")
+
+    with pytest.raises(kraft_builtins.BaseBranchMissing, match="base branch 'release'"):
+        await wtree.ensure(database, run_dirs, repo)
+
+    assert not (run_dirs.worktrees / "w1").exists(), "nothing was cut from a wrong base"
+
+
+async def test_the_pre_mr_rebase_onto_a_vanished_base_is_a_config_stop(database, run_dirs, origin):
+    """A stop for a person, never a failure a fix loop would retry into."""
+    repo, other = origin
+    await _item_on(database, repo, "release")
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    _git(other, "push", "-q", "origin", "--delete", "release")
+
+    status = await kraft_builtins.mr_rebase(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id="w1",
+        node_id="n",
+        hook_point="on.mr.rebase",
+        round=0,
+        repo=str(repo),
+        worktree=str(worktree),
+        branch=wtree.branch(database),
+    )
+
+    assert status == "config_error"
+    assert "base branch 'release'" in (run_dirs.logs / "s1.log").read_text()
+
+
+def test_an_unnamed_base_still_falls_back_to_the_checkout_with_no_origin(repo):
+    """Unchanged for an item that named nothing: no origin, the checkout's
+    HEAD is the base, as it always was."""
+    import asyncio
+
+    assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == git_read(
+        repo, "rev-parse", "HEAD"
+    )

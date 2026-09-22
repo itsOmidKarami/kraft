@@ -551,9 +551,15 @@ async def _resolve_conflict(
     span's approved gates.
     """
     old_base = dispatch._current_base_ref(db, work_item_id)
-    new_base = await _builtins.upstream_head(
-        Path(row["repo"]), await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
-    )
+    try:
+        new_base = await _builtins.upstream_head(
+            Path(row["repo"]), await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
+        )
+    except _builtins.BaseBranchMissing as exc:
+        # No base to resolve onto: a person has to say where this item goes.
+        reason = f"the conflict in node {node.id} cannot be resolved: {exc}"
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        return "needs_human"
     note = prompts.rebase_resolve_note(
         worktree,
         store.branch_for(row),

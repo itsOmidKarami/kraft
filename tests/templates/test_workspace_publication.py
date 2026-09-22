@@ -78,6 +78,12 @@ async def _workspace_item(
     # `legacy`: the shape every item filed before Task 10 has -- a
     # single-repository target, its submodules and pointer policy in columns.
     columns = {"submodules": list(mounts.values()), "root_merge_policy": pointer} if legacy else {}
+    if base_branch:
+        # The base the item names has to be on origin before its checkout is
+        # cut from it (Kraft-wz6vz).
+        _git(root, "branch", base_branch)
+        _git(tmp_path, "clone", "-q", "--bare", str(root), str(tmp_path / "root-origin.git"))
+        _git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     worktree = await wtree.ensure(database, run_dirs, root)
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
@@ -351,18 +357,17 @@ async def _publishable(
         database, run_dirs, tmp_path, [_task("t")], pointer=pointer, **item
     )
     root = Path(row["repo"])
-    if item.get("base_branch"):
-        _git(root, "branch", item["base_branch"])
     members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]
     origin = tmp_path / "root-origin.git"
-    _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
+    if not origin.exists():
+        _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
+        _git(root, "remote", "add", "origin", str(origin))
     if root_denies_push:
         hook = origin / "hooks" / "pre-receive"
         hook.write_text(
             "#!/bin/sh\n[ -n \"$FORGE_LANDS\" ] && exit 0\necho 'protected branch' >&2\nexit 1\n"
         )
         hook.chmod(0o755)
-    _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
     for member in members:
         _git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")

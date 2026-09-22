@@ -25,6 +25,14 @@ class RebaseConflict(RuntimeError):
     one apart from any other git failure without matching on message text."""
 
 
+class BaseBranchMissing(git.ForgeError):
+    """The item named a base branch origin no longer has, and there is no
+    copy of it to fall back on that is still true (Kraft-wz6vz). A stop for a
+    person naming the branch, never a silent fork from whatever the connected
+    checkout has on it. A `ForgeError` (so a `RuntimeError`): every door that
+    already stops on a failed refresh or a failed forge call stops on this."""
+
+
 def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> None:
     """Commit exactly `paths` in `worktree`, or commit nothing.
 
@@ -657,8 +665,10 @@ def promptless_git_env(repo: Path) -> dict[str, str]:
 
 async def upstream_head(repo: Path, branch: str) -> str | None:
     """The tip of origin's `branch` -- the item's `base_branch` -- fetched now;
-    the last fetched tip when the fetch fails; `repo`'s own HEAD only when there is no `origin`
-    or it was never fetched.
+    the last fetched tip when the fetch fails; `repo`'s own HEAD only for the
+    default branch when there is no `origin` or it was never fetched. A named
+    branch origin cannot give -- gone from it, or never fetched and no origin
+    to fetch from -- raises `BaseBranchMissing` instead (Kraft-wz6vz).
 
     An item's MR targets origin's branch, and the connected checkout is only
     as fresh as its owner's last pull -- Kraft merges on the forge, so nothing
@@ -673,6 +683,7 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
     one may not cover the base branch, leaving its ref unmoved. No prompt
     may reach a foreground `kraft`'s terminal (`promptless_git_env`).
     """
+    detail = "there is no origin remote"
     if git_read(repo, "remote", "get-url", "origin", expected_failure=True):
         ref = f"refs/remotes/origin/{branch}"
         env = promptless_git_env(repo)
@@ -692,9 +703,20 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
             detail = "timed out"
         if detail is not None:
             logger.warning("could not fetch origin/%s in %s: %s", branch, repo, detail)
+        # git's own words for a branch origin does not have. A last-fetched
+        # copy of a branch that is gone is no base to build on either.
+        gone = detail is not None and "couldn't find remote ref" in detail
         tip = git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True)
-        if tip:
+        if tip and not gone:
             return tip
+    # The checkout's HEAD stands in only for the default branch, as it always
+    # has. A named base branch has no stand-in: the checkout may be on any
+    # branch at all.
+    if branch != await git.default_branch(repo):
+        raise BaseBranchMissing(
+            f"base branch {branch!r} cannot be read from origin of {repo} ({detail}); "
+            "push it back, or retry the work item on a branch origin has"
+        )
     return git_read(repo, "rev-parse", "HEAD")
 
 
@@ -820,7 +842,23 @@ async def mr_rebase(
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
     base = await base_branch(db, work_item_id, Path(repo))
-    new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch, base=base)
+    try:
+        new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch, base=base)
+    except BaseBranchMissing as exc:
+        # Nothing an agent could fix: `config_error` stops the item for a
+        # person rather than sending a fix loop round against a missing base.
+        return await _record_done(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            hook_point=hook_point,
+            round=round,
+            log=f"{exc}\n",
+            status="config_error",
+            head_sha=head_sha,
+        )
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
         log = f"rebased {branch} onto {new_head}\n"
