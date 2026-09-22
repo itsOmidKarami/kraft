@@ -3,6 +3,7 @@ step's, or the node's -- runs once the step has settled, and exactly that
 scope is retried. The node-level repair's own prompt and findings are
 `test_walk.py`'s; this is which handler runs, when, and what it retries."""
 
+import json
 import shlex
 
 import pytest
@@ -322,3 +323,37 @@ async def test_a_measuring_tasks_question_stops_before_node_recovery(
     assert it.events("node_recovery_started") == []
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.startswith("needs_context: ")
+
+
+@pytest.mark.parametrize(
+    ("scope", "handler_path"),
+    [
+        ("task", "build.check.a.on_failure.main.fix"),
+        ("step", "build.check.on_failure.main.fix"),
+        ("node", "build.on_failure.main.fix"),
+    ],
+    ids=["task", "step", "node"],
+)
+async def test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring(
+    item_on, script, scope, handler_path
+):
+    """`a-repair-with-concerns-stops-for-a-human` (Kraft-s7c04.56): b5afe84c's
+    ci repair said "nothing to repair, skip rather than retry" and was
+    re-measured anyway, 22 minutes and $3.63 of the same failure."""
+    doubt = "Nothing to repair: the work is already on main; skip, do not retry."
+    task = _sub("a", on_failure=_fix()) if scope == "task" else _sub("a")
+    step = {"id": "check", "tasks": [task], **({"on_failure": _fix()} if scope == "step" else {})}
+    it = await item_on([_node([step], **({"on_failure": _fix()} if scope == "node" else {}))])
+
+    async def concerned(_row):
+        result = {"status": "done_with_concerns", "concerns": doubt}
+        (it.run_dirs.results / "s-fix.json").write_text(json.dumps(result))
+        await it.session("s-fix", handler_path, "done_with_concerns")
+
+    script.plan = {"a": ["failed", "done"], "fix": ["done_with_concerns"]}
+    script.effects["fix"] = concerned
+
+    assert await _walk(it) == "needs_human"
+    assert script.calls == ["a", "fix"]
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert reason.endswith(f"was not measured again: fix: {doubt}")

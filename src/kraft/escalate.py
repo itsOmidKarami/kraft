@@ -100,9 +100,9 @@ def _description_line(row) -> str:
     return f"Description: {row['description']}\n" if row["description"] else ""
 
 
-def _reason(db, work_item_id: str, evts: list | None = None) -> str:
-    """The most recent `work_item_needs_human` event's reason -- the live
-    answer to "why is this stopped", same reverse-scan idiom
+def _last_stop(db, work_item_id: str, evts: list | None = None) -> dict:
+    """The most recent `work_item_needs_human` event's payload, or `{}` -- the
+    live answer to "why is this stopped", same reverse-scan idiom
     `kraft.executor.dispatch.last_measurement`/`needs_context_question`
     already use. `evts`, when given, is a timeline the caller already
     fetched (`gates.auto_escalate_stuck`'s single read, threaded through
@@ -111,19 +111,27 @@ def _reason(db, work_item_id: str, evts: list | None = None) -> str:
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] == "work_item_needs_human":
-            return e["payload"].get("reason") or "(no reason recorded)"
-    return "(no reason recorded)"
+            return e["payload"]
+    return {}
 
 
-def _reason_line(db, work_item_id: str, status: str, evts: list | None = None) -> str:
-    """The `{reason_line}` `_STATE` slot. `needs_human` only -- a `paused`
-    item's most recent `work_item_needs_human` reason (if it has one at all)
-    belongs to whatever it stopped for *before* being paused, not to why it
-    is paused now, so reporting it here would be stale or actively
+def _reason_line(stop: dict, status: str) -> str:
+    """The `{reason_line}` `_STATE` slot, with the stop's `suggested_action`
+    when it has one (Kraft-s7c04.27), so a turn starts from what the chain
+    already concluded instead of rediscovering it. `needs_human` only -- a
+    `paused` item's most recent `work_item_needs_human` reason (if it has one
+    at all) belongs to whatever it stopped for *before* being paused, not to
+    why it is paused now, so reporting it here would be stale or actively
     misleading (Kraft-k5ol code-review finding)."""
     if status != "needs_human":
         return ""
-    return f"Why it is stopped: {_reason(db, work_item_id, evts=evts)}\n"
+    line = f"Why it is stopped: {stop.get('reason') or '(no reason recorded)'}\n"
+    if suggested := stop.get("suggested_action"):
+        line += (
+            f"What Kraft suggests a person do: {suggested['action']} -- {suggested['reason']} "
+            f"(`kraft item {suggested['action']}`)\n"
+        )
+    return line
 
 
 #: Events that close an episode, so a judge verdict before one of them describes
@@ -352,7 +360,7 @@ async def dispatch(
         resume_note=resume_note,
         status=row["status"],
         node_id=row["current_node_id"],
-        reason_line=_reason_line(db, work_item_id, row["status"], evts=evts),
+        reason_line=_reason_line(_last_stop(db, work_item_id, evts), row["status"]),
         judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,

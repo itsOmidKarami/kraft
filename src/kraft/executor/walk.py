@@ -20,6 +20,7 @@ from kraft.executor.context import (
     CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
+    REPAIR_DOUBTED,
     TIME_CAPPED,
     WAIT_TIMED_OUT,
     WAITING,
@@ -393,6 +394,14 @@ async def _sentinel_stop(
         return await stops.stop_for_time_cap(db, work_item_id, node)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
+    if verdict == REPAIR_DOUBTED:
+        doubts = "; ".join(dispatch.repair_doubts(db, work_item_id, node, failed))
+        reason = (
+            f"a repair in node {node.id} finished with concerns, so the node "
+            f"was not measured again: {doubts}"
+        )
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        return "needs_human"
     return None
 
 
@@ -416,6 +425,8 @@ class _Stuck:
     reason: str
     capped: dict | None = None
     bundle: dict | None = None
+    #: `stops.suggestion`: what the node's last session said to do next.
+    suggested: dict | None = None
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -435,7 +446,14 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
     reason = stuck.reason + extra
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, stuck.capped, bundle=stuck.bundle, stuck=True
+            c,
+            work_item_id,
+            node.id,
+            reason,
+            stuck.capped,
+            bundle=stuck.bundle,
+            stuck=True,
+            suggested=stuck.suggested,
         )
     )
     return "needs_human"
@@ -764,6 +782,7 @@ async def walk_node(
         )
         if not isinstance(result, _Stuck):
             return result
+        result = replace(result, suggested=stops.suggestion(db, work_item_id, node.id))
         outcome = await _escalate_stuck(
             db,
             run_dirs,

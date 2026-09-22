@@ -610,6 +610,14 @@ enter the declaring execution node's fix loop when one exists, or otherwise
 stop for a human.
 enforced-by: tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[fix-loop], tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[no-fix-loop]
 
+## REQ a-repair-with-concerns-stops-for-a-human
+
+When a task, step or execution-node recovery handler finishes
+`done_with_concerns`, the system SHALL stop for a human with the handler's
+concerns as the reason and SHALL NOT measure the recovered scope again.
+enforced-by: tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[task], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[step], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[node], tests/executor/test_base_change.py::test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase
+origin: src/kraft/executor/dispatch.py §run_recovery -- for an ordinary task doubts are information for the next gate (`_ADVANCING`); for a repair they are a verdict on whether repair was possible at all (Kraft-s7c04.56, b5afe84c). A conflict handler is excluded: its `done_with_concerns` means "resolved, but upstream touches this item" and rides `CONFLICT_RESOLVED` into the span's reopened gates.
+
 ## REQ fix-loop-is-an-exec-node-control
 
 A fix loop SHALL be configured only on an execution node and SHALL name its
