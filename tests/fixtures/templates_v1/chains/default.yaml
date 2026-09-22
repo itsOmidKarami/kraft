@@ -68,11 +68,20 @@ nodes:
       - id: author
         extends: describe_mr
 
+  # Kraft-3llig: `steps`, not the `tasks` shorthand -- a `tasks` group is one
+  # concurrent group (`exec-node-orders-concurrent-task-groups`), and the
+  # rebase must finish before `open` runs, not race it.
   - id: draft_merge_request
     kind: exec
-    tasks:
+    steps:
+      - id: rebase
+        tasks:
+          - id: rebase
+            extends: mr_rebase
       - id: open
-        extends: open_draft_mr
+        tasks:
+          - id: open
+            extends: open_draft_mr
 
   - id: merge_request_feedback
     extends: post_draft_feedback

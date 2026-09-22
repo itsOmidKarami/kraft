@@ -126,7 +126,10 @@ def test_resolution_types_every_task_in_the_design_chain(design):
     # Ruling 207: the draft opens from the metadata the node before it wrote.
     assert by_path["describe_merge_request.main.author"].produces == "mr_meta"
     assert by_path["describe_merge_request.main.author"].skill == "kraft:mr-metadata"
-    assert by_path["draft_merge_request.main.open"].target is ForgeAction.MR_OPEN_DRAFT
+    # Kraft-3llig: `steps`, so the rebase finishes before `open` -- not the
+    # `tasks` shorthand's one concurrent group.
+    assert by_path["draft_merge_request.rebase.rebase"].ref is BuiltinAction.MR_REBASE
+    assert by_path["draft_merge_request.open.open"].target is ForgeAction.MR_OPEN_DRAFT
     await_ci = by_path["merge_request_feedback.ci.await_ci"]
     # Its timeout is its own total cap (Ruling 196); `wait:` holds the polling.
     assert await_ci.policy.total_time_cap_minutes == 90

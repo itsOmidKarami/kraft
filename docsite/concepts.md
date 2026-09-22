@@ -139,7 +139,9 @@ A **task** is one unit of execution, of one of four kinds:
 - **`subprocess`** (`src/kraft/adapters/subprocess.py`) — runs a literal
   `command`.
 - **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself, named by a
-  `ref` such as `kraft.verify_changed_test_scopes`.
+  `ref` such as `kraft.verify_changed_test_scopes` or `kraft.mr_rebase` (the
+  shipped `default` chain runs the latter as `draft_merge_request`'s first
+  step, rebasing onto the item's base branch before the draft opens).
 - **`forge`** (`src/kraft/adapters/forge/`) — a merge-request action on GitHub
   or GitLab, named by its `target` (`mr.open_draft`, `mr.ci`, `mr.merge`, …),
   resolved per repo from the `forge` recorded in that repo's `repos.yaml`

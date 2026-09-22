@@ -6,6 +6,16 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.0.1
 
+- **Fix: the default chain's draft merge request now rebases before it
+  opens.** `draft_merge_request` opened against the item's base branch as it
+  stood when the worktree was cut, not wherever the base moved to while the
+  item ran -- Template Schema V1 had dropped the pre-MR rebase every earlier
+  chain had. `draft_merge_request` now runs a `kraft.mr_rebase` builtin task
+  first, then opens the draft. **A chain you wrote or customized yourself
+  keeps the old behavior** -- add the same task to your own
+  `draft_merge_request` (or wherever you open a draft) by hand; `kraft admin
+  templates show default --resolved` prints the shipped shape to copy from.
+
 - Fix: the Appearance settings page's palette, mode, density and board
   controls now show as disabled while your theme is still loading, instead of
   silently doing nothing if you clicked one in that window.

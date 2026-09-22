@@ -53,6 +53,7 @@ from kraft.templates import revision
 from kraft.templates.models import (
     AgentInput,
     AgentTask,
+    BuiltinAction,
     BuiltinTask,
     ExecutionMode,
     ForgeTask,
@@ -664,9 +665,26 @@ async def _dispatch_task(
         except SandboxUnresolved as exc:
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     if isinstance(t, BuiltinTask):
-        # `BuiltinAction` has exactly one member, so there is no branch to take
-        # on `ref`: a reference Kraft does not own was rejected by the type
-        # long before this (`builtin-task-references-code-owned-actions`).
+        if t.ref is BuiltinAction.MR_REBASE:
+            # Pure local git (`builtins.mr_rebase`, Kraft-3llig): rebase the
+            # worktree onto the item's base branch, and persist the moved
+            # `base_ref` itself -- same helper `/retry` and `/resume` already
+            # use. `has_rebase_bounce` is this *task's own node*, the same
+            # rule the forge branch below applies: only a node that itself
+            # declares `on_base_changed` reports `BASE_MOVED` rather than
+            # completing ordinarily.
+            return await _builtins.mr_rebase(
+                db,
+                run_dirs,
+                repo=work_item_row["repo"],
+                worktree=str(worktree),
+                branch=store.branch_for(work_item_row),
+                has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
+                **common,
+            )
+        # The only other member (`builtin-task-references-code-owned-actions`):
+        # a reference Kraft does not own was rejected by the type long before
+        # this.
         return await _run_changed_test_scopes(
             db,
             run_dirs,

@@ -1289,6 +1289,16 @@ open the draft with them.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_library.py::test_resolution_types_every_task_in_the_design_chain
 origin: templates/chains/default.yaml -- Ruling 207. The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
 
+## REQ default-chain-rebases-before-opening-the-draft
+
+The default chain's `draft_merge_request` node SHALL rebase the worktree onto
+the item's base branch, as its first step, before opening the draft merge
+request, and SHALL persist the moved base as the item's own `base_ref`. A
+rebase already onto a pushed branch (a rejected-review or crashed-retry
+re-entry into this node) SHALL NOT be force-rewritten.
+enforced-by: tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared], tests/executor/test_mr_rebase_dispatch.py::test_a_pushed_branch_is_not_force_rewritten_on_re_entry, tests/executor/test_default_chain.py::test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback
+origin: templates/chains/default.yaml §draft_merge_request -- Kraft-3llig. `draft_merge_request` opened against whatever `base` was when the worktree was cut, since nothing rebased it first; `builtins.mr_rebase` already existed for exactly this (`refresh_worktree_base` right before `open_mr`) but `BuiltinAction` had no member naming it, so no chain could reach it. Bound as `kraft.mr_rebase`, not a `ForgeAction`, because the rebase itself is pure local git -- the node's other task is the one that talks to the forge. The node moved from the `tasks` shorthand to `steps` so the rebase finishes before `open` runs rather than racing it (`exec-node-orders-concurrent-task-groups`). The pushed-branch guard (`refresh_worktree_base`'s own, `force=False` here) covers the re-entry case: a reviewer already reading the branch is not silently rewritten.
+
 ## REQ a-draft-with-no-metadata-opens-with-the-default-body
 
 IF a work item reaches its draft merge request with no merge-request metadata
