@@ -61,3 +61,57 @@ async def test_a_task_that_raises_leaves_its_session_and_the_reason(
     [row] = it.sessions("implementation")
     assert (row["hook_point"], row["status"]) == (f"implementation.main.{task['id']}", status)
     assert f"{type(exc).__name__}: {exc}" in Path(row["log_path"]).read_text()
+
+
+async def test_a_raise_during_a_resumed_wait_closes_that_wait_s_row(item_on, monkeypatch):
+    """Kraft-evyc7: a CI wait reuses its `waiting` row across polls
+    (Kraft-ivh1), a row older than this dispatch. A raise mid-poll closes that
+    row rather than leaving it waiting forever beside a new failed one."""
+    task = {"id": "ci", "kind": "forge", "target": "mr.ci"}
+    it = await item_on([{"id": "implementation", "kind": "exec", "tasks": [task]}])
+    await it.session("s-wait", "implementation.main.ci", "waiting")
+    monkeypatch.setattr(_builtins, "base_branch", _raise(RuntimeError("gh auth expired")))
+    node = it.chain.chain.nodes[0]
+
+    with pytest.raises(RuntimeError):
+        await dispatch.dispatch_node(
+            it.database,
+            it.run_dirs,
+            node.steps[0].tasks[0],
+            node,
+            it.row(),
+            it.repo,
+            launch=NO_SETUP,
+        )
+
+    [row] = it.sessions("implementation")
+    assert (row["id"], row["status"]) == ("s-wait", "failed")
+    assert "RuntimeError: gh auth expired" in Path(row["log_path"]).read_text()
+
+
+async def test_a_raise_leaves_a_session_that_already_finished_as_it_ended(item_on, monkeypatch):
+    """The changed-test-scopes builtin mints a row per scope: one scope that
+    passed before a later step raised keeps its own `done`, and its log."""
+    it = await item_on([{"id": "implementation", "kind": "exec", "tasks": [_BUILTIN]}])
+
+    async def one_scope_then_raise(*_a, **_kw):
+        await it.session("s-scope", "implementation.main.scopes", "done")
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(dispatch, "_run_changed_test_scopes", one_scope_then_raise)
+    node = it.chain.chain.nodes[0]
+
+    with pytest.raises(OSError):
+        await dispatch.dispatch_node(
+            it.database,
+            it.run_dirs,
+            node.steps[0].tasks[0],
+            node,
+            it.row(),
+            it.repo,
+            launch=NO_SETUP,
+        )
+
+    [row] = it.sessions("implementation")
+    assert (row["id"], row["status"]) == ("s-scope", "done")
+    assert not Path(row["log_path"]).exists()

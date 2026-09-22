@@ -518,14 +518,18 @@ async def dispatch_node(
 async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc) -> None:
     status = "conflict" if isinstance(exc, _builtins.RebaseConflict) else "failed"
     log = "".join(traceback.format_exception(exc))
+    # This dispatch's own rows, and the `waiting` row a forge wait resumes
+    # rather than mints (Kraft-ivh1): older than `since`, but this episode's
+    # (Kraft-evyc7).
     rows = db.read(
         lambda c: c.execute(
             "SELECT id, status, log_path, result_path FROM worker_sessions "
-            "WHERE work_item_id = ? AND hook_point = ? AND rowid > ?",
-            (work_item_row["id"], task.path, since),
+            "WHERE work_item_id = ? AND hook_point = ? AND (rowid > ? OR "
+            "(status = 'waiting' AND node_id = ? AND round = ?))",
+            (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
         ).fetchall()
     )
-    open_rows = [r for r in rows if r["status"] in ("pending", "running")]
+    open_rows = [r for r in rows if r["status"] in ("pending", "running", "waiting")]
     if not rows:
         sid, log_path, result_path = await _builtins.start_session(
             db,
