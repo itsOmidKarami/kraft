@@ -94,19 +94,28 @@ def set_chain_template(
 
 
 def set_attachments(
-    conn: sqlite3.Connection, work_item_id, attachments: list[dict], materialized_chain: str
+    conn: sqlite3.Connection,
+    work_item_id,
+    attachments: list[dict],
+    materialized_chain: str,
+    *,
+    seen: tuple[str | None, str],
 ) -> None:
     """Replace a not-yet-started item's attachments and the chain they trim
     (Kraft-s7c04.28), both at once so the trim and the documents that justify
-    it cannot disagree. Refuses (`ValueError`) once the item has a current
-    node: checked here, in the write, so a walk that started after the caller
-    read the row cannot have copied the old documents into its worktree
-    under a chain that no longer matches them."""
+    it cannot disagree. A compare-and-set on `seen`, the `(attachments,
+    materialized_chain)` the caller built this write from (Kraft-5pw3f):
+    `ValueError` if the item has started since, or another write changed
+    either column -- a stale write would put back a document the other one
+    dropped, whose copy is already gone."""
     row = conn.execute(
-        "SELECT attachments, current_node_id FROM work_items WHERE id = ?", (work_item_id,)
+        "SELECT attachments, materialized_chain, current_node_id FROM work_items WHERE id = ?",
+        (work_item_id,),
     ).fetchone()
     if row["current_node_id"] is not None:
         raise ValueError("work item has already started")
+    if (row["attachments"], row["materialized_chain"]) != seen:
+        raise ValueError("its attachments or chain changed while this request was made")
     conn.execute(
         "UPDATE work_items SET attachments = ?, materialized_chain = ?, updated_at = ? "
         "WHERE id = ?",

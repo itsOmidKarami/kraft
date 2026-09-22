@@ -252,21 +252,23 @@ def replace_attachments(
     """A not-yet-started item's attachments after a PATCH (Kraft-s7c04.28):
     each kind named in `changes` is dropped, `added` (validated, one per kind)
     is snapshotted under a fresh name, and every other kind keeps the copy it
-    has. Raises like intake does; `prune_attachments` clears whichever copies
-    the row ends up not naming."""
+    has. Raises like intake does; `discard_attachments` clears whichever set
+    the write did not keep."""
     kept = [a for a in current if a["kind"] not in changes]
     tag = f"-{uuid.uuid4().hex[:8]}"
     fresh = _store_attachments(run_dirs, work_item_id, added, repo=repo, tag=tag)
     return sorted(kept + fresh, key=lambda a: a["kind"] != "spec")
 
 
-def prune_attachments(run_dirs, work_item_id: str, keep: list[dict]) -> None:
-    """Delete every stored copy for this item that `keep` does not name."""
-    named = {Path(a["source"]).name for a in keep if a.get("source")}
+def discard_attachments(run_dirs, work_item_id: str, drop: list[dict], keep: list[dict]) -> None:
+    """Delete the stored copies `drop` names and `keep` does not: only this
+    item's own, and only the ones the caller made or superseded."""
     stored = run_dirs.attachments / work_item_id
-    for path in stored.iterdir() if stored.is_dir() else ():
-        if path.name not in named:
-            path.unlink(missing_ok=True)
+    kept = {a.get("source") for a in keep}
+    for a in drop:
+        source = a.get("source")
+        if source and source not in kept and Path(source).parent == stored:
+            Path(source).unlink(missing_ok=True)
 
 
 def attachments_of(work_item_row) -> list[dict]:

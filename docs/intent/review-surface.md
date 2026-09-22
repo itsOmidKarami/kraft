@@ -31,9 +31,11 @@ enforced-by: tests/executor/test_entry.py::test_intake_refuses_an_attachment_it_
 ## REQ attachments-can-change-until-the-item-starts
 WHILE a work item has not started, the system SHALL let a person replace or
 drop its attachments, re-copy a replaced one into Kraft's own storage, and
-re-trim its chain to match. IF the item has started, THEN the system SHALL
-refuse the change and leave its attachments and chain as they were.
-enforced-by: tests/api/test_attachment_patch.py::test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan, tests/api/test_attachment_patch.py::test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate, tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_nodes_skipped_at_intake, tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[replace], tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[drop], tests/api/test_attachment_patch.py::test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with, tests/store/test_chain_gates.py::test_set_attachments_refuses_an_item_that_started_after_the_caller_read_it
+re-trim its chain to match from its own snapshot, never the live template. IF
+the item has started, or another change reached its attachments or chain
+first, THEN the system SHALL refuse the change and leave its attachments,
+chain and stored copies as they were.
+enforced-by: tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_chain_frozen_at_intake, tests/api/test_attachment_patch.py::test_dropping_a_spec_filed_at_intake_restores_its_gate_from_the_snapshot, tests/api/test_attachment_patch.py::test_a_snapshot_without_its_untrimmed_chain_refuses_a_drop_and_says_why, tests/api/test_attachment_patch.py::test_a_patch_racing_another_patch_is_refused_and_the_winner_keeps_its_files, tests/cli/test_attachments.py::test_a_worker_cannot_set_its_own_items_attachments, tests/api/test_attachment_patch.py::test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan, tests/api/test_attachment_patch.py::test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate, tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_nodes_skipped_at_intake, tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[replace], tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[drop], tests/api/test_attachment_patch.py::test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with, tests/store/test_chain_gates.py::test_set_attachments_refuses_an_item_that_started_after_the_caller_read_it
 
 ## REQ missing-stored-attachment-fails-loudly
 IF an attachment's stored copy is missing when the worktree is prepared, THEN

@@ -1073,6 +1073,7 @@ class ResolvedChain:
             target=target,
             policy=policy,
             repository_policies=per_repository,
+            untrimmed=self.without_nodes(skip_nodes).chain if attachment_kinds else None,
         )
         # Every door that builds a snapshot comes through here -- intake by
         # any route, a trigger, a chain template switch -- so the refusal is
@@ -1379,6 +1380,8 @@ class _StoredMaterialization(BaseModel):
     steering: dict[str, str] | None = None
     #: `MaterializedChain.repository_policies`; absent for a single repository.
     repository_policies: dict[str, InstancePolicy] = {}
+    #: `MaterializedChain.untrimmed`; absent when nothing is attached.
+    untrimmed: Chain | None = None
 
 
 @dataclass(frozen=True)
@@ -1403,6 +1406,11 @@ class MaterializedChain:
     #: (`materialized-chain-is-immutable-work-item-input`), and a `PATCH` may
     #: change this.
     item_policy: WorkItemPolicy | None = None
+    #: The chain before its attachment trim (skips applied), kept while the item
+    #: has attachments so a not-yet-started item can drop one and get back the
+    #: nodes it trimmed from its own snapshot, never the live template
+    #: (Kraft-s7c04.29, Kraft-2fyjt). None when nothing is attached.
+    untrimmed: Chain | None = None
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`
     # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
@@ -1578,9 +1586,11 @@ class MaterializedChain:
             policy=self.policy,
             steering=self.chain.steering,
             repository_policies=dict(self.repository_policies),
+            untrimmed=self.untrimmed,
         ).model_dump_json(
-            # A single-repository item's snapshot keeps its exact shape.
-            exclude=None if self.repository_policies else {"repository_policies"}
+            # A single-repository item with no attachment keeps its exact shape.
+            exclude=({"repository_policies"} if not self.repository_policies else set())
+            | ({"untrimmed"} if self.untrimmed is None else set())
         )
 
     @classmethod
@@ -1598,4 +1608,5 @@ class MaterializedChain:
             target=stored.target,
             policy=stored.policy,
             repository_policies=stored.repository_policies,
+            untrimmed=stored.untrimmed,
         )

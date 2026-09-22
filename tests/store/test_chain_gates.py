@@ -352,9 +352,16 @@ async def test_set_attachments_refuses_an_item_that_started_after_the_caller_rea
     await mk_item(database)
     await database.write(lambda c: store.load_chain(c, "w1", "implementation"))
     spec = [{"kind": "spec", "path": "s.md", "source": "/k/spec.md"}]
+    seen = database.read(
+        lambda c: tuple(
+            c.execute(
+                "SELECT attachments, materialized_chain FROM work_items WHERE id='w1'"
+            ).fetchone()
+        )
+    )
 
     with pytest.raises(ValueError, match="already started"):
-        await database.write(lambda c: store.set_attachments(c, "w1", spec, "{}"))
+        await database.write(lambda c: store.set_attachments(c, "w1", spec, "{}", seen=seen))
 
     row = database.read(
         lambda c: c.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
