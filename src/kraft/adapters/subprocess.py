@@ -213,6 +213,31 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
+#: Substrings `docker run` itself prints when it never reached the sandboxed
+#: command at all -- the daemon is down, or (same class of infra problem) an
+#: image couldn't be pulled. Matched on wording, not exit code: probed
+#: empirically against a real daemon-down failure (docker-cli 29.7.2,
+#: 2026-09-22, daemon actually stopped) returned plain exit 1, the same code
+#: an ordinary failing command inside the container would -- so the exit
+#: code alone cannot tell the two apart. Lowercased text on both sides.
+_DOCKER_LAUNCH_FAILURE_PHRASES = (
+    "cannot connect to the docker daemon",  # legacy docker-cli wording
+    "failed to connect to the docker api",  # docker-cli 29.x wording
+)
+
+
+def _docker_launch_failed(log_path: Path) -> bool:
+    """True if `log_path` shows `docker run` itself failing to launch --
+    never the sandboxed command failing -- an infra problem no agent edit
+    can fix (Kraft-nc9gm). Best-effort: a log Kraft cannot read yet reads as
+    "not a docker failure", not a crash."""
+    try:
+        text = log_path.read_text().lower()
+    except OSError:
+        return False
+    return any(phrase in text for phrase in _DOCKER_LAUNCH_FAILURE_PHRASES)
+
+
 def _resolve_exit_file(path: Path) -> str | None:
     """Status from a task's own recorded exit code, or None if absent/garbage.
 
@@ -567,6 +592,14 @@ async def run_task(
             )
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
+    # `docker run` itself failing to launch (daemon down, image pull failed)
+    # is Kraft's own launcher not reaching the sandboxed command at all --
+    # the same "config problem, not a task failure" class as the
+    # FileNotFoundError branch above, one step later and inside the sandboxed
+    # path only (Kraft-nc9gm). Checked before every other status adjustment
+    # below so it can't be shadowed by require_result_file or post_resolve.
+    if sandbox and status == "failed" and _docker_launch_failed(log_path):
+        status = "config_error"
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell
     # "no contract" (a plain subprocess hook) from "broke the contract" (an

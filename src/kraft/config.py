@@ -618,7 +618,12 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.
+#: A Justfile/justfile comes first: it's an explicit wrapper a repo chose on
+#: purpose (like Kraft itself: `just test`, never raw pytest), so it must win
+#: over a manifest marker sitting right beside it (Kraft-reriq).
 _TEST_COMMANDS = [
+    ("Justfile", "just test"),
+    ("justfile", "just test"),
     ("pyproject.toml", "uv run pytest -q"),
     ("package.json", "npm test"),
     ("Cargo.toml", "cargo test"),
