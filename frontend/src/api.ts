@@ -216,7 +216,7 @@ export const openDocument = (id: string, editor?: string) =>
     json("POST", { editor: editor ?? null }),
   );
 
-export const getTemplates = () => req<TemplateSummary[]>("/templates");
+export const getTemplates = () => req<TemplateSummary[]>("/templates/chains");
 
 export const getHealth = () => req<Health>("/health");
 
@@ -289,15 +289,15 @@ export const patchRepo = (path: string, body: Partial<Repo>) =>
 export const deleteRepo = (path: string) =>
   req<void>(`/repos?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 
-export const getTemplate = (id: string) => req<ChainFile>(`/templates/${encodeURIComponent(id)}`);
+export const getTemplate = (id: string) => req<ChainFile>(`/templates/chains/${encodeURIComponent(id)}`);
 /** A saved chain resolved, not materialized: its nodes in `ChainNode` shape. */
 export const getResolvedTemplate = (id: string) =>
-  req<{ id: string; nodes: ChainNode[] }>(`/templates/${encodeURIComponent(id)}/resolved`);
+  req<{ id: string; nodes: ChainNode[] }>(`/templates/chains/${encodeURIComponent(id)}/resolved`);
 /** Save one chain file's text; the server refuses (422) a chain the library
  *  does not resolve. */
 export const putTemplate = (id: string, text: string) =>
   req<{ id: string; file: string; text: string }>(
-    `/templates/${encodeURIComponent(id)}`,
+    `/templates/chains/${encodeURIComponent(id)}`,
     json("PUT", { text }),
   );
 export const getLibrary = () => req<Library>("/templates/library");

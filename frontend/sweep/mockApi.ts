@@ -122,10 +122,10 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       return json(route, { ...(st.repos[0] ?? {}), ...(req.postDataJSON() ?? {}) });
     }
     if (p === "/repos/probe") return json(route, { path: req.postDataJSON()?.path ?? "/tmp/x", name: "x", branch: "main", submodules: ["vendor/kraft-lite"], has_beads: true, beads_export_auto: false, beads_export_git_add: true, has_engineering: true, test_command: "uv run pytest -q", test_scopes: null, forge: "gitlab", project: "acme/x" });
-    if (p === "/templates") return json(route, st.templates);
+    if (p === "/templates/chains") return json(route, st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
-    if ((m = p.match(/^\/templates\/([^/]+)$/))) {
+    if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json(route, { detail: "template not found" }, 404);
       return json(route, { id: tpl.id, nodes: tpl.nodes });

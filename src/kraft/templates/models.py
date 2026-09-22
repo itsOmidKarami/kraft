@@ -341,7 +341,7 @@ def retired_keys(data: object, at: str = "") -> list[str]:
     """Where `data` -- an authored chain or library mapping -- still writes a
     key Ruling 196 retired: a wait's `timeout` and `wait_timeout_minutes`.
     They still read, with a warning; a write that sets one is refused
-    (`PUT /templates/{id}`), naming what replaced it."""
+    (`PUT /templates/chains/{id}`), naming what replaced it."""
     found: list[str] = []
     if isinstance(data, dict):
         for key, value in data.items():

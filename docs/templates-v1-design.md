@@ -619,7 +619,7 @@ runtime options.
 ## Validation surface
 
 `GET /templates/lint` validates the installed library and chains. `GET
-/templates/{id}/resolved` returns a chain after component resolution, before
+/templates/chains/{id}/resolved` returns a chain after component resolution, before
 work-item materialization. `POST /templates/resolve` accepts either an unsaved
 candidate against the installed library or a complete unsaved library in
 isolation. The CLI exposes the corresponding lint and resolved-template views.

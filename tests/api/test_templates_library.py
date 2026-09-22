@@ -117,7 +117,7 @@ def test_an_unknown_component_is_404(client):
 
 def test_each_chain_names_the_library_components_each_node_uses(client):
     """What the Chains screen links a node to its components by."""
-    chains = {c["id"]: c for c in client.get("/api/templates").json()}
+    chains = {c["id"]: c for c in client.get("/api/templates/chains").json()}
     uses = chains["default"]["uses"]
     assert uses["implementation"] == ["nodes.implementation", "tasks.implementer"]
     assert uses["spec"] == ["steering.project-standards", "tasks.spec_author"]

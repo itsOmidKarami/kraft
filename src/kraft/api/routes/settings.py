@@ -52,7 +52,7 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     return {"id": id, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
 
 
-@api_router.get("/templates")
+@api_router.get("/templates/chains")
 async def list_templates(request: Request):
     """Every saved V1 chain -- the chains intake materializes, so the intake
     preview and intake agree (Kraft-pplyo)."""
@@ -60,9 +60,9 @@ async def list_templates(request: Request):
     return [_chain_summary(library, id) for id in sorted(library.chain_ids)]
 
 
-# ── the library itself (Kraft-6xkkm). Before `/templates/{tid}` and
-# `/templates/{tid}/resolved`, which would otherwise take `library` for a chain
-# id and `library/resolved` for a chain's resolved view.
+# ── the library itself (Kraft-6xkkm). Chains live under `/templates/chains/`
+# and the library under `/templates/library` (Ruling 204), so no chain id can
+# shadow a library route or the other way round, whatever order they declare.
 
 
 def _library_view(st, library: TemplateLibrary) -> dict:
@@ -127,9 +127,8 @@ async def put_library(body: LibraryText, request: Request):
 
 
 # ── Template Schema V1 inspection (docs/templates-v1-design.md "Validation
-# surface"). Declared before `/templates/{tid}`, which would otherwise take
-# `lint` for a template id. Every one of these reads and none writes: not a
-# file, and not the library the daemon is running (`st.library`).
+# surface"). Every one of these reads and none writes: not a file, and not the
+# library the daemon is running (`st.library`).
 
 
 def _resolved_view(chain: ResolvedChain) -> dict:
@@ -170,7 +169,7 @@ async def lint_templates(request: Request):
     }
 
 
-@api_router.get("/templates/{tid}/resolved")
+@api_router.get("/templates/chains/{tid}/resolved")
 async def get_resolved_template(tid: str, request: Request):
     """A saved chain of the library this daemon runs, resolved and not
     materialized (`resolved-template-api-shows-saved-chain`)."""
@@ -245,7 +244,7 @@ async def resolve_templates(body: ResolveBody, request: Request):
 
 
 #: An authored chain id, the same rule as every other V1 identifier: it names
-#: the file `PUT /templates/{id}` writes, so it can never walk out of `chains/`.
+#: the file `PUT /templates/chains/{id}` writes, so it can never walk out of `chains/`.
 _CHAIN_ID = re.compile(r"[a-z][a-z0-9_-]*")
 
 
@@ -267,7 +266,7 @@ def _authored_mapping(text: str, what: str) -> dict:
     return data
 
 
-@api_router.get("/templates/{tid}")
+@api_router.get("/templates/chains/{tid}")
 async def get_template(tid: str, request: Request):
     """One saved chain as its author wrote it: the file's text, which is what
     the Chains screen edits, and the mapping it parses to."""
@@ -286,7 +285,7 @@ class ChainText(BaseModel):
     text: str
 
 
-@api_router.put("/templates/{tid}")
+@api_router.put("/templates/chains/{tid}")
 async def put_template(tid: str, body: ChainText, request: Request):
     """Save one chain file, only if the library still resolves it: the text is
     checked as a candidate against the installed library -- the same check

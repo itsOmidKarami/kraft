@@ -32,24 +32,43 @@ def test_template_put_validates_before_it_writes(client, templates_dir):
     dangling = SCRATCH.replace(
         '{id: t, kind: subprocess, command: "true"}', "{id: t, extends: nope}"
     )
-    r = client.put("/api/templates/scratch", json={"text": dangling})
+    r = client.put("/api/templates/chains/scratch", json={"text": dangling})
     assert r.status_code == 422
     assert "nope" in r.json()["detail"]
     assert not (templates_dir / "chains" / "scratch.yaml").exists()
 
-    assert client.put("/api/templates/scratch", json={"text": SCRATCH}).status_code == 200
+    assert client.put("/api/templates/chains/scratch", json={"text": SCRATCH}).status_code == 200
     # Written verbatim, into chains/, and live without a restart.
     assert (templates_dir / "chains" / "scratch.yaml").read_text() == SCRATCH
-    assert any(t["id"] == "scratch" for t in client.get("/api/templates").json())
-    got = client.get("/api/templates/scratch").json()
+    assert any(t["id"] == "scratch" for t in client.get("/api/templates/chains").json())
+    got = client.get("/api/templates/chains/scratch").json()
     assert got["text"] == SCRATCH
     assert got["chain"]["nodes"][0]["id"] == "run"
-    assert client.get("/api/templates/nope").status_code == 404
+    assert client.get("/api/templates/chains/nope").status_code == 404
+
+
+@pytest.mark.parametrize("tid", ["library", "lint", "resolve", "parse", "reload"])
+def test_a_chain_may_take_the_name_of_a_templates_route(client, templates_dir, tid):
+    """Ruling 204: chains live under `/templates/chains/`, so no id shadows the
+    library or an inspection route, and none needs reserving."""
+    text = SCRATCH.replace("id: scratch", f"id: {tid}")
+    assert client.put(f"/api/templates/chains/{tid}", json={"text": text}).status_code == 200
+    assert (templates_dir / "chains" / f"{tid}.yaml").read_text() == text
+    assert client.get(f"/api/templates/chains/{tid}").json()["text"] == text
+    assert client.get(f"/api/templates/chains/{tid}/resolved").json()["id"] == tid
+    assert tid in {t["id"] for t in client.get("/api/templates/chains").json()}
+
+
+def test_the_pre_ruling_204_chain_paths_are_gone(client):
+    """No compatibility alias: a chain is not reachable at its old path."""
+    assert client.get("/api/templates").status_code in (404, 405)
+    assert client.get("/api/templates/default").status_code == 404
+    assert client.get("/api/templates/default/resolved").status_code == 404
 
 
 def test_template_put_refuses_an_id_that_is_not_the_files(client, templates_dir):
-    assert client.put("/api/templates/other", json={"text": SCRATCH}).status_code == 422
-    assert client.put("/api/templates/Bad..id", json={"text": SCRATCH}).status_code == 400
+    assert client.put("/api/templates/chains/other", json={"text": SCRATCH}).status_code == 422
+    assert client.put("/api/templates/chains/Bad..id", json={"text": SCRATCH}).status_code == 400
     assert not (templates_dir / "chains" / "other.yaml").exists()
 
 
@@ -57,20 +76,20 @@ def test_a_saved_chain_survives_a_get_then_put_round_trip(client, templates_dir)
     """Open the page, save: an untouched round trip is byte-for-byte a no-op,
     comments and layout included."""
     before = (templates_dir / "chains" / "default.yaml").read_text()
-    text = client.get("/api/templates/default").json()["text"]
-    assert client.put("/api/templates/default", json={"text": text}).status_code == 200
+    text = client.get("/api/templates/chains/default").json()["text"]
+    assert client.put("/api/templates/chains/default", json={"text": text}).status_code == 200
     assert (templates_dir / "chains" / "default.yaml").read_text() == before
 
 
 def test_reload_picks_up_a_chain_added_on_disk_without_a_restart(client, templates_dir):
-    assert not any(t["id"] == "scratch" for t in client.get("/api/templates").json())
+    assert not any(t["id"] == "scratch" for t in client.get("/api/templates/chains").json())
     (templates_dir / "chains" / "scratch.yaml").write_text(SCRATCH)
 
     r = client.post("/api/templates/reload")
     assert r.status_code == 200
     assert "scratch" in r.json()["valid"]
     assert r.json()["invalid_templates"] == {}
-    assert any(t["id"] == "scratch" for t in client.get("/api/templates").json())
+    assert any(t["id"] == "scratch" for t in client.get("/api/templates/chains").json())
 
 
 def test_reload_of_a_broken_library_reports_it_and_degrades(client, templates_dir):
@@ -120,7 +139,7 @@ def test_templates_lists_the_v1_chains_intake_materializes(tmp_path, monkeypatch
         yaml.safe_dump({"id": "broken", "nodes": [{"id": "n", "extends": "no_such_node"}]})
     )
     with _client(tmp_path, monkeypatch, templates_dir=templates, default_setup=False) as client:
-        got = {t["id"]: t for t in client.get("/api/templates").json()}
+        got = {t["id"]: t for t in client.get("/api/templates/chains").json()}
 
     assert list(got) == sorted(got)
     default = TemplateLibrary.from_yaml_dir(templates).resolve_chain("default")
@@ -326,7 +345,7 @@ def test_a_chain_saved_with_a_retired_wait_timeout_is_refused_naming_its_replace
 ):
     """It still reads from a file already on disk (Ruling 196); a save that
     writes one is refused, so no new file carries it."""
-    refused = client.put("/api/templates/scratch", json={"text": RETIRED_WAIT})
+    refused = client.put("/api/templates/chains/scratch", json={"text": RETIRED_WAIT})
 
     assert refused.status_code == 422
     assert "nodes[0].tasks[0].wait.timeout is retired" in refused.json()["detail"]

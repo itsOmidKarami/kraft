@@ -13,11 +13,11 @@ import { PhoneHeader, usePhone, useResource } from "./shared";
  *
  * A chain is one file under `templates/chains/`, and this screen edits that
  * file's text: the pill strip shows the saved chain as it resolves
- * (`GET /templates`), the editor holds the file as its author wrote it
- * (`GET /templates/{id}`), a debounced check resolves the draft against the
+ * (`GET /templates/chains`), the editor holds the file as its author wrote it
+ * (`GET /templates/chains/{id}`), a debounced check resolves the draft against the
  * installed library without writing anything (`POST /templates/resolve`), and
  * Save writes the text back only if the server resolves it too
- * (`PUT /templates/{id}`). There is no per-node form: a V1 node is a typed
+ * (`PUT /templates/chains/{id}`). There is no per-node form: a V1 node is a typed
  * `exec`/`gate` with library references, and the YAML is its one faithful
  * editor. */
 

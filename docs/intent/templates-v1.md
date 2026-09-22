@@ -1134,7 +1134,7 @@ origin: src/kraft/templates/library.py §TemplateLibrary.lint_dir -- reads the i
 
 ## REQ resolved-template-api-shows-saved-chain
 
-`GET /templates/{id}/resolved` SHALL return the fully resolved configuration of
+`GET /templates/chains/{id}/resolved` SHALL return the fully resolved configuration of
 a saved chain, before per-work-item materialization.
 enforced-by: tests/api/test_templates_inspection.py::test_resolved_shows_a_saved_chain_expanded_and_not_materialized, tests/api/test_templates_inspection.py::test_resolved_of_an_unknown_chain_is_404, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
 
@@ -1174,3 +1174,11 @@ origin: src/kraft/templates/catalogue.py §components -- built from the daemon's
 kind and the chains that use it, and `kraft admin templates library <id>` one
 component's definition.
 enforced-by: tests/cli/test_admin_templates_library.py::test_the_table_lists_each_component_its_kind_and_the_chains_using_it, tests/cli/test_admin_templates_library.py::test_one_component_prints_its_definition_and_users
+
+## REQ chain-routes-are-their-own-namespace
+
+A saved chain SHALL be read, saved and resolved under `/templates/chains/{id}`,
+so that no chain id can shadow the library or an inspection route and none is
+reserved. The pre-1.0 flat `/templates/{id}` paths SHALL NOT remain as aliases.
+enforced-by: tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
+origin: src/kraft/api/routes/settings.py §get_template -- Ruling 204, before 1.0 so the break happens once.

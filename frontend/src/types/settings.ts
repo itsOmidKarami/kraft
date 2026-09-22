@@ -56,7 +56,7 @@ export interface RepoProbe {
   project: string | null;
 }
 
-/** One saved chain as `GET /templates` lists it: its resolved nodes in the
+/** One saved chain as `GET /templates/chains` lists it: its resolved nodes in the
  *  board's `ChainNode` shape (`store.node_view`), or the error that stops it
  *  resolving. */
 export interface TemplateSummary {
@@ -91,7 +91,7 @@ export interface Library {
   components: LibraryComponent[];
 }
 
-/** One chain file as its author wrote it (`GET /templates/{id}`). */
+/** One chain file as its author wrote it (`GET /templates/chains/{id}`). */
 export interface ChainFile {
   id: string;
   file: string;

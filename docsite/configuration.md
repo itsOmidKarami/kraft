@@ -85,7 +85,10 @@ One selectable chain per file, named by its `id` (or the file name). See
 [Concepts](concepts.md#chain) for the node schema, with the shipped `default`
 and `quick-task` chains as worked examples. `kraft admin templates show ID
 --resolved` prints one with its library components expanded, and Settings →
-Chains edits the file itself.
+Chains edits the file itself. Over HTTP a chain is
+`/api/templates/chains/{id}` (`GET`, `PUT`, and `GET .../resolved`), and
+`GET /api/templates/chains` lists them; any valid id works, `library` and
+`lint` included.
 
 ## `policy.yaml` — caps, budget, archiving
 
