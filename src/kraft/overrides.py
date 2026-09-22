@@ -132,3 +132,21 @@ def harness_refusal(node, fields: dict) -> str | None:
             if not (h.supports(capability) and h.value_ok(capability, value)):
                 return f"{key!r} {value!r} is refused by harness {h.id!r} ({resolved.path})"
     return None
+
+
+def item_harness_refusal(nodes: dict, fields: dict) -> str | None:
+    """Why some agent task across the item's whole materialized chain would
+    refuse this item-wide `agent_overrides`' model/effort (Kraft-1qlgc): the
+    same per-node check (`harness_refusal`) `node_overrides` already gets,
+    run over every node instead of one, since an item-wide override reaches
+    every agent task the chain dispatches. Reuses `harness_refusal` rather
+    than duplicating its harness-resolution and value-checking; a node whose
+    harness cannot be resolved yet (the launch-time fallback list) is skipped
+    by that function already, left to the launch, same as the per-node door.
+    `nodes` maps node id to `ResolvedNode`, as `_check_node_overrides` builds
+    it. Errors carry the node id, since the field alone does not say which
+    task refused it."""
+    for node_id, node in nodes.items():
+        if (why := harness_refusal(node, fields)) is not None:
+            return f"node {node_id!r}: {why}"
+    return None

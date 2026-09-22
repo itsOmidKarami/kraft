@@ -277,6 +277,17 @@ launch.
 enforced-by: tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[effort], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[model], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[escalate_model], tests/test_item_overrides.py::test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors[accepted]
 origin: src/kraft/overrides.py §harness_refusal -- Kraft-a7ers. Called from `api/routes/work_items.py` §_check_node_overrides, which both intake and PATCH go through. Each task's profile is resolved to its provider (`adapters/agent.py` §harness_profile) and held to `Harness.supports`/`value_ok`; a profile that cannot be resolved is left to the launch, which stops on it already.
 
+## REQ item-override-model-effort-checked-against-every-nodes-harness
+
+The system SHALL refuse a work item's own (item-wide) `agent_overrides`'
+`model`, `escalate_model` or `effort` on a `PATCH` if the harness of any agent
+task across the item's whole materialized chain does not declare the
+capability or does not accept the value, naming the node and the harness. It
+SHALL NOT defer that refusal to the launch, and it SHALL reuse the per-node
+override's own check rather than a second one.
+enforced-by: tests/test_item_overrides_agent.py::test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused[effort], tests/test_item_overrides_agent.py::test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused[model], tests/test_item_overrides_agent.py::test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused[escalate_model], tests/test_item_overrides_agent.py::test_an_item_wide_agent_override_the_chain_harness_refuses_is_refused[accepted]
+origin: src/kraft/overrides.py §item_harness_refusal -- Kraft-1qlgc. Wraps §harness_refusal (one function, two callers) over every node of the materialized chain instead of one. Called from `api/routes/work_items.py`'s `PATCH /work-items/{wid}`, the one door that persists item-wide `agent_overrides` -- CLI `set-overrides` and MCP `set_agent_overrides` both call it. Intake (`POST /work-items`) has no `agent_overrides` field to check; an item-wide override is set only after filing.
+
 ## REQ node-override-beats-item-override-beats-the-task
 
 An agent task's model, escalate model and effort SHALL come from its node's

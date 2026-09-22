@@ -142,6 +142,9 @@ settings and `attempts`/`wall_clock_s`, it takes:
   (model only), the harness profile's `defaults:`. A value the node's harness refuses (its
   `values:`, or a capability it does not declare) is refused here, not at
   launch. A gate's `auto_review` keeps the item-wide values only.
+  `set-overrides` is held to the same check across every agent task of the
+  item's whole chain, for the same reason: a bad value should stop at the
+  door, not surface hours into the run.
 - `--extra-prompt TEXT`: appended to the instruction of every agent task the
   node runs (its steps, `on_failure`, `fix_loop`, judge and stuck
   escalation), after the task's own prompt and brief. It never replaces them.
