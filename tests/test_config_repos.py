@@ -62,6 +62,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"local_files": []}),
         ({"local_files": [".python-version"]}, {"local_files": [".python-version"]}),
         ({}, {"setup_command": None, "env": {}, "env_passthrough": []}),
+        ({}, {"intent_dir": None}),
+        ({"intent_dir": "docs/intent"}, {"intent_dir": "docs/intent"}),
     ],
     ids=[
         "reads-a-legacy-gitlab-project",
@@ -81,6 +83,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "local-files-default-to-empty",
         "keeps-a-declared-local-file",
         "defaults-setup-command-env-and-env-passthrough",
+        "intent-dir-defaults-to-none",
+        "keeps-an-intent-dir",
     ],
 )
 def test_load_repos_reads_an_entry(tmp_path, entry, expected):
@@ -109,6 +113,10 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"areas": {"api": {"paths": []}}}, "areas"),
         ({"areas": {"api": {"paths": ["a/**"], "forge": {"kind": "github"}}}}, "areas"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),
+        ({"intent_dir": "/abs/intent"}, "must be a relative path inside the repo"),
+        ({"intent_dir": "../intent"}, "must be a relative path inside the repo"),
+        ({"intent_dir": 3}, "intent_dir"),
+        ({"intent_dir": ""}, "intent_dir"),
     ],
     ids=[
         "a-malformed-sandbox",
@@ -128,6 +136,10 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         "an-area-covering-no-path",
         "an-area-naming-a-forge",
         "a-test-scope-with-no-command",
+        "an-absolute-intent-dir",
+        "an-intent-dir-escaping-the-repo",
+        "a-non-string-intent-dir",
+        "an-empty-intent-dir",
     ],
 )
 def test_load_repos_rejects_an_entry(tmp_path, entry, match):
