@@ -125,13 +125,15 @@ def test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended(
     assert usage.READERS["claude-stream-json"].unfinished_jobs(path) == expected
 
 
-def _child_writing(tmp_path, lines, result: dict) -> list[str]:
-    """A command that prints `lines` (into the session log) and writes
-    `result` to $KRAFT_RESULT_PATH, then exits 0."""
+def _child_writing(tmp_path, lines, result: dict | None) -> list[str]:
+    """A command that prints `lines` (into the session log), writes `result`
+    to $KRAFT_RESULT_PATH unless it is None, then exits 0."""
     src = tmp_path / "stream.jsonl"
     _log(src, lines)
-    payload = shlex.quote(json.dumps(result))
-    return ["sh", "-c", f'cat {shlex.quote(str(src))}; printf %s {payload} > "$KRAFT_RESULT_PATH"']
+    script = f"cat {shlex.quote(str(src))}"
+    if result is not None:
+        script += f'; printf %s {shlex.quote(json.dumps(result))} > "$KRAFT_RESULT_PATH"'
+    return ["sh", "-c", script]
 
 
 @pytest.fixture
@@ -175,7 +177,7 @@ async def run_agent(database, run_dirs, tmp_path):
 
 @pytest.mark.parametrize(
     "result",
-    [{"status": "done"}, {"status": "done_with_concerns", "concerns": "c"}, {}],
+    [{"status": "done"}, {"status": "done_with_concerns", "concerns": "c"}, None],
     ids=["claims-done", "claims-done-with-concerns", "no-result-file"],
 )
 async def test_a_turn_left_with_a_running_job_fails_naming_it(run_agent, result):
