@@ -74,7 +74,10 @@ def first_error(exc: ValidationError, prefix: str) -> str:
     regression an operator pays for.
     """
     err = exc.errors()[0]
-    head, *rest = (str(p) for p in err["loc"]) or ["<root>"]
+    if not err["loc"]:
+        # A model-level validator names what it refuses itself.
+        return f"{prefix}: {err['msg'].removeprefix('Value error, ')}"
+    head, *rest = (str(p) for p in err["loc"])
     where = f"'{head}'" + "".join(f".{p}" for p in rest)
     shape = _SHAPE_PROSE.get(err["type"])
     return f"{prefix}: {where} {shape}" if shape else f"{prefix}: {where}: {err['msg']}"

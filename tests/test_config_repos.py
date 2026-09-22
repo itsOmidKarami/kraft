@@ -479,7 +479,11 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
             "ws": {
                 "root": "ws",
                 "root_pointer_default": "bump",
-                "members": {"a": {"repository": "lib-a", "path": "libs/a"}},
+                "members": {
+                    "a": {"repository": "lib-a", "path": "libs/a"},
+                    # A name prefix of `libs/a`, not inside it.
+                    "ab": {"repository": "lib-a", "path": "libs/ab"},
+                },
             }
         },
     )
@@ -502,6 +506,19 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
         (_WS_REPOS, {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a"}}}}, "path"),
         ([{"path": "/a", "id": "x"}, {"path": "/b", "id": "x"}], None, "'x'"),
         ([{"path": "/a", "id": "Not An Id"}], None, "id"),
+        (
+            _WS_REPOS,
+            {
+                "ws": {
+                    "root": "ws",
+                    "members": {
+                        "a": {"repository": "lib-a", "path": "libs/a"},
+                        "x": {"repository": "lib-a", "path": "./libs/a/vendor/x/"},
+                    },
+                }
+            },
+            "member 'x' at 'libs/a/vendor/x' is inside member 'a' at 'libs/a'",
+        ),
     ],
     ids=[
         "an-unknown-root",
@@ -509,6 +526,7 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
         "a-member-with-no-mount-path",
         "two-repositories-with-one-id",
         "an-id-no-reference-can-name",
+        "a-member-nested-inside-another",
     ],
 )
 def test_a_workspace_that_cannot_assemble_is_refused_at_load(tmp_path, repos, workspaces, match):
