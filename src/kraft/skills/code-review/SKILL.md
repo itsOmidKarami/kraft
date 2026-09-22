@@ -40,6 +40,12 @@ Look for, in rough order of what actually bites:
   that some other caller in this repo still expects the old version of. Grep
   for the callers; do not assume the author did.
 
+If your instructions name an intent tree, two more cases earn an `important`
+finding: the diff changes behaviour a requirement in the tree describes without
+changing that requirement; or a requirement this diff adds or changes is stated
+more broadly than the test it is pinned to enforces. A new requirement with no
+pin yet is not a finding — it is legal, and the check reports it.
+
 Do not report style, formatting, or naming preferences. The linter runs in CI
 and has opinions that are enforced; yours are not.
 
