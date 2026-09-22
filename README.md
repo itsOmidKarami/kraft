@@ -117,7 +117,7 @@
 | src/kraft/templates/revision.py          |      241 |        6 |     98% |216, 249, 298, 328, 450, 484 |
 | src/kraft/triggers.py                    |       46 |        6 |     87% |59-60, 91-94 |
 | src/kraft/update.py                      |      119 |       10 |     92% |53-54, 84-88, 93, 109, 144-146 |
-| src/kraft/usage.py                       |      247 |       13 |     95% |112, 221, 231, 330, 367, 387-388, 391-392, 404, 479, 499-500 |
+| src/kraft/usage.py                       |      301 |       13 |     96% |113, 222, 232, 331, 368, 388-389, 392-393, 405, 480, 500-501 |
 | src/kraft/waits.py                       |      108 |        7 |     94% |286-288, 298-301 |
 | src/kraft/worker/\_\_init\_\_.py         |        0 |        0 |    100% |           |
 | src/kraft/worker/env.py                  |        9 |        0 |    100% |           |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       93 |        8 |     91% |135-136, 147-149, 175-176, 186 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16455** |  **836** | **95%** |           |
+| **TOTAL**                                | **16509** |  **836** | **95%** |           |
 
 
 ## Setup coverage badge
