@@ -185,6 +185,10 @@ class RepoEntry(BaseModel):
     # leaves verification nothing to run, and it stops for a human.
     test_command: str | None = None
     test_scopes: list[TestScope] | None = Field(default=None, min_length=1)
+    #: Where this repository states its intended behaviour, relative to its
+    #: root (intent-process design §3). None: the repository does no
+    #: intent-driven development, and no agent is told of a tree.
+    intent_dir: str | None = Field(default=None, min_length=1)
     #: Path-scoped execution contexts inside this repository, in the V1
     #: `Area` shape (`repository-area-can-declare-setup-and-test-scopes`):
     #: each area's test scopes join the repository's, and its `setup` runs
@@ -269,6 +273,13 @@ class RepoEntry(BaseModel):
                 raise ValueError(f"entry {rel!r} must be a relative path inside the repo")
             if any(c in rel for c in "*?["):
                 raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
+        return v
+
+    @field_validator("intent_dir")
+    @classmethod
+    def _intent_dir_inside_repo(cls, v: str | None) -> str | None:
+        if v is not None and (Path(v).is_absolute() or ".." in Path(v).parts):
+            raise ValueError(f"intent_dir {v!r} must be a relative path inside the repo")
         return v
 
     @field_serializer("policy")
@@ -618,7 +629,12 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.
+#: A Justfile/justfile comes first: it's an explicit wrapper a repo chose on
+#: purpose (like Kraft itself: `just test`, never raw pytest), so it must win
+#: over a manifest marker sitting right beside it (Kraft-reriq).
 _TEST_COMMANDS = [
+    ("Justfile", "just test"),
+    ("justfile", "just test"),
     ("pyproject.toml", "uv run pytest -q"),
     ("package.json", "npm test"),
     ("Cargo.toml", "cargo test"),

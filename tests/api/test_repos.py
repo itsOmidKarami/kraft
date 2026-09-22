@@ -166,8 +166,12 @@ def _disabled(client, repo):
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("local_files", [".python-version"]), ("models", {"codex_default": "gpt-5"})],
-    ids=["local-files", "models"],
+    [
+        ("local_files", [".python-version"]),
+        ("models", {"codex_default": "gpt-5"}),
+        ("intent_dir", "docs/intent"),
+    ],
+    ids=["local-files", "models", "intent-dir"],
 )
 def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, value):
     """The Settings UI's only write path for these (Kraft-gxcmy): PATCH goes
@@ -185,8 +189,12 @@ def test_patch_repo_round_trips_a_field(client, repo, templates_dir, field, valu
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("steering", ["does-not-exist"]), ("local_files", ["*.pyc"])],
-    ids=["a-missing-steering-name", "a-glob-in-local-files"],
+    [
+        ("steering", ["does-not-exist"]),
+        ("local_files", ["*.pyc"]),
+        ("intent_dir", "../out"),
+    ],
+    ids=["a-missing-steering-name", "a-glob-in-local-files", "an-escaping-intent-dir"],
 )
 def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, value):
     """Write-side validation must reject exactly what the read side would
@@ -194,11 +202,12 @@ def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, valu
     GET /repos."""
     _disabled(client, repo)
     before = (templates_dir / "repos.yaml").read_text()
+    (unpatched,) = client.get("/api/repos").json()["repos"]
     r = client.patch(f"/api/repos?path={repo}", json={field: value})
     assert 400 <= r.status_code < 500, r.text
     assert (templates_dir / "repos.yaml").read_text() == before
     (entry,) = client.get("/api/repos").json()["repos"]
-    assert entry[field] == []
+    assert entry[field] == unpatched[field]
 
 
 @pytest.mark.parametrize("model, payload", [(RepoBody, {"path": "/r"}), (RepoPatch, {})])

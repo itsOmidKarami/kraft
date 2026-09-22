@@ -299,6 +299,31 @@ def _rate_limit_claude(log_path: Path) -> dict | None:
     return None
 
 
+def _session_id_claude(log_path: Path) -> str | None:
+    """The `claude` CLI's own session id, off the `system`/`init` line every
+    `--output-format stream-json` run starts with -- the identity `--resume`
+    takes, distinct from Kraft's own `worker_sessions.id`.
+
+    Scanned across every line rather than assumed to be the first, the same
+    defensive shape `_rate_limit_claude` uses reading this same log: a line
+    Kraft cannot parse yet must not crash a session that otherwise ran fine.
+    """
+    try:
+        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
+            sid = obj.get("session_id")
+            if isinstance(sid, str) and sid:
+                return sid
+    return None
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -312,6 +337,10 @@ class Reader:
     stream: Callable[[Iterable[str], dict], Usage | None]
     envelope: Callable[[Path], dict | None]
     rate_limit: Callable[[Path], dict | None]
+    #: The CLI's own resumable-session id, off this schema's log -- distinct
+    #: from Kraft's own `worker_sessions.id` (Kraft-cvnx1). None for a schema
+    #: with no such id to extract.
+    session_id: Callable[[Path], str | None] = lambda _log_path: None
 
 
 READERS: dict[str, Reader] = {
@@ -320,6 +349,7 @@ READERS: dict[str, Reader] = {
         stream=from_stream,
         envelope=read_envelope,
         rate_limit=_rate_limit_claude,
+        session_id=_session_id_claude,
     ),
 }
 

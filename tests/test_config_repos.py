@@ -62,6 +62,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"local_files": []}),
         ({"local_files": [".python-version"]}, {"local_files": [".python-version"]}),
         ({}, {"setup_command": None, "env": {}, "env_passthrough": []}),
+        ({}, {"intent_dir": None}),
+        ({"intent_dir": "docs/intent"}, {"intent_dir": "docs/intent"}),
     ],
     ids=[
         "reads-a-legacy-gitlab-project",
@@ -81,6 +83,8 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "local-files-default-to-empty",
         "keeps-a-declared-local-file",
         "defaults-setup-command-env-and-env-passthrough",
+        "intent-dir-defaults-to-none",
+        "keeps-an-intent-dir",
     ],
 )
 def test_load_repos_reads_an_entry(tmp_path, entry, expected):
@@ -109,6 +113,10 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"areas": {"api": {"paths": []}}}, "areas"),
         ({"areas": {"api": {"paths": ["a/**"], "forge": {"kind": "github"}}}}, "areas"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),
+        ({"intent_dir": "/abs/intent"}, "must be a relative path inside the repo"),
+        ({"intent_dir": "../intent"}, "must be a relative path inside the repo"),
+        ({"intent_dir": 3}, "intent_dir"),
+        ({"intent_dir": ""}, "intent_dir"),
     ],
     ids=[
         "a-malformed-sandbox",
@@ -128,6 +136,10 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         "an-area-covering-no-path",
         "an-area-naming-a-forge",
         "a-test-scope-with-no-command",
+        "an-absolute-intent-dir",
+        "an-intent-dir-escaping-the-repo",
+        "a-non-string-intent-dir",
+        "an-empty-intent-dir",
     ],
 )
 def test_load_repos_rejects_an_entry(tmp_path, entry, match):
@@ -346,6 +358,21 @@ def test_probe_repo_suggests_a_setup_command(tmp_path):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
     assert config.probe_repo(repo)["setup_command"] == "uv sync"
+
+
+@pytest.mark.parametrize("name", ["Justfile", "justfile"], ids=["capitalized", "lowercase"])
+def test_the_test_probe_recognizes_a_justfile_marker(tmp_path, name):
+    """Kraft-reriq: a repo whose tests must go through a Justfile target (like
+    Kraft itself: `just test`, never raw pytest) was probed with the wrong
+    command -- `pyproject.toml` matched first and suggested plain pytest."""
+    (tmp_path / name).write_text("test:\n    pytest\n")
+    assert config._first_test_command(tmp_path) == "just test"
+
+
+def test_the_test_probe_prefers_an_explicit_justfile_wrapper_over_pyproject(tmp_path):
+    (tmp_path / "Justfile").write_text("test:\n    pytest\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert config._first_test_command(tmp_path) == "just test"
 
 
 @pytest.mark.parametrize(

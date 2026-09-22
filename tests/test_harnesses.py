@@ -63,6 +63,19 @@ def test_claude_constrains_effort_but_not_model():
     assert not claude.value_ok("effort", "minimal")  # codex's value, not claude's
 
 
+def test_codex_effort_values_include_xhigh():
+    """Kraft-c1qfa: codex-cli 0.155.0 passes `-c model_reasoning_effort=` straight
+    to the model API uninterpreted -- probed 2026-09-22, an invalid value's own
+    error names the real vocabulary as 'none', 'minimal', 'low', 'medium',
+    'high', 'xhigh', 'max'. codex.yaml's `values:` list (a closed vocabulary
+    Kraft ships, not codex's own) had fallen behind that and rejected a legit
+    xhigh binding at load with a RegistryError."""
+    codex = harness.load(None).valid["codex"]
+    assert codex.value_ok("effort", "xhigh")
+    assert codex.value_ok("effort", "minimal")  # unaffected by the widening
+    assert not codex.value_ok("effort", "bogus")
+
+
 def _write(tmp_path: Path, name: str, body: str) -> Path:
     d = tmp_path / "harnesses"
     d.mkdir(exist_ok=True)

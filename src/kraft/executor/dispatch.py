@@ -19,6 +19,7 @@ from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import skill as _skill
+from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
@@ -891,9 +892,7 @@ def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str,
     paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
     if paused is None:
         return None
-    from kraft.escalate import _extract_cli_session_id  # local: escalate imports the executor
-
-    provider = _extract_cli_session_id(Path(paused["log_path"]))
+    provider = _usage.READERS["claude-stream-json"].session_id(Path(paused["log_path"]))
     return (paused["id"], provider) if provider else None
 
 
