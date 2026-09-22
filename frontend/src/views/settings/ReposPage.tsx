@@ -34,6 +34,11 @@ export const parentOf = (r: Repo, all: Repo[]): Repo | undefined =>
     .filter((p) => p.path !== r.path && r.path.startsWith(`${p.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
+/** An absent `enabled` means enabled (Ruling 212): only an explicit `false`
+ *  turns a repo off. Exported for IntakeModal, which filters by the same
+ *  rule. */
+export const repoEnabled = (r: Pick<Repo, "enabled">): boolean => r.enabled !== false;
+
 function AddRepo({
   templates,
   onClose,
@@ -284,12 +289,12 @@ function RepoDetail({
       <SectionLabel>General</SectionLabel>
       <div className="field">
         <Switch
-          checked={current.enabled}
+          checked={repoEnabled(current)}
           onChange={(next) => set({ enabled: next })}
-          label={`${current.enabled ? "disable" : "enable"} ${current.name}`}
+          label={`${repoEnabled(current) ? "disable" : "enable"} ${current.name}`}
         />
         <span className="field-hint">
-          {current.enabled
+          {repoEnabled(current)
             ? "enabled — new items can target it"
             : "disabled — new items can't target it; running items keep going"}
         </span>
@@ -697,7 +702,7 @@ export function ReposPage() {
                   sub={[
                     r.default_chain_template,
                     r.forge && `${r.forge} ${r.project ?? ""}`.trim(),
-                    !r.enabled && "disabled",
+                    !repoEnabled(r) && "disabled",
                     parentOf(r, repos) && `in ${parentOf(r, repos)!.name}`,
                   ]
                     .filter(Boolean)
@@ -740,16 +745,16 @@ export function ReposPage() {
               <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
               <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
                 <Switch
-                  checked={r.enabled}
+                  checked={repoEnabled(r)}
                   onChange={(next) =>
                     api
                       .patchRepo(r.path, { enabled: next })
                       .then(reload)
                       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
                   }
-                  label={`${r.enabled ? "disable" : "enable"} ${r.name}`}
+                  label={`${repoEnabled(r) ? "disable" : "enable"} ${r.name}`}
                 />
-                <span className="row-sub">{r.enabled ? "enabled" : "disabled"}</span>
+                <span className="row-sub">{repoEnabled(r) ? "enabled" : "disabled"}</span>
               </span>
               <span onClick={(e) => e.stopPropagation()}>
                 <OverflowMenu
@@ -795,7 +800,7 @@ export function ReposPage() {
                   <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
                   <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
                     <Switch
-                      checked={r.enabled}
+                      checked={repoEnabled(r)}
                       onChange={(next) =>
                         api
                           .patchRepo(r.path, { enabled: next })

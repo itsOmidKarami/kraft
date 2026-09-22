@@ -65,6 +65,14 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"setup_command": None, "env": {}, "env_passthrough": []}),
         ({}, {"intent_dir": None}),
         ({"intent_dir": "docs/intent"}, {"intent_dir": "docs/intent"}),
+        # Ruling 212: an absent `enabled` is enabled, not disabled.
+        ({}, {"enabled": True}),
+        ({"enabled": False}, {"enabled": False}),
+        ({}, {"name": None, "default_chain_template": None}),
+        (
+            {"name": "r", "default_chain_template": "quick"},
+            {"name": "r", "default_chain_template": "quick"},
+        ),
     ],
     ids=[
         "reads-a-legacy-gitlab-project",
@@ -86,12 +94,40 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         "defaults-setup-command-env-and-env-passthrough",
         "intent-dir-defaults-to-none",
         "keeps-an-intent-dir",
+        "an-absent-enabled-is-enabled",
+        "keeps-an-explicit-enabled-false",
+        "name-and-default-chain-template-default-to-none",
+        "keeps-a-declared-name-and-default-chain-template",
     ],
 )
 def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     (repo,) = _load(tmp_path, {"path": "/r", **entry})
     assert {key: getattr(repo, key) for key in expected} == expected
     assert "gitlab_project" not in repo.model_dump()
+
+
+def test_model_dump_repo_keeps_an_unset_enabled_name_and_chain_template_absent(tmp_path):
+    """Ruling 212: `enabled: bool = True` (and `name`, `default_chain_template`)
+    carry a typed default so every reader can use the attribute, but a save or
+    a `GET /repos` must not fill an absent key in with it -- that would turn a
+    read into a write, flipping nothing but appearing to opt every existing
+    entry into "enabled" on disk."""
+    (repo,) = _load(tmp_path, {"path": "/r"})
+    dumped = repo.model_dump_repo()
+    assert "enabled" not in dumped
+    assert "name" not in dumped
+    assert "default_chain_template" not in dumped
+
+
+def test_model_dump_repo_keeps_an_explicit_value(tmp_path):
+    (repo,) = _load(
+        tmp_path,
+        {"path": "/r", "enabled": False, "name": "r", "default_chain_template": "quick"},
+    )
+    dumped = repo.model_dump_repo()
+    assert dumped["enabled"] is False
+    assert dumped["name"] == "r"
+    assert dumped["default_chain_template"] == "quick"
 
 
 @pytest.mark.parametrize(

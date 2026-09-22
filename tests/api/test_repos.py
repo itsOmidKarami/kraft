@@ -458,6 +458,36 @@ def _broken_repos_yaml(templates_dir: Path) -> None:
     )
 
 
+def _no_enabled_key(templates_dir: Path) -> None:
+    """Two entries, neither writing `enabled:` — a `repos.yaml` predating the
+    field, or a hand-edited one. Written directly: `POST /repos` always writes
+    an explicit `enabled` (Ruling 212 is about the entries it never touches)."""
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": "/r"}, {"path": "/other", "test_command": "pytest"}]})
+    )
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_an_entry_with_no_enabled_key_is_connected_and_runnable(client):
+    """Ruling 212: an absent `enabled` means enabled, not disabled."""
+    got = client.get("/api/repos").json()["repos"]
+    (r,) = [r for r in got if r["path"] == "/r"]
+    assert "enabled" not in r
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_patching_one_repo_does_not_write_enabled_into_an_untouched_entrys_absence(
+    client, templates_dir
+):
+    """`_editable_repos` re-dumps every connected entry to re-save one of them
+    -- a PATCH to `/other` must not fill `/r`'s never-set `enabled` in with its
+    default, baking "enabled: true" into an entry that never asked for it."""
+    client.patch("/api/repos?path=/other", json={"test_command": "just test"})
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    (r,) = [e for e in on_disk["repos"] if e["path"] == "/r"]
+    assert "enabled" not in r
+
+
 def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):
     """`_launch` runs on the reattach path too: `lifespan` calls it for every
     work item still 'active' at boot (crash recovery). A malformed repos.yaml,

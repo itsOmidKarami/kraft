@@ -24,6 +24,10 @@ import { backdropProps, useModal } from "../useModal";
  * rather than being pickable with no config behind it (Kraft-z6qb4).
  */
 
+/** An absent `enabled` means enabled (Ruling 212): only an explicit `false`
+ *  turns a repo off. */
+const repoEnabled = (r: Pick<Repo, "enabled">): boolean => r.enabled !== false;
+
 const POINTER_POLICIES = [
   { id: "ignore", label: "Ignore · leave the root unchanged" },
   { id: "bump", label: "Bump · update the root's pointers" },
@@ -119,7 +123,10 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     : undefined;
   const available = ws
     ? Object.entries(ws.members)
-        .filter(([, m]) => byId(m.repository)?.enabled)
+        .filter(([, m]) => {
+          const member = byId(m.repository);
+          return member != null && repoEnabled(member);
+        })
         .map(([id, m]) => ({ id, path: m.path }))
     : [];
   const pointer = pointerPolicy ?? ws?.root_pointer_default ?? "ignore";
@@ -359,9 +366,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                   select a repo…
                 </option>
                 {allRepos.map((r) => (
-                  <option key={r.path} value={r.path} disabled={!r.enabled}>
+                  <option key={r.path} value={r.path} disabled={!repoEnabled(r)}>
                     {r.name}
-                    {!r.enabled && " · disabled"}
+                    {!repoEnabled(r) && " · disabled"}
                   </option>
                 ))}
               </select>
