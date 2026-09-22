@@ -42,6 +42,7 @@ def test_the_tools_are_registered():
         "escalate_work_item",
         "set_mr_labels",
         "set_chain_template",
+        "set_attachments",
         "set_agent_overrides",
         "set_node_overrides",
         "set_work_item_policy",

@@ -93,6 +93,36 @@ def set_chain_template(
     )
 
 
+def set_attachments(
+    conn: sqlite3.Connection, work_item_id, attachments: list[dict], materialized_chain: str
+) -> None:
+    """Replace a not-yet-started item's attachments and the chain they trim
+    (Kraft-s7c04.28), both at once so the trim and the documents that justify
+    it cannot disagree. Refuses (`ValueError`) once the item has a current
+    node: checked here, in the write, so a walk that started after the caller
+    read the row cannot have copied the old documents into its worktree
+    under a chain that no longer matches them."""
+    row = conn.execute(
+        "SELECT attachments, current_node_id FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if row["current_node_id"] is not None:
+        raise ValueError("work item has already started")
+    conn.execute(
+        "UPDATE work_items SET attachments = ?, materialized_chain = ?, updated_at = ? "
+        "WHERE id = ?",
+        (json.dumps(attachments), materialized_chain, _now(), work_item_id),
+    )
+    events.append(
+        conn,
+        work_item_id,
+        "attachments_changed",
+        {
+            "from": sorted(a["kind"] for a in json.loads(row["attachments"] or "[]")),
+            "to": sorted(a["kind"] for a in attachments),
+        },
+    )
+
+
 def skip_node(
     conn: sqlite3.Connection,
     work_item_id: str,

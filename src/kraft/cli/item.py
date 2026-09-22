@@ -174,6 +174,16 @@ def _cmd_set_chain(ns: argparse.Namespace) -> None:
     )
 
 
+def _cmd_set_attachments(ns: argparse.Namespace) -> None:
+    # Absolute for the same reason `_cmd_create` gives.
+    spec, plan = (str(Path(v).expanduser().resolve()) if v else None for v in (ns.spec, ns.plan))
+    common.emit(
+        asyncio.run(client.set_attachments(spec, plan, ns.drop, ns.id)),
+        common._render_action,
+        ns.json,
+    )
+
+
 def _cmd_set_overrides(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(
@@ -382,6 +392,22 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_chain.add_argument("id", nargs="?")
     set_chain.add_argument("--template", required=True, help="a chain template name")
     set_chain.set_defaults(func=_cmd_set_chain)
+
+    set_attachments = subs.add_parser(
+        "set-attachments",
+        parents=[common],
+        help="replace or drop a not-yet-started item's spec/plan, instead of re-filing it",
+    )
+    set_attachments.add_argument("id", nargs="?")
+    set_attachments.add_argument("--spec", help="the revised spec, re-copied into Kraft")
+    set_attachments.add_argument("--plan", help="the revised plan, re-copied into Kraft")
+    set_attachments.add_argument(
+        "--drop",
+        action="append",
+        choices=["spec", "plan"],
+        help="remove that attachment, which puts back the gate it trimmed (repeatable)",
+    )
+    set_attachments.set_defaults(func=_cmd_set_attachments)
 
     set_overrides = subs.add_parser(
         "set-overrides",

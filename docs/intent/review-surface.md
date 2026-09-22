@@ -28,6 +28,13 @@ enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into
 IF intake cannot copy an attachment, THEN the system SHALL refuse the intake.
 enforced-by: tests/executor/test_entry.py::test_intake_refuses_an_attachment_it_cannot_copy
 
+## REQ attachments-can-change-until-the-item-starts
+WHILE a work item has not started, the system SHALL let a person replace or
+drop its attachments, re-copy a replaced one into Kraft's own storage, and
+re-trim its chain to match. IF the item has started, THEN the system SHALL
+refuse the change and leave its attachments and chain as they were.
+enforced-by: tests/api/test_attachment_patch.py::test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan, tests/api/test_attachment_patch.py::test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate, tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_nodes_skipped_at_intake, tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[replace], tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[drop], tests/api/test_attachment_patch.py::test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with, tests/store/test_chain_gates.py::test_set_attachments_refuses_an_item_that_started_after_the_caller_read_it
+
 ## REQ missing-stored-attachment-fails-loudly
 IF an attachment's stored copy is missing when the worktree is prepared, THEN
 the system SHALL fail rather than run without it.

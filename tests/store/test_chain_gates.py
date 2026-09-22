@@ -343,3 +343,22 @@ async def test_effective_auto_escalate_on_a_v1_item(database, overrides, expecte
     """
     row = await _stopped_on(database, "verify", overrides, materialized=_v1("verify"))
     assert (_STUCK(row, True), _DELAY(row, 30)) == expected
+
+
+async def test_set_attachments_refuses_an_item_that_started_after_the_caller_read_it(database):
+    """The PATCH door checks `current_node_id` on the row it read; the write
+    checks again, because a walk can start in between and copy the old
+    documents into its worktree (Kraft-s7c04.28)."""
+    await mk_item(database)
+    await database.write(lambda c: store.load_chain(c, "w1", "implementation"))
+    spec = [{"kind": "spec", "path": "s.md", "source": "/k/spec.md"}]
+
+    with pytest.raises(ValueError, match="already started"):
+        await database.write(lambda c: store.set_attachments(c, "w1", spec, "{}"))
+
+    row = database.read(
+        lambda c: c.execute("SELECT attachments FROM work_items WHERE id='w1'").fetchone()
+    )
+    assert row["attachments"] is None
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0))]
+    assert "attachments_changed" not in types

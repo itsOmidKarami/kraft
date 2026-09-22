@@ -211,7 +211,7 @@ async def intake(
 
 
 def _store_attachments(
-    run_dirs, work_item_id: str, attachments: list[dict] | None, *, repo: str
+    run_dirs, work_item_id: str, attachments: list[dict] | None, *, repo: str, tag: str = ""
 ) -> list[dict]:
     """Copy each attachment into Kraft's own storage; return the rewritten records.
 
@@ -223,6 +223,10 @@ def _store_attachments(
     Raises rather than skipping. Every other reader of an attachment is
     best-effort, and that is right for them; this one backs an irreversible
     decision.
+
+    `tag` names a re-snapshot apart from the copy it supersedes
+    (`replace_attachments`), so the old one stays intact until the row stops
+    naming it.
     """
     if not attachments:
         return attachments or []
@@ -231,7 +235,7 @@ def _store_attachments(
     stored = []
     for a in attachments:
         src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
-        dest = dest_dir / f"{a['kind']}{Path(a['path']).suffix or '.md'}"
+        dest = dest_dir / f"{a['kind']}{tag}{Path(a['path']).suffix or '.md'}"
         # Not shutil.copyfile's own error message: it names two absolute paths
         # under $KRAFT_HOME and says nothing about which attachment this was.
         try:
@@ -240,6 +244,29 @@ def _store_attachments(
             raise ValueError(f"cannot read the {a['kind']} attachment at {src}: {exc}") from exc
         stored.append({**a, "source": str(dest)})
     return stored
+
+
+def replace_attachments(
+    run_dirs, work_item_id: str, current: list[dict], changes: dict, added: list[dict], *, repo: str
+) -> list[dict]:
+    """A not-yet-started item's attachments after a PATCH (Kraft-s7c04.28):
+    each kind named in `changes` is dropped, `added` (validated, one per kind)
+    is snapshotted under a fresh name, and every other kind keeps the copy it
+    has. Raises like intake does; `prune_attachments` clears whichever copies
+    the row ends up not naming."""
+    kept = [a for a in current if a["kind"] not in changes]
+    tag = f"-{uuid.uuid4().hex[:8]}"
+    fresh = _store_attachments(run_dirs, work_item_id, added, repo=repo, tag=tag)
+    return sorted(kept + fresh, key=lambda a: a["kind"] != "spec")
+
+
+def prune_attachments(run_dirs, work_item_id: str, keep: list[dict]) -> None:
+    """Delete every stored copy for this item that `keep` does not name."""
+    named = {Path(a["source"]).name for a in keep if a.get("source")}
+    stored = run_dirs.attachments / work_item_id
+    for path in stored.iterdir() if stored.is_dir() else ():
+        if path.name not in named:
+            path.unlink(missing_ok=True)
 
 
 def attachments_of(work_item_row) -> list[dict]:

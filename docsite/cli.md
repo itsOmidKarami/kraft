@@ -89,6 +89,7 @@ kraft item progress 3        # a worker saying it started plan task 3 -- not one
 kraft item escalate --message "the fix loop keeps missing the same edge case"
 kraft item escalate --message "..." --new-thread  # a fresh agent session, not the latest thread
 kraft item set-chain --template quick-task        # switch a not-yet-started item's chain
+kraft item set-attachments --spec specs/x.md      # revise a not-yet-started item's spec; --drop spec restores its gate
 kraft item set-overrides --model opus --effort high
 kraft item set-overrides --clear                  # back to the template's own binding
 kraft item set-node-override --node verify --auto-escalate-stuck
