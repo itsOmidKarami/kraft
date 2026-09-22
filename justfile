@@ -119,9 +119,27 @@ install: bundle
 # `just test -k "a or b"` reached pytest as three words (Kraft-s7c04.37). The
 # attribute is per-recipe on purpose -- file-level `set positional-arguments`
 # would change $0/$@ for every recipe here.
+#
+# Kraft-1v6ow: with --testmon active, pytest's own "collected 0 items" exit
+# code (5, a failure) never reaches us -- testmon overrides it to 0 even when
+# nothing was collected at all, not merely deselected by testmon itself (that
+# case reads "collected N items / N deselected / 0 selected", never "collected
+# 0 items"). A path argument that matches nothing must not look like a run
+# that found nothing wrong, so we grep the one line pytest emits only for a
+# truly empty collection and fail on it ourselves, when args were given.
 [positional-arguments]
 test *ARGS:
-    COVERAGE_CORE=ctrace uv run pytest --testmon "$@"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    log=$(mktemp -t kraft-test.XXXXXX)
+    trap 'rm -f "$log"' EXIT
+    COVERAGE_CORE=ctrace uv run pytest --testmon "$@" 2>&1 | tee "$log"
+    status=${PIPESTATUS[0]}
+    if [ -n "$*" ] && grep -qE '^collected 0 items$' "$log"; then
+        echo "error: just test collected 0 items for the given args -- treating as a failure (Kraft-1v6ow)" >&2
+        exit 1
+    fi
+    exit "$status"
 
 # Check the intent tree: every enforced-by pin resolves, and list what nothing pins.
 intent:
