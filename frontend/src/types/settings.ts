@@ -186,16 +186,6 @@ export interface ResolveResult {
   issues: TemplateIssue[];
 }
 
-export interface SteeringFile {
-  name: string;
-  bytes: number | null;
-}
-
-export interface SteeringList {
-  files: SteeringFile[];
-  max_bytes: number;
-}
-
 export interface Intake {
   enabled: boolean;
   interval_s: number;

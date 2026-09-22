@@ -334,6 +334,17 @@ describe("Settings · repo detail (5b)", () => {
     );
   });
 
+  it("the steering picker offers the library's steering profiles, not a free-text file name", async () => {
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo());
+    renderAt("/settings/repos?repo=/repo-a");
+    const picker = await screen.findByRole("combobox", { name: "add steering profile" });
+    await waitFor(() => expect(within(picker).getByRole("option", { name: "house-style" })).toBeInTheDocument());
+    await userEvent.selectOptions(picker, "house-style");
+    expect(await screen.findByText("house-style ✕")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    expect(patch).toHaveBeenCalledWith("/repo-a", expect.objectContaining({ steering: ["house-style"] }));
+  });
+
   it("re-probing offers the found scopes, and applying them stages a draft edit", async () => {
     vi.spyOn(api, "probeRepo").mockResolvedValue({
       path: "/repo-a",

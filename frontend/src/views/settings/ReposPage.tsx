@@ -232,6 +232,7 @@ function RepoDetail({
   reload: () => Promise<void>;
 }) {
   const phone = usePhone();
+  const { value: library } = useResource(() => api.getLibrary());
   const repo = repos.find((r) => r.path === path);
   const [draft, setDraft] = useState<Repo | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -512,16 +513,14 @@ function RepoDetail({
               {name} ✕
             </button>
           ))}
-          <button
-            type="button"
-            className="tag tag-off"
-            onClick={() => {
-              const name = window.prompt("Steering file name");
-              if (name) set({ steering: [...current.steering, name] });
-            }}
+          <select aria-label="add steering profile" className="input" value=""
+            onChange={(e) => e.target.value && set({ steering: [...current.steering, e.target.value] })}
           >
-            + add
-          </button>
+            <option value="">+ add a library profile</option>
+            {(library?.components ?? [])
+              .filter((c) => c.kind === "steering" && !current.steering.includes(c.name))
+              .map((c) => <option key={c.name}>{c.name}</option>)}
+          </select>
         </div>
       </div>
       <div className="field">

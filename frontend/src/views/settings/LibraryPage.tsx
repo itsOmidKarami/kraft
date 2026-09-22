@@ -52,8 +52,9 @@ function ComponentDetail({ component }: { component: LibraryComponent }) {
       {component.kind === "steering" && typeof component.definition.instructions === "string" ? (
         <>
           <p className="chain-legend">
-            Steering profiles here are selected by tasks and frozen into an item's chain at intake. Repository
-            steering files live on the <Link to="/settings/steering">Steering page</Link>.
+            A steering profile is selected by tasks (<code>steering:</code> on a task) and by repositories
+            (<code>steering:</code> on <Link to="/settings/repos">Repos</Link>), and frozen into an item at intake.
+            Create, edit or remove one in library.yaml, beside.
           </p>
           <pre className="template-readout">{component.definition.instructions}</pre>
         </>
