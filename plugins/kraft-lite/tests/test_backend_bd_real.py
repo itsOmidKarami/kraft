@@ -38,10 +38,23 @@ def _bd_template(tmp_path_factory):
     """
     tpl = tmp_path_factory.mktemp("kl-bd-tpl")
     subprocess.run(["git", "init", "-q"], cwd=tpl, check=True)
+    # `bd init` commits, which spawns git's detached auto-maintenance; its
+    # `objects/maintenance.lock` vanishing mid-`copytree` below fails a test
+    # (Kraft-0y8nq, same race as tests/support/harness.py's templates).
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        subprocess.run(["git", "config", key, value], cwd=tpl, check=True)
     init = subprocess.run(["bd", "init", "--prefix", "KL"], cwd=tpl, capture_output=True, text=True)
     if init.returncode != 0:
         pytest.skip(f"bd init failed here: {init.stderr.strip()}")
     return tpl
+
+
+def test_the_bd_template_disables_git_auto_maintenance(_bd_template):
+    for key, want in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        got = subprocess.run(
+            ["git", "config", "--get", key], cwd=_bd_template, capture_output=True, text=True
+        ).stdout.strip()
+        assert got == want, key
 
 
 @pytest.fixture
