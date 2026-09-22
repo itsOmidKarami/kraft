@@ -243,15 +243,15 @@ def _mr_ref(st, wid: str) -> dict | None:
     MR still logs a fresh event, so this always names the current one, not a
     stale first-open URL for a since-force-pushed branch.
 
-    Single-repo only: a multi-repo item's `open_mr` node emits one
-    `mr_opened` per target repo (root and every declared submodule), and the
-    event carries no repo identifier to tell them apart. Returning "the
-    latest one" there would as often name a submodule's merge request as the
-    root's and label it "the" MR regardless -- silence until a per-repo
-    answer exists is better than a link to the wrong PR.
+    A multi-repo item's `open_mr` node emits one `mr_opened` per target repo
+    (root and every declared submodule), and the event carries no repo
+    identifier to tell them apart, so the events are never read for one: the
+    latest would as often name a submodule's merge request as the root's.
+    Its root's own row records the root's merge request (Kraft-mjsf), and
+    that is the item's; a root with none has no one merge request to link.
     """
-    if st.db.read(lambda c: store.repos_for(c, wid)):
-        return None
+    if rows := st.db.read(lambda c: store.repos_for(c, wid)):
+        return next((r["mr_ref"] for r in rows if r["role"] == "root"), None)
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
         if e["type"] == "mr_opened":
             return {"number": e["payload"]["number"], "url": e["payload"]["url"]}

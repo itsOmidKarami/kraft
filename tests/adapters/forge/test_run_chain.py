@@ -333,6 +333,12 @@ async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
     assert fake.cwds == [worktree / "repos" / "pkg", worktree], "submodule first, root last"
     assert [r["role"] for r in repos] == ["submodule", "root"]
     assert repos[0]["state"] == "open"
+    # Kraft-mjsf: every repo's own merge request is recorded on its row, in
+    # the order they were opened, not left to an event with no repo on it.
+    assert [r["mr_ref"] for r in repos] == [
+        {"number": 1, "url": "http://fake.forge/1"},
+        {"number": 2, "url": "http://fake.forge/2"},
+    ]
 
 
 async def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(
@@ -417,8 +423,14 @@ async def test_the_shape_that_broke_on_9d0ab38ff3c9439b90506df0f6966660(
     assert await walk(fake, it) == "completed"
 
     assert fake.merged == [1], "only the submodule's MR, never a root one"
-    repos = {r["role"]: r["state"] for r in database.read(lambda c: store.repos_for(c, it.id))}
+    rows = database.read(lambda c: store.repos_for(c, it.id))
+    repos = {r["role"]: r["state"] for r in rows}
     assert repos == {"submodule": "merged", "root": "pending"}, "ignore: root untouched, as asked"
+    # Kraft-mjsf: merging records a new state, and keeps the merge request.
+    assert {r["role"]: r["mr_ref"] for r in rows} == {
+        "submodule": {"number": 1, "url": "http://fake.forge/1"},
+        "root": None,
+    }
 
 
 async def test_a_member_changed_without_being_selected_stops_publication(

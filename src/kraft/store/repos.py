@@ -69,8 +69,11 @@ def repos_for(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
 def update_repo_state(
     conn: sqlite3.Connection, repo_row_id: int, *, merge_state: str, mr_ref: dict | None = None
 ) -> None:
-    """Record what a forge call just learned about one repo's merge request."""
+    """Record what a forge call just learned about one repo's merge request.
+    No `mr_ref` keeps the one already recorded: a merge changes the state,
+    not which merge request it was (Kraft-mjsf)."""
     conn.execute(
-        "UPDATE work_item_repos SET merge_state = ?, mr_ref = ?, updated_at = ? WHERE id = ?",
+        "UPDATE work_item_repos SET merge_state = ?, mr_ref = COALESCE(?, mr_ref), "
+        "updated_at = ? WHERE id = ?",
         (merge_state, json.dumps(mr_ref) if mr_ref else None, _now(), repo_row_id),
     )
