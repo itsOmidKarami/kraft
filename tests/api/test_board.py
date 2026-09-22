@@ -353,6 +353,8 @@ def test_mr_ref_on_a_multi_repo_item_is_the_root_row_s_own(client, repo, root_mr
         "/api/work-items",
         json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
+    member_mr = {"number": 1, "url": "https://forge.example/mr/1"}
+    _seed_repo(client, wid, repo_path="/wt/pkg", role="submodule", merge_rank=0, mr_ref=member_mr)
     _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1, mr_ref=root_mr)
     _seed_events(
         client,
