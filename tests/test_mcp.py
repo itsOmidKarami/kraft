@@ -163,3 +163,20 @@ def test_a_worker_cannot_set_its_own_policy_through_mcp(monkeypatch):
         asyncio.run(mcp.build().call_tool("set_work_item_policy", {"policy": {"max_attempts": 9}}))
     cause = refused.value.__cause__
     assert isinstance(cause, PermissionError) and "its own work item" in str(cause)
+
+
+def test_create_work_item_forwards_the_base_branch(monkeypatch):
+    """Kraft-v9gbi: the MCP door names an item's base branch too."""
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        seen.update(kwargs)
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", fake)
+    asyncio.run(
+        mcp.build().call_tool(
+            "create_work_item", {"title": "t", "repo": "/r", "base_branch": "release"}
+        )
+    )
+    assert seen["base_branch"] == "release"

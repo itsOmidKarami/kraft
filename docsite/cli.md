@@ -17,6 +17,7 @@ kraft view list --all --status=paused
 kraft view show                      # the work item whose worktree you are in
 kraft item create "fix the flaky test" --description "..."   # files it paused; a human starts it
 kraft item create "ship the thing" --spec .engineering/specs/x.md   # skips the spec node
+kraft item create "backport the fix" --base-branch release/1.2   # starts from, and merges into, release/1.2
 kraft item approve                   # approve whichever gate is pending
 kraft item reject --note "the plan skips migrations"
 kraft item pause / kraft item resume --steer "try the other adapter"

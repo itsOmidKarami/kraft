@@ -6,6 +6,7 @@ its own tests in test_client_*.py.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import pathlib
@@ -151,6 +152,34 @@ def test_create_carries_the_description(app, monkeypatch, capsys, repo):
 
     cli.main(["view", "show", created["id"], "--json"])
     assert json.loads(capsys.readouterr().out)["description"] == "the brief"
+
+
+@pytest.mark.parametrize(
+    "branch, outcome",
+    [("release", "release"), ("nope", "no branch 'nope' on origin")],
+    ids=["on-origin", "missing-on-origin"],
+)
+def test_create_files_an_item_on_a_base_branch(
+    app, monkeypatch, capsys, repo, tmp_path, branch, outcome
+):
+    """Kraft-v9gbi: `--base-branch` reaches the item's frozen target, and a
+    branch origin does not have is refused in words, at the terminal."""
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:release"], cwd=repo, check=True)
+    _connect(repo)
+    monkeypatch.chdir(repo)
+
+    if outcome != branch:
+        with pytest.raises(SystemExit):
+            cli.main(["item", "create", "t", "--base-branch", branch])
+        assert outcome in capsys.readouterr().err
+        return
+    cli.main(["item", "create", "t", "--base-branch", branch, "--json"])
+    created = json.loads(capsys.readouterr().out)
+    shown = asyncio.run(client.transport._get(f"/work-items/{created['id']}"))
+    assert json.loads(shown["materialized_chain"])["target"]["base_branch"] == outcome
 
 
 def test_item_create_passes_auto_gate(monkeypatch):

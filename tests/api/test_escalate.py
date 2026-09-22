@@ -275,7 +275,7 @@ def test_escalate_consumes_a_self_retry_left_by_a_human_escalated_agent(client, 
 
         return _fake
 
-    async def fake_refresh(worktree, repo, branch):
+    async def fake_refresh(worktree, repo, branch, **_kw):
         return None
 
     walk_calls = []

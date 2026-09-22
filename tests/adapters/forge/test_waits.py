@@ -17,7 +17,7 @@ from kraft.adapters import forge
 
 
 async def _opened(fake, repo):
-    await fake.open_mr(repo=repo, branch="kraft/w1", title="t", body="b")
+    await fake.open_mr(repo=repo, branch="kraft/w1", base="main", title="t", body="b")
     return fake
 
 

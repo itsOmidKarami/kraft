@@ -10,6 +10,15 @@ one from the UI, the CLI (`kraft item create`), or an MCP tool
 (`create_work_item`). It always lands **paused** — see
 [Agent integration](agent-integration.md) for why an agent can never skip that.
 
+Its work starts from the repository's default branch, and its merge request
+targets it, unless it names a **base branch** (`--base-branch`, the MCP tool's
+`base_branch`): then that branch is the one its worktree is cut from, every
+rebase replays onto, a base change is detected on, the merge request targets
+and post-merge CI watches. The branch must already exist on the repository's
+origin, or intake refuses the item. It is frozen at intake. On a workspace item
+it names the root's branch; each member keeps its own default branch, because
+one branch name means nothing across repositories that need not share it.
+
 ## Chain
 
 A work item enters as a **chain**: an ordered list of **nodes**, resolved from

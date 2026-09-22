@@ -9,7 +9,7 @@ from kraft.adapters import forge
 
 
 async def _opened(f: forge.FakeForge, branch: str = "kraft/abc") -> forge.MR:
-    return await f.open_mr(repo="/r", branch=branch, title="t", body="b")
+    return await f.open_mr(repo="/r", branch=branch, base="main", title="t", body="b")
 
 
 async def test_fake_forge_round_trips_an_mr():

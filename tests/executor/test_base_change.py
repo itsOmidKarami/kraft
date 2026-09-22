@@ -258,6 +258,64 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
     assert not it.events("base_change_restart")
 
 
+async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
+    item_on, script, monkeypatch
+):
+    """Kraft-wz6vz: no base to resolve onto is a person's call, named."""
+    from kraft import builtins as _builtins
+
+    it = await item_on(_chain(**_with_handler()))
+    script.plan = {"sync": ["conflict"]}
+
+    async def gone(_repo, branch):
+        raise _builtins.BaseBranchMissing(f"base branch {branch!r} is gone")
+
+    monkeypatch.setattr(_builtins, "upstream_head", gone)
+    monkeypatch.setattr(_builtins, "ensure_worktree", _existing_worktree(it))
+
+    assert await _walk(it) == "needs_human"
+    reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
+    assert "cannot be resolved" in reason and "base branch" in reason
+    assert not it.events("node_recovery_started"), "no handler ran against a missing base"
+
+
+async def test_a_conflict_handler_is_judged_against_the_items_base_branch(
+    item_on, script, monkeypatch
+):
+    """Kraft-v9gbi: a handler's rebase is believed only once the worktree sits
+    on the tip of the item's own base branch, not the default's."""
+    from kraft import builtins as _builtins
+    from kraft.templates.environment import WorkItemTarget
+
+    target = WorkItemTarget.for_repository("target", base_branch="release")
+    it = await item_on(_chain(**_with_handler()), target=target)
+    script.plan = {"sync": ["conflict"], "resolve": ["done"]}
+    asked = []
+
+    async def upstream_head(_repo, branch):
+        asked.append(branch)
+
+    async def record(_row):
+        await it.session("s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", "done")
+
+    monkeypatch.setattr(_builtins, "upstream_head", upstream_head)
+    script.effects = {"resolve": record}
+
+    assert await _walk(it) == "needs_human"
+    assert asked == ["release", "release"], "the fork point, then the handler's check"
+
+
+def _existing_worktree(it):
+    """`ensure_worktree` that hands back the item's worktree, so a test can
+    fake `upstream_head` for the conflict path alone."""
+
+    async def ensure(*_a, **_kw):
+        it.worktree.mkdir(parents=True, exist_ok=True)
+        return it.worktree
+
+    return ensure
+
+
 def _gated(**rebase_fields):
     """`_chain` with an approvable `review` gate between `verify` and `rebase`,
     inside the span a restart from `verify` reruns."""

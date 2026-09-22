@@ -178,3 +178,20 @@ def test_a_workspace_items_fork_keeps_each_repositorys_policy():
 
     assert fork.repository_policies == workspace_chain.repository_policies
     assert fork.to_json() == workspace_chain.to_json()
+
+
+def test_a_retry_fork_keeps_the_items_base_branch_and_its_own_policy():
+    """Kraft-ielvs, Kraft-wehx7: a fork is the item's, base branch
+    (Kraft-v9gbi) and item policy layer (Kraft-ab1bh) both -- a retry never
+    retargets the merge request nor drops the caps the item was given."""
+    chain = _chain()
+    on_release = chain.chain.materialize(
+        target=WorkItemTarget.for_repository("target", base_branch="release"),
+        effective_policy=chain.policy,
+    ).with_item_policy({"paths": {"build": {"max_attempts": 2}}})
+
+    fork = validate_retry_override(on_release, "build.work.implement").chain
+
+    assert fork.target.base_branch == "release"
+    assert fork.item_policy == on_release.item_policy
+    assert fork.policy_for(fork.chain.nodes[0]).max_attempts == 2

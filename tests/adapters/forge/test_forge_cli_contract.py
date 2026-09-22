@@ -20,6 +20,7 @@ GLAB = SimpleNamespace(
     number=54,
     url="https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54",
     body_flag="--description",
+    base_flag="--target-branch",
     ready_argv=["mr", "update", "54", "--ready"],
     update_argv=["mr", "update", "--description", "fresh"],
     merge_verb="mr merge",
@@ -34,6 +35,7 @@ GH = SimpleNamespace(
     number=7,
     url="https://github.com/o/r/pull/7",
     body_flag="--body",
+    base_flag="--base",
     ready_argv=["pr", "ready", "7"],
     update_argv=["pr", "edit", "--body", "fresh"],
     merge_verb="pr merge",
@@ -59,7 +61,9 @@ async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path
     and with more than one commit that is the branch name -- a work item id,
     so every Kraft MR read as a hex string (Kraft-c09h). An empty `--label ""`
     is a real, empty value to the CLI, not an absence."""
-    mr = await be.cls().open_mr(repo=tmp_path, branch="kraft/abc", title="Teach it", body="why")
+    mr = await be.cls().open_mr(
+        repo=tmp_path, branch="kraft/abc", base="main", title="Teach it", body="why"
+    )
 
     assert (mr.number, mr.url) == (be.number, be.url)
     argv = cli.argv(be.name)
@@ -70,10 +74,20 @@ async def test_open_mr_opens_a_draft_titled_with_the_work_item(be, cli, tmp_path
     assert not {"--label", "--assignee", "--reviewer"} & set(argv)
 
 
+async def test_open_mr_targets_the_base_it_is_given(be, cli, tmp_path):
+    """Kraft-v9gbi: the item's base branch, never the forge's default."""
+    await be.cls().open_mr(repo=tmp_path, branch="kraft/abc", base="release", title="T", body="B")
+
+    argv = cli.argv(be.name)
+    assert argv[argv.index(be.base_flag) + 1] == "release"
+
+
 async def test_open_mr_passes_the_authored_metadata(be, cli, tmp_path):
     meta = MRMeta(labels=("release::minor",), assignees=("omid",), reviewers=("ada", "grace"))
 
-    await be.cls().open_mr(repo=tmp_path, branch="kraft/abc", title="T", body="B", meta=meta)
+    await be.cls().open_mr(
+        repo=tmp_path, branch="kraft/abc", base="main", title="T", body="B", meta=meta
+    )
 
     argv = cli.argv(be.name)
     assert argv[argv.index("--label") + 1] == "release::minor"
@@ -98,7 +112,9 @@ async def test_open_mr_refuses_a_dirty_worktree(cli, tmp_path, backend, porcelai
     cli.stub("git", porcelain)
 
     with pytest.raises(forge.ForgeError, match=named):
-        await backend.cls().open_mr(repo=tmp_path, branch="kraft/abc", title="t", body="b")
+        await backend.cls().open_mr(
+            repo=tmp_path, branch="kraft/abc", base="main", title="t", body="b"
+        )
 
     assert cli.argv(backend.name) == [], "the CLI ran over an uncommitted worktree"
 

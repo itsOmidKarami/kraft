@@ -579,9 +579,10 @@ def git_read(
 
 
 @contextmanager
-def main_ignore_args(repo: Path) -> Iterator[list[str]]:
+def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
     """`-c core.excludesFile=<scratch>`, naming a temp file holding `origin/
-    main`'s current `.gitignore` -- or `[]` if there is no `origin/main`, no
+    <base>`'s current `.gitignore` -- `base` being the item's base branch
+    (`builtins.base_branch`) -- or `[]` if there is no `origin/<base>`, no
     `.gitignore` there, or git refuses to say.
 
     Layered on top of whatever `.gitignore` is actually checked out in
@@ -590,23 +591,27 @@ def main_ignore_args(repo: Path) -> Iterator[list[str]]:
     widens what a `git status`/`git add` in `repo` treats as ignored, never
     narrows it.
 
-    A worktree's checked-out `.gitignore` is whatever `main` looked like when
-    `ensure_worktree` cut the worktree, and nothing refreshes it afterward
-    short of a full rebase, which most nodes never trigger. A rule `main`
+    A worktree's checked-out `.gitignore` is whatever the base looked like
+    when `ensure_worktree` cut the worktree, and nothing refreshes it afterward
+    short of a full rebase, which most nodes never trigger. A rule the base
     gains later (Kraft-vu26: `.engineering/` widened past `sessions/`, then
     `docs/superpowers/` added) is invisible to that worktree's `git status`/
     `git add` until then, so whatever a node writes to the now-ignored path
     stages and commits exactly as if the rule had never landed, and rides
     into the merge request -- caught live on work item 46ef3286, whose
     worktree predated the `docs/superpowers/` rule by under an hour. Reading
-    `main`'s own copy from its remote-tracking ref sidesteps the lag outright:
-    it does not matter how old the branch's checkout is.
+    the base's own copy from its remote-tracking ref sidesteps the lag
+    outright: it does not matter how old the branch's checkout is. The base's,
+    not a hardcoded `main`'s: the merge request lands on the base, so its
+    rules are the ones the change must satisfy (Kraft-v9gbi).
     """
-    content = git_read(repo, "show", "origin/main:.gitignore", expected_failure=True, strip=False)
+    content = git_read(
+        repo, "show", f"origin/{base}:.gitignore", expected_failure=True, strip=False
+    )
     if not content:
         yield []
         return
-    with tempfile.NamedTemporaryFile("w", prefix="kraft-main-gitignore-", suffix=".txt") as f:
+    with tempfile.NamedTemporaryFile("w", prefix="kraft-base-gitignore-", suffix=".txt") as f:
         f.write(content)
         f.flush()
         yield ["-c", f"core.excludesFile={f.name}"]

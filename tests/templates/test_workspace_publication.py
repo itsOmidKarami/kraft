@@ -44,6 +44,7 @@ async def _workspace_item(
     second=False,
     legacy=False,
     nodes=None,
+    base_branch=None,
     **materialize,
 ):
     """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
@@ -60,7 +61,9 @@ async def _workspace_item(
     chain = v1_chain(
         nodes or [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
-        target=None if legacy else workspace_target(mounts, root_pointer_policy=pointer),
+        target=None
+        if legacy
+        else workspace_target(mounts, root_pointer_policy=pointer, base_branch=base_branch),
     )
     if materialize:
         # Built past `materialize`, as an item filed before Ruling 180 froze
@@ -75,6 +78,12 @@ async def _workspace_item(
     # `legacy`: the shape every item filed before Task 10 has -- a
     # single-repository target, its submodules and pointer policy in columns.
     columns = {"submodules": list(mounts.values()), "root_merge_policy": pointer} if legacy else {}
+    if base_branch:
+        # The base the item names has to be on origin before its checkout is
+        # cut from it (Kraft-wz6vz).
+        _git(root, "branch", base_branch)
+        _git(tmp_path, "clone", "-q", "--bare", str(root), str(tmp_path / "root-origin.git"))
+        _git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     worktree = await wtree.ensure(database, run_dirs, root)
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
@@ -350,14 +359,15 @@ async def _publishable(
     root = Path(row["repo"])
     members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]
     origin = tmp_path / "root-origin.git"
-    _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
+    if not origin.exists():
+        _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
+        _git(root, "remote", "add", "origin", str(origin))
     if root_denies_push:
         hook = origin / "hooks" / "pre-receive"
         hook.write_text(
             "#!/bin/sh\n[ -n \"$FORGE_LANDS\" ] && exit 0\necho 'protected branch' >&2\nexit 1\n"
         )
         hook.chmod(0o755)
-    _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
     for member in members:
         _git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")
@@ -417,6 +427,36 @@ async def test_child_merge_precedes_workspace_pointer_update(
     merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
     assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
+
+
+async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-v9gbi: the item's base branch names the root only. The member's
+    merge request targets the member's own default branch, and the bump
+    lands on the root's base branch, leaving its default alone."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", base_branch="release"
+    )
+    before = _git_out(origin, "rev-parse", "main")
+    fake = _LandingForge()
+    compared = []
+    source_changed = forge.run.git.source_changed
+
+    async def recorded(repo, branch, *, base, exclude):
+        compared.append(base)
+        return await source_changed(repo, branch, base=base, exclude=exclude)
+
+    monkeypatch.setattr(forge.run.git, "source_changed", recorded)
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+
+    assert set(compared) == {"release"}, "the root's own changes are against its base"
+    assert fake.opened_base == {1: "main"}, "the member's merge request, into its own default"
+    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    assert _git_out(origin, "rev-parse", "release:repos/pkg") == merged
+    assert _git_out(origin, "rev-parse", "main") == before
 
 
 @pytest.mark.parametrize(

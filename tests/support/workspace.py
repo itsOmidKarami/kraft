@@ -1,7 +1,9 @@
 """A workspace work item's target, for tests that file one."""
 
 
-def workspace_target(mounts: dict[str, str], *, root_pointer_policy: str = "ignore"):
+def workspace_target(
+    mounts: dict[str, str], *, root_pointer_policy: str = "ignore", base_branch: str | None = None
+):
     """A workspace `WorkItemTarget` selecting every member of `mounts` (member
     id -> mount path in the root), each member its own repository id."""
     from kraft.templates.environment import WorkItemTarget, Workspace, WorkspaceMember
@@ -12,5 +14,8 @@ def workspace_target(mounts: dict[str, str], *, root_pointer_policy: str = "igno
         members={m: WorkspaceMember(repository=m, path=p) for m, p in mounts.items()},
     )
     return WorkItemTarget.from_selection(
-        workspace, members=list(mounts), root_pointer_policy=root_pointer_policy
+        workspace,
+        members=list(mounts),
+        root_pointer_policy=root_pointer_policy,
+        base_branch=base_branch,
     )

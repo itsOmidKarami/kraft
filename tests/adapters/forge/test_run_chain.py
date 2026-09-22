@@ -66,9 +66,11 @@ class _RecordingForge(forge.FakeForge):
         super().__init__(**kw)
         self.cwds: list[Path] = []
 
-    async def open_mr(self, *, repo, branch, title, body, meta=None):
+    async def open_mr(self, *, repo, branch, base, title, body, meta=None):
         self.cwds.append(Path(repo))
-        return await super().open_mr(repo=repo, branch=branch, title=title, body=body, meta=meta)
+        return await super().open_mr(
+            repo=repo, branch=branch, base=base, title=title, body=body, meta=meta
+        )
 
 
 @pytest.mark.parametrize(
