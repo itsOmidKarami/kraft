@@ -177,14 +177,33 @@ that failed outright.
 ## Fallback
 
 A task that must not wait out a rate limit can name where its launch goes
-next. `fallback:` on an agent task in `library.yaml` is an ordered list; each
-entry names a `harness:` (a profile id from `harnesses.yaml`), a `model:`, an
-`effort:`, or several of them, and keeps whatever it omits from the task's own
-launch:
+next. A `fallback:` list is ordered. Each entry may name a `harness:` (a
+harness profile id from `harnesses.yaml`) plus one route, the same either-or a
+task obeys: an agent `profile:`, or a `model:` and/or `effort:`. It keeps
+whatever it omits from the task's own launch.
+
+The list lives on an agent profile, as the tier's default, and a task may set
+its own, which replaces the profile's whole (`fallback: []` means none, even
+under a profile that has one). The recommended start:
 
 ```yaml
+# harnesses.yaml
+profiles:
+  deep:
+    effort: high
+    model: { claude: opus, codex: gpt-5.6-sol }
+    fallback:
+      - { harness: codex }            # same tier, other harness
+      - { profile: strong }           # other tier, same harness
+  strong:
+    effort: high
+    model: { claude: sonnet, codex: gpt-5.6-terra }
+```
+
+```yaml
+# library.yaml
 tasks:
-  implementer:
+  legacy_task:
     kind: agent
     harness: claude
     model: opus
@@ -194,6 +213,24 @@ tasks:
       - { harness: codex, model: gpt-5.6-terra }   # codex, gpt-5.6-terra, high
 ```
 
+| entry | on `claude` + `profile: deep` | on `claude` + `model: opus`, `effort: high` |
+|---|---|---|
+| `{ harness: codex }` | codex + deep: `gpt-5.6-sol`, high | codex + `opus`: refused, codex takes no `opus` |
+| `{ profile: strong }` | claude + strong: `sonnet`, high | claude + strong |
+| `{ model: sonnet }` | claude + `sonnet`, no effort | claude + `sonnet`, high |
+
+An entry's own profile's list is not followed: lists do not chain. Like the
+profile body, a profile's list is read live at each launch. Through `extends`,
+a child task's `fallback:` replaces its parent's.
+
+Every entry of every list a chain's task uses must pair with its harness, the
+same check a task's own route gets: in Settings → Harnesses (which shows each
+profile's list with its problems per entry), in the guard on a harness save,
+and in `kraft admin doctor`. A problem names the task, the list's source and
+the entry's index: `chain 'default' task 'implementation.main.implementer':
+fallback entry 0 (profile 'deep''s list): ...`. A disabled harness is not a
+pairing problem, since the launch skips it.
+
 The **candidates** are the task's own launch, then each entry in order. Kraft
 moves to the next candidate, in the same dispatch, when:
 
@@ -201,8 +238,9 @@ moves to the next candidate, in the same dispatch, when:
   reported a rejected request). The next launch is a fresh session in the same
   worktree, with the task's instruction and a note that the earlier attempt
   may have left partial work (`git status`, `git diff`);
-- a candidate is **unavailable** before anything launches: its profile is
-  missing, disabled or sets a default Kraft cannot apply, or its executable is
+- a candidate is **unavailable** before anything launches: its harness
+  profile is missing, disabled or sets a default Kraft cannot apply, its agent
+  profile is missing or has no model for its provider, or its executable is
   not on `PATH` (not checked under a sandbox, where the executable lives in the
   container). This is checked again at every launch, so fixing it takes effect
   at once;
@@ -226,13 +264,14 @@ What carries over and what does not:
 - Switching spends none of `rate_limit_retries`, which still counts parks. The
   spend caps in `budget:` are checked before every launch, fallbacks included,
   and a task's time cap covers all of its attempts together.
-- Every entry's harness must be in the task's `allowed_harnesses`, or the
-  chain does not materialize. `deny_tools`, `allowed_tools` and the item's
+- Every entry's harness must be in the task's `allowed_harnesses`. A task's
+  own list is checked when the chain materializes; a profile's list, which is
+  live, is checked at the launch, which skips a refused entry as unavailable. `deny_tools`, `allowed_tools` and the item's
   sandbox apply to a fallback as to the task's own launch.
 
-It is opt-in. A task with no `fallback:` (or `fallback: []`) launches, parks
-and stops exactly as it would without it, and never consults the memory. No
-shipped task declares one. A gate's `auto_review` task cannot declare one.
+It is opt-in. A task with no list (none of its own, and none on its profile,
+or `fallback: []`) launches, parks and stops exactly as it would without it,
+and never consults the memory. No shipped task or profile declares one. A gate's `auto_review` task cannot declare one.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
 rate limit, which today is `claude`. `codex` and `gemini` can be fallback

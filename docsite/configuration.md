@@ -65,7 +65,7 @@ An `agent` task's keys:
 | `produces` | The document kind it writes (`spec`, `plan`, `work_brief`, `review_brief`) — what a gate's `artifact` decides and an attachment covers. |
 | `profile` | An [agent profile](harnesses.md#agent-profiles) from `harnesses.yaml`'s `profiles:` (`strong`): the model tier, spelled per provider, read live at each launch. Not with `model`/`effort`; through `extends`, the nearer layer's choice of the two wins whole. |
 | `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. Not with `profile`. |
-| `fallback` | An ordered list of where the launch goes when it is rate-limited or its harness is unavailable. Each entry sets `harness`, `model` and/or `effort`, and keeps what it omits from the task. Every entry's harness must be in the task's `allowed_harnesses`. `[]` means none. See [Fallback](harnesses.md#fallback). |
+| `fallback` | An ordered list of where the launch goes when it is rate-limited or its harness is unavailable. Each entry sets an optional `harness` plus `profile`, or `model` and/or `effort`, and keeps what it omits from the task. It replaces the agent profile's list; `[]` means none. Every entry's harness must be in the task's `allowed_harnesses`. See [Fallback](harnesses.md#fallback). |
 | `inputs` | What Kraft hands the task: `review_package` (the change under review), `carried_findings` (its previous round's findings) and `previous_review` (its previous session's result). |
 | `scope` | `each_repository` fans the task out once per selected repository of a workspace item; the default runs once. |
 | `on_failure` | A recovery pass for this task alone. |
@@ -346,6 +346,7 @@ profiles:
 | `<profile id>` | The name a task's `profile:` selects. Lowercase, digits, `_` and `-`. |
 | `model` | Required, at least one entry: provider id (`claude`, `codex`, `gemini`) to model id. A provider left out can't run this profile. Only a task pairing the two is refused. |
 | `effort` | Optional. One effort for every provider. At least one of the providers it names must accept it, and a task on a provider that refuses it is refused. |
+| `fallback` | Optional. The tier's default [fallback list](harnesses.md#fallback), for a task selecting it that sets none of its own. Entries as on a task; a `profile:` an entry names must be defined here, and its own list is not followed. |
 
 `kraft admin harnesses` lists every profile with its provider and the library
 tasks that select it, then each agent profile with its effort, its model per
