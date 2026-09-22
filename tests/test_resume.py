@@ -36,8 +36,6 @@ def _types(database, wid):
 
 
 def _launch(tmp_path) -> executor.LaunchContext:
-    # The shipped spec task names a `steering:` profile, which dispatch still
-    # resolves to a file (`seed_v1_library` writes it out beside the library).
     return executor.LaunchContext(repo_entry=None)
 
 

@@ -711,7 +711,7 @@ async def _dispatch_seeded(
         run_dirs,
         work_item_id="w1",
         start_index=start,
-        launch=replace(NO_SETUP, steering_dir=templates / "steering"),
+        launch=NO_SETUP,
     )
     sessions = database.read(
         lambda c: c.execute("SELECT * FROM worker_sessions ORDER BY created_at").fetchall()
@@ -751,9 +751,8 @@ async def test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
     """`spec.main.author` selects `steering: [project-standards]`, a profile
-    `library.yaml` declares inline. With no `templates/steering/*.md` on disk
-    -- which is what a fresh install has -- the profile's instructions still
-    reach the agent, after the contract
+    `library.yaml` declares inline, and its instructions reach the agent,
+    after the contract
     (`agent-task-contract-precedes-skill-and-steering`)."""
     sessions, prompt = await _dispatch_seeded(
         tmp_path, repo, database, run_dirs, monkeypatch, "spec"
@@ -771,15 +770,12 @@ async def test_editing_the_library_after_intake_does_not_change_a_running_items_
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
     """`materialized-chain-is-immutable-work-item-input`: steering is chain
-    content, frozen into the snapshot at intake. An edit to `library.yaml` --
-    or a same-named file under `templates/steering/` -- after the item was
-    filed reaches items filed afterwards, never this one."""
+    content, frozen into the snapshot at intake. An edit to `library.yaml`
+    after the item was filed reaches items filed afterwards, never this one."""
 
     def edit(templates):
         lib = templates / "library.yaml"
         lib.write_text(lib.read_text().replace(_PROJECT_STANDARDS, "EDITED AFTER INTAKE"))
-        (templates / "steering").mkdir(exist_ok=True)
-        (templates / "steering" / "project-standards.md").write_text("FILE AFTER INTAKE")
 
     sessions, prompt = await _dispatch_seeded(
         tmp_path, repo, database, run_dirs, monkeypatch, "spec", after_intake=edit
@@ -788,7 +784,6 @@ async def test_editing_the_library_after_intake_does_not_change_a_running_items_
     assert sessions[0]["status"] == "done", Path(sessions[0]["log_path"]).read_text()
     assert _PROJECT_STANDARDS in prompt
     assert "EDITED AFTER INTAKE" not in prompt
-    assert "FILE AFTER INTAKE" not in prompt
 
 
 async def test_a_snapshot_without_frozen_steering_stops_for_a_human(
@@ -845,7 +840,7 @@ async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
 
     templates = _seeded(tmp_path, monkeypatch)
     launched = _capture_launches(monkeypatch)
-    launch = replace(NO_SETUP, steering_dir=templates / "steering")
+    launch = NO_SETUP
     argv: dict[str, str] = {}
     for n, chain_id in enumerate(TemplateLibrary.from_yaml_dir(templates).chain_ids):
         chain = _materialize(templates, chain_id, repo)
