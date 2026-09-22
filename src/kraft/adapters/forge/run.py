@@ -136,7 +136,15 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
 
 
 async def _rebase_conflict_away(
-    db, forge: Forge, *, repo: Path, orig_repo: Path, branch: str, base: str, work_item_id: str
+    db,
+    forge: Forge,
+    *,
+    repo: Path,
+    orig_repo: Path,
+    branch: str,
+    base: str,
+    work_item_id: str,
+    moved: list[Path] | None = None,
 ) -> tuple[str, str]:
     """Force-rebase onto `base`'s current tip -- the item's base branch, the one
     thing that can turn a real conflict into nothing left to fix, since a
@@ -152,6 +160,10 @@ async def _rebase_conflict_away(
     nothing to rebase) -- the caller appends this to its own log and keeps
     its own status. Returns ("<what changed>\\n", "done") when it worked,
     with the branch already rebased, `base_ref` persisted, and pushed.
+
+    `moved` is given for a workspace member: `base_ref` is the root's, so a
+    member's move is appended there for `run_task` to report, never persisted
+    (Kraft-puqxq).
     """
     try:
         new_head = await _builtins.mr_rebase_forced(repo, orig_repo, branch, base)
@@ -159,7 +171,10 @@ async def _rebase_conflict_away(
         return f"rebase onto {base} failed: {exc}\n", "conflict"
     if not new_head:
         return "", "conflict"
-    await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
+    if moved is None:
+        await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
+    else:
+        moved.append(repo)
     await forge.push(repo=repo, branch=branch)
     return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
 
@@ -187,6 +202,8 @@ async def _run_one(
     #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
     #: records the merge request it opened or reused there (Kraft-mjsf).
     repo_row_id: int | None = None,
+    #: A workspace member's list for `_rebase_conflict_away`; None otherwise.
+    moved: list[Path] | None = None,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -390,6 +407,7 @@ async def _run_one(
                     branch=branch,
                     base=base,
                     work_item_id=work_item_id,
+                    moved=moved,
                 )
                 log += rebase_log
             if status == "failed" and ci_status.failed_jobs:
@@ -598,6 +616,7 @@ async def _run_one(
                         branch=branch,
                         base=base,
                         work_item_id=work_item_id,
+                        moved=moved,
                     )
                     log += rebase_log
                     rebased = gate_status == "done"
@@ -906,7 +925,8 @@ async def run_task(
     #: `refresh_worktree_base` fetches from here. None (every test call site
     #: that predates this, and any future one that never exercises the
     #: conflict path) falls back to `repo` -- harmless, since that path is
-    #: the only reader.
+    #: the only reader. A workspace's root; each member reads its own
+    #: checkout's origin instead (Kraft-puqxq).
     orig_repo: Path | None = None,
     branch: str,
     title: str,
@@ -1086,6 +1106,8 @@ async def run_task(
     merged_rows = {r["id"] for r in rows if r["merge_state"] == "merged"}
     awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
+    #: The members a conflict rebase moved (Kraft-puqxq).
+    moved: list[Path] = []
     #: Why the observation could not be made at all, when it could not.
     unobserved: str | None = None
     # Findings only ever reach `finish_session` for a single-target run: a
@@ -1140,7 +1162,9 @@ async def run_task(
                     live_forge,
                     db,
                     repo=target_repo,
-                    orig_repo=orig_repo or target_repo,
+                    # A member is its own source repository: its conflict
+                    # rebase reads its own origin, not the root's (Kraft-puqxq).
+                    orig_repo=target_repo if member else (orig_repo or target_repo),
                     branch=branch,
                     base=(
                         await _builtins.base_branch(db, work_item_id, target_repo, member=True)
@@ -1157,6 +1181,7 @@ async def run_task(
                     automated_review=automated_review,
                     merge_requested=requested,
                     repo_row_id=row_id,
+                    moved=moved if member else None,
                 )
             else:
                 one_log, one_status, one_findings = "", settled, None
@@ -1217,7 +1242,7 @@ async def run_task(
             unobserved=unobserved,
             session_id=session_id,
         )
-    return await _builtins.finish_session(
+    recorded = await _builtins.finish_session(
         db,
         log_path,
         result_path,
@@ -1227,6 +1252,11 @@ async def run_task(
         findings=findings,
         reused=reused,
     )
+    # A member's move is a base change `base_ref` cannot show: report it, as
+    # `builtins.mr_rebase` does, so the node's declared span re-verifies it.
+    from kraft.executor.context import BASE_MOVED  # the executor imports this module
+
+    return BASE_MOVED if (moved and has_rebase_bounce and recorded == "done") else recorded
 
 
 async def _observed(
