@@ -365,13 +365,12 @@ async def get_work_item(wid: str, request: Request):
         # The root repo's merge request, once `open_mr` has run -- the detail
         # screen's one link out to the forge.
         "mr_ref": _mr_ref(st, wid),
-        # Whether a stranded-at-this-node retry could ever carry a steer note
-        # anywhere downstream (Kraft-bz9b): the detail screen uses this to
-        # drop the steer box entirely rather than offer text `retry` would
-        # 409 on. Fails open (True) when the node isn't in its own chain --
-        # an unmapped edge case is not a reason to hide a control that may
-        # still work.
-        "steerable": lifecycle.steer_reachable(row),
+        # Whether a steer given now would be accepted (Kraft-bz9b, Ruling
+        # 183): the detail screen uses this to drop the steer box entirely
+        # rather than offer text the route would 409 on. A paused item needs
+        # a paused agent task; a stranded one an agent task downstream, failing
+        # open (True) when the node isn't in its own chain.
+        "steerable": lifecycle.steerable(st, row),
     }
 
 

@@ -44,7 +44,12 @@ A retry keeps everything the earlier run did and runs on a new run fork. It
 reopens every gate it has to rerun; a gate before the retried work keeps its
 decision. `resume --steer` reaches every paused agent task; `--steer-task`
 gives one its own, and naming a task that is not a paused agent task is
-refused. Pause is always the whole work item.
+refused. A paused agent task resumes its own session when its harness can
+(Claude's `--resume`), told the steer and to carry on; otherwise it restarts
+with its brief and the steer. A steer is refused while the item is running
+(pause it first) and when the pause stopped no agent task, such as a test
+run or a CI wait: there is nothing there for it to steer. Pause is always the
+whole work item.
 
 ## Following a running item
 

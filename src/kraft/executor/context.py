@@ -197,11 +197,14 @@ class Steer:
     def take(self, path: str | None = None) -> str | None:
         """The note for the launch of `path`. An addressed steer answers only a
         task it names; asked with no path, it gives up everything still
-        undelivered (what `walk._report_if_undelivered` reports)."""
+        undelivered (what `walk._report_if_undelivered` reports): one text
+        every task was given as itself, different ones by task."""
         if self._to is not None:
             if path is not None:
                 return self._to.pop(path, None)
             left, self._to = self._to, {}
+            if len(set(left.values())) == 1:
+                return next(iter(left.values()))
             return "\n".join(f"{p}: {t}" for p, t in left.items()) or None
         text, self._text = self._text, None
         return text
