@@ -891,6 +891,10 @@ async def _dispatch_task(
                 item_override=(merged_override or None) if primary else None,
                 harnesses=harnesses,
                 **frozen_steering(work_item_row),
+                # The item's own repo as recorded at intake (Kraft-jzdyp),
+                # only for this run's own repository: a fanned-out member
+                # repository's frozen key is its own path, not the item's.
+                item_repo=work_item_row["repo"] if repository is None else None,
                 policy=task_policy,
             )
             if listed and not sandbox:

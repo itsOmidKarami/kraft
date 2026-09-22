@@ -219,6 +219,46 @@ def test_no_forge_check_when_no_chain_runs_a_forge_task(app, tmp_path):
     assert "forge quiet" not in names
 
 
+def test_doctor_fails_a_repo_naming_a_steering_profile_the_library_lacks(app, tmp_path):
+    """Kraft-v7u1f: repo save, intake, and a library save removing a named
+    profile all refuse a repos.yaml `steering:` name the library does not
+    define -- but a hand-edited repos.yaml (or a library edited outside
+    Kraft) reached those refusals only at the next intake's 422. Doctor
+    needs its own row, naming the repo and the missing name, reusing the
+    same resolution those refusals use."""
+    repo = make_repo(tmp_path, name="unsteered")
+    asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    next(r for r in data["repos"] if r["name"] == "unsteered")["steering"] = ["gone"]
+    path.write_text(yaml.safe_dump(data))
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "steering unsteered")
+
+    assert not row["ok"]
+    assert "gone" in row["detail"]
+    assert "unsteered" in row["detail"] or str(repo) in row["detail"]
+
+
+def test_doctor_passes_a_repo_naming_a_steering_profile_the_library_defines(app, tmp_path):
+    repo = make_repo(tmp_path, name="steered")
+    library_path = tmp_path / "templates" / "library.yaml"
+    library_path.write_text(
+        library_path.read_text().replace(
+            "steering:\n", "steering:\n  house:\n    instructions: x\n", 1
+        )
+    )
+    asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    next(r for r in data["repos"] if r["name"] == "steered")["steering"] = ["house"]
+    path.write_text(yaml.safe_dump(data))
+
+    row = _by_name(asyncio.run(doctor.run_checks()), "steering steered")
+
+    assert row["ok"], row
+
+
 def test_an_orphaned_worktree_is_reported(app, tmp_path):
     _prime(tmp_path)
     (tmp_path / "run" / "worktrees" / "wi-ghost").mkdir(parents=True)

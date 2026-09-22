@@ -82,7 +82,11 @@ def select(names: Sequence[str], profiles: Mapping[str, str], *, where: str) -> 
 
 
 def for_repository(
-    entry, frozen: Mapping[str, Mapping[str, str]] | None, live: Mapping[str, str] | None
+    entry,
+    frozen: Mapping[str, Mapping[str, str]] | None,
+    live: Mapping[str, str] | None,
+    *,
+    item_repo: str | None = None,
 ) -> tuple[str, ...]:
     """The repository steering one launch injects, for the repository entry
     it runs in (`None` for none).
@@ -92,11 +96,24 @@ def for_repository(
     or the library say now. `None` is a snapshot stored before that was
     frozen, whose steering came from files read at each launch; those files
     are library profiles now (`migrate_files`), so it reads the entry's names
-    against the live library, `live`, and raises naming a name it lacks."""
+    against the live library, `live`, and raises naming a name it lacks.
+
+    A repos.yaml `path:` can be hand-edited while an item is in flight
+    (Kraft-jzdyp), so `entry.path` -- read live, at launch -- is not on its
+    own a reliable key into `frozen`, which was built at intake. `item_repo`
+    is the item's own repo as recorded at intake (the work item row's `repo`
+    column): stable for the item's own repository regardless of what
+    `repos.yaml` says today, so a root launch (`item_repo` given) is looked
+    up by it alone -- present or not, that answers the question, since the
+    root was simply unsteered at intake if it is absent. `entry.path` is
+    used only for a fanned-out member repository (`item_repo` is `None`
+    there): a member's path moving mid-flight still silently loses its
+    steering -- pre-existing, and Kraft-ku1um's to fix, not this one's."""
     if entry is None:
         return ()
     if frozen is not None:
-        return tuple(frozen.get(entry.path, {}).values())
+        key = item_repo if item_repo is not None else entry.path
+        return tuple(frozen.get(key, {}).values())
     if not entry.steering:
         return ()
     where = f"repos.yaml: {entry.path} (an item filed before repository steering was frozen)"

@@ -201,9 +201,15 @@ recovery plan, or fix loop.
 `steering:`, and a repository with `steering:` in its `repos.yaml` entry; both
 are resolved at intake and frozen into the work item's snapshot (the task's
 with the chain, the repository's as `repository_steering`, keyed by
-repository path). A launch injects the repository's, then the task's. The
-pre-1.0 `templates/steering/*.md` files are folded into this section on the
-first start and moved aside.
+repository path). A launch injects the repository's, then the task's. A
+launch against the item's own repository looks itself up by the item's own
+repo as recorded at intake, so editing `repos.yaml`'s `path:` for it does not
+drop an in-flight item's frozen steering; a repository that named nothing at
+intake gets nothing, whatever `repos.yaml` says now. A fanned-out member
+repository is still looked up by its own live `repos.yaml` path, so a
+member's path edited mid-flight still silently loses its steering
+(Kraft-ku1um). The pre-1.0 `templates/steering/*.md` files are folded into
+this section on the first start and moved aside.
 
 ```yaml
 # library.yaml

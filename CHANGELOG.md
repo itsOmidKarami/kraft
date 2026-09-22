@@ -4,6 +4,20 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.0.7
+
+- Fix: an in-flight work item's own repository steering no longer silently
+  drops if `repos.yaml`'s `path:` for that repository is hand-edited while it
+  runs. The launch now finds it by the repo the item was filed against, not
+  only by the repository's current path. (A workspace item's fanned-out
+  member repositories are still looked up by their live path only, so a
+  member's path edited mid-flight can still lose its steering -- Kraft-ku1um.)
+- Fix: `kraft admin doctor` now fails a row for a connected repo whose
+  `steering:` in repos.yaml names a profile the template library does not
+  define, naming the repo and the missing profile. Previously a hand-edited
+  repos.yaml (or a library edited outside Kraft) read healthy until the next
+  work item's intake refused it.
+
 ## 1.0.6
 
 - Fix: a gate's agent reviewer no longer approves a chain revision that

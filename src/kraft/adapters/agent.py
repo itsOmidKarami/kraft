@@ -287,6 +287,7 @@ def resolve_agent_task(
     harnesses: _harness.HarnessSet | None = None,
     steering: dict[str, str] | None = None,
     repository_steering: Mapping[str, Mapping[str, str]] | None = None,
+    item_repo: str | None = None,
     policy: InstancePolicy | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
@@ -321,9 +322,15 @@ def resolve_agent_task(
     frozen repository steering, injected first (`steering.for_repository`);
     `library_steering`, the live library's profiles, is read only for a
     snapshot stored before that was frozen. The profile is looked up after
-    both, so a harness problem still reports as one.
+    both, so a harness problem still reports as one. `item_repo` is the
+    item's own repo as recorded at intake (Kraft-jzdyp); pass it for the
+    item's own repository, and leave it `None` for a fanned-out member
+    repository, whose frozen key is its own live `repo_entry.path`, not the
+    item's.
     """
-    repo_texts = _steering.for_repository(repo_entry, repository_steering, library_steering)
+    repo_texts = _steering.for_repository(
+        repo_entry, repository_steering, library_steering, item_repo=item_repo
+    )
     if task.steering and steering is None:
         raise _steering.SteeringError(
             f"selects steering {list(task.steering)!r}, but this work item was materialized "

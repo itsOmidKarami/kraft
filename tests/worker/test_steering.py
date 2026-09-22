@@ -48,6 +48,35 @@ def test_a_frozen_snapshot_answers_whatever_the_live_library_says():
     assert steering.for_repository(entry, {}, {"house": "edited since"}) == ()
 
 
+def test_frozen_steering_survives_the_repos_yaml_path_changing():
+    """Kraft-jzdyp: repos.yaml's `path` for a connected repo can be hand-
+    edited while an item is in flight. The frozen map is still keyed by
+    whatever the path was at intake, so a lookup keyed only by the *live*
+    entry (whose `.path` now differs) must not be the only way in -- the
+    item's own repo, as recorded at intake, has to work too."""
+    entry = entry_of({"path": "/new/path", "steering": ["house"]})
+    frozen = {"/old/path": {"house": "filed with"}}
+    assert steering.for_repository(entry, frozen, None, item_repo="/old/path") == ("filed with",)
+
+
+def test_an_unsteered_repository_in_a_partly_steered_workspace_gets_nothing_and_does_not_raise():
+    """Kraft-jzdyp regression: `deps.repository_steering` only adds repos
+    that declare `steering:`, so a workspace item with one steered repo and
+    one unsteered one has a non-empty `frozen` that still lacks the
+    unsteered repository's own key. That must answer `()`, on the item's
+    first dispatch, for both an unsteered root and an unsteered member --
+    never raise just because *some other* repository in the item is steered."""
+    frozen = {"/steered": {"house": "filed with"}}
+    # The unsteered repository is the item's own root: item_repo is its path,
+    # simply absent from frozen.
+    unsteered_root = entry_of({"path": "/unsteered", "steering": []})
+    assert steering.for_repository(unsteered_root, frozen, None, item_repo="/unsteered") == ()
+    # The unsteered repository is a fanned-out member: no item_repo, looked
+    # up by its own (live) path, also absent from frozen.
+    unsteered_member = entry_of({"path": "/unsteered-member", "steering": []})
+    assert steering.for_repository(unsteered_member, frozen, None) == ()
+
+
 def test_a_snapshot_from_before_the_freeze_reads_the_live_library():
     """An rc item in flight across the upgrade read its steering files at
     each launch; they are library profiles now, so it reads those, and stops
