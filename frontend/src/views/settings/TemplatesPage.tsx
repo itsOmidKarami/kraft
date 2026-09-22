@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, Check, Flag, Shield } from "@phosphor-icons/react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { DraftDiff } from "../../components/DraftDiff";
 import { OverflowMenu, Tabs, type OverflowItem } from "../../components/ui";
@@ -13,11 +13,11 @@ import { PhoneHeader, usePhone, useResource } from "./shared";
  *
  * A chain is one file under `templates/chains/`, and this screen edits that
  * file's text: the pill strip shows the saved chain as it resolves
- * (`GET /templates`), the editor holds the file as its author wrote it
- * (`GET /templates/{id}`), a debounced check resolves the draft against the
+ * (`GET /templates/chains`), the editor holds the file as its author wrote it
+ * (`GET /templates/chains/{id}`), a debounced check resolves the draft against the
  * installed library without writing anything (`POST /templates/resolve`), and
  * Save writes the text back only if the server resolves it too
- * (`PUT /templates/{id}`). There is no per-node form: a V1 node is a typed
+ * (`PUT /templates/chains/{id}`). There is no per-node form: a V1 node is a typed
  * `exec`/`gate` with library references, and the YAML is its one faithful
  * editor. */
 
@@ -52,6 +52,29 @@ function NodeStrip({ nodes }: { nodes: ChainNode[] }) {
         </span>
       ))}
     </div>
+  );
+}
+
+/** Per node, the library components it is built from, each a link to it on
+ *  the Library screen (Kraft-wdbqo). */
+function LibraryUses({ uses }: { uses: Record<string, string[]> }) {
+  const nodes = Object.entries(uses);
+  if (nodes.length === 0) return null;
+  return (
+    <p className="chain-legend chain-uses">
+      library:
+      {nodes.map(([node, ids]) => (
+        <span key={node} data-node={node}>
+          {node} →{" "}
+          {ids.map((id, i) => (
+            <span key={id}>
+              {i > 0 && ", "}
+              <Link to={`/settings/library?c=${encodeURIComponent(id)}`}>{id}</Link>
+            </span>
+          ))}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -229,6 +252,7 @@ export function TemplatesPage() {
             <Flag size={11} weight="fill" /> gate · <ArrowsClockwise size={11} /> fix loop ·{" "}
             <Shield size={11} /> automated review · used by {plural(usedBy[current.id] ?? 0, "item")}
           </p>
+          <LibraryUses uses={current.uses ?? {}} />
         </div>
         <div className="chain-yaml-pane">
           <div className="field-hint">{saved?.file ?? `chains/${current.id}.yaml`}</div>

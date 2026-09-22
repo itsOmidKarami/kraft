@@ -18,6 +18,7 @@ from kraft import policy as policy_mod
 from kraft import store
 from kraft.adapters import beads
 from kraft.api import api_router, deps, perimeter
+from kraft.templates import catalogue
 from kraft.templates.library import (
     CHAINS_DIR,
     LIBRARY_FILE,
@@ -40,16 +41,18 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     the resolved nodes in the SPA's `ChainNode` shape, which carry the
     `covered_by` an attachment strikes by. A chain that does not resolve is
     listed with its error rather than dropped, so the Chains screen can still
-    open it to fix it."""
+    open it to fix it. `uses` names, per node id, the library components that
+    node is built from, which is what the screen links each node to."""
+    uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
     try:
         nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
     except TemplateLibraryError as exc:
-        return {"id": id, "nodes": [], "gates": 0, "error": str(exc)}
+        return {"id": id, "nodes": [], "gates": 0, "error": str(exc), "uses": uses}
     gates = sum(1 for n in nodes if n["kind"] == "gate")
-    return {"id": id, "nodes": nodes, "gates": gates, "error": None}
+    return {"id": id, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
 
 
-@api_router.get("/templates")
+@api_router.get("/templates/chains")
 async def list_templates(request: Request):
     """Every saved V1 chain -- the chains intake materializes, so the intake
     preview and intake agree (Kraft-pplyo)."""
@@ -57,10 +60,75 @@ async def list_templates(request: Request):
     return [_chain_summary(library, id) for id in sorted(library.chain_ids)]
 
 
+# ── the library itself (Kraft-6xkkm). Chains live under `/templates/chains/`
+# and the library under `/templates/library` (Ruling 204), so no chain id can
+# shadow a library route or the other way round, whatever order they declare.
+
+
+def _library_view(st, library: TemplateLibrary) -> dict:
+    """`library.yaml` as the Library screen edits it -- the file's text -- and
+    every component in it, linted by the same pass `admin templates lint` and
+    `/health` use (`TemplateLibrary.lint`)."""
+    path = st.templates_dir / LIBRARY_FILE
+    issues = library.lint(getattr(st, "instance_policy", None))
+    listed = catalogue.components(library, issues)
+    for component in listed:
+        component["issues"] = [_issue_view(i) for i in component["issues"]]
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise HTTPException(500, f"{path}: cannot read: {exc}") from exc
+    return {"file": str(path), "text": text, "components": listed}
+
+
+@api_router.get("/templates/library")
+async def get_library(request: Request):
+    st = request.app.state
+    return _library_view(st, deps.library_or_503(st))
+
+
+@api_router.get("/templates/library/{ref}")
+async def get_library_component(ref: str, request: Request):
+    """One component, by its id (`tasks.implementer`) or a bare name no
+    other section shares."""
+    st = request.app.state
+    listed = _library_view(st, deps.library_or_503(st))["components"]
+    found = catalogue.find(listed, ref)
+    if found is None:
+        raise HTTPException(404, f"no library component {ref!r}")
+    return found
+
+
+class LibraryText(BaseModel):
+    text: str
+
+
+@api_router.put("/templates/library")
+async def put_library(body: LibraryText, request: Request):
+    """Save `library.yaml`, only if every chain that resolves now still
+    resolves against it -- the chain save's own checks, over every chain --
+    and written verbatim. A chain that did not resolve before the edit is not
+    the edit's to fix, so it does not refuse it."""
+    st = request.app.state
+    library = deps.library_or_503(st)
+    path = st.templates_dir / LIBRARY_FILE
+    data = _authored_mapping(body.text, "library")
+    try:
+        candidate = library.with_library(data, path)
+    except TemplateLibraryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    policy = getattr(st, "instance_policy", None)
+    broken_before = {i.chain for i in library.lint(policy)}
+    if issues := [i for i in candidate.lint(policy) if i.chain not in broken_before]:
+        raise HTTPException(422, str(issues[0]))
+    config_mod.write_text(path, body.text)
+    deps._reload_templates(st)
+    return _library_view(st, deps.library_or_503(st))
+
+
 # ── Template Schema V1 inspection (docs/templates-v1-design.md "Validation
-# surface"). Declared before `/templates/{tid}`, which would otherwise take
-# `lint` for a template id. Every one of these reads and none writes: not a
-# file, and not the library the daemon is running (`st.library`).
+# surface"). Every one of these reads and none writes: not a file, and not the
+# library the daemon is running (`st.library`).
 
 
 def _resolved_view(chain: ResolvedChain) -> dict:
@@ -101,7 +169,7 @@ async def lint_templates(request: Request):
     }
 
 
-@api_router.get("/templates/{tid}/resolved")
+@api_router.get("/templates/chains/{tid}/resolved")
 async def get_resolved_template(tid: str, request: Request):
     """A saved chain of the library this daemon runs, resolved and not
     materialized (`resolved-template-api-shows-saved-chain`)."""
@@ -176,11 +244,29 @@ async def resolve_templates(body: ResolveBody, request: Request):
 
 
 #: An authored chain id, the same rule as every other V1 identifier: it names
-#: the file `PUT /templates/{id}` writes, so it can never walk out of `chains/`.
+#: the file `PUT /templates/chains/{id}` writes, so it can never walk out of `chains/`.
 _CHAIN_ID = re.compile(r"[a-z][a-z0-9_-]*")
 
 
-@api_router.get("/templates/{tid}")
+def _authored_mapping(text: str, what: str) -> dict:
+    """A chain or library file's text as the mapping a save checks, or the 422
+    that says why it cannot be one."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise HTTPException(422, f"not YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(422, f"a {what} file is a mapping")
+    if retired := retired_keys(data):
+        raise HTTPException(
+            422,
+            f"{retired[0]} is retired (Ruling 196): a wait's timeout is its task's own "
+            "policy.total_time_cap_minutes",
+        )
+    return data
+
+
+@api_router.get("/templates/chains/{tid}")
 async def get_template(tid: str, request: Request):
     """One saved chain as its author wrote it: the file's text, which is what
     the Chains screen edits, and the mapping it parses to."""
@@ -199,7 +285,7 @@ class ChainText(BaseModel):
     text: str
 
 
-@api_router.put("/templates/{tid}")
+@api_router.put("/templates/chains/{tid}")
 async def put_template(tid: str, body: ChainText, request: Request):
     """Save one chain file, only if the library still resolves it: the text is
     checked as a candidate against the installed library -- the same check
@@ -214,20 +300,9 @@ async def put_template(tid: str, body: ChainText, request: Request):
         if tid in library.chain_ids
         else st.templates_dir / CHAINS_DIR / f"{tid}.yaml"
     )
-    try:
-        chain = yaml.safe_load(body.text)
-    except yaml.YAMLError as exc:
-        raise HTTPException(422, f"not YAML: {exc}") from exc
-    if not isinstance(chain, dict):
-        raise HTTPException(422, "a chain file is a mapping")
+    chain = _authored_mapping(body.text, "chain")
     if chain.get("id", tid) != tid:
         raise HTTPException(422, f"the file declares id {chain['id']!r}, not {tid!r}")
-    if retired := retired_keys(chain):
-        raise HTTPException(
-            422,
-            f"{retired[0]} is retired (Ruling 196): a wait's timeout is its task's own "
-            "policy.total_time_cap_minutes",
-        )
     try:
         candidate, _ = library.with_chain(path, {**chain, "id": tid})
     except TemplateLibraryError as exc:

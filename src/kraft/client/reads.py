@@ -396,10 +396,21 @@ async def lint_templates() -> dict:
 
 async def template(template_id: str) -> dict:
     """One chain template's file, as its author wrote it."""
-    return await transport._get(f"/templates/{template_id}")
+    return await transport._get(f"/templates/chains/{template_id}")
 
 
 async def resolved_template(template_id: str) -> dict:
     """One saved chain with its library components expanded, before any work
     item materializes it."""
-    return await transport._get(f"/templates/{template_id}/resolved")
+    return await transport._get(f"/templates/chains/{template_id}/resolved")
+
+
+async def library() -> dict:
+    """The template library's components: each one's definition as written,
+    the chains that use it, and the lint issues that name it."""
+    return await transport._get("/templates/library")
+
+
+async def library_component(component_id: str) -> dict:
+    """One library component, by `tasks.implementer` or a bare unique name."""
+    return await transport._get(f"/templates/library/{component_id}")

@@ -56,7 +56,7 @@ export interface RepoProbe {
   project: string | null;
 }
 
-/** One saved chain as `GET /templates` lists it: its resolved nodes in the
+/** One saved chain as `GET /templates/chains` lists it: its resolved nodes in the
  *  board's `ChainNode` shape (`store.node_view`), or the error that stops it
  *  resolving. */
 export interface TemplateSummary {
@@ -65,9 +65,33 @@ export interface TemplateSummary {
   gates: number;
   /** Absent or null when the chain resolves. */
   error?: string | null;
+  /** Per node id, the library components that node is built from
+   *  (`tasks.implementer`). A node that uses none is absent. */
+  uses?: Record<string, string[]>;
 }
 
-/** One chain file as its author wrote it (`GET /templates/{id}`). */
+/** One reusable component of `library.yaml` (`GET /templates/library`). */
+export interface LibraryComponent {
+  /** `<section>.<name>`: `tasks.implementer`. */
+  id: string;
+  /** The `library.yaml` section: `tasks`, `steps`, `nodes`, `steering`. */
+  kind: string;
+  name: string;
+  /** As its author wrote it: no defaults filled in. */
+  definition: Record<string, unknown>;
+  /** The chain ids that use it, directly or through another component. */
+  used_by: string[];
+  issues: TemplateIssue[];
+}
+
+/** `library.yaml`'s text, which the Library screen edits, and its components. */
+export interface Library {
+  file: string;
+  text: string;
+  components: LibraryComponent[];
+}
+
+/** One chain file as its author wrote it (`GET /templates/chains/{id}`). */
 export interface ChainFile {
   id: string;
   file: string;

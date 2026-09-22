@@ -41,7 +41,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   const [allRepos, setAllRepos] = useState<Repo[]>([]);
   const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
   const [templates, setTemplates] = useState<string[]>(["default"]);
-  // GET /templates already returns each template's nodes (§8 chain preview
+  // GET /templates/chains already returns each template's nodes (§8 chain preview
   // needs them); kept alongside the id list rather than re-fetched per pick.
   const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>(
     [],

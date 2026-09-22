@@ -77,7 +77,7 @@ def test_lint_reports_all_library_errors_without_writing(client, templates_dir):
     # Not reloaded either: the daemon still runs the library it loaded, which
     # never had `dangling` in it. A reload would have met `garbled.yaml` and
     # left the daemon with no library at all (503).
-    assert client.get("/api/templates/dangling/resolved").status_code == 404
+    assert client.get("/api/templates/chains/dangling/resolved").status_code == 404
 
 
 def test_lint_reports_an_unreadable_library_file_as_an_issue(client, templates_dir):
@@ -88,11 +88,11 @@ def test_lint_reports_an_unreadable_library_file_as_an_issue(client, templates_d
     assert body["issues"][0]["chain"] is None
 
 
-# ── GET /templates/{id}/resolved (resolved-template-api-shows-saved-chain) ──
+# ── GET /templates/chains/{id}/resolved (resolved-template-api-shows-saved-chain) ──
 
 
 def test_resolved_shows_a_saved_chain_expanded_and_not_materialized(client):
-    response = client.get("/api/templates/default/resolved")
+    response = client.get("/api/templates/chains/default/resolved")
 
     assert response.status_code == 200
     body = response.json()
@@ -112,7 +112,7 @@ def test_resolved_names_the_attachment_kind_each_node_is_covered_by(client):
     """What the intake preview strikes through (Kraft-ene04): the gate whose
     `artifact` is the kind *and* the node that would produce it. The chain's
     final-review gate is never covered, whatever its `artifact`."""
-    nodes = client.get("/api/templates/default/resolved").json()["nodes"]
+    nodes = client.get("/api/templates/chains/default/resolved").json()["nodes"]
     covered = {n["id"]: n["covered_by"] for n in nodes}
     assert covered["spec"] == covered["spec_approval"] == "spec"
     assert covered["plan"] == covered["plan_approval"] == "plan"
@@ -121,7 +121,7 @@ def test_resolved_names_the_attachment_kind_each_node_is_covered_by(client):
 
 
 def test_resolved_of_an_unknown_chain_is_404(client):
-    assert client.get("/api/templates/nope/resolved").status_code == 404
+    assert client.get("/api/templates/chains/nope/resolved").status_code == 404
 
 
 # ── POST /templates/resolve (resolve-api-supports-candidate-and-library-input) ──
@@ -144,7 +144,7 @@ def test_resolve_candidate_uses_installed_library_without_writing(client, templa
     # `implementer` came from the installed library.yaml.
     assert resolved["chain"]["nodes"][0]["tasks"][0]["kind"] == "agent"
     assert snapshot(templates_dir) == before
-    assert client.get("/api/templates/candidate/resolved").status_code == 404
+    assert client.get("/api/templates/chains/candidate/resolved").status_code == 404
 
 
 def test_resolve_a_complete_library_in_isolation_without_writing(client, templates_dir):
@@ -164,7 +164,7 @@ def test_resolve_a_complete_library_in_isolation_without_writing(client, templat
     assert [i["chain"] for i in body["issues"]] == ["borrowing"]
     assert "implementer" in body["issues"][0]["message"]
     assert snapshot(templates_dir) == before
-    assert client.get("/api/templates/solo/resolved").status_code == 404
+    assert client.get("/api/templates/chains/solo/resolved").status_code == 404
 
 
 def test_a_candidate_that_does_not_resolve_is_reported_not_raised(client):
@@ -241,8 +241,8 @@ def test_a_registry_beside_the_library_configures_no_task(tmp_path, monkeypatch)
 
     with _client(tmp_path, monkeypatch, templates_dir=home) as client:
         health = client.get("/api/health").json()
-        listed = [t["id"] for t in client.get("/api/templates").json()]
-        resolved = client.get("/api/templates/quick-task/resolved").json()
+        listed = [t["id"] for t in client.get("/api/templates/chains").json()]
+        resolved = client.get("/api/templates/chains/quick-task/resolved").json()
 
     assert health["status"] == "ok", health
     assert health["invalid_templates"] == {}
@@ -261,11 +261,15 @@ def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch)
     (broken / "library.yaml").write_text("tasks: [unclosed\n")
 
     with _client(tmp_path, monkeypatch, templates_dir=broken) as client:
-        saved = client.get("/api/templates/default/resolved")
+        saved = client.get("/api/templates/chains/default/resolved")
         candidate = client.post("/api/templates/resolve", json={"chain": SOLO})
         alone = client.post("/api/templates/resolve", json={"library": {}, "chains": [SOLO]})
+        components = client.get("/api/templates/library")
+        component = client.get("/api/templates/library/tasks.implementer")
 
     assert saved.status_code == candidate.status_code == 503
+    assert components.status_code == component.status_code == 503
+    assert "library.yaml" in components.json()["detail"]
     assert "library.yaml" in saved.json()["detail"]
     assert alone.status_code == 200
     assert [c["id"] for c in alone.json()["chains"]] == ["solo"]

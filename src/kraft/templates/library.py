@@ -272,6 +272,17 @@ class TemplateLibrary:
             built._add_chain(chain_path, body)
         return built
 
+    def with_library(self, library: Mapping[str, object], library_path: Path) -> TemplateLibrary:
+        """This library's chains against a replacement `library.yaml` content:
+        how an edit of the library is checked before it is saved. `self` is not
+        changed."""
+        return TemplateLibrary.from_mappings(
+            library,
+            [(raw.source.file, raw.data) for raw in self._chains.values()],
+            library_path=library_path,
+            skills_dir=self.skills_dir,
+        )
+
     def with_chain(
         self, chain_path: Path, body: Mapping[str, object]
     ) -> tuple[TemplateLibrary, str]:
@@ -306,6 +317,19 @@ class TemplateLibrary:
 
     def component_names(self, namespace: str | Namespace) -> tuple[str, ...]:
         return tuple(self._components[Namespace(namespace)])
+
+    def references(self, id: str) -> dict[str, set[str]]:
+        """The library components chain `id` uses, per node id, each named
+        `<section>.<name>` (`tasks.implementer`): every `extends` parent its
+        expansion follows, transitively, and every steering profile a task
+        selects. A chain that stops expanding part-way answers with what it
+        reached; why it stopped is `lint`'s to say."""
+        resolution = _Resolution(self, self._chains[id].source)
+        try:
+            resolution.expand_chain(self._chains[id].data)
+        except TemplateLibraryError:
+            pass
+        return resolution.references
 
     def component(self, namespace: Namespace, name: str) -> RawComponent | None:
         return self._components[namespace].get(name)
@@ -466,6 +490,10 @@ class _Resolution:
         #: Where the component at one location was inherited from, filled by
         #: `_merge_chain` and consumed by `_locate` once its path is known.
         self._inherited: dict[tuple[object, ...], ComponentSource] = {}
+        #: Per node id, the library components its expansion used
+        #: (`TemplateLibrary.references`); filed under the node being expanded.
+        self.references: dict[str, set[str]] = {}
+        self._refs: set[str] = set()
 
     # ── expansion ──
 
@@ -489,7 +517,11 @@ class _Resolution:
 
     def _node(self, raw: object, index: int) -> Mapping[str, object]:
         loc: tuple[object, ...] = ("nodes", index)
-        node = self._expand(raw, Namespace.NODES, self._provisional(raw, "", index), loc)
+        provisional = self._provisional(raw, "", index)
+        # ponytail: keyed by the node's authored id (its position without one);
+        # a node whose id is only inherited is filed under `[index]`.
+        self._refs = self.references.setdefault(provisional, set())
+        node = self._expand(raw, Namespace.NODES, provisional, loc)
         path = self._record(node, loc, prefix="", fallback=f"nodes[{index}]")
 
         expanded = dict(self._container(node, path, loc))
@@ -572,6 +604,11 @@ class _Resolution:
             f"{prefix}{PATH_SEPARATOR}{segment}" if segment else self._provisional(raw, prefix, 0)
         )
         task = self._expand(raw, Namespace.TASKS, provisional, loc)
+        steering = task.get("steering")
+        if isinstance(steering, list):
+            self._refs.update(
+                f"{Namespace.STEERING.value}.{n}" for n in steering if isinstance(n, str)
+            )
         if segment is not None:
             # A dedicated task takes its container's segment as its path
             # (`component-identifiers-are-qualified-by-node-instance`), so its
@@ -654,6 +691,7 @@ class _Resolution:
     def _parent(self, namespace: Namespace, name: str, where: str) -> RawComponent:
         component = self._library.component(namespace, name)
         if component is not None:
+            self._refs.add(f"{namespace.value}.{name}")
             return component
         other = self._library.namespace_of(name)
         if other is not None:

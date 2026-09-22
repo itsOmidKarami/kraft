@@ -13,7 +13,7 @@ import type { ChainNode, KraftEvent, WorkerSession, WorkItem } from "../../types
  * Trimmed-node placeholders (21's dimmed `spec` with a `–` glyph, Kraft-1brd):
  * a node an attachment satisfied at intake never enters `chain_definition`,
  * so it needs the *template*'s own node list to know it existed at all.
- * `GET /templates/{id}/resolved` (`api.getResolvedTemplate`) returns that
+ * `GET /templates/chains/{id}/resolved` (`api.getResolvedTemplate`) returns that
  * list, keyed by `chain_template` -- fetched here rather than carried on the
  * detail payload since it is only needed for this rare state.
  */

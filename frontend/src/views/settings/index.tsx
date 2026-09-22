@@ -3,6 +3,7 @@ import { SETTINGS_GROUP_LABEL, SETTINGS_NAV } from "../../settingsNav";
 import { AccessPage } from "./AccessPage";
 import { AppearancePage } from "./AppearancePage";
 import { IntakePage } from "./IntakePage";
+import { LibraryPage } from "./LibraryPage";
 import { NotifyPage } from "./NotifyPage";
 import { PolicyPage } from "./PolicyPage";
 import { ReposPage } from "./ReposPage";
@@ -12,7 +13,7 @@ import { TemplatesPage } from "./TemplatesPage";
 
 /* ── shell ────────────────────────────────────────────────────────────────── */
 
-/** The Settings index (m10; W7.9 on desktop too): the eight sections with a
+/** The Settings index (m10; W7.9 on desktop too): the nine sections with a
  *  line each, so the "Settings" crumb names a page, not a redirect to Repos. */
 function SettingsIndex() {
   return (
@@ -51,6 +52,7 @@ export function Settings() {
               {
                 repos: <ReposPage />,
                 chains: <TemplatesPage />,
+                library: <LibraryPage />,
                 policy: <PolicyPage />,
                 steering: <SteeringPage />,
                 intake: <IntakePage />,

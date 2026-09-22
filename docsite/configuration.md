@@ -30,6 +30,14 @@ Four sections, each a map of name to definition, which any chain takes with
 | `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
 | `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
 
+`kraft admin templates library` lists every component as `<section>.<name>`
+(`tasks.implementer`) with the chains that use it — through `extends`, directly
+or by way of another component, or a task's `steering:` — and `... library ID`
+shows one with its definition and any lint issue that names it. Settings →
+Library shows the same and edits the file: a save is refused, with the reason
+and nothing written, if it would stop any chain that resolves now from
+resolving (`GET`/`PUT /api/templates/library`).
+
 ```yaml
 tasks:
   implementer:
@@ -77,7 +85,10 @@ One selectable chain per file, named by its `id` (or the file name). See
 [Concepts](concepts.md#chain) for the node schema, with the shipped `default`
 and `quick-task` chains as worked examples. `kraft admin templates show ID
 --resolved` prints one with its library components expanded, and Settings →
-Chains edits the file itself.
+Chains edits the file itself. Over HTTP a chain is
+`/api/templates/chains/{id}` (`GET`, `PUT`, and `GET .../resolved`), and
+`GET /api/templates/chains` lists them; any valid id works, `library` and
+`lint` included.
 
 ## `policy.yaml` — caps, budget, archiving
 
