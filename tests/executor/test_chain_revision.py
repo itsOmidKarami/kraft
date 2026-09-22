@@ -234,3 +234,19 @@ async def test_the_revising_task_is_told_which_nodes_it_may_change(item_on, fake
 
     [prompt] = fake_agent.prompts()
     assert f"including `{GATE}`" in prompt and '"build.main.run"' in prompt
+
+
+async def test_a_resume_after_an_approved_revision_runs_the_revised_chain(item_on, tmp_path):
+    """A crash between the approval and the walk it starts leaves the item on
+    the gate; reattach resumes it from the stored chain, the revised one."""
+    from kraft.executor import resuming
+
+    it = await item_on(_chain(tmp_path, PROPOSAL))
+    await _walk(it)
+    await _approve(it)
+
+    await resuming.resume_once(
+        it.database, it.run_dirs, work_item_id=it.id, adopted={}, launch=NO_SETUP
+    )
+
+    assert _completed(it) == ["revise", GATE, "build", "checked"]
