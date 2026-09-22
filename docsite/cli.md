@@ -19,10 +19,12 @@ kraft item create "fix the flaky test" --description "..."   # files it paused; 
 kraft item create "fix it now" --autostart   # starts it at once; refused (403) from a Kraft worker
 kraft item create "ship the thing" --spec .engineering/specs/x.md   # skips the spec node
 kraft item create "backport the fix" --base-branch release/1.2   # starts from, and merges into, release/1.2
+kraft item create "fix the parser" --repo ~/code/app --chain quick-task --implements app-123 --auto-gate
+                                     # another repo and chain; closes bead app-123 on completion; --auto-gate has an agent review auto-escalate gates before a human does
 kraft item create "small fix" --skip-nodes spec,plan --budget 5 \
   --node-override implementation.attempts=2   # intake fields POST /work-items takes; --budget none lifts the cap
 kraft item approve                   # approve whichever gate is pending
-kraft item reject --note "the plan skips migrations"
+kraft item reject --note "the plan skips migrations"   # --node N re-enters at N instead of the gate's reject_to
 kraft item pause / kraft item resume --steer "try the other adapter"
 kraft item retry                     # re-run the node a stopped item stopped on
 kraft view search "retry policy"
@@ -190,7 +192,7 @@ kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
 kraft admin reload             # reread the template library and policy.yaml, no restart
-kraft admin update [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
+kraft admin update [--force] [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
 kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
 kraft admin templates show ID  # one chain file as its author wrote it
 kraft admin templates show ID --resolved  # the same chain with its library components expanded

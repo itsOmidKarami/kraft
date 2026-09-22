@@ -24,6 +24,8 @@ commands that clear it (`uv tool uninstall kraft`, then `uv tool install
 --force --reinstall kraft-sdlc`, since the uninstall removes the `kraft`
 command both share).
 
+Upgrading from a 0.x install? Read the [1.0.0 changelog](https://github.com/itsOmidKarami/kraft/blob/main/CHANGELOG.md#100) first: finish or abandon in-flight items, and note that harness profile names and the template layout changed.
+
 Prefer driving Kraft from a coding agent instead of this shell? `kraft admin
 init` above already installs the `/kraft:*` skills alongside the MCP server —
 or skip it and go straight to the [Claude Code plugin
