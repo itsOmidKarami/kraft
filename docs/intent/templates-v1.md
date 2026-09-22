@@ -208,6 +208,15 @@ that session's original harness and runtime options. Changing them SHALL
 require a new escalation session.
 enforced-by: tests/test_escalate.py::test_a_resumed_escalation_keeps_its_original_runtime[resumed]
 
+## REQ a-resumed-escalation-turn-writes-where-it-remembers
+
+WHEN an escalation turn resumes a thread, the system SHALL give it the same
+result file and session summary paths every earlier turn of that thread had,
+SHALL start it with no result file left by an earlier turn, and SHALL keep each
+earlier turn's result and summary readable from that turn's own session row.
+enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
+origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b), Ruling 207: a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
+
 ## REQ builtin-task-references-code-owned-actions
 
 A built-in task SHALL name its action through `ref`, and the system SHALL

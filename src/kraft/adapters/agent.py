@@ -31,7 +31,7 @@ _CTX = (
     "Worker session: {session_id}\n"
     "\n"
     "When you are done, write a short session summary to "
-    ".engineering/sessions/{session_id}.md under the repo, starting with YAML "
+    ".engineering/sessions/{summary_name}.md under the repo, starting with YAML "
     "front-matter carrying exactly these keys and values:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
@@ -492,6 +492,7 @@ def build_context(
     #: The repo's `intent_dir` (`RepoEntry.intent_dir`); None names no tree.
     intent_dir: str | None = None,
     steering_texts: tuple[str, ...] = (),
+    summary_name: str | None = None,  # else session_id: `escalate.thread_files`
 ) -> str:
     """Kraft's contract, method, intent tree and steering, folded into one
     block of text.
@@ -512,6 +513,7 @@ def build_context(
         node_id=node_id,
         hook_point=hook_point,
         session_id=session_id,
+        summary_name=summary_name or session_id,
     )
     if artifact:
         title_line = _MR_META_KEYS if artifact == "mr_meta" else _TITLE_LINE.format(kind=artifact)
@@ -662,24 +664,21 @@ async def run_agent_task(
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,
-    #: `--resume <id>` when set — an escalation turn continuing its item's
-    #: existing thread. `None` (every chain dispatch) omits the flag entirely,
-    #: same as today.
+    #: `--resume <id>`: an escalation turn continuing its item's thread.
     resume_session_id: str | None = None,
-    #: `--autocompact <value>` when set. Paired with `resume_session_id` by
-    #: `escalate.dispatch`; no chain dispatch sets it.
+    #: `--autocompact <value>`; only `escalate.dispatch` sets it.
     autocompact: str | None = None,
     #: `False` only for an escalation turn: the child then gets no
     #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
-    #: human's own session rather than a worker's, and the existing
-    #: self-action guard (`client.context._forbid_self_action`) lets it act on the
-    #: very item it is escalating — see spec "The self-resume trick". Every
-    #: existing caller keeps today's behavior by leaving this `True`.
+    #: human's own session rather than a worker's, and the self-action guard
+    #: (`client.context._forbid_self_action`) lets it act on the very item it
+    #: is escalating — see spec "The self-resume trick".
     identify_as_worker: bool = True,
     head_sha: str | None = None,
     thread: int = 1,
     repo_entry: dict | None = None,
     time_cap=None,
+    files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
@@ -710,6 +709,7 @@ async def run_agent_task(
         method_text=method_text,
         intent_dir=(repo_entry or {}).get("intent_dir"),
         steering_texts=steering_texts,
+        summary_name=files,
     )
     options = {
         k: v
@@ -791,4 +791,5 @@ async def run_agent_task(
         repo_entry=repo_entry,
         reader=reader,
         time_cap=time_cap,
+        files=files,
     )
