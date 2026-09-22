@@ -368,11 +368,10 @@ def test_an_option_becomes_its_flag(run, overrides, flag, value):
         (("Read", "Grep"), "Read,Grep"),
         # Allow nothing: no built-in tool exists, and every MCP ask is denied.
         ((), ""),
-        # `--tools` takes bare built-in names and does not govern MCP tools,
-        # which the permission gate answers instead.
-        (("Bash(git *)", "mcp__kraft__report_progress"), "Bash"),
+        # `--tools` does not govern MCP tools; the permission gate answers those.
+        (("Bash", "mcp__kraft__report_progress"), "Bash"),
     ],
-    ids=["listed", "empty", "scoped-rule-and-mcp-tool"],
+    ids=["listed", "empty", "mcp-tool"],
 )
 def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(run, allowed, tools):
     """Kraft-nt6tt: `--allowedTools` only pre-approves, and in `auto` mode the

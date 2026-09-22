@@ -152,8 +152,16 @@ node; a gate's `auto_review` inherits its gate. At runtime:
 
 | Field | Rule down the layers | Enforced where |
 |---|---|---|
-| `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. |
+| `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. Allowing `Bash` allows its read-only use without a gate ask: Claude's `manual` mode runs a read-only shell command (`cat`, `ls`, `git status`) itself and asks the gate only about the rest, so a read-only command can read any file the worktree holds, gitignored ones included. |
 | `deny_tools` | only accumulates | Denied by the permission gate and passed as `--disallowed-tools`, on top of `allowed_tools`. |
+
+Both tool lists hold tool names, never permission rules: a bare tool (`Bash`,
+`Read`) or one exact MCP tool (`mcp__kraft__report_progress`). The permission
+gate matches a name exactly, so a scoped rule (`Bash(git *)`), a glob
+(`mcp__github__*`) or a whole server (`mcp__github`) would never match an ask.
+Kraft refuses one wherever the list is read (`policy.yaml`, `repos.yaml`, a
+chain template, a retry override, a work item's own policy), and the message
+names the field and the name to write instead.
 | `sandbox` | set once, never changed or removed | Wraps the task's process (agent, subprocess, builtin) in `docker run`. |
 | `token_budget` | only narrows | Before each agent launch, gate reviewers included: once the work item's sessions have spent this many tokens (input plus output) the next agent task is refused and the item stops for a human. Like `budget`, it cannot interrupt a running agent. |
 | `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |

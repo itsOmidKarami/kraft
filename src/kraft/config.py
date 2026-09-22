@@ -36,7 +36,7 @@ from pydantic import (
 )
 
 from kraft.automated_review import AutomatedReview
-from kraft.policy import SandboxPolicy, TemplatePolicyOverride
+from kraft.policy import SandboxPolicy, TemplatePolicyOverride, ToolNames
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
@@ -206,7 +206,7 @@ class RepoEntry(BaseModel):
     # daemon's inherited environment (Kraft-69atv).
     env: dict[str, str] = {}
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
-    deny_tools: list[str] = []
+    deny_tools: ToolNames = []
     steering: list[str] = []
     sandbox: Any = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-

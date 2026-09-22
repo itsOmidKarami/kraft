@@ -621,9 +621,9 @@ def _restricted(
             f"permission_mode={mode!r}; under an allowlist harness {harness!r} runs in "
             f"{asking!r}, the mode that asks the permission gate"
         )
-    # Bare built-in names: a scoped rule restricts its tool through the gate,
-    # and an `mcp__` tool is not the restriction flag's to govern.
-    names = tuple(dict.fromkeys(t.split("(", 1)[0] for t in allowed if not t.startswith("mcp__")))
+    # Built-in names only: an `mcp__` tool is not the restriction flag's to
+    # govern. Policy holds tool names, never rules (Kraft-9i6xy).
+    names = tuple(t for t in allowed if not t.startswith("mcp__"))
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
