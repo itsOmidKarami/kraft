@@ -312,6 +312,26 @@ chain, node or task is refused the same way when the item is filed or retried.
 An item already in flight when a sandbox appears stops for a person before
 Kraft runs any git in its worktree.
 
+A sandboxed worker on a plain repository can still create a git repository of
+its own inside its worktree, and commit a gitlink to it. That nested
+repository's config belongs to the worker. Kraft's own git therefore never
+works inside a nested repository. Its status and diff calls compare only the
+commit a gitlink records, and its automatic commit of leftover work skips
+nested repositories. The daemon pins `submodule.recurse`,
+`fetch.recurseSubmodules`, `push.recurseSubmodules`, `diff.submodule`,
+`status.submoduleSummary` and `diff.ignoreSubmodules`, whatever your own git
+config says. If a sandboxed item's worktree holds a nested repository Kraft did
+not create, the item stops for a person, and the stop names the paths. That
+includes an untracked one, a populated gitlink, or a gitlink the branch added
+or moved. Remove them, or `git rm --cached` the gitlinks, and retry. A
+submodule your repository already had, left unpopulated, doesn't stop anything.
+
+What this costs: the clean check before a merge request no longer looks for
+uncommitted edits inside a submodule. It still catches a submodule whose commit
+moved, and each declared workspace member is checked on its own. Leftover work
+is no longer committed into a submodule's pointer unless that submodule is one
+of the item's declared members.
+
 Publication goes members first. A member's merge request merges before the root
 moves. A root with source changes of its own gets its own merge request, and it
 stays a draft until every member has merged and the root names their merged
