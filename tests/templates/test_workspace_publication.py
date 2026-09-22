@@ -602,8 +602,13 @@ async def test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the
     assert root_reads[0] == ("ready", root, merged), "read before the root was ready"
     assert fake.order.index(("merge", "pkg")) < fake.order.index(root_reads[0])
     assert [e for e in fake.order if e[0] == "merge"] == [("merge", "pkg"), ("merge", root)]
+    assert fake.order[-1] == ("merge", root), "readied or re-read after its merge was asked"
     assert _pending(database, row) == ["merge", "external_approval", "merge"]
     assert _repos(database, row)["root"] == "merged"
+    # A later pass over a landed root only reads it: its source branch may be
+    # gone with the merge, and nothing is pushed to it again.
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+    assert fake.order[-1] == ("merge", root)
 
 
 async def test_a_root_approval_that_never_comes_times_out_for_a_human(
