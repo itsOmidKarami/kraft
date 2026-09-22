@@ -399,6 +399,29 @@ class BuiltinTask(TaskBase):
     execution: Annotated[ExecutionMode, _LOOSE] = ExecutionMode.SEQUENTIAL
 
 
+class FallbackEntry(BaseModel):
+    """One entry of an agent task's `fallback:` list: where its launch goes
+    next when the one before it is rate-limited or unavailable
+    (`rate-limited-launch-falls-back-to-next-candidate`). Whatever it omits is
+    kept from the task's own launch; the item's and the node's overrides are
+    not (`executor.fallback`)."""
+
+    model_config = _CONFIG
+
+    harness: Identifier | None = None
+    model: StrictStr | None = None
+    effort: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def _names_something(self) -> FallbackEntry:
+        if self.harness is None and self.model is None and self.effort is None:
+            raise ValueError(
+                "a fallback entry names a harness, a model or an effort: an empty one "
+                "would relaunch the same thing"
+            )
+        return self
+
+
 class AgentTask(TaskBase):
     kind: Literal[TaskKind.AGENT]
     harness: Identifier
@@ -418,6 +441,9 @@ class AgentTask(TaskBase):
     #: Inputs Kraft delivers to this task (`AgentInput`), e.g.
     #: `inputs: [review_package]`.
     inputs: list[Annotated[AgentInput, _LOOSE]] = Field(default_factory=list)
+    #: Tried in order when a launch is rate-limited or its harness unavailable
+    #: (`fallback-is-opt-in`). `None` is unset; `[]` is "none".
+    fallback: list[FallbackEntry] | None = None
 
     @model_validator(mode="after")
     def _one_route(self) -> Self:
@@ -1219,13 +1245,19 @@ class ResolvedChain:
                         ) from exc
                 allowed = task_policy.allowed_harnesses
                 if isinstance(task.task, AgentTask) and allowed is not None:
-                    if task.task.harness not in allowed:
-                        raise PolicyError(
-                            f"{task.path}: harness {task.task.harness!r} is not in its "
-                            f"allowed_harnesses {sorted(allowed)!r}",
-                            field="allowed_harnesses",
-                            path=task.path,
-                        )
+                    # A fallback can never run where the task's policy refuses
+                    # (`fallback-never-escapes-allowed-harnesses`).
+                    fallback = [e.harness for e in task.task.fallback or () if e.harness]
+                    for where, harness in [("harness", task.task.harness)] + [
+                        ("fallback harness", h) for h in fallback
+                    ]:
+                        if harness not in allowed:
+                            raise PolicyError(
+                                f"{task.path}: {where} {harness!r} is not in its "
+                                f"allowed_harnesses {sorted(allowed)!r}",
+                                field="allowed_harnesses",
+                                path=task.path,
+                            )
         # A sandbox wraps the whole work item, not the scope that set it
         # (Ruling 189): once one task has run in it the worktree is untrusted
         # for every later launch, so two scopes cannot ask for two.

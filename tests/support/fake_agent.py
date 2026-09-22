@@ -3,6 +3,8 @@
        --output-format stream-json --verbose
 CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error |
 rate_limit (rejects with KRAFT_FAKE_AGENT_RESETS_AT, default 1788968400).
+KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS (comma-separated `--model` values, `-` for a
+launch that names none) puts only those launches in rate_limit mode.
 
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
 reads the linkage fields back out of the prompt, writes
@@ -143,6 +145,11 @@ def _plan_entry() -> dict:
     return plan[min(n, len(plan) - 1)]
 
 
+def _model(argv: list[str]) -> str:
+    """This launch's `--model`, or `-` when it names none."""
+    return next((argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--model"), "-")
+
+
 def _record_argv(argv: list[str]) -> None:
     """Append the full argv (JSON, one line) to KRAFT_FAKE_AGENT_ARGV_LOG, so a
     test can assert on flags -p doesn't cover, like --model."""
@@ -157,6 +164,9 @@ def main() -> int:
     _record_prompt(sys.argv)
     _record_argv(sys.argv)
     mode = os.environ.get("KRAFT_FAKE_AGENT", "fix")
+    limited = os.environ.get("KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS")
+    if limited is not None and _model(sys.argv) in limited.split(","):
+        mode = "rate_limit"
     if mode == "fix":
         calc = pathlib.Path("calc.py")
         calc.write_text(calc.read_text().replace("a - b", "a + b"))

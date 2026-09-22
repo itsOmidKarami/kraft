@@ -29,6 +29,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.automated_review import AutomatedReview
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
+from kraft.executor import fallback as _fallback
 from kraft.executor import read_only as _read_only
 from kraft.executor.context import (
     _ADVANCING,
@@ -739,8 +740,13 @@ async def _dispatch_task(
 
     # Only agent tasks. A subprocess or builtin costs nothing, and stopping
     # verification for a budget would strand the item mid-node for no saving.
-    breach = stops.budget_breach(db, work_item_row["id"], budget, row=work_item_row, path=task.path)
-    if breach is not None:
+    # Checked again before every fallback launch (`executor.fallback`).
+    async def over_budget() -> bool:
+        breach = stops.budget_breach(
+            db, work_item_row["id"], budget, row=work_item_row, path=task.path
+        )
+        if breach is None:
+            return False
         # A scope's own cap (Ruling 195) is known only here, where the scope
         # is: recorded for the stop to name.
         if breach["scope"] in ("tokens", "usd"):
@@ -749,6 +755,9 @@ async def _dispatch_task(
                     c, work_item_row["id"], "scope_budget_reached", {**breach, "task": task.path}
                 )
             )
+        return True
+
+    if await over_budget():
         return BUDGET
     # A harness the runtime cannot offer stops for a human and never silently
     # substitutes another (`unavailable-selected-harness-needs-human`): the
@@ -816,103 +825,120 @@ async def _dispatch_task(
     instruction += _overrides.extra_prompt_note(node_override.get("extra_prompt"))
     keys = ("model", "escalate_model", "effort")
     merged_override = {**item_override, **{k: v for k, v in node_override.items() if k in keys}}
-    try:
-        inv = _agent.resolve_agent_task(
-            t,
-            launch.repo_entry if launch else None,
-            launch.library_steering if launch else None,
-            skills_dir=launch.skills_dir if launch else None,
-            escalate=escalate,
-            item_override=merged_override or None,
-            harnesses=harnesses,
-            **frozen_steering(work_item_row),
-            policy=task_policy,
-        )
-    except _agent.HarnessUnavailable as exc:
-        why = (
-            f"{task.path}: {exc}"  # its harness is there; its agent profile is not
-            if isinstance(exc, _agent.ProfileUnavailable)
-            else f"{task.path} selects harness {t.harness!r}, which is not available: {exc}"
-        )
-        return await config_error_session(db, run_dirs, common, why + "\n")
-    except (_skill.SkillError, _steering.SteeringError) as exc:
-        # A selected skill the environment cannot load stops for a human and
-        # never substitutes a method (`selected-skill-must-be-available`). A
-        # plugin-qualified reference is not checked here -- Kraft cannot read
-        # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
-        # to stop with `needs_context` instead. A steering selection the
-        # snapshot cannot supply stops the same way rather than run unsteered.
-        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
-    # A task an operator paused mid-turn resumes its own provider session when
-    # it can, told to carry on with any steer in hand; otherwise it restarts
-    # with its original instruction (`resumed-agent-task-preserves-its-
-    # session-when-possible`). Never on a fix loop's or a recovery's own
-    # instruction, which is a new job, not the paused one.
-    resumed = (
-        _resumable_session(db, work_item_row["id"], node, task, harnesses.valid.get(inv.harness))
-        if instruction_override is None
-        else None
+    # The task's own launch, then its `fallback:` entries (`executor.fallback`,
+    # Kraft-0a3h8). Without a list this loop runs once, exactly as before
+    # (`fallback-is-opt-in`); with one, a candidate that is unavailable or
+    # known to be rate-limited is skipped and a rate-limited launch moves on,
+    # every skip or switch logged. Overrides and escalation are the task's own
+    # launch's; a fallback entry runs as written.
+    cands = _fallback.candidates(t)
+    listed = len(cands) > 1
+    tried = _fallback.Attempts(
+        db, work_item_row["id"], node.id, task.path, overridden=bool(merged_override)
     )
-    if resumed is not None:
-        await db.write(
-            lambda c: events.append(
-                c,
-                work_item_row["id"],
-                "agent_session_resumed",
-                {"task": task.path, "session_id": resumed[0]},
-            )
-        )
-    # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
-    # the change under review, written out for this session.
-    package = None
-    if AgentInput.REVIEW_PACKAGE in t.inputs:
-        # The package is read off the worktree with host git, which must not
-        # race a sandboxed co-task still writing it (Kraft-69rwp).
+    status = None
+    for i, cand in enumerate(cands):
+        primary = i == 0
         try:
-            stops.refuse_live_sandboxed_session(
-                db, work_item_row, launch, what="the review package"
+            inv = _agent.resolve_agent_task(
+                cand,
+                launch.repo_entry if launch else None,
+                launch.library_steering if launch else None,
+                skills_dir=launch.skills_dir if launch else None,
+                escalate=escalate and primary,
+                item_override=(merged_override or None) if primary else None,
+                harnesses=harnesses,
+                **frozen_steering(work_item_row),
+                policy=task_policy,
             )
-        except RuntimeError as exc:
+            if listed and not sandbox:
+                _fallback.require_on_path(inv, harnesses)
+        except (_agent.HarnessUnavailable, _fallback.Unavailable) as exc:
+            if not listed:
+                why = (
+                    f"{task.path}: {exc}"  # its harness is there; its agent profile is not
+                    if isinstance(exc, _agent.ProfileUnavailable)
+                    else f"{task.path} selects harness {t.harness!r}, which is not available: {exc}"
+                )
+                return await config_error_session(db, run_dirs, common, why + "\n")
+            await tried.skip(_fallback.describe(cand), "unavailable", detail=str(exc))
+            continue
+        except (_skill.SkillError, _steering.SteeringError) as exc:
+            # A selected skill the environment cannot load stops for a human and
+            # never substitutes a method (`selected-skill-must-be-available`). A
+            # plugin-qualified reference is not checked here -- Kraft cannot read
+            # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
+            # to stop with `needs_context` instead. A steering selection the
+            # snapshot cannot supply stops the same way rather than run unsteered.
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
-        package = prompts.review_package(
-            db, run_dirs, work_item_row["id"], worktree, task.path, session_id
+        here = _fallback.describe(cand, inv)
+        until = (
+            db.read(lambda c, h=cand.harness, m=inv.model: _fallback.known_limited(c, h, m))
+            if listed
+            else None
         )
-    try:
-        status = await _agent.run_agent_task(
+        if until is not None:
+            await tried.skip(here, "known_limited", resets_at_iso=until)
+            continue
+        if not primary:
+            if await over_budget():
+                await tried.flush()
+                return BUDGET
+            common = {**common, "session_id": uuid.uuid4().hex}
+        await tried.launching(here, common["session_id"])
+        status, final = await _launch_agent(
             db,
             run_dirs,
-            command=inv.command,
-            harness=inv.harness,
+            t,
+            node,
+            work_item_row,
+            worktree,
+            task=task,
+            inv=inv,
+            harness_id=cand.harness,
             harnesses=harnesses,
-            model=inv.model,
-            deny_tools=inv.deny_tools,
-            effort=inv.effort,
-            allowed_tools=inv.allowed_tools,
-            permission_mode=inv.permission_mode,
             sandbox=sandbox,
-            steering_texts=inv.steering_texts,
-            artifact=t.produces,
-            method_text=inv.method_text,
-            title=work_item_row["title"],
-            task_instruction=(
-                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
-                if note
-                else ""
-            )
-            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction),
-            resume_session_id=resumed[1] if resumed is not None else None,
-            repo_path=work_item_row["repo"],
-            cwd=worktree,
-            repo_entry=launch.repo_entry if launch else None,
-            review_package=package,
+            launch=launch,
+            common=common,
+            # A resumed provider session is the task's own launch's, never a
+            # fallback's: no `--resume` across a switch.
+            resumable=primary and instruction_override is None,
+            instruction=instruction + tried.note,
+            note=note,
+            note_source=note_source,
             time_cap=time_cap,
-            **common,
         )
-    except _agent.LaunchRefused as exc:
-        # Refused before anything started (Kraft-hr0xr): the same stop as an
-        # unavailable harness, never a failed task for a fix loop to relaunch
-        # into the same refusal.
-        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+        if final:
+            return status
+        if status != RATE_LIMITED or not listed:
+            break
+        hit = stops.latest_rate_limit(db, work_item_row["id"]) or {}
+        await tried.skip(here, "rate_limit_hit", resets_at_iso=hit.get("resets_at_iso"))
+    else:
+        # No candidate left. Limited somewhere: park until the earliest reset
+        # (`stops.stop_for_rate_limit`), and the poller's relaunch starts from
+        # the top. Only unavailable: stop for a human naming each.
+        await tried.flush()
+        if tried.resets:
+            earliest = min(tried.resets)
+            await db.write(
+                lambda c, e=earliest: events.append(
+                    c,
+                    work_item_row["id"],
+                    "launch_fallback_exhausted",
+                    {"node_id": node.id, "task": task.path, "resets_at_iso": e},
+                )
+            )
+            if status is None:
+                return RATE_LIMITED
+        else:
+            return await config_error_session(
+                db,
+                run_dirs,
+                common,
+                f"{task.path}: no launch candidate is available:\n"
+                + "".join(f"  - {why}\n" for why in tried.unavailable),
+            )
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the
@@ -999,6 +1025,105 @@ async def _dispatch_task(
             )
         )
     return status
+
+
+async def _launch_agent(
+    db,
+    run_dirs,
+    t: AgentTask,
+    node,
+    work_item_row,
+    worktree,
+    *,
+    task,
+    inv,
+    harness_id: str,
+    harnesses,
+    sandbox,
+    launch,
+    common: dict,
+    resumable: bool,
+    instruction: str,
+    note,
+    note_source: str,
+    time_cap,
+) -> tuple[str, bool]:
+    """One candidate's launch for `dispatch_node`: `(status, final)`, `final`
+    when the launch never started and the status is the task's answer as it
+    stands (a refusal is a configuration stop, not a straggler to sweep)."""
+    # A task an operator paused mid-turn resumes its own provider session when
+    # it can, told to carry on with any steer in hand; otherwise it restarts
+    # with its original instruction (`resumed-agent-task-preserves-its-
+    # session-when-possible`). Never on a fix loop's or a recovery's own
+    # instruction, which is a new job, not the paused one.
+    resumed = (
+        _resumable_session(db, work_item_row["id"], node, task, harnesses.valid.get(inv.harness))
+        if resumable
+        else None
+    )
+    if resumed is not None:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_row["id"],
+                "agent_session_resumed",
+                {"task": task.path, "session_id": resumed[0]},
+            )
+        )
+    # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
+    # the change under review, written out for this session.
+    package = None
+    if AgentInput.REVIEW_PACKAGE in t.inputs:
+        # The package is read off the worktree with host git, which must not
+        # race a sandboxed co-task still writing it (Kraft-69rwp).
+        try:
+            stops.refuse_live_sandboxed_session(
+                db, work_item_row, launch, what="the review package"
+            )
+        except RuntimeError as exc:
+            status = await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+            return status, True
+        package = prompts.review_package(
+            db, run_dirs, work_item_row["id"], worktree, task.path, common["session_id"]
+        )
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            command=inv.command,
+            harness=inv.harness,
+            harnesses=harnesses,
+            model=inv.model,
+            deny_tools=inv.deny_tools,
+            effort=inv.effort,
+            allowed_tools=inv.allowed_tools,
+            permission_mode=inv.permission_mode,
+            sandbox=sandbox,
+            steering_texts=inv.steering_texts,
+            artifact=t.produces,
+            method_text=inv.method_text,
+            title=work_item_row["title"],
+            task_instruction=(
+                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                if note
+                else ""
+            )
+            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction),
+            resume_session_id=resumed[1] if resumed is not None else None,
+            repo_path=work_item_row["repo"],
+            cwd=worktree,
+            repo_entry=launch.repo_entry if launch else None,
+            review_package=package,
+            time_cap=time_cap,
+            harness_id=harness_id,
+            **common,
+        )
+    except _agent.LaunchRefused as exc:
+        # Refused before anything started (Kraft-hr0xr): the same stop as an
+        # unavailable harness, never a failed task for a fix loop to relaunch
+        # into the same refusal.
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n"), True
+    return status, False
 
 
 def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
