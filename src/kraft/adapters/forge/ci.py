@@ -56,14 +56,10 @@ async def render_ci(
 #: code. `script_failure`, an unrecognised reason, or a red pipeline that
 #: named no reason at all, are code-red — the failure a fix loop is for.
 #:
-#: Deliberately NOT `"cancelled"`. By the time a job's `failure_reason` is read
-#: here, `render_ci`'s sha guard has already confirmed this pipeline belongs to
-#: the current head, so nothing newer could have superseded it through
-#: GitLab's redundant-pipeline auto-cancel — the only thing left that could
-#: have cancelled *this* pipeline is a human clicking Cancel. Auto-retrying
-#: that through the forge would silently override a person's own decision,
-#: which is worse than spending one code-red fix cycle that finds nothing to
-#: change and reports back quickly with the cancellation named in the finding.
+#: No `"cancelled"`: a cancelled run never reaches here. Both backends read it
+#: as pending (Kraft-zn8me), because a cancelled run is never a verdict, and a
+#: run a person cancelled with no successor waits out the wait's own timeout.
+#: It is never auto-retried here, which would override that person's decision.
 _INFRA_REASONS = frozenset(
     {
         "runner_system_failure",

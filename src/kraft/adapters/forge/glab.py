@@ -21,11 +21,14 @@ from kraft.adapters.forge.models import (
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
 #: the next node is merge. Anything unrecognised falls through to 'failed' for
 #: the same reason — guessing in the direction of merging is the one guess that
-#: cannot be walked back.
+#: cannot be walked back. 'canceled' is a wait, not red: a cancelled pipeline
+#: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
+#: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
+#: person cancelled with no successor is caught by the wait's own timeout.
 _GLAB_STATES: dict[str, CIState] = {
     "success": "success",
     "failed": "failed",
-    "canceled": "failed",
+    "canceled": "pending",
     "skipped": "failed",
     "running": "pending",
     "pending": "pending",
@@ -223,7 +226,8 @@ class GlabCli(mr_ops.CliWaits):
                 top = mr_ops.parse_json(raw, "glab ci get")
             except ForgeError:
                 top = None
-            if isinstance(top, dict) and top:
+            # A cancelled pin has a successor to find, so it falls through too.
+            if isinstance(top, dict) and top and top.get("status") != "canceled":
                 raw_state = str(top.get("status", ""))
                 state: CIState = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
@@ -273,7 +277,8 @@ class GlabCli(mr_ops.CliWaits):
                 raw_state = str(top.get("status", ""))
                 state = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
-                pipeline_ref = str(top.get("id", ""))
+                # Never pin a cancelled pipeline: its successor is the one to read.
+                pipeline_ref = "" if raw_state == "canceled" else str(top.get("id", ""))
                 jobs = (f"pipeline {top.get('id')}: {raw_state}",)
                 if state == "failed":
                     detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
@@ -419,7 +424,7 @@ class GlabCli(mr_ops.CliWaits):
         status = str(mine[-1].get("status"))
         if status in ("success", "skipped"):
             return ReviewResult("clean", detail=f"{check}: {status}")
-        if status in ("failed", "canceled"):
+        if status == "failed":  # 'canceled' is never a verdict; it waits below
             return ReviewResult(
                 "actionable",
                 findings=(f"{check} {status}: {mine[-1].get('description') or ''}",),

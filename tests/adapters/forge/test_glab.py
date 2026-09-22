@@ -206,6 +206,44 @@ async def test_glab_ci_status_falls_back_when_the_pinned_pipeline_is_unreadable(
     assert (status.state, status.pipeline_ref) == ("success", "2826926699")
 
 
+GLAB_CI_CANCELED = (
+    '[{"id":2826926702,"iid":144,"status":"canceled","ref":"kraft/abc",'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926702"}]'
+)
+
+
+async def test_glab_ci_status_never_reads_a_canceled_pipeline_as_a_verdict(cli, tmp_path):
+    """Kraft-zn8me on GitLab: `set_labels` re-creates the MR pipeline, and
+    auto-cancel of redundant pipelines cancels the old one -- a wait for its
+    successor, never red. Nor is it pinned, or every re-entry would read the
+    same cancelled pipeline forever."""
+    cli.stub("glab", GLAB_CI_CANCELED)
+
+    status = await forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(1, "http://x/1"))
+
+    assert (status.state, status.pipeline_ref, status.failed_jobs) == ("pending", "", ())
+
+
+async def test_glab_ci_status_moves_off_a_pinned_pipeline_that_was_canceled(cli, tmp_path):
+    """The pin names the pipeline the last poll of this head saw. Once that one
+    is cancelled its successor is the one to read -- the latest on the branch."""
+    cli.stub(
+        "glab",
+        routes={
+            "mr view": GLAB_MR_VIEW,
+            "ci get": '{"id":2826926702,"status":"canceled","sha":"deadbeef"}',
+            "ci list": GLAB_CI_SUCCESS,
+        },
+    )
+    cli.stub("git", "")
+
+    status = await forge.GlabCli().ci_status(
+        repo=tmp_path, mr=forge.MR(1, "u"), branch="kraft/abc", pipeline_id="2826926702"
+    )
+
+    assert (status.state, status.pipeline_ref) == ("success", "2826926699")
+
+
 async def test_glab_ci_status_names_the_failed_job_and_why(cli, tmp_path):
     """Kraft-xh0q. 'pipeline 2826926700: failed' tells a reader nothing they can
     act on. The failed job's name and its trace tail say the blocker is a

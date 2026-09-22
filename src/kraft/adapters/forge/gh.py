@@ -26,10 +26,15 @@ _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "
 _GH_FAILURE_REASON = {
     "TIMED_OUT": "job_execution_timeout",
     "STARTUP_FAILURE": "runner_system_failure",
-    "CANCELLED": "cancelled",
     "FAILURE": "script_failure",
     "ACTION_REQUIRED": "script_failure",
 }
+#: The conclusions that are a red verdict. Not CANCELLED: a cancelled run is
+#: never a verdict (Kraft-zn8me, Kraft-7g5h4, Kraft-50bhi). GitHub cancels a
+#: superseded run's jobs seconds before it registers the successor's checks, so
+#: a read in that window sees only the cancelled rows. It is a wait, and a run
+#: a person cancelled with no successor is caught by the wait's own timeout.
+_GH_RED = frozenset(_GH_FAILURE_REASON)
 _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
 
 
@@ -163,10 +168,7 @@ class GhCli(mr_ops.CliWaits):
             )
         jobs = tuple(f"{c.get('name')}: {c.get('conclusion') or 'PENDING'}" for c in checks)
         conclusions = [str(c.get("conclusion") or "") for c in checks]
-        if any(
-            c in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
-            for c in conclusions
-        ):
+        if any(c in _GH_RED for c in conclusions):
             state: CIState = "failed"
         elif all(c in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in conclusions):
             state = "success"
@@ -180,8 +182,7 @@ class GhCli(mr_ops.CliWaits):
                 c.get("detailsUrl"),
             )
             for c in checks
-            if str(c.get("conclusion") or "")
-            in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+            if str(c.get("conclusion") or "") in _GH_RED
         )
         return CIStatus(
             state=state,
@@ -260,6 +261,8 @@ class GhCli(mr_ops.CliWaits):
             conclusion = str(run.get("conclusion") or "")
             if conclusion in ("success", "neutral", "skipped"):
                 return ReviewResult("clean", detail=f"{check}: {conclusion}")
+            if conclusion == "cancelled":  # never a verdict, as in `ci_status`
+                return ReviewResult("pending", detail=f"{check}: cancelled")
             output = run.get("output") or {}
             text = "\n".join(str(output[k]) for k in ("title", "summary", "text") if output.get(k))
             return ReviewResult("actionable", findings=(f"{check} {conclusion}: {text}",))
@@ -332,12 +335,18 @@ class GhCli(mr_ops.CliWaits):
                 "-L",
                 "20",
                 "--json",
-                "status,conclusion,headSha,url,name",
+                "status,conclusion,headSha,url,name,createdAt",
             ],
         )
         rows = mr_ops.parse_json(raw, "gh run list")
         runs = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
-        current = [r for r in runs if str(r.get("headSha") or "") == head_sha]
+        # The latest run of each workflow for this head, so a cancelled
+        # superseded run is outvoted by its successor, as in `ci_status`.
+        current = _latest_by_name(
+            [r for r in runs if str(r.get("headSha") or "") == head_sha],
+            name="name",
+            started="createdAt",
+        )
         if not current:
             return CIStatus(state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",))
         jobs = tuple(
@@ -347,13 +356,10 @@ class GhCli(mr_ops.CliWaits):
         if any(str(r.get("status") or "") != "completed" for r in current):
             state: CIState = "pending"
         else:
-            conclusions = [str(r.get("conclusion") or "") for r in current]
-            if any(
-                c in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
-                for c in conclusions
-            ):
+            conclusions = [str(r.get("conclusion") or "").upper() for r in current]
+            if any(c in _GH_RED for c in conclusions):
                 state = "failed"
-            elif all(c in ("success", "neutral", "skipped") for c in conclusions):
+            elif all(c in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in conclusions):
                 state = "success"
             else:
                 state = "pending"
@@ -365,8 +371,7 @@ class GhCli(mr_ops.CliWaits):
                 str(r.get("url") or "") or None,
             )
             for r in current
-            if str(r.get("conclusion") or "")
-            in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
+            if str(r.get("conclusion") or "").upper() in _GH_RED
         )
         return CIStatus(
             state=state,
