@@ -515,8 +515,10 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(client, repo
 
     usage = client.get(f"/api/work-items/{wid}").json()["usage"]
     impl = next(n for n in usage["by_node"] if n["node"] == "implementation")
-    # 1000 input + 500 cache-read, 200 output
-    assert (impl["tokens_in"], impl["tokens_out"]) == (1500, 200)
+    # 1000 uncached input, 500 cache-read, 200 output, each apart (Ruling 211)
+    kinds = ("tokens_in", "tokens_cache_write", "tokens_cache_read", "tokens_out")
+    assert [impl[k] for k in kinds] == [1000, 0, 500, 200]
+    assert impl["split_complete"] is True
     # cost is the agent's own number, carried through untouched
     assert impl["cost_usd"] == pytest.approx(0.035)
     assert impl["cost_complete"] is True

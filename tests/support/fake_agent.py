@@ -252,7 +252,9 @@ def main() -> int:
         "is_error": mode in ("error", "rate_limit"),
         # no top-level `model`: the real envelope carries `modelUsage`, keyed by
         # model name, which is why every worker_sessions row had model NULL
-        "modelUsage": {"fake-agent": {"inputTokens": 1500, "outputTokens": 200}},
+        "modelUsage": {
+            "fake-agent": {"inputTokens": 1000, "outputTokens": 200, "cacheReadInputTokens": 500}
+        },
         # a real agent CLI reports what it was billed; Kraft never computes it
         "total_cost_usd": 0.035,
         "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500},

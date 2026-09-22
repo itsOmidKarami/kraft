@@ -415,6 +415,14 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     )
 
 
+#: Every token kind a row stores, apart (Ruling 211), in `_tokens`' order.
+_SET_TOKENS = ", ".join(f"{k} = ?" for k in _usage.KINDS)
+
+
+def _tokens(usage: Usage) -> tuple[int, ...]:
+    return tuple(getattr(usage, k) for k in _usage.KINDS)
+
+
 def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
     """Live token counts and model for a session that is still running (Kraft-54dk).
 
@@ -430,9 +438,8 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     settled, and a late progress write must not reopen them.
     """
     conn.execute(
-        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ? "
-        "WHERE id = ? AND status = 'running'",
-        (usage.model, usage.tokens_in, usage.tokens_out, session_id),
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS} WHERE id = ? AND status = 'running'",
+        (usage.model, *_tokens(usage), session_id),
     )
 
 
@@ -495,9 +502,9 @@ def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None
     if usage is None:
         return
     conn.execute(
-        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, cost_usd = ? "
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ? "
         "WHERE id = ? AND status = 'paused'",
-        (usage.model, usage.tokens_in, usage.tokens_out, usage.cost_usd, session_id),
+        (usage.model, *_tokens(usage), usage.cost_usd, session_id),
     )
 
 
@@ -552,14 +559,13 @@ def session_exited(
     usage = _own_share(conn, session_id, usage)
     if usage is not None:
         conn.execute(
-            "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, "
-            "cost_usd = ?, wall_ms = ? WHERE id = ?",
-            (usage.model, usage.tokens_in, usage.tokens_out, usage.cost_usd, wall_ms, session_id),
+            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, wall_ms = ? "
+            "WHERE id = ?",
+            (usage.model, *_tokens(usage), usage.cost_usd, wall_ms, session_id),
         )
         payload |= {
             "model": usage.model,
-            "tokens_in": usage.tokens_in,
-            "tokens_out": usage.tokens_out,
+            **dict(zip(_usage.KINDS, _tokens(usage), strict=True)),
             "cost_usd": usage.cost_usd,
         }
     else:

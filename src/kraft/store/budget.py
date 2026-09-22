@@ -8,6 +8,7 @@ from kraft import caps as _caps
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.usage import KINDS, spent
 
 
 def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
@@ -24,9 +25,14 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     `wall_ms` is derived when the column is NULL (`_common.session_wall_ms`) --
     unlike cost, time is knowable for a session that never reported, because
     the row carries the same two stamps `session_exited` would have used.
+
+    Each kind of token is summed apart (Ruling 211). `split_complete` is false
+    when some session spent tokens but predates the split -- its cache kinds
+    are NULL and its `tokens_in` is its whole input -- so `tokens_in` is then
+    uncached input plus that older unsplit input, and says so.
     """
     rows = conn.execute(
-        "SELECT id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status, "
+        f"SELECT id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, status, "
         "started_at, created_at, exited_at "
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
@@ -41,8 +47,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
             r["node_id"],
             {
                 "node": r["node_id"],
-                "tokens_in": 0,
-                "tokens_out": 0,
+                **dict.fromkeys(KINDS, 0),
                 "cost_usd": 0.0,
                 "wall_ms": 0,
                 "sessions": 0,
@@ -51,14 +56,17 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "wait_timed_out": 0,
                 "time_capped": 0,
                 "cost_complete": True,
+                "split_complete": True,
             },
         )
-        node["tokens_in"] += r["tokens_in"] or 0
-        node["tokens_out"] += r["tokens_out"] or 0
+        for k in KINDS:
+            node[k] += r[k] or 0
         node["cost_usd"] += r["cost_usd"] or 0.0
         # a session that spent tokens but reported no cost makes the sum a floor
-        if r["cost_usd"] is None and (r["tokens_in"] or r["tokens_out"]):
+        if r["cost_usd"] is None and spent(r):
             node["cost_complete"] = False
+        if r["tokens_cache_read"] is None and spent(r):
+            node["split_complete"] = False
         # Not `r["wall_ms"] or 0`: only `session_exited` writes that column, so
         # a paused, skipped, capped or still-running session contributed
         # nothing and a node that had been running 75 minutes summed to 0
@@ -79,8 +87,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     total = {
         k: sum(n[k] for n in nodes)
         for k in (
-            "tokens_in",
-            "tokens_out",
+            *KINDS,
             "cost_usd",
             "wall_ms",
             "sessions",
@@ -93,6 +100,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     # summing would read as "this item retried nine times" for nine clean nodes.
     total["rounds"] = max((n["rounds"] for n in nodes), default=0)
     total["cost_complete"] = all(n["cost_complete"] for n in nodes)
+    total["split_complete"] = all(n["split_complete"] for n in nodes)
     return {"total": total, "by_node": sorted(nodes, key=lambda n: n["node"])}
 
 

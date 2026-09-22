@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from kraft import events, store
+from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
 
 logger = logging.getLogger(__name__)
@@ -367,7 +368,8 @@ def budget_breach(conn, row, path: str) -> dict | None:
     """The first spend cap already reached over a launch at `path` (a task's,
     or a node's for its escalation turn), broadest scope first, or None
     (Ruling 195). A scope's spend is what the launches inside it have spent,
-    since the item was filed: `token_budget` its tokens in and out (a running
+    since the item was filed: `token_budget` its tokens in and out, cache
+    reads and writes included (`usage.spent`, Decision 18; a running
     session's live count included), `budget_usd` its dollars. A finished
     launch that spent tokens and reported no cost is unknown spend, which is
     never counted as free: a scope with any is refused under a dollar cap,
@@ -398,7 +400,7 @@ def budget_breach(conn, row, path: str) -> dict | None:
             "hook_point": s["node_id"] if s["hook_point"] == "escalation" else s["hook_point"],
         }
         for s in conn.execute(
-            "SELECT node_id, hook_point, status, tokens_in, tokens_out, cost_usd "
+            f"SELECT node_id, hook_point, status, {', '.join(_usage.KINDS)}, cost_usd "
             "FROM worker_sessions WHERE work_item_id = ?",
             (row["id"],),
         ).fetchall()
@@ -417,7 +419,8 @@ def budget_breach(conn, row, path: str) -> dict | None:
                 continue
             above[name] = cap
             if name == "token_budget":
-                spent = sum((s["tokens_in"] or 0) + (s["tokens_out"] or 0) for s in under)
+                # Every kind, cache reads and writes included (Decision 18).
+                spent = sum(_usage.spent(s) for s in under)
                 if spent >= cap:
                     return {
                         "scope": "tokens",
@@ -430,7 +433,7 @@ def budget_breach(conn, row, path: str) -> dict | None:
                 1
                 for s in under
                 if s["cost_usd"] is None
-                and ((s["tokens_in"] or 0) + (s["tokens_out"] or 0)) > 0
+                and _usage.spent(s) > 0
                 and s["status"] not in ("pending", "running")
             )
             spent = sum(s["cost_usd"] or 0.0 for s in under)

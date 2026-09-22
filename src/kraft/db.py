@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 37
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -150,6 +150,9 @@ CREATE TABLE worker_sessions (
   model          TEXT,
   tokens_in      INTEGER,
   tokens_out     INTEGER,
+  -- cache writes and reads, apart from tokens_in (Ruling 211), NULL: unknown split
+  tokens_cache_write INTEGER,
+  tokens_cache_read  INTEGER,
   cost_usd       REAL,
   wall_ms        INTEGER,
   exited_at      TEXT,
@@ -758,6 +761,12 @@ FROM worker_sessions""",
     ],
     # A work item's own policy override (Kraft-ab1bh).
     35: ["ALTER TABLE work_items ADD COLUMN policy_override TEXT"],
+    # Cache tokens apart from tokens_in (Ruling 211). An older row keeps its
+    # summed tokens_in and NULLs here: its split is unknown, not zero.
+    36: [
+        "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_write INTEGER",
+        "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_read INTEGER",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

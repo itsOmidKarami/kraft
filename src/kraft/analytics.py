@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 
 from kraft import caps as _caps
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.usage import KINDS, spent
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
@@ -309,8 +310,9 @@ def compute(
         "mrs_merged": 0,
         "wall_ms": 0,
         "human_wait_ms": 0,
-        "tokens_in": 0,
-        "tokens_out": 0,
+        # each kind apart (Ruling 211); `split_complete` as in `usage_rollup`
+        **dict.fromkeys(KINDS, 0),
+        "split_complete": True,
         "cost_usd": 0.0,
         # false once a session has spent tokens without reporting a cost: the sum
         # is then a floor, and the view says so rather than showing a total that
@@ -373,7 +375,7 @@ def compute(
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
     holes = ",".join("?" * len(ids))
     sessions = conn.execute(
-        f"SELECT id, work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, "
+        f"SELECT id, work_item_id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, "
         f"status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
         ids,
@@ -404,7 +406,7 @@ def compute(
                 "time_capped": 0,
             },
         )
-        tok = (s["tokens_in"] or 0) + (s["tokens_out"] or 0)
+        tok = spent(s)
         # Derived when the column is NULL: only `session_exited` writes it, and
         # a paused session never gets there -- 71 rows, every one of them with
         # the stamps to answer with (Kraft-s7c04.18). This rollup is the one
@@ -429,8 +431,10 @@ def compute(
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 
-        totals["tokens_in"] += s["tokens_in"] or 0
-        totals["tokens_out"] += s["tokens_out"] or 0
+        for k in KINDS:
+            totals[k] += s[k] or 0
+        if s["tokens_cache_read"] is None and tok:
+            totals["split_complete"] = False
         totals["cost_usd"] += s["cost_usd"] or 0.0
         totals["wall_ms"] += wall
         totals["capped_out"] += 1 if capped else 0
