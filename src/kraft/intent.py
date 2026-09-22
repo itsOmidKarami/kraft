@@ -35,7 +35,8 @@ class Report:
     duplicates: list[Requirement] = field(default_factory=list)
     malformed: list[Requirement] = field(default_factory=list)
     #: Frontend pins, which this checker counts but cannot resolve (Kraft-fxyz).
-    #: Reported so "not verified here" never reads as "not pinned".
+    #: Reported so "not verified here" never reads as "not pinned", and
+    #: rendered before the failing lines because they fail nothing.
     unverified: list[tuple[Requirement, str]] = field(default_factory=list)
 
     @property
@@ -186,18 +187,22 @@ def collect_node_ids(root: Path) -> set[str]:
 
 
 def render(report: Report) -> str:
+    """The report, the lines that fail the check last: a failed check reaches
+    the fix loop as a blind failure whose message is the log's last five
+    lines (`findings._extract_message`), so UNPINNED and FRONTEND, which
+    fail nothing, come first."""
     lines: list[str] = []
 
+    for req in report.unpinned:
+        lines.append(f"UNPINNED  {req.path}:{req.line}  REQ {req.id}")
+    for req, pin in report.unverified:
+        lines.append(f"FRONTEND  {req.path}:{req.line}  REQ {req.id} -> {pin} (not checked here)")
     for req in report.malformed:
         lines.append(f"MALFORMED {req.path}:{req.line}  REQ {req.id}")
     for req in report.duplicates:
         lines.append(f"DUPLICATE {req.path}:{req.line}  REQ {req.id}")
     for req, pin in report.broken:
         lines.append(f"BROKEN    {req.path}:{req.line}  REQ {req.id} -> {pin}")
-    for req in report.unpinned:
-        lines.append(f"UNPINNED  {req.path}:{req.line}  REQ {req.id}")
-    for req, pin in report.unverified:
-        lines.append(f"FRONTEND  {req.path}:{req.line}  REQ {req.id} -> {pin} (not checked here)")
 
     summary = (
         f"intent: {report.total} requirements, {report.pinned} pinned, "
@@ -213,7 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     tree = Path(args[0]) if args else DEFAULT_TREE
 
-    files = sorted(tree.glob("*.md")) if tree.is_dir() else []
+    # The README states the format, and its examples are not requirements.
+    files = sorted(p for p in tree.glob("*.md") if p.name != "README.md") if tree.is_dir() else []
     if not files:
         print(f"intent: no intent tree at {tree}, nothing to check.")
         return 0
