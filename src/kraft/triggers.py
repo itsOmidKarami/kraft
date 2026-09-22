@@ -67,6 +67,7 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
                 repo=trig.repo,
                 chain=chain,
                 effective_policy=api_deps.item_policy(st, trig.repo),
+                repository_steering=api_deps.repository_steering(st, trig.repo),
                 chain_template=trig.chain,
                 status="paused",
             )

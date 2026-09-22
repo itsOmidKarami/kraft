@@ -14,7 +14,7 @@ _CHAIN = """
   tasks: [{id: run, kind: subprocess, command: "true"}]
 """
 
-LAUNCH = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=None, skills_dir=None)
 
 
 async def _stuck(item_on, reason="task failed in node implementation"):

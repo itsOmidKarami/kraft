@@ -1124,6 +1124,7 @@ class ResolvedChain:
         attachment_kinds: frozenset[str] = frozenset(),
         skip_nodes: frozenset[str] = frozenset(),
         repository_policies: Mapping[str, InstancePolicy] | None = None,
+        repository_steering: Mapping[str, Mapping[str, str]] | None = None,
     ) -> MaterializedChain:
         """Bind this chain to one work item: its immutable target and the
         policy its tasks run under, with the chain's own override layered on
@@ -1145,6 +1146,9 @@ class ResolvedChain:
         by repository id; each gets this chain's layer too, and is what a task
         fanned out to that repository runs under. `effective_policy` is then
         the assembled checkout's: the tightest of them all.
+
+        `repository_steering` is `MaterializedChain.repository_steering`,
+        resolved by the caller (`api.deps.repository_steering`).
         """
         policy = self.chain_policy(effective_policy)
         per_repository = {
@@ -1159,6 +1163,7 @@ class ResolvedChain:
             policy=policy,
             repository_policies=per_repository,
             untrimmed=self.without_nodes(skip_nodes).chain if attachment_kinds else None,
+            repository_steering=repository_steering,
         )
         # Every door that builds a snapshot comes through here -- intake by
         # any route, a trigger, a chain template switch -- so the refusal is
@@ -1491,6 +1496,9 @@ class _StoredMaterialization(BaseModel):
     repository_policies: dict[str, InstancePolicy] = {}
     #: `MaterializedChain.untrimmed`; absent when nothing is attached.
     untrimmed: Chain | None = None
+    #: `MaterializedChain.repository_steering`. Absent from a snapshot stored
+    #: before repository steering was frozen, which reads back as `None`.
+    repository_steering: dict[str, dict[str, str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -1520,6 +1528,15 @@ class MaterializedChain:
     #: nodes it trimmed from its own snapshot, never the live template
     #: (Kraft-s7c04.29, Kraft-2fyjt). None when nothing is attached.
     untrimmed: Chain | None = None
+    #: The steering each repository the item runs in selected in `repos.yaml`
+    #: at intake, resolved against the library's profiles: repository path to
+    #: an ordered name-to-instructions map, holding only repositories that
+    #: named any. Frozen like task steering: editing a profile or a
+    #: repository's `steering:` list reaches items filed afterwards. `None` is
+    #: a snapshot stored before this was frozen, whose launches read the
+    #: repository's names against the live library, the way they read the
+    #: steering files they were filed with (`adapters.agent.repo_steering`).
+    repository_steering: Mapping[str, Mapping[str, str]] | None = None
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`
     # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
@@ -1704,10 +1721,16 @@ class MaterializedChain:
             steering=self.chain.steering,
             repository_policies=dict(self.repository_policies),
             untrimmed=self.untrimmed,
+            repository_steering=(
+                None
+                if self.repository_steering is None
+                else {p: dict(t) for p, t in self.repository_steering.items()}
+            ),
         ).model_dump_json(
             # A single-repository item with no attachment keeps its exact shape.
             exclude=({"repository_policies"} if not self.repository_policies else set())
             | ({"untrimmed"} if self.untrimmed is None else set())
+            | ({"repository_steering"} if self.repository_steering is None else set())
         )
 
     @classmethod
@@ -1726,4 +1749,5 @@ class MaterializedChain:
             policy=stored.policy,
             repository_policies=stored.repository_policies,
             untrimmed=stored.untrimmed,
+            repository_steering=stored.repository_steering,
         )

@@ -44,7 +44,7 @@ THREE_NODES = """
 - {id: last, kind: exec, tasks: [{id: d, kind: subprocess, command: "true"}]}
 """
 
-LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 @pytest.fixture

@@ -27,7 +27,7 @@ from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
 
-LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(9, 3600))
 FIELDS = ("time_cap_minutes", "total_time_cap_minutes")
 WHAT = {"time_cap_minutes": "time cap", "total_time_cap_minutes": "total time cap"}

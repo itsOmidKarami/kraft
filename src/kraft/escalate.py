@@ -409,8 +409,10 @@ async def dispatch(
         inv = _agent.resolve_agent_task(
             ESCALATION_TASK,
             launch.repo_entry,
-            launch.steering_dir,
+            launch.library_steering,
             skills_dir=launch.skills_dir,
+            # The repository's steering, frozen with the item at intake.
+            **executor.frozen_steering(row),
             policy=policy,
         )
     except _agent.HarnessUnavailable as exc:

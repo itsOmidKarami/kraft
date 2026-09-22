@@ -66,7 +66,7 @@ async def _instruction(monkeypatch, tmp_path, database, run_dirs, *, auto=False,
         run_dirs,
         work_item_id="w1",
         message="please skip it",
-        launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
         auto=auto,
     )
     return seen["task_instruction"]

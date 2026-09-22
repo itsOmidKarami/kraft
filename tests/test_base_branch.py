@@ -337,7 +337,7 @@ async def test_the_straggler_sweep_runs_under_the_items_base_branch(item_on, tmp
         node,
         it.row(),
         it.repo,
-        launch=LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None),
+        launch=LaunchContext(repo_entry=entry_of({"setup_command": ""})),
     )
 
     assert status == "done"

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from kraft import caps, events, executor, store
+from kraft import caps, events, executor
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.templates.models import AgentTask, ResolvedNode
@@ -178,11 +178,10 @@ async def review(
         )
         return "undecided", hit.reason
     time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
-    snapshot = store.materialized_chain_of(row)
     inv = _agent.resolve_agent_task(
         auto_review.task,
         launch.repo_entry,
-        launch.steering_dir,
+        launch.library_steering,
         skills_dir=launch.skills_dir,
         # Item-wide overrides only -- an item marked cheap stays cheap for its
         # gate reviews too (Kraft-ui79: no per-gate floor). Deliberately *not*
@@ -190,8 +189,8 @@ async def review(
         # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
         # a different model does not carry that dial into its own gate review.
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
-        # The reviewer's steering, frozen with the chain at intake.
-        steering=snapshot.chain.steering if snapshot is not None else None,
+        # The reviewer's and the repository's steering, frozen at intake.
+        **executor.frozen_steering(row),
         # The gate scope's policy: its tool lists and sandbox, as for any task.
         policy=executor.scope_policy(row, auto_review),
     )

@@ -33,7 +33,7 @@ from kraft.executor.context import LaunchContext
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 def _agent(task_id="implement", **fields):
@@ -182,7 +182,7 @@ async def test_a_hook_with_its_own_skill_is_not_told_to_implement(item_on, fake_
         ],
     )
 
-    await _dispatch_each_node(it, launch=LaunchContext(repo_entry=None, steering_dir=None))
+    await _dispatch_each_node(it, launch=LaunchContext(repo_entry=None))
 
     impl_prompt, review_prompt = fake_agent.prompts()
     assert "Do not re-plan." in impl_prompt
@@ -213,7 +213,7 @@ async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fa
     ]
 
     await _dispatch_each_node(
-        it, launch=LaunchContext(repo_entry=entry_of({"test_scopes": scopes}), steering_dir=None)
+        it, launch=LaunchContext(repo_entry=entry_of({"test_scopes": scopes}))
     )
 
     impl_prompt, other_prompt = fake_agent.prompts()
@@ -240,7 +240,7 @@ async def test_dispatch_carries_the_notes_authorship_into_the_prompt(
         it = await item_on([_exec("verify", _agent("review"))], wid=source)
         await _dispatch_each_node(
             it,
-            launch=LaunchContext(repo_entry=None, steering_dir=None),
+            launch=LaunchContext(repo_entry=None),
             steer=executor.Steer("findings left unresolved: x", source=source),
         )
 

@@ -139,9 +139,10 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
     inv = _agent.resolve_agent_task(
         agent_task,
         launch.repo_entry,
-        launch.steering_dir,
+        launch.library_steering,
         skills_dir=launch.skills_dir,
         steering=snapshot.chain.steering,
+        repository_steering=snapshot.repository_steering,
         policy=scope_policy(item, scope),
     )
     return inv.allowed_tools, inv.deny_tools

@@ -605,7 +605,7 @@ def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
     path = tmp_path / "repos.yaml"
     path.write_text(_fenced("repos.yaml"))
 
-    repos = {r.id: r.model_dump() for r in config.load_repos(path, validate_steering=False)}
+    repos = {r.id: r.model_dump() for r in config.load_repos(path)}
     assert sorted(repos) == ["api", "platform", "product_root"]
     api, platform = repos["api"], repos["platform"]
     assert (api["forge"], api["project"]) == ("github", "acme/api")

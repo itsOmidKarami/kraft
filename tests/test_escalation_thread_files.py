@@ -26,7 +26,7 @@ _CHAIN = v1_chain(
     repo="/r",
 )
 _INIT = json.dumps({"type": "system", "subtype": "init", "session_id": "cli-1"})
-_LAUNCH = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+_LAUNCH = executor.LaunchContext(repo_entry=None, skills_dir=None)
 
 
 @pytest.fixture(autouse=True)

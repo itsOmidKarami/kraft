@@ -304,4 +304,4 @@ def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block)
     repos = tmp_path / "repos.yaml"
     repos.write_text(json.dumps({"repos": [{"path": "/r", "automated_review": block}]}))
     with pytest.raises(config.ConfigError, match="exactly one"):
-        config.load_repos(repos, validate_steering=False)
+        config.load_repos(repos)

@@ -217,7 +217,7 @@ def _row(repo: Path, base: str) -> dict:
 
 def _launch(repo: Path, sandbox: dict | None) -> LaunchContext:
     entry = {"path": str(repo)} | ({"sandbox": sandbox} if sandbox is not None else {})
-    return LaunchContext(repo_entry=entry_of(entry), steering_dir=None)
+    return LaunchContext(repo_entry=entry_of(entry))
 
 
 def test_a_planted_repository_stops_a_sandboxed_item_naming_its_path(repo):

@@ -36,7 +36,7 @@ def _walk(it, chain, node: str):
         work_item_id=it.id,
         start_index=[n.id for n in chain.nodes].index(node),
         policy=POLICY,
-        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
 

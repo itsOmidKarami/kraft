@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
@@ -184,7 +185,6 @@ class Invocation(NamedTuple):
 def resolve_invocation(
     binding: dict,
     repo_entry: RepoEntry | None,
-    steering_dir: Path | None,
     *,
     skills_dir: Path | None = None,
     escalate: bool = False,
@@ -198,9 +198,8 @@ def resolve_invocation(
     #: The harness profile id the launch runs on: the key the repo's
     #: per-profile `models:` is read at (Ruling 165). None reads no repo model.
     profile: str | None = None,
-    #: A V1 task's own steering, already resolved to text from its item's
-    #: snapshot (`resolve_agent_task`). Injected after the repo's, where a
-    #: binding's `steering:` file names would go.
+    #: The launch's steering texts, the repository's then the task's, already
+    #: resolved from the item's snapshot (`resolve_agent_task`).
     steering_texts: tuple[str, ...] = (),
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
@@ -213,26 +212,10 @@ def resolve_invocation(
     pd = profile_defaults or {}
     repo_deny = repo_entry.deny_tools if repo_entry else []
     deny = list(dict.fromkeys([*repo_deny, *binding.get("deny_tools", ())]))
-    repo_steering = repo_entry.steering if repo_entry else []
-    names = [*repo_steering, *binding.get("steering", ())]
-    if names and steering_dir is None:
-        # A configured `steering:` key evaporating silently is worse than a
-        # raise — unreachable in production (every real caller resolves a
-        # steering_dir), but a caller that passes None with names configured
-        # has a bug worth surfacing, not a launch worth degrading quietly.
-        raise _steering.SteeringError(
-            f"resolve_invocation: steering {names!r} configured but no steering_dir was given"
-        )
-    # repo first, then hook: the wider context before the narrower one, and
-    # fixed rather than merged cleverly — a reader debugging a prompt has to
-    # be able to predict what the agent saw.
-    read = _steering.Steering(dir=steering_dir).read(names) if names else ()
-    steering_texts = read + steering_texts
-    # `Steering.validate` (config load) checked repos.yaml's names and the
-    # hook's names as two separate lists, each against the budget on its own
-    # — two individually-valid lists can still blow the shared budget once
-    # combined here, which is the only place the real concatenation exists.
-    _steering.Steering.check_budget(steering_texts, where=f"resolve_invocation: {names!r} combined")
+    # The repository's and the task's lists were each checked on their own
+    # (repo save, intake); joined here, two that each fit can still blow the
+    # shared budget, and this is the only place the real concatenation exists.
+    _steering.Steering.check_budget(steering_texts, where="resolve_invocation: steering combined")
     # Hook-level only, deliberately: a method is what this *hook* does, where
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
@@ -296,13 +279,14 @@ class LaunchRefused(ValueError):
 def resolve_agent_task(
     task: AgentTask,
     repo_entry: RepoEntry | None,
-    steering_dir: Path | None,
+    library_steering: Mapping[str, str] | None = None,
     *,
     skills_dir: Path | None = None,
     escalate: bool = False,
     item_override: dict | None = None,
     harnesses: _harness.HarnessSet | None = None,
     steering: dict[str, str] | None = None,
+    repository_steering: Mapping[str, Mapping[str, str]] | None = None,
     policy: InstancePolicy | None = None,
 ) -> Invocation:
     """One V1 `AgentTask`'s launch.
@@ -331,12 +315,15 @@ def resolve_agent_task(
 
     `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
     and the only place a task's `steering:` names are read from -- never
-    `library.yaml`, never `steering_dir` (which still serves `repos.yaml`'s own
-    steering names). `None` is a snapshot stored before steering was frozen:
+    `library.yaml`. `None` is a snapshot stored before steering was frozen:
     a task selecting steering then raises `SteeringError` rather than run
-    unsteered or on today's text. The profile is looked up after it, so a
-    harness problem still reports as one.
+    unsteered or on today's text. `repository_steering` is the snapshot's
+    frozen repository steering, injected first (`steering.for_repository`);
+    `library_steering`, the live library's profiles, is read only for a
+    snapshot stored before that was frozen. The profile is looked up after
+    both, so a harness problem still reports as one.
     """
+    repo_texts = _steering.for_repository(repo_entry, repository_steering, library_steering)
     if task.steering and steering is None:
         raise _steering.SteeringError(
             f"selects steering {list(task.steering)!r}, but this work item was materialized "
@@ -373,13 +360,15 @@ def resolve_agent_task(
             **({"deny_tools": list(policy.deny_tools)} if policy is not None else {}),
         },
         repo_entry,
-        steering_dir,
         skills_dir=skills_dir,
         escalate=escalate,
         item_override=item_override,
         profile_defaults=profile.defaults,
         profile=profile.id,
-        steering_texts=tuple(steering[n] for n in task.steering) if task.steering else (),
+        # Repository first, then task: the wider context before the narrower
+        # one, fixed rather than merged, so a reader debugging a prompt can
+        # predict what the agent saw.
+        steering_texts=repo_texts + tuple((steering or {})[n] for n in task.steering),
     )
     if policy is None:
         return inv
@@ -526,8 +515,8 @@ def build_context(
         # The context-injection boundary (00_overview.md glossary) bans
         # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
         # rule governs the *channel*: this is the sanctioned one — the
-        # per-invocation system prompt — carrying files Kraft owns under
-        # $KRAFT_HOME/templates/steering/. Kraft reads nothing from inside
+        # per-invocation system prompt — carrying the steering profiles of
+        # Kraft's own library.yaml. Kraft reads nothing from inside
         # the target repo to build this. Written here because a future
         # reader finding a steering feature beside a rule banning steering
         # files would otherwise assume the rule was forgotten.

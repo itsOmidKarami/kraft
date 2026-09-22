@@ -117,7 +117,7 @@ async def test_verdict_resolution(monkeypatch, result, expected, database, run_d
     monkeypatch.setattr("kraft.gate_review._agent.run_agent_task", _fake_agent(result, seen))
 
     await _seed(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     verdict, _note = await gate_review.review(
         database,
         run_dirs,
@@ -142,7 +142,7 @@ async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, datab
             c, "w1", json.dumps({"model": "sonnet", "effort": "low"})
         )
     )
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await gate_review.review(
         database,
         run_dirs,
@@ -169,7 +169,6 @@ async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database
     await _seed(database, run_dirs, "w1")
     launch = executor.LaunchContext(
         repo_entry=entry_of({"sandbox": {"kind": "docker", "image": "kraft-worker:py"}}),
-        steering_dir=None,
         skills_dir=None,
     )
     await gate_review.review(
@@ -191,7 +190,7 @@ async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_di
     )
 
     await _seed(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await gate_review.review(
         database,
         run_dirs,
@@ -234,7 +233,7 @@ async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_
     )
 
     await _seed(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     with pytest.raises(agent.HarnessUnavailable, match="'claude' is disabled"):
         await gate_review.review(
             database,
@@ -309,7 +308,7 @@ async def _review_from_gate(
         rd,
         work_item_id=wid,
         policy=POLICY,
-        launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
         bd_cwd=None,
         on_approve=on_approve,
     )
@@ -492,7 +491,7 @@ async def test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop
         target=ChainPath.parse(walk.chain_of(row), "human_review_approval"),
         by_person=by_person,
         policy=POLICY,
-        launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
         on_approve=_passthrough_approve,
     )
 

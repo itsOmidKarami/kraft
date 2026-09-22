@@ -19,7 +19,7 @@ from kraft.executor import resuming
 from kraft.executor.context import LaunchContext
 from kraft.templates.models import MaterializedChain
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 def _exec(node_id, task_id="run"):

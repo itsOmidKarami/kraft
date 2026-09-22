@@ -24,7 +24,7 @@ from kraft.executor import dispatch, gates, stops, walk
 from kraft.executor.context import BUDGET, CONFIG_ERROR, LaunchContext
 from kraft.templates.models import MaterializedChain, ResolvedChain
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 TESTED = dataclasses.replace(
     NO_SETUP, repo_entry=entry_of({"setup_command": "", "test_command": "true"})
 )

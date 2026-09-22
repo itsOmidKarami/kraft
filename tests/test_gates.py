@@ -31,9 +31,7 @@ def _payloads(database, wid, etype):
 def _launch(tmp_path, **repo_entry):
     # The shipped spec task names a `steering:` profile, which dispatch still
     # resolves to a file (`seed_v1_library` writes it out beside the library).
-    return executor.LaunchContext(
-        repo_entry=repo_entry or None, steering_dir=tmp_path / "templates" / "steering"
-    )
+    return executor.LaunchContext(repo_entry=repo_entry or None)
 
 
 async def test_walk_stops_at_first_gate(tmp_path, database, run_dirs, repo):

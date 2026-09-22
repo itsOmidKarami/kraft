@@ -53,7 +53,7 @@ def _walk(it, *, repo_entry=NO_SETUP, **kwargs):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        launch=executor.LaunchContext(repo_entry=repo_entry, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=repo_entry),
         **kwargs,
     )
 
@@ -1094,7 +1094,7 @@ def _run(database, run_dirs, wid, tracker):
         run_dirs,
         work_item_id=wid,
         bd_cwd=str(tracker),
-        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
 

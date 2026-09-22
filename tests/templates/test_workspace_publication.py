@@ -422,7 +422,7 @@ async def _walk(database, run_dirs, row, fake, monkeypatch) -> str:
         work_item_id=row["id"],
         policy=None,
         launch=LaunchContext(
-            repo_entry=entry_of({"setup_command": "", "forge": "github"}), steering_dir=None
+            repo_entry=entry_of({"setup_command": "", "forge": "github"}),
         ),
     )
 

@@ -553,7 +553,7 @@ def test_an_unrecognised_key_loads_with_a_warning_naming_it_and_the_repo(tmp_pat
     but none may pass silently: an operator reading the log learns it binds
     nothing."""
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
-        (entry,) = config.load_repos(_entry(tmp_path, legacy_widget=1), validate_steering=False)
+        (entry,) = config.load_repos(_entry(tmp_path, legacy_widget=1))
 
     assert entry.path == "/r"
     assert any("legacy_widget" in r.message and "/r" in r.message for r in caplog.records)
@@ -575,8 +575,7 @@ def test_the_keys_kraft_itself_writes_are_not_unrecognised(tmp_path, caplog):
     and read elsewhere; they are no operator's typo."""
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
         config.load_repos(
-            _entry(tmp_path, name="r", enabled=True, default_chain_template="default"),
-            validate_steering=False,
+            _entry(tmp_path, name="r", enabled=True, default_chain_template="default")
         )
 
     assert not caplog.records
@@ -590,7 +589,7 @@ def test_a_key_one_typo_from_a_field_is_refused_naming_the_field(tmp_path, typo,
     """`automated_reviews:` would otherwise read as "no reviewer configured" --
     the one outcome Ruling 171 records as a deliberate choice."""
     with pytest.raises(config.ConfigError, match=f"did you mean '{meant}'"):
-        config.load_repos(_entry(tmp_path, **{typo: {}}), validate_steering=False)
+        config.load_repos(_entry(tmp_path, **{typo: {}}))
 
 
 # ── workspaces (`workspace-declares-root-and-members`) ──

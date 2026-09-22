@@ -16,7 +16,7 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
@@ -107,7 +107,7 @@ def write_text(path: str | Path, text: str) -> None:
     """Write `text`, atomically. A reader sees the old file or the new one.
 
     Every config Kraft owns is read straight off disk by something that did not
-    write it -- steering bodies at agent dispatch, the rest at load -- so a
+    write it -- a launch, an intake, the next load -- so a
     half-written file is a half-configured launch, not a cosmetic problem.
     """
     path = Path(path)
@@ -354,12 +354,13 @@ class RepoEntry(BaseModel):
 
     @model_validator(mode="after")
     def _steering_exists(self, info: ValidationInfo) -> RepoEntry:
-        # The context carries `steering_dir` only when the caller wants steering
-        # checked (`load_repos(validate_steering=True)`).
-        steering_dir = (info.context or {}).get("steering_dir")
-        if steering_dir is not None:
+        # The context carries the library's steering profiles (name to
+        # instructions) only when the caller wants the names checked
+        # (`load_repos(steering=...)`): a repository saved from Settings.
+        profiles = (info.context or {}).get("steering")
+        if profiles is not None:
             try:
-                _steering.Steering(dir=steering_dir).validate(self.steering, where="repos.yaml")
+                _steering.select(self.steering, profiles, where=f"repos.yaml: {self.path}")
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self
@@ -468,23 +469,18 @@ def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
     return out
 
 
-def load_repos(
-    path: str | Path, *, steering_dir: Path | None = None, validate_steering: bool = True
-) -> list[RepoEntry]:
+def load_repos(path: str | Path, *, steering: Mapping[str, str] | None = None) -> list[RepoEntry]:
     """Parse `repos.yaml` into its entries, or raise `ConfigError`.
 
-    `validate_steering` defaults on for direct/library callers, but the API's
-    read routes (`GET /repos`, `PATCH`/`DELETE /repos`, template validation)
-    pass it off: a steering file deleted after the fact must not 422 the very
-    screens an operator would use to fix it (the only escape otherwise is
-    hand-editing YAML — there is no Settings screen for steering files). The
-    write path stays strict: `_validate_repos` loads the candidate with
-    `validate_steering=True` (the default) before it is ever saved, and
-    `_launch`/`run_agent_task` already tolerate a steering name whose file is
-    gone by the time it is actually read.
+    `steering` is the library's steering profiles, name to instructions. When
+    given, every entry's `steering:` names must be among them and fit the
+    budget: the repository save passes it, so a name the library does not
+    define is refused there. Every reader leaves it off: a profile removed
+    after the fact must not 422 the very screens an operator would use to fix
+    it. Intake resolves the names again, and refuses an item whose
+    repository names a profile the library no longer has.
     """
     path = Path(path)
-    steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
     data = read_yaml(path, REPOS_DEFAULT)
     if "repositories" in data:
         # Loud, not ignored: a file keyed this way would otherwise load no
@@ -497,7 +493,7 @@ def load_repos(
     repos = data.get("repos") or []
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")
-    ctx = {"steering_dir": steering_dir} if validate_steering else None
+    ctx = {"steering": steering} if steering is not None else None
     out: list[RepoEntry] = []
     for r in _migrate_submodule_edges(repos):
         try:
@@ -539,12 +535,12 @@ def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[
 
     A workspace one of whose repositories sets a sandbox is refused too
     (`sandboxed_members`). `refuse_sandboxed=False` is for `GET /repos`
-    alone, the same carve-out `validate_steering` makes: the listing doctor
+    alone, the same carve-out every reader of `load_repos` makes: the listing doctor
     reads to fail that repository's row must still answer."""
     # Here, not at the top: `kraft.templates` imports this module.
     from kraft.templates.environment import Workspace
 
-    repos = load_repos(path, validate_steering=False)
+    repos = load_repos(path)
     ids = {r.id for r in repos if r.id}
     raw = read_yaml(path, REPOS_DEFAULT).get("workspaces") or {}
     if not isinstance(raw, dict):

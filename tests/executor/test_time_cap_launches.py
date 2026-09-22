@@ -19,7 +19,7 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
 from kraft.worker import reattach
 
-LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 def _agent(task_id: str, **fields) -> dict:

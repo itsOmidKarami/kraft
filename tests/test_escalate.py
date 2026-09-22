@@ -108,7 +108,7 @@ async def test_dispatch_on_a_paused_item_does_not_claim_needs_human_or_offer_ret
 
     wid = "w1"
     await _seed_paused(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database,
         run_dirs,
@@ -144,7 +144,7 @@ async def test_dispatch_sends_the_message_and_state_and_marks_the_session_non_wo
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     status = await escalate.dispatch(
         database,
         run_dirs,
@@ -181,7 +181,7 @@ async def test_dispatch_resumes_an_existing_thread(monkeypatch, database, run_di
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
     await database.write(lambda c: store.set_escalation_session(c, wid, "cli-existing"))
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database, run_dirs, work_item_id=wid, message="try again", launch=launch
     )
@@ -221,7 +221,7 @@ async def test_dispatch_default_continues_the_latest_thread(monkeypatch, databas
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id=wid, message="m1", launch=launch)
     assert seen["kwargs"]["thread"] == 1
     assert seen["kwargs"]["resume_session_id"] is None  # first-ever turn
@@ -269,7 +269,7 @@ async def test_dispatch_new_thread_starts_fresh_and_bumps_thread_number(
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id=wid, message="m1", launch=launch)
     assert seen["kwargs"]["thread"] == 1
     await escalate.dispatch(
@@ -303,7 +303,7 @@ async def test_dispatch_new_thread_on_first_ever_escalation_is_still_thread_one(
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database, run_dirs, work_item_id=wid, message="m1", launch=launch, new_thread=True
     )
@@ -325,7 +325,7 @@ async def test_dispatch_records_the_message_as_an_event(monkeypatch, database, r
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database, run_dirs, work_item_id=wid, message="look at src/widget.py", launch=launch
     )
@@ -354,7 +354,7 @@ async def test_dispatch_auto_uses_the_synthesized_message_and_auto_opening(
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database,
         run_dirs,
@@ -381,7 +381,7 @@ async def test_dispatch_manual_is_unchanged_by_the_auto_param(monkeypatch, datab
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database, run_dirs, work_item_id=wid, message="please look", launch=launch
     )
@@ -400,7 +400,7 @@ async def test_dispatch_auto_tags_the_event(monkeypatch, database, run_dirs):
 
     wid = "w1"
     await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(
         database, run_dirs, work_item_id=wid, message="msg", launch=launch, auto=True
     )
@@ -438,7 +438,6 @@ def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
             await _seed_needs_human(database, rd, wid)
             launch = executor.LaunchContext(
                 repo_entry=entry_of({"sandbox": {"kind": "docker", "image": "kraft-worker:py"}}),
-                steering_dir=None,
                 skills_dir=None,
             )
             return await escalate.dispatch(
@@ -519,7 +518,7 @@ def _dispatch_with(monkeypatch, tmp_path, seed_events):
                 rd,
                 work_item_id="w1",
                 message="have a look",
-                launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+                launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
             )
         finally:
             await database.close()
@@ -595,7 +594,7 @@ async def test_dispatch_resolves_its_agent_through_its_harness_profile(
     monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
 
     await _seed_needs_human(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id="w1", message="m", launch=launch)
     assert seen == {
         "command": "/opt/fake-claude",
@@ -620,7 +619,7 @@ async def test_an_escalation_on_an_unavailable_profile_launches_nothing(
 
     monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
     await _seed_needs_human(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
 
     status = await escalate.dispatch(
         database, run_dirs, work_item_id="w1", message="m", launch=launch
@@ -661,7 +660,7 @@ async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, d
         run_dirs,
         work_item_id="w1",
         message="any update?",
-        launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
     )
     assert agent_mod.SAFETY_RULES in launched["argv"]
 
@@ -694,7 +693,7 @@ async def test_a_resumed_escalation_keeps_its_original_runtime(
 
     monkeypatch.setattr("kraft.escalate._agent.resolve_agent_task", profile_says)
     await _seed_needs_human(database, run_dirs, "w1")
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
     await escalate.dispatch(database, run_dirs, work_item_id="w1", message="1", launch=launch)
     model["now"] = "sonnet"
 

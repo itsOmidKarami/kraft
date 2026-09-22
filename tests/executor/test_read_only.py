@@ -24,7 +24,7 @@ from kraft.executor import dispatch, walk
 from kraft.executor.context import READ_ONLY_VIOLATED, LaunchContext
 from kraft.templates import models as tm
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 def _git(cwd: Path, *args: str) -> str:

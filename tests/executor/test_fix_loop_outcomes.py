@@ -56,7 +56,7 @@ def _walk_node(it):
         it.row(),
         it.repo,
         policy=_policy_(),
-        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
 

@@ -26,7 +26,7 @@ CHAIN = """
 - {id: b, kind: exec, tasks: [{id: w, kind: subprocess, command: "true"}]}
 """
 
-LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 REST = ["a.second.z", "b.main.w"]
 
 

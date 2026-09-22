@@ -68,7 +68,7 @@ async def tick(app) -> list[str]:
         return []
 
     try:
-        repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(deps.repos_path(st))
     except config_mod.ConfigError as exc:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
         return []
@@ -148,6 +148,7 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
             repo=repo.path,
             chain=chain,
             effective_policy=deps.item_policy(st, repo.path),
+            repository_steering=deps.repository_steering(st, repo.path),
             bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the

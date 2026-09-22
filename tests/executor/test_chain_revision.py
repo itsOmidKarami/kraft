@@ -14,7 +14,7 @@ from kraft.api.routes import gates as gates_route
 from kraft.executor.context import LaunchContext
 from kraft.templates.library import TemplateLibrary
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 GATE = "revision_approval"
 
 LIBRARY = TemplateLibrary.from_mappings(

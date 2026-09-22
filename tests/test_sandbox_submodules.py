@@ -326,7 +326,7 @@ async def test_an_escalations_self_retry_stops_before_it_refreshes_the_worktree(
         lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
     )
     launch = LaunchContext(
-        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}), steering_dir=None
+        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}),
     )
 
     status = await gates.resume_after_escalation(
@@ -344,7 +344,7 @@ def test_the_guard_lets_a_sandboxed_item_without_submodules_through():
     row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
     row["submodules"] = None
     launch = LaunchContext(
-        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}), steering_dir=None
+        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}),
     )
     assert stops.refuse_sandboxed_submodules(row, launch) is None
 
@@ -356,6 +356,6 @@ def test_the_guard_reads_an_unreadable_repos_yaml_as_a_stop_not_as_no_sandbox():
     row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
     row["submodules"] = '["repos/pkg"]'
     poisoned = deps._PoisonedRepoEntry(config.ConfigError("repos.yaml: broken"))
-    launch = LaunchContext(repo_entry=poisoned, steering_dir=None)
+    launch = LaunchContext(repo_entry=poisoned)
     with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
         stops.refuse_sandboxed_submodules(row, launch)

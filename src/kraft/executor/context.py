@@ -128,22 +128,25 @@ class LaunchContext:
     """The repo config an agent dispatch resolves against.
 
     `None` on any field means "nothing configured", not "look elsewhere" —
-    `agent.resolve_invocation` already treats a missing repo entry and a missing
-    steering dir as empty. Threaded keyword-only, `launch: LaunchContext | None
-    = None`, from `kraft.api` down through every walk/resume path so a work item's
-    repo config reaches its agent launches, including reattach and the fix cycle.
+    `agent.resolve_invocation` already treats a missing repo entry as empty.
+    Threaded keyword-only, `launch: LaunchContext | None = None`, from
+    `kraft.api` down through every walk/resume path so a work item's repo
+    config reaches its agent launches, including reattach and the fix cycle.
 
     `skills_dir` is where an operator may override a bundled method file;
     `None` means the packaged copies only.
     """
 
     repo_entry: RepoEntry | None
-    steering_dir: Path | None
     skills_dir: Path | None = None
     #: Every connected repository entry with an `id`, by that id: what a task
     #: fanned out to a workspace member reads instead of `repo_entry` (its
     #: setup, test scopes, sandbox). Empty when nothing has an id.
     repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
+    #: The live library's steering profiles, name to instructions: read only
+    #: by an item whose snapshot predates frozen repository steering
+    #: (`steering.for_repository`). Everything else runs on its snapshot's.
+    library_steering: Mapping[str, str] = field(default_factory=dict)
 
 
 class Steer:

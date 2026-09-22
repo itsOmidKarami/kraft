@@ -101,7 +101,7 @@ class Indexer:
         if self._repos_path is None:
             return []
         try:
-            repos = config_mod.load_repos(self._repos_path, validate_steering=False)
+            repos = config_mod.load_repos(self._repos_path)
         except (config_mod.ConfigError, OSError) as exc:
             logger.warning("repo config unreadable, indexing without it: %s", exc)
             return []
