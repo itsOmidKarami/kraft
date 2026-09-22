@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -44,6 +45,50 @@ Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
 
 class TemplateEnvironmentError(Exception):
     pass
+
+
+#: What `git check-ref-format` never allows anywhere in a ref name: control
+#: characters, space and DEL, `~ ^ : ? * [ \\`, `..`, `@{` and `//`.
+_REF_FORBIDDEN = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]|\.\.|@\{|//")
+
+
+def branch_name_problem(name: str) -> str | None:
+    """Why `git check-ref-format --branch` would refuse `name`, or None.
+
+    Pure Python, so the model can refuse a bad name at validation whatever
+    door built it -- intake, a rehydrated snapshot, a retry fork, a script --
+    with no git call (Kraft-j4adz). A leading `-` is refused first by name:
+    it is the one that would reach `gh pr create --base` and friends as an
+    option. Stricter than git only on `@`, which `--branch` reads as the
+    current branch."""
+    if not name:
+        return "is empty"
+    if name.startswith("-"):
+        return "starts with '-', which a command would read as an option"
+    if name in ("@", "HEAD"):
+        return f"is {name!r}, which git reserves"
+    if (found := _REF_FORBIDDEN.search(name)) is not None:
+        return f"contains {found.group()!r}"
+    if name.startswith("/") or name.endswith("/"):
+        return "starts or ends with '/'"
+    if name.endswith("."):
+        return "ends with '.'"
+    for part in name.split("/"):
+        if part.startswith("."):
+            return f"has a component {part!r} starting with '.'"
+        if part.endswith(".lock"):
+            return f"has a component {part!r} ending with '.lock'"
+    return None
+
+
+def _valid_branch(name: str) -> str:
+    problem = branch_name_problem(name)
+    if problem is not None:
+        raise ValueError(f"base branch {name!r} is not a valid branch name: it {problem}")
+    return name
+
+
+BranchName = Annotated[StrictStr, AfterValidator(_valid_branch)]
 
 
 class RootPointerPolicy(StrEnum):
@@ -144,9 +189,11 @@ class WorkItemTarget(BaseModel):
     #: branch. It names the item's own repository, or a workspace's root only:
     #: each member keeps its own default branch, as it always has, since one
     #: branch name means nothing across repositories that need not share it.
-    #: Read through `builtins.base_branch`, never here directly. The pattern
-    #: keeps it from ever reaching git as an option.
-    base_branch: Annotated[StrictStr, Field(min_length=1, pattern=r"^[^-]")] | None = None
+    #: Read through `builtins.base_branch`, never here directly. `BranchName`
+    #: holds it to git's own branch-name rules, and off a leading `-`, on
+    #: every validation -- a snapshot rehydrated or a target built by any door
+    #: is checked, not only intake's (Kraft-j4adz).
+    base_branch: BranchName | None = None
 
     @model_validator(mode="after")
     def _kind_owns_its_fields(self) -> WorkItemTarget:

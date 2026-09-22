@@ -33,6 +33,7 @@ from kraft.templates.environment import (
     RootPointerPolicy,
     TemplateEnvironmentError,
     WorkItemTarget,
+    branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
 
@@ -343,12 +344,10 @@ async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
     if branch is None:
         return None
     path = Path(repo)
-    # `refs/heads/` in front, so no name ever reaches git as an option.
-    if branch.startswith("-") or (
-        config_mod.git_read(path, "check-ref-format", f"refs/heads/{branch}", expected_failure=True)
-        is None
-    ):
-        raise HTTPException(422, f"base branch {branch!r} is not a valid branch name")
+    # The model's own rules, checked here first so the refusal is one
+    # sentence rather than pydantic's error list, and before any git call.
+    if (problem := branch_name_problem(branch)) is not None:
+        raise HTTPException(422, f"base branch {branch!r} is not a valid branch name: it {problem}")
     if not config_mod.git_read(path, "remote", "get-url", "origin", expected_failure=True):
         raise HTTPException(
             422, f"base branch {branch!r} cannot be checked: {repo} has no origin remote"

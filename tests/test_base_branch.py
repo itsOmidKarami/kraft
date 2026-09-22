@@ -72,11 +72,69 @@ async def test_an_items_worktree_starts_from_its_base_branch(
     assert committed_under == ["release"]
 
 
-@pytest.mark.parametrize("name", ["-x", ""], ids=["an-option", "empty"])
-def test_a_target_never_holds_a_base_branch_git_would_read_as_an_option(name):
-    """Whatever door a target came through, including a rehydrated snapshot."""
-    with pytest.raises(ValueError):
+_REFUSED = {
+    "empty": "",
+    "an-option": "-x",
+    "a-range": "a..b",
+    "a-reflog-expression": "@{upstream}",
+    "at-alone": "@",
+    "head": "HEAD",
+    "a-space": "a b",
+    "a-newline": "a\nb",
+    "a-control-character": "a\x01b",
+    "a-delete": "a\x7fb",
+    "a-tilde": "a~1",
+    "a-caret": "a^",
+    "a-colon": "a:b",
+    "a-question-mark": "a?",
+    "a-star": "a*",
+    "a-bracket": "a[b",
+    "a-backslash": "a\\b",
+    "a-leading-slash": "/a",
+    "a-trailing-slash": "a/",
+    "a-double-slash": "a//b",
+    "a-trailing-dot": "a.",
+    "a-component-starting-with-a-dot": "a/.b",
+    "a-lock-component": "a.lock/b",
+    "a-trailing-lock": "a.lock",
+}
+_ACCEPTED = {"plain": "release", "nested": "release/1.2", "dashes-and-dots": "v1.2-rc.1"}
+
+
+def _git_accepts(name):
+    """`git check-ref-format --branch`, the rules the model mirrors."""
+    return (
+        subprocess.run(
+            ["git", "check-ref-format", "--branch", name], capture_output=True
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.parametrize("name", list(_REFUSED.values()), ids=list(_REFUSED))
+def test_a_target_refuses_a_base_branch_git_would_refuse(name):
+    """Kraft-j4adz: the model is the guard whatever door built the target --
+    intake, a rehydrated snapshot, a retry fork, a script -- and it refuses
+    what `git check-ref-format --branch` refuses, a leading `-` included."""
+    with pytest.raises(ValueError, match="base branch"):
         WorkItemTarget.for_repository("target", base_branch=name)
+    # Stricter than git on one: `--branch` reads `@` as the current branch,
+    # which is no name an item could target.
+    assert not _git_accepts(name) or name == "@", "git takes it, so the model must"
+
+
+@pytest.mark.parametrize("name", list(_ACCEPTED.values()), ids=list(_ACCEPTED))
+def test_a_target_takes_a_base_branch_git_would_take(name):
+    assert _git_accepts(name)
+    assert WorkItemTarget.for_repository("target", base_branch=name).base_branch == name
+
+
+def test_a_rehydrated_target_is_checked_too():
+    """A snapshot carries no exemption: the rules run on validation, not in
+    the constructor helpers."""
+    raw = WorkItemTarget.for_repository("target").model_dump(mode="json")
+    with pytest.raises(ValueError, match="base branch"):
+        WorkItemTarget.model_validate({**raw, "base_branch": "a..b"})
 
 
 @pytest.mark.parametrize(
