@@ -75,7 +75,7 @@ async def _beads_search(st, q: str, limit: int) -> list[dict]:
         # Best-effort by contract, same as `beads.search` itself: a malformed
         # repos.yaml is a missing footer strip, not a 500 on the search route.
         return []
-    cwds = [r["path"] for r in repos if (Path(r["path"]) / ".beads").is_dir()]
+    cwds = [r.path for r in repos if (Path(r.path) / ".beads").is_dir()]
     if not cwds:
         return []
     merged: dict[str, dict] = {}

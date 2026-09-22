@@ -8,12 +8,13 @@ import shlex
 import sys
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor, store
 from kraft import policy as _policy
 from kraft.executor import walk
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 KEY = "build.fix_loop"
 
 

@@ -598,11 +598,11 @@ async def get_intake(request: Request):
     repo_pickups: dict[str, dict] = {}
     for r in repos:
         try:
-            ready = await beads.ready(cwd=r["path"])
+            ready = await beads.ready(cwd=r.path)
             count = len(ready)
         except Exception:  # noqa: BLE001 -- a settings-page read must not 500 on a bad repo
             count = None
-        repo_pickups[r["path"]] = {"items": count, "last_picked_up": last_picked_up.get(r["path"])}
+        repo_pickups[r.path] = {"items": count, "last_picked_up": last_picked_up.get(r.path)}
     data["repo_pickups"] = repo_pickups
     data["recent_pickups"] = st.db.read(store.recent_auto_pickups)
     return data

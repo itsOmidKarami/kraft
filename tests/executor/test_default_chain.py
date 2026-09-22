@@ -11,6 +11,7 @@ which a test library seeded for the fake agent turns into a subprocess.
 from pathlib import Path
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor, store
 from kraft import policy as _policy
@@ -19,7 +20,7 @@ from kraft.templates.library import TemplateLibrary
 from kraft.templates.models import BuiltinTask
 
 SEEDED = Path(__file__).resolve().parents[2] / "templates"
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(3, 3600))
 
 
@@ -148,7 +149,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     ]
     [restart] = it.events("base_change_restart")
     assert restart["payload"]["restart_from"] == "verification"
-    assert gates.pending_gate(it.database, it.id) == "chain_review"
+    assert gates.pending_gate(it.database, it.id) == "final_review"
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
-    assert requested == ["local_review", "chain_review"]
+    assert requested == ["local_review", "final_review"]
     assert it.events("gate_reopened") == []

@@ -2,6 +2,7 @@
 launch (intent-process design §4)."""
 
 import pytest
+from support.harness import entry_of
 
 from kraft import skill
 from kraft.adapters import agent
@@ -15,7 +16,7 @@ def _system_prompt(cmd):
 def test_the_intent_block_sits_after_the_method_and_before_steering(run):
     prompt = _system_prompt(
         run(
-            repo_entry={"intent_dir": "docs/intent"},
+            repo_entry=entry_of({"intent_dir": "docs/intent"}),
             method_text="Write it in one page.",
             steering_texts=("Use tabs.",),
         )["cmd"]
@@ -36,4 +37,5 @@ def test_the_intent_block_sits_after_the_method_and_before_steering(run):
     ids=["no-entry", "empty-entry", "null-intent-dir"],
 )
 def test_no_intent_dir_no_intent_block(run, repo_entry):
-    assert agent.INTENT_HEADING not in _system_prompt(run(repo_entry=repo_entry)["cmd"])
+    entry = entry_of(repo_entry) if repo_entry is not None else None
+    assert agent.INTENT_HEADING not in _system_prompt(run(repo_entry=entry)["cmd"])

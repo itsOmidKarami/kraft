@@ -15,7 +15,7 @@ from pathlib import Path
 
 import psutil
 import pytest
-from support.harness import fails_once, fake_docker_bin
+from support.harness import entry_of, fails_once, fake_docker_bin
 
 from kraft import events, logs, store
 from kraft.adapters import subprocess as sp
@@ -199,7 +199,7 @@ async def test_run_task_builds_the_child_env_instead_of_inheriting_os_environ(
         ["sh", "-c", f'env > "{dumped}"; printf \'{{"status":"done"}}\' > "$KRAFT_RESULT_PATH"'],
         node_id="implementation",
         hook_point="on.implementation.start",
-        repo_entry={"env": {"MY_REPO": "1"}},
+        repo_entry=entry_of({"env": {"MY_REPO": "1"}}),
     )
 
     assert status == "done"
@@ -579,7 +579,7 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
         _writes_result({"status": "done"}),
         sandbox=DOCKER,
         env={"PYTHONDONTWRITEBYTECODE": "1"},
-        repo_entry={"env": {"MY_REPO": "1"}},
+        repo_entry=entry_of({"env": {"MY_REPO": "1"}}),
     )
 
     assert status == "done"

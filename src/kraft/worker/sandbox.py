@@ -4,9 +4,10 @@
 a sandbox: it does not stop a worker that spawns a shell directly, and a
 command-scoped allowlist does not help either -- an allowlisted `pytest`
 still executes a `conftest.py` the implementation node itself wrote, in the
-same host process, as the invoking user. This module is the one place that
-knows what a `sandbox:` value looks like, which of a binding's and a repo's
-wins, and how to wrap a command to actually run inside one.
+same host process, as the invoking user. What a `sandbox:` value looks like
+is `policy.SandboxPolicy`'s, and which one an item runs in is
+`dispatch.item_sandbox`'s; this module is how a command actually runs inside
+one.
 
 Isolation here is two halves, and the second is the load-bearing one. The
 mounts (`docker_argv`) keep the container out of everything it has no
@@ -20,9 +21,8 @@ file it used.
 Read docs/superpowers/specs/2026-09-13-worker-sandbox-docker-design.md for
 the design this implements.
 
-Off by default: nothing calls `resolve` unless a binding or a repo entry sets
-`sandbox:` at all, and `docker_argv` is only ever called with a resolved,
-already-validated value.
+Off by default: `docker_argv` is only ever called for an item something
+sandboxes, with a value its model already validated.
 """
 
 from __future__ import annotations
@@ -32,11 +32,6 @@ import os
 import subprocess
 from collections.abc import MutableMapping
 from pathlib import Path
-
-#: Only kind implemented. A binding naming any other kind is rejected at
-#: config load, not at dispatch -- the same "unknown X" treatment an unknown
-#: agent profile or forge backend already gets (`templates.py`).
-_KNOWN_KINDS = {"docker"}
 
 #: Kraft's own vars, plus whichever auth var this install's `claude` CLI
 #: actually uses, forwarded bare (`-e NAME`, no value) so docker copies each
@@ -57,44 +52,6 @@ FORWARDED_ENV = (
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
 )
-
-
-class SandboxError(Exception):
-    pass
-
-
-def validate(sandbox: object, *, where: str) -> None:
-    """A binding's or a repo's own `sandbox:` value, or raise.
-
-    Only called with a value that is neither `None` nor `False` -- both of
-    those are meaningful ("no sandbox" / "explicitly off") and have no shape
-    to check, so callers filter them out before reaching here.
-    """
-    if not isinstance(sandbox, dict):
-        raise SandboxError(f"{where}: 'sandbox' must be a mapping, not {sandbox!r}")
-    kind = sandbox.get("kind")
-    if kind not in _KNOWN_KINDS:
-        raise SandboxError(
-            f"{where}: sandbox kind {kind!r} is not supported; known: {sorted(_KNOWN_KINDS)}"
-        )
-    image = sandbox.get("image")
-    if not isinstance(image, str) or not image:
-        raise SandboxError(f"{where}: sandbox needs a non-empty string 'image'")
-
-
-def resolve(binding: dict, repo_entry: dict | None) -> dict | None:
-    """The sandbox a hook launches under.
-
-    A repo's own `sandbox` wins over the binding's wholesale -- the same
-    override-wins-over-registry rule `test_scopes`/`test_command` already use
-    for `command` (`executor/dispatch.py`), not a second rule and not a
-    merge. `None` on the repo entry (no `sandbox` key at all, the common
-    case) falls through to the binding's; `False` turns off a binding that
-    turned sandboxing on.
-    """
-    repo_sandbox = (repo_entry or {}).get("sandbox")
-    sandbox = repo_sandbox if repo_sandbox is not None else binding.get("sandbox")
-    return sandbox or None
 
 
 def submodule_refusal(who: str) -> str:

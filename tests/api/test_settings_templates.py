@@ -144,7 +144,8 @@ def test_templates_lists_the_v1_chains_intake_materializes(tmp_path, monkeypatch
     assert list(got) == sorted(got)
     default = TemplateLibrary.from_yaml_dir(templates).resolve_chain("default")
     assert got["default"]["nodes"] == [store.node_view(n) for n in default.nodes]
-    assert got["default"]["gates"] == 4
+    # spec, plan, chain revision (Kraft-oydes), local review, chain review.
+    assert got["default"]["gates"] == 5
     assert got["default"]["error"] is None
     assert got["broken"]["nodes"] == []
     assert "no_such_node" in got["broken"]["error"]

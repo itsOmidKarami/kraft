@@ -5,6 +5,7 @@ controls and run forks")."""
 from __future__ import annotations
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor, store
 from kraft.executor import dispatch
@@ -25,7 +26,7 @@ CHAIN = """
 - {id: b, kind: exec, tasks: [{id: w, kind: subprocess, command: "true"}]}
 """
 
-LAUNCH = executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 REST = ["a.second.z", "b.main.w"]
 
 

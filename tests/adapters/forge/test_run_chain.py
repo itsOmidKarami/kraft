@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo_with_submodule, v1_resolved
+from support.harness import entry_of, isolated_bd, make_repo_with_submodule, v1_resolved
 from support.workspace import workspace_target
 
 from kraft import builtins as _builtins
@@ -21,8 +21,8 @@ from .nodes import back_half, forge_node
 
 #: A repo that needs no preparation, on a forge. A V1 forge task always runs on
 #: `backend: auto`, which reads the forge off the repo entry.
-NO_SETUP = {"setup_command": ""}
-ON_A_FORGE = {**NO_SETUP, "forge": "github"}
+NO_SETUP = entry_of({"setup_command": ""})
+ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
 RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
 
 
@@ -81,7 +81,13 @@ class _RecordingForge(forge.FakeForge):
         ({"ci_states": ["success"]}, ON_A_FORGE, "completed", True, [1]),
         # The repo's forge has to reach the node: without it every node of a
         # `backend: auto` chain fails on a repo whose forge is recorded fine.
-        ({"ci_states": ["success"]}, {**NO_SETUP, "forge": "gitlab"}, "completed", True, [1]),
+        (
+            {"ci_states": ["success"]},
+            entry_of({"setup_command": "", "forge": "gitlab"}),
+            "completed",
+            True,
+            [1],
+        ),
         # The one that matters: a failed pipeline must never reach merge.
         ({"ci_states": ["failed"], "ci_failed_jobs": RED}, ON_A_FORGE, "needs_human", True, []),
         # A repo Kraft holds no forge for: `auto` fails the node rather than

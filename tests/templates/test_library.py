@@ -108,7 +108,7 @@ def test_the_design_chain_resolves_to_its_documented_canonical_paths(design):
 def test_the_design_chain_keeps_gates_as_ordered_nodes(design):
     chain = design.resolve_chain("default")
     gates = {n.id: n.node for n in chain.nodes if isinstance(n.node, GateNode)}
-    assert gates["chain_review"].chain_finalized is True
+    assert gates["final_review"].chain_finalized is True
     assert gates["spec_approval"].artifact == "spec"
     assert gates["spec_approval"].reject_to == "spec"
     assert [n.id for n in chain.nodes][:4] == ["spec", "spec_approval", "plan", "plan_approval"]
@@ -159,7 +159,7 @@ def test_extends_expands_a_library_node_into_the_chain(design):
 def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(design):
     chain = design.resolve_chain("default")
     ids = [n.id for n in chain.nodes]
-    assert ids[ids.index("plan_approval") + 1 : ids.index("draft_merge_request")] == [
+    assert ids[ids.index("chain_revision_approval") + 1 : ids.index("draft_merge_request")] == [
         "implementation",
         "verification",
         "work_brief",
@@ -188,7 +188,7 @@ def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(
     assert nodes["local_review"].node.artifact == "work_brief"
     # A rejection carries a human's note, and only the implementer acts on one.
     assert nodes["local_review"].node.reject_to == "implementation"
-    assert nodes["chain_review"].node.reject_to == "implementation"
+    assert nodes["final_review"].node.reject_to == "implementation"
     # A CI-conflict rebase in post-draft feedback re-tests and re-reviews the
     # rebased head (Kraft-bjw6a).
     assert nodes["merge_request_feedback"].node.on_base_changed.restart_from == "verification"

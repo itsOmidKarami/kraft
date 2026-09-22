@@ -122,6 +122,17 @@ def _declare_workspace(
     workspaces[ws_id] = {"root": root_id, "members": members}
 
 
+def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | None]:
+    """The connected entries as the plain mappings `save_repos` writes -- the
+    writer's boundary, where a route edits and re-saves what it read -- and
+    the one connected at `path` (`deps._connected`), if any. Loaded through
+    `RepoEntry` first, so a legacy shape is migrated on the way."""
+    models = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+    found = deps._connected(models, path) if path is not None else None
+    repos = [r.model_dump() for r in models]
+    return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
+
+
 def _workspaces(st) -> dict:
     """The raw `workspaces:` section, as written."""
     return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
@@ -156,7 +167,9 @@ async def list_repos(request: Request):
     # let an operator clear it. See `config.load_repos`'s docstring.
     path = deps.repos_path(st)
     return {
-        "repos": config_mod.load_repos(path, validate_steering=False),
+        "repos": [
+            r.model_dump(mode="json") for r in config_mod.load_repos(path, validate_steering=False)
+        ],
         "workspaces": {
             ws_id: ws.model_dump(mode="json")
             # Unrefused, so doctor can fail a sandboxed workspace's row by name.
@@ -181,7 +194,7 @@ async def add_repo(body: RepoBody, request: Request):
         probed = config_mod.probe_repo(body.path, test_command=body.test_command)
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+    repos, _ = _editable_repos(st)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
     test_command = body.test_command or probed["test_command"]
@@ -279,8 +292,7 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
 @api_router.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
-    entry = deps._connected(repos, path)
+    repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     # exclude_unset, not `v is not None`: a field the caller left out of the
@@ -302,8 +314,7 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
 @api_router.delete("/repos", status_code=204)
 async def remove_repo(request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
-    entry = deps._connected(repos, path)
+    repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]

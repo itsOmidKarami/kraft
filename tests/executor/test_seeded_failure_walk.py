@@ -10,14 +10,14 @@ fake."""
 from pathlib import Path
 
 import pytest
-from support.harness import seed_v1_library, v1_named_chain
+from support.harness import entry_of, seed_v1_library, v1_named_chain
 
 from kraft import executor
 from kraft import policy as _policy
 from kraft.adapters import forge
 
 FAKE_CLAUDE = Path(__file__).resolve().parents[2] / "fixtures" / "fake-claude.sh"
-ON_A_FORGE = {"setup_command": "", "forge": "github"}
+ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
 RED = (forge.FailedJob("test", "failed", "script_failure"),)
 NODE = "merge_request_feedback"
 #: What the walk is about: the controls, the stop, and the escalation after it.

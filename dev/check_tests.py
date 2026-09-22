@@ -108,10 +108,6 @@ EXPECTATION_ALLOWLIST: set[str] = {
     # and returns None either way -- no return value, no state it touches
     # that the test could inspect instead.
     "tests/test_pause_resume.py::test_terminate_still_swallows_a_process_that_is_already_gone",
-    # sandbox.validate(...) -> None: raises SandboxError on a bad shape,
-    # returns nothing on a good one. Nothing downstream to assert on without
-    # testing a second function's behaviour instead of this one's.
-    "tests/worker/test_sandbox.py::test_validate_accepts_a_well_formed_sandbox",
 }
 
 

@@ -1335,7 +1335,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
         raise HTTPException(422, "no labels given")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
-        backend = forge_mod.backend_for("auto", (repo_entry or {}).get("forge"))
+        backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
         forge = forge_mod.resolve(backend)
         await forge.set_labels(repo=worktree, mr=forge_mod.MR(number=0, url=""), labels=labels)
     except forge_mod.ForgeError as exc:

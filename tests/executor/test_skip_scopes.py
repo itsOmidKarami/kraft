@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor, store
 from kraft.executor import dispatch
@@ -24,7 +25,7 @@ CHAIN = """
 - {id: after, kind: exec, tasks: [{id: d, kind: subprocess, command: "true"}]}
 """
 
-LAUNCH = executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 
 
 @pytest.fixture

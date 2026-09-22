@@ -3,7 +3,7 @@
 That `dispatch_node` puts them in the prompt, in order, is test_dispatch's."""
 
 import pytest
-from support.harness import _git, v1_named_chain
+from support.harness import _git, entry_of, v1_named_chain
 
 from kraft.config import git_read
 from kraft.executor import prompts
@@ -135,13 +135,15 @@ def test_steer_prefix_names_the_notes_author(tmp_path, source, present, absent):
 # -- scope_note -------------------------------------------------------------------
 
 
-_SCOPES = {
-    "test_scopes": [
-        {"paths": ["frontend/**"], "command": "just test-ui"},
-        {"paths": ["frontend/**"], "command": "just e2e-ci"},
-        {"paths": ["src/**", "tests/**"], "command": "just ci-test"},
-    ]
-}
+_SCOPES = entry_of(
+    {
+        "test_scopes": [
+            {"paths": ["frontend/**"], "command": "just test-ui"},
+            {"paths": ["frontend/**"], "command": "just e2e-ci"},
+            {"paths": ["src/**", "tests/**"], "command": "just ci-test"},
+        ]
+    }
+)
 
 
 def test_scope_note_lists_every_scope_command_for_the_implementer():
@@ -159,14 +161,14 @@ def test_scope_note_is_empty_for_any_other_hook():
 
 
 def test_scope_note_is_empty_with_no_scopes_configured():
-    assert prompts.scope_note(_task(), {}) == ""
+    assert prompts.scope_note(_task(), entry_of({})) == ""
     assert prompts.scope_note(_task(), None) == ""
 
 
 def test_scope_note_handles_a_legacy_bare_test_command():
     # config.load_repos wraps a bare test_command into a ["**"] scope, but a
     # LaunchContext built by hand may not have been through that.
-    out = prompts.scope_note(_task(), {"test_command": "just test"})
+    out = prompts.scope_note(_task(), entry_of({"test_command": "just test"}))
     assert "just test" in out
 
 

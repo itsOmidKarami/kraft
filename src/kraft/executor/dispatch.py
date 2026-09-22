@@ -26,6 +26,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
 from kraft.automated_review import AutomatedReview
+from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
 from kraft.executor.context import (
     _ADVANCING,
@@ -44,6 +45,7 @@ from kraft.executor.context import (
     Steer,
 )
 from kraft.store import _now as _now
+from kraft.templates import revision
 from kraft.templates.models import (
     AgentInput,
     AgentTask,
@@ -160,7 +162,7 @@ def _select_scopes(
     node_id: str,
     task_hook: str,
     round: int,
-    repo_entry: dict,
+    repo_entry: RepoEntry | None,
 ) -> list[dict]:
     """The scopes the `kraft.verify_changed_test_scopes` builtin should run
     (test-scope design §3.2-3.3, C7 Kraft-s7c04.14). Their sandbox is the
@@ -182,10 +184,10 @@ def _select_scopes(
     repository (`repository-area-can-declare-setup-and-test-scopes`). A
     hardcoded single command is how verify ends up running something CI does
     not, or the wrong stack's suite entirely (Kraft-579, Kraft-9wzy).
-    `config.load_repos` already wraps a legacy `test_command` into a single
-    `["**"]` scope, so this is one shape regardless of which field an operator
-    set; a repo that declares neither returns no scopes at all and the caller
-    stops for a human rather than inventing a command.
+    A bare `test_command` is read as a single `["**"]` scope, so this is one
+    shape regardless of which field an operator set; a repo that declares
+    neither returns no scopes at all and the caller stops for a human rather
+    than inventing a command.
 
     C7: round 0 (and a round-0 re-entry, e.g. after `retry_after_cap` wipes
     the round counter) always selects from the whole branch diff since
@@ -204,19 +206,19 @@ def _select_scopes(
     only the one(s) that failed. Selecting less is only ever safe for a
     scope that passed.
     """
-    repo_scopes = repo_entry.get("test_scopes")
-    if not repo_scopes and repo_entry.get("test_command"):
-        # `config.load_repos` already wraps a bare `test_command` into a
-        # `test_scopes` entry for any repo it reads off disk -- this mirrors
-        # that for a `LaunchContext` built by hand (tests, or any future
-        # caller that skips the yaml round-trip).
-        repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
+    if repo_entry is None:
+        return []
+    repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
+    if not repo_scopes and repo_entry.test_command:
+        # Wrapped here, at the point of use, never in the loaded entry: a
+        # re-save would persist it (`config.TestScope`, Kraft-9wzy).
+        repo_scopes = [{"paths": ["**"], "command": repo_entry.test_command}]
     # One table after resolution: the repository's scopes, then each area's,
     # every area scope carrying the setup it needs first
     # (`repository-area-can-declare-setup-and-test-scopes`).
     area_scopes = [
         {**scope, "area": name, "setup": area.get("setup")}
-        for name, area in (repo_entry.get("areas") or {}).items()
+        for name, area in repo_entry.areas.items()
         for scope in (area.get("verification") or {}).get("test_scopes") or []
     ]
     if not repo_scopes and not area_scopes:
@@ -343,16 +345,16 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
         # Every repository the item launches against, members included: a
         # member's live sandbox wraps the root's runs too.
         entries = [launch.repo_entry, *launch.repositories.values()] if launch else []
-        live = [s for e in entries if e and (s := _sandbox.resolve({}, e))]
-        live = list({json.dumps(s, sort_keys=True): s for s in live}.values())
+        live = list(dict.fromkeys(s for e in entries if e and (s := e.effective_sandbox)))
     except (_policy.PolicyError, _config.ConfigError) as exc:
         raise SandboxUnresolved(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
     if len(live) > 1:
         raise SandboxUnresolved(
-            f"{row['id']}'s repositories set different sandboxes {live!r} in repos.yaml: "
+            f"{row['id']}'s repositories set different sandboxes "
+            f"{[s.model_dump() for s in live]!r} in repos.yaml: "
             "a sandbox wraps the whole work item (Ruling 189), so they must agree"
         )
-    return live[0] if live else None
+    return live[0].model_dump() if live else None
 
 
 def _frozen_steering(row) -> dict[str, str] | None:
@@ -419,7 +421,7 @@ async def _run_changed_test_scopes(
     flake nobody can reproduce. `parallel` is bounded by the number of selected
     scopes, which the repo's own table bounds.
     """
-    repo_entry = (launch.repo_entry or {}) if launch else {}
+    repo_entry = launch.repo_entry if launch else None
     to_run = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
@@ -482,10 +484,8 @@ async def _run_changed_test_scopes(
 
 
 def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
-    """The repository's named automated reviewer (Ruling 171), if any. The
-    entry was validated when `repos.yaml` was read; this only re-types it."""
-    raw = (launch.repo_entry or {}).get("automated_review") if launch else None
-    return AutomatedReview.model_validate(raw) if raw else None
+    """The repository's named automated reviewer (Ruling 171), if any."""
+    return launch.repo_entry.automated_review if launch and launch.repo_entry else None
 
 
 async def dispatch_node(
@@ -686,7 +686,7 @@ async def _dispatch_task(
             run_dirs,
             cmd=cmd,
             cwd=worktree,
-            repo_entry=(launch.repo_entry or {}) if launch else {},
+            repo_entry=launch.repo_entry if launch else None,
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             sandbox=sandbox,
             time_cap=time_cap,
@@ -702,7 +702,7 @@ async def _dispatch_task(
             # template: one install's chains run against whatever forge each
             # repo is on.
             backend="auto",
-            repo_forge=(launch.repo_entry or {}).get("forge") if launch else None,
+            repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
             automated_review=_automated_review(launch),
             # The worktree, not the repo: every forge CLI resolves the merge
             # request from the *current branch*, and the repo is on whatever
@@ -785,6 +785,8 @@ async def _dispatch_task(
         instruction += prompts.deferred_findings_note(
             deferred_findings(db, work_item_row["id"], loop_severities)
         )
+    if t.produces == revision.CHAIN_REVISION:
+        instruction += revision.context_note(store.materialized_chain_of(work_item_row), node.id)
     # A reviewing task's continuity, delivered only when it declares it
     # (`AgentTask.inputs`): what the node's last measurement found, tagged so a
     # repeat keeps its identity (the tags `walk` then trusts, and no others --

@@ -359,7 +359,8 @@ enforced-by: tests/templates/test_materialization.py::test_the_resolved_chain_is
 ## REQ materialized-chain-is-immutable-work-item-input
 
 A materialized chain SHALL contain effective policy values and intake-specific
-decisions for one work item and SHALL NOT change as that item executes.
+decisions for one work item and SHALL NOT change as that item executes, except
+by an approved chain revision (`revised-chain-is-what-every-later-reader-sees`).
 enforced-by: tests/templates/test_materialization.py::test_materialization_freezes_chain_policy_and_target, tests/templates/test_materialization.py::test_a_materialized_chain_cannot_be_changed_while_the_item_executes, tests/store/test_chain_gates.py::test_a_materialized_chain_round_trips_through_the_work_item_row, tests/executor/test_gates.py::test_the_typed_override_is_a_read_time_view_and_does_not_touch_the_snapshot, tests/executor/test_dispatch.py::test_editing_the_library_after_intake_does_not_change_a_running_items_steering, tests/executor/test_dispatch.py::test_a_snapshot_without_frozen_steering_stops_for_a_human, tests/templates/test_item_policy.py::test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored
 
 ## REQ steer-can-address-paused-agent-tasks-individually
@@ -561,7 +562,60 @@ A gate with the dedicated `chain_finalized` marker SHALL retain Kraft's
 chain-review behaviour; other gate nodes SHALL have ordinary pause and
 approval behaviour.
 enforced-by: tests/executor/test_gates.py::test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review, tests/executor/test_gates.py::test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour, tests/templates/test_models.py::test_an_attachment_never_trims_the_chain_finalized_gate
-origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in is **not** part of V1: the parked legacy splice was deleted in Task 11b, and revising a *materialized* chain in place has no V1 requirement or schema yet (Kraft-x2hdr).
+origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in at this gate is **not** part of V1: the parked legacy splice was deleted in Task 11b. Plan-driven revision came back as its own node and gate after the plan (Kraft-oydes, the `chain-revision-*` requirements below), and the final gate revises nothing.
+
+## REQ chain-revision-changes-only-the-unexecuted-tail
+
+WHEN a chain revision is applied, the system SHALL change only nodes after the
+revision's own gate, and SHALL refuse the whole change set if it skips,
+overrides or adds before a node at or before that gate.
+enforced-by: tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[skip-a-run-node], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[skip-its-own-gate], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[override-a-run-node], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[add-before-the-gate], tests/templates/test_revision.py::test_a_change_set_skips_adds_and_overrides_only_what_it_names
+origin: src/kraft/templates/revision.py §revise -- Kraft-oydes, Ruling 208 (DECISIONS 13): a change set, not a spliced tail, because the pre-V1 splice dropped what its reviewer did not re-emit (Kraft-eod0, Kraft-gnn1).
+
+## REQ chain-revision-cannot-skip-a-gate
+
+IF a chain revision skips or overrides a gate node, THEN the system SHALL refuse
+the whole change set.
+enforced-by: tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[skip-a-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[skip-the-final-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[override-a-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[override-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-gate]
+origin: src/kraft/templates/revision.py §revise
+
+## REQ chain-revision-cannot-remove-merge-request-work
+
+IF a chain revision skips a node whose own steps run a forge task or write the
+merge request's description, THEN the system SHALL refuse the whole change set.
+enforced-by: tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[describe_merge_request], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[draft_merge_request], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[merge_request_feedback], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[mark_ready], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[external_approval], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[merge], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[post_merge_ci], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[a-forge-action], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[a-forge-wait], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[the-mr-description]
+origin: src/kraft/templates/revision.py §_lands -- Kraft-eh5as: without it a revision could skip every node that lands the change, and the item would complete with nothing merged.
+
+## REQ chain-revision-approval-applies-what-was-shown
+
+IF the revision an approval would apply differs from the one its gate last showed, THEN the system SHALL refuse the approval as a conflict and SHALL apply nothing.
+enforced-by: tests/api/test_chain_revision_gate.py::test_a_library_change_after_the_gate_was_shown_refuses_the_approval, tests/api/test_chain_revision_gate.py::test_an_approval_nobody_rendered_applies_what_it_computes
+origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15.
+
+## REQ invalid-chain-revision-never-reaches-the-chain
+
+IF an approved chain revision cannot be read, or its revised chain does not
+validate under the model and policy intake uses, THEN the system SHALL refuse the
+approval with the reason and SHALL leave the item's chain unchanged.
+enforced-by: tests/executor/test_chain_revision.py::test_an_invalid_revision_never_reaches_the_chain, tests/templates/test_revision.py::test_anything_but_one_strict_change_set_is_refused[unknown-key], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[skip-a-reject-target], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-merge-before-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[cap-above-its-parent], tests/templates/test_revision.py::test_an_override_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_an_added_node_stays_within_the_administrator_maxima, tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unreadable], tests/templates/test_revision.py::test_the_gate_says_why_a_proposal_cannot_be_approved[unappliable]
+origin: src/kraft/api/routes/gates.py §_revise
+
+## REQ unchanged-chain-revision-advances-without-a-human
+
+WHEN a chain revision proposes no change, the system SHALL pass its gate without
+requesting a human decision and SHALL record the proposal's rationale in an
+event.
+enforced-by: tests/executor/test_chain_revision.py::test_an_unchanged_revision_advances_without_a_human, tests/executor/test_chain_revision.py::test_a_proposed_change_stops_at_the_gate, tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[prose], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[truncated-json], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[unknown-key], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[empty]
+origin: src/kraft/executor/gates.py §maybe_gate
+
+## REQ revised-chain-is-what-every-later-reader-sees
+
+WHEN a chain revision is approved, the system SHALL replace the chain the item
+runs with the revised chain, in one transaction with a `chain_revised` event
+carrying the change set and its diff, and every later walk, resume, retry fork
+and chain view SHALL read the revised chain.
+enforced-by: tests/executor/test_chain_revision.py::test_an_approved_revision_is_the_chain_every_later_reader_sees, tests/executor/test_chain_revision.py::test_a_resume_after_an_approved_revision_runs_the_revised_chain, tests/executor/test_chain_revision.py::test_a_retry_after_a_revision_keeps_it, tests/executor/test_chain_revision.py::test_a_revision_after_a_retry_revises_the_forks_chain, tests/executor/test_chain_revision.py::test_approving_a_revision_twice_applies_it_once
+origin: src/kraft/store/chain.py §revise_chain
 
 ## REQ gate-auto-review-is-explicit-and-bounded
 
@@ -832,7 +886,7 @@ origin: src/kraft/policy.py §_tool_names -- Kraft-9i6xy: the gate (`sessions.pe
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
 enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy, tests/api/test_repository_policy.py::test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all, tests/api/test_repository_policy.py::test_a_member_policy_the_instance_refuses_refuses_the_workspace_item, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy, tests/test_policy.py::test_the_meet_of_repository_layers_is_the_tightest_of_each_field, tests/templates/test_workspace_fanout.py::test_each_repository_binds_its_own_task_and_the_checkout_binds_all, tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[manual], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[auto], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_its_nodes_policy_refuses_never_launches[token-budget-spent]
-origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `config.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
+origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `RepoEntry.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
@@ -1008,7 +1062,7 @@ When the default chain's post-draft feedback moves the worktree base, the
 system SHALL restart at the verification node, so the rebased head is tested
 and reviewed again before the chain goes on.
 enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
-origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `chain_review`.
+origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `final_review`.
 
 ## REQ an-undeclared-conflict-rebase-waits-for-the-rebased-heads-ci
 

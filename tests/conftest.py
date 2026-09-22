@@ -11,7 +11,7 @@ from support import api as api_support
 from support import harness
 from support.fake_beads import Bd, FakeBeads
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo
 
 from kraft import client as kraft_client
 from kraft import db
@@ -62,14 +62,14 @@ def _default_setup_command_for_tests_without_a_launch_context(monkeypatch):
 
     async def _ensure_worktree_with_default(*args, repo_entry=None, **kwargs):
         if repo_entry is None:
-            repo_entry = dict(_INERT_REPO_ENTRY)
+            repo_entry = entry_of(_INERT_REPO_ENTRY)
         return await real_ensure_worktree(*args, repo_entry=repo_entry, **kwargs)
 
     async def _prepare_runtime_with_default(worktree, repo, repo_entry=None, **kwargs):
         # `prepare_runtime` already no-ops on a bare `None` rather than raising,
         # so this only keeps the two entry points saying the same thing.
         if repo_entry is None:
-            repo_entry = dict(_INERT_REPO_ENTRY)
+            repo_entry = entry_of(_INERT_REPO_ENTRY)
         return await real_prepare_runtime(worktree, repo, repo_entry, **kwargs)
 
     monkeypatch.setattr(builtins_mod, "ensure_worktree", _ensure_worktree_with_default)
@@ -129,11 +129,9 @@ def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):
 
     def patched(repo_entry, extra=None):
         names = [k for k in os.environ if k.startswith("KRAFT_FAKE_")]
-        entry = {
-            **(repo_entry or {}),
-            "env_passthrough": [*((repo_entry or {}).get("env_passthrough") or []), *names],
-        }
-        return real_worker_env(entry, extra)
+        entry = repo_entry or entry_of({})
+        passthrough = [*entry.env_passthrough, *names]
+        return real_worker_env(entry.model_copy(update={"env_passthrough": passthrough}), extra)
 
     monkeypatch.setattr(sp_mod, "worker_env", patched)
 

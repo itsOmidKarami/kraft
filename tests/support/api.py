@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from support.harness import fake_templates_dir, isolated_bd
+from support.harness import entry_of, fake_templates_dir, isolated_bd
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -79,7 +79,7 @@ def _client(
         real_connected = deps._connected
 
         def _connected_or_default(repos, path):
-            return real_connected(repos, path) or {"setup_command": ""}
+            return real_connected(repos, path) or entry_of({"path": path, "setup_command": ""})
 
         monkeypatch.setattr(deps, "_connected", _connected_or_default)
 
@@ -143,7 +143,7 @@ def _wait_for_status(client, wid, status, timeout=30):
 def _approve_gate(client, wid, gate, timeout=30):
     """Approve a gate, retrying past a 409.
 
-    An `auto_escalate` node's own walk (chain_review, in the shipped `default`
+    An `auto_escalate` node's own walk (final_review, in the shipped `default`
     template) can still be inside its own auto-review agent call when this
     gate first becomes pending -- `deps.spawn`'s `AlreadyRunning` refusal
     (Kraft-11e0) then 409s a manual approve that lands in that window. Retry

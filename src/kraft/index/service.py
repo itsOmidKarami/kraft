@@ -105,7 +105,7 @@ class Indexer:
         except (config_mod.ConfigError, OSError) as exc:
             logger.warning("repo config unreadable, indexing without it: %s", exc)
             return []
-        return [r["path"] for r in repos]
+        return [r.path for r in repos]
 
     # ---- ingestion ----
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import _git, fake_harness_home, isolated_bd, make_repo, v1_resolved
+from support.harness import _git, entry_of, fake_harness_home, isolated_bd, make_repo, v1_resolved
 
 from kraft import events, executor, store
 from kraft import findings as _findings
@@ -24,11 +24,11 @@ from kraft.executor.context import Steer
 
 #: A repo that deliberately needs no preparation. Most tests here are about
 #: chain walking, not environments.
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 #: The same, on a forge: a V1 forge task runs on `backend: auto`, which reads
 #: the forge off the repo entry. Without one the task fails in-process on the
 #: missing forge before the patched `resolve` is ever asked for a backend.
-FORGE_REPO = {**NO_SETUP, "forge": "github"}
+FORGE_REPO = entry_of({"setup_command": "", "forge": "github"})
 
 
 def _agent(task_id="implement", **fields):
@@ -204,7 +204,7 @@ async def test_run_once_threads_local_files_from_the_launch_context(item_on, rep
     # No env node in V1: the worktree is prepared before the first node runs.
     it = await item_on([_exec("work", _sub("noop", ["true"]))])
 
-    entry = {"local_files": [".python-version"], "setup_command": ""}
+    entry = entry_of({"local_files": [".python-version"], "setup_command": ""})
     assert await _walk(it, repo_entry=entry) == "completed"
     assert (it.worktree / ".python-version").read_text() == "3.11\n"
 
@@ -325,7 +325,7 @@ _OPEN_WITHOUT_A_FORGE = _exec("draft", _forge_task("open", "mr.open_draft"))
         # card read "fix_loop exhausted", with the cause only in the server log.
         (
             _exec("impl", _agent("work"), fix_loop={"tasks": [_agent("repair")]}),
-            {**NO_SETUP, "deny_tools": ["Bash"]},
+            entry_of({"setup_command": "", "deny_tools": ["Bash"]}),
             ["could not start work in node impl", "deny_tools"],
             0,
             ["impl.main.work"],
@@ -873,7 +873,7 @@ async def test_fix_cycle_dispatch_gets_the_same_launch_context(
 
     await _walk(
         it,
-        repo_entry={"models": {"fake": "haiku"}, "setup_command": ""},
+        repo_entry=entry_of({"models": {"fake": "haiku"}, "setup_command": ""}),
         policy=_loop_policy(tmp_path, attempts=1),
     )
 
@@ -954,7 +954,8 @@ async def test_the_worktree_and_setup_command_are_prepared_without_an_env_node(i
     runtime preparation done before the first node dispatches."""
     it = await item_on([_exec("build", _sub("run", ["true"]))])
 
-    assert await _walk(it, repo_entry={"setup_command": "touch prepared.marker"}) == "completed"
+    entry = entry_of({"setup_command": "touch prepared.marker"})
+    assert await _walk(it, repo_entry=entry) == "completed"
     assert (it.worktree / "prepared.marker").is_file()
     # No session stands in for the deleted node, and nothing names its hook.
     assert [s["hook_point"] for s in it.sessions()] == ["build.main.run"]
@@ -1024,7 +1025,7 @@ async def test_a_re_entered_walk_does_not_re_prepare_the_worktree(item_on, tmp_p
     it = await item_on([_exec("first", _sub("a", ["true"])), _exec("second", _sub("b", ["true"]))])
 
     status = await _walk(
-        it, repo_entry={"setup_command": f"sh -c 'echo run >> {runs}'"}, start_index=1
+        it, repo_entry=entry_of({"setup_command": f"sh -c 'echo run >> {runs}'"}), start_index=1
     )
 
     assert status == "completed"

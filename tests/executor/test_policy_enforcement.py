@@ -15,15 +15,19 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+from support.harness import entry_of
 
-from kraft import escalate, events, executor, gate_review, store
+from kraft import escalate, events, gate_review, store
 from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, gates, stops, walk
 from kraft.executor.context import BUDGET, CONFIG_ERROR, LaunchContext
 from kraft.templates.models import MaterializedChain, ResolvedChain
 
-NO_SETUP = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+TESTED = dataclasses.replace(
+    NO_SETUP, repo_entry=entry_of({"setup_command": "", "test_command": "true"})
+)
 
 
 def _agent(task_id="implement", **fields):
@@ -70,7 +74,9 @@ async def test_a_live_repository_deny_list_still_applies_on_top_of_the_frozen_on
     denies after the item was filed is denied too -- only tightening can
     come from the live entry."""
     it = await item_on(_node(_agent(), policy={"deny_tools": ["WebFetch"]}))
-    launch = dataclasses.replace(NO_SETUP, repo_entry={"setup_command": "", "deny_tools": ["Bash"]})
+    launch = dataclasses.replace(
+        NO_SETUP, repo_entry=entry_of({"setup_command": "", "deny_tools": ["Bash"]})
+    )
 
     assert await _dispatch(it, launch) == "done"
 
@@ -107,8 +113,9 @@ async def test_a_policy_sandbox_wraps_the_task_and_the_repository_cannot_turn_it
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
     monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", run_task)
     it = await item_on(_node(task, policy={"sandbox": _SANDBOX}))
-    entry = {"setup_command": "", "test_command": "true"} | (
-        {"sandbox": repo_sandbox} if repo_sandbox is not None else {}
+    entry = entry_of(
+        {"setup_command": "", "test_command": "true"}
+        | ({"sandbox": repo_sandbox} if repo_sandbox is not None else {})
     )
 
     await _dispatch(it, dataclasses.replace(NO_SETUP, repo_entry=entry))
@@ -263,7 +270,7 @@ async def test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves(ite
         it.row(),
         it.repo,
         policy=_policy.Policy(loops={}, default=_policy.Cap(9, 3600)),
-        launch=executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+        launch=NO_SETUP,
     )
 
     counter = it.database.read(lambda c: store.read_counter(c, it.id, "implementation.fix_loop"))
@@ -588,7 +595,7 @@ async def test_a_sandbox_on_one_task_wraps_every_launch_of_the_item(
     monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
     monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", run_task)
     it = await item_on(_sandboxed_elsewhere(sandbox))
-    launch = dataclasses.replace(NO_SETUP, repo_entry={"setup_command": "", "test_command": "true"})
+    launch = TESTED
 
     for node in it.chain.chain.nodes:
         await dispatch.dispatch_node(
@@ -725,7 +732,7 @@ async def test_a_task_whose_sandbox_cannot_be_resolved_stops_as_its_own_session(
     launched = _never_launches(monkeypatch)
     node = it.chain.chain.nodes[node_index]
     task = node.steps[0].tasks[0]
-    launch = dataclasses.replace(NO_SETUP, repo_entry={"setup_command": "", "test_command": "true"})
+    launch = TESTED
 
     status = await dispatch.dispatch_node(
         it.database, it.run_dirs, task, node, it.row(), it.repo, launch=launch

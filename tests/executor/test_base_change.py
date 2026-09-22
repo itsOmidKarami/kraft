@@ -7,13 +7,13 @@ import shlex
 import subprocess
 
 import pytest
-from support.harness import _git
+from support.harness import _git, entry_of
 
 from kraft import executor, store
 from kraft import policy as _policy
 from kraft.executor.context import BASE_MOVED
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _sub(task_id):

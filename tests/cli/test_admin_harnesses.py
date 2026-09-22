@@ -10,7 +10,10 @@ import pytest
 from kraft import cli
 
 
-def test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it(app, capsys):
+def test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it(app, capsys, monkeypatch):
+    # The last column truncates at the terminal's width; wide enough for every
+    # task the shipped library gives `claude`.
+    monkeypatch.setenv("COLUMNS", "400")
     cli.main(["admin", "harnesses"])
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].split() == ["ID", "PROVIDER", "ENABLED", "USED", "BY"]

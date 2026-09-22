@@ -32,9 +32,9 @@ def test_launch_returns_the_matching_repo_entry(tmp_path):
         "  - {path: /work/repo/libs/a, id: lib-a}\n  - {path: /work/other}\n"
     )
     ctx = deps.launch(st, "/work/repo")
-    assert ctx.repo_entry["models"] == {"claude": "opus"}
+    assert ctx.repo_entry.models == {"claude": "opus"}
     # What a task fanned out to a workspace member reads: every entry by id.
-    assert {k: v["path"] for k, v in ctx.repositories.items()} == {"lib-a": "/work/repo/libs/a"}
+    assert {k: v.path for k, v in ctx.repositories.items()} == {"lib-a": "/work/repo/libs/a"}
 
 
 def test_launch_on_a_malformed_repos_yaml_does_not_raise(tmp_path):

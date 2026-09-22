@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
-from kraft import executor, store
+from kraft import events, executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import artifacts, board
 from kraft.api.routes.lifecycle import _stop_live_sessions
 from kraft.executor import stops
+from kraft.templates import revision
 from kraft.templates.models import GateNode
 
 
@@ -58,11 +59,12 @@ async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
     Kraft-iv4y's posture: a clear 422 telling the human to `kraft item retry` the
     node that owed the document, not a 200 that changed nothing.
 
-    **What a `chain_finalized` approval does not do: revise the chain.** The
-    legacy splice rewrote `chain_definition` from a reviewer's legacy node
-    list; revising a *materialized* V1 chain in place is a different feature,
-    with no V1 requirement and no V1 schema, so the approval ingests the
-    artifact and advances.
+    **A gate about a `chain_revision` revises the chain** (Kraft-oydes): its
+    change set is applied to the item's chain and the result replaces it
+    (`_revise`), and the nodes returned are the revised ones, so the walk the
+    approval starts runs them. One that cannot be applied refuses the approval
+    with its reason, and the chain is untouched. A `chain_finalized` approval
+    does not revise anything.
     """
     nodes = gate_nodes(st, row)
     node = _gate_or_404(nodes, gate)
@@ -71,7 +73,64 @@ async def apply_approval(st, row, gate: str) -> tuple[tuple | None, str | None]:
         return None, (
             f"{gate}: the final review document is missing; the node that owed it did not write one"
         )
+    if node.node.artifact == revision.CHAIN_REVISION:
+        reason = await _revise(st, row, gate)
+        if reason is not None:
+            return None, reason
+        return gate_nodes(st, deps._work_item_row(st, row["id"])), None
     return nodes, None
+
+
+async def _revise(st, row, gate: str) -> str | None:
+    """Apply the chain revision `gate` is about, or say why it cannot be.
+
+    Nothing to apply is not a refusal: a revision gate with no document is
+    answerable like any other gate, and approving it changes nothing. A
+    revision this gate request already applied is not applied twice -- a
+    failure between this write and the gate's own approval leaves the gate
+    pending, and approving again must not replay the change set against the
+    chain it already revised.
+    """
+    for e in reversed(st.db.read(lambda c: events.read_after(c, 0, row["id"]))):
+        if e["type"] in ("chain_revised", "gate_requested") and e["payload"].get("gate") == gate:
+            if e["type"] == "chain_revised":
+                return None
+            break
+    rel = executor.gate_artifact(st.run_dirs, row, gate)
+    if rel is None:
+        return None
+    read = await artifacts._read_worktree_artifact(st, row["id"], rel)
+    if read is None:
+        return f"{gate}: the chain revision could not be read"
+    chain = executor.chain_of(row)
+    try:
+        changes = revision.parse(read[0])
+        revised = revision.revise(chain, changes, gate=gate, library=getattr(st, "library", None))
+    except revision.RevisionError as exc:
+        return f"{gate}: {exc}"
+    if revised is chain:
+        return None
+    # Bound to what the gate showed (Kraft-ze1yj): an `add` resolves out of the
+    # live library, which may have been edited and reloaded since. Nobody
+    # having looked binds nothing; the approval applies what it computes.
+    shown = st.db.read(lambda c: store.shown_revision(c, row["id"], gate))
+    if shown is not None and shown != revision.digest(revised):
+        raise revision.StaleRevision(
+            f"{gate}: the library changed since this revision was shown; review it again"
+        )
+    payload = {
+        "gate": gate,
+        "changes": changes.model_dump(mode="json", exclude_none=True),
+        "diff": revision.diff(chain.chain, revised.chain),
+    }
+    seen = (row["materialized_chain"], row["run_chain"])
+    try:
+        await st.db.write(
+            lambda c: store.revise_chain(c, row["id"], revised.to_json(), payload, seen=seen)
+        )
+    except ValueError as exc:
+        return f"{gate}: {exc}"
+    return None
 
 
 def _decided_by(request: Request) -> str:
@@ -131,7 +190,12 @@ async def approve_gate(wid: str, gate: str, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    nodes, reason = await apply_approval(st, row, gate)
+    try:
+        nodes, reason = await apply_approval(st, row, gate)
+    except revision.StaleRevision as exc:
+        # Nothing applied and nothing stopped: the gate is still pending, and
+        # reading its document again shows what an approval would now write.
+        raise HTTPException(409, str(exc)) from exc
     if nodes is None:
         # Kraft-iv4y: a human hitting `approve` again after this exact failure
         # used to get a 200 back with nothing changed -- the same reason

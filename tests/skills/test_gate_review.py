@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
-from support.harness import v1_chain, v1_item, write_harness_profiles
+from support.harness import entry_of, v1_chain, v1_item, write_harness_profiles
 
 from kraft import events, executor, gate_review, store
 from kraft import policy as _policy
@@ -168,7 +168,7 @@ async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database
 
     await _seed(database, run_dirs, "w1")
     launch = executor.LaunchContext(
-        repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
+        repo_entry=entry_of({"sandbox": {"kind": "docker", "image": "kraft-worker:py"}}),
         steering_dir=None,
         skills_dir=None,
     )

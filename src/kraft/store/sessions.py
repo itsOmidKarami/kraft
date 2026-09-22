@@ -238,7 +238,7 @@ def reusable_session(
     since it ran. The `node_started` shape above needs a departure to some
     other node in between, which a gate with no `reject_to` never produces:
     `gates.reject_target` falls back to the gate node itself, so `spec`,
-    `plan` and `chain_review` (`templates/default.yaml`) re-enter their own
+    `plan` and `final_review` (`templates/chains/default.yaml`) re-enter their own
     node with nothing in between, and their artifacts live in gitignored
     `.engineering/`, so `head_sha` does not move either. On a second
     rejection of such a gate every other key here still matches the first

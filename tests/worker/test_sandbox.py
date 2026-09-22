@@ -2,60 +2,9 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
 from support.harness import make_repo
 
 from kraft.worker import sandbox
-
-_X = {"kind": "docker", "image": "x"}
-_Y = {"kind": "docker", "image": "y"}
-
-
-@pytest.mark.parametrize(
-    "binding_sandbox, repo, expected",
-    [
-        (_X, {}, _X),
-        (_X, None, _X),
-        # The repo overrides wholesale, with its own image ...
-        (_X, {"sandbox": _Y}, _Y),
-        # ... can turn off a binding that turned sandboxing on ...
-        (_X, {"sandbox": False}, None),
-        # ... and can turn it on for a binding that left it unset.
-        (None, {"sandbox": _Y}, _Y),
-        (None, {}, None),
-    ],
-    ids=[
-        "binding-when-repo-sets-nothing",
-        "binding-when-repo-is-none",
-        "repo-overrides-wholesale",
-        "repo-turns-it-off",
-        "repo-turns-it-on",
-        "neither-sets-one",
-    ],
-)
-def test_resolve(binding_sandbox, repo, expected):
-    binding = {"kind": "agent", "command": "claude"}
-    if binding_sandbox is not None:
-        binding["sandbox"] = binding_sandbox
-    assert sandbox.resolve(binding, repo) == expected
-
-
-@pytest.mark.parametrize(
-    "value, match",
-    [
-        ("docker", "mapping"),
-        ({"kind": "podman", "image": "y"}, "podman"),
-        ({"kind": "docker"}, "image"),
-    ],
-    ids=["not-a-mapping", "unknown-kind", "missing-image"],
-)
-def test_validate_rejects(value, match):
-    with pytest.raises(sandbox.SandboxError, match=match):
-        sandbox.validate(value, where="x")
-
-
-def test_validate_accepts_a_well_formed_sandbox():
-    sandbox.validate({"kind": "docker", "image": "kraft-worker:py"}, where="x")
 
 
 def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():

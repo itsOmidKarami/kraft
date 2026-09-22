@@ -12,6 +12,7 @@ from kraft.adapters import agent as _agent
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.store import _now as _now
+from kraft.templates import revision
 from kraft.templates.models import ExecNode, GateNode, ResolvedNode
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     return False
 
 
-async def maybe_gate(db, work_item_id: str, node: ResolvedNode) -> bool:
+async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -> bool:
     """Whether the walk stops here because `node` is an unanswered gate
     (`gate-node-opens-and-halts-execution`).
 
@@ -219,12 +220,22 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode) -> bool:
     `enter_node` before the request: a gate node is where the item now is, so
     `current_node_id` has to say so for resume and for the approve door to find
     it.
+
+    A gate about a `chain_revision` that proposes no change passes without
+    asking anyone (Kraft-oydes): Kraft approves it, with the proposal's
+    rationale on a `chain_revision_unchanged` event.
     """
     if not isinstance(node.node, GateNode):
         return False
     if gate_cleared(db, work_item_id, node.id):
         return False
     await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
+    if node.node.artifact == revision.CHAIN_REVISION and run_dirs is not None:
+        rel = _agent.artifact_path(revision.CHAIN_REVISION, work_item_id)
+        why = revision.unchanged(run_dirs.worktrees / work_item_id, rel)
+        if why is not None:
+            await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
+            return False
     await db.write(lambda c: store.request_gate(c, work_item_id, node.id, node.id))
     return True
 
