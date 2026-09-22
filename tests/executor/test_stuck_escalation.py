@@ -259,6 +259,11 @@ NOT_STUCK = {
     "config error": (_loopless, None, "could not start check"),
     "budget": (_loopless, _returns("budget"), "budget cap reached"),
     "infra stop": (_loopless, _returns("infra_stop", "ci_infra_exhausted"), "ci_infra_exhausted"),
+    "abandoned CI run": (
+        _loopless,
+        _returns("infra_stop", "ci_run_abandoned"),
+        "ci_run_abandoned",
+    ),
     "reviewer error": (
         _loopless,
         _returns("infra_stop", "automated_review_errored"),

@@ -2,7 +2,8 @@
 approval, and the merge node's own waits (its pre-merge pipeline, a missing
 approval, and the merge landing). Parking, backoff, timeout and the scheduler
 are tests/test_waits.py; `ci_poll` and `merge_watch` reads, and a forge error
-ending a wait, are test_run.py and test_merge_watch.py."""
+ending a wait, are test_run.py and test_merge_watch.py. A cancelled run nobody
+followed up is here, at every node that reads a pipeline."""
 
 from __future__ import annotations
 
@@ -217,3 +218,29 @@ async def test_a_new_head_after_a_base_change_asks_for_the_merge_again(run_forge
     assert (await run_forge(fake, "merge", "m2", repo=repo, **_MERGE))[0] == "waiting"
 
     assert fake.requests == 2
+
+
+# --- a cancelled run nobody followed up, at every node that reads CI -----------
+
+
+@pytest.mark.parametrize(
+    "handler, kw",
+    [("ci_poll", {}), ("merge", _MERGE), ("merge_watch", {})],
+    ids=["ci_poll", "merge", "merge_watch"],
+)
+async def test_a_cancel_with_no_successor_stops_for_a_person_at_once(run_forge, repo, handler, kw):
+    """Kraft-kbqmk: a run cancelled an hour ago that is still the latest for
+    this head has no successor coming. Stop now, naming it -- not a failure
+    for a fix loop, and not the wait's full timeout later. Nothing merged."""
+    from datetime import UTC, datetime, timedelta
+
+    an_hour_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    fake = await _opened(
+        forge.FakeForge(ci_states=["pending"], ci_cancelled_at=[an_hour_ago]), repo
+    )
+
+    assert await run_forge(fake, handler, "c1", repo=repo, **kw) == ("infra_stop", "infra_stop")
+
+    assert fake.merged == []
+    [stop] = run_forge.events("ci_run_abandoned")
+    assert "was cancelled" in stop["reason"] and "re-run" in stop["reason"]

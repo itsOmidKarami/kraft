@@ -24,7 +24,7 @@ from kraft.adapters.forge.models import (
 #: cannot be walked back. 'canceled' is a wait, not red: a cancelled pipeline
 #: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
 #: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
-#: person cancelled with no successor is caught by the wait's own timeout.
+#: person cancelled with no successor is `ci.render_ci`'s "abandoned".
 _GLAB_STATES: dict[str, CIState] = {
     "success": "success",
     "failed": "failed",
@@ -256,7 +256,7 @@ class GlabCli(mr_ops.CliWaits):
         rows = mr_ops.parse_json(raw, "glab ci list")
         # No pipeline yet is not a green one.
         state = "pending"
-        url, jobs, sha, pipeline_ref = "", ("no pipeline yet",), "", ""
+        url, jobs, sha, pipeline_ref, cancelled_at = "", ("no pipeline yet",), "", "", ""
         failed_jobs = ()
         if rows:
             top = rows[0]
@@ -280,6 +280,8 @@ class GlabCli(mr_ops.CliWaits):
                 # Never pin a cancelled pipeline: its successor is the one to read.
                 pipeline_ref = "" if raw_state == "canceled" else str(top.get("id", ""))
                 jobs = (f"pipeline {top.get('id')}: {raw_state}",)
+                if raw_state == "canceled":  # when, for `render_ci` (Kraft-kbqmk)
+                    cancelled_at = str(top.get("updated_at") or "")
                 if state == "failed":
                     detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
                     jobs += detail_lines
@@ -290,6 +292,7 @@ class GlabCli(mr_ops.CliWaits):
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
+            cancelled_at=cancelled_at,
         )
 
     async def _failure_detail(

@@ -67,7 +67,7 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
 
 
 @pytest.mark.parametrize(
-    "checks, state, failed",
+    "checks, state, failed, cancelled_at",
     [
         # Kraft-zn8me / Kraft-7g5h4 / Kraft-50bhi: GitHub cancels the superseded
         # run's jobs seconds before it registers the successor's checks, so a
@@ -75,30 +75,43 @@ async def test_gh_ci_status_reads_the_check_rollup(cli, tmp_path, view, state, j
         # A cancelled run is never a verdict: that is a wait.
         (
             (
-                '{"name":"test","conclusion":"CANCELLED"}',
+                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
                 '{"name":"lint","conclusion":"CANCELLED"}',
                 '{"name":"playwright","conclusion":""}',
             ),
             "pending",
             (),
+            "",
         ),
-        # Every check cancelled and nothing else yet: still a wait.
-        (('{"name":"test","conclusion":"CANCELLED"}',), "pending", ()),
+        # Every check settled, one cancelled: still a wait, and when the
+        # cancel happened, for `render_ci` to tell a successor from none
+        # (Kraft-kbqmk). The latest cancel is the one that counts.
+        (
+            (
+                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
+                '{"name":"lint","conclusion":"CANCELLED","completedAt":"2026-09-18T00:16:00Z"}',
+                '{"name":"build","conclusion":"SUCCESS","completedAt":"2026-09-18T00:17:00Z"}',
+            ),
+            "pending",
+            (),
+            "2026-09-18T00:16:00Z",
+        ),
         # A cancelled sibling does not hide a real failure, and is not one of
         # the failed jobs a fix loop is handed.
         (
             (
-                '{"name":"test","conclusion":"CANCELLED"}',
+                '{"name":"test","conclusion":"CANCELLED","completedAt":"2026-09-18T00:15:33Z"}',
                 '{"name":"lint","conclusion":"FAILURE"}',
             ),
             "failed",
             ("lint",),
+            "",
         ),
     ],
     ids=["cancelled-beside-running", "only-cancelled", "cancelled-beside-a-failure"],
 )
 async def test_gh_ci_status_never_reads_a_cancelled_check_as_a_verdict(
-    cli, tmp_path, checks, state, failed
+    cli, tmp_path, checks, state, failed, cancelled_at
 ):
     cli.stub("gh", _rollup(*checks))
 
@@ -106,6 +119,7 @@ async def test_gh_ci_status_never_reads_a_cancelled_check_as_a_verdict(
 
     assert status.state == state
     assert tuple(j.name for j in status.failed_jobs) == failed
+    assert status.cancelled_at == cancelled_at
 
 
 @pytest.mark.parametrize(
@@ -171,7 +185,7 @@ async def test_gh_branch_ci_status_reads_runs_not_a_pull_request(cli, tmp_path):
     assert (status.state, status.sha) == ("failed", "deadbeef")
     assert status.failed_jobs[0].failure_reason == "script_failure"
     assert cli.calls("gh") == [
-        "run list --branch main -L 20 --json status,conclusion,headSha,url,name,createdAt"
+        "run list --branch main -L 20 --json status,conclusion,headSha,url,name,createdAt,updatedAt"
     ]
 
 
@@ -190,16 +204,18 @@ async def test_gh_branch_ci_status_waits_for_a_run_matching_the_given_head(cli, 
 def _run(name: str, conclusion: str, created: str) -> str:
     return (
         f'{{"status":"completed","conclusion":"{conclusion}","headSha":"deadbeef",'
-        f'"url":"https://github.com/o/r/actions/runs/1","name":"{name}","createdAt":"{created}"}}'
+        f'"url":"https://github.com/o/r/actions/runs/1","name":"{name}","createdAt":"{created}",'
+        f'"updatedAt":"{created.replace(":00Z", ":09Z")}"}}'
     )
 
 
 @pytest.mark.parametrize(
-    "runs, state",
+    "runs, state, cancelled_at",
     [
         # The same invariant post-merge (Kraft-zn8me): a concurrency-cancelled
-        # run on the target branch is a wait for its successor, not red.
-        ((_run("test", "cancelled", "2026-09-19T05:51:00Z"),), "pending"),
+        # run on the target branch is a wait for its successor, not red --
+        # and says when it was cancelled (Kraft-kbqmk).
+        ((_run("test", "cancelled", "2026-09-19T05:51:00Z"),), "pending", "2026-09-19T05:51:09Z"),
         # Once the successor for the same head exists, it is the verdict.
         (
             (
@@ -207,6 +223,7 @@ def _run(name: str, conclusion: str, created: str) -> str:
                 _run("test", "cancelled", "2026-09-19T05:51:00Z"),
             ),
             "success",
+            "",
         ),
         (
             (
@@ -214,18 +231,19 @@ def _run(name: str, conclusion: str, created: str) -> str:
                 _run("test", "failure", "2026-09-19T05:52:00Z"),
             ),
             "failed",
+            "",
         ),
     ],
     ids=["only-cancelled", "successor-green", "successor-red"],
 )
 async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
-    cli, tmp_path, runs, state
+    cli, tmp_path, runs, state, cancelled_at
 ):
     cli.stub("gh", "[" + ",".join(runs) + "]")
 
     status = await forge.GhCli().branch_ci_status(repo=tmp_path, branch="main", head_sha="deadbeef")
 
-    assert status.state == state
+    assert (status.state, status.cancelled_at) == (state, cancelled_at)
     assert all(j.failure_reason != "cancelled" for j in status.failed_jobs)
 
 

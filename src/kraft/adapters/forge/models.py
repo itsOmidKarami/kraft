@@ -122,6 +122,13 @@ class CIStatus:
     #: GitLab's numeric pipeline id, opaque outside `GlabCli.retry_jobs`. ""
     #: on gh, whose `retry_jobs` works from `failed_jobs[*].detail_url` instead.
     pipeline_ref: str = ""
+    #: When the run this pending read stands on was cancelled (the forge's own
+    #: timestamp), set only when a cancel is the *only* thing it is waiting
+    #: on: every other check settled and none red. "" otherwise, or when the
+    #: forge gave no time. `render_ci` reads it to tell a cancel whose
+    #: successor is still registering from one nobody followed up
+    #: (Kraft-kbqmk).
+    cancelled_at: str = ""
 
 
 class Forge(Protocol):
@@ -207,6 +214,8 @@ class FakeForge:
     #: needs this to make on.ci.poll's persisted `ci_pipeline_ref` non-empty
     #: against a fake forge.
     ci_pipeline_refs: list[str] = field(default_factory=lambda: [""])
+    #: Parallel to `ci_states`: each `ci_status` call's `cancelled_at`.
+    ci_cancelled_at: list[str] = field(default_factory=lambda: [""])
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
@@ -334,6 +343,7 @@ class FakeForge:
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
+            cancelled_at=self._next(self.ci_cancelled_at),
         )
 
     async def branch_ci_status(
