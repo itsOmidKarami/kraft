@@ -15,6 +15,9 @@ connection error.
 ## Gates
 
 - `approve_gate()` - let the chain continue past the gate it is waiting on.
+  A chain revision gate also needs `approve_gate(digest=...)`, with the
+  `digest` that `get_gate_artifact()` returned alongside the revision the person
+  read. If the revision changed since, the approval is refused: show it again.
 - `reject_gate(note="...")` - send it back to be re-planned. The note is
   required, because a rejection with no reason strands whoever picks the work up
   next.
