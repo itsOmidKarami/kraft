@@ -318,6 +318,15 @@ async def test_an_escalations_self_retry_stops_before_it_refreshes_the_worktree(
     assert refreshed == [] and not it.events("work_item_retried")
 
 
+def test_the_guard_lets_a_sandboxed_item_without_submodules_through():
+    """Only the pairing stops an item: a sandbox on one repository is the
+    ordinary sandboxed run."""
+    row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
+    row["submodules"] = None
+    launch = LaunchContext(repo_entry={"path": "/r", "sandbox": SANDBOX}, steering_dir=None)
+    assert stops.refuse_sandboxed_submodules(row, launch) is None
+
+
 def test_the_guard_reads_an_unreadable_repos_yaml_as_a_stop_not_as_no_sandbox():
     """A poisoned entry (`deps._PoisonedRepoEntry`) must not read as "no
     sandbox" and wave the item through."""
