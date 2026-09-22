@@ -513,6 +513,26 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
     ]
 
 
+async def test_a_root_merge_request_opened_for_source_since_reverted_is_still_merged(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """The item never completes while a merge request it opened is still
+    open: a root whose source changes were reverted after its merge request
+    opened has no source left, but it has a merge request, and `merge`
+    follows it through -- even under the `ignore` pointer policy."""
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=True
+    )
+    fake = _LandingForge()
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+    _git(worktree, "revert", "--no-edit", "HEAD")
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+
+    assert fake.order[-1] == ("merge", row["id"])
+    assert _repos(database, row)["root"] == "merged"
+
+
 #: Publication as a chain walks it: draft, approval, ready, merge.
 _PUBLISH = [
     {"id": id, "kind": "exec", "tasks": [{"id": id, "kind": "forge", "target": target}]}
@@ -608,7 +628,7 @@ async def test_a_root_approval_that_never_comes_times_out_for_a_human(
     assert (
         "timed out" in stop["payload"]["reason"] and "merge.main.merge" in stop["payload"]["reason"]
     )
-    assert _pending(database, row) == ["external_approval"]
+    assert _pending(database, row) == ["external_approval"] * 2, "the last one at the deadline"
     assert ("merge", root) not in fake.order and _repos(database, row)["root"] == "open"
 
 
