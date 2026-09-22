@@ -231,7 +231,7 @@ tasks:
       Repair what fails the merge request's checks from outside the code, such
       as a missing or wrong label. A code failure is the fix loop's, which runs
       after you.
-    skill: kraft:mr-checks-repair
+    skill: kraft:mr-metadata-repair
 
   strict_judge:
     kind: agent

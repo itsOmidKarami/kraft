@@ -1,9 +1,9 @@
 ---
-name: mr-checks-repair
-description: Read why a merge request's pipeline just failed, and repair what is fixable from here — starting with a missing label.
+name: mr-metadata-repair
+description: Repair a merge request's own metadata -- a missing or wrong label -- when its pipeline failed on it. Never code, never a failing test.
 ---
 
-# Repairing a red mr_checks pipeline
+# Repairing a merge request's metadata
 
 The merge request's CI wait just failed. Its diagnosis — the failed job's name
 and the tail of its trace — is already in the prompt above.
