@@ -10,6 +10,7 @@ claude one; `KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS` limits only the named models.""
 import json
 import logging
 import os
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,8 @@ from kraft import db as _db
 from kraft import events, store
 from kraft.executor import dispatch, fallback
 from kraft.paths import RunDirs
+
+FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
 
 #: Two resets well ahead, the first earlier.
 SOON = int(time.time()) + 3600
@@ -451,3 +454,42 @@ async def test_a_fallback_launch_is_refused_by_the_budget(tmp_path, repo, fake_a
     assert "scope_budget_reached" in [e["type"] for e in evts]
     (switch,) = _fallbacks(evts)
     assert switch["to"] is None
+
+
+async def test_a_sandboxed_launch_skips_the_host_path_check(
+    tmp_path, repo, fake_agent, monkeypatch
+):
+    """Under a sandbox the executable lives in the container: one missing from
+    the host's PATH is not unavailable, so the task's own launch runs and no
+    skip is logged. The fake `docker` puts `inner/` on the command's PATH, as
+    an image would; the host never has it."""
+    from support.harness import entry_of, fake_docker_bin
+
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    agent = inner / "kraft-in-container"
+    agent.write_text(f'#!/bin/sh\nexec {sys.executable} {FAKE_AGENT} "$@"\n')
+    agent.chmod(0o755)
+    outer = tmp_path / "outer-bin"
+    outer.mkdir()
+    docker = outer / "docker"
+    docker.write_text(
+        f'#!/bin/sh\nPATH="{inner}:$PATH" exec {fake_docker_bin(tmp_path)}/docker "$@"\n'
+    )
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{outer}:{os.environ['PATH']}")
+    _profiles(fake_agent, {"boxed": {"provider": "fake", "executable": "kraft-in-container"}})
+    sandboxed = entry_of(
+        {"setup_command": "", "sandbox": {"kind": "docker", "image": "kraft-worker:py"}}
+    )
+
+    status, evts, sessions, _ = await _walk(
+        tmp_path,
+        repo,
+        _chain(harness="boxed", fallback=[{"harness": "claude"}]),
+        repo_entry=sandboxed,
+    )
+
+    assert _fallbacks(evts) == []
+    assert [s["status"] for s in sessions] == ["done"]
+    assert status == "completed"
