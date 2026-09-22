@@ -605,6 +605,19 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
     ).fetchall()
 
 
+def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
+    """Every session of this item still running or just started, whatever
+    its node or task: what `stops.refuse_live_sandboxed_session` waits on."""
+    return [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM worker_sessions WHERE work_item_id = ? "
+            "AND status IN ('running', 'pending')",
+            (work_item_id,),
+        ).fetchall()
+    ]
+
+
 def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: str) -> list:
     """The running (or just-started) sessions of the task at `path`, or of
     every task under a step path -- what a skip of that scope stops, and

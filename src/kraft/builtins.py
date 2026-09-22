@@ -812,7 +812,7 @@ async def refresh_worktree_base(
         is not None
     ):
         return None
-    if git_read(worktree, "status", "--porcelain"):
+    if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
     done = await asyncio.to_thread(

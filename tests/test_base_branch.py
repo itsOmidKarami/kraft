@@ -316,7 +316,7 @@ async def test_the_straggler_sweep_runs_under_the_items_base_branch(item_on, tmp
     async def agent(_db, _rd, **_kw):
         return "done"
 
-    async def commit_stragglers(_worktree, *, base, message):
+    async def commit_stragglers(_worktree, *, base, message, mounts=()):
         bases.append(("sweep", base))
 
     monkeypatch.setattr(dispatch._agent, "run_agent_task", agent)
