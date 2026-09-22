@@ -7,6 +7,19 @@ from datetime import UTC, datetime
 ENDED = ("completed", "abandoned")
 
 
+def write_status(conn, sql: str, params: tuple) -> bool:
+    """Run `sql`, an `UPDATE work_items ... WHERE ...` that moves an item to a
+    status other than an ending one, unless the item has already ended. True
+    when it wrote; a caller appends its event only then (Kraft-y6f08).
+
+    Every non-ending status write in `store/` goes through here. `sql` stays a
+    whole literal at its call site, so `dev/check_claim_handoff.py` still sees
+    each claim. The ending writes (`mark_completed`, `MANUAL_ENDS`,
+    `abandon_work_item`) do not: ending is the one move an item may always make.
+    """
+    return conn.execute(f"{sql} AND status NOT IN (?, ?)", (*params, *ENDED)).rowcount == 1
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 

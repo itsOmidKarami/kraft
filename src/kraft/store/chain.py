@@ -6,7 +6,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import ENDED
+from kraft.store._common import write_status
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -117,11 +117,12 @@ def skip_node(
     ordering, same race).
     """
     now = _now()
-    conn.execute(
-        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? "
-        "WHERE id = ? AND status NOT IN (?, ?)",
-        (now, work_item_id, *ENDED),
-    )
+    if not write_status(
+        conn,
+        "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
+        (now, work_item_id),
+    ):
+        return
     events.append(
         conn, work_item_id, "node_skipped", {"node_id": node_id, "gate": gate, "note": note}
     )
