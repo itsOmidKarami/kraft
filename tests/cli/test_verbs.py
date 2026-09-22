@@ -273,6 +273,25 @@ def test_create_skips_nodes_caps_spend_and_overrides_a_node(
     assert cap.items() <= item["budget_cap"].items()
 
 
+def test_a_node_gets_its_model_effort_and_extra_prompt_from_the_terminal(
+    app, monkeypatch, capsys, repo
+):
+    """Kraft-a7ers: both CLI doors. An `extra_prompt` is taken as written, not
+    read as YAML, so a colon in the note stays a note."""
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    cli.main(["item", "create", "t", "--node-override", "plan.extra_prompt=Note: yes", "--json"])
+    wid = json.loads(capsys.readouterr().out)["id"]
+    cli.main(["item", "set-node-override", wid, "--node", "implementation", "--model", "opus",
+              "--effort", "high", "--extra-prompt", "Mind the order.", "--json"])  # fmt: skip
+    capsys.readouterr()
+    cli.main(["view", "show", wid, "--json"])
+    assert json.loads(capsys.readouterr().out)["node_overrides"] == {
+        "plan": {"extra_prompt": "Note: yes"},
+        "implementation": {"model": "opus", "effort": "high", "extra_prompt": "Mind the order."},
+    }
+
+
 @pytest.mark.parametrize(
     "flag, says",
     [(["--node-override", "plan=1"], "NODE.FIELD=VALUE"), (["--budget", "lots"], "dollars")],

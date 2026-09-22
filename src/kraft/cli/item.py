@@ -36,14 +36,16 @@ def _policy(pairs: list[str]) -> dict | None:
 
 def _node_overrides(pairs: list[str]) -> dict | None:
     """`--node-override NODE.FIELD=VALUE` pairs as the API's `node_overrides`,
-    each value read as YAML like `--policy`'s. The server checks the fields."""
+    each value read as YAML like `--policy`'s, except an `extra_prompt`, which
+    is prose and taken as written. The server checks the fields."""
     overrides: dict = {}
     for pair in pairs:
         key, sep, raw = pair.partition("=")
         node, dot, field = key.partition(".")
         if not (sep and dot and node and field):
             raise ValueError(f"--node-override takes NODE.FIELD=VALUE, not {pair!r}")
-        overrides.setdefault(node, {})[field] = yaml.safe_load(raw)
+        value = raw if field == "extra_prompt" else yaml.safe_load(raw)
+        overrides.setdefault(node, {})[field] = value
     return overrides or None
 
 
@@ -206,6 +208,9 @@ def _cmd_set_node_override(ns: argparse.Namespace) -> None:
                 ns.auto_escalate,
                 ns.auto_escalate_stuck,
                 ns.auto_escalate_delay_s,
+                model=ns.model,
+                effort=ns.effort,
+                extra_prompt=ns.extra_prompt,
                 clear=ns.clear,
                 work_item_id=ns.id,
             )
@@ -431,7 +436,8 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     set_node_override = subs.add_parser(
         "set-node-override",
         parents=[common],
-        help="per-item auto-escalate override for one node, without touching the template",
+        help="per-item override for one node (auto-escalate, model, effort, extra prompt), "
+        "without touching the template",
     )
     set_node_override.add_argument("id", nargs="?")
     set_node_override.add_argument("--node", required=True, help="a node id in the item's chain")
@@ -449,6 +455,15 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     set_node_override.add_argument(
         "--auto-escalate-delay-s", type=int, help="delay before this node's auto-escalate fires"
+    )
+    set_node_override.add_argument(
+        "--model", help="the model this node's agent tasks run on, over set-overrides"
+    )
+    set_node_override.add_argument(
+        "--effort", help="the effort this node's agent tasks run at, over set-overrides"
+    )
+    set_node_override.add_argument(
+        "--extra-prompt", help="text appended to every agent task's instruction in this node"
     )
     set_node_override.add_argument(
         "--clear", action="store_true", help="reset this node to the template's own binding"
