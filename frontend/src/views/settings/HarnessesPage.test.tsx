@@ -287,7 +287,7 @@ describe("Settings · harnesses", () => {
     expect(model).toHaveValue("sonnet");
   });
 
-  it("lists the agent profiles under the harnesses, read-only, with any pairing problem (Kraft-ps1ao)", async () => {
+  it("lists the agent profiles under the harnesses read-only with any pairing problem", async () => {
     renderAt("/settings/harnesses");
     const strong = (
       await screen.findByText("strong", { selector: ".capability-name" })
