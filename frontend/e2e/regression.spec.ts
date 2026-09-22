@@ -56,7 +56,9 @@ test("settings: a library task links to its harness profile, and the profile bac
   await page.getByRole("link", { name: "claude", exact: true }).click();
   await expect(page.getByRole("heading", { name: "claude", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: /^provider / })).toBeVisible();
-  await page.getByRole("link", { name: "tasks.implementer" }).click();
+  // The harness profile's own link: the agent profiles panel beside it
+  // (`strong`) links the same task too.
+  await page.locator(".template-draft").getByRole("link", { name: "tasks.implementer" }).click();
   await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
 });
 
