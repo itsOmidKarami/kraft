@@ -10,7 +10,7 @@ import { ago, elapsedBetween, judgeReasoning, repoName, until } from "../format"
 import { useItemStates, useStore } from "../store";
 import { showToast } from "../components/Toast";
 import type { Repo, Theme, WorkItem, WorkerSession } from "../types";
-import type { ComposerKind } from "./work_item/ActionBar/ItemCard";
+import { GATES_REQUIRE_ARTIFACT_PANE, type ComposerKind } from "./work_item/ActionBar/ItemCard";
 import { useActionBar } from "./work_item/ActionBar/useActionBar";
 import { fallbackSentence } from "./work_item/timelineHelpers";
 import { usePhone } from "./work_item/usePhone";
@@ -627,9 +627,9 @@ function RowAction({
   switch (state) {
     case "gate":
       control =
-        item.pending_gate === "human_review_approval" ? (
-          // No blind approve for the merge request: its deferred findings are
-          // only on the item page (spec §2).
+        item.pending_gate && GATES_REQUIRE_ARTIFACT_PANE.has(item.pending_gate) ? (
+          // No blind approve for a gate whose deferred findings or digest
+          // only live on the item page (spec §2, Kraft-xyt3x).
           <Link className="btn btn-secondary" to={`/work-items/${item.id}`}>
             Review to approve
           </Link>

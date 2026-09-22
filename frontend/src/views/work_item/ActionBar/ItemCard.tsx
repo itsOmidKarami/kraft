@@ -35,7 +35,16 @@ const PROMPTS: Record<string, string> = {
   plan_approval: "approve the plan to continue",
   chain_finalized: "approve the revised chain to continue",
   human_review_approval: "approve the merge request to continue",
+  chain_revision_approval: "approve the chain revision to continue",
 };
+
+/** Gates a blind Approve from the board or search palette must not fire
+ *  directly: `human_review_approval`'s deferred findings only render on the
+ *  item page, and `chain_revision_approval`'s Approve needs a digest that
+ *  only the artifact pane (`RightPane/Doc.tsx`, reached via this card's own
+ *  "Read document") carries -- a request with neither always 409s. Both
+ *  route to the item page instead (Kraft-xyt3x). */
+export const GATES_REQUIRE_ARTIFACT_PANE = new Set(["human_review_approval", "chain_revision_approval"]);
 /** The gate document's link names what it is where the gate says so; every
  *  other gate reads "Read document" (W11 rule 6). */
 const ARTIFACT_LABELS: Record<string, string> = {

@@ -4,6 +4,14 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## Unreleased
+
+- Fix: a `chain_revision_approval` gate now gets the same board, action-bar
+  and search Approve treatment `human_review_approval` has -- its own prompt
+  text, and Approve routes to the item page instead of firing a blind
+  request that always 409s (the gate's Approve needs a digest only the
+  artifact pane carries).
+
 ## 1.0.7
 
 - Fix: an in-flight work item's own repository steering no longer silently

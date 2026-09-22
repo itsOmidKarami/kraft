@@ -8,6 +8,7 @@ import { SectionLabel, TaskLine } from "./ui";
 import { useStore } from "../store";
 import { SETTINGS_NAV } from "../settingsNav";
 import type { Bead, SearchResult, TaskProgress } from "../types";
+import { GATES_REQUIRE_ARTIFACT_PANE } from "../views/work_item/ActionBar/ItemCard";
 import { DocumentModal } from "./DocumentModal";
 import { Snippet } from "./Snippet";
 
@@ -143,10 +144,12 @@ export function SearchOverlay({
       label: `Approve ${i.pending_gate}`,
       sub: i.title,
       act: () => {
-        // human_review_approval carries a deferred-findings roll-up that
-        // this palette has nowhere to show — Gate.tsx refuses to approve
-        // it inline for the same reason. Route to the item instead.
-        if (i.pending_gate === "human_review_approval") {
+        // human_review_approval carries a deferred-findings roll-up this
+        // palette has nowhere to show, and chain_revision_approval's Approve
+        // needs a digest only the artifact pane carries — neither is here to
+        // send, so both always 409 blind. Route to the item instead
+        // (Kraft-xyt3x).
+        if (i.pending_gate && GATES_REQUIRE_ARTIFACT_PANE.has(i.pending_gate)) {
           navigate(`/work-items/${i.id}`);
           onClose();
           return;

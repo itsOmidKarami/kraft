@@ -60,6 +60,7 @@ describe("ItemCard (W11 · A)", () => {
   it.each<[string, WorkItem, WorkerSession[], KraftEvent[], string[]]>([
     ["gate", gateItem(), [], [], ["Approve", "Reject", "Review spec"]],
     ["gate without a named document", gateItem({ pending_gate: "code_review" }), [], [], ["Approve", "Reject", "Read document"]],
+    ["gate: chain_revision_approval keeps Read document, unlike human_review_approval", gateItem({ pending_gate: "chain_revision_approval" }), [], [], ["Approve", "Reject", "Read document"]],
     ["running", item({ status: "active" }), [], [], ["Pause"]],
     ["paused", item({ status: "paused" }), [], [], ["Resume", "Steer"]],
     ["paused, steerable false", item({ status: "paused", steerable: false }), [], [], ["Resume"]],
@@ -212,6 +213,11 @@ describe("ItemCard (W11 · A)", () => {
     expect(sub.textContent).toMatch(/^code_review · 10 findings deferred · 1 concern · see Timeline$/);
     expect(screen.queryByText(/finding number 0/)).toBeNull();
     expect(screen.getByRole("link", { name: /see timeline/i })).toHaveAttribute("href", expect.stringContaining("tab=timeline"));
+  });
+
+  it("gate: chain_revision_approval gets its own prompt, not the generic fallback (Kraft-xyt3x)", () => {
+    renderCard(gateItem({ pending_gate: "chain_revision_approval" }));
+    expect(screen.getByText("approve the chain revision to continue")).toBeInTheDocument();
   });
 
   it("gate: the findings link targets the node whose findings_measured carries them, skipping a later empty one", () => {
