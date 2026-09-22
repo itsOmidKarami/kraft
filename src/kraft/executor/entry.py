@@ -254,8 +254,12 @@ def attachments_of(work_item_row) -> list[dict]:
 #: bare id anywhere in prose, this is a promise the author made deliberately,
 #: and it is the convention every forge already reads. It is also the signal
 #: that tracks implementation: a bead fixed by a merged commit stayed open for
-#: a day because nothing here read it.
-_TRAILER_RE = re.compile(r"\b(?:Fixes|Closes)\b:?\s+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I)
+#: a day because nothing here read it. A line of its own, not the word
+#: anywhere: a body retelling the brief ("the old path closes Kraft-x early")
+#: promises nothing (Kraft-iaou3).
+_TRAILER_RE = re.compile(
+    r"^[ \t]*(?:Fixes|Closes):?[ \t]+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I | re.M
+)
 
 
 def _trailer_beads(messages: list[str]) -> list[str]:
@@ -276,16 +280,31 @@ def _implements_beads(work_item_row) -> list[str]:
     return json.loads(raw) if raw else []
 
 
-async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
+async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = False) -> None:
     """Close `row['bead_id']`, every id in `row['implements_beads']`, and every id
-    a `Fixes`/`Closes` trailer on the item's own commits names.
+    a `Fixes`/`Closes` trailer on the item's own commits names -- but only when
+    the item's change carries them (Kraft-iaou3).
+
+    A chain running to its end is not evidence on its own: two P1s once read
+    "closed" with no code behind them, and the next work was planned on top.
+    The evidence is the item's own branch changing something besides its own
+    attachments (`base_ref..HEAD`, read from the row as it is *now* -- a
+    rebase mid-walk moves `base_ref`, and the stale one would count the base's
+    commits as the item's), or a member's merge request having merged. Without
+    it the beads stay open and a `beads_left_open` event says why: a bead left
+    open is found, a bead wrongly closed is not. `by_hand` is a person
+    completing the item and asking for the close (Ruling 167) -- they have said
+    where the work landed, so nothing here second-guesses it.
 
     An item filed while bd was down has no `bead_id` (Kraft-7gy); this backfills
-    one via a late `beads.intake` before closing, rather than leaving it open
+    one via a late `beads.intake` first, rather than leaving it untracked
     forever (Kraft-dr3n) -- and persists it to the row, same as if intake had
     filed it originally. Each id's failure is logged, not raised -- one bad bead
     must not stop the others from closing, same as the single-bead path before.
     """
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
+    )
     cwd = row["bead_cwd"] or bd_cwd
     bead_id = row["bead_id"]
     if bead_id is None:
@@ -295,24 +314,40 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
             logger.warning("late bead intake failed for %r: %r", row["title"], exc)
         else:
             await db.write(lambda c: store.set_bead_id(c, row["id"], bead_id))
-    if bead_id:
-        try:
-            await beads.complete(bead_id, cwd=cwd)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", bead_id, exc)
     # `git_read` never raises, so a worktree already cleaned up, or a row with no
-    # `base_ref`, degrades to closing exactly the stated beads: a bead left open
-    # is found, a bead wrongly closed is not.
+    # `base_ref`, reads as no change at all.
     worktree = run_dirs.worktrees / row["id"]
-    log = (
-        git_read(worktree, "log", "--format=%B%x00", f"{row['base_ref']}..HEAD")
-        if row["base_ref"]
-        else None
-    )
-    trailers = _trailer_beads(log.split("\0") if log else [])
+    base = row["base_ref"]
+    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
+    changed = git_read(worktree, "diff", "--name-only", base, "HEAD") if base else None
     stated = _implements_beads(row)
-    for sub_id in [*stated, *(x for x in trailers if x != bead_id and x not in stated)]:
+    trailers = _trailer_beads(log.split("\0") if log else [])
+    ids = [b for b in (bead_id, *stated) if b]
+    ids += [x for x in trailers if x not in ids]
+    if not by_hand and not _carries_a_change(db, row, changed):
+        if ids:
+            reason = (
+                "the item completed without changing anything but its own attachments, "
+                "and no member merge request merged; close them by hand once the work lands"
+            )
+            logger.warning("beads left open for %s: %s", row["id"], reason)
+            await db.write(
+                lambda c: events.append(
+                    c, row["id"], "beads_left_open", {"beads": ids, "reason": reason}
+                )
+            )
+        return
+    for one in ids:
         try:
-            await beads.complete(sub_id, cwd=cwd)
+            await beads.complete(one, cwd=cwd)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", sub_id, exc)
+            logger.warning("bead close failed for %s: %r", one, exc)
+
+
+def _carries_a_change(db, row, changed: str | None) -> bool:
+    """Whether the item's branch changed a path that is not one of its own
+    attachments, or one of its member repos' merge requests merged."""
+    attached = {a["path"] for a in attachments_of(row)}
+    if set((changed or "").splitlines()) - attached:
+        return True
+    return any(r["state"] == "merged" for r in db.read(lambda c: store.repos_for(c, row["id"])))
