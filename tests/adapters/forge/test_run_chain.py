@@ -379,6 +379,23 @@ async def test_root_with_no_changes_of_its_own_never_opens_a_merge_request(
     assert next(r for r in repos if r["role"] == "root")["state"] == "pending"
 
 
+async def test_a_workspace_item_that_changed_nothing_opens_no_merge_request(
+    item_on, database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-vz8e for a workspace: its one member is untouched (so skipped,
+    Kraft-j14jn) and the root has no source, so there is nothing to publish.
+    `open_mr` stops as a `config_error` naming why, with nothing opened."""
+    it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
+    _with_origin(tmp_path, it, worktree)
+    fake = forge.FakeForge(ci_states=["success"])
+
+    status = await _run_task(database, run_dirs, it, worktree, branch, fake, monkeypatch)
+
+    assert status == "config_error" and not fake.opened
+    log = (run_dirs.logs / "s1.log").read_text()
+    assert log.startswith("refusing to open a merge request") and "no selected repository" in log
+
+
 async def test_run_task_is_unchanged_for_a_single_repo_item(
     item_on, database, run_dirs, repo, monkeypatch
 ):
@@ -400,6 +417,9 @@ async def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_rep
     no `merge_state='merged'` for that row, no later targets, and no root
     pointer bump (which would push root pointing at a branch nothing merged)."""
     it, worktree, branch = await _multi_repo_item(item_on, database, run_dirs, tmp_path, "bump")
+    # A member with an MR to merge has changed: an untouched one is never a
+    # target at all (Kraft-j14jn).
+    _commit(worktree / "repos" / "pkg", "new.txt", "x\n")
     calls: list[Path] = []
 
     async def fake_run_one(*args, **kwargs):

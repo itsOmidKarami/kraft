@@ -1007,6 +1007,19 @@ async def run_task(
             # merged yet, so a root MR here would review a pointer that
             # doesn't exist.
             targets = [t for t in targets if t[2] != "root"]
+        # An item selects more members than it changes, and only a changed
+        # one is published (`changed-child-repositories-get-separate-merge-
+        # requests`): a member with nothing beyond its own base gets no merge
+        # request and is no reason to stop (Kraft-j14jn). Only one that never
+        # opened one -- an open merge request is followed to its end.
+        untouched = set()
+        for r in rows:
+            if r["role"] == "submodule" and r["merge_state"] == "pending":
+                sub = Path(r["repo_path"])
+                sub_base = await _builtins.base_branch(db, work_item_id, sub, member=True)
+                if await git.commits_ahead(sub, branch, sub_base) == 0:
+                    untouched.add(r["id"])
+        targets = [t for t in targets if t[0] not in untouched]
 
     if handler == "merge_watch" and targets:
         # `merge_watch` ignores the per-target `repo` entirely -- it reads
@@ -1020,6 +1033,19 @@ async def run_task(
         # needs the root row to resolve `root_has_changes`.
         targets = [next((t for t in targets if t[2] == "root"), targets[0])]
 
+    if handler == "open_mr" and multi and not targets:
+        # Every selected repository untouched: the workspace form of
+        # Kraft-vz8e's empty branch, refused the same way.
+        return await _builtins.finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=session_id,
+            status="config_error",
+            log=f"refusing to open a merge request for {branch}: no selected repository has "
+            "commits beyond its base -- the implementation committed nothing\n",
+            reused=reused,
+        )
     try:
         live_forge = resolve(backend_for(backend, repo_forge))
     except ForgeError as exc:
