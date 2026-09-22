@@ -9,6 +9,7 @@ import json
 import subprocess
 
 import pytest
+from support.harness import make_repo
 
 from kraft.adapters import forge
 
@@ -270,6 +271,70 @@ async def test_mark_ready_undrafts_the_merge_request(run_forge, tmp_path):
     assert await run_forge(fake, handler, "s-ready") == ("done", "done")
 
     assert fake.opened_draft[1] is False
+
+
+def _branch_over_origin(tmp_path, *, commits: int):
+    """A real repo whose `kraft/w1` adds `commits` commits to a real
+    origin's `main` -- the base `commits_ahead` reads against."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
+    repo = make_repo(tmp_path)
+    work = [["commit", "--allow-empty", "-qm", f"work {n}"] for n in range(commits)]
+    setup = [["remote", "add", "origin", str(origin)], ["push", "-q", "origin", "main"]]
+    for args in [*setup, ["checkout", "-qb", "kraft/w1"], *work]:
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    return repo
+
+
+@pytest.mark.parametrize(
+    "handler, opened", [("open_mr", False), ("sync_mr", True), ("mark_ready", True)]
+)
+async def test_a_branch_with_no_commits_is_never_opened_or_readied(
+    run_forge, tmp_path, handler, opened
+):
+    """Kraft-vz8e: a worker that committed nothing got an MR opened anyway,
+    and mr_checks waited out its cap on a pipeline that never started. A
+    branch with nothing beyond its base stops the item naming why -- as a
+    `config_error`, so no fix loop spends an agent turn on it -- and the
+    merge request is neither opened nor undrafted."""
+    repo = _branch_over_origin(tmp_path, commits=0)
+    fake = forge.FakeForge()
+    if opened:
+        await _opened(fake, repo)
+
+    assert await run_forge(fake, handler, "z1", repo=repo) == ("config_error", "config_error")
+
+    assert list(fake.opened) == ([1] if opened else [])
+    assert all(fake.opened_draft.values()), "an empty merge request was marked ready"
+    assert not fake.pushed
+    assert run_forge.log("z1").startswith(
+        "refusing to " + ("ready" if opened else "open") + " a merge request for kraft/w1: "
+        "it has no commits beyond origin/main"
+    ), "the first log line is the reason the stop names"
+
+
+@pytest.mark.parametrize("handler", ["sync_mr", "mark_ready"])
+async def test_a_merged_branch_with_no_commits_left_is_still_already_merged(
+    run_forge, tmp_path, handler
+):
+    """A branch merged outside Kraft reads empty against its base; the
+    "already merged" shortcut must still answer before the guard above."""
+    repo = _branch_over_origin(tmp_path, commits=0)
+    fake = await _opened(forge.FakeForge(), repo, merged=True)
+
+    assert await run_forge(fake, handler, "z3", repo=repo) == ("done", "done")
+
+    assert "already merged" in run_forge.log("z3")
+
+
+async def test_a_branch_with_commits_opens_its_merge_request(run_forge, tmp_path):
+    """The other side of the guard above, against the same real origin."""
+    repo = _branch_over_origin(tmp_path, commits=1)
+    fake = forge.FakeForge()
+
+    assert await run_forge(fake, "open_mr", "z2", repo=repo) == ("done", "done")
+
+    assert fake.opened == {1: "kraft/w1"}
 
 
 class _Recording(forge.FakeForge):

@@ -163,6 +163,8 @@ def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
     seen = {}
 
     def run(command, **kwargs):
+        if command[:3] == ["uv", "tool", "list"]:
+            return type("R", (), {"returncode": 0, "stdout": ""})()
         seen["command"] = command
         wheel_path = pathlib.Path(command[5])
         seen["wheel_bytes"] = wheel_path.read_bytes()
@@ -264,6 +266,48 @@ def test_perform_under_homebrew_without_brew_is_a_readable_failure(monkeypatch):
 
     with pytest.raises(SystemExit, match="brew"):
         update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
+
+
+#: `uv tool list` on a machine installed before the kraft -> kraft-sdlc PyPI
+#: rename and updated since: two receipts, both claiming the `kraft` command.
+PRE_RENAME_LISTING = "black v24.1.0\n- black\nkraft v0.40.0\n- kraft\nkraft-sdlc v0.76.2\n- kraft\n"
+
+
+@pytest.mark.parametrize(
+    "listing, stale",
+    [
+        (PRE_RENAME_LISTING, True),
+        ("kraft-sdlc v0.76.2\n- kraft\n", False),
+        ("", False),
+    ],
+    ids=["pre-rename-receipt", "kraft-sdlc-only", "no-tools"],
+)
+def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, listing, stale):
+    """Kraft-rswxq: a `kraft` uv tool left over from before the PyPI rename
+    shares the `kraft` command with `kraft-sdlc`, and `uv tool uninstall
+    kraft` -- the obvious cleanup -- deletes that command for both. Update
+    stops before it downloads anything and names both commands, in order;
+    `uv` itself is never reached past `tool list`."""
+    downloads = []
+    monkeypatch.setattr(update, "_request", lambda url, _timeout: downloads.append(url) or b"")
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        out = listing if command[:3] == ["uv", "tool", "list"] else ""
+        return type("R", (), {"returncode": 0, "stdout": out})()
+
+    release = update.Release(tag="v0.4.0", wheel_url="u/w.whl")
+    if not stale:
+        assert update.perform(release, run=run) == 0
+        assert calls[-1][:3] == ["uv", "tool", "install"]
+        return
+    with pytest.raises(SystemExit) as err:
+        update.perform(release, run=run)
+    assert calls == [["uv", "tool", "list"]], "nothing may be installed over the stale receipt"
+    assert not downloads, "the wheel was downloaded for an update that cannot run"
+    message = str(err.value)
+    assert "uv tool uninstall kraft\n  uv tool install --force --reinstall kraft-sdlc" in message
 
 
 def test_is_homebrew_install_is_false_for_a_uv_tool_prefix(monkeypatch):

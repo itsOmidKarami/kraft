@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 import psutil
 import pytest
-from support.harness import fake_docker_bin
+from support.harness import fails_once, fake_docker_bin
 
 from kraft import events, store
 from kraft.worker import reattach
@@ -339,12 +339,23 @@ async def test_an_adopted_session_records_its_usage(item, database, run_dirs):
     assert _usage(item) == ("claude-opus-5", 400, 20, 1.25)
 
 
-async def test_an_adopted_session_carries_live_tokens_before_it_exits(item, database, run_dirs):
+@pytest.mark.parametrize("seam", [None, "read", "write"], ids=["clean", "bad-read", "bad-write"])
+async def test_an_adopted_session_carries_live_tokens_before_it_exits(
+    item, database, run_dirs, monkeypatch, caplog, seam
+):
     """Kraft-jgs6: the child survives the restart (`run_task` starts it
     `start_new_session=True` precisely so it can) and keeps writing its log.
     Before `_adopt` had its own progress loop, tokens sat frozen at whatever
     `run_task` last wrote before the restart. Calls `_adopt` directly to
-    shorten `progress_s` -- the default 5s would make this as slow as the bug."""
+    shorten `progress_s` -- the default 5s would make this as slow as the bug.
+
+    Kraft-0jpb: a tick that raises, reading the log or writing the row, is
+    logged with its traceback, and the next tick still lands -- the same
+    contract as `run_task`'s own loop."""
+    if seam == "read":
+        monkeypatch.setattr(reattach, "_progress_usage", fails_once(reattach._progress_usage))
+    elif seam == "write":
+        monkeypatch.setattr(store, "session_progress", fails_once(store.session_progress))
     script = (
         'printf \'{"type":"assistant","request_id":"req_1","message":'
         '{"model":"claude-opus-5","usage":{"input_tokens":1000,"output_tokens":200}}}\\n\'; '
@@ -372,6 +383,8 @@ async def test_an_adopted_session_carries_live_tokens_before_it_exits(item, data
 
     assert live is not None, "tokens_in never appeared on the row before the child exited"
     assert live[:3] == ("claude-opus-5", 1000, 200)
+    failed = [r for r in caplog.records if "usage progress tick failed" in r.getMessage()]
+    assert [r.exc_info[1].args for r in failed] == ([] if seam is None else [("poison tick",)])
 
 
 async def test_adopting_a_session_leaves_its_backgrounded_child_alone(
