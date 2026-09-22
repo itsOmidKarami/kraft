@@ -128,6 +128,8 @@ agent, decides whether to skip, abandon, or give more room.
 - `install-service` works on Linux runners and reinstalls cleanly.
 - Editing a repo whose `repos.yaml` entry leaves `enabled` unset now refuses
   to save it enabled with no test command, as for an explicit `enabled: true`.
+- `kraft view logs -n 0 -f` prints only lines written after it started, not the
+  log's tail.
 
 ### Removed
 

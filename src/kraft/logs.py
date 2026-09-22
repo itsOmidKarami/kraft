@@ -241,6 +241,11 @@ class Tail:
         self._times_offset = 0
         self._times: dict[int, str] = {}
 
+    @property
+    def next_line(self) -> int:
+        """The number the next line read will get: where "now" is in the log."""
+        return self._n
+
     def read(self, *, final: bool = False) -> list[dict]:
         """The rows written since the last read. A missing log is no rows."""
         try:

@@ -76,8 +76,16 @@ async def get_log(sid: str, request: Request, format: str | None = None, follow:
                 media_type="text/event-stream",
                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
             )
-        lines = await asyncio.to_thread(lambda: list(logs_mod.jsonl(path)))
-        return {"session_id": sid, "status": row["status"], "lines": lines}
+        tail = logs_mod.Tail(path)
+        lines = await asyncio.to_thread(tail.read, final=True)
+        # `next_line`: where a follow resumes when no line was printed to
+        # resume after (`kraft view logs -n 0 -f`, Kraft-tbnse).
+        return {
+            "session_id": sid,
+            "status": row["status"],
+            "lines": lines,
+            "next_line": tail.next_line,
+        }
     if not path.exists():
         raise HTTPException(404, "log not found")
     return FileResponse(path, media_type="text/plain")
