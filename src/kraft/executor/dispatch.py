@@ -34,6 +34,7 @@ from kraft.executor.context import (
     CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
+    REPAIR_DOUBTED,
     SCOPE,
     TIME_CAPPED,
     WAIT_TIMED_OUT,
@@ -1312,7 +1313,7 @@ async def run_recovery(
         repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
     else:
         repair_steer = Steer(context, source="seeded")
-    return await measure_node(
+    verdict, h_failed, h_excs = await measure_node(
         db,
         run_dirs,
         work_item_id,
@@ -1326,6 +1327,27 @@ async def run_recovery(
         budget=budget,
         loop_severities=loop_severities,
     )
+    if verdict == "ok" and scope != "conflict":
+        doubted = [
+            t for step in handler for t in step.tasks if repair_doubts(db, work_item_id, node, [t])
+        ]
+        if doubted:
+            return REPAIR_DOUBTED, doubted, []
+    return verdict, h_failed, h_excs
+
+
+def repair_doubts(
+    db, work_item_id: str, node: ResolvedNode, tasks: list[ResolvedTask]
+) -> list[str]:
+    """`task: concerns` for each of `tasks` whose latest session ended
+    `done_with_concerns` -- what `REPAIR_DOUBTED` stops on."""
+    doubts = []
+    for task in tasks:
+        session = _latest_session(db, work_item_id, node, task)
+        if session is not None and session["status"] == "done_with_concerns":
+            concerns = _subprocess.read_concerns(Path(session["result_path"]))
+            doubts.append(f"{task.task.id}: {concerns or '(no concerns given)'}")
+    return doubts
 
 
 def measured_tasks(
