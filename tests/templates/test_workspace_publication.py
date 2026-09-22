@@ -44,6 +44,7 @@ async def _workspace_item(
     second=False,
     legacy=False,
     nodes=None,
+    base_branch=None,
     **materialize,
 ):
     """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
@@ -60,7 +61,9 @@ async def _workspace_item(
     chain = v1_chain(
         nodes or [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
-        target=None if legacy else workspace_target(mounts, root_pointer_policy=pointer),
+        target=None
+        if legacy
+        else workspace_target(mounts, root_pointer_policy=pointer, base_branch=base_branch),
     )
     if materialize:
         # Built past `materialize`, as an item filed before Ruling 180 froze
@@ -348,6 +351,8 @@ async def _publishable(
         database, run_dirs, tmp_path, [_task("t")], pointer=pointer, **item
     )
     root = Path(row["repo"])
+    if item.get("base_branch"):
+        _git(root, "branch", item["base_branch"])
     members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]
     origin = tmp_path / "root-origin.git"
     _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
@@ -417,6 +422,27 @@ async def test_child_merge_precedes_workspace_pointer_update(
     merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
     assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
+
+
+async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-v9gbi: the item's base branch names the root only. The member's
+    merge request targets the member's own default branch, and the bump
+    lands on the root's base branch, leaving its default alone."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", base_branch="release"
+    )
+    before = _git_out(origin, "rev-parse", "main")
+    fake = _LandingForge()
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+
+    assert fake.opened_base == {1: "main"}, "the member's merge request, into its own default"
+    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    assert _git_out(origin, "rev-parse", "release:repos/pkg") == merged
+    assert _git_out(origin, "rev-parse", "main") == before
 
 
 @pytest.mark.parametrize(
