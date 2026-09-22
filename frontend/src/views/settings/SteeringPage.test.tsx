@@ -95,6 +95,18 @@ describe("Settings · steering (5c-bis, design 30)", () => {
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
+  it("says these are repository steering files and points at the Library for task steering", async () => {
+    renderAt("/settings/steering");
+    const note = (await screen.findByRole("link", { name: "Library" })).closest(".settings-note");
+    expect(note).toHaveTextContent("Markdown files a repository selects in repos.yaml (steering:), read at each launch");
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("href", "/settings/library");
+  });
+
+  it("the empty state says there are no repository steering files", async () => {
+    vi.spyOn(api, "getSteering").mockResolvedValue({ files: [], max_bytes: 8192 });
+    renderAt("/settings/steering");
+    expect(await screen.findByText("no repository steering files yet")).toBeInTheDocument();
+  });
 });
 
 describe("phone", () => {
@@ -112,5 +124,9 @@ describe("phone", () => {
     await userEvent.type(await screen.findByLabelText("steering body"), "x");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(put).toHaveBeenCalled();
+  });
+  it("phone: the file list says the same and links to the Library", async () => {
+    renderAt("/settings/steering");
+    expect(await screen.findByRole("link", { name: "Library" })).toHaveAttribute("href", "/settings/library");
   });
 });
