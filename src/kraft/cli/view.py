@@ -70,7 +70,8 @@ def _cmd_list(ns: argparse.Namespace) -> None:
 
 
 def _cmd_show(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.get_work_item(ns.id)), _render_show, ns.json)
+    item = asyncio.run(client.get_work_item(ns.id, full=ns.json))
+    common.emit(item, _render_show, ns.json)
 
 
 def _cmd_search(ns: argparse.Namespace) -> None:

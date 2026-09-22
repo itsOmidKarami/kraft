@@ -111,6 +111,23 @@ def test_show_defaults_to_the_work_item_this_session_is_in(
     assert "implicit" in capsys.readouterr().out
 
 
+def test_show_json_is_the_detail_endpoints_payload(app, capsys, make_item, repo):
+    """Kraft-w17d: `--json` prints what `GET /work-items/{id}` returns, plus the
+    CLI's own `next_node_id`, so a script never needs curl and the MCP token."""
+    wid = make_item(repo, "all of it")
+
+    async def detail():
+        async with client.transport.http() as http:
+            return (await http.get(f"/api/work-items/{wid}")).json()
+
+    full = asyncio.run(detail())
+    cli.main(["view", "show", wid, "--json"])
+    shown = json.loads(capsys.readouterr().out)
+
+    assert {"chain_definition", "worker_sessions", "base_ref", "branch"} <= set(full)
+    assert shown == {**full, "next_node_id": full["chain_definition"]["nodes"][0]["id"]}
+
+
 def test_show_with_no_context_names_both_ways_to_fix_it(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["view", "show"])
@@ -301,16 +318,8 @@ def test_create_attaches_a_spec_from_the_flag(app, tmp_path, monkeypatch, capsys
     assert [a["kind"] for a in item["attachments"]] == ["spec"]
     assert item["attachments"][0]["path"] == ".engineering/specs/s.md"
 
-    # the attached spec trims the gate it satisfies — `view show` trims the
-    # chain itself away, so check the untrimmed item straight from the API
-    import asyncio
-
-    async def _fetch_full():
-        async with client.transport.http() as http:
-            return (await http.get(f"/api/work-items/{created['id']}")).json()
-
-    full = asyncio.run(_fetch_full())
-    assert "spec_approval" not in [n["gate_after"] for n in full["chain_definition"]["nodes"]]
+    # the attached spec trims the gate it satisfies
+    assert "spec_approval" not in [n["gate_after"] for n in item["chain_definition"]["nodes"]]
 
 
 def test_create_through_the_mcp_door_attaches(app, tmp_path, monkeypatch, repo):
@@ -371,7 +380,7 @@ def test_a_worker_cannot_set_its_own_policy_through_the_cli(
     assert "cannot act on its own work item" in capsys.readouterr().err
     monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
     cli.main(["view", "show", wid, "--json"])
-    assert "policy_override" not in json.loads(capsys.readouterr().out)
+    assert json.loads(capsys.readouterr().out)["policy_override"] is None
 
 
 def test_resume_starts_a_paused_item(app, capsys, make_item, repo):
@@ -642,7 +651,7 @@ def test_no_source_string_tells_a_user_to_run_a_removed_verb():
 
 
 def test_show_renders_progress_as_a_task_list(app, monkeypatch, capsys):
-    async def fake_get(work_item_id=None):
+    async def fake_get(work_item_id=None, *, full=False):
         return {
             "id": "w1",
             "current_node_id": "implementation",

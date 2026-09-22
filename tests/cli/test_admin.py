@@ -45,7 +45,7 @@ def test_reindex_unknown_repo_is_a_readable_404(app):
 
 def test_reload_templates_returns_the_template_set(app):
     payload = asyncio.run(client.reload_templates())
-    assert set(payload) == {"valid", "invalid_templates"}
+    assert set(payload) == {"valid", "invalid_templates", "refused_policy"}
     assert {"quick-task", "default"} <= set(payload["valid"])
 
 
@@ -62,6 +62,15 @@ def test_reload_reports_invalid_templates_and_exits_1(app, capsys):
         cli.main(["admin", "reload"])
     assert caught.value.code == 1
     assert "invalid: library.yaml" in capsys.readouterr().out
+
+
+def test_reload_reports_a_refused_policy_and_exits_1(app, capsys):
+    templates_dir = Path(os.environ["KRAFT_TEMPLATES_DIR"])
+    (templates_dir / "policy.yaml").write_text("default: [unclosed\n")
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "reload"])
+    assert caught.value.code == 1
+    assert "refused: policy.yaml" in capsys.readouterr().out
 
 
 def test_reload_refused_by_the_server_is_a_kraft_message(app, monkeypatch, capsys):

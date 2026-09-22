@@ -85,8 +85,12 @@ def _next_node_id(item: dict) -> str | None:
     return ids[after] if after < len(ids) else None
 
 
-async def get_work_item(work_item_id: str | None = None) -> dict:
-    """One item. Defaults to the item this session is standing in."""
+async def get_work_item(work_item_id: str | None = None, *, full: bool = False) -> dict:
+    """One item. Defaults to the item this session is standing in.
+
+    Trimmed so an agent's context is not spent on the chain and its sessions;
+    `full` keeps the detail endpoint's whole payload, which is what
+    `kraft view show --json` prints (Kraft-w17d)."""
     if work_item_id is None:
         work_item_id, _origin = context.resolve_context()
     if work_item_id is None:
@@ -95,6 +99,8 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
             f"no work item: pass an id, or run from a Kraft worktree under {worktrees}"
         )
     item = await transport._get(f"/work-items/{work_item_id}")
+    if full:
+        return {**item, "next_node_id": _next_node_id(item)}
     keep = (
         "id",
         "title",
