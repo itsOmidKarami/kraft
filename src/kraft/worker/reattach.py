@@ -259,7 +259,9 @@ def _is_agent_hook(db, row) -> bool:
     no snapshot was filed by the legacy loader, which no V1 walk can run; it
     takes the conservative answer below.
 
-    Only `_adopted_status` asks, and its unknown-hook direction has to be the
+    Asked by adoption (`_adopted_status`) and by the dead, identity-
+    unconfirmed branch of `reattach` (Kraft-s7c04.38), both through
+    `_evidenced_status`. Its unknown-hook direction has to be the
     conservative one: calling an agent a subprocess would let its exit code
     override the `require_result_file` contract.
     """
