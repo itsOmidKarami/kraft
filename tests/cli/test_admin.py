@@ -329,6 +329,21 @@ def test_admin_update_force_installs_anyway(monkeypatch, capsys):
     assert called
 
 
+@pytest.mark.parametrize("other", [None, "/opt/homebrew/bin/kraft"], ids=["alone", "shadowed"])
+def test_admin_update_warns_when_another_kraft_is_first_on_path(monkeypatch, capsys, other):
+    """Kraft-xs3ri: the update lands in this install; an MCP session running
+    `kraft` by name keeps the shadowing one, so say so where the human looks."""
+    from kraft import update
+
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v0.5.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "0.4.0")
+    monkeypatch.setattr(update, "perform", lambda *a, **k: 0)
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: other)
+    cli.main(["admin", "update"])
+    out = capsys.readouterr().out
+    assert ("/opt/homebrew/bin/kraft" in out) is (other is not None)
+
+
 def test_admin_update_with_no_release_known_exits_1(monkeypatch, capsys):
     from kraft import update
 

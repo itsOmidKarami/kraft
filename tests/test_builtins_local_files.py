@@ -169,3 +169,33 @@ def test_uncarried_local_files_omits_what_was_carried(tmp_path, repo):
     kraft_builtins._carry_local_files(repo, wt, [".python-version"])
 
     assert kraft_builtins._uncarried_local_files(repo, wt) == []
+
+
+async def test_the_preparation_report_names_a_refused_entry_apart_from_noise(
+    database, run_dirs, repo
+):
+    """Kraft-hro48: a configured entry that was not carried -- root-level or
+    nested -- is named as such in the report the item's events carry, not only
+    in the server's logger, and not buried in the untracked-noise list."""
+    (repo / ".python-version").write_text("3.11\n")  # root, not ignored: refused
+    (repo / "config").mkdir()
+    (repo / "config" / "secrets.local.json").write_text("{}\n")  # nested, not ignored
+    (repo / ".DS_Store").write_text("x")  # noise nobody configured
+    await wtree.make_item(database, repo)
+
+    report = await wtree.prepare(
+        database,
+        run_dirs,
+        repo,
+        repo_entry={
+            "setup_command": "",
+            "local_files": [".python-version", "config/secrets.local.json"],
+        },
+    )
+
+    refused, _, noise = report.partition("untracked root-level files")
+    assert "  .python-version\n" in refused
+    assert "  config/secrets.local.json\n" in refused
+    assert "NOT carried" in refused
+    assert "  .DS_Store\n" in noise
+    assert ".python-version" not in noise

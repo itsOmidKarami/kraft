@@ -366,13 +366,46 @@ def test_the_test_probe_recognizes_a_justfile_marker(tmp_path, name):
     Kraft itself: `just test`, never raw pytest) was probed with the wrong
     command -- `pyproject.toml` matched first and suggested plain pytest."""
     (tmp_path / name).write_text("test:\n    pytest\n")
-    assert config._first_test_command(tmp_path) == "just test"
+    assert config._first_test_marker(tmp_path) == (name, "just test")
 
 
-def test_the_test_probe_prefers_an_explicit_justfile_wrapper_over_pyproject(tmp_path):
-    (tmp_path / "Justfile").write_text("test:\n    pytest\n")
+@pytest.mark.parametrize(
+    ("justfile", "expected"),
+    [
+        ("test:\n    pytest\n", ("Justfile", "just test")),
+        (
+            "set shell := ['zsh']\n[no-cd]\n@test *ARGS: build\n    pytest {{ARGS}}\n",
+            ("Justfile", "just test"),
+        ),
+        ("test-ui:\n    npm test\nlint:\n    ruff\n", ("pyproject.toml", "uv run pytest -q")),
+        ("test := 'x'\n", ("pyproject.toml", "uv run pytest -q")),
+    ],
+    ids=[
+        "a-test-recipe",
+        "a-test-recipe-with-args-and-attributes",
+        "no-test-recipe",
+        "a-variable-named-test",
+    ],
+)
+def test_the_test_probe_prefers_the_justfiles_test_recipe_over_pyproject(
+    tmp_path, justfile, expected
+):
+    """Kraft-enc5z: a justfile wins only when `just test` would run something;
+    one without a `test` recipe falls through to the manifest beside it."""
+    (tmp_path / "Justfile").write_text(justfile)
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
-    assert config._first_test_command(tmp_path) == "just test"
+    assert config._first_test_marker(tmp_path) == expected
+
+
+def test_probe_repo_names_the_marker_each_test_command_came_from(tmp_path):
+    """Kraft-enc5z: the operator is told what the proposal was read from."""
+    repo = make_repo(tmp_path)
+    (repo / "justfile").write_text("test:\n    pytest\n")
+    (repo / "frontend").mkdir()
+    (repo / "frontend" / "package.json").write_text("{}")
+    probed = config.probe_repo(repo)
+    assert probed["test_command"] == "just test"
+    assert probed["test_markers"] == ["justfile", "frontend/package.json"]
 
 
 @pytest.mark.parametrize(

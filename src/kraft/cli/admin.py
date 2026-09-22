@@ -923,6 +923,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if code != 0:
         raise SystemExit(code)
     print(f"kraft {release.tag} installed.")
+    if other := update.shadowing_kraft():
+        print(
+            f"warning: `kraft` on PATH is {other}, another install -- MCP servers and "
+            "hooks keep running it; uninstall it or reorder PATH (kraft admin doctor)"
+        )
     if ns.restart:
         _cmd_restart(ns)
     else:

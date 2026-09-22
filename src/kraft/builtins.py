@@ -1084,8 +1084,24 @@ async def prepare_runtime(
         if repo_entry is not None
         else ""
     )
-    missing = await asyncio.to_thread(_uncarried_local_files, repo, worktree)
+    # Stateless like `_uncarried_local_files`: a configured entry whose source
+    # exists but whose copy does not was refused, root-level or nested -- and
+    # it is the operator's own config, so it is named apart from the noise
+    # below rather than only in the server's logger (Kraft-hro48).
+    local_files = (repo_entry or {}).get("local_files") or []
+    refused = [r for r in local_files if (repo / r).exists() and not (worktree / r).exists()]
+    missing = [
+        n
+        for n in await asyncio.to_thread(_uncarried_local_files, repo, worktree)
+        if n not in refused
+    ]
     report = f"worktree ready at {worktree}\n{setup_log}"
+    if refused:
+        report += (
+            "\nlocal_files entries NOT carried into this worktree -- only a file the "
+            "worktree's .gitignore covers is copied, so ignore these or drop them:\n"
+            + "".join(f"  {r}\n" for r in refused)
+        )
     if missing:
         # Informational, not a to-do list: on most repos this names things
         # like `.DS_Store` or `.testmondata` that nobody would ever carry.

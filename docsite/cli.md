@@ -161,8 +161,10 @@ for it:
 | `env` | Literal variables every worker for this repo gets. |
 | `env_passthrough` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist does not cover. |
 
-`kraft repo connect` probes a `setup_command` from the repo's markers; check it
-before trusting it, and `kraft admin doctor` reports any repo still undeclared.
+`kraft repo connect` probes a `setup_command` and a test command from the
+repo's markers, and prints the test command with the file it came from (a
+justfile with a `test` recipe proposes `just test` ahead of any manifest). Check
+both before trusting them; `kraft admin doctor` reports any repo still undeclared.
 Editing a repo's settings stays in the UI. Full field list, including
 `test_scopes`, `forge`, and `default_chain_template`:
 [Configuration](configuration.md#reposyaml-connected-repos).
@@ -198,6 +200,12 @@ installed, back into the background if it was `--detach`ed, or — if it was
 running attached to a terminal — stopped with a note that only that terminal
 can bring it back. `kraft admin update --restart` chains the same restart
 onto a successful update.
+
+Agent registrations run `kraft admin mcp` by name, so they get whichever
+`kraft` is first on PATH. A second, older install ahead of this one (a Homebrew
+formula beside a `uv tool` install, say) keeps every MCP session on its code
+after an update. `kraft admin update` warns when that is the case, and
+`kraft admin doctor` fails its `kraft on PATH` row.
 
 A home still holding the pre-V1 template configuration (a `registry.yaml` and
 no `library.yaml`) is not converted and not overwritten. The server starts

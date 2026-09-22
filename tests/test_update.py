@@ -567,3 +567,36 @@ def test_a_staging_dir_no_update_finished_writing_is_never_installed(legacy_home
 
     assert (legacy_home / "library.yaml").is_file()
     assert not (legacy_home / "junk.yaml").exists()
+
+
+def _script(path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize(
+    "path_entries, shadowed",
+    [
+        (["this/bin"], False),
+        (["linked"], False),
+        (["other/bin", "this/bin"], True),
+        ([], False),
+    ],
+    ids=["this-install", "symlink-to-this-install", "older-install-first", "not-on-path"],
+)
+def test_shadowing_kraft_names_another_install_ahead_on_path(
+    tmp_path, monkeypatch, path_entries, shadowed
+):
+    """Kraft-xs3ri: a Homebrew `kraft` ahead of the uv one kept every MCP
+    session on old code after `kraft admin update`. `~/.local/bin/kraft` is a
+    symlink into the uv venv, so a symlink to this install is still this one."""
+    _script(tmp_path / "this" / "bin" / "kraft")
+    _script(tmp_path / "other" / "bin" / "kraft")
+    (tmp_path / "linked").mkdir()
+    (tmp_path / "linked" / "kraft").symlink_to(tmp_path / "this" / "bin" / "kraft")
+    monkeypatch.setattr(update.sys, "executable", str(tmp_path / "this" / "bin" / "python"))
+    monkeypatch.setenv("PATH", ":".join(str(tmp_path / e) for e in path_entries) or "/nonexistent")
+    expected = str(tmp_path / "other" / "bin" / "kraft") if shadowed else None
+    assert update.shadowing_kraft() == expected

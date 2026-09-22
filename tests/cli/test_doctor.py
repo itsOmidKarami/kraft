@@ -501,6 +501,17 @@ def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
     assert "kraft admin init" in check["detail"]
 
 
+def test_path_check_fails_when_another_kraft_shadows_this_one(monkeypatch):
+    """Kraft-xs3ri: every MCP registration runs `kraft` by name, so an older
+    install ahead on PATH answers the tools whatever `admin update` installed."""
+    from kraft import update
+
+    monkeypatch.setattr(update, "shadowing_kraft", lambda: "/opt/homebrew/bin/kraft")
+    row = doctor._path_check()
+    assert row["ok"] is False
+    assert "/opt/homebrew/bin/kraft" in row["detail"]
+
+
 # ── _agent_checks: per selected harness profile, not a hardcoded claude ─────
 
 

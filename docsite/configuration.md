@@ -304,7 +304,7 @@ repos:
 | `setup_command` | *(required — no fallback)* | Run in every new worktree before any node starts. `""` means "deliberately nothing"; an absent value stops the repo's next work item rather than guessing. On a sandboxed item it runs as `sh -c` inside the sandbox, never on the host; without docker the item stops. |
 | `env` | `{}` | Literal environment variables every worker for this repo gets, layered onto the worker baseline allowlist. |
 | `env_passthrough` | `[]` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist doesn't cover. |
-| `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. |
+| `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent task on this repo, beside the task's own library steering. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
@@ -313,9 +313,11 @@ repos:
 
 No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed. The exceptions are `name`, `enabled` and `default_chain_template`, which Kraft writes itself.
 
-`kraft repo connect` probes a `setup_command` from the repo's markers; check it
-before trusting it, and `kraft admin doctor` reports any connected repo still
-missing one.
+`kraft repo connect` probes a `setup_command` and a test command from the repo's
+markers (a justfile with a `test` recipe proposes `just test` ahead of any
+manifest) and prints the test command with the file it came from; check both
+before trusting them, and `kraft admin doctor` reports any connected repo still
+missing a `setup_command`.
 
 ### Workspaces
 

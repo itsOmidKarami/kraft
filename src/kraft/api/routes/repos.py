@@ -240,7 +240,8 @@ async def add_repo(body: RepoBody, request: Request):
         await st.indexer.rescan_repo(entry["path"])
     except Exception:  # noqa: BLE001 -- scan_repo touches git and the filesystem
         logger.exception("index scan failed for newly connected repo %s", entry["path"])
-    return entry
+    # Told, not stored: which marker files the proposed commands came from.
+    return {**entry, "test_markers": probed["test_markers"]}
 
 
 class RepoPatch(BaseModel):
