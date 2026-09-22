@@ -44,6 +44,7 @@ from pydantic import (
 )
 
 from kraft.policy import (
+    FROZEN,
     InstancePolicy,
     PolicyError,
     SandboxPolicy,
@@ -1310,7 +1311,9 @@ class MaterializedChain:
         from kraft.templates.library import TemplateLibraryError
 
         try:
-            stored = _StoredMaterialization.model_validate_json(raw)
+            # Read leniently: a rule frozen before Kraft-9i6xy refused one still
+            # reads, and its launch is refused instead (Kraft-9ct4q).
+            stored = _StoredMaterialization.model_validate_json(raw, context=FROZEN)
         except ValidationError as exc:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(

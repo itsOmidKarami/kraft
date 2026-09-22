@@ -330,6 +330,21 @@ def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
     path.write_text(yaml.safe_dump({"harnesses": merged}, sort_keys=False))
 
 
+def harness_without(capability: str, harness_id: str = "claude"):
+    """The bundled harness set with `harness_id` stripped of `capability`: a
+    harness shape no shipped YAML has, for pinning what a launch refuses.
+
+    `run(harnesses=harness_without("permission_mode"), allowed_tools=(), ...)`"""
+    from dataclasses import replace
+
+    from kraft import harness
+
+    hs = harness.load(None)
+    h = hs.valid[harness_id]
+    caps = {k: v for k, v in h.capabilities.items() if k != capability}
+    return replace(hs, valid={**hs.valid, harness_id: replace(h, capabilities=caps)})
+
+
 def v1_library(templates_dir: Path, *, agent_command: str = "true"):
     """The `TemplateLibrary` for `templates_dir`, seeding the V1 layout first
     if it is not already there.

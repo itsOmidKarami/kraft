@@ -377,6 +377,39 @@ def steer_reachable(row, node_id: str | None = None) -> bool:
     return not reached
 
 
+def not_paused(row) -> str:
+    """The 409 a steer or resume on an item that is not paused gets. A running
+    one is told what to do (Ruling 183: a steer never reaches a running item)."""
+    if row["status"] in ("active", "waiting"):
+        return f"work item is {row['status']}: it is running, so pause it first"
+    return f"work item is {row['status']}, not paused"
+
+
+def paused_steer_refusal(db, row) -> str | None:
+    """Why a steer given to this paused item would reach no agentic work, or
+    None when an agent task of its node is paused to take it (Ruling 183,
+    Kraft-5d3sy). A pause that stopped a subprocess or a CI wait has no agent
+    task to resume with the text, and handing it to whichever agent runs next
+    is not steering the work the operator stopped. An item filed paused and
+    never started stopped nothing: its steer is a note to its first agent, as
+    `steer_reachable` already fails open on no current node."""
+    if row["current_node_id"] is None or executor.resume_steer(db, row, None, {}):
+        return None
+    return (
+        f"no agent task is paused at node {row['current_node_id']!r}, and a steer reaches "
+        "only an agent task a pause stopped; resume without one"
+    )
+
+
+def steerable(st, row) -> bool:
+    """`GET /work-items/{id}`'s `steerable`: what the door this item's status
+    offers would accept -- a paused item's own agent task, else (a retry or a
+    needs_context answer) an agent task downstream (`steer_reachable`)."""
+    if row["status"] == "paused":
+        return paused_steer_refusal(st.db, row) is None
+    return steer_reachable(row)
+
+
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
@@ -384,10 +417,12 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
     if row["status"] != "paused" and not (
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
-        raise HTTPException(409, "work item is not paused")
+        raise HTTPException(409, not_paused(row))
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
+    if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+        raise HTTPException(409, why)
     await st.db.write(lambda c: store.set_steer(c, wid, text))
     return {"id": wid, "steer": text}
 
@@ -404,7 +439,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # Same reason as retry: claim_for_run below still decides, but an item
         # that was never paused should hear that, not a complaint about its
         # steer text or a busy slot.
-        raise HTTPException(409, "work item is not paused")
+        raise HTTPException(409, not_paused(row))
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -418,6 +453,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     steer_text = None
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
+        if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+            raise HTTPException(409, why)
         found = row["current_node_id"] in store.chain_node_ids(row)
         if found and not steer_reachable(row):
             raise HTTPException(

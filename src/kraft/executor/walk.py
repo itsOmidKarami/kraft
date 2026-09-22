@@ -1518,12 +1518,13 @@ async def _door_conflict(
     `on_conflict` handler as the walk would hand a task's (Kraft-e7anb): the
     node to restart at once it is resolved -- the declared span, its approved
     gates reopened -- or the stop it ended in. With no handler it stops for a
-    human (`rebase-conflict-requires-explicit-handler`), and an unaddressed
-    steer goes back on the row for the attempt that follows."""
+    human (`rebase-conflict-requires-explicit-handler`), and the steer goes
+    back on the row for the attempt that follows -- one addressed to paused
+    agent tasks too, which is every steer a paused item takes (Ruling 183)."""
     node = nodes[index]
     declared = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
     if declared is None or declared.on_conflict is None:
-        if carried and not carried.targeted:
+        if carried:
             text = carried.take()
             await db.write(lambda c: store.set_steer(c, work_item_id, text))
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, conflict))

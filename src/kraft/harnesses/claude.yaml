@@ -37,8 +37,8 @@ capabilities:
   # tool without ever asking the permission gate. `manual` asks the gate
   # about every call it does not settle itself. What it settles itself
   # without asking is read-only work -- file reads (gone unless listed) and
-  # read-only shell commands, so under a scoped rule such as `Bash(git *)`
-  # a read-only `cat` still runs.
+  # read-only shell commands, so an allowlist naming `Bash` lets a read-only
+  # `cat` run unasked. Policy holds bare names, never rules (Kraft-9i6xy).
   allowed_tools:    { cli: ["--allowedTools", "{csv}"] }
   restrict_tools:   { cli: ["--tools", "{csv}"] }
   permission_mode:  { cli: ["--permission-mode", "{value}"], values: [acceptEdits, auto, bypassPermissions, manual, dontAsk, plan], always: auto, under_allowlist: manual }

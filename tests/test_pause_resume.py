@@ -52,12 +52,21 @@ def _running_agent(client, wid):
     return _wait(check, "a running agent session")
 
 
-def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatch, repo, client):
+@pytest.mark.parametrize("provider_session", [None, "cli-7"], ids=["restarts", "resumes"])
+def test_pause_then_resume_with_a_steer_relaunches_the_task(
+    tmp_path, monkeypatch, repo, client, provider_session
+):
+    """Ruling 183 end to end: a steer given to a paused agent task reaches its
+    relaunch -- into its own provider session (`--resume`, told to carry on)
+    when the paused run named one, else a fresh run of the whole brief."""
     # a slow agent gives the test a live session to interrupt
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
-    prompts = tmp_path / "prompts.txt"
+    prompts, argvs = tmp_path / "prompts.txt", tmp_path / "argv.txt"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_ARGV_LOG", str(argvs))
+    if provider_session:
+        monkeypatch.setenv("KRAFT_FAKE_CLAUDE_SESSION_ID", provider_session)
 
     wid = client.post(
         "/api/work-items",
@@ -115,6 +124,12 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(tmp_path, monkeypatc
     steered = [p for p in sent if "keep the old signature" in p]
     assert len(steered) == 1
     assert steered[0].startswith("A human has steered this run:")
+    relaunch = argvs.read_text().split("\x00\n")[1].splitlines()
+    if provider_session:
+        assert relaunch[relaunch.index("--resume") + 1] == provider_session
+        assert "Carry on" in steered[0] and "pause me" not in steered[0]
+    else:
+        assert "--resume" not in relaunch and "pause me" in steered[0]
 
     # the steer is spent, and the counters were never touched
     assert client.get(f"/api/work-items/{wid}").json()["pending_steer_context"] is None
@@ -132,8 +147,10 @@ def test_steer_and_resume_are_refused_while_the_item_is_running(monkeypatch, rep
         json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
     ).json()["id"]
     _running_agent(client, wid)
-    assert client.post(f"/api/work-items/{wid}/steer", json={"text": "x"}).status_code == 409
-    assert client.post(f"/api/work-items/{wid}/resume", json={}).status_code == 409
+    for verb, body in (("steer", {"text": "x"}), ("resume", {"steer": "x"})):
+        r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
+        assert r.status_code == 409
+        assert r.json()["detail"] == "work item is active: it is running, so pause it first"
     assert client.post("/api/work-items/nope/pause", json={}).status_code == 404
     client.post(f"/api/work-items/{wid}/pause", json={})
 
@@ -666,9 +683,10 @@ def test_resume_leaves_the_position_to_the_walk(monkeypatch, repo, client):
     assert seen["work_item_id"] == "w1"
 
 
-def _paused_in_verification(client, repo):
-    """An item paused in `verification` with its agent review's session
-    paused, the way `/pause` leaves one; forced, so no agent runs."""
+def _paused_in_verification(client, repo, task="verification.review.code_review"):
+    """An item paused in `verification` with `task`'s session paused -- by
+    default its agent review's -- the way `/pause` leaves one; forced, so no
+    agent runs."""
     from kraft import store
 
     wid = client.post(
@@ -682,15 +700,15 @@ def _paused_in_verification(client, repo):
         await db.write(
             lambda c: store.create_session(
                 c,
-                id="s-review",
+                id=f"s-{wid}",
                 work_item_id=wid,
                 node_id="verification",
-                hook_point="verification.review.code_review",
+                hook_point=task,
                 log_path="/l",
                 result_path="/r",
             )
         )
-        await db.write(lambda c: store.session_exited(c, "s-review", "paused"))
+        await db.write(lambda c: store.session_exited(c, f"s-{wid}", "paused"))
 
     client.portal.call(seed)
     return wid
@@ -740,3 +758,27 @@ def test_a_steer_aimed_at_a_non_agent_task_is_refused_naming_it(repo, client):
     assert r.json()["detail"].startswith(f"steers.{path}: ")
     assert "a steer reaches only an agent task" in r.json()["detail"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "paused"
+
+
+def test_a_pause_that_stopped_no_agent_task_takes_no_steer(repo, client):
+    """Ruling 183 (Kraft-5d3sy): a steer reaches agentic work the pause
+    stopped. One that stopped a subprocess has nothing to take it, so both
+    doors refuse the text rather than hand it to whichever agent runs next,
+    and the detail screen offers no steer box."""
+    wid = _paused_in_verification(client, repo, task="verification.tests.test_changed_scopes")
+    refusal = (
+        "no agent task is paused at node 'verification', and a steer reaches only "
+        "an agent task a pause stopped; resume without one"
+    )
+
+    for verb, body in (("steer", {"text": "x"}), ("resume", {"steer": "x"})):
+        r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
+        assert (r.status_code, r.json()["detail"]) == (409, refusal)
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert (item["status"], item["steerable"], item["pending_steer_context"]) == (
+        "paused",
+        False,
+        None,
+    )
+    agentic = _paused_in_verification(client, repo)
+    assert client.get(f"/api/work-items/{agentic}").json()["steerable"] is True

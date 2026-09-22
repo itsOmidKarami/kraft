@@ -335,13 +335,21 @@ enforced-by: tests/executor/test_steer_targets.py::test_one_steer_reaches_every_
 When resuming a paused agent task, the system SHALL resume its durable session
 when available, and otherwise restart that task with its original instruction
 and any supplied steer.
-enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry]
+enforced-by: tests/executor/test_steer_targets.py::test_a_paused_agent_task_resumes_its_own_session, tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[no-provider-id], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[not-paused], tests/executor/test_steer_targets.py::test_an_agent_task_that_cannot_resume_restarts_with_its_instruction[before-a-retry], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[resumes], tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
+
+## REQ steer-reaches-only-stopped-agentic-work
+
+The system SHALL refuse a steer on a running work item, and on a paused work
+item whose pause stopped no agent task, naming why. A steer SHALL NOT be
+handed to whichever agent runs next in place of the work the pause stopped.
+enforced-by: tests/test_pause_resume.py::test_steer_and_resume_are_refused_while_the_item_is_running, tests/test_pause_resume.py::test_a_pause_that_stopped_no_agent_task_takes_no_steer, tests/api/test_lifecycle.py::test_a_rebase_conflict_does_not_escalate_when_disarmed[resume]
+origin: src/kraft/api/routes/lifecycle.py §paused_steer_refusal -- Ruling 183 (Kraft-5d3sy): steer works only on an item that is not running, and only when the current work is agentic; the paused agent session is resumed when its harness allows it, the steer injected, and the work continues. An item filed paused and never started stopped nothing, so its steer is a note to its first agent.
 
 ## REQ pause-is-a-work-item-control
 
 An operator MAY pause a work item. The system SHALL NOT expose pause as a
 task, step, or node control.
-enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_only, tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task
+enforced-by: tests/test_operator_surface.py::test_pause_is_a_work_item_control_only, tests/test_pause_resume.py::test_pause_then_resume_with_a_steer_relaunches_the_task[restarts]
 
 ## REQ resume-preserves-completed-work
 
@@ -720,6 +728,16 @@ scopes setting different sandboxes SHALL be refused when the chain is built,
 naming both scopes.
 enforced-by: tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[sandbox0-expected0], tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[None-None], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_runs_in_a_sandbox_another_node_set[manual], tests/executor/test_policy_enforcement.py::test_a_gate_reviewer_runs_in_a_sandbox_another_node_set, tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-task], tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-node], tests/executor/test_policy_enforcement.py::test_an_item_filed_with_two_sandboxes_stops_rather_than_pick_one, tests/executor/test_setup_in_sandbox.py::test_the_walk_runs_both_setups_in_the_items_sandbox[entry0-expected0], tests/executor/test_setup_in_sandbox.py::test_a_sandboxed_item_without_docker_stops_for_a_human, tests/executor/test_setup_in_sandbox.py::test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox[entry0-expected0]
 origin: src/kraft/executor/dispatch.py §item_sandbox -- Omid's decision (Ruling 189, Kraft-h10e5, Kraft-p8nem): a sandbox is a safety ceiling that only tightens, and once one task has run in it the worktree is the worker's to write, so every later host-side launch would run what it wrote. `item_sandbox` is the one resolution every launch reads; `ResolvedChain.check_scopes` refuses two.
+
+## REQ policy-tool-lists-hold-tool-names
+
+A policy's `allowed_tools` and `deny_tools` SHALL hold only tool names the
+permission gate can match exactly: a bare tool or one exact MCP tool. A scoped
+rule, a glob or a whole MCP server SHALL be refused wherever policy loads,
+naming the field and the name to write instead. A snapshot frozen before the
+refusal SHALL still read, and its launch SHALL stop naming the field.
+enforced-by: tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[instance-maxima], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[repository-policy-allowed], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[repository-policy-denied], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[repository-entry-denied], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[template-allowed], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[template-denied], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[retry-override-allowed], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[retry-override-denied], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[work-item-allowed], tests/test_policy_tool_names.py::test_every_policy_door_refuses_a_rule_naming_the_field[work-item-denied], tests/test_policy_tool_names.py::test_a_tool_list_holds_only_names_the_gate_can_match[allowed_tools-scoped-rule], tests/test_policy_tool_names.py::test_a_tool_list_holds_only_names_the_gate_can_match[allowed_tools-mcp-glob], tests/test_policy_tool_names.py::test_a_tool_list_holds_only_names_the_gate_can_match[allowed_tools-mcp-server-rule], tests/test_policy_tool_names.py::test_a_tool_list_holds_only_names_the_gate_can_match[allowed_tools-mcp-tool], tests/test_policy_tool_names.py::test_a_snapshot_frozen_with_a_rule_still_renders_on_the_board, tests/executor/test_policy_enforcement.py::test_a_rule_frozen_into_a_snapshot_stops_its_launch_naming_the_field[allowed_tools], tests/executor/test_policy_enforcement.py::test_a_rule_frozen_into_a_snapshot_stops_its_launch_naming_the_field[deny_tools]
+origin: src/kraft/policy.py §_tool_names -- Kraft-9i6xy: the gate (`sessions.permission_request`) compares names exactly and the harness restricts only bare tools, so a rule bounded nothing it claimed to; the ruling was to refuse rule syntax at load rather than teach the gate the CLI's rule matching.
 
 ## REQ repository-policy-cannot-relax-instance-safety
 

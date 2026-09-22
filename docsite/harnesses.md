@@ -97,12 +97,12 @@ prefix rather than a trailing flag (see `codex.yaml`'s `command_resume:
 A launch whose policy sets `allowed_tools` (an empty list included) must not
 let a tool outside the list run, and pre-approving the listed ones is not
 that. It needs two things from its harness: `restrict_tools`, the CLI's own
-flag for which built-in tools exist (Claude's `--tools`, given the bare names
-from the list), and, when the harness declares `permission_mode`, an
-`under_allowlist:` mode that asks the approval channel about everything else
-instead of approving it (Claude's `manual`; its `auto` lets a classifier
-approve an unlisted tool without asking). A harness missing either refuses
-to launch under an allowlist, and so does a launch whose own
+flag for which built-in tools exist (Claude's `--tools`, given the built-in
+names from the list), and a `permission_mode` with an `under_allowlist:` mode
+that asks the approval channel about everything else instead of approving it
+(Claude's `manual`; its `auto` lets a classifier approve an unlisted tool
+without asking). A harness missing either, `permission_mode` included,
+refuses to launch under an allowlist, and so does a launch whose own
 `permission_mode` differs from that mode.
 
 Validate with `kraft admin doctor` — it loads every harness a live binding

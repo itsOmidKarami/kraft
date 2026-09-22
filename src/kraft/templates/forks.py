@@ -239,12 +239,12 @@ def override_record(override: RetryOverride) -> dict:
 def override_from_record(record: dict) -> RetryOverride:
     """`override_record` read back. Not validated again: it was, when the retry
     was asked for, against the chain it carries."""
-    from kraft.policy import TaskPolicyOverride, TemplatePolicyOverride
+    from kraft.policy import FROZEN, TaskPolicyOverride, TemplatePolicyOverride
 
     shape = TemplatePolicyOverride if PATH_SEPARATOR not in record["path"] else TaskPolicyOverride
     return RetryOverride(
         path=record["path"],
         task_config=record["task_config"],
-        policy=shape.model_validate(record["policy"]) if record["policy"] else None,
+        policy=shape.model_validate(record["policy"], context=FROZEN) if record["policy"] else None,
         chain=MaterializedChain.from_json(record["chain"]),
     )
