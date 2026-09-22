@@ -84,6 +84,37 @@ MANIFEST: tuple[Capability, ...] = (
             "            extends: open_draft_mr"
         ),
     ),
+    Capability(
+        version="1.0.99",
+        name="never_signal_steering",
+        what="the never-signal-processes-you-didnt-start rule (never kill a process "
+        "you didn't start -- it might be the Kraft daemon) is no longer appended to "
+        "every agent launch automatically; it is now an opt-in library steering "
+        "profile a repository names for itself. A repository whose tests start "
+        "servers of their own should name it.",
+        how=(
+            "add to library.yaml's `steering:` (skip this part if `migrate_files` "
+            "already carried it over from a pre-1.0 install's "
+            "templates/steering/never-signal-processes-you-didnt-start.md):\n"
+            "  never-signal-processes-you-didnt-start:\n"
+            "    instructions: |\n"
+            "      Never signal a process you did not start. If something is already\n"
+            "      listening on a port you need, it is not a stale leftover to clear -- it\n"
+            "      might be the Kraft daemon serving other work right now. Check\n"
+            "      $KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before\n"
+            "      touching anything you find on a port: if the pid or the port matches, it\n"
+            "      is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill`\n"
+            "      would take down orchestration for every other work item on this install,\n"
+            "      including this one. Ask any server you start yourself for an ephemeral\n"
+            "      port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the\n"
+            "      daemon's. If a task genuinely needs the daemon's own port, that is a\n"
+            "      question for a human, not something to resolve by killing what is\n"
+            "      already there.\n"
+            "then in repos.yaml, on any repository entry whose tests start their own "
+            "servers:\n"
+            "    steering: [never-signal-processes-you-didnt-start]"
+        ),
+    ),
 )
 
 
