@@ -12,6 +12,8 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from fastapi import HTTPException
+
 from kraft import executor
 from kraft.api import deps as api_deps
 from kraft.policy import cron_due
@@ -57,6 +59,14 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
         chain = api_deps.resolve_chain(st, trig.chain)
         if chain is None:
             logger.warning("trigger %d: unknown chain template %r, skipped", index, trig.chain)
+            continue
+        try:
+            api_deps.connected_or_422(st, trig.repo)
+        except HTTPException as exc:
+            # Same door the HTTP intake routes use (`deps.connected_or_422`,
+            # Kraft-ta8nv): an operator-authored trigger naming an unconnected
+            # repo skips, not a whole tick over one bad `policy.yaml` entry.
+            logger.warning("trigger %d: %s, skipped", index, exc.detail)
             continue
         try:
             wid = await executor.intake(

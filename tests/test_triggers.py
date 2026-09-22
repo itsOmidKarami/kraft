@@ -24,6 +24,17 @@ def _state(tmp_path, *, policy_obj) -> dict:
     }
 
 
+def _connect(tmp_path, *repos) -> None:
+    """Write `repos.yaml` connecting each repo path (Kraft-jzhg2): `tick`
+    now refuses a trigger naming a repo that is not connected, the same
+    door the HTTP intake routes use."""
+    import yaml
+
+    (tmp_path / "templates" / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": str(r)} for r in repos]})
+    )
+
+
 async def test_tick_ignores_a_not_yet_due_trigger(tmp_path, stub_app):
     repo = isolated_bd(tmp_path)  # a real bd workspace, so intake's `bd create` succeeds
     pol = policy.Policy(
@@ -54,6 +65,7 @@ async def test_tick_files_a_paused_item_on_a_due_trigger(tmp_path, stub_app):
     )
 
     app = stub_app(**_state(tmp_path, policy_obj=pol))
+    _connect(tmp_path, repo)
     now = datetime(2026, 9, 10, 14, 30, tzinfo=UTC)
     filed = await triggers.tick(app, now=now)
     assert len(filed) == 1
@@ -100,12 +112,51 @@ async def test_a_trigger_whose_chain_exceeds_the_ceiling_is_skipped_not_the_whol
     monkeypatch.setattr(triggers.executor, "intake", intake)
 
     app = stub_app(**_state(tmp_path, policy_obj=pol))
+    _connect(tmp_path, repo)
     filed = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
     assert len(filed) == 1
     titles = app.state.db.read(
         lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items")]
     )
     assert titles == ["filed"]
+
+
+async def test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tick(
+    tmp_path, stub_app, caplog
+):
+    """Kraft-jzhg2: the HTTP intake doors already refuse a repo that is not
+    connected (`deps.connected_or_422`, Kraft-ta8nv); an operator-authored
+    cron trigger must get the same door, not file straight past it."""
+    unconnected = tmp_path / "unconnected"
+    unconnected.mkdir()
+    connected = isolated_bd(tmp_path, name="connected")
+    pol = policy.Policy(
+        loops={},
+        default=policy.Cap(attempts=3, wall_clock_s=3600),
+        triggers=[
+            policy.Trigger(
+                cron="30 14 * * *", repo=str(unconnected), chain="default", title="unconnected"
+            ),
+            policy.Trigger(
+                cron="30 14 * * *", repo=str(connected), chain="default", title="connected"
+            ),
+        ],
+    )
+    app = stub_app(**_state(tmp_path, policy_obj=pol))
+    _connect(tmp_path, connected)
+
+    with caplog.at_level("WARNING", logger="kraft.triggers"):
+        filed = await triggers.tick(app, now=datetime(2026, 9, 10, 14, 30, tzinfo=UTC))
+
+    titles = app.state.db.read(
+        lambda c: [r["title"] for r in c.execute("SELECT title FROM work_items")]
+    )
+    assert titles == ["connected"]
+    assert len(filed) == 1
+    assert any(
+        f"{unconnected} is not a connected repo" in r.message and "kraft repo connect" in r.message
+        for r in caplog.records
+    )
 
 
 async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stub_app):
