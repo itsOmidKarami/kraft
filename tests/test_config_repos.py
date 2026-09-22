@@ -348,6 +348,21 @@ def test_probe_repo_suggests_a_setup_command(tmp_path):
     assert config.probe_repo(repo)["setup_command"] == "uv sync"
 
 
+@pytest.mark.parametrize("name", ["Justfile", "justfile"], ids=["capitalized", "lowercase"])
+def test_the_test_probe_recognizes_a_justfile_marker(tmp_path, name):
+    """Kraft-reriq: a repo whose tests must go through a Justfile target (like
+    Kraft itself: `just test`, never raw pytest) was probed with the wrong
+    command -- `pyproject.toml` matched first and suggested plain pytest."""
+    (tmp_path / name).write_text("test:\n    pytest\n")
+    assert config._first_test_command(tmp_path) == "just test"
+
+
+def test_the_test_probe_prefers_an_explicit_justfile_wrapper_over_pyproject(tmp_path):
+    (tmp_path / "Justfile").write_text("test:\n    pytest\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert config._first_test_command(tmp_path) == "just test"
+
+
 @pytest.mark.parametrize(
     ("expected_failure", "warns"),
     [(True, False), (False, True)],
