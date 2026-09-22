@@ -164,6 +164,15 @@ test-ui:
     cd frontend && npx tsc -b
     cd frontend && npm test
 
+# Kraft-m2wru: launch every (harness, model, effort) the shipped library uses
+# once against the real CLI. Spends a few cents. Tests run with a temp HOME, so
+# a `claude login` is invisible to them: export ANTHROPIC_API_KEY or
+# CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) first. The pre-commit hook
+# runs this when a commit touches templates/ or the bundled harnesses.
+smoke-models:
+    @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }
+    KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon
+
 # Playwright e2e
 e2e:
     cd frontend && npm run e2e
