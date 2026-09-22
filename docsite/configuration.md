@@ -276,8 +276,17 @@ each_repository` runs once per selected repository.
 Each selected repository binds the tasks that run in it with its own policy
 layer. A task in the assembled worktree, which holds all of them at once, runs
 under the tightest of their layers: allowlists intersect, deny lists add up, and
-numbers take their minimum. Two different sandboxes cannot both hold, so filing
-such an item is refused.
+numbers take their minimum.
+
+A workspace with members can't be sandboxed at all. A sandboxed worker can write
+each submodule's git directory, so it could plant a hook or `core.sshCommand`
+there that host git would run as you when Kraft pushes the submodule. If the
+root or any member sets `sandbox` (or `policy.sandbox`), `repos.yaml` fails to
+load, connecting the root is refused, filing an item is refused, and `kraft
+admin doctor` fails that repository's `sandbox` row. A sandbox that comes from a
+chain, node or task is refused the same way when the item is filed or retried.
+An item already in flight when a sandbox appears stops for a person before
+Kraft runs any git in its worktree.
 
 Publication goes members first. A member's merge request merges before the root
 moves. A root with source changes of its own gets its own merge request, and it

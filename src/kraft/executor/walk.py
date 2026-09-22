@@ -1662,6 +1662,9 @@ async def run_once(
     # failed to start" -- node_started, then needs_human naming it -- should
     # not disappear just because the failure now happens a moment earlier.
     try:
+        # Before the worktree is touched at all: host git in a sandboxed
+        # item's submodule runs what its worker planted there (Kraft-dshto).
+        stops.refuse_sandboxed_submodules(row, launch)
         worktree = await _builtins.ensure_worktree(
             db,
             run_dirs,
