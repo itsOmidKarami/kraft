@@ -238,7 +238,6 @@ class Tail:
         self._n = 0
         self._pending = bytearray()
         self._pending_open = False  # a line has begun that has no newline yet
-        self._times_offset = 0
         self._times: dict[int, str] = {}
 
     def read(self, *, final: bool = False) -> list[dict]:
@@ -271,7 +270,6 @@ class Tail:
                 pass
             self._n += 1 if part else 0
         self._offset = fh.tell()
-        self._times_offset = 0
         return [_marker(self._n, self._offset)]
 
     def _complete_lines(self, fh, final: bool) -> list[str]:
