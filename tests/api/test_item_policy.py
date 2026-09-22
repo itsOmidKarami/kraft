@@ -24,7 +24,7 @@ def bounded(client):
                 "maxima": {
                     "max_attempts": 5,
                     "timeout_minutes": 120,
-                    "total_time_cap_minutes": 10080,
+                    "tasks": {"total_time_cap_minutes": 10080},
                 }
             }
         )

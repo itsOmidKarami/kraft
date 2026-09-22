@@ -50,6 +50,11 @@ def _nodes(*, chain=None, node=None, step=None, task=None, handler=None) -> dict
     }
 
 
+def _every_level(**caps) -> dict:
+    """The same `defaults:`/`maxima:` caps at every level (Ruling 211)."""
+    return {level: caps for level in _policy.CAP_LEVELS}
+
+
 def _materialize(chain: dict, **policy_yaml) -> MaterializedChain:
     return ResolvedChain.from_chain(Chain.model_validate(chain)).materialize(
         target=WorkItemTarget.for_repository("target"),
@@ -126,7 +131,7 @@ def test_a_child_cap_at_or_below_its_parents_is_accepted_and_each_scope_keeps_it
 @pytest.mark.parametrize("field", FIELDS)
 def test_no_scope_may_set_a_cap_past_the_administrator_maximum(field):
     with pytest.raises(PolicyError, match="administrator maximum 60|> its"):
-        _materialize(_nodes(task={field: 90}), maxima={field: 60})
+        _materialize(_nodes(task={field: 90}), maxima={"tasks": {field: 60}})
 
 
 @pytest.mark.parametrize("field", FIELDS)
@@ -135,7 +140,11 @@ def test_a_scope_may_raise_a_cap_above_the_default_up_to_the_maximum(field, scop
     """Ruling 198: an instance `defaults:` cap is a default, not a ceiling.
     Any scope may set a longer one, up to `maxima:`; a default applies only
     where nothing set one."""
-    chain = _materialize(_nodes(**{scope: {field: 240}}), defaults={field: 30}, maxima={field: 240})
+    chain = _materialize(
+        _nodes(**{scope: {field: 240}}),
+        defaults=_every_level(**{field: 30}),
+        maxima={"work_item": {field: 240}},
+    )
     by_path = {t.path: t for n in chain.chain.nodes for t in n.tasks()}
 
     assert getattr(chain.policy_for(by_path["build.run.impl"]), field) == 240
@@ -147,13 +156,21 @@ def test_a_scope_may_raise_a_cap_above_the_default_up_to_the_maximum(field, scop
 @pytest.mark.parametrize("field", FIELDS)
 def test_a_scope_past_the_maximum_is_refused_even_with_no_parent_cap(field):
     with pytest.raises(PolicyError, match="administrator maximum 240"):
-        _materialize(_nodes(node={field: 300}), defaults={field: 30}, maxima={field: 240})
+        _materialize(
+            _nodes(node={field: 300}),
+            defaults=_every_level(**{field: 30}),
+            maxima={"work_item": {field: 240}},
+        )
 
 
 @pytest.mark.parametrize("field", FIELDS)
 def test_a_default_cap_past_its_maximum_is_refused_when_policy_loads(field):
-    with pytest.raises(ValueError, match=f"defaults.{field} 90 exceeds maxima.{field} 60"):
-        InstancePolicyInput.model_validate({"defaults": {field: 90}, "maxima": {field: 60}})
+    with pytest.raises(
+        ValueError, match=f"defaults.tasks.{field} 90 exceeds maxima.work_item.{field} 60"
+    ):
+        InstancePolicyInput.model_validate(
+            {"defaults": {"tasks": {field: 90}}, "maxima": {"work_item": {field: 60}}}
+        )
 
 
 def test_a_gate_timeout_past_its_total_cap_is_refused():
@@ -167,6 +184,154 @@ def test_a_gate_timeout_past_its_total_cap_is_refused():
         _materialize(chain)
 
 
+# ── per-level defaults and maxima (Ruling 211) ────────────────────────────────
+
+#: Omid's shape (Ruling 211), for any one cap field.
+LEVELS = {"work_item": 480, "nodes": 180, "steps": 120, "tasks": 90}
+
+
+def _levels(field: str, values: dict = LEVELS) -> dict:
+    return {level: {field: v} for level, v in values.items()}
+
+
+@pytest.mark.parametrize("field", _policy.SCOPE_CAP_FIELDS)
+@pytest.mark.parametrize("section", ["defaults", "maxima"])
+def test_a_flat_cap_is_refused_at_load_naming_its_level(tmp_path, section, field):
+    """The flat form was rc-only and never shipped in a release (Ruling 211):
+    refused, pointing at the per-level form."""
+    path = tmp_path / "policy.yaml"
+    path.write_text(
+        yaml.safe_dump({"default": {"attempts": 3, "wall_clock_s": 60}, section: {field: 30}})
+    )
+
+    with pytest.raises(PolicyError, match=f"use {section}.tasks.{field}"):
+        _policy.PolicyInput.from_yaml(path)
+
+
+@pytest.mark.parametrize("section", ["defaults", "maxima"])
+@pytest.mark.parametrize(
+    ("values", "names"),
+    [
+        ({"steps": 120, "tasks": 150}, "{s}.tasks.{f} 150 exceeds {s}.steps.{f} 120"),
+        ({"work_item": 100, "tasks": 150}, "{s}.tasks.{f} 150 exceeds {s}.work_item.{f} 100"),
+        ({"work_item": 100, "nodes": 180}, "{s}.nodes.{f} 180 exceeds {s}.work_item.{f} 100"),
+    ],
+    ids=["task-over-step", "task-over-work-item-past-unset-levels", "node-over-work-item"],
+)
+def test_a_narrower_levels_cap_above_a_broader_ones_is_refused_naming_both(section, values, names):
+    field = "time_cap_minutes"
+    with pytest.raises(ValueError, match=names.format(s=section, f=field)):
+        InstancePolicyInput.model_validate({section: _levels(field, values)})
+
+
+def test_a_levels_default_above_its_maximum_is_refused_naming_both():
+    """A default is held to its own level's maximum, or the nearest broader
+    one, which bounds every level under it."""
+    with pytest.raises(ValueError, match="defaults.steps.budget_usd 30 exceeds maxima.nodes"):
+        InstancePolicyInput.model_validate(
+            {"defaults": {"steps": {"budget_usd": 30}}, "maxima": {"nodes": {"budget_usd": 20}}}
+        )
+
+
+@pytest.mark.parametrize("field", _policy.SCOPE_CAP_FIELDS)
+def test_each_scope_runs_under_its_levels_default_where_nothing_set_one(field):
+    chain = _materialize(_nodes(), defaults=_levels(field))
+    node, gate = chain.chain.nodes
+    by_path = {t.path: t for t in node.tasks()}
+
+    assert getattr(chain.work_item_policy(), field) == 480
+    assert getattr(chain.policy_for(node), field) == 180
+    assert getattr(chain.policy_for(gate), field) == 180
+    assert getattr(chain.policy_for(node.steps[0]), field) == 120
+    assert getattr(chain.policy_for(by_path["build.run.impl"]), field) == 90
+    # A recovery task is a task too.
+    assert getattr(chain.policy_for(by_path["build.run.impl.on_failure.main.fix"]), field) == 90
+
+
+@pytest.mark.parametrize("field", _policy.SCOPE_CAP_FIELDS)
+def test_a_value_the_chain_or_the_item_sets_replaces_every_levels_default_under_it(field):
+    """Ruling 211: a level's default applies unless the chain, node, step,
+    task or the item's own override sets a value. An inherited value is held
+    to each level's maximum."""
+    chain = _materialize(
+        _nodes(chain={field: 600}),
+        defaults=_levels(field),
+        maxima={"work_item": {field: 1440}, "tasks": {field: 240}},
+    )
+    node = chain.chain.nodes[0]
+    impl = next(t for t in node.tasks() if t.path == "build.run.impl")
+
+    assert getattr(chain.work_item_policy(), field) == 600
+    assert getattr(chain.policy_for(node), field) == 600
+    assert getattr(chain.policy_for(impl), field) == 240
+
+    raised = chain.with_item_policy({field: 1000})
+
+    assert getattr(raised.work_item_policy(), field) == 1000
+    assert getattr(raised.policy_for(node), field) == 1000
+    assert getattr(raised.policy_for(impl), field) == 240
+
+
+@pytest.mark.parametrize("field", _policy.SCOPE_CAP_FIELDS)
+def test_a_scope_may_exceed_its_levels_default_but_not_its_levels_maximum(field):
+    maxima = {"work_item": {field: 1440}, "tasks": {field: 240}}
+    chain = _materialize(_nodes(task={field: 200}), defaults=_levels(field), maxima=maxima)
+    impl = next(t for t in chain.chain.nodes[0].tasks() if t.path == "build.run.impl")
+    assert getattr(chain.policy_for(impl), field) == 200
+
+    with pytest.raises(PolicyError) as refused:
+        _materialize(_nodes(task={field: 300}), defaults=_levels(field), maxima=maxima)
+
+    assert (
+        f"task build.run.impl sets {field} 300 > the administrator maximum 240 "
+        f"(maxima.tasks.{field}" in str(refused.value)
+    )
+    assert refused.value.field == field
+
+
+@pytest.mark.parametrize("field", _policy.SCOPE_CAP_FIELDS)
+def test_an_items_own_cap_is_bounded_by_the_work_item_maximum_its_paths_by_their_levels(field):
+    """The item-wide value is the work item's own (Ruling 211), up to
+    `maxima.work_item`; one on a path may exceed its level's default, up to
+    its level's maximum."""
+    chain = _materialize(
+        _nodes(),
+        defaults=_levels(field),
+        maxima={"work_item": {field: 1440}, "tasks": {field: 240}},
+    )
+    impl = "build.run.impl"
+
+    assert getattr(chain.with_item_policy({field: 1400}).work_item_policy(), field) == 1400
+    on_path = chain.with_item_policy({"paths": {impl: {field: 200}}})
+    assert getattr(on_path.policy_at(impl), field) == 200
+
+    with pytest.raises(PolicyError) as wide:
+        chain.with_item_policy({field: 1500})
+    with pytest.raises(PolicyError) as path:
+        chain.with_item_policy({"paths": {impl: {field: 300}}})
+
+    assert wide.value.field == f"policy.{field}"
+    assert path.value.field == f"policy.paths.{impl}.{field}"
+    assert f"maxima.tasks.{field}" in str(path.value)
+
+
+def test_a_snapshot_frozen_before_ruling_211_reads_its_flat_maxima_as_the_work_items():
+    """An rc snapshot's flat maximum bounded every scope; the `work_item`
+    maximum does now, so an item filed then runs under the same bounds."""
+    chain = _materialize(_nodes())
+    stored = json.loads(chain.to_json())
+    stored["policy"]["maxima"].update(
+        {"time_cap_minutes": 60, "token_budget": None, "work_item": {}}
+    )
+    del stored["policy"]["cap_defaults"]
+
+    read = MaterializedChain.from_json(json.dumps(stored))
+
+    impl = next(t for t in read.chain.nodes[0].tasks() if t.path == "build.run.impl")
+    assert read.policy.maxima.work_item.time_cap_minutes == 60
+    assert read.policy_for(impl).time_cap_minutes == 60
+
+
 # ── a work item's own cap only tightens ───────────────────────────────────────
 
 
@@ -176,8 +341,9 @@ def test_a_gate_timeout_past_its_total_cap_is_refused():
     [
         ({"paths": {"build.run": {"{f}": 20}}}, "policy.paths.build.run.{f}"),
         ({"paths": {"build": {"{f}": 5}, "build.run": {"{f}": 8}}}, "policy.paths.build.run.{f}"),
+        ({"{f}": 30, "paths": {"build": {"{f}": 40}}}, "policy.paths.build.{f}"),
     ],
-    ids=["path-over-its-own", "path-over-an-enclosing-override"],
+    ids=["path-over-its-own", "path-over-an-enclosing-override", "path-over-the-items-own"],
 )
 def test_an_items_path_cap_above_the_one_it_lands_on_is_refused(field, override, where):
     """An item's override on a path only tightens that inner scope: inner
@@ -198,7 +364,9 @@ def test_an_item_may_raise_its_own_cap_above_the_chains_up_to_the_maximum(field)
     """Ruling 198: the item is the outer scope, so its own cap may exceed the
     chain's, up to `maxima:`. A scope that set its own keeps it; one that set
     none takes the item's; and above the maximum it is refused."""
-    chain = _materialize(_nodes(chain={field: 60}, step={field: 10}), maxima={field: 600})
+    chain = _materialize(
+        _nodes(chain={field: 60}, step={field: 10}), maxima={"work_item": {field: 600}}
+    )
     raised = chain.with_item_policy({field: 120})
     by_path = {t.path: t for n in raised.chain.nodes for t in n.tasks()}
 
@@ -277,7 +445,7 @@ def test_a_policy_file_written_before_ruling_196_reads_its_wait_maximum_as_the_t
     with caplog.at_level(logging.WARNING):
         parsed = _policy.PolicyInput.from_yaml(path)
 
-    assert parsed.maxima.total_time_cap_minutes == 600
+    assert parsed.maxima.tasks.total_time_cap_minutes == 600
     assert "deprecated" in caplog.text
 
 
@@ -371,7 +539,7 @@ def test_a_child_budget_above_its_parents_is_refused_naming_both(field, big, sma
 def test_an_item_may_raise_its_own_budget_above_the_chains_up_to_the_maximum(field, big, small):
     """Ruling 198: the item is the outer scope; its own budget may exceed the
     chain's, up to `maxima`, and is refused above it."""
-    chain = _materialize(_nodes(chain={field: small}), maxima={field: big * 2})
+    chain = _materialize(_nodes(chain={field: small}), maxima={"work_item": {field: big * 2}})
 
     raised = chain.with_item_policy({field: big})
 
@@ -386,13 +554,13 @@ def test_a_budget_may_be_raised_above_the_default_up_to_the_maximum(field, value
     """Ruling 198: a `defaults:` budget is a default, not a ceiling."""
     chain = _materialize(
         _nodes(node={field: value}),
-        defaults={field: 100 if field == "token_budget" else 1},
-        maxima={field: value},
+        defaults=_every_level(**{field: 100 if field == "token_budget" else 1}),
+        maxima={"work_item": {field: value}},
     )
 
     assert getattr(chain.policy_for(chain.chain.nodes[0]), field) == value
     with pytest.raises(PolicyError, match="administrator maximum"):
-        _materialize(_nodes(node={field: value * 2}), maxima={field: value})
+        _materialize(_nodes(node={field: value * 2}), maxima={"nodes": {field: value}})
 
 
 # ── the shipped default (Kraft-nxqft) ─────────────────────────────────────────

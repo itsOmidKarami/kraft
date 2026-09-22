@@ -569,13 +569,13 @@ def test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed
     mid-run."""
     with pytest.raises(
         PolicyError,
-        match=r"ci\.main\.ci: 'total_time_cap_minutes' 120 cannot exceed the administrator "
-        r"maximum 60",
+        match=r"ci\.main\.ci: task ci\.main\.ci sets total_time_cap_minutes 120 > the "
+        r"administrator maximum 60",
     ):
         _materialize(
             [forge_node("ci", "mr.ci", **_wait(minutes=120))],
             repo,
-            {"total_time_cap_minutes": 60},
+            {"tasks": {"total_time_cap_minutes": 60}},
         )
 
 
@@ -585,14 +585,14 @@ def test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed
         # Authored values win, within the maximum.
         (
             _wait(minutes=45, initial="10s", maximum="1m"),
-            {"total_time_cap_minutes": 60},
+            {"tasks": {"total_time_cap_minutes": 60}},
             (2700, 10, 60),
         ),
         # Nothing authored: the seed default, 90 minutes (Kraft-7xpv4).
         (None, {}, (5400, 30, 300)),
         # Nothing authored, under a lower maximum: the default is clamped to
         # it rather than refusing a chain whose author never chose a number.
-        (None, {"total_time_cap_minutes": 20}, (1200, 30, 300)),
+        (None, {"tasks": {"total_time_cap_minutes": 20}}, (1200, 30, 300)),
     ],
     ids=["authored", "seed-default", "default-clamped-to-maximum"],
 )

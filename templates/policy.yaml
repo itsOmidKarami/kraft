@@ -4,7 +4,7 @@
 # External waits -- a pipeline, an automated review, an approval, a merge
 # landing -- are not loops and have no key here: each wait's timeout is its
 # task's own `policy: total_time_cap_minutes` in library.yaml (Ruling 196) and
-# its polling its `wait:`, bounded by `maxima.total_time_cap_minutes` below.
+# its polling its `wait:`, bounded by `maxima.tasks.total_time_cap_minutes`.
 # The old `ci_wait` key is gone with the poller that read it.
 #
 # Nothing else is named here on purpose (Ruling 57/88). A `loops:` key that
@@ -80,9 +80,20 @@ archive:
 # own; a repository, work item, chain or execution node may move them in
 # either direction. `maxima:` bounds those overrides — a safety field listed
 # only here (`allowed_tools`) starts *at* its maximum and can only ever be
-# narrowed; a cap (the time caps, `token_budget`, `budget_usd`) with no default
-# starts at its maximum too, and any scope may set its own up to it. Read by the same loader as everything above:
-# `policy.yaml` has one reader.
+# narrowed. Read by the same loader as everything above: `policy.yaml` has
+# one reader.
+#
+# The four caps -- time_cap_minutes, total_time_cap_minutes, token_budget,
+# budget_usd -- are set per level of scope in both sections (Ruling 211):
+# `work_item:`, `nodes:` (a gate is a node), `steps:`, `tasks:`. A level's
+# default applies to every scope of that kind unless the chain, a node, step
+# or task, or the item's own override sets a value (which then also holds for
+# every scope under it that sets none). A default is not a ceiling (Ruling
+# 198): a scope may set more, up to its level's maximum. A level's maximum
+# bounds every narrower level too; a cap with no default runs at it. A
+# narrower level may not exceed a broader one (tasks <= steps <= nodes <=
+# work_item), and the flat form (`defaults: time_cap_minutes: 30`) is
+# refused, naming the level form.
 #
 # A work item freezes its policy when it is filed: this file, then the
 # repository's `policy:` in repos.yaml, then the chain's, node's, step's and
@@ -99,9 +110,7 @@ archive:
 #                      spend before the next agent task there is refused --
 #                      that scope's own spend, not the whole item's (Ruling
 #                      195). Set on any scope; a child's cannot exceed its
-#                      parent's. A default here binds each task's own
-#                      launches where nothing more specific is set, not a
-#                      ceiling (Ruling 198). Checked like budget.work_item_usd,
+#                      parent's. Checked like budget.work_item_usd,
 #                      which with budget.daily_usd stays the outer ceiling.
 #                      Launches that start together in one scope each pass
 #                      the check before any has spent, so a shared cap can be
@@ -124,20 +133,19 @@ archive:
 #                      waits, gates and rate limits, less only a manual pause.
 #                      A task's total is its running time, except a wait's:
 #                      that is the wait's timeout (Ruling 196), and a wait with
-#                      none gets 90 minutes or the maximum, whichever is
-#                      shorter.
+#                      none set and no tasks default runs to the tasks'
+#                      maximum, or 90 minutes when there is none.
 #                      Both caps are set on any scope, and each caps its own:
 #                      a child's cannot exceed its parent's (chain > node >
 #                      step > task), and a layer that tries is refused when
-#                      the item is filed. A default here is a default, not a
-#                      ceiling (Ruling 198): any scope may set more, up to the
-#                      maximum, and the default applies where nothing did.
+#                      the item is filed.
 #
 # Last of all, a work item's own override (`kraft item create --policy`,
 # `kraft item set-policy`) binds that one item, within these maxima. Its
-# item-wide time cap is the work item's own and may be raised above the
-# chain's, up to the maximum -- so a person unsticks a capped item by raising
-# it and retrying; one on a path only tightens that scope.
+# item-wide cap is the work item's own and may be raised above the chain's,
+# up to `maxima.work_item` -- so a person unsticks a capped item by raising
+# it and retrying; one on a path may pass its level's default, up to its
+# level's maximum, and only tightens what the chain set.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install
@@ -147,10 +155,17 @@ archive:
 #   timeout_minutes: 60
 #   max_attempts: 3
 #   allowed_harnesses: [codex, claude]
+#   work_item: { time_cap_minutes: 480, total_time_cap_minutes: 2880, budget_usd: 20 }
+#   nodes:     { time_cap_minutes: 180 }
+#   steps:     { time_cap_minutes: 120 }
+#   tasks:     { time_cap_minutes: 90 }   # the shipped implementer sets 120
 # maxima:
 #   timeout_minutes: 180
-#   total_time_cap_minutes: 10080   # a week: the seeded approval wait's 7d
-#   token_budget: 2000000
-#   budget_usd: 25
 #   allowed_tools: [git, shell, editor]
 #   allowed_harnesses: [codex, claude]
+#   work_item: { time_cap_minutes: 1440, token_budget: 2000000, budget_usd: 25 }
+#   tasks:     { time_cap_minutes: 240, total_time_cap_minutes: 10080 }  # a week: the seeded approval wait's 7d
+#
+# Note the work item's total_time_cap_minutes counts its gates and waits: at
+# 2880 (two days) an item still waiting on the seeded 7-day approval stops
+# for a person after two days.

@@ -412,7 +412,9 @@ async def put_policy(body: PolicyBody, request: Request):
     if isinstance(maxima, dict) and policy_mod.RETIRED_WAIT_TIMEOUT in maxima:
         value = maxima.pop(policy_mod.RETIRED_WAIT_TIMEOUT)
         if value is not None:
-            maxima.setdefault("total_time_cap_minutes", value)
+            tasks = maxima.setdefault("tasks", {})
+            if isinstance(tasks, dict):
+                tasks.setdefault("total_time_cap_minutes", value)
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "policy.yaml"
         candidate.write_text(yaml.safe_dump(data))

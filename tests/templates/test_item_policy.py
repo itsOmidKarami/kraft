@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError, WorkItemPolicy
+from kraft.policy import (
+    SCOPE_CAP_FIELDS,
+    InstancePolicy,
+    InstancePolicyInput,
+    PolicyError,
+    WorkItemPolicy,
+)
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, MaterializedChain, ResolvedChain
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
@@ -51,9 +57,18 @@ def _chain(**maxima) -> MaterializedChain:
         },
         {"id": "review", "kind": "gate"},
     ]
+    # A cap's maximum is per level (Ruling 211); the work item's bounds every
+    # scope under it.
+    caps = {k: maxima.pop(k) for k in list(maxima) if k in SCOPE_CAP_FIELDS}
     instance = InstancePolicy.from_input(
         InstancePolicyInput.model_validate(
-            {"maxima": {"allowed_tools": ["Read", "Edit", "Bash"], **maxima}}
+            {
+                "maxima": {
+                    "allowed_tools": ["Read", "Edit", "Bash"],
+                    "work_item": caps,
+                    **maxima,
+                }
+            }
         )
     )
     return ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(

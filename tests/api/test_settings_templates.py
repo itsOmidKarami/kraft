@@ -361,5 +361,5 @@ def test_a_policy_save_writes_a_retired_wait_maximum_under_its_new_name(client, 
     assert client.put("/api/policy", json=body).status_code == 200
 
     saved = yaml.safe_load((templates_dir / "policy.yaml").read_text())["maxima"]
-    assert saved == {"total_time_cap_minutes": 600}
-    assert client.app.state.instance_policy.maxima.total_time_cap_minutes == 600
+    assert saved == {"tasks": {"total_time_cap_minutes": 600}}
+    assert client.app.state.instance_policy.maxima.tasks.total_time_cap_minutes == 600

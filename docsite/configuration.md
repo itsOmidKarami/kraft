@@ -136,10 +136,16 @@ defaults:
   timeout_minutes: 60
   max_attempts: 3
   allowed_harnesses: [codex, claude]
+  # Caps are set per level of scope (Ruling 211).
+  work_item: { time_cap_minutes: 480, total_time_cap_minutes: 2880, budget_usd: 20 }
+  nodes:     { time_cap_minutes: 180 }
+  steps:     { time_cap_minutes: 120 }
+  tasks:     { time_cap_minutes: 90 }
 maxima:
   timeout_minutes: 180
-  token_budget: 2000000
   allowed_harnesses: [codex, claude]
+  work_item: { time_cap_minutes: 1440, token_budget: 2000000 }
+  tasks:     { time_cap_minutes: 240 }
 ```
 
 The example sets no `maxima.allowed_tools`, on purpose: a safety field set
@@ -149,7 +155,7 @@ shipped chain would stop.
 
 | Key | Means |
 |---|---|
-| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`verification.fix_loop`), not by a flat name, and a `max_attempts` on the loop itself wins over this key's `attempts`. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names none. An external wait (a pipeline, an automated review, an approval, a merge landing) is not a loop: its timeout is its task's own `total_time_cap_minutes` and its polling its `wait:`, bounded by `maxima.total_time_cap_minutes`. Only a person resets a loop's count: a `retry` from the board or `kraft item retry` at a terminal starts the retried span's fix loops and reject loops afresh and records a `cap_counters_reset` event, while a retry a worker, an MCP assistant, an escalation turn or the rate-limit relaunch asks for goes on counting. |
+| `loops.<name>` | `attempts` and `wall_clock_s` ceiling for one named loop. `default` covers anything not named explicitly, which today is every fix loop: a chain node's fix loop is keyed by the node's own canonical path (`verification.fix_loop`), not by a flat name, and a `max_attempts` on the loop itself wins over this key's `attempts`. A key naming no live loop is **silently unused** — `loops.get(key, default)` neither errors nor warns — so the shipped file names none. An external wait (a pipeline, an automated review, an approval, a merge landing) is not a loop: its timeout is its task's own `total_time_cap_minutes` and its polling its `wait:`, bounded by `maxima.tasks.total_time_cap_minutes`. Only a person resets a loop's count: a `retry` from the board or `kraft item retry` at a terminal starts the retried span's fix loops and reject loops afresh and records a `cap_counters_reset` event, while a retry a worker, an MCP assistant, an escalation turn or the rate-limit relaunch asks for goes on counting. |
 | `max_concurrent` | How many work items may be `active` at once, across every repo, however they were started (`resume`, `retry`, or auto-intake). Moved here from `intake.yaml` — that file's copy is now a legacy fallback `load_policy` reads only when this key is absent. |
 | `auto_escalate_stuck` | Whether a *stuck* stop auto-dispatches an escalation turn on a node that declares no `escalation` of its own. Stuck means a task that failed after recovery, an exhausted fix loop, a stall, or the fix-loop judge's `stop_needs_human`. A config error, a budget or rate limit, an infra stop, a reviewer error, a wait timeout or a question goes straight to a human, as do a pending gate and a spent reject loop. Independent of a node's own `auto_escalate` (gate review) — different mechanism, different trigger. Defaults on. |
 | `auto_escalate_stuck_cap` | Attempts one `needs_human` run may be auto-escalated by `auto_escalate_stuck` before leaving it for a human — the stuck-escalation equivalent of a fix loop's `attempts`. |
@@ -161,8 +167,17 @@ shipped chain would stop.
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
-| `defaults` | Template Schema V1's inheritable starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, which a repository, work item, chain or execution node may move in either direction, bounded only by `maxima`; and the time caps `time_cap_minutes`/`total_time_cap_minutes`, which are defaults too, not ceilings (Ruling 198): any chain, node, step or task may set a longer cap, up to `maxima`, and the default applies where nothing set one. All optional; unset means unbounded. |
-| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`, `time_cap_minutes` and `total_time_cap_minutes`. `total_time_cap_minutes` is also the longest any external wait may wait (a wait with no cap anywhere above it gets 90 minutes or this, whichever is shorter); it replaces `wait_timeout_minutes` (Ruling 196), which a file written before still loads as, with a deprecation warning. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override; a time cap with no default starts at its maximum too, which any scope may lower. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+| `defaults` | Template Schema V1's inheritable starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, which a repository, work item, chain or execution node may move in either direction, bounded only by `maxima`; and the four caps `time_cap_minutes`, `total_time_cap_minutes`, `token_budget` and `budget_usd`, set **per level** (Ruling 211): under `work_item:`, `nodes:` (a gate is a node), `steps:` and `tasks:`. A level's default applies to every scope of that kind unless the chain, a node, step or task, or the item's own override sets a value. It is a default, not a ceiling (Ruling 198): any scope may set more, up to its level's maximum. All optional; unset means unbounded. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `allowed_tools`, and the four caps per level, as in `defaults`. A level's maximum bounds every narrower level too, so `work_item:` alone bounds every scope. `tasks: total_time_cap_minutes` is also the longest any external wait may wait (a wait with no cap set anywhere and no `tasks` default runs to this maximum, or 90 minutes when there is none); it replaces `wait_timeout_minutes` (Ruling 196), which a file written before still loads as, with a deprecation warning. A safety field listed only here (`allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override; a cap with no default runs at its level's maximum. An unset maximum is no bound at all, which is what a fresh install ships with. |
+
+In both sections a narrower level's cap may not exceed a broader one's
+(`tasks` ≤ `steps` ≤ `nodes` ≤ `work_item`), a `defaults` entry may not exceed
+its level's maximum, and either is refused when the file is read, naming both.
+A cap written flat (`defaults: time_cap_minutes: 30`), the form release
+candidates used, is refused too, naming the level form: "use
+defaults.tasks.time_cap_minutes (or work_item, nodes, steps)". A work item
+filed by a release candidate still runs, its flat maximum read as the work
+item's.
 
 **How V1 policy resolves and what it does.** A work item's policy is frozen
 when it is filed, layered broadest first: `defaults`/`maxima` here, the
@@ -181,12 +196,14 @@ loop's own `max_attempts`. Its safety values combine in no order: an
 adds to it, and a `sandbox` must match any already set. So they only ever
 tighten, and are never refused because the chain narrowed the same field
 first. Its item-wide caps -- `time_cap_minutes`, `total_time_cap_minutes`,
-`token_budget`, `budget_usd` -- are the work item's own (Rulings 195, 198):
-each replaces the chain's for every scope that set none, meets any scope's own
-that is larger, and may be raised above the chain's up to `maxima` -- so a
-person unsticks a capped item by raising it and retrying, with no config
-edit. A cap on a path only tightens that scope, and one above the cap it would
-land on is refused, naming both. `wait_timeout_minutes` is retired (Ruling 196): a write
+`token_budget`, `budget_usd` -- are the work item's own (Rulings 195, 198,
+211): each replaces the chain's, and every level's default, for every scope
+that set none, and may be raised above the chain's up to
+`maxima.work_item` -- so a person unsticks a capped item by raising it and
+retrying, with no config edit. A cap on a path may exceed that scope's level
+default up to its level's maximum, but never what the chain, the item's own
+cap or an enclosing path already gives it, and one above is refused, naming
+both. `wait_timeout_minutes` is retired (Ruling 196): a write
 refuses it, naming `total_time_cap_minutes`; an override stored before reads a
 path's value as that path's `total_time_cap_minutes` and an item-wide one as
 every wait task's, with a deprecation warning. It binds that item only, and it
@@ -201,12 +218,12 @@ node; a gate's `auto_review` inherits its gate. At runtime:
 | `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. Allowing `Bash` allows its read-only use without a gate ask: Claude's `manual` mode runs a read-only shell command (`cat`, `ls`, `git status`) itself and asks the gate only about the rest, so a read-only command can read any file the worktree holds, gitignored ones included. |
 | `deny_tools` | only accumulates | Denied by the permission gate and passed as `--disallowed-tools`, on top of `allowed_tools`. |
 | `sandbox` | set once, never changed or removed | Wraps the whole work item, not only the scope that sets it (Ruling 189): every process it launches (agents, subprocesses, builtins, recoveries, judges, escalations, gate reviews, test scopes, area setups and `setup_command`) runs in `docker run`. Two scopes setting different sandboxes are refused when the chain is built. |
-| `token_budget` | within `maxima`; a child's never above its parent's; a default binds a task's own launches (Ruling 198) | The spend of the scope that sets it (Ruling 195): the tokens, input plus output, of every launch inside that scope — a task's own launches, a step's or a node's, the whole work item's. Before each agent launch, gate reviewers and escalation turns included, the launch is refused, and the item stops for a human naming the scope, once its own scope or any scope around it has reached its cap. Like `budget`, it cannot interrupt a running agent. |
-| `budget_usd` | within `maxima`; a child's never above its parent's; a default binds a task's own launches (Ruling 198) | The same, in dollars, under `budget.work_item_usd`/`budget.daily_usd`, which stay the outer ceilings. A finished launch whose harness reported no cost is unknown spend and never counted as free: a scope with any cannot be shown to be under its cap, so its next launch stops for a human, saying so. A launch still running reports its cost when it exits. Launches that start together in one scope (a parallel step's tasks) each pass the check before any of them has spent, so a shared scope's cap can be overshot by up to their combined cost; nothing is reserved ahead of a launch. An escalation turn's spend is its node's. A launch that resumes an earlier one's agent session (a paused task's resume, a later escalation turn) counts only what it added, since the agent reports its session's running total. |
+| `token_budget` | within its level's `maxima`; a child's never above its parent's; a level's default binds every scope of its kind that set none (Ruling 211) | The spend of the scope that sets it (Ruling 195): the tokens, input plus output, of every launch inside that scope — a task's own launches, a step's or a node's, the whole work item's. Before each agent launch, gate reviewers and escalation turns included, the launch is refused, and the item stops for a human naming the scope, once its own scope or any scope around it has reached its cap. Like `budget`, it cannot interrupt a running agent. |
+| `budget_usd` | within its level's `maxima`; a child's never above its parent's; a level's default binds every scope of its kind that set none (Ruling 211) | The same, in dollars, under `budget.work_item_usd`/`budget.daily_usd`, which stay the outer ceilings. A finished launch whose harness reported no cost is unknown spend and never counted as free: a scope with any cannot be shown to be under its cap, so its next launch stops for a human, saying so. A launch still running reports its cost when it exits. Launches that start together in one scope (a parallel step's tasks) each pass the check before any of them has spent, so a shared scope's cap can be overshot by up to their combined cost; nothing is reserved ahead of a launch. An escalation turn's spend is its node's. A launch that resumes an earlier one's agent session (a paused task's resume, a later escalation turn) counts only what it added, since the agent reports its session's running total. |
 | `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |
 | `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |
-| `time_cap_minutes` | only lowers what it inherits, within `maxima` | The running time of the scope that sets it: a task's one run, a step's or a node's task runs since it started (a node's recovery, fix loop and escalation included), the work item's since it started. Paused, external-wait, gate and rate-limited time does not count. A launch past it is refused; a running process is killed at it, a sandbox's container too. |
-| `total_time_cap_minutes` | only lowers what it inherits, within `maxima` | The wall clock of the scope that sets it — running time plus waits, gates and rate limits — less only a manual pause. For a task other than a wait that is its running time; for a wait it is the wait's timeout. A gate's `timeout` must fit under it, and runs out the same way. |
+| `time_cap_minutes` | within its level's `maxima`; a child's never above its parent's; a level's default binds every scope of its kind that set none (Ruling 211) | The running time of the scope that sets it: a task's one run, a step's or a node's task runs since it started (a node's recovery, fix loop and escalation included), the work item's since it started. Paused, external-wait, gate and rate-limited time does not count. A launch past it is refused; a running process is killed at it, a sandbox's container too. |
+| `total_time_cap_minutes` | as `time_cap_minutes` | The wall clock of the scope that sets it — running time plus waits, gates and rate limits — less only a manual pause. For a task other than a wait that is its running time; for a wait it is the wait's timeout. A gate's `timeout` must fit under it, and runs out the same way. |
 
 **Time caps.** Each scope that sets `time_cap_minutes` or
 `total_time_cap_minutes` caps its own time, and a child's cap may not exceed
@@ -227,18 +244,29 @@ A node's cap bounds everything that runs as that node: its tasks, recovery
 and fix loop, a gate's automated review, and the automatic stuck-escalation
 turn (a person's own escalation chat is not the node running, and is not
 capped). A session Kraft adopts after a restart keeps the deadline it
-launched under. An instance or repository default binds a task's own run
-where nothing more specific was set (Ruling 198); the work item, its nodes and
-its steps are bound only by a cap the chain or the item set, or by `maxima`.
+launched under.
+
+**Caps per level (Ruling 211).** A cap `defaults` sets for a level binds every
+scope of that kind that nothing set a value for: with the example above, the
+work item runs under 480 minutes, each node under 180, each step under 120
+and each task under 90, all at once, and whichever runs out first stops the
+item, naming its scope. A value set in the chain -- on the chain, a node, a
+step or a task -- or by the item's own override replaces the defaults of that
+scope and of every scope under it that sets none, so a node set to 240 minutes
+runs its steps and tasks under 240 too. A work item's `total_time_cap_minutes`
+counts its gates and external waits, so one of two days stops an item still
+waiting on a week-long approval. A repository's caps (`repos.yaml` `policy:`)
+are the work item's, like the chain's own `policy:`.
 
 The shipped `implementer` task, which both shipped chains run, sets
 `time_cap_minutes: 120`. Every successful implementer run on record finished
 inside 96 minutes (p99 73), so the cap binds only a run that has already gone
 wrong, like the worker that spent 68 minutes and $9.46 waiting on a test run
 it had backgrounded (Kraft-nxqft). A long plan can take more: raise the
-item's own cap, or set a larger one on the task in `library.yaml`. A
-`maxima.time_cap_minutes` under 120 refuses both shipped chains until the
-task's cap is lowered to fit.
+item's own cap, or set a larger one on the task in `library.yaml`. It exceeds
+the example's `tasks` default of 90, which a scope may; a
+`maxima.tasks.time_cap_minutes` (or a broader level's) under 120 refuses both
+shipped chains until the task's cap is lowered to fit.
 
 **Background jobs.** A worker's session ends with its turn. When an agent's
 turn ends with a background job still running (a `run_in_background` call,
@@ -353,7 +381,7 @@ repos:
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (below): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Steering docs (from `templates/steering/`) attached to every agent task on this repo, beside the task's own library steering. |
 | `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
-| `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `token_budget`, `allowed_harnesses`, `timeout_minutes`, `max_attempts`, applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
+| `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `sandbox`, `allowed_harnesses`, `timeout_minutes`, `max_attempts` and the four caps (`time_cap_minutes`, `total_time_cap_minutes`, `token_budget`, `budget_usd`, each the work item's own, within `maxima.work_item`), applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes intake refuse the item. See `policy.yaml`'s table above. |
 | `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for, named exactly one way. `bot: <login>` settles when that forge login has reviewed the merge request's current head: on GitHub, changes requested or any inline comment is actionable (one finding per comment) and anything else is clean; on GitLab, the bot's unresolved discussions are actionable and its approval is clean. `check: <name>` settles when that check run or commit status on the head completes: success is clean, failure is actionable with its output as the finding. Unset, the repository expects no automated review: the task settles clean at once and records `automated_review_not_configured`. A reviewer that errors stops the item for a person rather than spending a repair. A dismissed GitHub review doesn't count. Kraft reads only the first page of 100 of each list it asks for: the pull request's reviews, a review's comments, and a GitLab merge request's discussions and commit statuses. A bot with no match on that first page reads as not having reviewed yet. On GitLab an approval isn't tied to a commit, so a bot's approval of an earlier head still reads as clean, unless the project resets approvals on push. |
 
 No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed. The exceptions are `name`, `enabled` and `default_chain_template`, which Kraft writes itself.
