@@ -586,26 +586,38 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     assert seen["env"] == {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "failed to connect to the docker API; check if the daemon is running",  # current cli
-        "Cannot connect to the Docker daemon. Is the docker daemon running?",  # legacy cli
-    ],
-    ids=["current-wording", "legacy-wording"],
-)
 async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(
-    run, run_dirs, tmp_path, monkeypatch, message
+    run, run_dirs, tmp_path, monkeypatch
 ):
     """Kraft-nc9gm: `docker run` itself failing to launch (daemon down, or an
     image pull failure) is the same infra-not-agent class as
-    `test_run_task_that_cannot_launch_is_a_config_error`, one step later."""
+    `test_run_task_that_cannot_launch_is_a_config_error`, one step later.
+    Told by docker never writing `--cidfile`, not by its wording (Kraft-6ltwh),
+    so this fake prints what docker-cli 29.7.2 does and writes no cidfile."""
+    message = "failed to connect to the docker API; check if the daemon is running"
     bin_dir = tmp_path / "fake-docker-daemon-down"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
     docker.write_text(f"#!/usr/bin/env bash\necho {shlex.quote(message)} >&2\nexit 1\n")
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    # An earlier launch's container id is not this launch's (Kraft-6ltwh).
+    sp.result_path_for(run_dirs, "s-daemon-down").with_suffix(".cid").write_text("old-id")
     status, row = await run(["echo", "hi"], "s-daemon-down", sandbox=DOCKER)
     assert (status, row["status"]) == ("config_error", "config_error")
     assert "daemon" in (run_dirs.logs / "s-daemon-down.log").read_text()
+
+
+async def test_run_task_sandboxed_command_printing_dockers_words_is_its_own_failure(
+    run, docker, run_dirs
+):
+    """Kraft-6ltwh: the log holds the sandboxed command's own output too. A
+    task that itself prints docker's daemon-down wording (a test exercising
+    docker, a worker echoing it) ran in a container docker did create, so its
+    failure is its own -- the fix loop's, not a launch failure."""
+    cmd = ["sh", "-c", "echo 'Cannot connect to the Docker daemon. Is it running?' >&2; exit 1"]
+
+    status, row = await run(cmd, "s-says-docker", sandbox=DOCKER)
+
+    assert (status, row["status"]) == ("failed", "failed")
+    assert "Docker daemon" in (run_dirs.logs / "s-says-docker.log").read_text()

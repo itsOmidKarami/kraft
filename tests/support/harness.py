@@ -161,7 +161,8 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     first survivor) and the real command (everything after it), regardless
     of exact flag count or order. `--security-opt=...`/`--cap-drop=...` carry
     their value in the same token (`=`-joined), so they are dropped outright
-    rather than skip-one'd.
+    rather than skip-one'd. `--cidfile=PATH` gets a fake container id, as
+    docker writes one once it has created the container.
 
     Also answers `docker rm -f NAME` -- the container teardown
     `sandbox.teardown` issues once a sandboxed session's client side is down
@@ -196,6 +197,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
         "    --rm|--security-opt=*|--cap-drop=*) continue ;;\n"
+        '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         "    -u|-v|-w|-e|--name) skip=1; continue ;;\n"
         "    *)\n"
         '      if [ -z "$image" ]; then image="$arg"; else cmd+=("$arg"); fi\n'

@@ -137,6 +137,7 @@ def docker_argv(
     env: dict | None = None,
     name: str | None = None,
     result_path: str | Path | None = None,
+    cidfile: str | Path | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -192,6 +193,11 @@ def docker_argv(
     `FORWARDED_ENV` crosses into the container by default. Passed through as
     literal `-e NAME=VALUE`, unlike `FORWARDED_ENV`'s bare `-e NAME` (which
     copies from docker's own process env, never written to disk).
+
+    `cidfile`: docker writes the container's id there once it has created
+    the container, and leaves no file when it never got that far -- the one
+    thing that tells docker's own launch failure from the sandboxed
+    command's (`subprocess._docker_launch_failed`, Kraft-6ltwh).
     """
     cwd = str(cwd)
     argv = [
@@ -214,6 +220,8 @@ def docker_argv(
     argv += _gitdir_mounts(Path(cwd))
     if name is not None:
         argv += ["--name", name]
+    if cidfile is not None:
+        argv.append(f"--cidfile={cidfile}")
     for env_name in FORWARDED_ENV:
         argv += ["-e", env_name]
     for env_name, value in (env or {}).items():
