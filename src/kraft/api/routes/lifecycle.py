@@ -346,7 +346,8 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "title": tasks[body.task - 1][0],
     }
     await st.db.write(lambda c: events.append(c, wid, "plan_progress", payload))
-    return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}
+    p = progress_mod.for_item(st.db, row, worktree)
+    return {"id": wid, "progress": p.model_dump() if p else None}
 
 
 def steer_reachable(row, node_id: str | None = None) -> bool:

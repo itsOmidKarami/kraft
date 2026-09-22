@@ -4,7 +4,11 @@ through the API in test_progress_api.py."""
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from kraft import progress
+from kraft.progress import ProgressReport, TaskProgress
 
 PLAN = """# Land it
 
@@ -101,23 +105,23 @@ TASKS = [("parse", False), ("serve", False), ("render", False)]
 
 def test_combine_with_no_signal_is_task_one():
     p = progress.combine(TASKS, reported=0, committed=0)
-    assert (p["current"], p["total"], p["title"]) == (1, 3, "parse")
-    assert [t["state"] for t in p["tasks"]] == ["current", "pending", "pending"]
-    assert [t["n"] for t in p["tasks"]] == [1, 2, 3]
+    assert (p.current, p.total, p.title) == (1, 3, "parse")
+    assert [t.state for t in p.tasks] == ["current", "pending", "pending"]
+    assert [t.n for t in p.tasks] == [1, 2, 3]
 
 
 def test_combine_follows_the_agent_report():
-    assert progress.combine(TASKS, reported=2, committed=0)["current"] == 2
+    assert progress.combine(TASKS, reported=2, committed=0).current == 2
 
 
 def test_a_committed_task_moves_current_past_it():
-    assert progress.combine(TASKS, reported=1, committed=2)["current"] == 3
+    assert progress.combine(TASKS, reported=1, committed=2).current == 3
 
 
 def test_combine_caps_at_the_last_task():
     p = progress.combine(TASKS, reported=0, committed=9)
-    assert p["current"] == 3
-    assert [t["state"] for t in p["tasks"]] == ["done", "done", "current"]
+    assert p.current == 3
+    assert [t.state for t in p.tasks] == ["done", "done", "current"]
 
 
 def test_combine_without_tasks_is_none():
@@ -128,21 +132,29 @@ def test_combine_clamps_current_off_a_done_marked_task():
     tasks = [("a", False)] * 6 + [("g", True), ("h", True), ("i", True), ("j", True)]
     # reported=0, committed=6 -> raw current would be 7, but task 7 is [DONE]
     p = progress.combine(tasks, reported=0, committed=6)
-    assert p["current"] == 6
-    assert p["title"] == "a"
+    assert p.current == 6
+    assert p.title == "a"
 
 
 def test_combine_marks_a_done_task_done_regardless_of_position():
     tasks = [("a", False), ("b", True), ("c", False)]
     p = progress.combine(tasks, reported=1, committed=0)
-    assert [t["state"] for t in p["tasks"]] == ["current", "done", "pending"]
+    assert [t.state for t in p.tasks] == ["current", "done", "pending"]
 
 
 def test_combine_clamp_stops_at_task_one():
     tasks = [("a", True), ("b", True)]
     p = progress.combine(tasks, reported=0, committed=1)
-    assert p["current"] == 1
-    assert [t["state"] for t in p["tasks"]] == ["done", "done"]
+    assert p.current == 1
+    assert [t.state for t in p.tasks] == ["done", "done"]
+
+
+def test_current_cannot_exceed_total():
+    """The invariant the docstring asserts is now enforced, not just claimed."""
+    with pytest.raises(ValidationError, match="current task index cannot exceed total"):
+        ProgressReport(
+            current=4, total=3, title="x", tasks=[TaskProgress(n=1, title="a", state="current")]
+        )
 
 
 def test_implementation_node_is_found_by_hook_not_name():

@@ -153,7 +153,7 @@ def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
 def _board_progress(st, row) -> dict | None:
     """The board's share of `progress`: position and title, not the task list."""
     p = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / row["id"])
-    return {k: p[k] for k in ("current", "total", "title")} if p else None
+    return {"current": p.current, "total": p.total, "title": p.title} if p else None
 
 
 def _completed_nodes(st, wid: str) -> set[str]:
@@ -334,6 +334,7 @@ async def get_work_item(wid: str, request: Request):
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
     spent_usd, _daily = st.db.read(lambda c: store.budget_spend(c, wid))
+    progress = progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid)
     return {
         **{k: row[k] for k in row.keys()},
         "chain_definition": chain,
@@ -363,7 +364,7 @@ async def get_work_item(wid: str, request: Request):
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
         # Where the implementer is in its plan ("3 of 6 · title"), or None off the
         # implementation node or for a plan with no `## Task N` headings.
-        "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
+        "progress": progress.model_dump() if progress else None,
         # empty on a single-repo item; the detail's repos panel is multi-repo only
         "repos": st.db.read(lambda c: store.repos_for(c, wid)),
         # One entry per escalation thread this item has had, oldest first
