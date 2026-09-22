@@ -2,6 +2,14 @@
 # is a real config field (probed with --strict-config, which rejects unknown
 # keys without calling a model), which is what settled Kraft-n70's blocking
 # research question.
+#
+# Kraft-c1qfa: `model_reasoning_effort` isn't validated by codex-cli itself --
+# it's passed straight through to the model API. Probed against codex-cli
+# 0.155.0 on 2026-09-22 with an invalid value: the API's own
+# invalid_enum_value error names the real vocabulary as 'none', 'minimal',
+# 'low', 'medium', 'high', 'xhigh', 'max'. Widening only to add xhigh, the
+# value this bead named -- 'none' and 'max' are a separate widening the brief
+# didn't ask for.
 id: codex
 kind: cli
 command: [codex, exec]
@@ -13,7 +21,7 @@ capabilities:
   context:         { channel: system_prompt, cli: ["-c", "developer_instructions={value}"] }
   structured_log:  { cli: ["--json"] }
   model:           { cli: ["-m", "{value}"], values: ['(gpt|o[0-9]|codex).*'] }
-  effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high] }
+  effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high, xhigh] }
   permission_mode: { cli: ["-s", "{value}"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
   resume:          { via: command_resume }
   usage:           { source: result_file }
