@@ -730,3 +730,43 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
         "spec_approval",
     ]
     assert started["current_node_id"] == "spec"
+
+
+def _append(wid: str, type: str, payload: dict) -> None:
+    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        events.append(conn, wid, type, payload)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_a_card_marks_an_item_whose_last_launch_ran_on_a_fallback(client, tmp_path):
+    """`every-fallback-switch-is-logged`: the board card carries the switch
+    while the item's latest launch is the fallback's, and drops it once a
+    later launch starts."""
+    wid = client.post("/api/work-items", json={"title": "t", "repo": str(tmp_path)}).json()["id"]
+    _set_status(wid, "paused")  # keep the executor off this item
+
+    def card():
+        return next(i for i in client.get("/api/work-items").json()["items"] if i["id"] == wid)
+
+    assert card()["fallback"] is None
+    switch = {
+        "node_id": "n",
+        "task": "n.main.t",
+        "from": {"harness": "claude", "model": "opus", "effort": None},
+        "to": {"harness": "codex", "model": "gpt-5.6-sol", "effort": None},
+        "reason": "rate_limit_hit",
+        "resets_at_iso": "2026-09-22T13:40:00+00:00",
+        "session_id": "s2",
+        "override_not_carried": False,
+    }
+    _append(wid, "worker_session_started", {"session_id": "s1", "node_id": "n"})
+    _append(wid, "launch_fallback", switch)
+    _append(wid, "worker_session_started", {"session_id": "s2", "node_id": "n"})
+    assert card()["fallback"] == switch
+
+    _append(wid, "worker_session_started", {"session_id": "s3", "node_id": "m"})
+    assert card()["fallback"] is None

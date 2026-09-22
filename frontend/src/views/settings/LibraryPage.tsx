@@ -49,6 +49,15 @@ function ComponentDetail({ component }: { component: LibraryComponent }) {
           </Link>
         </p>
       )}
+      {Array.isArray(component.definition.fallback) && (
+        <p className="chain-legend" data-testid="task-fallback">
+          {component.definition.fallback.length === 0
+            ? "no fallback (overrides a profile's list)"
+            : `falls back to ${(component.definition.fallback as Record<string, string>[])
+                .map((e) => [e.harness, e.model, e.effort].filter(Boolean).join(" / "))
+                .join(", then ")}`}
+        </p>
+      )}
       {component.kind === "steering" && typeof component.definition.instructions === "string" ? (
         <>
           <p className="chain-legend">

@@ -12,6 +12,7 @@ import { showToast } from "../components/Toast";
 import type { Repo, Theme, WorkItem, WorkerSession } from "../types";
 import type { ComposerKind } from "./work_item/ActionBar/ItemCard";
 import { useActionBar } from "./work_item/ActionBar/useActionBar";
+import { fallbackSentence } from "./work_item/timelineHelpers";
 import { usePhone } from "./work_item/usePhone";
 
 const FILTERS_KEY = "kraft.board_filters";
@@ -776,6 +777,11 @@ function BoardRow({
           {/* The phone line is repo · 15h · reason (W11 · C.1). */}
           {item.bead_id && <code className="board-row-meta-desk">{item.bead_id}</code>}
           <span className="board-row-meta-desk">{item.chain_template}</span>
+          {item.fallback && (
+            <span className="board-row-fallback" title={fallbackSentence(item.fallback)}>
+              fallback
+            </span>
+          )}
           {age && (
             <span>
               {age.replace(/ ago$/, "")}
