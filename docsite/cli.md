@@ -161,8 +161,10 @@ for it:
 | `env` | Literal variables every worker for this repo gets. |
 | `env_passthrough` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist does not cover. |
 
-`kraft repo connect` probes a `setup_command` from the repo's markers; check it
-before trusting it, and `kraft admin doctor` reports any repo still undeclared.
+`kraft repo connect` probes a `setup_command` and a test command from the
+repo's markers, and prints the test command with the file it came from (a
+justfile with a `test` recipe proposes `just test` ahead of any manifest). Check
+both before trusting them; `kraft admin doctor` reports any repo still undeclared.
 Editing a repo's settings stays in the UI. Full field list, including
 `test_scopes`, `forge`, and `default_chain_template`:
 [Configuration](configuration.md#reposyaml-connected-repos).

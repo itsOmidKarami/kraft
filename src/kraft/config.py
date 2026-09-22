@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from collections.abc import Iterator
@@ -632,9 +633,8 @@ def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
 
 
 #: Test commands to look for, in the order a repo is most likely to want them.
-#: A Justfile/justfile comes first: it's an explicit wrapper a repo chose on
-#: purpose (like Kraft itself: `just test`, never raw pytest), so it must win
-#: over a manifest marker sitting right beside it (Kraft-reriq).
+#: A justfile with a `test` recipe comes first: an explicit wrapper (Kraft's own
+#: `just test`) beats a manifest beside it (Kraft-reriq, Kraft-enc5z).
 _TEST_COMMANDS = [
     ("Justfile", "just test"),
     ("justfile", "just test"),
@@ -689,8 +689,24 @@ def normalized_repo_root(p: Path) -> Path | None:
     return Path(common).parent if common and Path(common).name == ".git" else Path(toplevel)
 
 
-def _first_test_command(directory: Path) -> str | None:
-    return next((cmd for marker, cmd in _TEST_COMMANDS if (directory / marker).is_file()), None)
+_JUST_TEST_RECIPE = re.compile(r"^@?test(?:\s[^:\n]*)?:(?!=)", re.MULTILINE)
+
+
+def _first_test_marker(directory: Path) -> tuple[str, str] | None:
+    """(marker, command) for the first `_TEST_COMMANDS` marker here. Names come
+    from the listing: a case-insensitive disk says `Justfile` is a file when the
+    file is `justfile`. A justfile counts only with a `test` recipe."""
+    try:
+        names = {f.name for f in directory.iterdir() if f.is_file()}
+    except OSError:
+        return None
+    for marker, cmd in _TEST_COMMANDS:
+        if marker in names and (
+            cmd != "just test"
+            or _JUST_TEST_RECIPE.search((directory / marker).read_text("utf-8", "replace"))
+        ):
+            return marker, cmd
+    return None
 
 
 #: Marker -> the command that prepares a checkout of this kind of repo. A
@@ -713,35 +729,30 @@ def _first_setup_command(directory: Path) -> str | None:
 
 def _probe_test_scopes(
     root: Path, *, test_command: str | None = None
-) -> tuple[str | None, list[dict]]:
-    """(legacy singular `test_command`, `test_scopes` list) for `root` (design §2).
+) -> tuple[str | None, list[dict], list[str]]:
+    """(legacy singular `test_command`, `test_scopes`, their marker files) for `root`.
 
-    Walks the same `_TEST_COMMANDS` markers, but at the repo root *and* one
-    level under it -- deliberately shallow, matching both Kraft's own repo
-    (`pyproject.toml` at root, `package.json` under `frontend/`) and the
-    common monorepo layout. A marker match in a subdirectory becomes a
-    "nested scope"; the root scope's `paths` then excludes every directory a
-    nested scope claimed, so a frontend-only diff cannot also match the
-    backend scope. No nested scopes -> unchanged single-stack behavior
-    (`paths: ["**"]`).
+    Markers are read at the root and one level under it -- deliberately shallow,
+    like Kraft's own `frontend/`. A subdirectory match becomes a nested scope,
+    and the root scope's `paths` exclude every directory one claimed, so a
+    frontend-only diff cannot also match the backend. None -> `paths: ["**"]`.
 
-    `test_command`, when given, stands in for whatever marker-derived command
-    the root would otherwise have gotten. This is what lets a repo connected
-    with an explicit `test_command` still get its nested scopes probed
-    (Kraft-k4mx): the command an operator supplies at connect time is what a
-    root scope's command always was, so it takes exactly that place rather
-    than suppressing probing altogether.
+    `test_command`, when given, takes the root's marker-derived command's place
+    rather than suppressing probing, so nested scopes are still found (Kraft-k4mx).
     """
-    root_command = test_command or _first_test_command(root)
+    found = None if test_command else _first_test_marker(root)
+    root_command = test_command or (found and found[1])
     try:
         subdirs = sorted(d for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
     except OSError:
         subdirs = []
-    nested = [(d.name, cmd) for d in subdirs if (cmd := _first_test_command(d)) is not None]
+    hits = [(d.name, hit) for d in subdirs if (hit := _first_test_marker(d))]
+    nested = [(name, cmd) for name, (_, cmd) in hits]
+    markers = ([found[0]] if found else []) + [f"{name}/{marker}" for name, (marker, _) in hits]
 
     if not nested:
         scopes = [{"paths": ["**"], "command": root_command}] if root_command else []
-        return root_command, scopes
+        return root_command, scopes, markers
 
     claimed = {name for name, _ in nested}
     try:
@@ -761,7 +772,7 @@ def _probe_test_scopes(
     if root_command:
         scopes.append({"paths": top_level, "command": root_command})
     scopes.extend({"paths": [f"{name}/**"], "command": cmd} for name, cmd in nested)
-    return root_command or nested[0][1], scopes
+    return root_command or nested[0][1], scopes, markers
 
 
 def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
@@ -804,7 +815,7 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
     remote = git_read(root, "remote", "get-url", "origin", expected_failure=True) or ""
     forge, project = _detect_forge(remote)
 
-    test_command, test_scopes = _probe_test_scopes(root, test_command=test_command)
+    test_command, test_scopes, test_markers = _probe_test_scopes(root, test_command=test_command)
 
     return {
         "path": str(root),
@@ -817,6 +828,7 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
         "has_engineering": (root / ".engineering").is_dir(),
         "test_command": test_command,
         "test_scopes": test_scopes,
+        "test_markers": test_markers,  # what each command was read from (Kraft-enc5z)
         "setup_command": _first_setup_command(root),
         "forge": forge,
         "project": project,

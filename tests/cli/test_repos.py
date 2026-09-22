@@ -69,6 +69,14 @@ def test_connect_twice_is_fine_and_says_so(app, capsys, repo):
     assert "already connected" in capsys.readouterr().out
 
 
+def test_connect_names_the_test_command_and_the_marker_it_came_from(app, capsys, repo):
+    """Kraft-enc5z: the proposal is a guess a human should check, so connect
+    says what it proposed and which file it read that from."""
+    (repo / "justfile").write_text("test:\n    pytest\n")
+    cli.main(["repo", "connect", str(repo)])
+    assert "test command: just test (from justfile)" in capsys.readouterr().out
+
+
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
     plain = tmp_path / "plain"
     plain.mkdir()
