@@ -414,7 +414,7 @@ class GhCli(mr_ops.CliWaits):
                 "--state",
                 "all",
                 "--json",
-                "number,url,state",
+                "number,url,state,autoMergeRequest",
                 "-L",
                 "5",
             ],
@@ -426,6 +426,7 @@ class GhCli(mr_ops.CliWaits):
                     number=int(r["number"]),
                     url=str(r.get("url", "")),
                     state=_GH_MR_STATES.get(str(r.get("state", "")), "closed"),
+                    merge_queued=bool(r.get("autoMergeRequest")),
                 )
                 for r in rows
             ]

@@ -182,6 +182,7 @@ async def _run_one(
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
     automated_review: AutomatedReview | None = None,
+    merge_requested: bool = False,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -203,6 +204,9 @@ async def _run_one(
     ever re-verify the rebased head, so reporting "done" without calling
     `forge.merge` would leave the branch unmerged while the walk moves on
     regardless (code-review).
+
+    `merge_requested` is whether the merge wait's last observation already
+    asked for *this* repo's merge (`run_task` works out which repo that was).
     """
     findings: list[dict] | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch), meta)
@@ -511,11 +515,15 @@ async def _run_one(
             # scheduler, never a sleep (Kraft-7jja): the pipeline a late push
             # re-armed, a missing approval, and the merge landing.
             existing = await forge.find_mr(repo=repo, branch=branch)
-            # Whether this wait already asked for the merge: its last
-            # observation was of the merge landing.
-            wait = db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
-            requested = (
-                wait is not None and wait.last is not None and (wait.last["condition"] == "merge")
+            # Asked for already: by this wait's own last observation, or --
+            # read off the forge, so a retry, run fork or base-change restart
+            # that ended the wait does not forget it -- a merge the forge
+            # still holds queued (Kraft-l98h6). Every merge request goes
+            # through here, so a merge request is asked to merge at most once
+            # per head: a new head the forge dropped the queue for is asked
+            # again.
+            requested = merge_requested or (
+                existing is not None and existing.state == "open" and existing.merge_queued
             )
             if existing is not None and existing.state == "merged":
                 log = f"already merged (!{existing.number}); nothing to do\n"
@@ -954,13 +962,23 @@ async def run_task(
         root_repo = next(t for _, t, role in targets if role == "root")
         mounts = {r["submodule_path"] for r in rows if r["role"] == "submodule"}
         root_has_changes = await git.source_changed(root_repo, branch, exclude=mounts)
-        if not root_has_changes:
+        root_state = next(r["merge_state"] for r in rows if r["role"] == "root")
+        # `merge` publishes the root whenever it has something to publish: its
+        # source, a merge request it already has (opened while it had source,
+        # or a pointer bump's fallback), or a bump its policy asks for. An
+        # item never completes while a merge request it opened is still open
+        # (`external-wait-covers-merge-request-lifecycle`).
+        publishes = handler == "merge" and (
+            root_state != "pending" or root_policy is RootPointerPolicy.BUMP
+        )
+        if not root_has_changes and not publishes:
             # A pointer-only root has no source of its own to review -- it
             # never goes through the ordinary per-repo loop below
             # (`workspace-root-code-change-gets-a-root-merge-request`). Its
             # pointer follows the item's root-pointer policy after every
-            # member merges (below): at `open_mr` time no member has merged
-            # yet, so a root MR here would review a pointer that doesn't exist.
+            # member merges (`_ready_root`): at `open_mr` time no member has
+            # merged yet, so a root MR here would review a pointer that
+            # doesn't exist.
             targets = [t for t in targets if t[2] != "root"]
 
     if handler == "merge_watch" and targets:
@@ -991,6 +1009,22 @@ async def run_task(
             log=f"{hook_point} cannot run: {exc}\n",
             reused=reused,
         )
+    # Whether the merge wait's last observation asked for a merge, and whose:
+    # the loop stops at the first target that has not merged, so that was the
+    # first target not recorded merged. A later target's merge is not asked
+    # for yet, however the last observation ended.
+    merge_wait = (
+        db.read(lambda c: waits.open_wait(c, work_item_id, hook_point))
+        if handler == "merge"
+        else None
+    )
+    merge_requested = (
+        merge_wait is not None
+        and merge_wait.last is not None
+        and merge_wait.last["condition"] == "merge"
+    )
+    merged_rows = {r["id"] for r in rows if r["merge_state"] == "merged"}
+    awaiting_landing = next((t[0] for t in targets if t[0] not in merged_rows), None)
     log, status = "", "done"
     #: Why the observation could not be made at all, when it could not.
     unobserved: str | None = None
@@ -1011,38 +1045,51 @@ async def run_task(
             covered = {Path(r["repo_path"]).resolve() for r in rows if r["role"] == "submodule"}
             await git._assert_submodules_covered(repo, covered)
         for row_id, target_repo, role in targets:
-            if multi and role == "root" and handler == "mark_ready":
+            if multi and role == "root" and handler in ("mark_ready", "external_approval"):
                 # The root's own merge request waits for its members: it is
                 # marked ready by `merge`, once they have landed and it names
                 # their merged revisions (`root-source-merge-request-
-                # readiness-waits-for-child-merges`).
+                # readiness-waits-for-child-merges`), and its approval is
+                # awaited there, once there is something to approve. A draft
+                # reads as approved on both CLIs (`classify_block_reason`), so
+                # reading it here would record an approval nobody gave.
                 log += f"[{target_repo.name}] stays a draft until its members merge\n"
                 continue
+            requested = merge_requested and row_id == awaiting_landing
+            settled = None
             if multi and role == "root" and handler == "merge":
                 # Reached only once every member merged: the loop stops at the
                 # first one that does not.
-                log += await _ready_root_at_merged_members(
+                root_log, settled = await _ready_root(
                     live_forge,
+                    db,
                     rows,
                     root_repo=target_repo,
                     branch=branch,
+                    title=title,
                     work_item_id=work_item_id,
+                    has_source=root_has_changes,
                 )
-            one_log, one_status, one_findings = await _run_one(
-                live_forge,
-                db,
-                repo=target_repo,
-                orig_repo=orig_repo or target_repo,
-                branch=branch,
-                title=title,
-                work_item_id=work_item_id,
-                node_id=node_id,
-                handler=handler,
-                hook_point=hook_point,
-                meta=meta,
-                has_rebase_bounce=has_rebase_bounce,
-                automated_review=automated_review,
-            )
+                log += root_log
+            if settled is None:
+                one_log, one_status, one_findings = await _run_one(
+                    live_forge,
+                    db,
+                    repo=target_repo,
+                    orig_repo=orig_repo or target_repo,
+                    branch=branch,
+                    title=title,
+                    work_item_id=work_item_id,
+                    node_id=node_id,
+                    handler=handler,
+                    hook_point=hook_point,
+                    meta=meta,
+                    has_rebase_bounce=has_rebase_bounce,
+                    automated_review=automated_review,
+                    merge_requested=requested,
+                )
+            else:
+                one_log, one_status, one_findings = "", settled, None
             if not multi:
                 findings = one_findings
             log += (f"[{target_repo.name}] " if multi else "") + one_log
@@ -1076,20 +1123,6 @@ async def run_task(
                 # loop is known to have stopped for this reason alone.
                 status = one_status
                 break
-        if (
-            handler == "merge"
-            and multi
-            and root_policy is RootPointerPolicy.BUMP
-            and not root_has_changes
-            and status == "done"
-        ):
-            # Every member merged (a failure stopped the loop above, leaving
-            # the root untouched -- `blocked-child-merge-leaves-parent-
-            # unchanged`), so the pointers can name what landed
-            # (`child-merge-precedes-parent-pointer-update`).
-            log += await _bump_pointer_only_root(
-                live_forge, db, rows, branch=branch, title=title, work_item_id=work_item_id
-            )
         if status == "rebased":
             # Internal-only marker (worker_sessions.status has no "rebased"
             # value, and the walk's own bounce -- keyed off base_ref moving,
@@ -1222,23 +1255,71 @@ async def _ready_root_at_merged_members(
     return f"[{root_repo.name}] {moved}marked ready now that its members merged\n"
 
 
+async def _ready_root(
+    forge: Forge,
+    db,
+    rows,
+    *,
+    root_repo: Path,
+    branch: str,
+    title: str,
+    work_item_id: str,
+    has_source: bool,
+) -> tuple[str, str | None]:
+    """The root's turn in `merge`, once every member merged: bump a
+    pointer-only root, ready its merge request at the merged revisions, and
+    await its own approval. Returns the log and the root's status when that
+    settles it -- `done` for a bump that needed no merge request,
+    `approval_pending` -- or None when its merge request goes on to merge.
+
+    A merge the forge already holds queued, or has landed, is only read for
+    its landing: the source branch may be gone with it, and nothing may be
+    pushed to it. The forge's record, not the wait's, so a restart of the
+    wait does not forget it (Kraft-l98h6)."""
+    root = next(r for r in rows if r["role"] == "root")
+    if root["merge_state"] == "merged":
+        return "", None
+    if root["merge_state"] == "open":
+        existing = await forge.find_mr(repo=root_repo, branch=branch)
+        if existing is not None and (existing.state == "merged" or existing.merge_queued):
+            return "", None
+    log = ""
+    if root["merge_state"] == "pending" and not has_source:
+        log, opened = await _bump_pointer_only_root(
+            forge, db, rows, branch=branch, title=title, work_item_id=work_item_id
+        )
+        if not opened:
+            return log, "done"
+    log += await _ready_root_at_merged_members(
+        forge, rows, root_repo=root_repo, branch=branch, work_item_id=work_item_id
+    )
+    if await forge.approval_state(repo=root_repo, branch=branch) == "pending":
+        return log + f"[{root_repo.name}] waiting for its required approval\n", "approval_pending"
+    return log, None
+
+
 async def _bump_pointer_only_root(
     forge: Forge, db, rows, *, branch: str, title: str, work_item_id: str
-) -> str:
+) -> tuple[str, bool]:
     """A requested bump of a root with no source changes: straight onto the
     root's default branch when it takes the push
     (`workspace-pointer-bump-prefers-direct-push`), otherwise as a merge
     request from the item's branch in the root
-    (`workspace-pointer-bump-falls-back-to-merge-request`)."""
+    (`workspace-pointer-bump-falls-back-to-merge-request`). Returns the log
+    and whether it opened that merge request, which `_ready_root` then
+    follows to its merge like any root merge request (Kraft-srt9v)."""
     root = next(r for r in rows if r["role"] == "root")
     root_repo = Path(root["repo_path"])
     bumped = await _point_at_merged_members(rows, root_repo, work_item_id)
     if not bumped:
-        return "every member pointer already names its merged revision\n"
+        return "every member pointer already names its merged revision\n", False
     root_default = await git.default_branch(root_repo)
     try:
         await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{root_default}"])
-        return f"bumped {', '.join(bumped)} directly on {root_default}, no root merge request\n"
+        return (
+            f"bumped {', '.join(bumped)} directly on {root_default}, no root merge request\n",
+            False,
+        )
     except ForgeError as exc:
         refused = str(exc).strip().splitlines()[-1] if str(exc).strip() else "refused"
     await forge.push(repo=root_repo, branch=branch)
@@ -1256,4 +1337,4 @@ async def _bump_pointer_only_root(
     return (
         f"{root_default} refused the direct push ({refused}); opened !{mr.number} "
         f"to bump {', '.join(bumped)}\n"
-    )
+    ), True

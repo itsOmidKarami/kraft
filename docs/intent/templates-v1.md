@@ -764,7 +764,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_pre
 
 When the system cannot push a requested root-pointer bump directly, it SHALL
 create a merge request for the pointer update instead.
-enforced-by: tests/templates/test_workspace_publication.py::test_pointer_bump_falls_back_to_merge_request_when_push_is_denied
+enforced-by: tests/templates/test_workspace_publication.py::test_pointer_bump_falls_back_to_merge_request_when_push_is_denied, tests/templates/test_workspace_publication.py::test_a_fallback_pointer_merge_request_is_followed_to_its_merge
 
 ## REQ workspace-root-code-change-gets-a-root-merge-request
 
@@ -831,7 +831,7 @@ enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge
 The system MAY create a draft merge request before final-gate approval so CI
 and automated merge-request review can run. A draft merge request SHALL NOT be
 marked ready or merged before that approval.
-enforced-by: tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
+enforced-by: tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.merge], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[fix-loop-mr.merge], tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[task-on-failure-mr.mark_ready]
 
 ## REQ default-chain-verification-does-not-rerun-the-implementer
 
@@ -882,13 +882,13 @@ origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision
 A chain MAY declare a gate before draft merge-request creation. Until that gate
 is approved, the work item SHALL remain local and SHALL NOT create a merge
 request.
-enforced-by: tests/templates/test_workspace_publication.py::test_a_pre_draft_gate_keeps_the_work_local
+enforced-by: tests/templates/test_publication_chain_order.py::test_a_pre_draft_gate_keeps_the_work_local
 
 ## REQ final-gate-governs-merge-request-readiness
 
 After final-gate approval, the system SHALL mark the draft merge request ready
 for external approval and merge.
-enforced-by: tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_workspace_publication.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
+enforced-by: tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order, tests/templates/test_publication_chain_order.py::test_nothing_readies_or_merges_before_the_final_gate[node-task-mr.mark_ready]
 
 ## REQ external-wait-has-configurable-timeout-and-polling
 
@@ -913,13 +913,13 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure.
-enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared]
+enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
 
 ## REQ external-wait-covers-merge-request-lifecycle
 
 The shared external-wait mechanism SHALL support CI completion, automated
 review settlement, external approval, merge completion, and post-merge CI.
-enforced-by: tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci
+enforced-by: tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_workspace_publication.py::test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the_item_completes, tests/templates/test_workspace_publication.py::test_a_fallback_pointer_merge_request_is_followed_to_its_merge, tests/templates/test_workspace_publication.py::test_a_root_merge_request_opened_for_source_since_reverted_is_still_merged, tests/adapters/forge/test_waits.py::test_a_restart_mid_merge_asks_the_forge_to_merge_only_once[work_item_retried], tests/adapters/forge/test_waits.py::test_a_restart_mid_merge_asks_the_forge_to_merge_only_once[run_forked], tests/adapters/forge/test_waits.py::test_a_restart_mid_merge_asks_the_forge_to_merge_only_once[base_change_restart], tests/adapters/forge/test_waits.py::test_a_new_head_after_a_base_change_asks_for_the_merge_again, tests/templates/test_workspace_publication.py::test_a_restart_mid_the_root_merge_asks_the_forge_to_merge_it_once[root], tests/templates/test_workspace_publication.py::test_a_restart_mid_the_root_merge_asks_the_forge_to_merge_it_once[fallback-pointer], tests/adapters/forge/test_forge_cli_contract.py::test_find_mr_reads_a_merge_the_forge_already_holds_queued[glab], tests/adapters/forge/test_forge_cli_contract.py::test_find_mr_reads_a_merge_the_forge_already_holds_queued[gh]
 
 ## REQ automated-review-is-an-explicit-optional-task
 
@@ -949,7 +949,7 @@ declared automated-review task, address CI failures and actionable feedback,
 produce a work-item summary and review, and then request final-gate approval.
 After approval, it SHALL mark the merge request ready, await external approval,
 and merge.
-enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_workspace_publication.py::test_the_seeded_default_chain_publishes_in_the_required_order
+enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_publication_chain_order.py::test_the_seeded_default_chain_publishes_in_the_required_order
 
 ## REQ post-draft-feedback-uses-node-recovery-controls
 
@@ -984,7 +984,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_rea
 When a workspace work item changes root source and child repositories, the
 system SHALL NOT mark the root merge request ready until the child merge
 requests have merged and the root contains their final pointer revisions.
-enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
+enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged, tests/templates/test_workspace_publication.py::test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the_item_completes
 
 ## REQ blocked-child-merge-leaves-parent-unchanged
 

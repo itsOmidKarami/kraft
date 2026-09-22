@@ -33,6 +33,12 @@ GLAB_MR_LIST_MERGED = (
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
 )
 
+#: An open merge request set to merge when its pipeline succeeds.
+GLAB_MR_LIST_AUTO_MERGE = (
+    '[{"iid":54,"state":"opened","source_branch":"kraft/abc","merge_when_pipeline_succeeds":true,'
+    '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
+)
+
 GH_PR_VIEW = (
     '{"number":7,"url":"https://github.com/o/r/pull/7",'
     '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"},'
@@ -51,3 +57,9 @@ GH_PR_VIEW_NEEDS_APPROVAL = (
 )
 
 GH_PR_LIST_MERGED = '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED"}]'
+#: An open pull request with auto-merge enabled: GitHub merges it itself once
+#: its checks pass (`gh pr list --json autoMergeRequest`).
+GH_PR_LIST_AUTO_MERGE = (
+    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"OPEN",'
+    '"autoMergeRequest":{"enabledAt":"2026-09-22T10:00:00Z","mergeMethod":"SQUASH"}}]'
+)

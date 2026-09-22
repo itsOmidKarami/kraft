@@ -4,6 +4,7 @@ every node speaks in.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -62,6 +63,11 @@ class MRRef:
     number: int
     url: str
     state: Literal["open", "merged", "closed"]
+    #: The forge already holds a merge request for it -- auto-merge enabled,
+    #: merge when the pipeline succeeds -- and will land it on its own. The
+    #: forge's record, so it outlives any restart of Kraft's own wait
+    #: (Kraft-l98h6): nothing asks it to merge a second time.
+    merge_queued: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,6 +142,18 @@ class Forge(Protocol):
     async def automated_review(
         self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
     ) -> ReviewResult: ...
+
+
+def _head(repo: Path) -> str | None:
+    """`repo`'s checked-out head, for `FakeForge`; None when `repo` is not a
+    git checkout (most fake-forge tests hand it a bare directory)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+        )
+    except OSError, subprocess.CalledProcessError:
+        return None
+    return out.stdout.strip()
 
 
 @dataclass
@@ -220,11 +238,17 @@ class FakeForge:
     #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
     #: shares `ci_states` with the merge request's pipeline.
     branch_ci_states: list[CIState] | None = None
-    #: How many `find_mr` reads after `merge` still find the merge request
-    #: open -- a forge that merges when its checks pass rather than at once.
+    #: How many `find_mr` reads of a merge request after its `merge` still
+    #: find it open, its merge queued -- a forge that merges when its checks
+    #: pass rather than at once.
     merge_delay: int = 0
-    #: Merges requested but not landed yet: number -> reads left.
+    #: Merges queued but not landed yet, each merge request's own: number ->
+    #: reads of it left. Reading one never moves another.
     _landing: dict[int, int] = field(default_factory=dict)
+    #: The head each queued merge was asked for at. A push of a different
+    #: head drops the queued merge, as a forge drops it for commits nobody
+    #: asked it to merge.
+    _queued_head: dict[int, str | None] = field(default_factory=dict)
 
     @staticmethod
     def _next(script: list):
@@ -250,6 +274,12 @@ class FakeForge:
 
     async def push(self, *, repo: Path, branch: str) -> None:
         self.pushed.append(branch)
+        head = _head(repo)
+        for number in list(self._landing):
+            asked_at = self._queued_head[number]
+            same_mr = self.opened[number] == branch and self._matches(number, repo)
+            if same_mr and asked_at is not None and head is not None and head != asked_at:
+                del self._landing[number], self._queued_head[number]
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
@@ -338,6 +368,7 @@ class FakeForge:
             raise ForgeError(f"no such merge request: {mr.number}")
         if self.merge_delay:
             self._landing[number] = self.merge_delay
+            self._queued_head[number] = _head(repo)
         else:
             self.merged.append(number)
 
@@ -349,18 +380,19 @@ class FakeForge:
         return recorded is None or recorded == str(repo)
 
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None:
-        for number, reads_left in list(self._landing.items()):
-            if reads_left:
-                self._landing[number] -= 1
-            else:
-                del self._landing[number]
-                self.merged.append(number)
         numbers = [n for n, b in self.opened.items() if b == branch and self._matches(n, repo)]
         if not numbers:
             return None
         number = next((n for n in numbers if n not in self.merged), numbers[0])
+        if number in self._landing:
+            if self._landing[number]:
+                self._landing[number] -= 1
+            else:
+                del self._landing[number], self._queued_head[number]
+                self.merged.append(number)
         return MRRef(
             number=number,
             url=f"http://fake.forge/{number}",
             state="merged" if number in self.merged else "open",
+            merge_queued=number in self._landing,
         )

@@ -10,7 +10,9 @@ import asyncio
 import json
 
 import pytest
+from support.harness import _git
 
+from kraft import events
 from kraft.adapters import forge
 
 
@@ -148,6 +150,16 @@ async def test_merge_waits_for_a_missing_approval_instead_of_failing(run_forge, 
     assert _trail(run_forge)[-1] == ("external_wait_observed", "pending", "external_approval")
 
 
+class _Counting(forge.FakeForge):
+    """A `FakeForge` that counts every merge Kraft asks it for."""
+
+    requests = 0
+
+    async def merge(self, *, repo, branch="", mr):
+        self.requests += 1
+        await super().merge(repo=repo, branch=branch, mr=mr)
+
+
 async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_again(
     run_forge, tmp_path, no_sleeping
 ):
@@ -155,14 +167,7 @@ async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_aga
     (Kraft-79x3): the landing is read off the forge. A second observation
     reads it again; it does not ask for a second merge."""
 
-    class Counting(forge.FakeForge):
-        requests = 0
-
-        async def merge(self, *, repo, branch="", mr):
-            self.requests += 1
-            await super().merge(repo=repo, branch=branch, mr=mr)
-
-    fake = await _opened(Counting(merge_delay=2), tmp_path)
+    fake = await _opened(_Counting(merge_delay=2), tmp_path)
 
     results = [(await run_forge(fake, "merge", f"m{i}"))[0] for i in range(3)]
 
@@ -175,3 +180,40 @@ async def test_a_merge_that_has_not_landed_is_observed_again_never_requested_aga
         ("external_wait_observed", "settled", "merge"),
         ("external_wait_ended", "settled", None),
     ]
+
+
+_MERGE = {"hook_point": "merge.main.merge", "node_id": "merge"}
+
+
+@pytest.mark.parametrize("restart", ["work_item_retried", "run_forked", "base_change_restart"])
+async def test_a_restart_mid_merge_asks_the_forge_to_merge_only_once(run_forge, repo, restart):
+    """Kraft-l98h6: a restart ends the merge wait, and with it Kraft's memory
+    of having asked for the merge. The forge still has the request queued, so
+    the restarted merge reads that off the merge request and waits for the
+    landing rather than asking a second time."""
+    fake = await _opened(_Counting(merge_delay=2), repo)
+    assert (await run_forge(fake, "merge", "m1", repo=repo, **_MERGE))[0] == "waiting"
+    await run_forge.database.write(lambda c: events.append(c, "w1", restart, {}))
+
+    assert (await run_forge(fake, "merge", "m2", repo=repo, **_MERGE))[0] == "waiting"
+
+    assert fake.requests == 1
+    assert (await run_forge(fake, "merge", "m3", repo=repo, **_MERGE))[0] == "done"
+    assert fake.requests == 1
+
+
+async def test_a_new_head_after_a_base_change_asks_for_the_merge_again(run_forge, repo):
+    """The merge is asked for once per head: a base change that puts a new
+    head on the branch drops the queued merge on the forge, and once the
+    restarted span has pushed that head, merge asks for it afresh."""
+    fake = await _opened(_Counting(merge_delay=3), repo)
+    assert (await run_forge(fake, "merge", "m1", repo=repo, **_MERGE))[0] == "waiting"
+    (repo / "rebased.txt").write_text("the new base\n")
+    _git(repo, "add", "rebased.txt")
+    _git(repo, "commit", "-qm", "rebased onto the new base")
+    await run_forge.database.write(lambda c: events.append(c, "w1", "base_change_restart", {}))
+    assert (await run_forge(fake, "ci_poll", "c1", repo=repo))[0] == "done"
+
+    assert (await run_forge(fake, "merge", "m2", repo=repo, **_MERGE))[0] == "waiting"
+
+    assert fake.requests == 2

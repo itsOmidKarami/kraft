@@ -497,6 +497,7 @@ class GlabCli(mr_ops.CliWaits):
                     number=int(r["iid"]),
                     url=str(r.get("web_url", "")),
                     state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
+                    merge_queued=bool(r.get("merge_when_pipeline_succeeds")),
                 )
                 for r in rows
             ]
