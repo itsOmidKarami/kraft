@@ -47,6 +47,7 @@ from kraft.policy import (
     FROZEN,
     InstancePolicy,
     PolicyError,
+    SandboxPolicy,
     TaskPolicyOverride,
     TemplatePolicyOverride,
     WorkItemPolicy,
@@ -1085,6 +1086,38 @@ class ResolvedChain:
                             field="allowed_harnesses",
                             path=task.path,
                         )
+        # A sandbox wraps the whole work item, not the scope that set it
+        # (Ruling 189): once one task has run in it the worktree is untrusted
+        # for every later launch, so two scopes cannot ask for two.
+        sandboxes = list(self.scope_sandboxes(policy, item).items())
+        if len(sandboxes) > 1:
+            (first, where), (second, other) = sandboxes[:2]
+            raise PolicyError(
+                f"{where} runs in sandbox {first.model_dump()!r} and {other} in "
+                f"{second.model_dump()!r}: a sandbox wraps the whole work item (Ruling 189), "
+                "so every scope that sets one must set the same one",
+                field="sandbox",
+            )
+
+    def scope_sandboxes(
+        self, policy: InstancePolicy, item: WorkItemPolicy | None = None
+    ) -> dict[SandboxPolicy, str]:
+        """Each distinct sandbox a scope of this chain runs under on top of
+        `policy`, a work `item`'s own layers last, with the first scope that
+        runs under it: `"the chain"` when `policy` itself carries it. At most
+        one for a chain `check_scopes` accepts (Ruling 189)."""
+        found: dict[SandboxPolicy, str] = {}
+        if policy.sandbox is not None:
+            found[policy.sandbox] = "the chain"
+        for node in self.nodes:
+            for path, scopes in [
+                (node.id, node.scopes),
+                *((t.path, t.scopes) for t in node.tasks()),
+            ]:
+                sandbox = _scoped(path, policy, scopes, item).sandbox
+                if sandbox is not None:
+                    found.setdefault(sandbox, path)
+        return found
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
         """This chain without the nodes an attachment of each kind in `kinds`
@@ -1203,6 +1236,21 @@ class MaterializedChain:
     @property
     def task_paths(self) -> tuple[str, ...]:
         return self.chain.task_paths
+
+    def item_sandbox(self) -> SandboxPolicy | None:
+        """The one sandbox this item runs every launch in, whichever scope
+        froze it (Ruling 189), or None. Raises `PolicyError` for a snapshot
+        with two, which `check_scopes` refuses to build; only one filed before
+        the ruling can carry them."""
+        found = self.chain.scope_sandboxes(self.policy, self.item_policy)
+        if len(found) > 1:
+            raise PolicyError(
+                "its scopes freeze different sandboxes "
+                + ", ".join(f"{where}: {s.model_dump()!r}" for s, where in found.items())
+                + "; a sandbox wraps the whole work item (Ruling 189)",
+                field="sandbox",
+            )
+        return next(iter(found), None)
 
     def sandbox_refusal(self) -> str | None:
         """Why this snapshot cannot run, when it mounts submodules and any task

@@ -17,7 +17,6 @@ from kraft.templates.environment import (
     TemplateEnvironmentError,
 )
 from kraft.templates.models import AgentTask
-from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 _CTX = (
@@ -168,7 +167,6 @@ class Invocation(NamedTuple):
     #: reading as "every tool" is how a restriction goes missing.
     allowed_tools: tuple[str, ...] | None = None
     permission_mode: str | None = None
-    sandbox: dict | None = None
 
 
 def resolve_invocation(
@@ -281,7 +279,6 @@ def resolve_invocation(
             tuple(binding["allowed_tools"]) if binding.get("allowed_tools") is not None else None
         ),
         permission_mode=binding.get("permission_mode") or pd.get("permission_mode"),
-        sandbox=_sandbox.resolve(binding, repo),
     )
 
 
@@ -359,14 +356,14 @@ def resolve_agent_task(
     this profile (`models:`). Raises `HarnessUnavailable`.
 
     `policy` is the task's resolved policy (`MaterializedChain.policy_for`),
-    the only source of its tool lists and the winning source of its sandbox:
-    `allowed_tools` is the policy's (unbounded only when no layer set it),
-    `deny_tools` the policy's plus the repository entry's live ones (a later
-    denial still applies), and a policy `sandbox` wins over the entry's, which
-    cannot turn it off. A profile outside the policy's `allowed_harnesses`
-    raises `HarnessUnavailable`. `None` leaves the tool lists and sandbox to
-    the repository entry; no launch passes it (Kraft-l8ype: the escalation
-    turn runs under its node's policy too).
+    the only source of its tool lists: `allowed_tools` is the policy's
+    (unbounded only when no layer set it), `deny_tools` the policy's plus the
+    repository entry's live ones (a later denial still applies). A profile
+    outside the policy's `allowed_harnesses` raises `HarnessUnavailable`.
+    `None` leaves the tool lists to the repository entry; no launch passes it
+    (Kraft-l8ype: the escalation turn runs under its node's policy too). The
+    sandbox is not an invocation's: every launch reads the item's from
+    `dispatch.item_sandbox` (Ruling 189).
 
     `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
     and the only place a task's `steering:` names are read from -- never
@@ -418,10 +415,7 @@ def resolve_agent_task(
     )
     if policy is None:
         return inv
-    return inv._replace(
-        allowed_tools=policy.allowed_tools,
-        sandbox=policy.sandbox.model_dump() if policy.sandbox is not None else inv.sandbox,
-    )
+    return inv._replace(allowed_tools=policy.allowed_tools)
 
 
 def _envelope_is_error(

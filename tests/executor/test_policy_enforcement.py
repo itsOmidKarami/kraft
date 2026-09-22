@@ -21,7 +21,7 @@ from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, gates, stops, walk
 from kraft.executor.context import BUDGET, CONFIG_ERROR, LaunchContext
-from kraft.templates.models import MaterializedChain
+from kraft.templates.models import MaterializedChain, ResolvedChain
 
 NO_SETUP = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
 
@@ -78,6 +78,7 @@ async def test_a_live_repository_deny_list_still_applies_on_top_of_the_frozen_on
 
 
 _SANDBOX = {"kind": "docker", "image": "kraft/policy:1"}
+_OTHER = {"kind": "docker", "image": "kraft/other:2"}
 _BUILTIN = {"id": "run", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
 
 
@@ -546,3 +547,243 @@ async def test_a_recovery_and_a_judge_launch_under_their_own_scopes_policy(
     (argv,) = fake_agent.argv()
     assert argv[argv.index("--tools") + 1] == ""
     assert "--allowedTools" not in argv
+
+
+# -- a sandbox wraps the whole item (Ruling 189, Kraft-h10e5) ---------------------------
+
+
+def _sandboxed_elsewhere(sandbox: dict | None) -> list[dict]:
+    """Four launches, one of which (`first`) may set `sandbox`; none of the
+    others sets one of its own."""
+    first = _agent("first", **({"policy": {"sandbox": sandbox}} if sandbox else {}))
+    return [
+        {"id": "a", "kind": "exec", "tasks": [first]},
+        {
+            "id": "b",
+            "kind": "exec",
+            "tasks": [{"id": "s", "kind": "subprocess", "command": "true"}],
+        },
+        {"id": "c", "kind": "exec", "tasks": [_BUILTIN]},
+        {"id": "d", "kind": "exec", "tasks": [_agent("later")]},
+    ]
+
+
+@pytest.mark.parametrize(("sandbox", "expected"), [(_SANDBOX, _SANDBOX), (None, None)])
+async def test_a_sandbox_on_one_task_wraps_every_launch_of_the_item(
+    item_on, monkeypatch, fake_agent, sandbox, expected
+):
+    """Ruling 189: once one task ran sandboxed the worktree is untrusted, so
+    the item's other tasks -- subprocess, builtin and agent alike -- launch in
+    that sandbox too. A chain with no sandbox anywhere is unchanged."""
+    launched = []
+
+    async def run_task(*_a, hook_point, sandbox=None, **_kw):
+        launched.append((hook_point, sandbox))
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+    monkeypatch.setattr("kraft.adapters.agent._subprocess.run_task", run_task)
+    it = await item_on(_sandboxed_elsewhere(sandbox))
+    launch = dataclasses.replace(NO_SETUP, repo_entry={"setup_command": "", "test_command": "true"})
+
+    for node in it.chain.chain.nodes:
+        await dispatch.dispatch_node(
+            it.database, it.run_dirs, node.steps[0].tasks[0], node, it.row(), it.repo, launch=launch
+        )
+
+    assert launched == [
+        ("a.main.first", expected),
+        ("b.main.s", expected),
+        ("c.main.run", expected),
+        ("d.main.later", expected),
+    ]
+
+
+@pytest.mark.parametrize("auto", [False, True], ids=["manual", "auto"])
+async def test_an_escalation_turn_runs_in_a_sandbox_another_node_set(
+    item_on, fake_agent, monkeypatch, auto
+):
+    it = await item_on(
+        [
+            {"id": "first", "kind": "exec", "tasks": [_agent(policy={"sandbox": _SANDBOX})]},
+            *_node(_agent()),
+        ],
+        "implementation",
+    )
+    seen = _capture(monkeypatch)
+
+    await _escalate(it, auto)
+
+    assert seen["sandbox"] == _SANDBOX
+
+
+async def test_a_gate_reviewer_runs_in_a_sandbox_another_node_set(item_on, fake_agent, monkeypatch):
+    chain = _reviewed_gate({})
+    chain[0]["tasks"][0]["policy"] = {"sandbox": _SANDBOX}
+    it = await item_on(chain, auto_gate=True)
+    seen = _capture(monkeypatch)
+    await _requested(it)
+
+    await gate_review.review(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate="spec_approval",
+        node=it.chain.chain.nodes[1],
+        launch=NO_SETUP,
+    )
+
+    assert seen["sandbox"] == _SANDBOX
+
+
+@pytest.mark.parametrize(
+    ("where", "names"),
+    [
+        (lambda c: c[3]["tasks"][0].update(policy={"sandbox": _OTHER}), "d.main.later"),
+        (lambda c: c[1].update(policy={"sandbox": _OTHER}), "b"),
+    ],
+    ids=["another-task", "another-node"],
+)
+async def test_two_scopes_asking_for_different_sandboxes_are_refused_at_build(
+    item_on, where, names
+):
+    chain = _sandboxed_elsewhere(_SANDBOX)
+    where(chain)
+
+    with pytest.raises(_policy.PolicyError, match="Ruling 189") as refused:
+        await item_on(chain)
+
+    assert refused.value.field == "sandbox"
+    assert "a.main.first" in str(refused.value) and repr(_OTHER) in str(refused.value)
+    assert f"{names} in" in str(refused.value)
+
+
+async def test_two_scopes_asking_for_the_same_sandbox_build(item_on):
+    chain = _sandboxed_elsewhere(_SANDBOX)
+    chain[3]["tasks"][0]["policy"] = {"sandbox": _SANDBOX}
+
+    it = await item_on(chain)
+
+    assert it.chain.item_sandbox() == _policy.SandboxPolicy(**_SANDBOX)
+
+
+async def test_an_item_filed_with_two_sandboxes_stops_rather_than_pick_one(item_on, monkeypatch):
+    """A snapshot from before Ruling 189 can carry two; it is built past the
+    refusal here the way such a row reaches the walk."""
+    monkeypatch.setattr(ResolvedChain, "check_scopes", lambda *_a: None)
+    chain = _sandboxed_elsewhere(_SANDBOX)
+    chain[3]["tasks"][0]["policy"] = {"sandbox": _OTHER}
+    it = await item_on(chain)
+    monkeypatch.undo()
+
+    with pytest.raises(RuntimeError, match="different sandboxes"):
+        dispatch.item_sandbox(it.row(), NO_SETUP)
+
+
+# -- a sandbox nobody can resolve stops the launch, attributed (Kraft-9t2dp) -------------
+
+
+async def _two_sandboxes(item_on, monkeypatch, chain, **kwargs):
+    """An item whose snapshot froze two sandboxes, built past the build-time
+    refusal the way a pre-Ruling-189 row reaches a launch."""
+    monkeypatch.setattr(ResolvedChain, "check_scopes", lambda *_a, **_kw: None)
+    it = await item_on(chain, **kwargs)
+    monkeypatch.undo()
+    return it
+
+
+def _never_launches(monkeypatch) -> list:
+    launched = []
+
+    async def launch(*_a, **kw):
+        launched.append(kw)
+        return "done"
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", launch)
+    monkeypatch.setattr(agent_mod._subprocess, "run_task", launch)
+    monkeypatch.setattr(agent_mod, "run_agent_task", launch)
+    return launched
+
+
+def _config_error_session(it, hook_point):
+    (session,) = [s for s in it.sessions() if s["hook_point"] == hook_point]
+    assert session["status"] == CONFIG_ERROR
+    assert "different sandboxes" in Path(session["log_path"]).read_text()
+
+
+@pytest.mark.parametrize("node_index", [1, 2, 3], ids=["subprocess", "builtin", "agent"])
+async def test_a_task_whose_sandbox_cannot_be_resolved_stops_as_its_own_session(
+    item_on, monkeypatch, fake_agent, node_index
+):
+    chain = _sandboxed_elsewhere(_SANDBOX)
+    chain[3]["tasks"][0]["policy"] = {"sandbox": _OTHER}
+    it = await _two_sandboxes(item_on, monkeypatch, chain)
+    launched = _never_launches(monkeypatch)
+    node = it.chain.chain.nodes[node_index]
+    task = node.steps[0].tasks[0]
+    launch = dataclasses.replace(NO_SETUP, repo_entry={"setup_command": "", "test_command": "true"})
+
+    status = await dispatch.dispatch_node(
+        it.database, it.run_dirs, task, node, it.row(), it.repo, launch=launch
+    )
+
+    assert status == CONFIG_ERROR
+    assert launched == []
+    _config_error_session(it, task.path)
+
+
+async def test_a_gate_review_whose_sandbox_cannot_be_resolved_stops_as_its_own_session(
+    item_on, monkeypatch, fake_agent
+):
+    chain = _reviewed_gate({"sandbox": _OTHER})
+    chain[0]["tasks"][0]["policy"] = {"sandbox": _SANDBOX}
+    it = await _two_sandboxes(item_on, monkeypatch, chain, auto_gate=True)
+    launched = _never_launches(monkeypatch)
+    await _requested(it)
+    gate = it.chain.chain.nodes[1]
+
+    verdict, note = await gate_review.review(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate="spec_approval",
+        node=gate,
+        launch=NO_SETUP,
+    )
+
+    assert (verdict, launched) == ("undecided", [])
+    assert "different sandboxes" in note
+    _config_error_session(it, gate.auto_review.path)
+
+
+@pytest.mark.parametrize("auto", [False, True], ids=["manual", "auto"])
+async def test_an_escalation_whose_sandbox_cannot_be_resolved_stops_as_its_own_session(
+    item_on, monkeypatch, fake_agent, auto
+):
+    chain = [
+        {"id": "first", "kind": "exec", "tasks": [_agent(policy={"sandbox": _SANDBOX})]},
+        *_node(_agent(policy={"sandbox": _OTHER})),
+    ]
+    it = await _two_sandboxes(item_on, monkeypatch, chain, node="implementation")
+    launched = _never_launches(monkeypatch)
+
+    assert await _escalate(it, auto) == CONFIG_ERROR
+
+    assert launched == []
+    _config_error_session(it, "escalation")
+
+
+async def test_a_work_items_own_sandbox_wraps_the_whole_item(item_on):
+    """#111's item override is a scope like any other (Ruling 189)."""
+    it = await item_on(_sandboxed_elsewhere(None))
+
+    item = it.chain.with_item_policy({"paths": {"d.main.later": {"sandbox": _SANDBOX}}})
+
+    assert item.item_sandbox() == _policy.SandboxPolicy(**_SANDBOX)
+
+
+async def test_a_work_items_sandbox_that_conflicts_with_the_chains_is_refused(item_on):
+    it = await item_on(_sandboxed_elsewhere(_SANDBOX))
+
+    with pytest.raises(_policy.PolicyError, match="Ruling 189"):
+        it.chain.with_item_policy({"paths": {"d.main.later": {"sandbox": _OTHER}}})

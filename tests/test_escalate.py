@@ -469,9 +469,10 @@ async def test_dispatch_auto_tags_the_event(monkeypatch, database, run_dirs):
 
 
 def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
-    """Kraft-rki: `resolve_invocation` folds a repo's `sandbox:` into `inv`,
-    but a dispatch that builds `inv` and then forgets to pass it on is the
-    silent 'sometimes not actually sandboxed' case the spec rules out.
+    """Kraft-rki: a repo's `sandbox:` reaches the escalation turn's
+    `run_agent_task`, through `dispatch.item_sandbox` (Ruling 189); a turn
+    that dropped it is the silent 'sometimes not actually sandboxed' case the
+    spec rules out.
     """
     seen = {}
 

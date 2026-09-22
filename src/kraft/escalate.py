@@ -271,7 +271,7 @@ ESCALATION_TASK = AgentTask(
 
 async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
     """An escalation turn that could not launch, recorded as its own session so
-    the stop names why (the same shape `dispatch._config_error` gives a chain
+    the stop names why (the same shape `dispatch.config_error_session` gives a chain
     task)."""
     from kraft import builtins as _builtins
     from kraft.executor.context import CONFIG_ERROR
@@ -427,6 +427,12 @@ async def dispatch(
     # (`adapters/agent.py`'s `command=command or None`), which is what every
     # other V1 agent launch already does.
     try:
+        # The item's sandbox, as for every launch of it (Ruling 189).
+        sandbox = executor.item_sandbox(row, launch)
+    except executor.SandboxUnresolved as exc:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
+    try:
         inv = _agent.resolve_agent_task(
             ESCALATION_TASK,
             launch.repo_entry,
@@ -470,7 +476,7 @@ async def dispatch(
             deny_tools=inv.deny_tools,
             allowed_tools=inv.allowed_tools,
             steering_texts=inv.steering_texts,
-            sandbox=inv.sandbox,
+            sandbox=sandbox,
             task_instruction=task_instruction,
             title=row["title"],
             repo_path=row["repo"],

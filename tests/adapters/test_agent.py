@@ -594,7 +594,6 @@ def test_repo_agent_docs_do_not_forbid_a_kraft_worker_from_committing():
 # --- resolve_invocation --------------------------------------------------------------
 
 C = {"command": "c"}
-DOCKER = {"kind": "docker", "image": "kraft-worker"}
 
 
 @pytest.mark.parametrize(
@@ -662,9 +661,6 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
         # binary -- one hook can change either without the other.
         ({"command": "claude-next"}, None, {}, "command", "claude-next"),
         ({"command": "claude-next"}, None, {}, "harness", "claude"),
-        ({**C, "sandbox": DOCKER}, {}, {}, "sandbox", DOCKER),
-        ({**C, "sandbox": DOCKER}, {"sandbox": False}, {}, "sandbox", None),
-        (C, {}, {}, "sandbox", None),
     ],
     ids=[
         "hook-model-beats-repo-default",
@@ -691,9 +687,6 @@ DOCKER = {"kind": "docker", "image": "kraft-worker"}
         "deny-tools-union-repo-first-deduplicated",
         "command-varies-alone",
         "harness-stays-claude",
-        "sandbox-off-the-binding",
-        "repo-sandbox-false-overrides-the-binding",
-        "no-sandbox",
     ],
 )
 def test_resolve_invocation_picks(binding, repo, kw, field, expected):
