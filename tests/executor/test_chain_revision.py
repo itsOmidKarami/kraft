@@ -7,13 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor, store
 from kraft.api.routes import gates as gates_route
 from kraft.executor.context import LaunchContext
 from kraft.templates.library import TemplateLibrary
 
-NO_SETUP = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 GATE = "revision_approval"
 
 LIBRARY = TemplateLibrary.from_mappings(

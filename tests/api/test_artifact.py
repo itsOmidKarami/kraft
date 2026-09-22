@@ -335,4 +335,4 @@ def test_the_review_gate_still_resolves_its_brief(tmp_path):
     st = SimpleNamespace(run_dirs=SimpleNamespace(worktrees=tmp_path / "wt"))
     row = {"id": "w1", "chain_definition": "{}", "materialized_chain": chain.to_json()}
 
-    assert board._gate_artifact(st, row, "chain_review") == ".engineering/review_briefs/w1.md"
+    assert board._gate_artifact(st, row, "final_review") == ".engineering/review_briefs/w1.md"
