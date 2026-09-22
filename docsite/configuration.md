@@ -30,6 +30,14 @@ Four sections, each a map of name to definition, which any chain takes with
 | `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
 | `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
 
+`kraft admin templates library` lists every component as `<section>.<name>`
+(`tasks.implementer`) with the chains that use it — through `extends`, directly
+or by way of another component, or a task's `steering:` — and `... library ID`
+shows one with its definition and any lint issue that names it. Settings →
+Library shows the same and edits the file: a save is refused, with the reason
+and nothing written, if it would stop any chain that resolves now from
+resolving (`GET`/`PUT /api/templates/library`).
+
 ```yaml
 tasks:
   implementer:

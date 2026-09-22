@@ -1158,3 +1158,19 @@ enforced-by: tests/templates/test_materialization.py::test_resolution_is_expansi
 non-zero when errors exist. `kraft admin templates show <id> --resolved` SHALL
 print a selected chain's resolved configuration.
 enforced-by: tests/cli/test_admin.py::test_admin_templates_lint_of_a_clean_library_exits_0, tests/cli/test_admin.py::test_admin_templates_lint_prints_each_error_and_exits_1, tests/cli/test_admin.py::test_admin_templates_show_resolved_prints_the_expanded_chain
+
+## REQ template-library-api-lists-its-components
+
+`GET /templates/library` SHALL list every component the loaded `library.yaml`
+declares with its definition as written, the chains that use it, and the lint
+issues that name it. `PUT /templates/library` SHALL refuse, writing nothing, a
+library that would stop any chain that resolves now from resolving.
+enforced-by: tests/api/test_templates_library.py::test_the_library_lists_every_component_with_the_chains_that_use_it, tests/api/test_templates_library.py::test_a_lint_issue_is_listed_on_the_component_it_names, tests/api/test_templates_library.py::test_a_library_save_that_breaks_a_chain_is_refused_and_writes_nothing, tests/api/test_templates_library.py::test_a_library_save_is_written_verbatim_and_live, tests/api/test_templates_inspection.py::test_with_no_library_loaded_the_library_reads_are_503
+origin: src/kraft/templates/catalogue.py §components -- built from the daemon's loaded `st.library` and its own `lint`, never a second parse; `TemplateLibrary.references` records what each chain's `extends` expansion actually follows. Kraft-6xkkm.
+
+## REQ template-cli-lists-library-components
+
+`kraft admin templates library` SHALL print every library component with its
+kind and the chains that use it, and `kraft admin templates library <id>` one
+component's definition.
+enforced-by: tests/cli/test_admin_templates_library.py::test_the_table_lists_each_component_its_kind_and_the_chains_using_it, tests/cli/test_admin_templates_library.py::test_one_component_prints_its_definition_and_users

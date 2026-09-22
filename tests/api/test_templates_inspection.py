@@ -264,8 +264,12 @@ def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch)
         saved = client.get("/api/templates/default/resolved")
         candidate = client.post("/api/templates/resolve", json={"chain": SOLO})
         alone = client.post("/api/templates/resolve", json={"library": {}, "chains": [SOLO]})
+        components = client.get("/api/templates/library")
+        component = client.get("/api/templates/library/tasks.implementer")
 
     assert saved.status_code == candidate.status_code == 503
+    assert components.status_code == component.status_code == 503
+    assert "library.yaml" in components.json()["detail"]
     assert "library.yaml" in saved.json()["detail"]
     assert alone.status_code == 200
     assert [c["id"] for c in alone.json()["chains"]] == ["solo"]

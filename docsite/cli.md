@@ -183,6 +183,8 @@ kraft admin update [--restart] [-y] # install the newest release (brew upgrade, 
 kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
 kraft admin templates show ID  # one chain file as its author wrote it
 kraft admin templates show ID --resolved  # the same chain with its library components expanded
+kraft admin templates library      # every library.yaml component, its kind, and the chains using it
+kraft admin templates library ID   # one component: its definition, users and lint issues (tasks.implementer, or a unique bare name)
 kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
 kraft admin mcp                # serve the MCP tools over stdio
 ```
