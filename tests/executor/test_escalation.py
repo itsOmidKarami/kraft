@@ -17,15 +17,18 @@ _CHAIN = """
 LAUNCH = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
 
 
-async def _stuck(item_on, reason="budget exhausted"):
-    """An item standing at `implementation`, stopped `needs_human` for `reason`."""
+async def _stuck(item_on, reason="task failed in node implementation"):
+    """An item standing at `implementation`, stopped `needs_human` for `reason`
+    -- a stop in the stuck set (Ruling 176), the only kind this answers."""
     it = await item_on(_CHAIN, "implementation", repo="/r")
     await _stop(it, reason)
     return it
 
 
-async def _stop(it, reason):
-    await it.database.write(lambda c: store.mark_needs_human(c, it.id, "implementation", reason))
+async def _stop(it, reason, *, stuck=True):
+    await it.database.write(
+        lambda c: store.mark_needs_human(c, it.id, "implementation", reason, stuck=stuck)
+    )
 
 
 def _pol(**kwargs):
@@ -56,12 +59,12 @@ def dispatched(monkeypatch):
     return calls
 
 
-# -- seeds: what each row adds on top of an item stopped for "budget exhausted" --
+# -- seeds: what each row adds on top of an item stopped stuck --
 
 
-def _restopped(reason):
+def _restopped(reason, *, stuck=True):
     async def seed(it):
-        await _stop(it, reason)
+        await _stop(it, reason, stuck=stuck)
 
     return seed
 
@@ -113,8 +116,9 @@ async def _over_budget(it):
         # The gate flow owns this stop (Kraft-cg6yt: this row used to pass with
         # the guard deleted, because nothing faked the dispatch it reached).
         ("needs_human", _pending_gate, {}, 0, []),
-        # A worker asked a direct question; only a human can answer it.
-        ("needs_human", _restopped("needs_context: which flag?"), {}, 0, []),
+        # A worker asked a direct question; only a human can answer it. Like
+        # every stop outside the stuck set (Ruling 176), it is not escalated.
+        ("needs_human", _restopped("needs_context: which flag?", stuck=False), {}, 0, []),
         # The escalation turn itself asked one (Kraft-b52cm).
         ("needs_human", _escalation("needs_context"), {}, 0, ["needs_context"]),
         # ... but a question from a previous run of stuckness does not suppress

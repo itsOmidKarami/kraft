@@ -149,6 +149,80 @@ async def test_crash_resume_stops_on_an_item_no_longer_active(
     assert dispatched == []
 
 
+ENDED = pytest.mark.parametrize(
+    ("verb", "ended"), [("complete", "completed"), ("cancel", "abandoned")]
+)
+
+
+async def _ended(item_on, verb):
+    """An item on `THREE_NODES` whose first node's session finished, ended
+    by an operator's `verb` -- which crash resume must not settle or walk on."""
+    it = await item_on(THREE_NODES, "n", worktree=True, status="active")
+    await it.session("s-a", "n.main.a", "done")
+    await it.database.write(lambda c: store.end_work_item(c, it.id, verb, "by hand"))
+    return it
+
+
+@ENDED
+@pytest.mark.parametrize("entry", ["walk", "crash-resume"])
+async def test_no_entry_into_the_walk_runs_an_ended_item(
+    item_on, database, run_dirs, dispatched, verb, ended, entry
+):
+    """Kraft-dncfg: the executor's own half of "no action on an ended item
+    runs its chain again" -- whatever door reached it, and before the walk
+    touches the worktree, the bead tracker or the item's cursor."""
+    it = await _ended(item_on, verb)
+    before = len(it.events())
+
+    if entry == "walk":
+        result = await executor.run_once(
+            database, run_dirs, work_item_id=it.id, policy=_policy(), launch=LAUNCH
+        )
+    else:
+        result = await _crash_resume(database, run_dirs, it)
+
+    assert (result, it.status()) == (ended, ended)
+    assert dispatched == []
+    assert len(it.events()) == before
+
+
+#: Every store write that moves an item to a status other than an ending one.
+_NOW = "2000-01-01T00:00:00+00:00"
+STATUS_WRITES = {
+    "mark_needs_human": lambda c, wid: store.mark_needs_human(c, wid, "n", "stop"),
+    "mark_rate_limited": lambda c, wid: store.mark_rate_limited(c, wid, "n", _NOW),
+    "mark_waiting": lambda c, wid: store.mark_waiting(c, wid, "n", _NOW),
+    "mark_blocked_by_dependency": lambda c, wid: store.mark_blocked_by_dependency(
+        c, wid, "n", ["b-1"]
+    ),
+    "mark_reentered": lambda c, wid: store.mark_reentered(c, wid),
+    "pause_work_item": lambda c, wid: store.pause_work_item(c, wid, []),
+    "pause_for_broken_base": lambda c, wid: store.pause_for_broken_base(
+        c, wid, broken_by="abc", follow_up_bead=None
+    ),
+    "claim_for_run": lambda c, wid: store.claim_for_run(c, wid, from_statuses=list(store.ENDED)),
+    "request_gate": lambda c, wid: store.request_gate(c, wid, "n", "g"),
+    "approve_gate": lambda c, wid: store.approve_gate(c, wid, "n"),
+    "reject_gate": lambda c, wid: store.reject_gate(c, wid, "n", "no", reopen=True),
+    "skip_node": lambda c, wid: store.skip_node(c, wid, "n", None, None),
+}
+
+
+@ENDED
+@pytest.mark.parametrize("write", list(STATUS_WRITES))
+async def test_no_status_write_moves_an_ended_item(item_on, database, verb, ended, write):
+    """Kraft-y6f08: whichever door or poller reaches it, and however late, a
+    status write leaves an ended item ended -- and a write that did not
+    happen records nothing. The backstop behind every door's own 409."""
+    it = await _ended(item_on, verb)
+    before = len(it.events())
+
+    await database.write(lambda c: STATUS_WRITES[write](c, it.id))
+
+    assert it.status() == ended
+    assert len(it.events()) == before
+
+
 def _policy() -> policy.Policy:
     return policy.Policy(
         loops={}, default=policy.Cap(attempts=2, wall_clock_s=3600), auto_escalate_stuck=True

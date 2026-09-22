@@ -381,7 +381,16 @@ class _Stuck:
     one kind of stop its declared `escalation` task may still answer
     (`stuck-escalation-is-an-exec-node-control`). Carried back to `walk_node`
     unrecorded, so a successful escalation retries the node without the item
-    ever reading `needs_human`."""
+    ever reading `needs_human`.
+
+    **The one definition of the stuck set** (Ruling 176): a task failed after
+    recovery, an exhausted fix-loop cap, a stall, and the judge's
+    `stop_needs_human` -- the four places this is constructed. Automatic
+    escalation answers these and nothing else: the node's declared escalation
+    reads this value, and the generic `gates.auto_escalate_stuck` reads the
+    `stuck` mark `_stop_stuck` records from it. Every other stop (config,
+    budget, infra, a reviewer error, a wait timeout, a rate limit, a question)
+    goes straight to a human under its own cause."""
 
     reason: str
     capped: dict | None = None
@@ -405,7 +414,7 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
     reason = stuck.reason + extra
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, stuck.capped, bundle=stuck.bundle
+            c, work_item_id, node.id, reason, stuck.capped, bundle=stuck.bundle, stuck=True
         )
     )
     return "needs_human"
@@ -1583,6 +1592,10 @@ async def run_once(
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
+    if row["status"] in store.ENDED:
+        # Whatever door got here, an ended item's chain does not run again
+        # (Kraft-dncfg) -- not even the bookkeeping and worktree set-up below.
+        return row["status"]
     nodes = chain_of(row).chain.nodes
     if start_index is None:
         start_index, cursor_step = _cursor(row, nodes)

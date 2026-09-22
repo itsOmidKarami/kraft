@@ -206,6 +206,16 @@ def _work_item_row(st, wid):
     return row
 
 
+def _live_work_item_row(st, wid):
+    """`_work_item_row` for a door onto the item's chain: an ended item
+    answers 409 naming its status, because nothing runs its chain again
+    (Kraft-dncfg)."""
+    row = _work_item_row(st, wid)
+    if row["status"] in store.ENDED:
+        raise HTTPException(409, f"work item is {row['status']}; its chain does not run again")
+    return row
+
+
 def _reload_templates(st) -> None:
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
     lint_loaded(st)

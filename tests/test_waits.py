@@ -330,6 +330,23 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
     assert starts == [wait_clock.at(60), wait_clock.at(3660)]
 
 
+@pytest.mark.parametrize("restart", ["work_item_retried", "run_forked", "base_change_restart"])
+async def test_each_restart_on_its_own_ends_an_open_wait(walk, item_on, restart):
+    """Every member of `waits._RESTARTS` ends an open wait alone. A `/retry`
+    writes `work_item_retried` and `run_forked` together, so a walk through it
+    cannot tell whether `run_forked` is honoured (final review 2 D): a fork
+    written by any other path must still start a fresh wait."""
+    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m"))])
+    assert await walk(forge.FakeForge(ci_states=["pending"]), it) == "waiting"
+    [started] = it.events("external_wait_started")
+    task = started["payload"]["task"]
+    assert it.database.read(lambda c: waits.open_wait(c, it.id, task)) is not None
+
+    await it.database.write(lambda c: events.append(c, it.id, restart, {}))
+
+    assert it.database.read(lambda c: waits.open_wait(c, it.id, task)) is None
+
+
 # --- automated review feedback enters the node's controls ----------------------
 
 
@@ -591,6 +608,29 @@ async def test_tick_does_not_re_enter_a_row_its_own_previous_tick_already_claime
     assert await waits.tick(app) == ["w1"]
     assert await waits.tick(app) == []
     assert _status(app) != "waiting"
+
+
+@pytest.mark.parametrize(("verb", "ended"), [("complete", "completed"), ("cancel", "abandoned")])
+async def test_an_item_ended_as_its_wait_came_due_stays_ended(
+    repo, scheduler, monkeypatch, verb, ended
+):
+    """Kraft-dncfg: an operator ends the item between the tick selecting it
+    and re-entering it. The re-entry claims nothing and runs nothing."""
+    app = scheduler()
+    await _seed_waiting(app, repo, retry_at="2000-01-01T00:00:00+00:00")
+    reentered = store.mark_reentered
+
+    def end_first(c, wid):
+        store.end_work_item(c, wid, verb, "done by hand")
+        return reentered(c, wid)
+
+    monkeypatch.setattr(store, "mark_reentered", end_first)
+
+    assert await waits.tick(app) == []
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    assert _status(app) == ended
+    types = [e["type"] for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "node_started" not in types[types.index("work_item_" + ended) :]
 
 
 async def test_a_reentry_resumes_at_the_waiting_step(repo, scheduler, monkeypatch):

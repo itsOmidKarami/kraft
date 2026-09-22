@@ -380,7 +380,7 @@ def steer_reachable(row, node_id: str | None = None) -> bool:
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] != "paused" and not (
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
@@ -396,7 +396,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     from_statuses = ["paused"]
     if row["status"] == "needs_human" and board._needs_context_stop(st, wid):
         from_statuses.append("needs_human")
@@ -493,27 +493,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             await st.db.write(
                 lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
             )
-            try:
-                deps.spawn(
-                    request.app,
-                    wid,
-                    deps.guard(
-                        st.db,
-                        wid,
-                        gates.auto_escalate_stuck(
-                            "needs_human",
-                            st.db,
-                            st.run_dirs,
-                            work_item_id=wid,
-                            policy=st.policy,
-                            launch=deps.launch(st, row["repo"]),
-                            bd_cwd=deps.bd_cwd(),
-                            on_approve=deps._on_approve(st),
-                        ),
-                    ),
-                )
-            except deps.AlreadyRunning:
-                raise HTTPException(409, "a walk is already running for this work item") from None
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         if new_base:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
@@ -602,7 +582,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     branch below.
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
@@ -794,27 +774,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         except RuntimeError as exc:
             reason = str(exc)
             await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
-            try:
-                deps.spawn(
-                    request.app,
-                    wid,
-                    deps.guard(
-                        st.db,
-                        wid,
-                        gates.auto_escalate_stuck(
-                            "needs_human",
-                            st.db,
-                            st.run_dirs,
-                            work_item_id=wid,
-                            policy=st.policy,
-                            launch=deps.launch(st, row["repo"]),
-                            bd_cwd=deps.bd_cwd(),
-                            on_approve=deps._on_approve(st),
-                        ),
-                    ),
-                )
-            except deps.AlreadyRunning:
-                raise HTTPException(409, "a walk is already running for this work item") from None
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         if new_base:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
@@ -919,7 +879,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     the same way `POST .../retry` does.
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
     await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
@@ -1190,7 +1150,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     reason = reason.strip()
     if not reason:
         raise HTTPException(422, "reason: a terminal action needs a reason")
-    if row["status"] in ("completed", "abandoned"):
+    if row["status"] in store.ENDED:
         raise HTTPException(409, f"work item is already {row['status']}")
     sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
     ids = [s["id"] for s in sessions]
@@ -1211,7 +1171,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] not in ("needs_human", "paused"):
         raise HTTPException(409, "work item is not needs_human or paused")
     # A `paused` item that has never started (current_node_id is NULL, per

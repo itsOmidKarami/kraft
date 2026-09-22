@@ -5,13 +5,16 @@ import sqlite3
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store import chain
+from kraft.store._common import write_status
 
 
 def request_gate(conn: sqlite3.Connection, work_item_id, node_id, gate) -> None:
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'needs_human', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(conn, work_item_id, "gate_requested", {"gate": gate, "node_id": node_id})
 
 
@@ -31,10 +34,12 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     completion: the gate reopens, and `gate_rejected` already says so.
     `complete_node` is idempotent, so re-approving writes one event.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'active', updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by})
     chain.complete_node(conn, work_item_id, gate)
 
@@ -72,10 +77,12 @@ def reject_gate(
     `note` and `node` for the reason those do.
     """
     status = "'active'" if reopen else "status"
-    conn.execute(
+    if not write_status(
+        conn,
         f"UPDATE work_items SET status = {status}, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn,
         work_item_id,

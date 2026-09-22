@@ -407,7 +407,7 @@ def test_retry_is_refused_on_an_item_that_is_not_stopped(client, repo):
     wid = _completed_item(client, repo)
     r = client.post(f"/api/work-items/{wid}/retry", json={"steer": "try harder"})
     assert r.status_code == 409
-    assert "not stopped" in r.json()["detail"]
+    assert "work item is completed" in r.json()["detail"]
     assert client.post("/api/work-items/nope/retry", json={}).status_code == 404
 
 

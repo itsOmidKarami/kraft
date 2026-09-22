@@ -6,6 +6,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.store._common import write_status
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -145,8 +146,14 @@ def mark_needs_human(
     capped: dict | None = None,
     budget: dict | None = None,
     bundle: dict | None = None,
+    *,
+    stuck: bool = False,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
+
+    `stuck` marks a stop in the stuck set (`walk._Stuck`, Ruling 176): the only
+    stops automatic escalation answers. Written only by `walk._stop_stuck`;
+    `executor.gates.stuck_stop` is its reader.
 
     The UI shows capped-out as a glyph *plus* the words "capped n/n", and the
     board never fetches sessions per row — so the numbers have to ride the
@@ -161,11 +168,13 @@ def mark_needs_human(
     event log, gathered once at the moment Kraft gives up rather than asked
     for later.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'needs_human', retry_at = NULL, updated_at = ? "
         "WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     payload = {"node_id": node_id, "reason": reason}
     # The reason names the hook that failed, never why -- that is in the failed
     # session's log. Naming the session here is what lets the timeline offer
@@ -192,6 +201,8 @@ def mark_needs_human(
         payload["budget"] = budget
     if bundle is not None:
         payload["bundle"] = bundle
+    if stuck:
+        payload["stuck"] = True
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
@@ -200,10 +211,12 @@ def mark_rate_limited(
 ) -> None:
     """The item hit an API rate limit; `rate_limit_retry.poller` relaunches it
     once `retry_at` passes, with nobody paged (unlike `mark_needs_human`)."""
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'rate_limited', retry_at = ?, updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn, work_item_id, "work_item_rate_limited", {"node_id": node_id, "retry_at": retry_at}
     )
@@ -218,10 +231,12 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     and the intake slot frees (Kraft-g15w); and with no coroutine in flight
     there is nothing for pause to fail to cancel (Kraft-tnak).
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'waiting', retry_at = ?, updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn, work_item_id, "work_item_waiting", {"node_id": node_id, "retry_at": retry_at}
     )
@@ -237,10 +252,12 @@ def mark_blocked_by_dependency(
     resume costs one more `bd blocked` call and re-pauses here, not a full
     agent session that reads the blocker from prose.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn,
         work_item_id,
@@ -249,15 +266,19 @@ def mark_blocked_by_dependency(
     )
 
 
-def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> None:
+def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
     """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
     its own poller decides to re-enter it, before the spawned run has done
     anything -- so the *next* tick's `WHERE status = 'waiting'` no longer
     matches this row (Kraft-ppk9). No event: `node_started` already narrates
     the re-entry once the walk actually begins; this is bookkeeping to make
     the row stop looking due, not something a human reads.
+
+    False, and nothing written, for an item an operator ended after the
+    poller selected it (Kraft-dncfg).
     """
-    conn.execute(
+    return write_status(
+        conn,
         "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
@@ -394,10 +415,12 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     look like it worked and then silently undo itself.
     """
     now = _now()
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (now, work_item_id),
-    )
+    ):
+        return
     events.append(conn, work_item_id, "pause_requested", {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
@@ -423,10 +446,12 @@ def pause_for_broken_base(
     walk at the next node rather than mid-session -- cheap and eventual, the
     same posture Part 1's blocked-by pause takes.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn,
         work_item_id,
@@ -605,12 +630,12 @@ def claim_for_run(
     if limit is not None:
         capacity_clause = " AND (SELECT COUNT(*) FROM work_items WHERE status = 'active') < ?"
         params = (*params, limit)
-    cur = conn.execute(
+    return write_status(
+        conn,
         f"UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? "
         f"WHERE id = ? AND status IN ({placeholders}){capacity_clause}",
         params,
     )
-    return cur.rowcount == 1
 
 
 def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | None) -> None:
