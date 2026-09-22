@@ -55,6 +55,20 @@ def test_a_make_repo_copy_reads_clean_to_git_plumbing(tmp_path):
     assert out == ""
 
 
+def test_make_repo_disables_git_auto_maintenance(tmp_path):
+    """`git commit` spawns git's detached auto-maintenance, which creates and
+    deletes `.git/objects/maintenance.lock` in the background; a `copytree` of
+    the template (or a copy made from it, since config is inherited) that
+    lists that file and then finds it gone fails (PR #168's flake). The
+    template's commit must be made with both keys already off."""
+    repo = make_repo(tmp_path)
+    for key, want in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        out = subprocess.run(
+            ["git", "config", "--get", key], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        assert out == want
+
+
 def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, monkeypatch):
     """Kraft-vrcw3: the beads fake cannot reach a `python -m kraft` child, so a
     unit test's child must resolve `bd` to the stub that refuses loudly, never

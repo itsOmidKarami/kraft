@@ -71,6 +71,12 @@ def make_repo(tmp_path: Path, name: str = "sample") -> Path:
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
         _git(tpl, "config", "user.name", "t")
+        # A commit below spawns git's detached auto-maintenance, which creates
+        # and deletes `.git/objects/maintenance.lock` in the background. A
+        # `copytree` of this template (or of a copy made from it, since config
+        # is inherited) that lists that file and then finds it gone fails.
+        _git(tpl, "config", "maintenance.auto", "false")
+        _git(tpl, "config", "gc.auto", "0")
         _git(tpl, "add", "-A")
         _git(tpl, "commit", "-m", "init")
         atexit.register(shutil.rmtree, tpl.parent, ignore_errors=True)
@@ -158,6 +164,8 @@ def _bd_template(real: bool) -> Path:
         _git(tpl, "init", "-q", "-b", "main")
         _git(tpl, "config", "user.email", "t@t")
         _git(tpl, "config", "user.name", "t")
+        _git(tpl, "config", "maintenance.auto", "false")
+        _git(tpl, "config", "gc.auto", "0")
         if real:
             subprocess.run(
                 ["bd", "init", "--prefix", "TEST"],
