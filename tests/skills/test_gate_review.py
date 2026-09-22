@@ -292,7 +292,7 @@ async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
     )
 
 
-async def _passthrough_approve(row, gate):
+async def _passthrough_approve(row, gate, **_kw):
     """What `kraft.api.routes.gates.apply_approval` returns for a gate with nothing to splice."""
     return walk.chain_of(row).chain.nodes, None
 
@@ -550,7 +550,7 @@ async def test_approve_parks_the_item_when_the_approval_refuses(monkeypatch, dat
     _stub_review(monkeypatch, "approve")
     _stub_walk(monkeypatch, calls)
 
-    async def refuse(row, gate):
+    async def refuse(row, gate, **_kw):
         return None, "chain_review: no artifact found; the worker did not write one"
 
     status = await _review_from_gate(database, run_dirs, auto_gate=True, on_approve=refuse)
@@ -594,7 +594,7 @@ def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
                 repo=rd.base,
             ).chain.nodes
 
-            async def splice(row, gate):
+            async def splice(row, gate, **_kw):
                 return spliced, None
 
             status = await _review_from_gate(database, rd, auto_gate=True, on_approve=splice)

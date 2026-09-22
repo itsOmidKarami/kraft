@@ -889,7 +889,7 @@ async def test_gate_review_that_cannot_locate_its_gate_stops_rather_than_leaving
         gates_module.gate_review, "review", lambda *a, **kw: _resolved(("approve", None))
     )
 
-    async def _on_approve(row, gate):
+    async def _on_approve(row, gate, **_kw):
         # A node list the gate is absent from -- what a template switch or a
         # spliced chain leaves behind.
         return [n for n in it.chain.chain.nodes if n.id != gate], None

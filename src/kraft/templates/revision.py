@@ -471,6 +471,30 @@ def digest(revised: MaterializedChain) -> str:
     return hashlib.sha256(revised.to_json().encode()).hexdigest()
 
 
+def artifact_digest(
+    chain: MaterializedChain, gate: str, text: str, *, library: TemplateLibrary | None = None
+) -> str | None:
+    """What `gate`'s chain-revision artifact currently resolves to, or None
+    when it cannot be parsed or applied, or resolves to no change -- an
+    unresolvable or empty proposal binds nothing, the same as `_revise`'s own
+    approval check (`kraft.api.routes.gates`).
+
+    The same three functions that check, applies whole (`parse`, `revise`,
+    `digest`), exposed so a reader of the artifact *before* approval -- an
+    agent's own gate review (Kraft-rndd1) -- can bind its verdict to exactly
+    what it read, the way a person's approval already binds to what `GET
+    .../artifact` rendered for them.
+    """
+    try:
+        changes = parse(text)
+        revised = revise(chain, changes, gate=gate, library=library)
+    except RevisionError:
+        return None
+    if revised is chain:
+        return None
+    return digest(revised)
+
+
 class StaleRevision(RevisionError):
     """The revision would apply something other than what its gate showed: the
     library changed between the two (Kraft-ze1yj)."""

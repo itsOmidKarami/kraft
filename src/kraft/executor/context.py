@@ -120,7 +120,12 @@ SCOPE: dict[str, str] = {
 #: `kraft.api.routes.gates.apply_approval`, partially applied over the app state. `None` means
 #: no door is wired up, and an agent may not approve at all -- see
 #: `kraft.executor.gates.review_gates`.
-OnApprove = Callable[[Any, str], Awaitable[tuple[dict | None, str | None]]]
+#:
+#: `Callable[..., ...]`, not a fixed two-positional signature: `review_gates`
+#: also calls it with the keyword-only `seen=` `apply_approval` already takes
+#: (Kraft-rndd1) -- the digest of what its own reviewer read, bound the same
+#: way a person's `seen` is.
+OnApprove = Callable[..., Awaitable[tuple[dict | None, str | None]]]
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,16 @@ class LaunchContext:
     #: by an item whose snapshot predates frozen repository steering
     #: (`steering.for_repository`). Everything else runs on its snapshot's.
     library_steering: Mapping[str, str] = field(default_factory=dict)
+    #: `revision.artifact_digest` bound to the live template library
+    #: (Kraft-rndd1): what a chain-revision gate's artifact currently
+    #: resolves to, the same rendering a person's `GET .../artifact` computes
+    #: (`kraft.api.routes.artifacts.get_work_item_artifact`). `None` when no
+    #: library is available to resolve it -- a launch built with no `st.library`
+    #: at hand, or one that predates this field. `gate_review.review` uses it
+    #: to capture a digest of what it is about to dispatch its reviewer onto,
+    #: right before it does, so the reviewer's own approval can be bound to
+    #: exactly that, not to whatever a person separately rendered.
+    chain_revision_digest: Callable[[Any, str, str], str | None] | None = None
 
 
 class Steer:

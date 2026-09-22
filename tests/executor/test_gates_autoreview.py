@@ -20,6 +20,7 @@ own contract:
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ from kraft.api.routes import artifacts as artifacts_route
 from kraft.api.routes import gates as gates_route
 from kraft.executor import gates as gates_module
 from kraft.executor.context import LaunchContext
+from kraft.templates import revision
 from kraft.templates.library import TemplateLibrary
 
 GATE = "revision_approval"
@@ -44,6 +46,14 @@ LIBRARY = TemplateLibrary.from_mappings(
     },
     (),
     library_path=Path("library.yaml"),
+)
+
+#: A wired launch (`deps.launch`'s own shape): the reviewer's approval binds
+#: to `revision.artifact_digest` over `LIBRARY`, the same as production binds
+#: it to `st.library`.
+REVISION_LAUNCH = LaunchContext(
+    repo_entry=entry_of({"setup_command": ""}),
+    chain_revision_digest=functools.partial(revision.artifact_digest, library=LIBRARY),
 )
 
 REVIEWER = {"id": "reviewer", "kind": "agent", "harness": "fake", "prompt": "review it"}
@@ -160,13 +170,14 @@ async def test_agent_approval_refuses_an_artifact_edited_after_its_read(
     item_on, tmp_path, monkeypatch
 ):
     """Nobody has ever rendered this gate (`store.shown_revision` is None), so
-    today `apply_approval`'s agent-path check is skipped entirely and
-    whatever is on disk at approval time is applied -- not what the reviewer
-    actually read. The reviewer here verdicts `approve` while "reading"
-    `PROPOSAL`; before that verdict is applied the artifact is rewritten to
-    `MUTATED`."""
+    without the fix `apply_approval`'s agent-path check is skipped entirely
+    and whatever is on disk at approval time is applied -- not what the
+    reviewer actually read. The reviewer here verdicts `approve` while
+    "reading" `PROPOSAL`; before that verdict is applied the artifact is
+    rewritten to `MUTATED`. `review_gates` now captures its own digest right
+    before dispatching the reviewer, so the mismatch is caught."""
     it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
-    launch = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
+    launch = REVISION_LAUNCH
     fake_harness_home(tmp_path, ["true"])
 
     async def _edit():
@@ -190,13 +201,16 @@ async def test_agent_approval_refuses_even_when_a_person_renders_the_new_version
     item_on, tmp_path, monkeypatch
 ):
     """The second half of the race: a person's render of the (already
-    mutated) artifact writes `store.shown_revision`, and today's fallback
-    (`apply_approval`'s non-viewer path reads whatever was *last* shown,
-    unconditionally) is satisfied by it -- the agent's approval ends up bound
+    mutated) artifact writes `store.shown_revision`, and without the fix
+    `apply_approval`'s non-viewer path reads whatever was *last* shown,
+    unconditionally -- satisfied by it, so the agent's approval ends up bound
     to the person's view, not to what the agent itself judged, even though
-    the agent never looked at the mutated version at all."""
+    the agent never looked at the mutated version at all. `review_gates` now
+    supplies its own `seen`, which `apply_approval` honours over the store's
+    the moment it is not None -- the store lookup is a fallback for a caller
+    that has nothing of its own, not an override."""
     it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
-    launch = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
+    launch = REVISION_LAUNCH
     fake_harness_home(tmp_path, ["true"])
 
     async def _edit_then_render():
