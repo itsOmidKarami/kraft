@@ -206,10 +206,13 @@ def materialized_chain_of(row):
 
 def policy_override_of(row):
     """`row["policy_override"]` as the `WorkItemPolicy` it holds, or None."""
-    from kraft.policy import WorkItemPolicy
+    from kraft.policy import FROZEN, WorkItemPolicy
 
     raw = row["policy_override"] if "policy_override" in row.keys() else None
-    return WorkItemPolicy.model_validate_json(raw) if raw else None
+    # Read back leniently, like a snapshot (Kraft-9ct4q): an override stored
+    # before tool names were checked must still load. The write doors refuse
+    # a rule; a launch refuses one that is already stored.
+    return WorkItemPolicy.model_validate_json(raw, context=FROZEN) if raw else None
 
 
 def set_policy_override(conn: sqlite3.Connection, work_item_id: str, override) -> None:

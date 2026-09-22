@@ -158,3 +158,28 @@ def test_the_older_node_override_door_is_held_to_the_same_maxima(
 
     assert refused.status_code == 422, refused.text
     assert named in refused.json()["detail"]
+
+
+def test_an_override_stored_before_tool_names_were_checked_still_reads(bounded, repo):
+    """Kraft-9ct4q's rule for anything Kraft froze: an item whose override was
+    stored before rule syntax was refused still loads, and the refusal
+    happens at launch instead. Writing one now is refused."""
+    wid = _file(bounded, repo).json()["id"]
+    db = bounded.app.state.db
+    stored = '{"deny_tools": ["Bash(git *)"]}'
+
+    async def write():
+        await db.write(
+            lambda c: c.execute(
+                "UPDATE work_items SET policy_override = ? WHERE id = ?", (stored, wid)
+            )
+        )
+
+    bounded.portal.call(write)
+
+    assert _stored(bounded, wid) == {"deny_tools": ["Bash(git *)"]}
+    refused = bounded.patch(
+        f"/api/work-items/{wid}", json={"policy": {"deny_tools": ["Bash(git *)"]}}
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"].startswith("policy.deny_tools: ")

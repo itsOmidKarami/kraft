@@ -232,3 +232,24 @@ def test_a_retry_that_would_unlock_a_sandbox_the_item_set_below_it_is_refused():
         )
 
     assert refused.value.field == "policy.sandbox"
+
+
+@pytest.mark.parametrize(
+    ("override", "field"),
+    [
+        ({"allowed_tools": ["Read", "Bash(git *)"]}, "policy.allowed_tools"),
+        (
+            {"paths": {"verification": {"deny_tools": ["mcp__x__*"]}}},
+            "policy.paths.verification.deny_tools",
+        ),
+    ],
+    ids=["scoped-rule-item-wide", "glob-on-a-path"],
+)
+def test_an_override_naming_a_rule_not_a_tool_is_refused(override, field):
+    """Kraft-9i6xy: the item layer's tool lists hold tool names, as every
+    layer's do. A rule is refused when the override is set, naming the field."""
+    with pytest.raises(PolicyError) as refused:
+        _chain().with_item_policy(override)
+
+    assert refused.value.field == field
+    assert "Bash" in str(refused.value) or "mcp__" in str(refused.value)
