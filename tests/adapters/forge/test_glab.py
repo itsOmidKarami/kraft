@@ -417,8 +417,25 @@ async def test_merge_state_still_raises_when_find_mr_has_no_answer(cli, tmp_path
             '{"iid":62,"state":"opened","web_url":"http://x/62"}]',
             forge.MRRef(number=62, url="http://x/62", state="open"),
         ),
+        # Kraft-n60oh: with no merge commit, a squash fast-forwarded onto the
+        # target is what landed; with neither, the head itself.
+        (
+            '[{"iid":54,"state":"merged","web_url":"http://x/54","sha":"c3",'
+            '"merge_commit_sha":null,"squash_commit_sha":"c2"}]',
+            forge.MRRef(number=54, url="http://x/54", state="merged", merged_sha="c2"),
+        ),
+        (
+            '[{"iid":54,"state":"merged","web_url":"http://x/54","sha":"c3",'
+            '"merge_commit_sha":null,"squash_commit_sha":null}]',
+            forge.MRRef(number=54, url="http://x/54", state="merged", merged_sha="c3"),
+        ),
     ],
-    ids=["none-when-the-branch-has-none", "prefers-the-open-one"],
+    ids=[
+        "none-when-the-branch-has-none",
+        "prefers-the-open-one",
+        "a-fast-forwarded-squash-landed-its-squash",
+        "a-fast-forward-landed-its-head",
+    ],
 )
 async def test_glab_find_mr_picks_the_branch_s_merge_request(cli, tmp_path, mr_list, expected):
     cli.stub("glab", mr_list)

@@ -501,7 +501,14 @@ class GlabCli(mr_ops.CliWaits):
                     url=str(r.get("web_url", "")),
                     state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
                     merge_queued=bool(r.get("merge_when_pipeline_succeeds")),
+                    merged_sha=_landed(r) if r.get("state") == "merged" else "",
                 )
                 for r in rows
             ]
         )
+
+
+def _landed(r: dict) -> str:
+    """What a merged merge request landed on its target: its merge commit,
+    else a squash fast-forwarded onto it, else its fast-forwarded head."""
+    return str(r.get("merge_commit_sha") or r.get("squash_commit_sha") or r.get("sha") or "")

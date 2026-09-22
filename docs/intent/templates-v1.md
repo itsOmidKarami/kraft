@@ -1028,7 +1028,7 @@ enforced-by: tests/adapters/forge/test_waits.py::test_missing_external_approval_
 
 The system SHALL wait for a changed child repository to merge before updating
 a workspace root pointer to that child's revision.
-enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged, tests/templates/test_workspace_publication.py::test_the_pointer_bump_moves_only_merged_members_and_to_what_merged
 
 ## REQ root-source-draft-merge-request-may-run-early
 

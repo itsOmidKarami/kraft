@@ -41,7 +41,12 @@ GH = SimpleNamespace(
     merge_verb="pr merge",
     merged_list=outputs.GH_PR_LIST_MERGED,
     queued_list=outputs.GH_PR_LIST_AUTO_MERGE,
-    find_args={"pr": "list", "--state": "all", "--head": "kraft/abc"},
+    find_args={
+        "pr": "list",
+        "--state": "all",
+        "--head": "kraft/abc",
+        "--json": "number,url,state,autoMergeRequest,mergeCommit",
+    },
 )
 
 
@@ -150,12 +155,14 @@ async def test_merge_resolves_from_the_branch_when_no_number_is_known(be, cli, t
 async def test_find_mr_reads_the_state_of_an_existing_merge_request(be, cli, tmp_path):
     """Lists every state -- or a merged MR reads as "no MR at all" -- for this
     source branch only -- or it answers about whatever the project merged most
-    recently."""
+    recently. A merged one names the revision its merge landed."""
     cli.stub(be.name, be.merged_list)
 
     found = await be.cls().find_mr(repo=tmp_path, branch="kraft/abc")
 
-    assert found == forge.MRRef(number=be.number, url=be.url, state="merged")
+    assert found == forge.MRRef(
+        number=be.number, url=be.url, state="merged", merged_sha="c0ffee1"
+    ), "with the revision its merge landed (Kraft-n60oh)"
     argv = cli.argv(be.name)
     for flag, value in be.find_args.items():
         assert flag in argv and (value is None or argv[argv.index(flag) + 1] == value), flag

@@ -186,6 +186,40 @@ async def test_child_merge_precedes_workspace_pointer_update(
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
 
 
+class _OvertakenForge(_LandingForge):
+    """Someone else lands a commit on a member's origin right after the
+    item's merge, before the root's turn."""
+
+    async def merge(self, *, repo, branch="", mr):
+        await super().merge(repo=repo, branch=branch, mr=mr)
+        if Path(repo).name.startswith("pkg"):
+            origin = Path(_git_out(repo, "remote", "get-url", "origin"))
+            _git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")
+
+
+async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-n60oh: the root pointer moves only for a member whose merge
+    request merged in this item, and to the revision that merge landed --
+    never to whatever its origin's tip has become, which the item never
+    built. A selected member the item never changed keeps its pointer."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", second=True, untouched=("pkg2",)
+    )
+    untouched = _git_out(origin, "rev-parse", "main:repos/pkg2")
+    _git(tmp_path / "pkg2", "commit", "-q", "--allow-empty", "-m", "upstream, never built here")
+    merged = _git_out(worktree / "repos" / "pkg", "rev-parse", "HEAD")
+    fake = _OvertakenForge()
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+
+    assert _git_out(tmp_path / "pkg", "rev-parse", "main") != merged, "someone landed after it"
+    assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
+    assert _git_out(origin, "rev-parse", "main:repos/pkg2") == untouched
+
+
 async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
     database, run_dirs, tmp_path, monkeypatch
 ):

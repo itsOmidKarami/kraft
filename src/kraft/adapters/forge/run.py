@@ -1312,22 +1312,36 @@ async def _observed(
     return ("waiting" if state == "pending" else status), log
 
 
-async def _point_at_merged_members(db, rows, root_repo: Path, work_item_id: str) -> list[str]:
-    """Move each member's pointer in `root_repo` to the revision its origin's
-    default branch has now -- what its merge landed -- and commit them.
-    Returns the mount paths that moved. A member's base is its own default
-    branch, whatever the item's base branch is (`builtins.base_branch`)."""
+async def _point_at_merged_members(
+    forge: Forge, db, root_repo: Path, branch: str, work_item_id: str
+) -> list[str]:
+    """Move the pointer in `root_repo` of each member whose merge request
+    merged in this item to the revision that merge landed, and commit them
+    (Kraft-n60oh). Returns the mount paths that moved. A member the item never
+    merged keeps its pointer, and a merged one never moves past its merge to
+    whatever its origin's tip has become since: the item built neither.
+
+    Read afresh, not off `run_task`'s rows: a member merged earlier in the
+    same pass is recorded merged only in the table."""
+    merged = db.read(
+        lambda c: c.execute(
+            "SELECT repo_path FROM work_item_repos WHERE work_item_id = ? "
+            "AND role = 'submodule' AND merge_state = 'merged' ORDER BY merge_rank",
+            (work_item_id,),
+        ).fetchall()
+    )
     bumped = []
-    for r in rows:
-        if r["role"] != "submodule":
-            continue
+    for r in merged:
         sub_path = Path(r["repo_path"])
+        landed = await forge.find_mr(repo=sub_path, branch=branch)
+        if landed is None or landed.state != "merged" or not landed.merged_sha:
+            raise ForgeError(
+                f"cannot tell which revision {sub_path.name}'s merge landed; "
+                "its pointer is left where it was"
+            )
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
         await git.run_git(sub_path, ["git", "fetch", "origin", default])
-        merged_sha = (
-            await git.run_git(sub_path, ["git", "rev-parse", f"origin/{default}"])
-        ).strip()
-        await git.run_git(sub_path, ["git", "checkout", merged_sha])
+        await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
         rel = str(sub_path.relative_to(root_repo))
         await git.run_git(root_repo, ["git", "add", "--", rel])
         bumped.append(rel)
@@ -1341,12 +1355,12 @@ async def _point_at_merged_members(db, rows, root_repo: Path, work_item_id: str)
 
 
 async def _ready_root_at_merged_members(
-    forge: Forge, db, rows, *, root_repo: Path, branch: str, work_item_id: str
+    forge: Forge, db, *, root_repo: Path, branch: str, work_item_id: str
 ) -> str:
     """A root with source changes of its own, once its members merged: point
     it at their merged revisions, push, and only now mark its merge request
     ready (`root-source-merge-request-readiness-waits-for-child-merges`)."""
-    bumped = await _point_at_merged_members(db, rows, root_repo, work_item_id)
+    bumped = await _point_at_merged_members(forge, db, root_repo, branch, work_item_id)
     await forge.push(repo=root_repo, branch=branch)
     existing = await forge.find_mr(repo=root_repo, branch=branch)
     await forge.mark_ready(
@@ -1393,7 +1407,7 @@ async def _ready_root(
         if not opened:
             return log, "done"
     log += await _ready_root_at_merged_members(
-        forge, db, rows, root_repo=root_repo, branch=branch, work_item_id=work_item_id
+        forge, db, root_repo=root_repo, branch=branch, work_item_id=work_item_id
     )
     if await forge.approval_state(repo=root_repo, branch=branch) == "pending":
         return log + f"[{root_repo.name}] waiting for its required approval\n", "approval_pending"
@@ -1412,7 +1426,7 @@ async def _bump_pointer_only_root(
     follows to its merge like any root merge request (Kraft-srt9v)."""
     root = next(r for r in rows if r["role"] == "root")
     root_repo = Path(root["repo_path"])
-    bumped = await _point_at_merged_members(db, rows, root_repo, work_item_id)
+    bumped = await _point_at_merged_members(forge, db, root_repo, branch, work_item_id)
     if not bumped:
         return "every member pointer already names its merged revision\n", False
     try:

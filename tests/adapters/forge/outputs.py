@@ -28,8 +28,10 @@ GLAB_CI_SUCCESS = (
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926699"}]'
 )
 
+#: Merged with a merge commit over a squash: the merge commit is what landed.
 GLAB_MR_LIST_MERGED = (
-    '[{"iid":54,"state":"merged","source_branch":"kraft/abc",'
+    '[{"iid":54,"state":"merged","source_branch":"kraft/abc","sha":"c0ffee3",'
+    '"merge_commit_sha":"c0ffee1","squash_commit_sha":"c0ffee2",'
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/merge_requests/54"}]'
 )
 
@@ -56,7 +58,10 @@ GH_PR_VIEW_NEEDS_APPROVAL = (
     '"statusCheckRollup":[{"name":"build","conclusion":"SUCCESS"}]}'
 )
 
-GH_PR_LIST_MERGED = '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED"}]'
+GH_PR_LIST_MERGED = (
+    '[{"number":7,"url":"https://github.com/o/r/pull/7","state":"MERGED",'
+    '"mergeCommit":{"oid":"c0ffee1"}}]'
+)
 #: An open pull request with auto-merge enabled: GitHub merges it itself once
 #: its checks pass (`gh pr list --json autoMergeRequest`).
 GH_PR_LIST_AUTO_MERGE = (
