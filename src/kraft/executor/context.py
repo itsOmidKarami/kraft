@@ -79,6 +79,11 @@ INFRA_STOP = "infra_stop"
 #: handler is not a repair here: its concerns ride `CONFLICT_RESOLVED`.
 REPAIR_DOUBTED = "repair_doubted"
 
+#: A `read_only` step or node changed the worktree (`executor.read_only`). A
+#: stop, not a failure: nothing about the implementation's code failed, and a
+#: fix loop or recovery writing more would not make the check true.
+READ_ONLY_VIOLATED = "read_only_violated"
+
 
 #: The tier that handles each status, in one place so a new status cannot be
 #: added without declaring where it is handled.
@@ -104,6 +109,7 @@ SCOPE: dict[str, str] = {
     WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
     REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
+    READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

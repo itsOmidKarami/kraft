@@ -29,6 +29,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.automated_review import AutomatedReview
 from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
+from kraft.executor import read_only as _read_only
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -37,6 +38,7 @@ from kraft.executor.context import (
     CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
+    READ_ONLY_VIOLATED,
     REPAIR_DOUBTED,
     SCOPE,
     TIME_CAPPED,
@@ -1133,7 +1135,18 @@ async def measure_node(
     # step that stops the node leaves `results` shorter than the task list, and
     # `tasks[i]` would then name the wrong task in `failed` -- silently, into
     # the fix loop and the on_failure repair.
-    async def _settle(tasks, *, retry: bool = False) -> list:
+    async def _wrote(before, scope: str) -> bool:
+        return await _read_only.violation(
+            db, row, launch, worktree, before, node_id=node.id, scope=scope
+        )
+
+    def _snapshot(flagged: bool):
+        return _read_only.snapshot(db, row, launch, worktree) if flagged else None
+
+    async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:
+        # A read_only step is checked around every run of its tasks, a
+        # recovery's retry included; the handler itself runs outside it.
+        before = _snapshot(step.read_only)
         results = await asyncio.gather(
             *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
         )
@@ -1146,6 +1159,8 @@ async def measure_node(
         for r in results:
             if isinstance(r, AssertionError):
                 raise r
+        if await _wrote(before, step.path):
+            return [READ_ONLY_VIOLATED] * len(tasks)
         return list(results)
 
     async def _handle(handler, scope: str, failed: list[ResolvedTask]):
@@ -1190,7 +1205,7 @@ async def measure_node(
             spent.add(task.path)
             verdict, h_failed, h_excs = await _handle(task.on_failure, "task", [task])
             if verdict == "ok":
-                (status[task.path],) = await _settle([task], retry=True)
+                (status[task.path],) = await _settle([task], step, retry=True)
             elif verdict != "failed":
                 return results, (verdict, h_failed, h_excs)
         rest = [t for t in failed if not t.on_failure]
@@ -1199,11 +1214,14 @@ async def measure_node(
             verdict, h_failed, h_excs = await _handle(step.on_failure, "step", rest)
             if verdict == "ok":
                 # Every task, a task-recovered one too (step-recovery-retries-the-entire-step).
-                return await _settle(step.tasks, retry=True), None
+                return await _settle(step.tasks, step, retry=True), None
             if verdict != "failed":
                 return results, (verdict, h_failed, h_excs)
         return [status[t.path] for t in step.tasks], None
 
+    # A read_only node is checked around its own steps, a step around its
+    # tasks (`_settle`); recovery and fix loops run outside either check.
+    node_before = _snapshot(own and getattr(node.node, "read_only", False))
     outcomes: list[tuple[ResolvedTask, object]] = []
     for index, step in enumerate(groups):
         # A resumed node skips the steps before `start_step` -- they already
@@ -1214,7 +1232,7 @@ async def measure_node(
             # Recorded before the step runs, not after, so a crash mid-step
             # resumes at that step rather than past it.
             await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
-        results = await _settle(step.tasks)
+        results = await _settle(step.tasks, step)
         if own:
             results, stopped = await _recover(step, results)
             if stopped is not None:
@@ -1226,7 +1244,13 @@ async def measure_node(
         # "this task moved the node forward": ("done", "done_with_concerns").
         if any(isinstance(r, BaseException) or r not in _ADVANCING for r in results):
             break
+    if all(r != READ_ONLY_VIOLATED for _, r in outcomes) and await _wrote(node_before, node.id):
+        outcomes = [(t, READ_ONLY_VIOLATED) for t, _ in outcomes]
     results = [r for _, r in outcomes]
+    # Outranks every other outcome, a pause too: whatever else happened, the
+    # worktree a read_only scope promised to leave alone is not the one it found.
+    if READ_ONLY_VIOLATED in results:
+        return READ_ONLY_VIOLATED, [t for t, r in outcomes if r == READ_ONLY_VIOLATED], []
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.

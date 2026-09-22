@@ -11,6 +11,7 @@ from kraft import policy as _policy
 from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
+from kraft.executor import read_only as _read_only
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
@@ -20,6 +21,7 @@ from kraft.executor.context import (
     CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
+    READ_ONLY_VIOLATED,
     REPAIR_DOUBTED,
     TIME_CAPPED,
     WAIT_TIMED_OUT,
@@ -392,6 +394,8 @@ async def _sentinel_stop(
         return await stops.stop_for_infra(db, work_item_id, node)
     if verdict == TIME_CAPPED:
         return await stops.stop_for_time_cap(db, work_item_id, node)
+    if verdict == READ_ONLY_VIOLATED:
+        return await _read_only.stop(db, work_item_id, node.id)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
     if verdict == REPAIR_DOUBTED:

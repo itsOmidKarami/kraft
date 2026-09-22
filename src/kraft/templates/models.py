@@ -381,6 +381,17 @@ class TaskBase(BaseModel):
     #: component unless it says `false` here.
     skippable: StrictBool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_only_is_not_a_task_field(cls, data: object) -> object:
+        # Named, not left to `extra="forbid"`: the fix is one level up.
+        if isinstance(data, dict) and "read_only" in data:
+            raise ValueError(
+                "set read_only on the step: tasks in a step share one worktree, "
+                "so a task-level check would fail on a sibling's writes"
+            )
+        return data
+
 
 class BuiltinTask(TaskBase):
     kind: Literal[TaskKind.BUILTIN]
@@ -483,6 +494,9 @@ class Step(BaseModel):
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
     skippable: StrictBool = True
+    #: The step's tasks must leave the worktree as they found it, checked
+    #: around all of them together (`executor.read_only`).
+    read_only: StrictBool = False
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -566,6 +580,7 @@ class ExecutionShape(BaseModel):
                     on_failure=_handler_steps(step.on_failure, path, step_scopes),
                     scopes=step_scopes,
                     own=step.policy,
+                    read_only=step.read_only,
                 )
             )
         return tuple(resolved)
@@ -608,6 +623,8 @@ def _refuse_nested_handlers(where: str, shape: ExecutionShape | None) -> None:
     for step in shape.steps or ():
         if step.on_failure is not None:
             raise ValueError(f"{where}: step {step.id!r} cannot declare its own on_failure")
+        if step.read_only:
+            raise ValueError(f"{where}: step {step.id!r} cannot be read_only: it writes by design")
     for task in shape.own_tasks():
         if task.on_failure is not None:
             raise ValueError(f"{where}: task {task.id!r} cannot declare its own on_failure")
@@ -690,6 +707,16 @@ class ExecNode(ExecutionShape):
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
     skippable: StrictBool = True
+    #: The node's own steps must leave the worktree as they found it, checked
+    #: from before its first step to after its last (`executor.read_only`).
+    read_only: StrictBool = False
+
+    @model_validator(mode="after")
+    def _read_only_has_no_fix_loop(self) -> Self:
+        # A fix loop writes by design.
+        if self.read_only and self.fix_loop is not None:
+            raise ValueError(f"{self.id}: a node with a fix_loop cannot be read_only")
+        return self
 
     @model_validator(mode="after")
     def _escalation_identifier(self) -> Self:
@@ -884,6 +911,7 @@ class ResolvedStep:
     scopes: Scopes = ()
     #: The override this step sets itself.
     own: TaskPolicyOverride | None = None
+    read_only: bool = False
 
     level: ClassVar[str] = "steps"
 
