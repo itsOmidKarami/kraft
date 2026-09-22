@@ -314,6 +314,26 @@ async def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch, stub_app)
     assert seen == []
 
 
+async def test_starts_a_bead_from_a_repo_entry_with_no_enabled_key(tmp_path, monkeypatch, stub_app):
+    """Ruling 212: an absent `enabled` means enabled -- not "off until an
+    operator's first save writes it in". `_state` always writes an explicit
+    `enabled`; this rewrites repos.yaml to the shape of an entry that never
+    set one at all."""
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "pick me up", "priority": 3}])
+    )
+    state = _state(tmp_path)
+    templates_dir = state["templates_dir"]
+    (repo,) = config.load_repos(templates_dir / "repos.yaml")
+    (templates_dir / "repos.yaml").write_text(
+        yaml.safe_dump({"repos": [{"path": repo.path, "default_chain_template": "default"}]})
+    )
+
+    app = stub_app(**state)
+    started = await intake_mod.tick(app)
+    assert len(started) == 1
+
+
 async def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch, stub_app):
     """Spec §5 reached by configuration: a chain that gates nowhere would take a
     bead to merge unattended with no human anywhere."""

@@ -73,9 +73,7 @@ async def tick(app) -> list[str]:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
         return []
     wanted = set(cfg.get("repos") or [])
-    # `enabled` defaults to True here because `RepoEntry` does not type it and
-    # the API's own `RepoBody` does — an entry hand-written without it is on.
-    repos = [r for r in repos if getattr(r, "enabled", True) and (not wanted or r.path in wanted)]
+    repos = [r for r in repos if r.enabled and (not wanted or r.path in wanted)]
     # `repos.yaml` paths are stored as written, so a `~` or a trailing slash in
     # the filter matches nothing and the poller ticks forever picking nothing up.
     if wanted and not repos:
@@ -122,7 +120,7 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
             "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
         )
         return None
-    chain = deps.resolve_chain(st, getattr(repo, "default_chain_template", None) or "default")
+    chain = deps.resolve_chain(st, repo.default_chain_template or "default")
     if chain is None:
         logger.warning("auto-intake: %s has no valid chain template, skipping", repo.path)
         return None

@@ -129,7 +129,7 @@ def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | Non
     `RepoEntry` first, so a legacy shape is migrated on the way."""
     models = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
     found = deps._connected(models, path) if path is not None else None
-    repos = [r.model_dump() for r in models]
+    repos = [r.model_dump_repo() for r in models]
     return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
 
 
@@ -168,7 +168,8 @@ async def list_repos(request: Request):
     path = deps.repos_path(st)
     return {
         "repos": [
-            r.model_dump(mode="json") for r in config_mod.load_repos(path, validate_steering=False)
+            r.model_dump_repo(mode="json")
+            for r in config_mod.load_repos(path, validate_steering=False)
         ],
         "workspaces": {
             ws_id: ws.model_dump(mode="json")

@@ -28,6 +28,18 @@ def test_repos_lists_a_connected_repo(app, repo):
     assert [entry["path"] for entry in listed] == [str(repo)]
 
 
+def test_repo_list_reads_a_missing_enabled_key_as_enabled(app, capsys):
+    """Ruling 212: an absent `enabled` means enabled. Written by hand, since
+    `POST /repos` always writes an explicit value -- this is the shape of an
+    entry that predates the field."""
+    repos_yaml = Path(os.environ["KRAFT_TEMPLATES_DIR"]) / "repos.yaml"
+    repos_yaml.write_text(yaml.safe_dump({"repos": [{"path": "/r", "name": "r"}]}))
+    cli.main(["repo", "list"])
+    row = next(line for line in capsys.readouterr().out.splitlines() if "/r" in line)
+    assert "disabled" not in row
+    assert "enabled" in row
+
+
 def test_open_worktree_without_a_worktree_is_a_readable_404(app, make_item, repo):
     wid = make_item(repo)  # paused, never run: no worktree yet
     with pytest.raises(ValueError, match="404"):
