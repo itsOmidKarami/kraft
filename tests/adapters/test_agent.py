@@ -752,7 +752,7 @@ def _bare_provider(provider_id: str):
     """A provider declaring only prompt/context/usage: no model, effort or resume."""
     from kraft import harness as _harness
 
-    return _harness.parse(
+    return _harness.Harness.from_mapping(
         {
             "id": provider_id,
             "kind": "cli",

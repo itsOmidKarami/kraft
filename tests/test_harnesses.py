@@ -168,6 +168,85 @@ def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect
     assert expect in hs.invalid["x"]
 
 
+_CAPS = "  context: { channel: prompt }\n  usage: { source: result_file }\n"
+
+
+@pytest.mark.parametrize(
+    "body,expect",
+    [
+        ("- just\n- a list\n", "x.yaml: expected a top-level mapping"),
+        ("id: 7\nkind: cli\ncommand: [x]\n", "missing a string 'id'"),
+        ("id: x\nkind: [cli]\ncommand: [x]\n", "unknown kind ['cli']"),
+        ("id: x\nkind: cli\ncommand: {a: b}\n", "'command' must be a string or a list"),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncommand_resume: [1]\n",
+            "'command_resume' must be a string or a list",
+        ),
+        ("id: x\nkind: cli\ncommand: [x]\ncapabilities: [prompt]\n", "non-empty mapping"),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n" + _CAPS + "  prompt: [-p]\n",
+            "capability 'prompt' must be a mapping",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n" + _CAPS + "  prompt: { cli: -p }\n",
+            "capability 'prompt' 'cli' must be a list of strings",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _CAPS
+            + "  prompt: { cli: ['-p', '{value}'] }\n"
+            + "  effort: { cli: ['-e', '{value}'], values: [1] }\n",
+            "capability 'effort' 'values' must be a list of strings",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _CAPS
+            + "  effort: { cli: ['-e', '{value}'], always: 3 }\n"
+            + "  prompt: { cli: ['-p', '{value}'] }\n",
+            "capability 'effort' 'always' must be a string or a list of strings",
+        ),
+    ],
+)
+def test_a_misshapen_harness_is_refused_in_prose_naming_the_key(tmp_path, body, expect):
+    """Kraft-5d510.2: the shape is `HarnessInput`'s, but the reason an operator
+    reads is still the one the hand-rolled parser gave, never pydantic's
+    "Input should be a valid list"."""
+    _write(tmp_path, "x.yaml", body)
+    assert expect in harness.load(tmp_path / "harnesses").invalid["x"]
+
+
+def test_a_harness_is_built_from_its_input_model():
+    """The pattern `HarnessProfileInput`/`HarnessProfile` use: the model holds
+    the shape, `from_input` the relationships between capabilities."""
+    parsed = harness.HarnessInput.model_validate(
+        {
+            "id": "mini",
+            "kind": "cli",
+            "command": "mini",
+            "capabilities": {
+                "context": {"channel": "prompt"},
+                "usage": {"source": "result_file"},
+                "prompt": {"cli": ["-p", "{value}"]},
+            },
+        }
+    )
+    h = harness.Harness.from_input(parsed, where="test")
+    assert (h.id, h.command, list(h.capabilities)) == (
+        "mini",
+        ("mini",),
+        ["context", "usage", "prompt"],
+    )
+    with pytest.raises(harness.HarnessError, match="test: missing required capability 'prompt'"):
+        harness.Harness.from_input(
+            parsed.model_copy(
+                update={
+                    "capabilities": {k: v for k, v in parsed.capabilities.items() if k != "prompt"}
+                }
+            ),
+            where="test",
+        )
+
+
 def test_one_bad_file_does_not_take_the_others_down(tmp_path):
     """The `load_templates` precedent: quarantine by name, keep serving."""
     _write(tmp_path, "good.yaml", _MINIMAL.format(id="good"))

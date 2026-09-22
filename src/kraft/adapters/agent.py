@@ -762,7 +762,7 @@ async def run_agent_task(
     )
     # One name serves usage-envelope reading, live progress and rate-limit
     # detection alike (usage.READERS): every shipped harness that declares
-    # either gives it the same reader, and `harness.parse` requires
+    # either gives it the same reader, and `Harness.from_input` requires
     # `structured_log` behind both, so there is one schema to pick from.
     usage_cap = h.capabilities["usage"]
     rate_limit_cap = h.capabilities.get("rate_limit_signal")
