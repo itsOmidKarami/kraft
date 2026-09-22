@@ -238,6 +238,12 @@ def test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem(tmp_path, monk
     assert listed["deep"]["problems"] == []
 
 
+def test_a_task_overriding_its_parents_profile_does_not_use_it(tmp_path, monkeypatch):
+    tasks = {**PAIRED, "own_model": {"extends": "codex_deep", "model": "gpt-5.6-terra"}}
+    listed = {p["id"]: p for p in _view(_live(tmp_path, monkeypatch, tasks))["agent_profiles"]}
+    assert listed["deep"]["used_by"] == ["tasks.codex_deep"]
+
+
 def test_only_the_task_pairing_a_missing_provider_is_refused(tmp_path, monkeypatch):
     live = _live(tmp_path, monkeypatch, {**PAIRED, "codex_fast": CODEX_FAST})
     listed = {p["id"]: p for p in _view(live)["agent_profiles"]}
@@ -364,6 +370,7 @@ async def test_a_profile_missing_at_launch_stops_the_task_for_a_human(tmp_path, 
     assert [s["status"] for s in sessions] == ["config_error"]
     log = Path(sessions[0]["log_path"]).read_text()
     assert "profile 'fast' has no model for provider 'codex' (harness 'codex')" in log, log
+    assert "which is not available" not in log, "its harness is available; its profile is not"
 
 
 # ── shipped defaults and the upgrade path ──
