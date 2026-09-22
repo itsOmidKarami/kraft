@@ -831,7 +831,13 @@ async def _dispatch_task(
     # known to be rate-limited is skipped and a rate-limited launch moves on,
     # every skip or switch logged. Overrides and escalation are the task's own
     # launch's; a fallback entry runs as written.
-    cands = _fallback.candidates(t)
+    try:
+        # A profile's own list is live configuration, like the profile body;
+        # a file that does not load has none, and the launch below says why.
+        table = _agent.harness_table(harnesses)[0] if t.fallback is None and t.profile else None
+    except _agent.HarnessUnavailable:
+        table = None
+    cands = _fallback.candidates(t, table)
     listed = len(cands) > 1
     tried = _fallback.Attempts(
         db, work_item_row["id"], node.id, task.path, overridden=bool(merged_override)

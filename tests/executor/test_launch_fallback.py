@@ -97,9 +97,9 @@ async def test_a_rate_limited_launch_falls_back_in_the_same_dispatch(
     assert switch == {
         "node_id": "build",
         "task": "build.main.implement",
-        "from": {"harness": "claude", "model": "opus", "effort": "high"},
+        "from": {"harness": "claude", "profile": None, "model": "opus", "effort": "high"},
         # The entry omits effort, so the task's own is kept.
-        "to": {"harness": "claude", "model": "sonnet", "effort": "high"},
+        "to": {"harness": "claude", "profile": None, "model": "sonnet", "effort": "high"},
         "reason": "rate_limit_hit",
         "resets_at_iso": _iso(SOON),
         "session_id": sessions[1]["id"],
@@ -179,7 +179,10 @@ async def test_all_candidates_limited_parks_until_the_earliest_reset(
     assert row["retry_at"] == _iso(SOON)
     assert [s["status"] for s in sessions] == ["rate_limited"]
     assert [(f["reason"], f["to"]) for f in _fallbacks(evts)] == [
-        ("rate_limit_hit", {"harness": "claude", "model": "sonnet", "effort": None}),
+        (
+            "rate_limit_hit",
+            {"harness": "claude", "profile": None, "model": "sonnet", "effort": None},
+        ),
         ("known_limited", None),
     ]
 
@@ -251,7 +254,7 @@ async def test_a_limit_hit_on_one_item_is_skipped_by_another_until_reset(
     (skip,) = _fallbacks(evts)
     assert skip["reason"] == "known_limited"
     assert skip["resets_at_iso"] == _iso(SOON)
-    assert skip["from"] == {"harness": "claude", "model": "opus", "effort": None}
+    assert skip["from"] == {"harness": "claude", "profile": None, "model": "opus", "effort": None}
     assert skip["to"]["model"] == "sonnet"
     assert skip["session_id"] == sessions[0]["id"]
 
@@ -353,8 +356,8 @@ async def test_an_unavailable_candidate_falls_back_to_the_next(
     (skip,) = _fallbacks(evts)
     assert skip["reason"] == "unavailable"
     assert why in skip["detail"], skip["detail"]
-    assert skip["from"] == {"harness": "primary", "model": "opus", "effort": None}
-    assert skip["to"] == {"harness": "claude", "model": "opus", "effort": None}
+    assert skip["from"] == {"harness": "primary", "profile": None, "model": "opus", "effort": None}
+    assert skip["to"] == {"harness": "claude", "profile": None, "model": "opus", "effort": None}
 
 
 async def test_every_candidate_unavailable_stops_for_a_human_naming_each(
@@ -373,7 +376,7 @@ async def test_every_candidate_unavailable_stops_for_a_human_naming_each(
     assert "off / opus: profile 'off' is disabled" in log
     assert "gone / opus:" in log and "defines no such profile" in log
     assert [(f["reason"], f["to"]) for f in _fallbacks(evts)] == [
-        ("unavailable", {"harness": "gone", "model": "opus", "effort": None}),
+        ("unavailable", {"harness": "gone", "profile": None, "model": "opus", "effort": None}),
         ("unavailable", None),
     ]
 

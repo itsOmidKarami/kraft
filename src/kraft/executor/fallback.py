@@ -31,18 +31,38 @@ LIMITED_NOTE = (
 )
 
 
-def candidates(task: AgentTask) -> list[AgentTask]:
-    """The task's own launch, then one per `fallback:` entry, in order. An
-    entry keeps whatever it omits from the task; its own list is dropped, so
-    lists never chain."""
-    out = [task]
-    for entry in task.fallback or ():
-        update: dict = {"fallback": None}
-        for field in ("harness", "model", "effort"):
-            if getattr(entry, field) is not None:
-                update[field] = getattr(entry, field)
-        out.append(task.model_copy(update=update))
-    return out
+def fallback_list(task: AgentTask, table=None) -> tuple[list, str | None]:
+    """The entries that apply to `task`, and where they come from: its own
+    `fallback:` when set (`[]` is none, overriding a profile's), else its
+    agent profile's in `table` (a live `HarnessProfileTable`), else none."""
+    if task.fallback is not None:
+        return list(task.fallback), "the task's list"
+    profile = table.agent_profiles.get(task.profile) if table and task.profile else None
+    if profile is not None and profile.fallback:
+        return list(profile.fallback), f"profile {task.profile!r}'s list"
+    return [], None
+
+
+def apply(task: AgentTask, entry) -> AgentTask:
+    """`task` launched as `entry` says. The entry's route replaces the task's
+    whole when either is a profile; two field routes merge per field. Its
+    list is dropped, so lists never chain."""
+    update: dict = {"fallback": None}
+    if entry.harness is not None:
+        update["harness"] = entry.harness
+    if entry.profile is not None:
+        update |= {"profile": entry.profile, "model": None, "effort": None}
+    elif entry.model is not None or entry.effort is not None:
+        if task.profile is not None:
+            update |= {"profile": None, "model": entry.model, "effort": entry.effort}
+        else:
+            update |= {k: getattr(entry, k) for k in ("model", "effort") if getattr(entry, k)}
+    return task.model_copy(update=update)
+
+
+def candidates(task: AgentTask, table=None) -> list[AgentTask]:
+    """The task's own launch, then one per entry of its list, in order."""
+    return [task] + [apply(task, e) for e in fallback_list(task, table)[0]]
 
 
 class Unavailable(Exception):
@@ -83,6 +103,7 @@ def describe(task: AgentTask, inv=None) -> dict:
     else as the task spells it (a candidate that never resolved)."""
     return {
         "harness": task.harness,
+        "profile": task.profile,
         "model": inv.model if inv is not None else task.model,
         "effort": inv.effort if inv is not None else task.effort,
     }

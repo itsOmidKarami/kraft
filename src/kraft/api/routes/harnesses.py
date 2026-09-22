@@ -59,34 +59,37 @@ def _problems(
         except HarnessUnavailable as exc:
             problems[chain, task_path] = f"{where}: {exc}"
             continue
-        if task.profile is not None:
-            if why := table.pairing_problem(task.profile, profile, providers):
-                problems[chain, task_path] = f"chain {chain!r} task {task_path!r}: {why}"
-            continue
-        for option in ("model", "effort"):
-            value = getattr(task, option)
-            if value is not None and not providers[profile.provider].value_ok(option, value):
-                problems[chain, task_path] = (
-                    f"{where}: provider {profile.provider!r} takes no {option} {value!r}"
-                )
-        # Each `fallback:` entry must pair with its harness too. A disabled one
-        # is not a pairing problem: the launch skips it (`executor.fallback`).
-        for n, cand in enumerate(fallback.candidates(task)[1:]):
-            at = f"chain {chain!r} task {task_path!r}: fallback entry {n} (the task's list)"
-            entry = profiles.get(cand.harness)
-            if entry is None:
-                problems[chain, f"{task_path} fallback[{n}]"] = (
-                    f"{at}: harness {cand.harness!r} is not in {path}"
-                )
-                continue
-            for option in ("model", "effort"):
-                value = getattr(cand, option)
-                if value is not None and not providers[entry.provider].value_ok(option, value):
-                    problems[chain, f"{task_path} fallback[{n}]"] = (
-                        f"{at}: provider {entry.provider!r} (harness {cand.harness!r}) "
-                        f"takes no {option} {value!r}"
-                    )
+        if why := _route_problem(task, profile, table, providers):
+            problems[chain, task_path] = f"chain {chain!r} task {task_path!r}: {why}"
+        # Each fallback entry must pair with its harness too, from the task's
+        # own list or its profile's. A disabled one is not a pairing problem:
+        # the launch skips it (`executor.fallback`).
+        entries, source = fallback.fallback_list(task, table)
+        for n, entry in enumerate(entries):
+            cand = fallback.apply(task, entry)
+            at = f"chain {chain!r} task {task_path!r}: fallback entry {n} ({source})"
+            harness = table.profiles.get(cand.harness)
+            if harness is None:
+                why = f"harness {cand.harness!r} is not in {path}"
+            else:
+                why = _route_problem(cand, harness, table, providers)
+            if why:
+                problems[chain, f"{task_path} fallback[{n}]"] = f"{at}: {why}"
     return problems
+
+
+def _route_problem(task: AgentTask, harness, table: HarnessProfileTable, providers) -> str | None:
+    """Why `task`'s route (its agent profile, or its own model/effort) cannot
+    run on `harness`, or None."""
+    if task.profile is not None:
+        return table.pairing_problem(task.profile, harness, providers)
+    for option in ("model", "effort"):
+        value = getattr(task, option)
+        if value is not None and not providers[harness.provider].value_ok(option, value):
+            return (
+                f"harness {harness.id!r}: provider {harness.provider!r} takes no {option} {value!r}"
+            )
+    return None
 
 
 def _task_harness(library: TemplateLibrary, name: str) -> str | None:
@@ -131,6 +134,21 @@ def _agent_profiles_view(table, library, selections, path, providers) -> list[di
                 problems[c, tp]
                 for c, tp, t in selections
                 if t.profile == p.id and (c, tp) in problems
+            ],
+            # Its default fallback list, each entry with the pairing problems
+            # of the tasks that take it (Kraft-0a3h8).
+            "fallback": [
+                {
+                    **entry.model_dump(exclude_none=True),
+                    "problems": [
+                        problems[c, f"{tp} fallback[{n}]"]
+                        for c, tp, t in selections
+                        if t.profile == p.id
+                        and t.fallback is None
+                        and (c, f"{tp} fallback[{n}]") in problems
+                    ],
+                }
+                for n, entry in enumerate(p.fallback)
             ],
         }
         for p in table.agent_profiles.values()

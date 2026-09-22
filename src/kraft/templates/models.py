@@ -57,7 +57,7 @@ from kraft.policy import (
     WorkItemPolicy,
     deprecated,
 )
-from kraft.templates.environment import Identifier, WorkItemTarget
+from kraft.templates.environment import FallbackEntry, Identifier, WorkItemTarget
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
@@ -397,29 +397,6 @@ class BuiltinTask(TaskBase):
     kind: Literal[TaskKind.BUILTIN]
     ref: Annotated[BuiltinAction, _LOOSE]
     execution: Annotated[ExecutionMode, _LOOSE] = ExecutionMode.SEQUENTIAL
-
-
-class FallbackEntry(BaseModel):
-    """One entry of an agent task's `fallback:` list: where its launch goes
-    next when the one before it is rate-limited or unavailable
-    (`rate-limited-launch-falls-back-to-next-candidate`). Whatever it omits is
-    kept from the task's own launch; the item's and the node's overrides are
-    not (`executor.fallback`)."""
-
-    model_config = _CONFIG
-
-    harness: Identifier | None = None
-    model: StrictStr | None = None
-    effort: StrictStr | None = None
-
-    @model_validator(mode="after")
-    def _names_something(self) -> FallbackEntry:
-        if self.harness is None and self.model is None and self.effort is None:
-            raise ValueError(
-                "a fallback entry names a harness, a model or an effort: an empty one "
-                "would relaunch the same thing"
-            )
-        return self
 
 
 class AgentTask(TaskBase):
