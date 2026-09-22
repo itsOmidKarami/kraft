@@ -19,7 +19,7 @@ import yaml
 from support.harness import make_repo_with_submodule, v1_chain, v1_walk
 from support.workspace import workspace_target
 
-from kraft import client, config, doctor, events, store
+from kraft import client, config, doctor, events, executor, store
 from kraft.executor import gates, stops
 from kraft.executor.context import LaunchContext
 from kraft.policy import (
@@ -167,6 +167,23 @@ def test_materializing_a_sandboxed_chain_onto_submodule_mounts_is_refused():
     assert chain.materialize(
         target=v1_chain(_NODES, repo="/r").target, effective_policy=_base_policy()
     ).policy.sandbox == SandboxPolicy(**SANDBOX)
+
+
+async def test_intake_refuses_a_task_sandbox_over_submodule_mounts(database, run_dirs):
+    """`executor.intake` is every filing door's (HTTP, MCP, a trigger); a
+    sandbox a task sets is refused before anything is written."""
+    task = {**_NODES[0]["tasks"][0], "policy": {"sandbox": SANDBOX}}
+    chain = v1_chain([{**_NODES[0], "tasks": [task]}], repo="/r").chain
+    with pytest.raises(PolicyError, match="workspace 'ws': the chain sets a sandbox"):
+        await executor.intake(
+            database,
+            run_dirs,
+            title="t",
+            repo="/r",
+            chain=chain,
+            target=workspace_target({"a": "libs/a"}),
+        )
+    assert database.read(lambda c: c.execute("SELECT id FROM work_items").fetchall()) == []
 
 
 def test_a_retry_that_adds_a_sandbox_to_a_workspace_task_is_refused():
