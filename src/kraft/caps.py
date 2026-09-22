@@ -48,12 +48,20 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from kraft import events, store
 from kraft import usage as _usage
 from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
 
 logger = logging.getLogger(__name__)
+
+#: Shared by every `Breach` shape: an unknown or another scope's key is
+#: refused at construction, not silently dropped (pydantic's default is to
+#: ignore extras) -- the thing this union exists to make impossible.
+_BREACH_CONFIG = ConfigDict(extra="forbid")
 
 #: A task's status when a time cap stopped it or refused its launch. The
 #: session row exits `capped_out` (no status migration); `REACHED` names it.
@@ -364,7 +372,60 @@ def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None
     return best if best is not None and best.remaining_s <= 0 else None
 
 
-def budget_breach(conn, row, path: str) -> dict | None:
+class TokenBreach(BaseModel):
+    """A `token_budget` cap reached at `path` (`""` for the work item)."""
+
+    model_config = _BREACH_CONFIG
+
+    scope: Literal["tokens"]
+    path: str
+    spent_tokens: int
+    cap_tokens: int
+
+
+class UsdBreach(BaseModel):
+    """A `budget_usd` cap reached at `path`, or refused for unknown spend."""
+
+    model_config = _BREACH_CONFIG
+
+    scope: Literal["usd"]
+    path: str
+    spent_usd: float
+    cap_usd: float
+    unknown_launches: int
+
+
+class WorkItemBreach(BaseModel):
+    """The instance-wide `work_item_usd` cap reached (`executor.stops`)."""
+
+    model_config = _BREACH_CONFIG
+
+    scope: Literal["work_item"]
+    spent_usd: float
+    cap_usd: float
+
+
+class DailyBreach(BaseModel):
+    """The instance-wide `daily_usd` cap reached (`executor.stops`)."""
+
+    model_config = _BREACH_CONFIG
+
+    scope: Literal["daily"]
+    spent_usd: float
+    cap_usd: float
+
+
+#: The four shapes a budget breach can take, tagged on `scope` so a reader
+#: can no longer reach for a key another scope's breach does not carry
+#: (Kraft-5d510.11): each branch of `executor.stops.budget_reason` narrows to
+#: one of these types instead of bare-string-branching on `breach["scope"]`.
+Breach = Annotated[
+    TokenBreach | UsdBreach | WorkItemBreach | DailyBreach,
+    Field(discriminator="scope"),
+]
+
+
+def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
     """The first spend cap already reached over a launch at `path` (a task's,
     or a node's for its escalation turn), broadest scope first, or None
     (Ruling 195). A scope's spend is what the launches inside it have spent,
@@ -422,12 +483,9 @@ def budget_breach(conn, row, path: str) -> dict | None:
                 # Every kind, cache reads and writes included (Decision 18).
                 spent = sum(_usage.spent(s) for s in under)
                 if spent >= cap:
-                    return {
-                        "scope": "tokens",
-                        "path": level,
-                        "spent_tokens": spent,
-                        "cap_tokens": cap,
-                    }
+                    return TokenBreach(
+                        scope="tokens", path=level, spent_tokens=spent, cap_tokens=cap
+                    )
                 continue
             unknown = sum(
                 1
@@ -438,13 +496,13 @@ def budget_breach(conn, row, path: str) -> dict | None:
             )
             spent = sum(s["cost_usd"] or 0.0 for s in under)
             if unknown or spent >= cap:
-                return {
-                    "scope": "usd",
-                    "path": level,
-                    "spent_usd": spent,
-                    "cap_usd": float(cap),
-                    "unknown_launches": unknown,
-                }
+                return UsdBreach(
+                    scope="usd",
+                    path=level,
+                    spent_usd=spent,
+                    cap_usd=float(cap),
+                    unknown_launches=unknown,
+                )
     return None
 
 
