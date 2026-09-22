@@ -605,11 +605,12 @@ def _restricted(
     the listed ones (`allowed_tools`) is not that. The harness's own tool
     restriction removes the unlisted built-ins, and its `under_allowlist` mode
     sends every other ask to the permission gate instead of approving it. A
-    harness missing either half, or a launch that chose a mode of its own, is
+    harness missing either half (no `restrict_tools` is refused with every
+    other undeclared option), or a launch that chose a mode of its own, is
     refused rather than run with the bound unenforced."""
     cap = h.capabilities.get("permission_mode")
     asking = cap.under_allowlist if cap is not None else None
-    if not h.supports("restrict_tools") or (cap is not None and asking is None):
+    if cap is not None and asking is None:
         raise LaunchRefused(
             f"harness {harness!r} ({h.path}) cannot hold an agent to a tool list, and this "
             f"launch's policy sets allowed_tools={list(allowed)!r}"
