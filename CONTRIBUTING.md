@@ -61,6 +61,11 @@ is the declaration that this change ships nothing.
 Nothing checks that the declared impact matches the diff. The label is a claim by
 its author; review is what tests it.
 
+A pull request that ships something adds its line to `CHANGELOG.md`, under a
+`## X.Y.Z` heading for the version it will become. The release workflow
+publishes that section as the release notes, and falls back to GitHub's
+generated notes when there isn't one.
+
 **Pull requests from forks are not asked for a label** — only people with write
 access can apply one. A maintainer labels the pull request before merging. An
 unlabelled merge reads as `release::none` and ships nothing.

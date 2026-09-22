@@ -140,7 +140,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
+          # The notes are CHANGELOG.md's `## X.Y.Z` section when it has one:
+          # a release PR squashes many PRs into one commit, so --generate-notes
+          # would list only that one PR. Without a section, fall back to it.
+          awk -v h="## ${TAG#v}" '$0==h{f=1;next} f&&/^## /{exit} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
+          fi
 
       - name: publish to PyPI
         if: steps.impact.outputs.tag != ''
