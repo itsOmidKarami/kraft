@@ -266,6 +266,53 @@ async def test_the_fix_loop_counts_under_the_bounds_its_node_policy_resolves(ite
     assert (counter["cap_attempts"], counter["cap_wall_s"]) == (1, 420)
 
 
+async def _set_item_policy(it, **override):
+    item = _policy.WorkItemPolicy.model_validate(override)
+    await it.database.write(lambda c: store.set_policy_override(c, it.id, item))
+
+
+async def test_an_items_own_node_cap_binds_that_nodes_fix_loop(item_on, script):
+    """Kraft-ab1bh: a work item's cap for one node wins over the loop's own
+    `max_attempts`, the way an operator's per-item value always has. Set
+    after the caller read the row -- a PATCH while the item ran -- it still
+    binds the node entered next."""
+    script.real = {"check"}
+    check = {"id": "check", "kind": "subprocess", "command": "false"}
+    fix = {"id": "fix", "kind": "subprocess", "command": "true"}
+    it = await item_on(_node(check, fix_loop={"tasks": [fix], "max_attempts": 2}))
+    stale = it.row()
+    await _set_item_policy(it, paths={"implementation": {"max_attempts": 4, "timeout_minutes": 9}})
+
+    await walk.walk_node(
+        it.database,
+        it.run_dirs,
+        it.id,
+        it.chain.chain.nodes[0],
+        stale,
+        it.repo,
+        policy=_policy.Policy(loops={}, default=_policy.Cap(9, 3600)),
+        launch=NO_SETUP,
+    )
+
+    counter = it.database.read(lambda c: store.read_counter(c, it.id, "implementation.fix_loop"))
+    assert (counter["cap_attempts"], counter["cap_wall_s"]) == (4, 540)
+
+
+async def test_a_node_entered_after_a_policy_change_launches_under_it(item_on, fake_agent):
+    """A PATCH to a running item applies from the next node it enters: every
+    task that node dispatches resolves its policy from the row as it is at
+    the node's entry, not as the run first read it."""
+    it = await item_on(_node(_agent()))
+    stale = it.row()
+    await _set_item_policy(it, allowed_tools=["Read"])
+
+    await walk.walk_node(
+        it.database, it.run_dirs, it.id, it.chain.chain.nodes[0], stale, it.repo, launch=NO_SETUP
+    )
+
+    assert _flag(fake_agent.argv()[0], "--allowedTools") == ["Read"]
+
+
 # -- a gate's reviewer sits in its gate's scope ------------------------------------
 
 

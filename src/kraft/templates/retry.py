@@ -131,7 +131,8 @@ def validate_retry_override(
         ) from exc
     resolved = ResolvedChain.from_chain(patched, steering=chain.chain.steering)
     try:
-        resolved.check_scopes(chain.policy)
+        # The item's own layer is part of the bounds (Kraft-ab1bh).
+        resolved.check_scopes(chain.policy, chain.item_policy)
     except PolicyError as exc:
         field = (
             "task_config.harness"
@@ -146,6 +147,7 @@ def validate_retry_override(
         target=chain.target,
         policy=chain.policy,
         repository_policies=chain.repository_policies,
+        item_policy=chain.item_policy,
     )
     # A retry is a door onto a new snapshot too: a `sandbox` it adds to a
     # workspace item's task is refused as intake would refuse it (Kraft-dshto).

@@ -194,7 +194,34 @@ def materialized_chain_of(row):
     raw = (row["run_chain"] if "run_chain" in keys else None) or (
         row["materialized_chain"] if "materialized_chain" in keys else None
     )
-    return MaterializedChain.from_json(raw) if raw else None
+    if not raw:
+        return None
+    chain = MaterializedChain.from_json(raw)
+    # The item's own override, layered on read (Kraft-ab1bh): a reader that
+    # selected only some columns gets the snapshot without it, which is only
+    # safe because no such reader asks the snapshot for policy.
+    override = policy_override_of(row)
+    return dataclasses.replace(chain, item_policy=override) if override is not None else chain
+
+
+def policy_override_of(row):
+    """`row["policy_override"]` as the `WorkItemPolicy` it holds, or None."""
+    from kraft.policy import WorkItemPolicy
+
+    raw = row["policy_override"] if "policy_override" in row.keys() else None
+    return WorkItemPolicy.model_validate_json(raw) if raw else None
+
+
+def set_policy_override(conn: sqlite3.Connection, work_item_id: str, override) -> None:
+    """Replace the item's own policy override with `override` (a validated
+    `WorkItemPolicy`, or None to clear it). The caller has already checked
+    it against the item's chain (`MaterializedChain.with_item_policy`)."""
+    stored = override.model_dump(exclude_none=True, exclude_defaults=True) if override else None
+    conn.execute(
+        "UPDATE work_items SET policy_override = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(stored) if stored else None, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "policy_override_changed", {"policy": stored or {}})
 
 
 def chain_node_ids(row) -> tuple[str, ...]:

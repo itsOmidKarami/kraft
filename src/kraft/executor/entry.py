@@ -102,6 +102,9 @@ async def intake(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: The item's own policy override (Kraft-ab1bh): checked against the
+    #: materialization below, with everything else pure, before a bead is filed.
+    policy_override: dict | None = None,
     source: str | None = None,
     bead_priority: int | None = None,
 ) -> str:
@@ -132,6 +135,7 @@ async def intake(
         skip_nodes=skip_nodes,
         repository_policies=repository_policies,
     )
+    item_policy = materialized.with_item_policy(policy_override).item_policy
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
     # here, before a bead is filed or an attachment copied -- a trigger used to
@@ -194,6 +198,11 @@ async def intake(
             budget_set=budget_set,
             budget_usd=budget_usd,
             node_overrides=node_overrides,
+            policy_override=(
+                item_policy.model_dump(exclude_none=True, exclude_defaults=True)
+                if item_policy is not None
+                else None
+            ),
             source=source,
             bead_priority=bead_priority,
         )

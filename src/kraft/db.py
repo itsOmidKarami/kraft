@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -87,6 +87,11 @@ CREATE TABLE work_items (
   -- chain_definition at read time -- nothing else reads chain_definition's
   -- node fields directly once this exists.
   node_overrides TEXT,
+  -- the item's own policy override (`policy.WorkItemPolicy`, Kraft-ab1bh):
+  -- JSON, item-wide fields plus `paths` keyed by canonical path. NULL means
+  -- none. Layered onto the snapshot when the row is read
+  -- (`store.materialized_chain_of`), never written into it.
+  policy_override TEXT,
   -- who and when a completed/abandoned item was archived (UI v2 · 03).
   -- NULL means "not archived". Never set on any other status -- archiving
   -- does not change `status` -- "Ended as" keeps reading completed/
@@ -751,6 +756,8 @@ FROM worker_sessions""",
         "CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)",
         *_RUN_FORK_TRIGGERS,
     ],
+    # A work item's own policy override (Kraft-ab1bh).
+    35: ["ALTER TABLE work_items ADD COLUMN policy_override TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

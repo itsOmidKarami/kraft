@@ -68,6 +68,10 @@ def create_work_item(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: The item's own policy override, already validated against its chain
+    #: (`MaterializedChain.with_item_policy`); stored as `set_policy_override`
+    #: stores it.
+    policy_override: dict | None = None,
     #: Set when this item was filed by the auto-intake poller, not a person
     #: (`intake.py::_start`). Recorded on `work_item_created` only -- never a
     #: column -- so "recent pickups" and "last picked up per repo" (design 31)
@@ -99,8 +103,8 @@ def create_work_item(
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
         "auto_gate, budget_set, budget_usd, node_overrides, "
-        "materialized_chain) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "materialized_chain, policy_override) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -123,6 +127,7 @@ def create_work_item(
             budget_usd,
             json.dumps(node_overrides) if node_overrides else None,
             materialized_chain,
+            json.dumps(policy_override) if policy_override else None,
         ),
     )
     payload = {"title": title, "repo": repo, "chain_template": chain_template}
