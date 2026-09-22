@@ -441,7 +441,13 @@ async def _enter_with_conflict(it, door, steer=None):
 
         target = ChainPath.parse(store.materialized_chain_of(it.row()), "rebase")
         return await executor.retry(
-            it.database, it.run_dirs, work_item_id=it.id, target=target, steer=steer, **kwargs
+            it.database,
+            it.run_dirs,
+            work_item_id=it.id,
+            target=target,
+            by_person=True,
+            steer=steer,
+            **kwargs,
         )
     return await executor.run_once(
         it.database, it.run_dirs, work_item_id=it.id, steer=steer, **kwargs

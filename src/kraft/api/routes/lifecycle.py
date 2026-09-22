@@ -623,6 +623,8 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     rather than run inline -- see the `work_item_self_retry_requested`
     branch below.
     """
+    from kraft.api.routes.gates import _decided_by  # local: it imports this module
+
     st = request.app.state
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] not in store.chain_node_ids(row):
@@ -847,6 +849,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                         st.run_dirs,
                         work_item_id=wid,
                         target=target,
+                        # Only a person's retry resets a cap counter
+                        # (Kraft-s7c04.22): not a worker's, not an MCP
+                        # assistant's.
+                        by_person=_decided_by(request) == "human",
                         override=override,
                         bd_cwd=deps.bd_cwd(),
                         policy=st.policy,

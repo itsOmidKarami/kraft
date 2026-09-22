@@ -285,8 +285,7 @@ def test_default_profile_reproduces_todays_command_line(run):
     - the permission prompt tool on every task: the decision and its event are
       the point (Kraft-oor).
     - no `--resume`/`--autocompact`: only an escalation turn resumes.
-    - no steering, artifact or method: the system prompt is byte-identical to
-      the bare context plus the safety rules.
+    - no steering, artifact or method: the prompt is the bare context and rules.
     """
     ctx = (
         agent._CTX.format(
@@ -297,6 +296,7 @@ def test_default_profile_reproduces_todays_command_line(run):
             node_id="implementation",
             hook_point="on.implementation.start",
             session_id="s1",
+            summary_name="s1",
         )
         + agent.SAFETY_RULES
     )

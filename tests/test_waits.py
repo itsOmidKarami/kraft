@@ -389,6 +389,7 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
         it.run_dirs,
         work_item_id=it.id,
         target=ChainPath.parse(store.materialized_chain_of(it.row()), "ci"),
+        by_person=True,
         launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
     )
 

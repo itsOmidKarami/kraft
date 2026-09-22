@@ -144,7 +144,7 @@ async def test_a_retry_after_a_revision_keeps_it(item_on, tmp_path):
     await _walk(it)
     await _approve(it)
 
-    await it.database.write(lambda c: store.fork_run(c, it.id, None))
+    await it.database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
 
     assert _ids(it.row()) == ["revise", GATE, "build", "checked"]
 
@@ -153,7 +153,7 @@ async def test_a_revision_after_a_retry_revises_the_forks_chain(item_on, tmp_pat
     """After a retry the item runs its fork's copy (`run_chain`); a revision
     that wrote the intake snapshot instead would be invisible to every reader."""
     it = await item_on(_chain(tmp_path, PROPOSAL))
-    await it.database.write(lambda c: store.fork_run(c, it.id, None))
+    await it.database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
     intake = it.row()["materialized_chain"]
     await _walk(it)
 
@@ -264,7 +264,7 @@ async def test_a_revision_computed_from_a_chain_that_has_since_changed_is_refuse
     it = await item_on(_chain(tmp_path, PROPOSAL))
     await _walk(it)
     stale = it.row()
-    await it.database.write(lambda c: store.fork_run(c, it.id, None))
+    await it.database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
     forked = it.row()["run_chain"]
 
     nodes, reason = await gates_route.apply_approval(_state(it), stale, GATE)

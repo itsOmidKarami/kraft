@@ -86,6 +86,26 @@ async def test_tick_relaunches_a_due_item(tmp_path, monkeypatch, repo, stub_app)
     assert ev["steer"] == rate_limit_retry.RESUME_PROMPT
 
 
+async def test_a_relaunch_resets_no_cap_counter(tmp_path, monkeypatch, repo, stub_app):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the poller's
+    relaunch is Kraft's own retry, so the stopped node's counters stand."""
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+    isolated_bd(tmp_path)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    keys = ("ci_infra:implementation", "implementation.escalation")
+    for key in keys:
+        await app.state.db.write(
+            lambda c, k=key: store.bump_counter(c, "w1", k, policy.Cap(9, 3600))
+        )
+
+    assert await rate_limit_retry.tick(app) == ["w1"]
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+
+    counted = app.state.db.read(lambda c: store.cap_counts(c, "w1"))
+    assert [counted.get(key) for key in keys] == [1, 1]
+
+
 async def test_tick_falls_back_to_needs_human_once_the_cap_breaches(
     tmp_path, monkeypatch, repo, stub_app
 ):

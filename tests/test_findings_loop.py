@@ -574,7 +574,9 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
                 lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
             )
             await database.write(
-                lambda c: store.retry_after_cap(c, wid, "review", "review.fix_loop", None)
+                lambda c: store.retry_after_cap(
+                    c, wid, "review", "review.fix_loop", None, by_person=True
+                )
             )
             await executor.run(
                 database,

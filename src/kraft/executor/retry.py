@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from kraft import events, store
 from kraft import policy as _policy
-from kraft import store
 from kraft.executor import walk
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.templates.forks import ChainPath
@@ -17,6 +17,7 @@ async def retry(
     *,
     work_item_id: str,
     target: ChainPath | None,
+    by_person: bool,
     override: RetryOverride | None = None,
     steer: str | None = None,
     seeded: bool = False,
@@ -39,6 +40,11 @@ async def retry(
     node's first step, the retried step, or the retried task's step -- whose
     completed siblings the walk keeps (`RunFork.preserved`).
 
+    `by_person` is whether a person asked for this retry: only then are the
+    span's cap counters reset, and the reset is recorded as a
+    `cap_counters_reset` event naming each counter and the count it had
+    (`only-a-person-resets-a-cap-counter`, Kraft-s7c04.22).
+
     `conflict` is a rebase conflict the caller hit refreshing the worktree:
     the fork's starting node's `on_conflict` handler takes it (`walk.run_once`).
     """
@@ -50,16 +56,23 @@ async def retry(
     key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
 
     def _record(c):
+        before = store.cap_counts(c, work_item_id)
         store.retry_after_cap(
             c,
             work_item_id,
             node.id,
             key,
             steer,
+            by_person=by_person,
             escalated=escalated,
             seeded=seeded,
         )
-        return store.fork_run(c, work_item_id, target, override)
+        fork = store.fork_run(c, work_item_id, target, override, by_person=by_person)
+        if by_person:
+            left = store.cap_counts(c, work_item_id)
+            reset = {k: n for k, n in before.items() if k not in left}
+            events.append(c, work_item_id, "cap_counters_reset", {"by": "human", "counters": reset})
+        return fork
 
     fork = await db.write(_record)
     start_index, start_step = fork.start

@@ -80,11 +80,12 @@ async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, 
     return status if status == "needs_context" else "failed"
 
 
-def result_path_for(run_dirs, session_id: str) -> Path:
+def result_path_for(run_dirs, name: str) -> Path:
     """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
-    caller that needs to predict it ahead of dispatch (`escalate.dispatch`'s
-    resumed-turn note) must use, rather than reimplementing it."""
-    return run_dirs.results / f"{session_id}.json"
+    caller that needs to predict it ahead of dispatch must use, rather than
+    reimplementing it. `name` is the session id, or an escalation thread's
+    `escalate.thread_files` name."""
+    return run_dirs.results / f"{name}.json"
 
 
 def _resolve_result_file(path: Path) -> str | None:
@@ -467,9 +468,13 @@ async def run_task(
     #: deadline the process group, and a sandbox's container, is killed and
     #: the session exits `capped_out` with `caps.REACHED` naming the scope.
     time_cap: caps.Deadline | None = None,
+    #: The name the result file (and its sidecars) goes under, when not the
+    #: session's own: an escalation thread's, shared by its turns
+    #: (`escalate.thread_files`, Kraft-s7c04.54). The log stays per session.
+    files: str | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = result_path_for(run_dirs, session_id)
+    result_path = result_path_for(run_dirs, files or session_id)
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
     exit_path = result_path.with_suffix(".exit")

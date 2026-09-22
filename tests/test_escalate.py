@@ -188,63 +188,6 @@ async def test_dispatch_resumes_an_existing_thread(monkeypatch, database, run_di
     assert seen["resume_session_id"] == "cli-existing"
 
 
-async def test_dispatch_resumed_turn_restates_this_turns_result_and_summary_paths(
-    monkeypatch, database, run_dirs
-):
-    """Kraft-s7c04.21: a `--resume`d conversation carries forward its own
-    memory of an earlier turn's literal result/summary path. The prompt for
-    turn > 1 must spell out *this* turn's own paths, or a model that trusts
-    its memory over the fresh instruction writes to the wrong turn's file
-    and gets recorded `failed` despite finishing cleanly."""
-    seen = {}
-
-    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
-        seen["session_id"] = session_id
-        seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("")
-        return "done"
-
-    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
-
-    wid = "w1"
-    await _seed_needs_human(database, run_dirs, wid)
-    await database.write(lambda c: store.set_escalation_session(c, wid, "cli-existing"))
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-    await escalate.dispatch(
-        database, run_dirs, work_item_id=wid, message="try again", launch=launch
-    )
-    session_id = seen["session_id"]
-    instruction = seen["task_instruction"]
-    assert f"results/{session_id}.json" in instruction
-    assert f".engineering/sessions/{session_id}.md" in instruction
-    assert "NEW, not the ones from earlier in this conversation" in instruction
-
-
-async def test_dispatch_first_turn_has_no_resume_note(monkeypatch, database, run_dirs):
-    """Turn 1 has no earlier turn to be confused with, so the restatement
-    the resumed-turn test above checks for must not appear here."""
-    seen = {}
-
-    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
-        seen["task_instruction"] = task_instruction
-        log_path = run_dirs.logs / f"{session_id}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("")
-        return "done"
-
-    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
-
-    wid = "w1"
-    await _seed_needs_human(database, run_dirs, wid)
-    launch = executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None)
-    await escalate.dispatch(
-        database, run_dirs, work_item_id=wid, message="first look", launch=launch
-    )
-    assert "NEW, not the ones from earlier in this conversation" not in seen["task_instruction"]
-
-
 async def test_dispatch_default_continues_the_latest_thread(monkeypatch, database, run_dirs):
     seen = {}
 

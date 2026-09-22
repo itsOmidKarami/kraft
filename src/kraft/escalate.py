@@ -11,6 +11,7 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
+import shutil
 import uuid
 
 from kraft import caps, events, executor, store
@@ -20,6 +21,8 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, TaskKind
+
+_SESSIONS = ".engineering/sessions"
 
 #: Prepended to every turn's prompt, regenerated fresh each call rather than
 #: diffed against a prior turn -- the live state is always correct to hand
@@ -64,26 +67,20 @@ _PAUSED_ACTION = (
     "clearly whether you think it's ready to resume, and let a human run "
     "`kraft item resume` themselves.\n"
 )
-#: `{resume_note}` on a turn > 1 in a thread (`resume_session_id` set) --
-#: b5afe84c: a `--resume`d conversation carries forward its own memory of the
-#: literal path an earlier turn wrote its result/summary to, and a model
-#: that recalls "I know where to write" from that memory instead of
-#: re-reading this turn's fresh instruction writes to the wrong turn's file,
-#: which `require_result_file` then downgrades to `failed` despite the turn
-#: having finished cleanly. Empty on turn 1, where no earlier-turn memory
-#: exists to be confused with.
-_RESUME_NOTE = (
-    "This turn's own files are NEW, not the ones from earlier in this "
-    "conversation -- if you recall writing to a path from an earlier turn, "
-    "that path belongs to that turn, not this one:\n"
-    "  - Result file: {result_path}\n"
-    "  - Session summary: {summary_path}\n"
-    "Write to these exact paths for this turn, even if they differ from "
-    "what you wrote before.\n"
+#: After `{action_line}` on every turn, manual or automatic, needs_human or
+#: paused (Ruling 209, Kraft-s7c04.67): nothing pre-approves these verbs for
+#: an escalation agent, so a person's own classifier would refuse the call,
+#: and the turn hands the person the one command instead of trying.
+_HANDS_OFF = (
+    "You are not allowed to skip or abandon this work item yourself, for "
+    "safety. If a person asks you to skip it, or you conclude skipping is "
+    "right, say plainly that you may not take that action yourself, and give "
+    "them the one command that does: `kraft item skip {work_item_id}` (or the "
+    "Skip action on the board). Abandoning is theirs as well: `kraft item "
+    "abandon --yes {work_item_id}`.\n"
 )
 _STATE = (
     "{opening}"
-    "{resume_note}"
     "Status: {status}\n"
     "Current node: {node_id}\n"
     "{reason_line}"
@@ -91,6 +88,7 @@ _STATE = (
     "{description_line}"
     "\n"
     "{action_line}"
+    "{hands_off}"
     "\n"
     "The human's message:\n{message}"
 )
@@ -347,23 +345,15 @@ async def dispatch(
     session_id = uuid.uuid4().hex
     worktree = run_dirs.worktrees / work_item_id
 
-    resume_note = (
-        _RESUME_NOTE.format(
-            result_path=result_path_for(run_dirs, session_id),
-            summary_path=f".engineering/sessions/{session_id}.md",
-        )
-        if resume_session_id
-        else ""
-    )
     task_instruction = _STATE.format(
         opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
-        resume_note=resume_note,
         status=row["status"],
         node_id=row["current_node_id"],
         reason_line=_reason_line(_last_stop(db, work_item_id, evts), row["status"]),
         judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
+        hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
         message=message,
     )
 
@@ -454,6 +444,8 @@ async def dispatch(
             )
         time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
     await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
+    files = thread_files(work_item_id, thread)
+    await _archive_last_turn(db, run_dirs, worktree, files)
     try:
         status = await _agent.run_agent_task(
             db,
@@ -480,6 +472,7 @@ async def dispatch(
             identify_as_worker=False,
             repo_entry=launch.repo_entry,
             thread=thread,
+            files=files,
             time_cap=time_cap,
         )
     except _agent.LaunchRefused as exc:
@@ -491,6 +484,58 @@ async def dispatch(
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))
     return status
+
+
+def thread_files(work_item_id: str, thread: int) -> str:
+    """The name every turn of one escalation thread writes its result file
+    and session summary under (Kraft-s7c04.54,
+    `a-resumed-escalation-turn-writes-where-it-remembers`).
+
+    Per thread, not per turn: a `--resume`d conversation remembers the
+    literal paths an earlier turn wrote to, and a model that trusts that
+    memory over the fresh instruction wrote to the earlier turn's file
+    (b5afe84c), which `require_result_file` then recorded as `failed`. With
+    one name per thread, the path it remembers is this turn's path.
+    """
+    return f"escalation-{work_item_id}-{thread}"
+
+
+async def _archive_last_turn(db, run_dirs, worktree, files: str) -> None:
+    """Give the thread's last turn its own names back before the next turn
+    writes, so this turn starts with no result file to be mistaken for its
+    own and the last turn's stays readable from its row.
+
+    The result family (`.json` and its `.exit`/`.cid` sidecars) moves to the
+    last turn's session id and its row follows. The summary is copied, not
+    moved: it sits in the worktree, where a repo that does not ignore
+    `.engineering/` may track it.
+    """
+    shared = result_path_for(run_dirs, files)
+    summary = f"{_SESSIONS}/{files}.md"
+    last = db.read(
+        lambda c: c.execute(
+            "SELECT id, session_summary_ref FROM worker_sessions WHERE result_path = ?",
+            (str(shared),),
+        ).fetchone()
+    )
+    if last is not None:
+        own = result_path_for(run_dirs, last["id"])
+        for suffix in (".json", ".exit", ".cid"):
+            if shared.with_suffix(suffix).exists():
+                shared.with_suffix(suffix).replace(own.with_suffix(suffix))
+        ref = last["session_summary_ref"]
+        if ref == summary and (worktree / summary).exists():
+            ref = f"{_SESSIONS}/{last['id']}.md"
+            shutil.copyfile(worktree / summary, worktree / ref)
+        await db.write(
+            lambda c: c.execute(
+                "UPDATE worker_sessions SET result_path = ?, session_summary_ref = ? WHERE id = ?",
+                (str(own), ref, last["id"]),
+            )
+        )
+    # A turn that never got a row (refused before launch) owns nothing here.
+    for suffix in (".json", ".exit", ".cid"):
+        shared.with_suffix(suffix).unlink(missing_ok=True)
 
 
 def _node_policy(row) -> _policy.InstancePolicy | None:

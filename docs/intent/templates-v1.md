@@ -208,6 +208,23 @@ that session's original harness and runtime options. Changing them SHALL
 require a new escalation session.
 enforced-by: tests/test_escalate.py::test_a_resumed_escalation_keeps_its_original_runtime[resumed]
 
+## REQ a-resumed-escalation-turn-writes-where-it-remembers
+
+WHEN an escalation turn resumes a thread, the system SHALL give it the same
+result file and session summary paths every earlier turn of that thread had,
+SHALL start it with no result file left by an earlier turn, and SHALL keep each
+earlier turn's result and summary readable from that turn's own session row.
+enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
+origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b), Ruling 207: a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
+
+## REQ an-escalation-turn-hands-a-skip-to-the-person
+
+The system SHALL tell every escalation turn, manual or automatic, that it is
+not allowed to skip or abandon its work item itself, and SHALL give it the
+exact commands that do, for the person to run.
+enforced-by: tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[manual], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[automatic], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[paused]
+origin: src/kraft/escalate.py §_HANDS_OFF -- Ruling 209 (Kraft-s7c04.67): no verb is pre-approved for an escalation agent.
+
 ## REQ builtin-task-references-code-owned-actions
 
 A built-in task SHALL name its action through `ref`, and the system SHALL
@@ -392,6 +409,16 @@ Resuming a paused work item SHALL NOT spend a retry attempt: no fix-loop or
 gate reject-loop counter SHALL change because of the resume itself.
 enforced-by: tests/api/test_lifecycle.py::test_resume_does_not_consume_a_retry_attempt
 origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Task 11b fix round 1, Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
+
+## REQ only-a-person-resets-a-cap-counter
+
+WHEN a work item is retried, the system SHALL reset its fix-loop, gate
+reject-loop, CI-infra, stuck-escalation and base-change counters only if a
+person asked for the retry (not a Kraft worker, an MCP assistant, an
+escalation turn or the rate-limit relaunch), and SHALL record the counters it
+reset, with their counts, in a `cap_counters_reset` event.
+enforced-by: tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[person], tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[worker], tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[mcp-assistant], tests/executor/test_escalation.py::test_an_escalations_own_retry_resets_no_cap_counter, tests/test_rate_limit_retry.py::test_a_relaunch_resets_no_cap_counter, tests/store/test_forks.py::test_a_retry_no_person_asked_for_clears_no_counter, tests/store/test_counters.py::test_a_retry_no_person_asked_for_clears_no_counter, tests/skills/test_gate_review.py::test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop[agent], tests/skills/test_gate_review.py::test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop[person]
+origin: src/kraft/executor/retry.py -- Kraft-s7c04.22: an agent-initiated retry deleted the gate's reject-loop counter, so a cap meant to bound agents was one they could reset.
 
 ## REQ task-retry-reruns-that-task-and-later-work
 
@@ -1115,6 +1142,15 @@ the scope, and SHALL NOT be treated as a code failure: it SHALL spend no
 recovery or fix-loop attempt and SHALL NOT trigger stuck escalation.
 enforced-by: tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[task-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[step-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[node-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[chain-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[item-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[task-total_time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[node-total_time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[item-total_time_cap_minutes], tests/executor/test_time_caps.py::test_a_task_cap_under_a_larger_step_cap_stops_the_task_at_its_own_value, tests/executor/test_time_caps.py::test_a_launch_under_a_spent_cap_is_refused_and_nothing_runs, tests/executor/test_time_caps.py::test_the_kill_reaches_a_sandboxs_container, tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[pause], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[gate], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[wait], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[rate_limited], tests/executor/test_time_caps.py::test_the_wall_clock_leaves_out_only_a_manual_pause[pause-95], tests/executor/test_time_caps.py::test_the_wall_clock_leaves_out_only_a_manual_pause[gate-35], tests/executor/test_time_caps.py::test_a_cap_stop_spends_no_attempt_and_is_not_escalated, tests/executor/test_time_caps.py::test_a_parked_item_past_its_total_cap_is_stopped_for_a_human[waiting], tests/executor/test_time_caps.py::test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerable, tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[task-over-step-time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[step-over-node-total_time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[node-over-chain-time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_at_load[time_cap_minutes], tests/templates/test_time_caps.py::test_an_items_path_cap_above_the_one_it_lands_on_is_refused[path-over-its-own-total_time_cap_minutes], tests/templates/test_time_caps.py::test_a_scope_may_raise_a_cap_above_the_default_up_to_the_maximum[node-time_cap_minutes], tests/templates/test_time_caps.py::test_a_scope_past_the_maximum_is_refused_even_with_no_parent_cap[total_time_cap_minutes], tests/templates/test_time_caps.py::test_an_item_may_raise_its_own_cap_above_the_chains_up_to_the_maximum[time_cap_minutes], tests/templates/test_time_caps.py::test_a_retry_raising_a_cap_above_its_parents_is_refused_naming_both[time_cap_minutes], tests/templates/test_time_caps.py::test_a_retry_raising_a_cap_above_its_parents_is_refused_naming_both[total_time_cap_minutes], tests/executor/test_time_cap_launches.py::test_a_default_cap_leaves_a_longer_scope_its_own_and_binds_the_rest, tests/executor/test_time_cap_launches.py::test_raising_the_items_own_cap_unsticks_a_capped_item, tests/executor/test_time_cap_launches.py::test_a_gate_review_launches_under_its_gates_time_cap, tests/executor/test_time_cap_launches.py::test_only_an_automatic_escalation_turn_runs_under_its_nodes_time_cap[auto], tests/executor/test_time_cap_launches.py::test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline, tests/executor/test_time_cap_launches.py::test_the_poller_does_not_stop_an_item_that_moved_since_it_measured[status], tests/templates/test_time_caps.py::test_a_gate_timeout_past_its_total_cap_is_refused, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[wait-cap-raised], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[wait-cap-raised]
 origin: src/kraft/caps.py §at_launch -- Rulings 194, 195, 196 and 198 (a default is not a ceiling; an item may raise its own cap). Omid, 2026-09-22: "at any level that it's configured, it applies ... caps can[not] be configured to be more than a parent cap. So if a step has 10 mins, the task inside that step can't set it to 20 mins." The refusal is `ResolvedChain._check_caps` (src/kraft/templates/models.py), run by `check_scopes` at load, intake and PATCH; the ratchet is `InstancePolicy.apply_template_override`, and an item layer meets (`WorkItemPolicy.apply_to`). A wait's timeout became its task's total cap (Ruling 196), so `wait_timeout_minutes` is retired and still read.
+
+## REQ a-resumed-cli-session-is-counted-once
+
+WHEN a session resumes an earlier session's agent CLI session (a paused task
+resumed, or a later turn of an escalation thread), the system SHALL record for
+it only the tokens and cost it added to that CLI session's running totals,
+and SHALL record its cost as unknown when the earlier session's is unknown.
+enforced-by: tests/store/test_resumed_usage.py::test_a_resumed_session_records_only_what_it_spent_itself, tests/store/test_resumed_usage.py::test_a_resumed_escalation_turn_skips_a_refused_turn_between, tests/store/test_resumed_usage.py::test_an_unknown_earlier_cost_leaves_the_resumed_cost_unknown, tests/store/test_resumed_usage.py::test_a_new_cli_session_is_not_netted_against_an_earlier_one
+origin: src/kraft/store/sessions.py §_own_share -- Kraft-s7c04.62: the CLI's cost and modelUsage are cumulative per session id, so a resumed row repeated what the paused row already recorded and usage_rollup counted it twice.
 
 ## REQ scope-budgets-cap-their-own-spend
 

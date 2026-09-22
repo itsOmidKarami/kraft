@@ -349,6 +349,54 @@ def _rate_limit_claude(log_path: Path) -> dict | None:
     return None
 
 
+def _cumulative(log_path: Path, cli: str) -> Usage | None:
+    """What CLI session `cli` had spent by the end of this log: its last
+    result envelope's `modelUsage` tokens and `total_cost_usd`, both running
+    totals over every invocation of that session (`_combine`'s measurement).
+    None when the log has no result envelope for it."""
+    last = None
+    try:
+        with log_path.open() as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict) and obj.get("type") == "result":
+                    last = obj if obj.get("session_id") in (cli, None) else last
+    except OSError:
+        return None
+    own = from_envelope(last)
+    if own is None:
+        return None
+    tokens = _from_model_usage(last.get("modelUsage"), None) or own
+    return Usage(tokens.tokens_in, tokens.tokens_out, own.cost_usd, own.model)
+
+
+def net_of_earlier(own: Usage, log_path: Path, earlier_log: Path, cli: str) -> Usage:
+    """`own`, less what CLI session `cli` had already spent by the end of
+    `earlier_log`, a session this one resumed (Kraft-s7c04.62). Both logs'
+    envelopes report the session's running totals, so the difference is this
+    session's own spend. Unknown earlier spend makes this session's cost
+    unknown too, never the whole running total and never zero."""
+    mine, before = _cumulative(log_path, cli), _cumulative(earlier_log, cli)
+    if mine is None:
+        return own
+    if before is None:
+        return Usage(own.tokens_in, own.tokens_out, None, own.model)
+    cost = (
+        None
+        if mine.cost_usd is None or before.cost_usd is None
+        else max(mine.cost_usd - before.cost_usd, 0.0)
+    )
+    return Usage(
+        max(mine.tokens_in - before.tokens_in, 0),
+        max(mine.tokens_out - before.tokens_out, 0),
+        cost,
+        own.model,
+    )
+
+
 def _session_id_claude(log_path: Path) -> str | None:
     """The `claude` CLI's own session id, off the `system`/`init` line every
     `--output-format stream-json` run starts with -- the identity `--resume`
@@ -357,20 +405,26 @@ def _session_id_claude(log_path: Path) -> str | None:
     Scanned across every line rather than assumed to be the first, the same
     defensive shape `_rate_limit_claude` uses reading this same log: a line
     Kraft cannot parse yet must not crash a session that otherwise ran fine.
+    Read line by line and stopped at the first init: `store.sessions` asks
+    this of a work item's earlier logs at every session end (Kraft-s7c04.62).
     """
     try:
-        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
+        with log_path.open() as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(obj, dict)
+                    and obj.get("type") == "system"
+                    and obj.get("subtype") == "init"
+                ):
+                    sid = obj.get("session_id")
+                    if isinstance(sid, str) and sid:
+                        return sid
     except OSError:
         return None
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
-            sid = obj.get("session_id")
-            if isinstance(sid, str) and sid:
-                return sid
     return None
 
 

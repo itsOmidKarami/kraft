@@ -523,6 +523,31 @@ def test_retry_clears_the_ci_counter_for_the_current_node(client, repo):
     assert not _counter_exists(wid, "ci_infra:merge_request_feedback")
 
 
+@pytest.mark.parametrize(
+    ("headers", "by_person"),
+    [({}, True), ({"X-Kraft-Session-Id": "s-worker"}, False), ({"X-Kraft-Client": "mcp"}, False)],
+    ids=["person", "worker", "mcp-assistant"],
+)
+def test_only_a_persons_retry_resets_a_cap_counter(client, repo, headers, by_person):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the route asks
+    who is calling the way a gate decision does. A person's retry resets the
+    counter and records what it reset; a worker's or an MCP assistant's leaves
+    it standing and records no reset."""
+    wid = _post_default(client, repo)
+    _poll_events(client, wid, "gate_requested")
+    _force_node(wid, "merge_request_feedback", "needs_human")
+    _seed_counter(wid, "ci_infra:merge_request_feedback")
+
+    r = client.post(f"/api/work-items/{wid}/retry", json={}, headers=headers)
+
+    assert r.status_code == 200, r.text
+    evts = _poll_events(client, wid, "run_forked")
+    assert _counter_exists(wid, "ci_infra:merge_request_feedback") is not by_person
+    resets = [e["payload"] for e in evts if e["type"] == "cap_counters_reset"]
+    expected = {"by": "human", "counters": {"ci_infra:merge_request_feedback": 2}}
+    assert resets == ([expected] if by_person else [])
+
+
 def test_retry_with_no_steer_seeds_the_last_measurements_findings(client, repo):
     """Kraft-7sec, second half: a retry after a fix-loop cap breach with no
     explicit steer must seed the agent with the last measurement's unresolved

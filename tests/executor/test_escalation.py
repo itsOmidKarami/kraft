@@ -373,6 +373,29 @@ async def test_resume_after_escalation_threads_the_seeded_flag_onto_retry_after_
     assert it.events("work_item_retried")[0]["payload"]["seeded"] is seeded
 
 
+async def test_an_escalations_own_retry_resets_no_cap_counter(item_on, run_dirs, no_rebase_no_walk):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the retry an
+    escalation turn asked for on itself is an agent's, so the counters that
+    stopped the item stand and no reset is recorded."""
+    it = await _stuck(item_on)
+    await it.database.write(
+        lambda c: store.bump_counter(c, it.id, "ci_infra:implementation", _policy.Cap(9, 3600))
+    )
+    cursor = it.events()[-1]["seq"]
+    payload = _self_retry_event()
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", payload)
+    )
+
+    await gates_module.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor
+    )
+
+    assert it.events("run_forked"), "the retry did not happen"
+    assert it.database.read(lambda c: store.cap_counts(c, it.id)) == {"ci_infra:implementation": 1}
+    assert not it.events("cap_counters_reset")
+
+
 async def test_resume_after_escalation_stops_an_item_whose_node_left_the_chain(item_on, run_dirs):
     """The claim-then-return class in its fourth instance, and the one no review
     named. `resume_after_escalation` claims the item, writes `retry_after_cap`,

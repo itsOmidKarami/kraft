@@ -1037,6 +1037,8 @@ async def resume_after_escalation(
                 steer=steer,
                 seeded=seeded,
                 escalated=True,
+                # An agent asked for this one: the cap counters stand.
+                by_person=False,
                 bd_cwd=bd_cwd,
                 policy=policy,
                 launch=launch,

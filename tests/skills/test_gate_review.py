@@ -471,6 +471,36 @@ async def test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, datab
     assert count == 3  # attempts=2, so the third is the breach
 
 
+@pytest.mark.parametrize(("by_person", "count"), [(False, 4), (True, 3)], ids=["agent", "person"])
+async def test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop(
+    monkeypatch, database, run_dirs, by_person, count
+):
+    """Kraft-s7c04.22 (`only-a-person-resets-a-cap-counter`): a retry between
+    two runs of fixed verdicts does not buy the reviewer a fresh cycle unless a
+    person asked for it. The agent's retry breaches on its first fixed verdict
+    (the count goes on from 3); a person's starts a fresh one (1, 2, 3)."""
+    from kraft.templates.forks import ChainPath
+
+    await test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, database, run_dirs)
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["needs_human"]))
+
+    status = await executor.retry(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        target=ChainPath.parse(walk.chain_of(row), "human_review_approval"),
+        by_person=by_person,
+        policy=POLICY,
+        launch=executor.LaunchContext(repo_entry=None, steering_dir=None, skills_dir=None),
+        on_approve=_passthrough_approve,
+    )
+
+    assert status == "needs_human"
+    counted = database.read(lambda c: store.cap_counts(c, "w1"))
+    assert counted["human_review_approval_reject_loop"] == count
+
+
 async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dirs):
     """A review Kraft cannot pay for is not started, and the gate goes to a
     human rather than being cleared by nobody."""
