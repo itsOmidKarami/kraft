@@ -252,6 +252,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
         {n.id: n.auto_review for n in chain.nodes},
         deps.instance_policy(st).maxima,
     )
+    # Read before this item exists, so it cannot find itself. Warned, not
+    # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
+    # the usual reason to re-file, a revised spec, now has its own door.
+    duplicates = st.db.read(
+        lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
+    )
     try:
         wid = await executor.intake(
             st.db,
@@ -297,6 +303,13 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # noise in `kraft item create`'s kv block and in the API.
     warning = deps._bead_warning(st, wid)
     extra = {"bead_warning": warning} if warning else {}
+    if duplicates:
+        extra["duplicate_warning"] = (
+            "looks like open work item "
+            + "; ".join(f"{r['id']} ({r['status']}, {why})" for r, why in duplicates)
+            + ". To revise its spec or plan, use `kraft item set-attachments` on it "
+            "rather than filing again; abandon whichever of the two is not wanted"
+        )
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL

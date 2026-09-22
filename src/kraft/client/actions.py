@@ -87,8 +87,9 @@ async def create_work_item(
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
-    if body.get("bead_warning"):
-        result["bead_warning"] = body["bead_warning"]
+    for warning in ("bead_warning", "duplicate_warning"):
+        if body.get(warning):
+            result[warning] = body[warning]
     return result
 
 

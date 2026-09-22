@@ -40,6 +40,12 @@ IF an attachment's stored copy is missing when the worktree is prepared, THEN
 the system SHALL fail rather than run without it.
 enforced-by: tests/test_builtins.py::test_a_missing_attachment_source_fails_loudly
 
+## REQ intake-warns-of-an-open-duplicate
+WHEN a work item is filed with the same title as an open item in the same
+repository, or naming a bead an open item there already implements, the system
+SHALL file it and warn, naming that item.
+enforced-by: tests/api/test_duplicate_intake.py::test_filing_what_an_open_item_already_covers_is_filed_with_a_warning_naming_it[title], tests/api/test_duplicate_intake.py::test_filing_what_an_open_item_already_covers_is_filed_with_a_warning_naming_it[implements-beads], tests/api/test_duplicate_intake.py::test_no_warning_without_an_open_item_in_the_same_repo[abandoned], tests/api/test_duplicate_intake.py::test_no_warning_without_an_open_item_in_the_same_repo[another-repo], tests/api/test_duplicate_intake.py::test_the_warning_reaches_the_client_and_so_the_cli_and_mcp
+
 ## REQ worktree-preparation-pins-the-diff-base
 WHEN the system creates a work item's worktree, it SHALL record the source repo's
 current HEAD as that work item's `base_ref`.
