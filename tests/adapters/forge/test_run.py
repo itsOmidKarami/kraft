@@ -708,3 +708,27 @@ async def test_merge_rebases_a_conflict_away_before_calling_merge(run_forge, rep
     )
 
     assert fake.merged == [], "an unresolved conflict must never reach forge.merge"
+
+
+@pytest.mark.parametrize("handler", ["ci_poll", "merge"])
+async def test_a_conflict_is_rebased_onto_the_items_base_branch(
+    run_forge, item_on, repo, monkeypatch, handler
+):
+    """Kraft-v9gbi: the forced rebase a conflict gets replays onto the item's
+    base branch, the one its merge request targets."""
+    from kraft.templates.environment import WorkItemTarget
+
+    target = WorkItemTarget.for_repository("target", base_branch="release")
+    run_forge.item = await item_on(back_half(), repo=repo, target=target)
+    bases = []
+
+    async def forced(_worktree, _repo, _branch, base):
+        bases.append(base)
+
+    monkeypatch.setattr(forge.run._builtins, "mr_rebase_forced", forced)
+    fake = await _opened(
+        forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict"), repo
+    )
+
+    assert (await run_forge(fake, handler, "r1", repo=repo))[0] == "conflict"
+    assert bases == ["release"]

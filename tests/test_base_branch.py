@@ -194,3 +194,38 @@ async def test_an_escalations_self_retry_rebases_onto_the_items_base_branch(
     await gates.resume_after_escalation(it.database, run_dirs, work_item_id=it.id, cursor=cursor)
 
     assert bases == ["release"]
+
+
+async def test_the_merge_request_lists_the_commits_it_adds_to_its_base(
+    database, run_dirs, origin, monkeypatch
+):
+    """The description's commit list is the branch against its base: an item
+    on `release` does not claim `release`'s own commits as its work."""
+    from kraft.adapters import forge
+
+    repo, _other = origin
+    await _item_on(database, repo, "release")
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    (worktree / "work.txt").write_text("the item's work\n")
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-q", "-m", "the item's work")
+    fake = forge.FakeForge()
+    monkeypatch.setattr(forge.run, "resolve", lambda _name: fake)
+
+    await forge.run_task(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id="w1",
+        node_id="n",
+        hook_point="n.main.t",
+        handler="open_mr",
+        backend="fake",
+        repo=worktree,
+        orig_repo=repo,
+        branch=wtree.branch(database),
+        title="t",
+    )
+
+    assert "- the item's work" in fake.opened_bodies[1]
+    assert "release.txt" not in fake.opened_bodies[1]
