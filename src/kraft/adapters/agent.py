@@ -312,28 +312,29 @@ _PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
 
 def harness_profile(profile_id: str, harnesses: _harness.HarnessSet) -> HarnessProfile:
     """The enabled `harnesses.yaml` profile `profile_id` names, or
-    `HarnessUnavailable`.
-
-    Read from the same templates directory the app loads the library from
-    (`KRAFT_TEMPLATES_DIR`, else `$KRAFT_HOME/templates`) and on every call,
-    like `kraft.harness.load(None)`: an edit to the file reaches the next
-    launch. Never a fallback onto a provider of the same name -- a task selects
-    a profile, and a missing one stops for a human.
-    """
+    `HarnessUnavailable`. Read from the app's templates directory
+    (`KRAFT_TEMPLATES_DIR`, else `$KRAFT_HOME/templates`) on every call, so an
+    edit reaches the next launch. Never a fallback onto a provider of the same
+    name -- a task selects a profile, and a missing one stops for a human."""
     path = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "harnesses.yaml"
     try:
         profiles = HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid).profiles
     except TemplateEnvironmentError as exc:
         raise HarnessUnavailable(str(exc)) from exc
-    profile = profiles.get(profile_id)
+    return select_profile(profiles, profile_id, path)
+
+
+def select_profile(profiles: dict[str, HarnessProfile], pid: str, path: Path) -> HarnessProfile:
+    """`harness_profile` over a loaded table, which a save checks (Kraft-archr)."""
+    profile = profiles.get(pid)
     if profile is None:
         raise HarnessUnavailable(f"{path} defines no such profile; known are {sorted(profiles)}")
     if not profile.is_available():
-        raise HarnessUnavailable(f"profile {profile_id!r} is disabled in {path}")
+        raise HarnessUnavailable(f"profile {pid!r} is disabled in {path}")
     unapplied = sorted(set(profile.defaults) - set(_PROFILE_DEFAULTS))
     if unapplied:
         raise HarnessUnavailable(
-            f"profile {profile_id!r} sets defaults {unapplied}, which Kraft does not "
+            f"profile {pid!r} sets defaults {unapplied}, which Kraft does not "
             f"apply; only {list(_PROFILE_DEFAULTS)} are"
         )
     return profile

@@ -1226,3 +1226,21 @@ so that no chain id can shadow the library or an inspection route and none is
 reserved. The pre-1.0 flat `/templates/{id}` paths SHALL NOT remain as aliases.
 enforced-by: tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
 origin: src/kraft/api/routes/settings.py §get_template -- Ruling 204, before 1.0 so the break happens once.
+
+## REQ harness-api-lists-and-guards-profiles
+
+`GET /harnesses` SHALL list every `harnesses.yaml` profile with its provider,
+executable, enabled flag and defaults, and the library tasks and chains that
+select it; `GET /harnesses/providers` each provider package's capability
+surface. `PUT /harnesses/{id}` SHALL save one profile only through the loader's
+own parse, and SHALL refuse, writing nothing, a profile that would stop an agent
+task of a chain that resolves now from launching.
+enforced-by: tests/api/test_harnesses.py::test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it, tests/api/test_harnesses.py::test_providers_are_each_packages_capability_surface, tests/api/test_harnesses.py::test_a_save_the_loader_refuses_is_refused_and_writes_nothing[bad-value], tests/api/test_harnesses.py::test_a_save_that_stops_a_chain_launching_is_refused[disabled], tests/api/test_harnesses.py::test_a_provider_change_the_selecting_task_cannot_run_on_is_refused, tests/api/test_harnesses.py::test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save, tests/api/test_harnesses.py::test_a_profile_save_is_written_and_read_back
+origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.from_mapping` is `from_yaml`'s parse, and `agent.select_profile` is the rule a launch applies. Kraft-archr, Ruling 206.
+
+## REQ harness-cli-lists-profiles
+
+`kraft admin harnesses` SHALL print every harness profile with its provider and
+the library tasks that select it, and `kraft admin harnesses <id>` one profile's
+settings and users.
+enforced-by: tests/cli/test_admin_harnesses.py::test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it, tests/cli/test_admin_harnesses.py::test_one_profile_prints_its_settings_and_users

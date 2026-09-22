@@ -373,16 +373,12 @@ def _first_error(exc: ValidationError) -> str:
     return f"{location}: {error['msg']}" if location else error["msg"]
 
 
-def _read_mapping(path: Path, section: str) -> dict[str, object]:
-    """One top-level mapping section of `path`, or `{}` when it is absent.
+def _section(data: object, section: str, path: Path) -> dict[str, object]:
+    """One top-level mapping section of a parsed file, or `{}` when it is absent.
 
     An absent section is not an error, but a section present and not a mapping
     is, because the keys are the identifiers everything else references.
     """
-    try:
-        data = yaml.safe_load(path.read_text())
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
     if data is None:
         data = {}
     if not isinstance(data, dict):
@@ -421,8 +417,22 @@ class HarnessProfileTable:
         (`provider-declares-harness-capabilities`).
         """
         path = Path(path)
+        try:
+            data = yaml.safe_load(path.read_text())
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            raise TemplateEnvironmentError(f"{path}: cannot read/parse: {exc}") from exc
+        return cls.from_mapping(data, path, harnesses=harnesses)
+
+    @classmethod
+    def from_mapping(
+        cls, data: object, path: str | Path, *, harnesses: Mapping[str, Harness]
+    ) -> HarnessProfileTable:
+        """`from_yaml` for a file's already-parsed content -- a candidate the
+        Harnesses screen would save as `path` -- so a save is checked by the
+        very parse a load makes (Kraft-archr)."""
+        path = Path(path)
         profiles: dict[str, HarnessProfile] = {}
-        for id, body in _read_mapping(path, "harnesses").items():
+        for id, body in _section(data, "harnesses", path).items():
             try:
                 parsed = HarnessProfileInput.model_validate(body or {})
             except ValidationError as exc:

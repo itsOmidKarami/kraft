@@ -290,6 +290,18 @@ harnesses:
 | `executable` | The command to launch, when it differs from the provider's own default. It replaces the executable only: the provider's own subcommand (`codex exec`) is kept after it. |
 | `defaults` | Runtime options every task using this profile starts from: `model`, `effort` and `permission_mode`. Checked against what the provider declares it accepts. They are the lowest rung: a work item's own override, the task's own field and the repo's `default_model` all win over them. Any other key stops the task for a human rather than being ignored. |
 
+`kraft admin harnesses` lists every profile with its provider and the library
+tasks that select it, and `kraft admin harnesses ID` shows one. Settings →
+Harnesses shows the same, beside each provider's read-only capability surface
+(`GET /api/harnesses/providers`), and edits one profile at a time
+(`GET`/`PUT /api/harnesses/{id}`). A save goes through the same parse as
+loading the file, and is refused, with the reason and nothing written, if an
+agent task of a chain that resolves now would stop launching: its profile
+disabled, a default no launch applies, or a provider that does not take
+the task's own `model` or `effort`. A save rewrites the file, so comments in it
+are not kept. `providers` cannot be a profile id, since the providers route
+has that path.
+
 ## `repos.yaml` — connected repos
 
 ```yaml
