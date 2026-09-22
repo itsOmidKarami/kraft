@@ -294,3 +294,34 @@ def test_view_diff_prints_landed_and_in_flight_sections(app, monkeypatch, capsys
 
     cli.main(["view", "diff", wid, "--name-only"])
     assert capsys.readouterr().out.split() == ["flight.py", "doc.md"]
+
+
+def test_a_chain_revisions_artifact_prints_the_approve_command_with_its_digest(
+    app, monkeypatch, capsys
+):
+    """Kraft-ec66w: the digest is what binds an approval to this render."""
+
+    async def fake_artifact(work_item_id=None):
+        return {"work_item_id": "w1", "path": "p.md", "content": "# Revision\n", "digest": "d1"}
+
+    monkeypatch.setattr(client, "artifact", fake_artifact)
+    cli.main(["view", "artifact", "w1"])
+    assert "kraft item approve --digest d1 w1" in capsys.readouterr().out
+
+
+def test_kraft_item_approve_sends_the_digest_it_was_given(app, monkeypatch):
+    from kraft.client import transport
+
+    sent = {}
+
+    async def fake_act(path, payload=None):
+        sent[path] = payload
+        return {"id": "w1", "status": "active"}
+
+    monkeypatch.setattr(transport, "_act", fake_act)
+    cli.main(["item", "approve", "w1", "--gate", "chain_revision_approval", "--digest", "d1"])
+    cli.main(["item", "approve", "w1", "--gate", "spec_approval"])
+    assert sent == {
+        "/work-items/w1/gates/chain_revision_approval/approve": {"digest": "d1"},
+        "/work-items/w1/gates/spec_approval/approve": None,
+    }

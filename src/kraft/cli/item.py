@@ -91,7 +91,9 @@ def _cmd_create(ns: argparse.Namespace) -> None:
 
 
 def _cmd_approve(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.approve_gate(ns.gate, ns.id)), common._render_action, ns.json)
+    common.emit(
+        asyncio.run(client.approve_gate(ns.gate, ns.id, ns.digest)), common._render_action, ns.json
+    )
 
 
 def _cmd_reject(ns: argparse.Namespace) -> None:
@@ -295,6 +297,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     approve = subs.add_parser("approve", parents=[common], help="approve the pending gate")
     approve.add_argument("id", nargs="?")
     approve.add_argument("--gate", help="default: whichever gate is pending")
+    approve.add_argument("--digest", help="a chain revision's, as `kraft view artifact` printed it")
     approve.set_defaults(func=_cmd_approve)
 
     reject = subs.add_parser("reject", parents=[common], help="reject the pending gate")
