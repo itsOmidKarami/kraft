@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 import yaml
@@ -71,6 +72,7 @@ async def run_checks() -> list[dict]:
     checks.append(_pidfile_check())
     checks.extend(_agent_checks())
     checks.append(await _mcp_check(health is not None))
+    checks.append(_path_check())
     checks.append(_completion_check())
     checks.append(_bundle_check())
     checks.append(_version_check())
@@ -422,6 +424,24 @@ async def _mcp_check(server_up: bool) -> dict:
         False,
         "no kraft MCP server registered — workers' permission prompts go unanswered; "
         "run `kraft admin init`",
+    )
+
+
+def _path_check() -> dict:
+    """Is the `kraft` on PATH this one? Every MCP registration runs it by name,
+    so an older install ahead of this one on PATH answers every agent's tool
+    call with that install's code, whatever `kraft admin update` installed.
+    `ok=False` for the same reason as `_mcp_check`: it breaks silently."""
+    from kraft import update
+
+    other = update.shadowing_kraft()
+    if other is None:
+        return _check("kraft on PATH", True, shutil.which("kraft") or "not on PATH")
+    return _check(
+        "kraft on PATH",
+        False,
+        f"{other} is another install, ahead of this one ({update.installed()}, "
+        f"{sys.prefix}) -- MCP servers and hooks run it; uninstall it or reorder PATH",
     )
 
 

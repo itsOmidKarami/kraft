@@ -9,11 +9,13 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
+from support.harness import make_repo
 from support.server import child_env
 
-from kraft import mcp
+from kraft import client, mcp
 
 
 def _tools():
@@ -180,3 +182,23 @@ def test_create_work_item_forwards_the_base_branch(monkeypatch):
         )
     )
     assert seen["base_branch"] == "release"
+
+
+def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path):
+    """Kraft-xs3ri: the MCP door, not only the client, hands back what
+    `GET /repos` stores for an already-connected repo -- never the probe,
+    whose `submodules`/`has_beads` keys no stored entry carries."""
+    repo = make_repo(tmp_path)
+    server = mcp.build()
+
+    async def scenario():
+        await server.call_tool("ensure_repo", {"path": str(repo)})
+        await client.transport._patch(
+            f"/repos?path={quote(str(repo))}", {"test_command": "just ci-test"}
+        )
+        return await server.call_tool("ensure_repo", {"path": str(repo)})
+
+    out = json.loads(asyncio.run(scenario()).content[0].text)
+    assert out["already_connected"] is True
+    assert out["test_command"] == "just ci-test", "got the probed command, not the stored one"
+    assert "submodules" not in out

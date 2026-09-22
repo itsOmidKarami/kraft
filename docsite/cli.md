@@ -199,6 +199,12 @@ running attached to a terminal — stopped with a note that only that terminal
 can bring it back. `kraft admin update --restart` chains the same restart
 onto a successful update.
 
+Agent registrations run `kraft admin mcp` by name, so they get whichever
+`kraft` is first on PATH. A second, older install ahead of this one (a Homebrew
+formula beside a `uv tool` install, say) keeps every MCP session on its code
+after an update. `kraft admin update` warns when that is the case, and
+`kraft admin doctor` fails its `kraft on PATH` row.
+
 A home still holding the pre-V1 template configuration (a `registry.yaml` and
 no `library.yaml`) is not converted and not overwritten. The server starts
 degraded and refuses new work, and `kraft admin update` says what will change,

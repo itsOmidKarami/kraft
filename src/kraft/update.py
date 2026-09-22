@@ -10,7 +10,9 @@ here blocks for longer than its timeout. A failure is `None`, which reads as
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -50,6 +52,24 @@ def installed() -> str:
         return _pkg_version("kraft-sdlc")
     except PackageNotFoundError:
         return "0.0.0+source"
+
+
+def shadowing_kraft() -> str | None:
+    """The `kraft` PATH resolves to, when that is not this install; else None.
+
+    Every agent registration runs `kraft admin mcp` by name (`init.py`, the
+    plugin manifest), so a second, older install earlier on PATH is what those
+    sessions get -- `kraft admin update` replacing this one changes nothing
+    they run (Kraft-xs3ri: a Homebrew 0.65.0 ahead of a uv 0.76.2 kept MCP's
+    `ensure_repo` on a fix three releases old). A console script lives next to
+    its venv's interpreter, so "this install" is `sys.executable`'s directory.
+    None too when nothing named `kraft` is on PATH: there is nothing to shadow.
+    """
+    found = shutil.which("kraft")
+    if found is None:
+        return None
+    here = os.path.realpath(os.path.dirname(sys.executable))
+    return None if os.path.dirname(os.path.realpath(found)) == here else found
 
 
 def _cache_path():
