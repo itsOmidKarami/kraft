@@ -308,4 +308,7 @@ export interface LogLine {
   text: string;
   /** a one-line rendering of a stream-json line; absent for plain output */
   summary?: string;
+  /** present only on the marker row (`n: -1`) a reader gets in place of the
+   *  lines it skipped, when the log is over the server's read cap */
+  truncated?: { lines: number; bytes: number };
 }

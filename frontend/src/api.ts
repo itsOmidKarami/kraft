@@ -253,6 +253,12 @@ export const getLogText = async (sessionId: string): Promise<string> => {
   return res.text();
 };
 
+/** Plain-text log URL for a direct browser download -- past the jsonl
+ *  reader's cap (Kraft-2vvus), `getLogText` buffering the whole file into
+ *  the page is the same choke it was meant to avoid; a `download` link lets
+ *  the browser stream it from disk instead. */
+export const logTextUrl = (sessionId: string) => apiUrl(logUrl(sessionId));
+
 export const search = (params: {
   q: string;
   source_kind?: string;
