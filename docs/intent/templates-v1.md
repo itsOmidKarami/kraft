@@ -1299,6 +1299,18 @@ re-entry into this node) SHALL NOT be force-rewritten.
 enforced-by: tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared], tests/executor/test_mr_rebase_dispatch.py::test_a_pushed_branch_is_not_force_rewritten_on_re_entry, tests/executor/test_default_chain.py::test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback
 origin: templates/chains/default.yaml §draft_merge_request -- Kraft-3llig. `draft_merge_request` opened against whatever `base` was when the worktree was cut, since nothing rebased it first; `builtins.mr_rebase` already existed for exactly this (`refresh_worktree_base` right before `open_mr`) but `BuiltinAction` had no member naming it, so no chain could reach it. Bound as `kraft.mr_rebase`, not a `ForgeAction`, because the rebase itself is pure local git -- the node's other task is the one that talks to the forge. The node moved from the `tasks` shorthand to `steps` so the rebase finishes before `open` runs rather than racing it (`exec-node-orders-concurrent-task-groups`). The pushed-branch guard (`refresh_worktree_base`'s own, `force=False` here) covers the re-entry case: a reviewer already reading the branch is not silently rewritten.
 
+## REQ mr-rebase-is-bounded-by-its-task-time-cap
+
+`kraft.mr_rebase`'s `git rebase` subprocess SHALL be bounded by the task's own
+time cap, the same one every other task launch is killed at. Past it, the
+rebase SHALL be aborted and the stop recorded the way any other time-capped
+task's is -- `capped_out`, `time_cap_reached`, `time_capped` -- not a distinct
+stop kind. A caller that passes no time cap (`/retry`, `/resume`, gate
+self-retry, `mr_rebase_forced`'s conflict rebase) SHALL keep running
+unbounded, as before this requirement.
+enforced-by: tests/test_builtins_rebase.py::test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs, tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared]
+origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig review round 1. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`caps.REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
+
 ## REQ a-draft-with-no-metadata-opens-with-the-default-body
 
 IF a work item reaches its draft merge request with no merge-request metadata

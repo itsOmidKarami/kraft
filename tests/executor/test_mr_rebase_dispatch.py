@@ -111,3 +111,7 @@ async def test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin(
         store.branch_for(row),
     )
     assert kw["has_rebase_bounce"] is bounce
+    # Kraft-3llig review fix 1: dropped entirely, a hanging rebase (a slow
+    # hook, a smudge/LFS filter) would hold the worker slot forever -- must
+    # reach builtins.mr_rebase even when unset (None, no cap resolved here).
+    assert "time_cap" in kw
