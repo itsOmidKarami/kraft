@@ -862,7 +862,9 @@ async def test_no_seeded_agent_task_carries_the_never_signal_rule_by_default(
         "default:spec.main.author",
         "quick-task:implementation.main.implement",
     } <= set(argv), argv
-    assert (carrying := sorted(p for p, a in argv.items() if NEVER_SIGNAL in a)) == [], carrying
+    assert (carrying := sorted(p for p, a in argv.items() if NEVER_SIGNAL_TEXT in a)) == [], (
+        carrying
+    )
 
 
 @pytest.mark.parametrize("named", [False, True], ids=["unnamed", "named"])
