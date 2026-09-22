@@ -4,7 +4,7 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
-## Unreleased
+## 1.0.7
 
 - Fix: an in-flight work item's own repository steering no longer silently
   drops if `repos.yaml`'s `path:` for that repository is hand-edited while it
