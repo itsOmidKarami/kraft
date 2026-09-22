@@ -238,6 +238,7 @@ class Tail:
         self._n = 0
         self._pending = bytearray()
         self._pending_open = False  # a line has begun that has no newline yet
+        self._times_offset = 0
         self._times: dict[int, str] = {}
 
     def read(self, *, final: bool = False) -> list[dict]:
