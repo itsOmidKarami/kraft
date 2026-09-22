@@ -472,6 +472,7 @@ async def dispatch(
             resume_session_id=resume_session_id,
             autocompact="auto",
             identify_as_worker=False,
+            harness_id=ESCALATION_TASK.harness,
             repo_entry=launch.repo_entry,
             thread=thread,
             files=files,

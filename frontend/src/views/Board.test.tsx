@@ -694,7 +694,7 @@ describe("the .board-row grid contract", () => {
 });
 
 describe("Board: a launch that ran on a fallback (Kraft-0a3h8)", () => {
-  it("marks the card, with the timeline's sentence as its tooltip", () => {
+  it("marks the card with the timeline's sentence as its tooltip", () => {
     const fallback = {
       reason: "known_limited",
       from: { harness: "claude", model: "opus", effort: null },

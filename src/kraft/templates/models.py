@@ -829,6 +829,13 @@ class GateNode(BaseModel):
     @model_validator(mode="after")
     def _no_handler(self) -> Self:
         _refuse_handler_on("a gate's auto_review task", self.auto_review)
+        if self.auto_review is not None and self.auto_review.fallback:
+            # `gate_review` launches its reviewer once; a list it never walks
+            # would read as a fallback that is not there.
+            raise ValueError(
+                f"a gate's auto_review task {self.auto_review.id!r} cannot declare a "
+                "fallback list: a gate review never falls back"
+            )
         return self
 
 

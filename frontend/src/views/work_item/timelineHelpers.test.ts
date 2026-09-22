@@ -275,7 +275,7 @@ describe("timelineHelpers: launch_fallback (Kraft-0a3h8)", () => {
     );
   });
 
-  it("reads an unavailable harness, and a list that ran out", () => {
+  it("reads an unavailable harness and a list that ran out", () => {
     const codex = { harness: "codex", model: null, effort: null };
     expect(sentence({ reason: "unavailable", detail: "harness disabled", from: codex, to: null, session_id: null })).toBe(
       "Skipped codex (harness disabled); no fallback is left.",

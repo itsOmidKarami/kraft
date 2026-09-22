@@ -217,6 +217,7 @@ async def review(
         cwd=run_dirs.worktrees / work_item_id,
         repo_entry=launch.repo_entry,
         time_cap=time_cap,
+        harness_id=auto_review.task.harness,
     )
 
     result_path = run_dirs.results / f"{session_id}.json"

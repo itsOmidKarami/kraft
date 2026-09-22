@@ -433,6 +433,25 @@ The `produces` contract is Kraft-owned. An agent task may select one skill as a
 method, but the contract is supplied before the skill and steering and cannot
 be removed by either.
 
+An agent task may declare a `fallback:` list, tried in order when its launch
+is rate-limited or its harness is unavailable. No shipped task declares one:
+
+```yaml
+  implementer:
+    kind: agent
+    harness: claude
+    model: opus
+    effort: high
+    fallback:
+      - { model: sonnet }                          # keeps harness and effort
+      - { harness: codex, model: gpt-5.6-terra }
+```
+
+Each entry keeps what it omits from the task's own launch, and every entry's
+harness must be in the task's `allowed_harnesses`. The work item's and the
+node's overrides pick the task's own launch only. Every skip or switch writes
+one `launch_fallback` event.
+
 The provider or recipe behind `automated_review` owns webhooks, forge API
 calls, CLI probes, and other transport details. The task reports only ordinary
 pending, clean, actionable, or error results.

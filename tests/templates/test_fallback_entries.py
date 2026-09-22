@@ -84,3 +84,13 @@ def test_a_fallback_harness_outside_allowed_harnesses_fails_materialization():
     assert refused.value.field == "allowed_harnesses"
     # Inside the policy, the same list materializes.
     assert _materialize(task, {"allowed_harnesses": ["claude", "codex"]}) is not None
+
+
+def test_a_gate_review_task_refuses_a_fallback_list():
+    """`gate_review` launches its reviewer once and never walks a list."""
+    reviewer = {"id": "r", "kind": "agent", "harness": "claude", "prompt": "review"}
+    gate = {"id": "g", "kind": "gate", "auto_review": reviewer}
+    Chain.model_validate({"id": "c", "nodes": [gate]})
+    reviewer["fallback"] = [{"model": "sonnet"}]
+    with pytest.raises(ValidationError, match="a gate review never falls back"):
+        Chain.model_validate({"id": "c", "nodes": [gate]})

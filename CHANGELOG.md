@@ -107,6 +107,12 @@ agent, decides whether to skip, abandon, or give more room.
 - `read_only: true` on a step or an exec node: Kraft checks the worktree
   before and after, and stops the item naming any file it changed. It is
   opt-in, and no shipped chain sets it.
+- **Launch fallback:** an agent task's `fallback:` list says where its launch
+  goes when it is rate-limited or its harness is unavailable, in the same
+  dispatch. Kraft remembers a rate-limited harness and model until its reset
+  and skips it on every item, and logs each switch as a `launch_fallback`
+  event, a timeline sentence and a board marker. It is opt-in, and no shipped
+  task declares one.
 
 ### Changed
 

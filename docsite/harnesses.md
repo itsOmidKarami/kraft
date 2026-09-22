@@ -173,3 +173,83 @@ refuses to launch under an allowlist, and so does a launch whose own
 Validate with `kraft admin doctor` — it loads every harness a live binding
 names and reports a PATH check for each, plus the load error for any file
 that failed outright.
+
+## Fallback
+
+A task that must not wait out a rate limit can name where its launch goes
+next. `fallback:` on an agent task in `library.yaml` is an ordered list; each
+entry names a `harness:` (a profile id from `harnesses.yaml`), a `model:`, an
+`effort:`, or several of them, and keeps whatever it omits from the task's own
+launch:
+
+```yaml
+tasks:
+  implementer:
+    kind: agent
+    harness: claude
+    model: opus
+    effort: high
+    fallback:
+      - { model: sonnet }                          # claude, sonnet, high
+      - { harness: codex, model: gpt-5.6-terra }   # codex, gpt-5.6-terra, high
+```
+
+The **candidates** are the task's own launch, then each entry in order. Kraft
+moves to the next candidate, in the same dispatch, when:
+
+- a launch ends **rate-limited** (a harness that declares `rate_limit_signal`
+  reported a rejected request). The next launch is a fresh session in the same
+  worktree, with the task's instruction and a note that the earlier attempt
+  may have left partial work (`git status`, `git diff`);
+- a candidate is **unavailable** before anything launches: its profile is
+  missing, disabled or sets a default Kraft cannot apply, or its executable is
+  not on `PATH` (not checked under a sandbox, where the executable lives in the
+  container). This is checked again at every launch, so fixing it takes effect
+  at once;
+- a candidate is **known to be limited**: Kraft remembers, from the event log,
+  which harness and model a `rate_limit_hit` limited, on any work item, and
+  skips that pair until its reset. One account-wide limit therefore costs one
+  quickly-refused launch per model before each is remembered.
+
+When no candidate is left and one was limited, the item parks as
+`rate_limited` until the earliest reset among them, and its relaunch starts
+from the top of the list, so the first choice is used again as soon as it is
+back. When every candidate is unavailable, the task stops for a human with a
+reason naming each one and why.
+
+What carries over and what does not:
+
+- The work item's `agent_overrides` and a node's `model`/`effort` override
+  pick the task's own launch only, and so does a fix loop's escalation model.
+  A fallback runs exactly as its entry says. A node's `extra_prompt` is part
+  of the instruction and does reach it.
+- Switching spends none of `rate_limit_retries`, which still counts parks. The
+  spend caps in `budget:` are checked before every launch, fallbacks included,
+  and a task's time cap covers all of its attempts together.
+- Every entry's harness must be in the task's `allowed_harnesses`, or the
+  chain does not materialize. `deny_tools`, `allowed_tools` and the item's
+  sandbox apply to a fallback as to the task's own launch.
+
+It is opt-in. A task with no `fallback:` (or `fallback: []`) launches, parks
+and stops exactly as it would without it, and never consults the memory. No
+shipped task declares one. A gate's `auto_review` task cannot declare one.
+
+Only a harness that declares `rate_limit_signal` can trigger a switch on a
+rate limit, which today is `claude`. `codex` and `gemini` can be fallback
+targets, and an unavailable one is skipped, but a rate limit on them fails
+the launch as it does without a list.
+
+Every skip or switch is logged:
+
+- one `launch_fallback` event (`kraft view events --type launch_fallback`),
+  with `from`, `to` (`null` when nothing was left), `reason`
+  (`rate_limit_hit`, `known_limited` or `unavailable`, with a `detail`),
+  `resets_at_iso` and `override_not_carried`;
+- one sentence on the item's timeline, such as "Ran on claude / sonnet instead
+  of claude / opus: claude / opus is rate-limited until 15:40.";
+- one INFO line in the server log;
+- a "fallback" marker on the board card while the item's latest launch is a
+  fallback's, with the same sentence as its tooltip.
+
+Session rows record the model that actually ran, so Analytics attributes each
+attempt's cost to it.

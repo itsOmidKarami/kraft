@@ -58,13 +58,14 @@ An `agent` task's keys:
 |---|---|
 | `id` | Its local identifier (`[a-z][a-z0-9_-]*`); a library entry is named by its key instead. |
 | `kind` | `agent`. |
-| `harness` | The [harness profile](harnesses.md) it runs on — an id from `harnesses.yaml`. A disabled or missing profile stops the task for a human; nothing substitutes another. |
+| `harness` | The [harness profile](harnesses.md) it runs on — an id from `harnesses.yaml`. A disabled or missing profile stops the task for a human; nothing substitutes another unless the task declares `fallback`. |
 | `prompt` | What the task is asked to do. Kraft's own output contract is given before the skill and steering. |
 | `skill` | One skill the agent is launched with, by name (`kraft:code-review`, or a plugin's `plugin:skill`). A skill that cannot be loaded stops the task for a human. `spec_author` and `plan_author` default to `kraft:spec` and `kraft:plan`; name another (`superpowers:writing-plans`) and the task's contract still tells it the chain implements the document and verification runs the suite. |
 | `steering` | Names from the library's `steering` section. |
 | `produces` | The document kind it writes (`spec`, `plan`, `work_brief`, `review_brief`) — what a gate's `artifact` decides and an attachment covers. |
 | `profile` | An [agent profile](harnesses.md#agent-profiles) from `harnesses.yaml`'s `profiles:` (`strong`): the model tier, spelled per provider, read live at each launch. Not with `model`/`effort`; through `extends`, the nearer layer's choice of the two wins whole. |
 | `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. Not with `profile`. |
+| `fallback` | An ordered list of where the launch goes when it is rate-limited or its harness is unavailable. Each entry sets `harness`, `model` and/or `effort`, and keeps what it omits from the task. Every entry's harness must be in the task's `allowed_harnesses`. `[]` means none. See [Fallback](harnesses.md#fallback). |
 | `inputs` | What Kraft hands the task: `review_package` (the change under review), `carried_findings` (its previous round's findings) and `previous_review` (its previous session's result). |
 | `scope` | `each_repository` fans the task out once per selected repository of a workspace item; the default runs once. |
 | `on_failure` | A recovery pass for this task alone. |
@@ -301,7 +302,8 @@ and the file is read again at each agent launch, so an edit reaches the next
 one without a restart. A task whose profile is missing or disabled, or whose
 `harnesses.yaml` cannot be read, stops for a human with the reason in its
 session log; Kraft never falls back to another profile or to a provider of the
-same name.
+same name, unless the task itself declares a [`fallback:`](harnesses.md#fallback)
+list.
 
 ```yaml
 harnesses:
@@ -357,7 +359,8 @@ loading the file, and is refused, with the reason and nothing written, if an
 agent task of a chain that resolves now would stop launching: its profile
 disabled, a default no launch applies, a provider that does not take
 the task's own `model` or `effort`, or one its agent profile names no model
-for. Agent profiles are listed read-only there; edit them in the file. A save rewrites the file, so comments in it
+for, or the same for one of its `fallback:` entries (a disabled fallback
+harness is not a problem: the launch skips it). Agent profiles are listed read-only there; edit them in the file. A save rewrites the file, so comments in it
 are not kept.
 
 ## `repos.yaml` — connected repos
