@@ -348,13 +348,22 @@ class _LandingForge(forge.FakeForge):
 
 
 async def _publishable(
-    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, root_source=False, **item
+    database,
+    run_dirs,
+    tmp_path,
+    *,
+    pointer,
+    root_denies_push=False,
+    root_source=False,
+    untouched=(),
+    **item,
 ):
     """A workspace item whose root and member each have an origin that takes a
     push (the member's is its source repository), the member carrying a
     commit, and the root one too when `root_source`. `root_denies_push`
     protects the root's `main` from every push but the forge's own merge.
-    `item` goes to `_workspace_item`. Returns `(row, worktree, root_origin)`."""
+    A member named in `untouched` is selected but gets no commit. `item`
+    goes to `_workspace_item`. Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await _workspace_item(
         database, run_dirs, tmp_path, [_task("t")], pointer=pointer, **item
     )
@@ -373,6 +382,8 @@ async def _publishable(
     _git(worktree, "fetch", "-q", "origin")
     for member in members:
         _git(tmp_path / member, "config", "receive.denyCurrentBranch", "updateInstead")
+        if member in untouched:
+            continue
         (worktree / "repos" / member / "lib.py").write_text("x = 1\n")
         _git(worktree / "repos" / member, "add", "-A")
         _git(worktree / "repos" / member, "commit", "-qm", "member change")
@@ -630,6 +641,32 @@ async def test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the
     # gone with the merge, and nothing is pushed to it again.
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
     assert fake.order[-1] == ("merge", root)
+
+
+async def test_an_untouched_selected_member_gets_no_merge_request_and_the_item_completes(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """`changed-child-repositories-get-separate-merge-requests`: an item
+    selects more members than it changes. The untouched one gets no merge
+    request -- not an empty one whose CI never runs, and not a refusal that
+    stops the item (Kraft-vz8e, Kraft-j14jn) -- and the item completes on
+    the changed one alone."""
+    kw = {"pointer": "ignore", "second": True, "untouched": ("pkg2",), "nodes": _PUBLISH}
+    row, _, _ = await _publishable(database, run_dirs, tmp_path, **kw)
+    # Lands a read late: by then the member's branch reads empty against its
+    # base, and its open merge request must still be followed to "merged".
+    fake = _LandingForge(merge_delay=1)
+
+    for _ in range(6):
+        if (status := await _walk(database, run_dirs, row, fake, monkeypatch)) != "waiting":
+            break
+
+    assert status == "completed"
+    assert [Path(r).name for r in fake._opened_repo.values()] == ["pkg"]
+    assert [e for e in fake.order if e[0] == "merge"] == [("merge", "pkg")]
+    members = database.read(lambda c: store.repos_for(c, row["id"]))
+    states = {m["repo"]: m["state"] for m in members if m["role"] == "submodule"}
+    assert states == {"pkg": "merged", "pkg2": "pending"}
 
 
 async def test_a_root_approval_that_never_comes_times_out_for_a_human(

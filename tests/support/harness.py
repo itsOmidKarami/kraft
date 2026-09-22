@@ -720,3 +720,20 @@ async def v1_walk(
         return status, evts, sessions, row
     finally:
         await database.close()
+
+
+def fails_once(real):
+    """`real`, except that its first call raises `RuntimeError("poison tick")`
+    -- one bad tick of a loop that must survive it. Usage:
+
+        monkeypatch.setattr(store, "session_progress", fails_once(store.session_progress))
+    """
+    calls = []
+
+    def once(*a, **kw):
+        calls.append(a)
+        if len(calls) == 1:
+            raise RuntimeError("poison tick")
+        return real(*a, **kw)
+
+    return once

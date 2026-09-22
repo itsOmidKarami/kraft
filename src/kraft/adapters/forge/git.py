@@ -287,6 +287,17 @@ async def commits_on(repo: Path, branch: str, base: str) -> tuple[str, ...]:
     return tuple(line for line in raw.splitlines() if line.strip())
 
 
+async def commits_ahead(repo: Path, branch: str, base: str) -> int | None:
+    """How many commits `branch` adds to `origin/<base>`, as `commits_on`
+    reads them; None when git cannot say (no origin), which is no evidence
+    the branch is empty."""
+    try:
+        raw = await run_git(repo, ["git", "rev-list", "--count", f"origin/{base}..{branch}"])
+    except ForgeError:
+        return None
+    return int(raw.strip() or 0)
+
+
 async def source_changed(repo: Path, branch: str, *, base: str, exclude: set[str]) -> bool:
     """Whether `branch` changes any path of `repo` outside `exclude` -- a
     workspace root's member mount paths, so a commit that only moves a
