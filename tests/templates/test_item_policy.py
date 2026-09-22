@@ -31,9 +31,15 @@ def _chain(**maxima) -> MaterializedChain:
         {
             "id": "feedback",
             "kind": "exec",
+            "policy": {"wait_timeout_minutes": 60},
             "tasks": [
                 {"id": "ci", "kind": "forge", "target": "mr.ci", "wait": _WAIT},
-                {"id": "approval", "kind": "forge", "target": "mr.external_approval"},
+                {
+                    "id": "approval",
+                    "kind": "forge",
+                    "target": "mr.external_approval",
+                    "policy": {"allowed_tools": ["Read"]},
+                },
             ],
         },
         {"id": "review", "kind": "gate"},
@@ -54,8 +60,10 @@ def _task(chain: MaterializedChain, path: str):
 
 def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored():
     """Item-wide fields reach every scope; a path's reach that path and
-    everything under it, narrowest last. The snapshot itself is untouched: the
-    override is a layer on it, not an edit of it."""
+    everything under it, narrowest last. An operational value wins over the
+    one the chain authored -- the node's own 60-minute wait policy here
+    (Ruling 188). The snapshot itself is untouched: the override is a layer
+    on it, not an edit of it."""
     chain = _chain()
     item = chain.with_item_policy(
         {
@@ -78,12 +86,12 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
     ) == (5, 90)
     assert item.policy_for(_task(item, "verification.check.test")).allowed_tools == ("Read", "Bash")
     assert item.to_json() == chain.to_json()
-    # Without the layer, the chain's own values: the authored 90m wait.
+    # Without the layer, the chain's own value: its node policy's 60 minutes.
     assert (
         _task(chain, "feedback.main.ci")
         .task.wait_bounds(chain.policy_for(_task(chain, "feedback.main.ci")))
         .timeout.total_seconds()
-        == 90 * 60
+        == 60 * 60
     )
 
 
@@ -99,20 +107,12 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
             {"paths": {"feedback.main.ci": {"wait_timeout_minutes": 999}}},
             "policy.paths.feedback.main.ci.wait_timeout_minutes",
         ),
-        ({"allowed_tools": ["Read", "WebFetch"]}, "policy.allowed_tools"),
-        ({"paths": {"feedback": {"token_budget": 10**9}}}, "policy.paths.feedback.token_budget"),
     ],
-    ids=[
-        "attempts-over-maximum",
-        "node-timeout-over-maximum",
-        "wait-timeout-over-maximum",
-        "widens-safety-allowlist",
-        "raises-safety-budget",
-    ],
+    ids=["attempts-over-maximum", "node-timeout-over-maximum", "wait-timeout-over-maximum"],
 )
 def test_an_override_past_its_bounds_is_refused_naming_the_field(override, field):
-    """Operational values move only within the administrator maxima; safety
-    values only tighten. The refusal names the one field, as data."""
+    """Operational values move only within the administrator maxima. The
+    refusal names the one field, as data."""
     chain = _chain(max_attempts=5, timeout_minutes=120, wait_timeout_minutes=600, token_budget=1000)
 
     with pytest.raises(PolicyError) as refused:
@@ -120,6 +120,34 @@ def test_an_override_past_its_bounds_is_refused_naming_the_field(override, field
 
     assert refused.value.field == field
     assert str(refused.value).startswith(f"{field}: ")
+
+
+@pytest.mark.parametrize(
+    ("override", "path", "expected"),
+    [
+        ({"allowed_tools": ["Read", "WebFetch"]}, "verification.check.test", ("Read",)),
+        ({"allowed_tools": ["Read", "Edit"]}, "feedback.main.approval", ("Read",)),
+        ({"paths": {"feedback": {"token_budget": 10**9}}}, "feedback.main.ci", 1000),
+        ({"paths": {"feedback": {"token_budget": 10}}}, "feedback.main.ci", 10),
+    ],
+    ids=[
+        "allowlist-wider-than-the-ceiling-intersects",
+        "allowlist-wider-than-a-narrower-task-intersects",
+        "budget-above-the-ceiling-takes-the-minimum",
+        "budget-below-it-binds",
+    ],
+)
+def test_an_items_safety_value_only_tightens_whatever_it_lands_on(override, path, expected):
+    """Ruling 188: an item's safety values combine in no order -- an allowlist
+    intersects, a budget takes the minimum -- so one is never refused because
+    a ceiling or a narrower chain scope already narrowed the field. It can
+    only ever tighten."""
+    chain = _chain(token_budget=1000).with_item_policy(override)
+
+    resolved = chain.policy_for(_task(chain, path))
+
+    field = "token_budget" if isinstance(expected, int) else "allowed_tools"
+    assert getattr(resolved, field) == expected
 
 
 @pytest.mark.parametrize(
@@ -176,14 +204,31 @@ def test_a_retry_is_bounded_by_the_items_own_layer():
     )
 
 
-def test_a_retry_whose_fork_the_items_layer_cannot_resolve_is_refused():
-    """The item's layer comes last, so a retry narrowing a task below the
-    item's own allowlist leaves that layer widening it. Refused when the
-    retry is asked for, rather than forked into a chain whose task cannot
-    resolve a policy when it launches."""
+def test_a_retry_may_narrow_a_task_below_the_items_allowlist():
+    """Ruling 188: the item's allowlist meets whatever the task resolves to,
+    so a retry that narrows the task further is a tightening like any other,
+    and the fork's task runs under the narrower list."""
     item = _chain().with_item_policy({"allowed_tools": ["Read", "Edit"]})
 
-    with pytest.raises(RetryOverrideError) as refused:
-        validate_retry_override(item, "verification.check.test", policy={"allowed_tools": ["Read"]})
+    fork = validate_retry_override(
+        item, "verification.check.test", policy={"allowed_tools": ["Read"]}
+    ).chain
 
-    assert refused.value.field == "policy.allowed_tools"
+    assert fork.policy_for(_task(fork, "verification.check.test")).allowed_tools == ("Read",)
+
+
+def test_a_retry_that_would_unlock_a_sandbox_the_item_set_below_it_is_refused():
+    """A sandbox locks at every layer. The item's is set on one task, so a
+    retry of the enclosing node that names another sandbox passes the node's
+    own bounds -- and is refused on the task under it, not forked into a
+    task that cannot resolve a policy when it launches."""
+    item = _chain().with_item_policy(
+        {"paths": {"verification.check.test": {"sandbox": {"kind": "docker", "image": "a:1"}}}}
+    )
+
+    with pytest.raises(RetryOverrideError) as refused:
+        validate_retry_override(
+            item, "verification", policy={"sandbox": {"kind": "docker", "image": "b:1"}}
+        )
+
+    assert refused.value.field == "policy.sandbox"

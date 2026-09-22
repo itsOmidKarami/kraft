@@ -123,9 +123,11 @@ kraft item set-policy <id> --policy max_attempts=2   # replaces the whole overri
 
 The fields are the ones `policy.yaml` explains (see [Configuration](configuration.md)):
 `timeout_minutes`, `max_attempts` (execution nodes only), `wait_timeout_minutes`
-and `allowed_harnesses` move within the administrator `maxima`; `allowed_tools`,
-`deny_tools`, `token_budget` and `sandbox` only tighten. A value past a bound,
-a path the chain does not have, or a key that is not a policy field is refused,
+and `allowed_harnesses` move within the administrator `maxima`, and win over
+what the chain authored. `allowed_tools`, `deny_tools`, `token_budget` and
+`sandbox` only tighten: a list intersects with what each task already allows,
+a budget takes the lower value. An operational value past its maximum, a path
+the chain does not have, or a key that is not a policy field is refused,
 naming the field. `set-policy` works on any item that has not ended: on a
 running or waiting one it binds from the next node the item enters and from
 the next observation of a wait it is parked on, whose new timeout counts from

@@ -792,14 +792,10 @@ def _scoped(
     """`policy.layered(scopes)`, then `item`'s layers at `path`, with a
     refusal prefixed by the scope's path."""
     try:
-        return policy.layered((*scopes, *_item_layers(item, path)))
+        policy = policy.layered(scopes)
+        return item.apply_to(policy, path) if item is not None else policy
     except PolicyError as exc:
         raise PolicyError(f"{path}: {exc}", field=exc.field, path=path) from exc
-
-
-def _item_layers(item: WorkItemPolicy | None, path: str) -> Scopes:
-    """A work item's own layers at `path`, applied after every authored scope."""
-    return tuple(layer for _, layer in item.layers_at(path)) if item is not None else ()
 
 
 @dataclass(frozen=True)
@@ -1247,7 +1243,8 @@ class MaterializedChain:
         # item's, which is the meet of them all: never looser than its own.
         base = self.repository_policies.get(repository, self.policy) if repository else self.policy
         path = scope.id if isinstance(scope, ResolvedNode) else scope.path
-        return base.layered((*scope.scopes, *_item_layers(self.item_policy, path)))
+        policy = base.layered(scope.scopes)
+        return self.item_policy.apply_to(policy, path) if self.item_policy else policy
 
     def with_item_policy(self, raw: WorkItemPolicy | dict | None) -> MaterializedChain:
         """This snapshot with a work item's own override `raw` layered on, once

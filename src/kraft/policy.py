@@ -663,16 +663,53 @@ class TemplatePolicyOverride(TaskPolicyOverride):
         )
 
 
+#: The safety fields an item layer meets rather than ratchets (Ruling 188):
+#: `deny_tools` already only accumulates and `sandbox` already locks, so those
+#: two go through `apply_template_override` unchanged.
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "token_budget")
+
+
 class WorkItemPolicy(TemplatePolicyOverride):
     """One work item's own override (Kraft-ab1bh): item-wide fields, plus
     `paths` -- an override for one node, step or task, keyed by its canonical
     path. Set at intake or by a `PATCH`, and held on the item's row, never in
     its snapshot or its template: `MaterializedChain.with_item_policy`
-    validates it, and `MaterializedChain.policy_for` layers it last, after
-    every scope the chain authored, so an operator's operational value wins
-    over the template's while a safety value still only tightens."""
+    validates it, and `MaterializedChain.policy_for` applies it after every
+    scope the chain authored (`apply_to`, Ruling 188)."""
 
     paths: dict[StrictStr, TemplatePolicyOverride] = Field(default_factory=dict)
+
+    def apply_to(self, policy: InstancePolicy, path: str) -> InstancePolicy:
+        """`policy` -- a scope's, every authored layer already applied -- with
+        this item's layers at `path` on top (Ruling 188). Operational fields
+        apply in order, last, so the item's value wins over the template's
+        within the maxima. Safety fields combine in no order: an allowlist
+        intersects, a deny list unions, a budget takes the minimum, and a
+        sandbox locks -- so an item's safety value only ever tightens, and is
+        never refused because a narrower scope already narrowed it."""
+        for _, layer in self.layers_at(path):
+            policy = policy.apply_template_override(
+                layer.model_copy(update=dict.fromkeys(_ORDERLESS_SAFETY_FIELDS))
+            )
+            if layer.allowed_tools is not None:
+                allowed = policy.allowed_tools
+                policy = dataclasses.replace(
+                    policy,
+                    allowed_tools=tuple(
+                        t
+                        for t in (allowed if allowed is not None else layer.allowed_tools)
+                        if t in layer.allowed_tools
+                    ),
+                )
+            if layer.token_budget is not None:
+                budget = policy.token_budget
+                policy = dataclasses.replace(
+                    policy,
+                    token_budget=min(budget, layer.token_budget)
+                    if budget is not None
+                    else layer.token_budget,
+                )
+        return policy
 
     def layers_at(self, path: str) -> tuple[tuple[str, TaskPolicyOverride], ...]:
         """The layers that bind the scope at `path`, broadest first, each with

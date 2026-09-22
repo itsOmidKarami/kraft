@@ -14,7 +14,7 @@ from support.harness import v1_chain, v1_item
 from kraft import db, store, waits
 from kraft.adapters import forge
 from kraft.paths import RunDirs
-from kraft.templates.models import WaitBounds
+from kraft.templates.models import DEFAULT_WAIT
 
 TASK = "ci.main.ci"
 
@@ -46,7 +46,10 @@ def parked_before_restart(tmp_path, repo, monkeypatch):
                     node_id="ci",
                     task=TASK,
                     kind="mr.ci",
-                    bounds=WaitBounds.from_seconds(timeout=3600, initial=30, maximum=300),
+                    # What the chain's wait resolves to: a server that parked
+                    # it resolved the same bounds, so the restart is one
+                    # instance and not a rebound (Kraft-ab1bh).
+                    bounds=DEFAULT_WAIT,
                     condition="ci",
                     state="pending",
                     result="pending",

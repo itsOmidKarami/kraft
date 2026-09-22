@@ -330,6 +330,21 @@ def test_a_worker_cannot_act_on_its_own_work_item(app, monkeypatch, capsys, make
     assert "cannot act on its own work item" in capsys.readouterr().err
 
 
+def test_a_worker_cannot_set_its_own_policy_through_the_cli(
+    app, monkeypatch, capsys, make_item, repo
+):
+    """Kraft-j89jc: `kraft item set-policy` from inside the item's own worker."""
+    wid = make_item(repo, "mine to run, not to loosen")
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["item", "set-policy", "--policy", "max_attempts=9"])
+    assert caught.value.code == 1
+    assert "cannot act on its own work item" in capsys.readouterr().err
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
+    cli.main(["view", "show", wid, "--json"])
+    assert "policy_override" not in json.loads(capsys.readouterr().out)
+
+
 def test_resume_starts_a_paused_item(app, capsys, make_item, repo):
     wid = make_item(repo, "start me")
     cli.main(["item", "resume", wid, "--steer", "go left", "--json"])

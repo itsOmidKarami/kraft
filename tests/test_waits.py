@@ -245,6 +245,26 @@ async def test_a_policy_change_rebounds_an_open_wait_from_its_next_observation(
     assert _trail(it, "ci.main.ci")[-1] == ("external_wait_observed", "pending")
 
 
+async def test_a_policy_change_below_the_time_already_waited_times_the_wait_out(
+    walk, item_on, wait_clock
+):
+    """Kraft-x7yl6: the rebounded deadline counts from the wait's own start,
+    so shrinking the timeout below what has already elapsed ends the wait
+    at its next observation -- a stop for a human, not a code failure."""
+    it = await item_on([forge_node("ci", "mr.ci", wait=_wait())])
+    fake = forge.FakeForge(ci_states=["pending"])
+    assert await walk(fake, it) == "waiting"
+    wait_clock.advance(5 * 60)
+    item = policy.WorkItemPolicy(paths={"ci": {"wait_timeout_minutes": 1}})
+    await it.database.write(lambda c: store.set_policy_override(c, it.id, item))
+
+    assert await walk(fake, it) == "needs_human"
+
+    (rebounded,) = it.events("external_wait_rebounded")
+    assert rebounded["payload"]["deadline"] == wait_clock.at(60)
+    assert _trail(it, "ci.main.ci")[-1] == ("external_wait_ended", "timed_out")
+
+
 async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, wait_clock):
     """Kraft-uwbc8: both sessions end `capped_out` (no migration), but a wait
     that ran out is not a fix loop that ran out. Usage and analytics count

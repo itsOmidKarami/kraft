@@ -154,8 +154,11 @@ canonical path to the fields for that scope. It is applied after every scope
 the chain authored, so its operational values win over the template's — a
 `wait_timeout_minutes` there replaces the wait's own `wait: timeout`, and a
 `max_attempts` or `timeout_minutes` on an execution node wins over its fix
-loop's own `max_attempts` — while its safety values still only tighten, so it
-cannot widen what the chain narrowed either. It binds that item only, and it
+loop's own `max_attempts`. Its safety values combine in no order: an
+`allowed_tools` intersects with what the scope already allows, a `deny_tools`
+adds to it, a `token_budget` takes the lower of the two, and a `sandbox` must
+match any already set. So they only ever tighten, and are never refused
+because the chain narrowed the same field first. It binds that item only, and it
 is the one layer that can change after filing: on a running or waiting item a
 change binds from the next node entered and the next observation of a wait. A
 recovery plan inherits the task, step or node that declares it; a fix loop,

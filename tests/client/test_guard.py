@@ -67,3 +67,11 @@ def test_a_worker_cannot_set_its_own_node_overrides(run_dir, monkeypatch):
     monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
     with pytest.raises(PermissionError, match="its own work item"):
         asyncio.run(actions.set_node_overrides("some_node", auto_escalate=True))
+
+
+def test_a_worker_cannot_set_its_own_policy(run_dir, monkeypatch):
+    """Kraft-j89jc: a worker raising its own caps or waits is the self-action
+    Kraft-g1ebw closed on the two override doors beside this one."""
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
+    with pytest.raises(PermissionError, match="its own work item"):
+        asyncio.run(actions.set_work_item_policy({"max_attempts": 9}))
