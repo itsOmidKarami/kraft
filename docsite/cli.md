@@ -101,6 +101,8 @@ kraft item set-attachments --spec specs/x.md      # revise a not-yet-started ite
 kraft item set-overrides --model opus --effort high
 kraft item set-overrides --clear                  # back to the template's own binding
 kraft item set-node-override --node verify --auto-escalate-stuck
+kraft item set-node-override --node implementation --model opus --effort high \
+  --extra-prompt "Keep the migration backwards compatible."   # one node's agent tasks
 kraft item set-policy --policy merge_request_feedback.ci.await_ci.total_time_cap_minutes=60
 kraft item set-policy --clear                     # drop the item's own policy override
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
@@ -117,6 +119,26 @@ uncommitted work in the item's worktree; `--yes` is required, not optional,
 on purpose. `complete` and `cancel` are the explicit terminal actions: each
 needs a `--reason`, stops whatever is running, and records the reason on the
 item's timeline.
+
+### One node's agent tasks
+
+`kraft item set-node-override --node N` (and `--node-override N.FIELD=VALUE`
+at intake, or MCP `set_node_overrides`) changes one node of one item, until
+that node starts; after that it answers 409. Besides the auto-escalate
+settings and `attempts`/`wall_clock_s`, it takes:
+
+- `--model`, `--effort`: what every agent task in the node launches with. The
+  order, highest first: this node override, the item-wide `set-overrides`,
+  the task's own `model:`/`effort:` in the library, the repo's `models:`
+  (model only), the harness profile's `defaults:`. A value the node's harness refuses (its
+  `values:`, or a capability it does not declare) is refused here, not at
+  launch. A gate's `auto_review` keeps the item-wide values only.
+- `--extra-prompt TEXT`: appended to every agent task's instruction in the
+  node, after the task's own prompt and brief. It never replaces them. At
+  intake, `N.extra_prompt=...` is taken as written, not read as YAML.
+
+The node override is stored on the item. It is not a chain edit, so the frozen
+chain and its policy are unchanged.
 
 ### A work item's own policy
 

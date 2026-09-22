@@ -82,6 +82,11 @@ agent, decides whether to skip, abandon, or give more room.
 - `kraft admin doctor` checks for a shadowing `kraft` on PATH.
 - The Library shows a steering profile's text, and the Library and Steering
   pages each say which kind of steering they hold and link to the other.
+- One node of a not-yet-started item can get its own `model`, `effort` and an
+  `extra_prompt` appended to each of its agent tasks (`kraft item
+  set-node-override`, `--node-override`, MCP `set_node_overrides`). The node's
+  values beat the item-wide `set-overrides`; one the node's harness refuses is
+  refused when you set it.
 
 ### Changed
 
