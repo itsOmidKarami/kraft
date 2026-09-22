@@ -75,3 +75,15 @@ def test_a_chain_switch_keeps_the_items_base_branch(client, repo):
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["chain_template"] == "default"
     assert json.loads(item["materialized_chain"])["target"]["base_branch"] == "release"
+
+
+def test_intake_freezes_the_base_branch_beside_the_items_own_policy(client, repo):
+    """Kraft-wehx7: the two intake-time layers of one item, filed together,
+    both land -- neither door's field crowds out the other's."""
+    override = {"paths": {"verification": {"max_attempts": 2}}}
+    r = _file(client, repo, base_branch="release", policy=override)
+
+    assert r.status_code == 201, r.text
+    item = client.get(f"/api/work-items/{r.json()['id']}").json()
+    assert json.loads(item["materialized_chain"])["target"]["base_branch"] == "release"
+    assert item["policy_override"] == override
