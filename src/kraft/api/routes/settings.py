@@ -504,7 +504,7 @@ async def list_steering(request: Request):
     budget is the number an operator is actually rationing."""
     steering_dir = _steering_dir(request.app.state)
     if not steering_dir.is_dir():
-        return {"files": [], "max_bytes": steering_mod.MAX_BYTES}
+        return {"files": [], "max_bytes": steering_mod.Steering.MAX_BYTES}
     files = []
     for path in sorted(steering_dir.glob("*.md")):
         try:
@@ -513,14 +513,14 @@ async def list_steering(request: Request):
             # Unreadable or not UTF-8: it exists and it is broken, which is
             # more useful on the screen than a file that silently is not there.
             files.append({"name": path.stem, "bytes": None})
-    return {"files": files, "max_bytes": steering_mod.MAX_BYTES}
+    return {"files": files, "max_bytes": steering_mod.Steering.MAX_BYTES}
 
 
 @api_router.get("/steering/{name}")
 async def get_steering(name: str, request: Request):
     st = request.app.state
     try:
-        path = steering_mod.path_for(_steering_dir(st), name, where="steering")
+        path = steering_mod.Steering(dir=_steering_dir(st)).path(name, where="steering")
     except steering_mod.SteeringError as exc:
         raise HTTPException(400, str(exc)) from exc
     try:
@@ -536,7 +536,7 @@ async def put_steering(name: str, body: SteeringBody, request: Request):
     st = request.app.state
     steering_dir = _steering_dir(st)
     try:
-        path = steering_mod.path_for(steering_dir, name, where="steering")
+        path = steering_mod.Steering(dir=steering_dir).path(name, where="steering")
     except steering_mod.SteeringError as exc:
         raise HTTPException(400, str(exc)) from exc
     await asyncio.to_thread(_check_steering_change, st, name, body.body)
@@ -551,7 +551,7 @@ async def put_steering(name: str, body: SteeringBody, request: Request):
 async def delete_steering(name: str, request: Request):
     st = request.app.state
     try:
-        path = steering_mod.path_for(_steering_dir(st), name, where="steering")
+        path = steering_mod.Steering(dir=_steering_dir(st)).path(name, where="steering")
     except steering_mod.SteeringError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not path.is_file():

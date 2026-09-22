@@ -53,7 +53,7 @@ def _files_excluding_fixture(body: dict) -> list[dict]:
 def test_steering_list_reports_sizes_against_the_injection_budget(client, templates_dir):
     (_steering_dir(templates_dir) / "house-style.md").write_text("prefer stdlib\n")
     body = client.get("/api/steering").json()
-    assert body["max_bytes"] == steering_mod.MAX_BYTES
+    assert body["max_bytes"] == steering_mod.Steering.MAX_BYTES
     assert _files_excluding_fixture(body) == [
         {"name": "house-style", "bytes": len(b"prefer stdlib\n")}
     ]
@@ -89,7 +89,9 @@ def test_a_body_over_the_injection_budget_is_refused_and_rolled_back(
     (_steering_dir(templates_dir) / "big.md").write_text("small\n")
     _name_in_repos_yaml(tmp_path, client, templates_dir, "big")
 
-    resp = client.put("/api/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)})
+    resp = client.put(
+        "/api/steering/big", json={"body": "x" * (steering_mod.Steering.MAX_BYTES + 1)}
+    )
     assert resp.status_code == 422
     # the file on disk is the one that still loads, not the one that was refused
     assert (templates_dir / "steering" / "big.md").read_text() == "small\n"
@@ -205,7 +207,7 @@ def test_a_refused_steering_save_never_writes_the_real_file(tmp_path, client, te
     before = target.stat().st_mtime_ns
     assert (
         client.put(
-            "/api/steering/big", json={"body": "x" * (steering_mod.MAX_BYTES + 1)}
+            "/api/steering/big", json={"body": "x" * (steering_mod.Steering.MAX_BYTES + 1)}
         ).status_code
         == 422
     )

@@ -337,7 +337,7 @@ class RepoEntry(BaseModel):
         steering_dir = (info.context or {}).get("steering_dir")
         if steering_dir is not None:
             try:
-                _steering.validate(steering_dir, self.steering, where="repos.yaml")
+                _steering.Steering(dir=steering_dir).validate(self.steering, where="repos.yaml")
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self

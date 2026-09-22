@@ -513,7 +513,7 @@ def test_the_system_prompt_carries_in_order(run, overrides, in_order):
 @pytest.mark.parametrize(
     "overrides, tail",
     [
-        ({"steering_texts": ("Use tabs.",)}, steering.HEADING + "Use tabs."),
+        ({"steering_texts": ("Use tabs.",)}, steering.Steering.HEADING + "Use tabs."),
         ({"method_text": "Write it in one page."}, skill.UNAVAILABLE),
     ],
     ids=["steering-under-its-heading", "method-then-the-unavailable-note"],
@@ -708,14 +708,14 @@ def test_a_repo_entry_of_none_behaves_like_an_empty_one(tmp_path):
 
 
 def test_combined_repo_and_hook_steering_over_budget_raises(tmp_path):
-    """`steering.validate` runs over repos.yaml's names and a hook's names
+    """`Steering.validate` runs over repos.yaml's names and a hook's names
     separately at config-load time -- each valid here. Nothing at load time
     measures the concatenation `resolve_invocation` builds, which can still
     blow the shared 8 KB budget."""
-    (tmp_path / "repo-note.md").write_text("x" * (steering.MAX_BYTES // 2))
-    (tmp_path / "hook-note.md").write_text("y" * (steering.MAX_BYTES // 2))
-    steering.validate(tmp_path, ["repo-note"], where="repos.yaml")
-    steering.validate(tmp_path, ["hook-note"], where="registry.yaml")
+    (tmp_path / "repo-note.md").write_text("x" * (steering.Steering.MAX_BYTES // 2))
+    (tmp_path / "hook-note.md").write_text("y" * (steering.Steering.MAX_BYTES // 2))
+    steering.Steering(dir=tmp_path).validate(["repo-note"], where="repos.yaml")
+    steering.Steering(dir=tmp_path).validate(["hook-note"], where="registry.yaml")
 
     with pytest.raises(steering.SteeringError, match="8192"):
         agent.resolve_invocation(

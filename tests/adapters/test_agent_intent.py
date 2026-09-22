@@ -24,7 +24,7 @@ def test_the_intent_block_sits_after_the_method_and_before_steering(run):
         skill.HEADING + "Write it in one page.",
         agent.INTENT_HEADING + "This repository states its intended behaviour in `docs/intent/`",
         "`docs/intent/README.md`",
-        steering.HEADING + "Use tabs.",
+        steering.Steering.HEADING + "Use tabs.",
     )
     firsts = [prompt.index(p) for p in in_order]
     assert firsts == sorted(firsts)
