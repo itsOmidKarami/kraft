@@ -7,23 +7,6 @@ from kraft.templates import environment as te
 
 
 @pytest.fixture
-def api_repository() -> te.Repository:
-    return te.Repository(
-        id="api",
-        path="/work/product/services/api",
-        forge=te.ForgeTarget(kind="github", project="acme/api"),
-        worktree=te.Worktree(
-            setup="just setup",
-            local_files=[".env.test"],
-            environment=te.WorktreeEnvironment(set={"CI": "1"}, pass_through=["NPM_TOKEN"]),
-        ),
-        verification=te.Verification(
-            test_scopes=[te.TestScope(paths=["src/**", "tests/**"], command="just test")]
-        ),
-    )
-
-
-@pytest.fixture
 def workspace() -> te.Workspace:
     return te.Workspace(
         id="product",
@@ -33,21 +16,8 @@ def workspace() -> te.Workspace:
     )
 
 
-# ── repositories, workspaces, areas are distinct
+# ── areas are not repositories
 # (repositories-workspaces-and-areas-are-distinct) ──
-
-
-def test_repository_parses_worktree_and_verification(api_repository):
-    assert api_repository.forge == te.ForgeTarget(kind="github", project="acme/api")
-    assert api_repository.worktree.setup == "just setup"
-    assert api_repository.worktree.local_files == [".env.test"]
-    assert api_repository.worktree.environment.pass_through == ["NPM_TOKEN"]
-    assert api_repository.verification.test_scopes[0].command == "just test"
-
-
-def test_repository_worktree_rejects_an_unsafe_local_file():
-    with pytest.raises(ValidationError, match="local_files"):
-        te.Repository(id="api", path="/work/api", worktree=te.Worktree(local_files=["../secret"]))
 
 
 def test_area_declares_setup_and_test_scopes():
@@ -73,19 +43,6 @@ def test_area_has_no_forge_field_to_declare():
         te.Area.model_validate(
             {"paths": ["x/**"], "forge": {"kind": "github", "project": "acme/x"}}
         )
-
-
-def test_repository_with_areas_keeps_them_path_scoped_not_independent():
-    platform = te.Repository(
-        id="platform",
-        path="/work/platform",
-        areas={
-            "python_api": te.Area(paths=["services/api/**"], setup="uv sync"),
-            "java_worker": te.Area(paths=["services/worker/**"], setup="./gradlew classes"),
-        },
-    )
-    assert set(platform.areas) == {"python_api", "java_worker"}
-    assert platform.areas["python_api"].paths == ["services/api/**"]
 
 
 # ── workspaces (workspace-declares-root-and-members) ──
@@ -130,8 +87,8 @@ def test_workspace_target_rejects_an_unmounted_member(workspace):
         te.WorkItemTarget.from_selection(workspace, members=["nope"])
 
 
-def test_work_item_target_for_a_single_repository(api_repository):
-    target = te.WorkItemTarget.for_repository(api_repository)
+def test_work_item_target_for_a_single_repository():
+    target = te.WorkItemTarget.for_repository("api")
     assert target.kind == "repository"
     assert target.repository == "api"
     assert target.members == ()
@@ -184,138 +141,25 @@ def test_repository_target_rejects_a_non_default_include_root():
         te.WorkItemTarget(kind="repository", repository="api", include_root=True)
 
 
-def test_repository_target_include_root_defaults_off(api_repository):
-    target = te.WorkItemTarget.for_repository(api_repository)
+def test_repository_target_include_root_defaults_off():
+    target = te.WorkItemTarget.for_repository("api")
     assert target.include_root is False
 
 
 def test_environment_ids_use_the_same_rule_as_the_references_to_them():
     """A repository id a workspace member (or an `AgentTask.harness`) cannot
     name is a definition nothing can reference."""
+    from kraft import config
+
     with pytest.raises(ValidationError, match="string_pattern_mismatch"):
-        te.Repository(id="Api-Service", path="/work/api")
+        config.RepoEntry(id="Api-Service", path="/work/api")
     with pytest.raises(ValidationError, match="string_pattern_mismatch"):
         te.Workspace(id="Product", root="product_root")
 
 
-# --- The two V1 file loaders (`from_yaml` does boundary I/O, `from_input` is pure) ---
+# --- `harnesses.yaml` (`from_yaml` does boundary I/O, `from_input` is pure) ---
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-
-_V1_REPOS = """
-repositories:
-  product_root:
-    path: /work/product
-    default_chain: default
-    forge: { kind: github, project: acme/product }
-  api:
-    path: /work/product/services/api
-    forge: { kind: github, project: acme/api }
-    worktree:
-      setup: just setup
-      local_files: [.env.test]
-      environment:
-        set: { CI: "1" }
-        pass_through: [NPM_TOKEN]
-    verification:
-      test_scopes:
-        - paths: [src/**, tests/**]
-          command: just test
-    managed: false
-    models: { claude_review: opus }
-    policy:
-      allowed_harnesses: [codex_default, claude_review]
-      deny_tools: [WebFetch]
-workspaces:
-  product:
-    root: product_root
-    members:
-      api: { repository: api, path: services/api }
-"""
-
-
-def test_repository_table_loads_repositories_and_workspaces(tmp_path):
-    """V1 keys `repositories:` by id -- the id the rest of the configuration
-    references -- rather than carrying a list whose entries are identified by
-    their filesystem path."""
-    path = tmp_path / "repos.yaml"
-    path.write_text(_V1_REPOS)
-    table = te.RepositoryTable.from_yaml(path)
-
-    assert sorted(table.repositories) == ["api", "product_root"]
-    api = table.repositories["api"]
-    assert api.id == "api"
-    assert api.forge == te.ForgeTarget(kind="github", project="acme/api")
-    assert api.worktree.environment.pass_through == ["NPM_TOKEN"]
-    assert api.verification.test_scopes[0].command == "just test"
-    assert table.repositories["product_root"].default_chain == "default"
-    # The design document's repository `policy:` block: the repository layer
-    # (`repository-policy-cannot-relax-instance-safety`), Ruling 105's
-    # `deny_tools` included.
-    assert api.policy.allowed_harnesses == ["codex_default", "claude_review"]
-    assert api.policy.deny_tools == ["WebFetch"]
-    assert table.repositories["product_root"].policy is None
-    # Ruling 165: `managed` is a top-level repository flag, not policy, and a
-    # repository's model is chosen per harness profile.
-    assert (api.managed, table.repositories["product_root"].managed) == (False, True)
-    assert api.models == {"claude_review": "opus"}
-    assert table.repositories["product_root"].models == {}
-
-    workspace = table.workspaces["product"]
-    assert workspace.root == "product_root"
-    assert workspace.members["api"].path == "services/api"
-    assert workspace.root_pointer_default is te.RootPointerPolicy.IGNORE
-
-
-def test_a_workspace_mounting_an_unknown_repository_is_refused_at_load(tmp_path):
-    """Both ends of the reference, at load: left to run time this assembles an
-    empty checkout hours after the typo, and nothing before then says so."""
-    path = tmp_path / "repos.yaml"
-    path.write_text(
-        "repositories:\n"
-        "  product_root: { path: /work/product }\n"
-        "workspaces:\n"
-        "  product:\n"
-        "    root: product_root\n"
-        "    members:\n"
-        "      api: { repository: api, path: services/api }\n"
-    )
-    with pytest.raises(te.TemplateEnvironmentError, match="'api' is not a declared repository"):
-        te.RepositoryTable.from_yaml(path)
-
-
-def test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load(tmp_path):
-    path = tmp_path / "repos.yaml"
-    path.write_text("repositories: {}\nworkspaces:\n  product: { root: nope }\n")
-    with pytest.raises(te.TemplateEnvironmentError, match="root 'nope'"):
-        te.RepositoryTable.from_yaml(path)
-
-
-def test_a_malformed_repos_yaml_names_its_file(tmp_path):
-    """A read or parse failure becomes this module's own error type naming the
-    file, so a caller catches one exception per configuration file rather than
-    `OSError`/`YAMLError`/`ValidationError` from three layers down."""
-    path = tmp_path / "repos.yaml"
-    path.write_text("repositories:\n  api: { path: /r, nonsense: 1 }\n")
-    with pytest.raises(te.TemplateEnvironmentError) as exc:
-        te.RepositoryTable.from_yaml(path)
-    assert str(path) in str(exc.value) and "api" in str(exc.value)
-
-    listed = tmp_path / "list.yaml"
-    listed.write_text("repositories:\n  - path: /r\n")
-    with pytest.raises(te.TemplateEnvironmentError, match="must be a mapping keyed by id"):
-        te.RepositoryTable.from_yaml(listed)
-
-
-def test_a_repos_yaml_in_the_legacy_shape_loads_as_empty_rather_than_wrong(tmp_path):
-    """Seeding only ever creates, so an existing home keeps its legacy list
-    under `repos:`. This loader must not read it: a reader that silently
-    accepted both shapes is how the two start disagreeing. Converting such a
-    home is Task 11's `major-update-*` work."""
-    path = tmp_path / "repos.yaml"
-    path.write_text("repos:\n- path: /r\n  name: r\n  default_chain_template: default\n")
-    table = te.RepositoryTable.from_yaml(path)
-    assert table.repositories == {} and table.workspaces == {}
 
 
 def test_harness_profiles_load_against_their_provider_declarations(tmp_path):

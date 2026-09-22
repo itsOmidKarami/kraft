@@ -32,7 +32,7 @@ from kraft.templates.environment import (
     TemplateEnvironmentError,
     WorkItemTarget,
 )
-from kraft.templates.library import TemplateLibrary, TemplateLibraryError
+from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +218,26 @@ def _live_work_item_row(st, wid):
 
 def _reload_templates(st) -> None:
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
+    lint_loaded(st)
+
+
+def lint_loaded(st) -> None:
+    """Record, per chain id, why each chain of the loaded library does not
+    resolve (Kraft-n1zp9). The same `lint` pass `admin templates lint` runs,
+    once per load -- and again when `policy.yaml` changes, because a chain past
+    a `maxima:` ceiling is one of its issues."""
+    issues = st.library.lint(getattr(st, "instance_policy", None)) if st.library else []
+    st.invalid_chains = {issue.chain: issue.message for issue in issues}
+
+
+def invalid_templates(st) -> dict[str, str]:
+    """What `/health` and reload report under `invalid_templates`: the library
+    that did not load, keyed by its file, and each chain that does not resolve,
+    keyed `chain <id>`. One reader, so the two answers cannot differ."""
+    invalid = {LIBRARY_FILE: "; ".join(st.invalid_library)} if st.invalid_library else {}
+    for id, message in (getattr(st, "invalid_chains", None) or {}).items():
+        invalid[f"chain {id}"] = message
+    return invalid
 
 
 def load_library(
@@ -284,11 +304,14 @@ def resolve_chain_or_422(st, chain_template: str | None):
     does not parse. Same posture and same shape as `invalid_policy`'s 503: name
     the file, refuse the work, and leave the Settings screens reachable.
     """
-    library_or_503(st)
-    chain = resolve_chain(st, chain_template)
-    if chain is None:
-        raise HTTPException(422, "unknown or invalid template")
-    return chain
+    library = library_or_503(st)
+    name = chain_template if chain_template is not None else "default"
+    try:
+        return library.resolve_chain(name)
+    except TemplateLibraryError as exc:
+        # The resolver's own message: it names the unknown id, or the path and
+        # reference that broke the chain (Kraft-n1zp9).
+        raise HTTPException(422, f"chain template {name!r}: {exc}") from exc
 
 
 def repos_path(st) -> Path:

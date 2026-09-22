@@ -721,15 +721,15 @@ origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry
 The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
-enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_environment.py::test_repository_with_areas_keeps_them_path_scoped_not_independent, tests/templates/test_environment.py::test_repository_table_loads_repositories_and_workspaces, tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-naming-a-forge]
-origin: src/kraft/templates/environment.py -- `repos.yaml` keeps the three in separate sections (`repositories:` keyed by id, `workspaces:` beside it, `areas:` only inside a repository), so the distinction holds at the file boundary and not only in the types.
+enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_materialization.py::test_the_design_documents_repos_yaml_is_what_the_daemon_reads, tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-naming-a-forge], tests/test_config_repos.py::test_a_top_level_repositories_key_fails_loudly
+origin: src/kraft/config.py -- `repos.yaml` keeps the three in separate sections (the `repos:` list, `workspaces:` beside it naming entries by `id`, `areas:` only inside an entry), read by `load_repos`/`load_workspaces` into the one repository model, `RepoEntry` (Ruling 177), so the distinction holds at the file boundary and not only in the types.
 
 ## REQ workspace-declares-root-and-members
 
 A workspace SHALL declare its root repository and each member repository with
 the path where it is mounted in that root.
-enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/templates/test_environment.py::test_a_workspace_mounting_an_unknown_repository_is_refused_at_load, tests/templates/test_environment.py::test_a_workspace_rooted_on_an_unknown_repository_is_refused_at_load, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id, tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-root], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-member-repository], tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/api/test_repos.py::test_disconnecting_a_repository_a_workspace_mounts_is_refused
-origin: src/kraft/templates/environment.py -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
+enforced-by: tests/templates/test_environment.py::test_workspace_declares_root_and_members, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id, tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-root], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[an-unknown-member-repository], tests/api/test_repos.py::test_connecting_a_workspace_declares_it_with_its_submodules_as_members, tests/api/test_repos.py::test_disconnecting_a_repository_a_workspace_mounts_is_refused
+origin: src/kraft/config.py §load_workspaces -- both ends of every declaration are resolved when the file is read; a root or member naming no declared repository assembles an empty checkout at run time, hours after the typo.
 
 ## REQ work-item-target-selection-is-immutable
 

@@ -1,16 +1,12 @@
-"""V1 template-schema environment: real repositories, the workspaces built
-from them, path-scoped areas inside one, and the harness profiles an agent
-task selects from.
+"""V1 template-schema environment: the workspaces built from connected
+repositories, the path-scoped areas inside one, the target a work item runs
+against, and the harness profiles an agent task selects from.
 
-See docs/templates-v1-design.md's "Harness profiles" and "Repositories,
-workspaces, and areas" sections for the concrete YAML shapes these types
-model. Standalone by design (no import from `kraft.templates.models` /
-`kraft.templates.library`, which do not exist yet): this is Phase 1, "types
-only" (docs/intent/templates-v1.md `repositories-workspaces-and-areas-are-
-distinct`, `workspace-declares-root-and-members`). Workspace and area
-*behaviour* -- assembling a checkout, root-pointer updates, changed-test-scope
-selection -- lands in Phase 6; this module exists so Phase 2's materializer
-has a typed target to build into and freeze.
+A repository itself is not modelled here: `config.RepoEntry`, read by
+`config.load_repos`, is the one repository model (Ruling 177), and it checks
+its `areas:` against `Area` below and `config.load_workspaces` its
+`workspaces:` against `Workspace`. See docs/templates-v1-design.md's "Harness
+profiles" and "Repositories, workspaces, and areas" sections for the YAML.
 """
 
 from __future__ import annotations
@@ -30,13 +26,10 @@ from pydantic import (
     StrictBool,
     StrictStr,
     ValidationError,
-    field_validator,
     model_validator,
 )
 
-from kraft.automated_review import AutomatedReview
 from kraft.harness import Harness
-from kraft.policy import TemplatePolicyOverride
 
 #: One identifier rule for both sides of every reference: the harness-profile
 #: id an `AgentTask.harness` names, the repository id a workspace member
@@ -53,21 +46,6 @@ class TemplateEnvironmentError(Exception):
     pass
 
 
-def _safe_relative_file(rel: str) -> str:
-    """A worktree file `git worktree add` cannot carry (`config.RepoEntry`'s
-    `local_files` invariant): relative, literal, no traversal. Kept as a
-    plain validator body, not a shared helper -- `RepoEntry.local_files` is
-    the legacy V0 schema and this is its own V1 model; nothing here reuses
-    `config.py` code, only the rule."""
-    if rel.endswith("/"):
-        raise ValueError(f"entry {rel!r} must name a file")
-    if Path(rel).is_absolute() or ".." in Path(rel).parts:
-        raise ValueError(f"entry {rel!r} must be a relative path inside the repo")
-    if any(c in rel for c in "*?["):
-        raise ValueError(f"entry {rel!r} must be a literal path, not a glob")
-    return rel
-
-
 class RootPointerPolicy(StrEnum):
     """How a workspace's root-repository submodule pointers are handled when
     its members change. `IGNORE` is the shipped default
@@ -76,17 +54,6 @@ class RootPointerPolicy(StrEnum):
 
     IGNORE = "ignore"
     BUMP = "bump"
-
-
-class ForgeTarget(BaseModel):
-    """Where a repository's merge requests land. Only `Repository` carries
-    this field; `Area` has no `forge` of its own to set, by omission, not by
-    a runtime check (`repositories-workspaces-and-areas-are-distinct`)."""
-
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    kind: StrictStr = Field(min_length=1)
-    project: StrictStr = Field(min_length=1)
 
 
 class TestScope(BaseModel):
@@ -106,28 +73,6 @@ class Verification(BaseModel):
     test_scopes: list[TestScope] = Field(default_factory=list)
 
 
-class WorktreeEnvironment(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    set: dict[StrictStr, StrictStr] = Field(default_factory=dict)
-    pass_through: list[StrictStr] = Field(default_factory=list)
-
-
-class Worktree(BaseModel):
-    """How a repository's worktree is prepared before a task runs in it."""
-
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    setup: StrictStr | None = None
-    local_files: list[StrictStr] = Field(default_factory=list)
-    environment: WorktreeEnvironment = Field(default_factory=WorktreeEnvironment)
-
-    @field_validator("local_files")
-    @classmethod
-    def _safe_local_files(cls, v: list[str]) -> list[str]:
-        return [_safe_relative_file(rel) for rel in v]
-
-
 class Area(BaseModel):
     """A path-scoped execution context inside one real repository. Never a
     forge target: it has no `forge` field to declare, and no `path` of its
@@ -139,41 +84,6 @@ class Area(BaseModel):
     paths: list[StrictStr] = Field(min_length=1)
     setup: StrictStr | None = None
     verification: Verification = Field(default_factory=Verification)
-
-
-class Repository(BaseModel):
-    """An independently-clonable Git repository -- the only thing that can
-    own a forge merge request."""
-
-    model_config = ConfigDict(strict=True, extra="forbid")
-
-    id: Identifier
-    path: StrictStr = Field(min_length=1)
-    enabled: StrictBool = True
-    #: A person connected or edited this repository, as opposed to Kraft
-    #: detecting it as a workspace child (Ruling 165: bookkeeping, not
-    #: policy). It keeps a detected child out of Settings' main list, out of
-    #: `kraft repo list`, and out of the client's cwd-to-repository resolution.
-    managed: StrictBool = True
-    default_chain: Identifier | None = None
-    #: The model an agent task runs with here, per harness profile id
-    #: (Ruling 165) -- over the profile's `defaults:`, under the task's own.
-    models: dict[Identifier, StrictStr] = Field(default_factory=dict)
-    forge: ForgeTarget | None = None
-    worktree: Worktree = Field(default_factory=Worktree)
-    verification: Verification = Field(default_factory=Verification)
-    steering: list[Identifier] = Field(default_factory=list)
-    areas: dict[Identifier, Area] = Field(default_factory=dict)
-    #: The repository policy layer: after the instance policy, before the
-    #: work item's, and only ever tightening what it inherits
-    #: (`repository-policy-cannot-relax-instance-safety`). Where the legacy
-    #: entry's `deny_tools` and `sandbox` live in V1 (Ruling 105). Today's
-    #: daemon still reads the legacy `repos:` list, whose `RepoEntry.policy`
-    #: is this same type (`config.repository_override`).
-    policy: TemplatePolicyOverride | None = None
-    #: The automated reviewer `mr.automated_review` waits for, if any (Ruling
-    #: 171). Mirrored on the legacy `config.RepoEntry`, which the daemon reads.
-    automated_review: AutomatedReview | None = None
 
 
 class WorkspaceMember(BaseModel):
@@ -261,8 +171,9 @@ class WorkItemTarget(BaseModel):
         return ((self.root,) if self.root else ()) + members
 
     @classmethod
-    def for_repository(cls, repository: Repository) -> WorkItemTarget:
-        return cls(kind="repository", repository=repository.id)
+    def for_repository(cls, repository: str) -> WorkItemTarget:
+        """A single-repository target, by the repository's id."""
+        return cls(kind="repository", repository=repository)
 
     @classmethod
     def from_selection(
@@ -361,11 +272,11 @@ class HarnessProfile:
         return self.enabled
 
 
-# ── The two V1 files these types are read from ───────────────────────────────
+# ── `harnesses.yaml`, the V1 file these types are read from ──────────────────
 #
-# `from_yaml` may do boundary I/O; `from_input` stays pure. Each translates a
+# `from_yaml` may do boundary I/O; `from_input` stays pure. It translates a
 # read or parse failure into this module's own error type, so a caller catches
-# one exception per configuration file rather than `OSError`/`YAMLError`/
+# one exception for the file rather than `OSError`/`YAMLError`/
 # `ValidationError` from three layers down.
 
 
@@ -373,7 +284,7 @@ def _first_error(exc: ValidationError) -> str:
     """A pydantic failure as one line naming the field that failed. Its own
     three lines rather than an import: `templates.models.first_error` joins
     with `PATH_SEPARATOR`, which is that module's, and this module cannot
-    import it (`models` imports *this* one -- the cycle the header names)."""
+    import it (`models` imports *this* one, so the reverse is a cycle)."""
     error = exc.errors()[0]
     location = ".".join(str(part) for part in error["loc"])
     return f"{location}: {error['msg']}" if location else error["msg"]
@@ -382,10 +293,8 @@ def _first_error(exc: ValidationError) -> str:
 def _read_mapping(path: Path, section: str) -> dict[str, object]:
     """One top-level mapping section of `path`, or `{}` when it is absent.
 
-    An absent section is not an error -- a `repos.yaml` with repositories and
-    no workspaces is the ordinary single-repository install -- but a section
-    present and not a mapping is, because the keys are the identifiers
-    everything else references.
+    An absent section is not an error, but a section present and not a mapping
+    is, because the keys are the identifiers everything else references.
     """
     try:
         data = yaml.safe_load(path.read_text())
@@ -405,62 +314,6 @@ def _read_mapping(path: Path, section: str) -> dict[str, object]:
             f"the configuration references it as"
         )
     return raw
-
-
-@dataclass(frozen=True)
-class RepositoryTable:
-    """One `repos.yaml`: the repositories on this instance and the workspaces
-    assembled from them (`repositories-workspaces-and-areas-are-distinct`)."""
-
-    repositories: dict[str, Repository]
-    workspaces: dict[str, Workspace]
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> RepositoryTable:
-        """Read `repositories:` and `workspaces:` from `path`.
-
-        **An existing install's `repos.yaml` is not in this shape and this
-        loader will not read it.** Seeding only ever *creates* -- `seed_home`
-        returns early when `templates/` exists (`cli/admin.py`), so a home
-        written before V1 keeps its legacy list under `repos:` and comes back
-        from here empty rather than wrong. Converting such a home is Task 11's
-        `major-update-*` work, deliberately not this loader's: a reader that
-        silently accepted both shapes is how the two start disagreeing.
-        """
-        path = Path(path)
-        repositories: dict[str, Repository] = {}
-        for id, body in _read_mapping(path, "repositories").items():
-            try:
-                repositories[id] = Repository.model_validate({"id": id, **(body or {})})
-            except ValidationError as exc:
-                raise TemplateEnvironmentError(
-                    f"{path}: repositories.{id}: {_first_error(exc)}"
-                ) from exc
-
-        workspaces: dict[str, Workspace] = {}
-        for id, body in _read_mapping(path, "workspaces").items():
-            try:
-                workspace = Workspace.model_validate({"id": id, **(body or {})})
-            except ValidationError as exc:
-                raise TemplateEnvironmentError(
-                    f"{path}: workspaces.{id}: {_first_error(exc)}"
-                ) from exc
-            # Both ends of every reference, at load: a workspace mounting a
-            # repository this file does not declare assembles an empty checkout
-            # at run time, hours after the typo, and nothing before this point
-            # would have said so.
-            if workspace.root not in repositories:
-                raise TemplateEnvironmentError(
-                    f"{path}: workspaces.{id}: root {workspace.root!r} is not a declared repository"
-                )
-            for name, member in workspace.members.items():
-                if member.repository not in repositories:
-                    raise TemplateEnvironmentError(
-                        f"{path}: workspaces.{id}.members.{name}: "
-                        f"{member.repository!r} is not a declared repository"
-                    )
-            workspaces[id] = workspace
-        return cls(repositories=repositories, workspaces=workspaces)
 
 
 @dataclass(frozen=True)

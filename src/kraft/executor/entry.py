@@ -11,7 +11,7 @@ from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
 from kraft.policy import InstancePolicy, InstancePolicyInput
-from kraft.templates.environment import Repository, WorkItemTarget
+from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import ResolvedChain
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def single_repo_target(repo: str) -> WorkItemTarget:
     materialization before it files a bead -- two copies of this would let the
     dry run and the real one disagree about what gets trimmed.
     """
-    return WorkItemTarget.for_repository(Repository(id="target", path=repo))
+    return WorkItemTarget.for_repository("target")
 
 
 async def intake(

@@ -213,11 +213,9 @@ class RepoEntry(BaseModel):
     #: safety`): applied after the instance policy and before everything a
     #: work item or chain adds, and allowed only to tighten what it inherits.
     #: The entry's own `deny_tools` and `sandbox` above belong to the same layer
-    #: (Ruling 105) and are folded into it by `repository_override`; V1's
-    #: `Repository` has only this block.
+    #: (Ruling 105) and are folded into it by `repository_override`.
     policy: TemplatePolicyOverride | None = None
-    #: The automated reviewer `mr.automated_review` waits for (Ruling 171);
-    #: the same type as V1's `Repository.automated_review`.
+    #: The automated reviewer `mr.automated_review` waits for (Ruling 171).
     automated_review: AutomatedReview | None = None
 
     @model_validator(mode="before")
@@ -442,6 +440,14 @@ def load_repos(
     path = Path(path)
     steering_dir = steering_dir if steering_dir is not None else path.parent / "steering"
     data = read_yaml(path, REPOS_DEFAULT)
+    if "repositories" in data:
+        # Loud, not ignored: a file keyed this way would otherwise load no
+        # repository at all, and only a workspace naming one would ever say so
+        # -- blaming the workspace (Kraft-iep21, Ruling 177).
+        raise ConfigError(
+            "repos.yaml: top-level 'repositories:' is not read; did you mean 'repos:'? "
+            "Kraft reads a list of entries under 'repos:', each naming its 'path'"
+        )
     repos = data.get("repos") or []
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")

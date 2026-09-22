@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from kraft.policy import InstancePolicy, InstancePolicyInput
-from kraft.templates.environment import Repository, WorkItemTarget
+from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, MaterializedChain, ResolvedChain
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
@@ -38,7 +38,7 @@ def _chain(**maxima) -> MaterializedChain:
     ]
     instance = InstancePolicy.from_input(InstancePolicyInput.model_validate({"maxima": maxima}))
     return ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
-        target=WorkItemTarget.for_repository(Repository(id="target", path="/r")),
+        target=WorkItemTarget.for_repository("target"),
         effective_policy=instance,
     )
 

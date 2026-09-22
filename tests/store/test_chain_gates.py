@@ -272,7 +272,7 @@ def _materialized():
     from pathlib import Path
 
     from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
     from kraft.templates.library import TemplateLibrary
 
     root = Path(__file__).resolve().parents[2] / "templates"
@@ -280,7 +280,7 @@ def _materialized():
         TemplateLibrary.from_yaml_dir(root)
         .resolve_chain("default")
         .materialize(
-            target=WorkItemTarget.for_repository(Repository(id="api", path="/work/api")),
+            target=WorkItemTarget.for_repository("api"),
             effective_policy=InstancePolicy.from_input(
                 InstancePolicyInput.model_validate({"defaults": {"timeout_minutes": 60}})
             ),

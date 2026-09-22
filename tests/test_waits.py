@@ -479,10 +479,10 @@ async def test_a_reviewer_error_stops_for_a_human_and_spends_no_repair(walk, ite
 
 
 def _materialize(nodes, repo, maxima: dict):
-    from kraft.templates.environment import Repository, WorkItemTarget
+    from kraft.templates.environment import WorkItemTarget
 
     return v1_resolved(nodes).materialize(
-        target=WorkItemTarget.for_repository(Repository(id="target", path=str(repo))),
+        target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(
             InstancePolicyInput.model_validate({"maxima": maxima})
         ),

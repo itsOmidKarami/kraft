@@ -9,12 +9,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from kraft import config
 from kraft.adapters import forge
 from kraft.automated_review import AutomatedReview
-from kraft.templates.environment import Repository
 
 HEAD = "abc123"
 
@@ -283,9 +281,6 @@ async def test_a_repository_naming_no_reviewer_settles_clean_and_says_why(run_fo
     ids=["both", "neither"],
 )
 def test_a_reviewer_is_named_exactly_one_way_or_refused_at_load(tmp_path, block):
-    with pytest.raises(ValidationError, match="exactly one"):
-        Repository.model_validate({"id": "r", "path": "/r", "automated_review": block})
-
     repos = tmp_path / "repos.yaml"
     repos.write_text(json.dumps({"repos": [{"path": "/r", "automated_review": block}]}))
     with pytest.raises(config.ConfigError, match="exactly one"):
