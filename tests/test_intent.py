@@ -332,3 +332,30 @@ def test_a_frontend_pin_with_no_test_name_is_broken_not_silent_coverage(tmp_path
     assert [pin for _req, pin in report.broken] == ["frontend/src/views/board/Board.test.tsx"]
     assert report.unverified == []
     assert not report.ok
+
+
+def test_main_does_not_parse_the_tree_readme(tmp_path, monkeypatch, capsys):
+    _write(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "# The format\n\n## REQ not-a-requirement\nThe system SHALL be ignored.\n"
+    )
+    monkeypatch.setattr(
+        "kraft.intent.collect_node_ids",
+        lambda root: {
+            "tests/test_gates.py::test_reject",
+            "tests/test_gates.py::test_one",
+            "tests/test_gates.py::test_two",
+        },
+    )
+    assert main([str(tmp_path)]) == 0
+    assert "not-a-requirement" not in capsys.readouterr().out
+
+
+def test_render_puts_the_failing_lines_last_before_the_summary(tmp_path):
+    """A failed check reaches the fix loop as a blind failure whose message
+    is the log's last five lines (findings._extract_message): the lines
+    that fail the check must be the ones nearest the summary."""
+    lines = render(check(parse_file(_write(tmp_path)), set())).splitlines()
+    kinds = [line.split()[0] for line in lines[:-1]]
+    assert kinds.index("UNPINNED") < kinds.index("BROKEN")
+    assert kinds[-1] == "BROKEN"
