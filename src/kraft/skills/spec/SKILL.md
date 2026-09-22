@@ -45,6 +45,11 @@ and why.
   they did not expect.
 - **How it will be verified**: the tests that must exist, named.
 
+If your instructions name an intent tree, the spec also states the requirement
+changes this work makes to it: each requirement it adds, changes or removes, one
+behaviour per requirement, in the tree's format and no broader than a test will
+enforce. Where no capability file covers the behaviour yet, propose a new one.
+
 Leave no "TBD", no "to be determined later", no section that describes what a
 decision will be about instead of making it. If you cannot resolve something,
 that is a `needs_context` stop, not a placeholder.

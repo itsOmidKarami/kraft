@@ -22,3 +22,13 @@ origin: src/kraft/adapters/agent.py §build_context
 The intent check SHALL NOT read a tree's `README.md` as a capability file.
 enforced-by: tests/test_intent.py::test_main_does_not_parse_the_tree_readme
 origin: docs/intent/README.md
+
+## REQ planning-and-review-methods-carry-the-intent-process
+The spec, plan, code-review and work-brief methods SHALL each carry the paragraph that applies the intent process when the launch context names an intent tree.
+enforced-by: tests/skills/test_intent_paragraphs.py::test_the_skill_carries_the_intent_paragraph[spec], tests/skills/test_intent_paragraphs.py::test_the_skill_carries_the_intent_paragraph[plan], tests/skills/test_intent_paragraphs.py::test_the_skill_carries_the_intent_paragraph[code-review], tests/skills/test_intent_paragraphs.py::test_the_skill_carries_the_intent_paragraph[work-brief]
+origin: docs/intent/README.md
+
+## REQ unrecorded-behaviour-change-is-an-important-finding
+WHERE a repository names an intent tree, the code-review method SHALL rank a behaviour change with no matching requirement change as `important`.
+enforced-by: tests/skills/test_intent_paragraphs.py::test_the_code_review_intent_cases_are_important
+origin: docs/intent/README.md

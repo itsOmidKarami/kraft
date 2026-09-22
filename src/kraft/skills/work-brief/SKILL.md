@@ -48,6 +48,10 @@ line; do not drop it.
    though it is still a draft. A human who does not know that may approve
    casually.
 
+If your instructions name an intent tree, **What changed** also lists each
+requirement this diff adds, changes or removes, by id, and any requirement it
+leaves with no `enforced-by:` pin.
+
 ## What it leaves out
 
 - **The diff.** The human can read it themselves, and the brief is where they
