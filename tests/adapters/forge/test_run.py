@@ -279,13 +279,10 @@ def _branch_over_origin(tmp_path, *, commits: int):
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(origin)], check=True)
     repo = make_repo(tmp_path)
-    for args in (["remote", "add", "origin", str(origin)], ["push", "-q", "origin", "main"]):
+    work = [["commit", "--allow-empty", "-qm", f"work {n}"] for n in range(commits)]
+    setup = [["remote", "add", "origin", str(origin)], ["push", "-q", "origin", "main"]]
+    for args in [*setup, ["checkout", "-qb", "kraft/w1"], *work]:
         subprocess.run(["git", *args], cwd=repo, check=True)
-    subprocess.run(["git", "checkout", "-qb", "kraft/w1"], cwd=repo, check=True)
-    for n in range(commits):
-        (repo / f"work{n}.txt").write_text("the work\n")
-        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-        subprocess.run(["git", "commit", "-qm", f"work {n}"], cwd=repo, check=True)
     return repo
 
 

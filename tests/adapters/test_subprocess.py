@@ -15,7 +15,7 @@ from pathlib import Path
 
 import psutil
 import pytest
-from support.harness import fake_docker_bin
+from support.harness import fails_once, fake_docker_bin
 
 from kraft import events, logs, store
 from kraft.adapters import subprocess as sp
@@ -544,10 +544,21 @@ async def test_log_is_readable_while_the_child_is_still_running(run, run_dirs):
     assert "init" in early[0]["text"]
 
 
-async def test_running_session_row_carries_tokens_before_exit(run, database):
+@pytest.mark.parametrize("seam", [None, "read", "write"], ids=["clean", "bad-read", "bad-write"])
+async def test_running_session_row_carries_tokens_before_exit(
+    run, database, monkeypatch, caplog, seam
+):
     """Kraft-54dk / Kraft-2r8s: usage was harvested once, at exit, so a live
     node's row held NULL tokens and model for its whole run -- and
-    `usage_rollup` reports 0 for exactly the node a human is watching."""
+    `usage_rollup` reports 0 for exactly the node a human is watching.
+
+    Kraft-0jpb, pinning Kraft-41f7: a tick that raises -- reading the log
+    (`_progress_usage`) or writing the row (`store.session_progress`) -- is
+    logged with its traceback, and the next tick still lands."""
+    if seam == "read":
+        monkeypatch.setattr(sp, "_progress_usage", fails_once(sp._progress_usage))
+    elif seam == "write":
+        monkeypatch.setattr(store, "session_progress", fails_once(store.session_progress))
     script = (
         'printf \'{"type":"system","subtype":"init","model":"claude-opus-5"}\\n\'; '
         'printf \'{"type":"assistant","request_id":"req_1","message":'
@@ -575,6 +586,8 @@ async def test_running_session_row_carries_tokens_before_exit(run, database):
         "tokens_in": 1000,
         "tokens_out": 200,
     }
+    failed = [r for r in caplog.records if "usage progress tick failed" in r.getMessage()]
+    assert [r.exc_info[1].args for r in failed] == ([] if seam is None else [("poison tick",)])
 
 
 # --- the process group ---------------------------------------------------------------------
