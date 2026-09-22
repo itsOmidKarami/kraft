@@ -62,12 +62,14 @@ exist. Once the plan is approved, `default`'s `chain_revision` node has an agent
 read both against the nodes still to run and propose a change set: skip a node,
 add one built from library components, or set a task's `model`/`effort` or an
 operational policy value (a cap, a budget, a fix loop's bound) within the
-administrator maxima. Only nodes after its gate may change, and a gate never
-does. Usually it proposes nothing, and the `chain_revision_approval` gate passes
+administrator maxima. Only nodes after its gate may change, a gate never
+does, and no node that opens, describes, syncs, readies or merges the merge
+request (or waits on its checks) can be skipped. Usually it proposes nothing, and the `chain_revision_approval` gate passes
 without asking anyone. When it does propose something, that gate shows the
 rationale, each change with the line of the spec or plan behind it, and the diff;
-approving replaces the item's chain with the revised one (a `chain_revised`
-event), and a proposal that would not validate cannot be approved — reject it
+approving replaces the item's chain with exactly the revision the gate showed (a
+`chain_revised` event; if the library changed since, the approval is refused
+until you look again), and a proposal that would not validate cannot be approved — reject it
 back to `chain_revision` with the reason the gate gives.
 
 ## Node

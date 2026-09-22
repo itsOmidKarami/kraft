@@ -552,6 +552,19 @@ the whole change set.
 enforced-by: tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[skip-a-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[skip-the-final-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[override-a-gate], tests/templates/test_revision.py::test_a_revision_can_never_skip_or_change_a_gate[override-the-final-gate], tests/templates/test_revision.py::test_a_change_set_that_would_not_validate_is_refused[add-a-gate]
 origin: src/kraft/templates/revision.py §revise
 
+## REQ chain-revision-cannot-remove-merge-request-work
+
+IF a chain revision skips a node whose own steps run a forge task or write the
+merge request's description, THEN the system SHALL refuse the whole change set.
+enforced-by: tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[describe_merge_request], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[draft_merge_request], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[merge_request_feedback], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[mark_ready], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[external_approval], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[merge], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request[post_merge_ci], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[a-forge-action], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[a-forge-wait], tests/templates/test_revision.py::test_a_revision_cannot_skip_a_merge_request_node_of_any_chain[the-mr-description]
+origin: src/kraft/templates/revision.py §_lands -- Kraft-eh5as: without it a revision could skip every node that lands the change, and the item would complete with nothing merged.
+
+## REQ chain-revision-approval-applies-what-was-shown
+
+IF the revision an approval would apply differs from the one its gate last showed, THEN the system SHALL refuse the approval as a conflict and SHALL apply nothing.
+enforced-by: tests/api/test_chain_revision_gate.py::test_a_library_change_after_the_gate_was_shown_refuses_the_approval, tests/api/test_chain_revision_gate.py::test_an_approval_nobody_rendered_applies_what_it_computes
+origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15.
+
 ## REQ invalid-chain-revision-never-reaches-the-chain
 
 IF an approved chain revision cannot be read, or its revised chain does not
@@ -565,7 +578,7 @@ origin: src/kraft/api/routes/gates.py §_revise
 WHEN a chain revision proposes no change, the system SHALL pass its gate without
 requesting a human decision and SHALL record the proposal's rationale in an
 event.
-enforced-by: tests/executor/test_chain_revision.py::test_an_unchanged_revision_advances_without_a_human, tests/executor/test_chain_revision.py::test_a_proposed_change_stops_at_the_gate
+enforced-by: tests/executor/test_chain_revision.py::test_an_unchanged_revision_advances_without_a_human, tests/executor/test_chain_revision.py::test_a_proposed_change_stops_at_the_gate, tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[prose], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[truncated-json], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[unknown-key], tests/executor/test_chain_revision.py::test_a_malformed_revision_is_never_read_as_no_change[empty]
 origin: src/kraft/executor/gates.py §maybe_gate
 
 ## REQ revised-chain-is-what-every-later-reader-sees
