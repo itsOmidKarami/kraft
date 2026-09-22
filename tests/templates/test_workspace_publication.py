@@ -9,6 +9,7 @@ under is the question."""
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 from pathlib import Path
 
@@ -17,11 +18,12 @@ from support import worktree as wtree
 from support.harness import _git, make_repo, make_repo_with_submodule, v1_chain
 from support.workspace import workspace_target
 
-from kraft import store
+from kraft import events, store
 from kraft.adapters import forge
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
 from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy
+from kraft.templates.models import DEFAULT_WAIT
 
 NO_SETUP = {"setup_command": ""}
 _SANDBOX = SandboxPolicy(kind="docker", image="kraft/member:1")
@@ -41,12 +43,13 @@ async def _workspace_item(
     pointer="ignore",
     second=False,
     legacy=False,
+    nodes=None,
     **materialize,
 ):
     """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
     `repos/pkg2` when `second`), filed as a workspace item selecting them under
-    root-pointer policy `pointer`, on one exec node of `tasks`; its checkout
-    assembled. Returns `(row, node, worktree)`."""
+    root-pointer policy `pointer`, on one exec node of `tasks` (or the chain
+    `nodes`); its checkout assembled. Returns `(row, node, worktree)`."""
     root, _ = make_repo_with_submodule(tmp_path)
     mounts = {"pkg": "repos/pkg"}
     if second:
@@ -55,7 +58,7 @@ async def _workspace_item(
         _git(root, "commit", "-qm", "add a second submodule")
         mounts["pkg2"] = "repos/pkg2"
     chain = v1_chain(
-        [{"id": "n", "kind": "exec", "tasks": tasks}],
+        nodes or [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
         target=None if legacy else workspace_target(mounts, root_pointer_policy=pointer),
     )
@@ -281,14 +284,31 @@ def _git_out(cwd, *args) -> str:
 
 class _LandingForge(forge.FakeForge):
     """A `FakeForge` whose merge really lands the branch on its repository's
-    origin `main`, and which records, in order, every merge and every
-    readiness -- the root's with the member pointer its head carried then."""
+    origin `main` -- past a branch protection, as a forge's own merge does --
+    and which records, in order, every merge, every approval read and every
+    readiness -- the root's with the member pointer its head carried then.
+    `awaiting` holds a repository's approval pending for that many reads."""
 
-    def __init__(self, refuse: str | None = None, raise_on_merge: bool = False):
-        super().__init__(ci_states=["success"])
+    def __init__(
+        self,
+        refuse: str | None = None,
+        raise_on_merge: bool = False,
+        awaiting: dict[str, int] | None = None,
+        merge_delay: int = 0,
+    ):
+        super().__init__(ci_states=["success"], merge_delay=merge_delay)
         self.order: list[tuple] = []
         self.refuse = refuse
         self.raise_on_merge = raise_on_merge
+        self.awaiting = dict(awaiting or {})
+
+    async def approval_state(self, *, repo, branch):
+        name = Path(repo).name
+        self.order.append(("approval", name))
+        if self.awaiting.get(name, 0) > 0:
+            self.awaiting[name] -= 1
+            return "pending"
+        return "approved"
 
     async def ci_status(self, *, repo, mr, branch="", pipeline_id=""):
         status = await super().ci_status(repo=repo, mr=mr, branch=branch, pipeline_id=pipeline_id)
@@ -300,7 +320,13 @@ class _LandingForge(forge.FakeForge):
         if self.raise_on_merge and Path(repo).name == self.refuse:
             raise forge.ForgeError("merge refused: the branch is protected")
         await super().merge(repo=repo, branch=branch, mr=mr)
-        _git(repo, "push", "-q", "origin", "HEAD:main")
+        subprocess.run(
+            ["git", "push", "-q", "origin", "HEAD:main"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            env={**os.environ, "FORGE_LANDS": "1"},
+        )
         self.order.append(("merge", Path(repo).name))
 
     async def mark_ready(self, *, repo, branch, mr):
@@ -311,13 +337,31 @@ class _LandingForge(forge.FakeForge):
 
 
 async def _publishable(
-    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, second=False, legacy=False
+    database,
+    run_dirs,
+    tmp_path,
+    *,
+    pointer,
+    root_denies_push=False,
+    second=False,
+    legacy=False,
+    root_source=False,
+    nodes=None,
 ):
     """A workspace item whose root and member each have an origin that takes a
     push (the member's is its source repository), the member carrying a
-    commit. Returns `(row, worktree, root_origin)`."""
+    commit, and the root one too when `root_source`. `root_denies_push`
+    protects the root's `main` from every push but the forge's own merge.
+    Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await _workspace_item(
-        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, second=second, legacy=legacy
+        database,
+        run_dirs,
+        tmp_path,
+        [_task("t")],
+        pointer=pointer,
+        second=second,
+        legacy=legacy,
+        nodes=nodes,
     )
     root = Path(row["repo"])
     members = ["pkg", "pkg2"] if second else ["pkg"]
@@ -325,7 +369,9 @@ async def _publishable(
     _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
     if root_denies_push:
         hook = origin / "hooks" / "pre-receive"
-        hook.write_text("#!/bin/sh\necho 'protected branch' >&2\nexit 1\n")
+        hook.write_text(
+            "#!/bin/sh\n[ -n \"$FORGE_LANDS\" ] && exit 0\necho 'protected branch' >&2\nexit 1\n"
+        )
         hook.chmod(0o755)
     _git(root, "remote", "add", "origin", str(origin))
     _git(worktree, "fetch", "-q", "origin")
@@ -334,6 +380,10 @@ async def _publishable(
         (worktree / "repos" / member / "lib.py").write_text("x = 1\n")
         _git(worktree / "repos" / member, "add", "-A")
         _git(worktree / "repos" / member, "commit", "-qm", "member change")
+    if root_source:
+        (worktree / "root.txt").write_text("root source\n")
+        _git(worktree, "add", "root.txt")
+        _git(worktree, "commit", "-qm", "root source change")
     return row, worktree, origin
 
 
@@ -413,15 +463,16 @@ async def test_pointer_bump_falls_back_to_merge_request_when_push_is_denied(
 ):
     """`workspace-pointer-bump-falls-back-to-merge-request`: a root whose
     default branch refuses the direct push gets the same bump as a merge
-    request, from the item's own branch in the root."""
+    request, from the item's own branch in the root. (Its approval is held
+    here: what follows it to its merge is the test after the next.)"""
     row, worktree, origin = await _publishable(
         database, run_dirs, tmp_path, pointer="bump", root_denies_push=True
     )
     before = _git_out(origin, "rev-parse", "main")
-    fake = _LandingForge()
+    fake = _LandingForge(awaiting={row["id"]: 1})
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
-    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "waiting"
 
     assert _git_out(origin, "rev-parse", "main") == before, "the refused push changed nothing"
     (pointer_mr,) = [n for n, r in fake._opened_repo.items() if r == str(worktree)]
@@ -440,10 +491,9 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
     run-early`), but it is not marked ready until the member has merged and
     the root names the member's merged revision
     (`root-source-merge-request-readiness-waits-for-child-merges`)."""
-    row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
-    (worktree / "root.txt").write_text("root source\n")
-    _git(worktree, "add", "root.txt")
-    _git(worktree, "commit", "-qm", "root source change")
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=True
+    )
     fake = _LandingForge()
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr") == "done"
@@ -454,7 +504,138 @@ async def test_root_mr_not_ready_until_child_mrs_have_merged(
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
     merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
-    assert fake.order[1:] == [("merge", "pkg"), ("ready", row["id"], merged), ("merge", row["id"])]
+    root = row["id"]
+    assert fake.order[1:] == [
+        ("merge", "pkg"),
+        ("ready", root, merged),
+        ("approval", root),
+        ("merge", root),
+    ]
+
+
+#: Publication as a chain walks it: draft, approval, ready, merge.
+_PUBLISH = [
+    {"id": id, "kind": "exec", "tasks": [{"id": id, "kind": "forge", "target": target}]}
+    for id, target in [
+        ("draft", "mr.open_draft"),
+        ("approval", "mr.external_approval"),
+        ("ready", "mr.mark_ready"),
+        ("merge", "mr.merge"),
+    ]
+]
+
+
+async def _walk(database, run_dirs, row, fake, monkeypatch) -> str:
+    """`executor.run` on the item from its own cursor, re-entered as the wait
+    scheduler would, with every forge task answered by `fake`."""
+    from kraft import executor
+
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    wid = row["id"]
+    status = database.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )["status"]
+    if status == "waiting":
+        await database.write(lambda c: store.mark_reentered(c, wid))
+    return await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        policy=None,
+        launch=LaunchContext(repo_entry={**NO_SETUP, "forge": "github"}, steering_dir=None),
+    )
+
+
+def _pending(database, row, task="merge.main.merge") -> list[str]:
+    """What each pending observation of the merge task's wait was waiting for."""
+    return [
+        e["payload"]["condition"]
+        for e in database.read(lambda c: events.read_after(c, 0, row["id"]))
+        if e["type"] == "external_wait_observed"
+        and e["payload"]["task"] == task
+        and e["payload"]["state"] == "pending"
+    ]
+
+
+async def test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the_item_completes(
+    database, run_dirs, tmp_path, monkeypatch, wait_clock
+):
+    """Kraft-ontlw: the root's approval is read only once it is ready -- after
+    its member merged, never while it was a draft at the chain's approval
+    node -- and the merge node waits on it, then on its merge landing,
+    through the one wait scheduler. The item completes only once the root
+    merged. The forge lands every merge a read late, so the root's merge is
+    asked for after the member's landed, not taken for already requested."""
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=True, nodes=_PUBLISH
+    )
+    root = row["id"]
+    fake = _LandingForge(awaiting={root: 1}, merge_delay=1)
+
+    for _ in range(3):
+        assert await _walk(database, run_dirs, row, fake, monkeypatch) == "waiting"
+    assert ("merge", root) in fake.order and _repos(database, row)["root"] == "open"
+    assert await _walk(database, run_dirs, row, fake, monkeypatch) == "completed"
+
+    merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    root_reads = [e for e in fake.order if e[1] == root]
+    assert root_reads[0] == ("ready", root, merged), "read before the root was ready"
+    assert fake.order.index(("merge", "pkg")) < fake.order.index(root_reads[0])
+    assert [e for e in fake.order if e[0] == "merge"] == [("merge", "pkg"), ("merge", root)]
+    assert _pending(database, row) == ["merge", "external_approval", "merge"]
+    assert _repos(database, row)["root"] == "merged"
+
+
+async def test_a_root_approval_that_never_comes_times_out_for_a_human(
+    database, run_dirs, tmp_path, monkeypatch, wait_clock
+):
+    """`external-wait-timeout-needs-human`, for the root's own approval: the
+    wait runs out, the item stops for a person, and the root is left
+    unmerged -- the item never completes over it."""
+    row, worktree, _ = await _publishable(
+        database, run_dirs, tmp_path, pointer="ignore", root_source=True, nodes=_PUBLISH
+    )
+    root = row["id"]
+    fake = _LandingForge(awaiting={root: 10**6})
+
+    assert await _walk(database, run_dirs, row, fake, monkeypatch) == "waiting"
+    wait_clock.advance(DEFAULT_WAIT.timeout.total_seconds())
+
+    assert await _walk(database, run_dirs, row, fake, monkeypatch) == "needs_human"
+
+    item = database.read(lambda c: events.read_after(c, 0, row["id"]))
+    (stop,) = [e for e in item if e["type"] == "work_item_needs_human"]
+    assert (
+        "timed out" in stop["payload"]["reason"] and "merge.main.merge" in stop["payload"]["reason"]
+    )
+    assert _pending(database, row) == ["external_approval"]
+    assert ("merge", root) not in fake.order and _repos(database, row)["root"] == "open"
+
+
+async def test_a_fallback_pointer_merge_request_is_followed_to_its_merge(
+    database, run_dirs, tmp_path, monkeypatch, wait_clock
+):
+    """Kraft-srt9v: a pointer bump the root's `main` refused goes out as a
+    merge request, and the item does not complete with it open -- it is
+    readied, its approval awaited, and it is merged, like any root merge
+    request (`external-wait-covers-merge-request-lifecycle`)."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", root_denies_push=True, nodes=_PUBLISH
+    )
+    root = row["id"]
+    fake = _LandingForge(awaiting={root: 1})
+
+    assert await _walk(database, run_dirs, row, fake, monkeypatch) == "waiting"
+    (pointer_mr,) = [n for n, r in fake._opened_repo.items() if r == str(worktree)]
+    assert fake.opened_draft[pointer_mr] is False, "the pointer merge request was never readied"
+    assert await _walk(database, run_dirs, row, fake, monkeypatch) == "completed"
+
+    assert pointer_mr in fake.merged
+    assert _git_out(origin, "rev-parse", "main:repos/pkg") == _git_out(
+        tmp_path / "pkg", "rev-parse", "main"
+    )
+    assert _pending(database, row) == ["external_approval"]
+    assert _repos(database, row)["root"] == "merged"
 
 
 @pytest.mark.parametrize(
@@ -477,12 +658,8 @@ async def test_blocked_child_merge_leaves_the_root_unchanged(
     approval is an ordinary wait (`missing-external-approval-is-normal-
     pending-state`), and the root waits with it."""
     row, worktree, origin = await _publishable(
-        database, run_dirs, tmp_path, pointer="bump", second=second
+        database, run_dirs, tmp_path, pointer="bump", second=second, root_source=root_source
     )
-    if root_source:
-        (worktree / "root.txt").write_text("root source\n")
-        _git(worktree, "add", "root.txt")
-        _git(worktree, "commit", "-qm", "root source change")
     before = _git_out(origin, "rev-parse", "main")
     fake = _LandingForge(refuse="pkg2" if second else "pkg", raise_on_merge=refused)
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
