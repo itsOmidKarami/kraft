@@ -326,6 +326,11 @@ includes an untracked one, a populated gitlink, or a gitlink the branch added
 or moved. Remove them, or `git rm --cached` the gitlinks, and retry. A
 submodule your repository already had, left unpopulated, doesn't stop anything.
 
+While one of a sandboxed item's sessions is still running, Kraft runs no git in
+its worktree at all. The diff view answers that the diff is available once the
+sandboxed session ends. A task that needs the review package stops for a
+person, and the sweep of leftover work waits for the last task of the step.
+
 What this costs: the clean check before a merge request no longer looks for
 uncommitted edits inside a submodule. It still catches a submodule whose commit
 moved, and each declared workspace member is checked on its own. Leftover work
