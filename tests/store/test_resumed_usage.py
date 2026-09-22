@@ -117,3 +117,31 @@ async def test_a_new_cli_session_is_not_netted_against_an_earlier_one(database, 
     await _turn(database, tmp_path, "b", "cli-y", _envelope(30, 3, 30, 3, 0.30))
 
     assert _spent(database, "b") == (30, 3, pytest.approx(0.30))
+
+
+async def test_a_resumed_session_nets_each_kind_of_token(database, tmp_path):
+    """The cache kinds are running totals too (Ruling 211): each one nets
+    against what the earlier turn recorded, not just the uncached input."""
+
+    def cached(write, read, cost):
+        return {
+            "modelUsage": {
+                "claude-opus-5": {
+                    "inputTokens": 10,
+                    "outputTokens": 1,
+                    "cacheCreationInputTokens": write,
+                    "cacheReadInputTokens": read,
+                }
+            },
+            "total_cost_usd": cost,
+        }
+
+    await _turn(database, tmp_path, "a", "cli-x", cached(100, 1000, 1.0), paused=True)
+    await _turn(database, tmp_path, "b", "cli-x", cached(130, 1600, 1.2))
+
+    row = database.read(
+        lambda c: c.execute(
+            "SELECT tokens_cache_write, tokens_cache_read FROM worker_sessions WHERE id = 'b'"
+        ).fetchone()
+    )
+    assert tuple(row) == (30, 600)
