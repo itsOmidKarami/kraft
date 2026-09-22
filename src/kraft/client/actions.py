@@ -179,11 +179,17 @@ async def _pending_gate_of(work_item_id: str) -> str:
     return gate
 
 
-async def approve_gate(gate: str | None = None, work_item_id: str | None = None) -> dict:
-    """Approve the gate a work item is waiting on."""
+async def approve_gate(
+    gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
+) -> dict:
+    """Approve the gate a work item is waiting on. A chain revision's approval
+    needs the `digest` its artifact carried (Kraft-ec66w)."""
     target = context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
-    return await transport._act(f"/work-items/{target}/gates/{quote(gate, safe='')}/approve")
+    return await transport._act(
+        f"/work-items/{target}/gates/{quote(gate, safe='')}/approve",
+        {"digest": digest} if digest else None,
+    )
 
 
 async def reject_gate(

@@ -323,6 +323,12 @@ def artifact_body(payload: dict) -> str:
             + ".",
             "\033[33m",
         )
+    if payload.get("digest"):
+        # A chain revision's approval is bound to this render (Kraft-ec66w).
+        out += (
+            "\n\nTo approve this revision: kraft item approve --digest "
+            f"{payload['digest']} {payload.get('work_item_id', '')}".rstrip()
+        )
     return out
 
 

@@ -180,6 +180,7 @@ async def get_work_item_artifact(wid: str, request: Request):
     text, truncated = result
     fm, body = ingest_mod.split_front_matter(text)
     chain = store.materialized_chain_of(row)
+    shown = None
     if chain is not None and any(
         n.id == gate and n.node.artifact == revision.CHAIN_REVISION for n in chain.chain.nodes
     ):
@@ -193,6 +194,9 @@ async def get_work_item_artifact(wid: str, request: Request):
     return {
         "work_item_id": wid,
         "path": rel,
+        # A chain revision's approval sends this back (Kraft-ec66w); absent
+        # where approving applies nothing.
+        **({"digest": shown} if shown else {}),
         "title": ingest_mod.derive_title(rel, fm, body),
         # Front matter stripped: it is the contract's plumbing, not the
         # document, and a reviewer reading a spec should not have to skip it.

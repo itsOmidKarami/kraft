@@ -503,3 +503,48 @@ def test_a_revision_cannot_skip_a_merge_request_node_of_any_chain(task):
     assert [n.id for n in _revise(chain, skip=[_skip("after")]).chain.nodes][
         -1
     ] == "ship_it_somehow"
+
+
+_SYNC = {"id": "sync", "kind": "forge", "target": "mr.sync"}
+
+
+@pytest.mark.parametrize(
+    "recovery",
+    [
+        {"on_failure": {"tasks": [_SYNC]}},
+        {"fix_loop": {"tasks": [_SYNC], "max_attempts": 2}},
+        {
+            "on_base_changed": {
+                "restart_from": "keeps_it_in_sync",
+                "on_conflict": {"tasks": [_SYNC]},
+            }
+        },
+        {
+            "tasks": [
+                {
+                    "id": "run",
+                    "kind": "subprocess",
+                    "command": "true",
+                    "on_failure": {"tasks": [_SYNC]},
+                }
+            ]
+        },
+    ],
+    ids=["node-on-failure", "fix-loop", "on-conflict", "task-on-failure"],
+)
+def test_a_revision_cannot_skip_a_node_whose_only_merge_request_work_is_its_recovery(recovery):
+    """Kraft-8cu5r: every step container counts (`ResolvedNode.steps_in`), so a
+    custom chain that syncs its merge request only when a node fails is held."""
+    nodes = [
+        _run("plan"),
+        {"id": GATE, "kind": "gate", "artifact": "chain_revision"},
+        _run("keeps_it_in_sync", **recovery),
+        _run("after"),
+    ]
+    chain = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+    )
+
+    with pytest.raises(revision.RevisionError, match="merge request"):
+        _revise(chain, skip=[_skip("keeps_it_in_sync")])

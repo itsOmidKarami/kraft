@@ -228,3 +228,16 @@ def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path
     assert out["already_connected"] is True
     assert out["test_command"] == "just ci-test", "got the probed command, not the stored one"
     assert "submodules" not in out
+
+
+def test_approve_gate_forwards_the_digest_the_artifact_carried(monkeypatch):
+    """Kraft-ec66w: a chain revision's approval is refused without it."""
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        seen["args"], seen["kwargs"] = args, kwargs
+        return {"id": "w1", "status": "active"}
+
+    monkeypatch.setattr(mcp.client, "approve_gate", fake)
+    asyncio.run(mcp.build().call_tool("approve_gate", {"work_item_id": "w1", "digest": "d1"}))
+    assert seen["kwargs"].get("digest") == "d1"

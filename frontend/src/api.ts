@@ -155,8 +155,12 @@ export const raiseBudget = (id: string, budgetUsd: number | null) =>
     json("POST", { budget_usd: budgetUsd }),
   );
 
-export const approveGate = (id: string, gate: string) =>
-  req<void>(`/work-items/${id}/gates/${encodeURIComponent(gate)}/approve`, { method: "POST" });
+/** `digest`: a chain revision's, as its artifact carried it (Kraft-ec66w). */
+export const approveGate = (id: string, gate: string, digest?: string) =>
+  req<void>(
+    `/work-items/${id}/gates/${encodeURIComponent(gate)}/approve`,
+    digest ? json("POST", { digest }) : { method: "POST" },
+  );
 
 export const rejectGate = (id: string, gate: string, note: string) =>
   req<void>(`/work-items/${id}/gates/${encodeURIComponent(gate)}/reject`, json("POST", { note }));

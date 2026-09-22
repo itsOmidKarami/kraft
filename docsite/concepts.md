@@ -67,9 +67,10 @@ does, and no node that opens, describes, syncs, readies or merges the merge
 request (or waits on its checks) can be skipped. Usually it proposes nothing, and the `chain_revision_approval` gate passes
 without asking anyone. When it does propose something, that gate shows the
 rationale, each change with the line of the spec or plan behind it, and the diff;
-approving replaces the item's chain with exactly the revision the gate showed (a
-`chain_revised` event; if the library changed since, the approval is refused
-until you look again), and a proposal that would not validate cannot be approved — reject it
+approving replaces the item's chain with exactly the revision you were shown (a
+`chain_revised` event). The approval sends back the digest of what you read
+(`kraft view artifact` prints the `kraft item approve --digest` to run); if
+the revision changed since, it is refused until you look again, and a proposal that would not validate cannot be approved — reject it
 back to `chain_revision` with the reason the gate gives.
 
 ## Node
