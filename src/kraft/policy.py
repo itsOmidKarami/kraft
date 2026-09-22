@@ -464,11 +464,18 @@ _OPERATIONAL_LIST_FIELDS = ("allowed_harnesses",)
 _TOOL_NAME = re.compile(r"(?!mcp__)[A-Za-z][\w-]*|mcp__[\w-]+?__[\w.-]+")
 
 
-def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
-    """Refuse permission-rule syntax in a policy tool list (Kraft-9i6xy): a
-    scoped rule (`Bash(git *)`) or a glob (`mcp__x__*`) would never match an
-    ask, and the harness can only restrict a bare tool, so it would bound
-    nothing it claims to."""
+#: Validation context for reading back what Kraft itself froze (a snapshot, a
+#: fork's override record): a tool list there is not refused, because a
+#: snapshot frozen before the refusal existed must still read (Kraft-9ct4q).
+#: `adapters.agent.run_agent_task` refuses the rule at launch instead.
+FROZEN = {"frozen": True}
+
+
+def tool_name_refusal(field: str, names: Iterable[str]) -> str | None:
+    """Why `names` is not a tool list the permission gate can match, or None
+    (Kraft-9i6xy): a scoped rule (`Bash(git *)`) or a glob (`mcp__x__*`)
+    would never match an ask, and the harness can only restrict a bare tool,
+    so it would bound nothing it claims to."""
     for name in names:
         if _TOOL_NAME.fullmatch(name):
             continue
@@ -482,10 +489,18 @@ def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
         else:
             what = "not a tool name"
             fix = "list each tool by its exact tool name"
-        raise ValueError(
-            f"{info.field_name}: {name!r} is {what}. Kraft's permission gate matches exact "
+        return (
+            f"{field}: {name!r} is {what}. Kraft's permission gate matches exact "
             f"tool names, so {fix}"
         )
+    return None
+
+
+def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
+    if not (info.context or {}).get("frozen") and (
+        why := tool_name_refusal(info.field_name, names)
+    ):
+        raise ValueError(why)
     return names
 
 

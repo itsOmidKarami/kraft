@@ -43,7 +43,13 @@ from pydantic import (
     model_validator,
 )
 
-from kraft.policy import InstancePolicy, PolicyError, TaskPolicyOverride, TemplatePolicyOverride
+from kraft.policy import (
+    FROZEN,
+    InstancePolicy,
+    PolicyError,
+    TaskPolicyOverride,
+    TemplatePolicyOverride,
+)
 from kraft.templates.environment import Identifier, WorkItemTarget
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
@@ -1259,7 +1265,9 @@ class MaterializedChain:
         from kraft.templates.library import TemplateLibraryError
 
         try:
-            stored = _StoredMaterialization.model_validate_json(raw)
+            # Read leniently: a rule frozen before Kraft-9i6xy refused one still
+            # reads, and its launch is refused instead (Kraft-9ct4q).
+            stored = _StoredMaterialization.model_validate_json(raw, context=FROZEN)
         except ValidationError as exc:
             raise TemplateLibraryError(f"not a materialized chain: {first_error(exc)}") from exc
         return cls(

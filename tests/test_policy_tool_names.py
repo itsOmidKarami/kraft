@@ -9,7 +9,9 @@ the field and the name to write instead.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 
 import pytest
 import yaml
@@ -141,3 +143,65 @@ def _work_item(tmp_path, field, name):
 def test_every_policy_door_refuses_a_rule_naming_the_field(tmp_path, load, field, refusal):
     with pytest.raises(refusal, match=rf"{field}: 'Bash\(git \*\)' .*'Bash'"):
         load(tmp_path, field, "Bash(git *)")
+
+
+def with_a_frozen_rule(raw: str, field: str = "allowed_tools") -> str:
+    """`raw`, a stored snapshot, as a build before Kraft-9i6xy could have
+    frozen it: its first node's policy lists a scoped rule."""
+    import json
+
+    doc = json.loads(raw)
+    doc["chain"]["nodes"][0]["policy"] = {field: ["Bash(git *)"]}
+    return json.dumps(doc)
+
+
+def test_a_snapshot_frozen_with_a_rule_still_renders_on_the_board(client, repo):
+    """Kraft-9ct4q: rule syntax is refused where a policy is written, never
+    where a snapshot is read -- an item frozen before the refusal existed
+    must not 500 its board page on every read. Its launch stops instead
+    (tests/executor/test_policy_enforcement.py)."""
+    import sqlite3
+
+    wid = client.post(
+        "/api/work-items",
+        json={"repo": str(repo), "title": "t", "chain_template": "quick-task", "autostart": False},
+    ).json()["id"]
+    db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
+    with sqlite3.connect(db) as conn:
+        (raw,) = conn.execute(
+            "SELECT materialized_chain FROM work_items WHERE id = ?", (wid,)
+        ).fetchone()
+        conn.execute(
+            "UPDATE work_items SET materialized_chain = ? WHERE id = ?",
+            (with_a_frozen_rule(raw), wid),
+        )
+
+    r = client.get(f"/api/work-items/{wid}")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == wid
+
+
+def test_a_fork_record_frozen_with_a_rule_still_reads():
+    """Kraft-9ct4q, for a retry override stored on a run fork before the
+    refusal: read back as it was frozen, and refused at launch like a
+    snapshot's rule."""
+    from kraft.templates.forks import override_from_record
+
+    task = {"id": "t", "kind": "agent", "harness": "h", "prompt": "p"}
+    chain = ResolvedChain.from_chain(
+        Chain.model_validate({"id": "c", "nodes": [{"id": "n", "kind": "exec", "tasks": [task]}]})
+    ).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+    record = {
+        "path": "n",
+        "task_config": {},
+        "policy": {"allowed_tools": ["Bash(git *)"]},
+        "chain": with_a_frozen_rule(chain.to_json()),
+    }
+
+    read = override_from_record(record)
+
+    assert read.policy.allowed_tools == ["Bash(git *)"]

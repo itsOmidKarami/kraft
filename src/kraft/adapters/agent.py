@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import subprocess as _subprocess
 from kraft.paths import default_templates_dir
@@ -673,6 +674,11 @@ async def run_agent_task(
     thread: int = 1,
     repo_entry: dict | None = None,
 ) -> str:
+    # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
+    # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
+    for field, names in (("allowed_tools", allowed_tools or ()), ("deny_tools", deny_tools)):
+        if why := _policy.tool_name_refusal(field, names):
+            raise LaunchRefused(f"this launch's policy {why}")
     hs = harnesses if harnesses is not None else _harness.load(None)
     try:
         h = hs.valid[harness]

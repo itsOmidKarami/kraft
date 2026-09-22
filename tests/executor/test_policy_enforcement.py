@@ -134,6 +134,26 @@ async def test_a_harness_its_policy_disallows_never_launches(item_on, fake_agent
     assert "'fake'" in Path(session["log_path"]).read_text()
 
 
+@pytest.mark.parametrize("field", ["allowed_tools", "deny_tools"])
+async def test_a_rule_frozen_into_a_snapshot_stops_its_launch_naming_the_field(
+    item_on, fake_agent, field
+):
+    """Kraft-9ct4q: a snapshot frozen before rule syntax was refused still
+    reads, but a rule never reaches the agent. The launch is refused and
+    its log names the field, rather than the rule running unbounded or being
+    silently dropped."""
+    from test_policy_tool_names import with_a_frozen_rule
+
+    source = (await item_on(_node(_agent()), wid="source")).chain
+    it = await item_on(MaterializedChain.from_json(with_a_frozen_rule(source.to_json(), field)))
+
+    assert await _dispatch(it) == CONFIG_ERROR
+
+    assert fake_agent.argv() == []
+    (session,) = it.sessions("implementation")
+    assert f"{field}: 'Bash(git *)' is a permission rule" in Path(session["log_path"]).read_text()
+
+
 async def _spend(it, tokens_in: int, tokens_out: int) -> None:
     """A finished session of this item that spent these tokens."""
 
