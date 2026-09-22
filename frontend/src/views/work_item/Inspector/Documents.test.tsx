@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../../api";
@@ -94,8 +94,10 @@ describe("Documents (W11 · G)", () => {
     expect(ids()).toEqual(["g1", "r2"]);
     expect([...document.querySelectorAll(".doc-fold-label")].map((t) => t.textContent)).toEqual(["spec · 1 spec", "verify · 1 review · 2 sessions"]);
     expect([...document.querySelectorAll(".doc-fold-count")].map((t) => t.textContent)).toEqual(["1", "3"]);
-    // The gate's row and this node's one document.
-    expect(onCount).toHaveBeenLastCalledWith(2);
+    // The gate's row and this node's one document. onCount fires from a
+    // passive effect, a tick after the commit findByText anchors on --
+    // settle on it rather than assert on a commit that doesn't imply it.
+    await waitFor(() => expect(onCount).toHaveBeenLastCalledWith(2));
   });
 
   it("with no node selected, nothing is folded: every document shows and counts", async () => {
@@ -118,7 +120,7 @@ describe("Documents (W11 · G)", () => {
     await screen.findByText("reviews g1");
     expect(document.querySelectorAll(".doc-fold")).toHaveLength(0);
     expect(ids(".doc-row")).toHaveLength(6);
-    expect(onCount).toHaveBeenLastCalledWith(6);
+    await waitFor(() => expect(onCount).toHaveBeenLastCalledWith(6));
   });
 
   it("a folded node expands inline", async () => {
@@ -136,7 +138,7 @@ describe("Documents (W11 · G)", () => {
     await screen.findByText("reviews g1");
     expect(document.querySelectorAll(".doc-fold")).toHaveLength(0);
     expect(ids(".doc-row")).toEqual(["g1", "s1", "v1", "v2", "v3", "r2"]);
-    expect(onCount).toHaveBeenLastCalledWith(6);
+    await waitFor(() => expect(onCount).toHaveBeenLastCalledWith(6));
   });
 
   it("an intake attachment keeps its title first, with `hook · time`, a paperclip, no node and no path", async () => {
@@ -227,7 +229,10 @@ describe("Documents rows (W13 · B)", () => {
     renderDocs({ gatePending: false, preselectPath: null, item });
     await screen.findByText(/^on\.review\.requested/);
     expect(ids()).toEqual(["d3", "d1", "d2", "d4"]);
-    document.body.innerHTML = "";
+    // A hand-rolled `document.body.innerHTML = ""` here left the first React
+    // root mounted on a detached node instead of unmounting it. cleanup()
+    // properly unmounts and removes the container between the two renders.
+    cleanup();
     renderDocs({
       gatePending: false,
       preselectPath: null,
