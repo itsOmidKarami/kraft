@@ -12,6 +12,7 @@ from pathlib import Path
 from kraft import logs, store
 from kraft.adapters.forge import git
 from kraft.config import git_read, main_ignore_args
+from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
@@ -437,6 +438,7 @@ async def ensure_worktree(
     work_item_id: str,
     repo_entry: dict | None,
     attachments: list[dict] | None = None,
+    sandbox: dict | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -545,7 +547,7 @@ async def ensure_worktree(
     # a node into a known-broken environment and let the verify node retry a
     # deterministic failure ten times over (Kraft-s0w2l).
     try:
-        await run_setup_command(worktree, Path(repo), repo_entry)
+        await run_setup_command(worktree, Path(repo), repo_entry, sandbox=sandbox)
     except RuntimeError as exc:
         # Only the creating caller may throw away a worktree other nodes are
         # already using, so the discard lives here and not in the helper.
@@ -578,7 +580,9 @@ def item_mounts(row) -> list[str]:
     return mounts
 
 
-async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None) -> str:
+async def run_setup_command(
+    worktree: Path, repo: Path, repo_entry: dict | None, *, sandbox: dict | None = None
+) -> str:
     """Prepare `worktree` the way its repo declares, and say what happened.
 
     Extracted from `ensure_worktree` so it can run more than once per item
@@ -591,6 +595,9 @@ async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None)
     There is no default and no marker sniffing: the repo declares how it is
     prepared, or the chain stops (Kraft-kji8w). Raises `RuntimeError` when the
     repo declares no `setup_command` at all, or when the command fails.
+
+    `sandbox` is the item's (`dispatch.item_sandbox`): given one, the command
+    runs inside it or not at all.
     """
     cmd = (repo_entry or {}).get("setup_command")
     if cmd is None:
@@ -601,15 +608,39 @@ async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None)
         )
     if not cmd:
         return ""
-    done = await asyncio.to_thread(
-        subprocess.run,
-        cmd,
-        shell=True,
-        cwd=worktree,
-        env=worker_env(repo_entry),
-        capture_output=True,
-        text=True,
-    )
+    if sandbox:
+        # Never on the host for a sandboxed item (Kraft-p8nem): the worktree
+        # is the worker's to write, so `uv sync` or `npm ci` there runs a build
+        # backend or package script the worker may have written. The docker
+        # client runs on the host with the worker env, like `run_task`'s; the
+        # container gets only the entry's literal `env`.
+        argv = _sandbox.docker_argv(
+            ["sh", "-c", cmd],
+            worktree,
+            sandbox,
+            None,
+            env=(repo_entry or {}).get("env") or {},
+        )
+        run = dict(args=argv)
+    else:
+        run = dict(args=cmd, shell=True)
+    try:
+        done = await asyncio.to_thread(
+            subprocess.run,
+            **run,
+            cwd=worktree,
+            env=worker_env(repo_entry),
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        if not sandbox:
+            raise
+        # No docker means no setup, never a host fallback.
+        raise RuntimeError(
+            f"setup command for {worktree.name} must run in its sandbox, but "
+            f"{argv[0]!r} could not be started: {exc}"
+        ) from exc
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")
@@ -956,7 +987,9 @@ async def _record_done(
     )
 
 
-async def prepare_runtime(worktree: Path, repo: Path, repo_entry: dict | None) -> str:
+async def prepare_runtime(
+    worktree: Path, repo: Path, repo_entry: dict | None, *, sandbox: dict | None = None
+) -> str:
     """Re-prepare an existing worktree and say what happened.
 
     What the `env_setup` node used to do, minus the session bookkeeping: V1 has
@@ -975,7 +1008,9 @@ async def prepare_runtime(worktree: Path, repo: Path, repo_entry: dict | None) -
     # No entry, nothing declared to re-run: `ensure_worktree` already refused a
     # repo without a `setup_command` when it cut this worktree.
     setup_log = (
-        await run_setup_command(worktree, repo, repo_entry) if repo_entry is not None else ""
+        await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox)
+        if repo_entry is not None
+        else ""
     )
     missing = await asyncio.to_thread(_uncarried_local_files, repo, worktree)
     report = f"worktree ready at {worktree}\n{setup_log}"

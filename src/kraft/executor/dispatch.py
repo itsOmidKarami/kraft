@@ -289,6 +289,28 @@ def _task_sandbox(frozen: _policy.SandboxPolicy | None, repo_entry: dict | None)
     return frozen.model_dump() if frozen is not None else _sandbox.resolve({}, repo_entry)
 
 
+def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
+    """The sandbox an item's own launches outside any task run in -- its
+    repository's `setup_command` (Kraft-p8nem) -- or None for an item nothing
+    sandboxes. The same "sandboxed item" #107's walk guard reads
+    (`stops.refuse_sandboxed_submodules`): the snapshot's item policy, else
+    the entry's live value, else any task's frozen one, since once a
+    sandboxed task has run the worktree is the worker's to write. A poisoned
+    `repos.yaml` raises `RuntimeError`: unreadable is never "no sandbox"."""
+    snapshot = store.materialized_chain_of(row)
+    try:
+        sandbox = _task_sandbox(
+            snapshot.policy.sandbox if snapshot is not None else None,
+            launch.repo_entry if launch is not None else None,
+        )
+    except _config.ConfigError as exc:
+        raise RuntimeError(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
+    if sandbox or snapshot is None:
+        return sandbox
+    frozen = (snapshot.policy_for(t).sandbox for n in snapshot.chain.nodes for t in n.tasks())
+    return next((s.model_dump() for s in frozen if s is not None), None)
+
+
 def _frozen_steering(row) -> dict[str, str] | None:
     """The steering text frozen into this item's snapshot at intake."""
     snapshot = store.materialized_chain_of(row)

@@ -133,7 +133,7 @@ def docker_argv(
     cmd: list[str],
     cwd: str | Path,
     sandbox: dict,
-    results_dir: str | Path,
+    results_dir: str | Path | None,
     env: dict | None = None,
     name: str | None = None,
     result_path: str | Path | None = None,
@@ -162,7 +162,9 @@ def docker_argv(
     neighbours there (its own `<session>.review.md`, the previous fix
     session's result file), but a session writing another session's
     `<other>.json` would forge that session's status and findings. Only this
-    session's own `result_path` is mounted back read-write.
+    session's own `result_path` is mounted back read-write. `None` for a
+    launch that is no session and has no results to read (a repository's
+    `setup_command`, `builtins.run_setup_command`): nothing is mounted.
 
     `<repo>/.git`: read-only, with `objects/`, `refs/`, `logs/` and this
     worktree's own gitdir (`<repo>/.git/worktrees/<id>`) read-write -- what a
@@ -192,7 +194,6 @@ def docker_argv(
     copies from docker's own process env, never written to disk).
     """
     cwd = str(cwd)
-    results_dir = str(results_dir)
     argv = [
         "docker",
         "run",
@@ -205,9 +206,9 @@ def docker_argv(
         f"{cwd}:{cwd}",
         "-w",
         cwd,
-        "-v",
-        f"{results_dir}:{results_dir}:ro",
     ]
+    if results_dir is not None:
+        argv += ["-v", f"{results_dir}:{results_dir}:ro"]
     if result_path is not None:
         argv += ["-v", f"{result_path}:{result_path}"]
     argv += _gitdir_mounts(Path(cwd))

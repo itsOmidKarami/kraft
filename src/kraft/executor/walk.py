@@ -1665,6 +1665,9 @@ async def run_once(
         # Before the worktree is touched at all: host git in a sandboxed
         # item's submodule runs what its worker planted there (Kraft-dshto).
         stops.refuse_sandboxed_submodules(row, launch)
+        # A sandboxed item's setup_command runs in its sandbox, never on the
+        # host (Kraft-p8nem).
+        sandbox = dispatch.item_sandbox(row, launch)
         worktree = await _builtins.ensure_worktree(
             db,
             run_dirs,
@@ -1672,6 +1675,7 @@ async def run_once(
             work_item_id=work_item_id,
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
+            sandbox=sandbox,
         )
         # What the deleted `env_setup` node used to do, as implicit runtime
         # preparation: V1 has no builtin action for it, and every node from the
@@ -1690,7 +1694,7 @@ async def run_once(
         # its whole stdout to the events table each time.
         report = (
             await _builtins.prepare_runtime(
-                worktree, Path(row["repo"]), launch.repo_entry if launch else None
+                worktree, Path(row["repo"]), launch.repo_entry if launch else None, sandbox=sandbox
             )
             if start_index == 0
             else None
