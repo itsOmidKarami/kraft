@@ -6,6 +6,7 @@ import json
 import logging
 import shlex
 import sqlite3
+import traceback
 import uuid
 from collections.abc import Sequence
 from dataclasses import replace
@@ -488,6 +489,68 @@ def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
 
 
 async def dispatch_node(
+    db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
+) -> str:
+    """`_dispatch_task`, and a session row for whatever it raised.
+
+    `measure_node` folds a raised exception into the node's verdict, so the
+    chain stops correctly -- but a task that raised before its session row
+    existed (a rebase conflict, a git error) left nothing for `kraft view
+    logs` or the Tasks tab, and one that raised after left its row running
+    (Kraft-s7c04.55; forge/run.py's Kraft-41b is the same wound). One door
+    for every task kind: the rows this dispatch made that are still open are
+    closed, or one is made, with the traceback as the log. Then it re-raises,
+    so the verdict is unchanged.
+    """
+    since = db.read(
+        lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
+    )
+    try:
+        return await _dispatch_task(db, run_dirs, task, node, work_item_row, worktree, **kw)
+    except Exception as exc:
+        try:
+            await _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc)
+        except Exception:
+            logger.exception("could not record the session %s raised", task.path)
+        raise
+
+
+async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc) -> None:
+    status = "conflict" if isinstance(exc, _builtins.RebaseConflict) else "failed"
+    log = "".join(traceback.format_exception(exc))
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT id, status, log_path, result_path FROM worker_sessions "
+            "WHERE work_item_id = ? AND hook_point = ? AND rowid > ?",
+            (work_item_row["id"], task.path, since),
+        ).fetchall()
+    )
+    open_rows = [r for r in rows if r["status"] in ("pending", "running")]
+    if not rows:
+        sid, log_path, result_path = await _builtins.start_session(
+            db,
+            run_dirs,
+            session_id=uuid.uuid4().hex,
+            work_item_id=work_item_row["id"],
+            node_id=node.id,
+            hook_point=task.path,
+            round=kw.get("round", 0),
+            head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
+        )
+        open_rows = [{"id": sid, "log_path": log_path, "result_path": result_path}]
+    for r in open_rows:
+        await _builtins.finish_session(
+            db,
+            Path(r["log_path"]),
+            Path(r["result_path"]),
+            session_id=r["id"],
+            status=status,
+            log=log,
+            reused=True,
+        )
+
+
+async def _dispatch_task(
     db,
     run_dirs,
     task: ResolvedTask,
