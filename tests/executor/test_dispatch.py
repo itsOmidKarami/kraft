@@ -22,6 +22,7 @@ from support.harness import (
     seed_v1_library,
     v1_chain,
     v1_item,
+    v1_resolved,
     v1_walk,
     write_harness_profiles,
 )
@@ -826,15 +827,24 @@ def _capture_launches(monkeypatch) -> dict[str, str]:
     return launched
 
 
-async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
+#: The name `steering.migrate_files` gives the pre-1.0 seeded
+#: `templates/steering/never-signal-processes-you-didnt-start.md` when it
+#: folds that file into a fresh `library.yaml`'s `steering:` -- reused here so
+#: a repo naming it resolves to the same profile on an upgraded install.
+_NEVER_SIGNAL = "never-signal-processes-you-didnt-start"
+_NEVER_SIGNAL_TEXT = "never signal a process you did not start\n"
+
+
+async def test_no_seeded_agent_task_carries_the_never_signal_rule_by_default(
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
-    """`every-agent-launch-carries-kraft-safety-rules` (Kraft-5x93b): the legacy
-    registry gave every agent the never-signal steering by default; V1 has no
-    such default, so the rule is Kraft's own contract text instead. Every agent
-    task of every chain the shipped seed selects is materialized the way intake
-    does and dispatched on the shipped harness profiles, so a new seeded agent
-    task is covered the moment it exists."""
+    """`every-agent-launch-carries-kraft-safety-rules` (Kraft-c82sp): the rule
+    is opt-in steering now, not code-appended contract text, so a repo that
+    names no steering gets none of it -- not even from the shipped seed's own
+    tasks, none of which select it. Every agent task of every chain the
+    shipped seed selects is materialized the way intake does and dispatched on
+    the shipped harness profiles, so a new seeded agent task is covered the
+    moment it exists."""
     from kraft.templates.library import TemplateLibrary
     from kraft.templates.models import AgentTask
 
@@ -865,27 +875,44 @@ async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
         "default:spec.main.author",
         "quick-task:implementation.main.implement",
     } <= set(argv), argv
-    # The rule itself, not only its env-var hint: dropping the headline
-    # sentence must go red too (Kraft-5x93b review, finding 1).
-    for phrase in (
-        "Never signal a process you did not start",
-        "KRAFT_DAEMON_PID",
-        "a question for a human",
-    ):
-        assert phrase in agent_mod.SAFETY_RULES, phrase
-    missing = sorted(p for p, a in argv.items() if agent_mod.SAFETY_RULES not in a)
-    assert missing == [], missing
+    carrying = sorted(p for p, a in argv.items() if _NEVER_SIGNAL in a)
+    assert carrying == [], carrying
 
 
-async def test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule(
-    item_on, tmp_path, monkeypatch
+@pytest.mark.parametrize("named", [False, True], ids=["unnamed", "named"])
+async def test_an_operator_agent_task_carries_the_rule_only_when_its_repo_names_the_profile(
+    tmp_path, repo, database, run_dirs, monkeypatch, named
 ):
-    """The rule is not something a task opts into, so a task an operator
-    writes without any steering or skill carries it all the same."""
+    """`every-agent-launch-carries-kraft-safety-rules`: a task an operator
+    wrote with no skill or steering of its own still carries the rule when its
+    repo names `never-signal-processes-you-didnt-start` in `repos.yaml`
+    `steering:` (`repository_steering`, frozen at intake) -- and carries none
+    of it when the repo names nothing."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
+
     fake_harness_home(tmp_path, ["true"])
     launched = _capture_launches(monkeypatch)
     raw = {"id": "write", "kind": "agent", "harness": "fake", "prompt": "Do the thing."}
-    it = await item_on(_one_task(raw, "work", "do"))
+    resolved = v1_resolved(_one_task(raw, "work", "do"))
+    materialized = resolved.materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        repository_steering={str(repo): ({_NEVER_SIGNAL: _NEVER_SIGNAL_TEXT} if named else {})},
+    )
+    await v1_item(database, materialized, repo=repo, wid="w1")
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", ("w1",)).fetchone()
+    )
+    entry_fields = {"path": str(repo), "setup_command": ""}
+    if named:
+        entry_fields["steering"] = [_NEVER_SIGNAL]
+    launch = LaunchContext(repo_entry=entry_of(entry_fields))
+    node = materialized.chain.nodes[0]
 
-    assert await _dispatch_one(it) == "done"
-    assert agent_mod.SAFETY_RULES in launched["work.do.write"]
+    status = await dispatch.dispatch_node(
+        database, run_dirs, node.steps[0].tasks[0], node, row, repo, launch=launch
+    )
+
+    assert status == "done"
+    assert (_NEVER_SIGNAL_TEXT in launched["work.do.write"]) == named

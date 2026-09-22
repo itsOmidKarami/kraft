@@ -133,12 +133,12 @@ origin: src/kraft/adapters/artifact_notes.py -- Kraft-35u4m.3, Kraft-35u4m.4: `s
 ## REQ every-agent-launch-carries-kraft-safety-rules
 
 Every agent launch -- a chain task, a gate auto-review, an escalation turn --
-SHALL carry Kraft's own safety rules as part of its contract, including the rule
-never to signal a process the agent did not start. The rules SHALL NOT depend
-on a task selecting them, and no task, chain, steering profile or repository
-configuration SHALL be able to remove them.
-enforced-by: tests/executor/test_dispatch.py::test_every_seeded_agent_task_launches_with_the_never_signal_rule, tests/executor/test_dispatch.py::test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule, tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_never_signal_rule, tests/test_escalate.py::test_an_escalation_launch_carries_the_never_signal_rule
-origin: src/kraft/adapters/agent.py §SAFETY_RULES -- Kraft-5x93b: the legacy registry's `defaults: {agent: {steering: [never-signal-processes-you-didnt-start]}}` gave every agent the rule born of Kraft-f8u3 (a worker SIGKILLed the daemon); V1 has no registry default, so the rule became contract text appended by `build_context`, the one builder every launch path uses.
+for a repository that names the `never-signal-processes-you-didnt-start`
+library steering profile in its `repos.yaml` `steering:` SHALL carry that
+profile's text, on all three of those launch paths. A repository that names
+no such profile SHALL carry none of it.
+enforced-by: tests/executor/test_dispatch.py::test_no_seeded_agent_task_carries_the_never_signal_rule_by_default, tests/executor/test_dispatch.py::test_an_operator_agent_task_carries_the_rule_only_when_its_repo_names_the_profile[named], tests/executor/test_dispatch.py::test_an_operator_agent_task_carries_the_rule_only_when_its_repo_names_the_profile[unnamed], tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_rule_only_when_the_repo_names_it[named], tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_rule_only_when_the_repo_names_it[unnamed], tests/test_escalate.py::test_an_escalation_launch_carries_the_rule_only_when_the_repo_names_it[named], tests/test_escalate.py::test_an_escalation_launch_carries_the_rule_only_when_the_repo_names_it[unnamed]
+origin: src/kraft/adapters/agent.py §SAFETY_RULES (removed, Kraft-c82sp) -- Kraft-5x93b: the legacy registry's `defaults: {agent: {steering: [never-signal-processes-you-didnt-start]}}` gave every agent the rule born of Kraft-f8u3 (a worker SIGKILLed the daemon); V1 first made it contract text appended unconditionally by `build_context`. Omid ruled (2026-09-22) that text is Kraft-dev-specific, so Kraft-c82sp moved it back to an opt-in `library.yaml` steering profile -- the same name the legacy registry named and `steering.migrate_files` still produces from an upgraded install's pre-1.0 seed -- named in `repos.yaml` `steering:` like any other.
 
 ## REQ a-turn-left-with-a-running-background-job-fails
 
