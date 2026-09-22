@@ -17,8 +17,11 @@ import json
 import uuid
 
 from kraft import caps, events, executor
+from kraft import harness as _harness
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.profiles import HarnessUnavailable, harness_table
+from kraft.executor.fallback import fallback_list
 from kraft.templates.models import AgentTask, ResolvedNode
 
 #: The only strings a verdict may be. Anything else -- a typo, a sentence, a
@@ -65,6 +68,50 @@ def _artifact_line(rel: str | None) -> str:
     if not rel:
         return "There is no artifact document for this gate; read the worktree.\n"
     return f"The document this gate is about: {rel} (relative to this worktree)\n"
+
+
+def _profile_fallback_refusal(task: AgentTask, gate: str) -> str | None:
+    """None, or the operator-facing reason `task` must not launch (Kraft-t4y8g):
+    its `profile:` names an agent profile that itself carries a `fallback:`
+    list.
+
+    `GateNode._no_handler` already refuses a gate whose `auto_review` task
+    declares its own `fallback:`, at template load -- "a gate review never
+    falls back" (this module launches its reviewer once; the loop lives in
+    `dispatch.dispatch_node` alone, and stays there: making `gate_review` run
+    it is a feature, not this fix). A profile's list is invisible to that
+    check: `profile:` is read live from `harnesses.yaml`
+    (`kraft.adapters.profiles`, Kraft-ps1ao), not at template load, so a
+    profile with no fallback list today can grow one tomorrow without the
+    chain that selects it ever being re-validated. That is also why the
+    refusal lives here, at the gate's actual launch, rather than in template
+    lint or `kraft admin doctor`: both would read `harnesses.yaml` once and
+    could go stale the moment an operator edits it, while a launch-time check
+    is the one place it is always current.
+
+    Reuses `executor.fallback.fallback_list`, the same function
+    `dispatch.dispatch_node` walks -- it already knows the precedence (the
+    task's own list wins, else its profile's) and already names which one it
+    found.
+    """
+    if task.profile is None:
+        return None
+    try:
+        table, _path = harness_table(_harness.load(None))
+    except HarnessUnavailable:
+        # The launch a moment later hits the identical problem and reports
+        # it; nothing here needs to say it twice.
+        return None
+    entries, source = fallback_list(task, table)
+    if not entries or source == "the task's list":
+        # The task's own list is `GateNode._no_handler`'s refusal, already
+        # caught before this chain could ever be materialized.
+        return None
+    return (
+        f"gate {gate!r}'s auto_review task selects profile {task.profile!r}, whose "
+        f"{source} is not empty; a gate review launches its reviewer once and never "
+        "runs the fallback loop, so it is refused rather than silently ignored"
+    )
 
 
 async def review(
@@ -116,6 +163,19 @@ async def review(
             )
         )
         return "undecided", (f"gate {gate!r} declares no agent task to review it; a person decides")
+    if (refusal := _profile_fallback_refusal(auto_review.task, gate)) is not None:
+        # Same posture as the kind-check above: an unpaired skip, no
+        # `_started`, so `_gate_review_attempts` still counts it as one
+        # attempt and the delay poller does not re-arm a dead gate forever.
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "gate_auto_review_skipped",
+                {"gate": gate, "reason": "profile_fallback"},
+            )
+        )
+        return "undecided", refusal
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
