@@ -287,6 +287,11 @@ kraft view watch              # a live board, redrawn on every event
 `kraft view logs --json` emits NDJSON — one object per line — because a stream has no
 end to close an array on.
 
+A log over 2 MB is read from its end: every structured reader (`kraft view logs`,
+the log modal, `format=jsonl`) leads with one `sys` row, `n` -1, carrying
+`"truncated": {"lines": …, "bytes": …}` for what it skipped. The plain-text log
+(`GET /api/worker-sessions/<id>/log`) is always the whole file.
+
 Reviewing before you approve:
 
 ```bash
