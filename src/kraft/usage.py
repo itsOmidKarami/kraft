@@ -243,10 +243,14 @@ def _combine(envelopes: list[dict]) -> dict:
     alone. So taking the last envelope kept the cost but dropped every earlier
     invocation's tokens, and summing costs would double-count them.
 
-    Per CLI session: the first envelope read as before, plus what `modelUsage`
-    grew by after it; cost is the last envelope's. Distinct CLI sessions in one
-    log are summed. A group whose last envelope reports no cost makes the whole
-    cost unknown, never zero.
+    Per CLI session, then, the last envelope speaks for the whole: its cost and
+    its `modelUsage` tokens. Not "the first envelope plus `modelUsage`
+    growth": 6c235b8c's first turn ran 2,380 lines and was killed before it
+    wrote a result, so its first result's `usage` held 1.2M input tokens of
+    the 123M its $34.72 paid for. Only a group with no `modelUsage` to read
+    falls back to summing each invocation's own `usage`. Distinct CLI sessions
+    in one log are summed. A group whose last envelope reports no cost makes
+    the whole cost unknown, never zero.
     """
     groups: dict[object, list[dict]] = {}
     for envelope in envelopes:
@@ -254,19 +258,10 @@ def _combine(envelopes: list[dict]) -> dict:
     tokens_in = tokens_out = 0
     cost: float | None = 0.0
     for group in groups.values():
-        first, last = group[0], group[-1]
-        u = from_envelope(first) or Usage()
-        tokens_in, tokens_out = tokens_in + u.tokens_in, tokens_out + u.tokens_out
-        grew_from = _from_model_usage(first.get("modelUsage"), None)
-        grew_to = _from_model_usage(last.get("modelUsage"), None)
-        if grew_from is not None and grew_to is not None:
-            tokens_in += grew_to.tokens_in - grew_from.tokens_in
-            tokens_out += grew_to.tokens_out - grew_from.tokens_out
-        else:
-            # No cumulative counts to diff: each later invocation's own block.
-            for envelope in group[1:]:
-                later = from_envelope(envelope) or Usage()
-                tokens_in, tokens_out = tokens_in + later.tokens_in, tokens_out + later.tokens_out
+        last = group[-1]
+        total = _from_model_usage(last.get("modelUsage"), None)
+        for u in [total] if total is not None else [from_envelope(e) for e in group]:
+            tokens_in, tokens_out = tokens_in + u.tokens_in, tokens_out + u.tokens_out
         last_cost = (from_envelope(last) or Usage()).cost_usd
         cost = None if cost is None or last_cost is None else cost + last_cost
     combined: dict = {
@@ -279,8 +274,15 @@ def _combine(envelopes: list[dict]) -> dict:
 
 
 def read_envelope(log_path: Path) -> dict | None:
-    """The agent's result envelope: every JSON object that carries a `usage`
-    block, combined (`_combine`) when there is more than one.
+    """The agent's result envelope: every invocation's, combined (`_combine`)
+    when there is more than one.
+
+    An invocation is a `type: result` line (or an untyped one, the shape a
+    result file has) that `from_envelope` can read. A `usage` block alone is
+    not enough: a Task-tool sub-agent's `system/task_progress` line carries
+    one of its own, `{total_tokens, tool_uses, duration_ms}`, and read as an
+    invocation it over-counted 6c235b8c by 156,662 input tokens
+    (Kraft-lp01z).
 
     Claude Code's `stream-json` output appends a trailing `system/task_summary`
     line *after* the `result` line that carries `usage` and `total_cost_usd`.
@@ -303,7 +305,7 @@ def read_envelope(log_path: Path) -> dict | None:
         if not isinstance(envelope, dict):
             continue
         fallback = envelope
-        if isinstance(envelope.get("usage"), dict):
+        if envelope.get("type", "result") == "result" and from_envelope(envelope):
             envelopes.append(envelope)
     if len(envelopes) > 1:
         return _combine(envelopes)

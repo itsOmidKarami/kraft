@@ -495,6 +495,19 @@ def _result(sid, cost, usage_out, total_out, *, usage_in=10, total_in=None):
     return json.dumps(line)
 
 
+def _progress(sid, tokens):
+    """A claude `system/task_progress` line: a Task-tool sub-agent's running
+    tally, `usage` and all, which is not an invocation of this session."""
+    return json.dumps(
+        {
+            "type": "system",
+            "subtype": "task_progress",
+            "session_id": sid,
+            "usage": {"total_tokens": tokens, "tool_uses": 1, "duration_ms": 10},
+        }
+    )
+
+
 @pytest.mark.parametrize(
     ("lines", "expected"),
     [
@@ -527,8 +540,50 @@ def _result(sid, cost, usage_out, total_out, *, usage_in=10, total_in=None):
             ],
             Usage(4, 6),
         ),
+        # Shaped like 6c235b8c (Kraft-lp01z): Task-tool progress lines carry a
+        # `usage` of their own ({total_tokens, tool_uses, duration_ms}) and
+        # are no invocation. Its first turn was killed before writing a
+        # result, so only the cumulative `modelUsage` holds what the $34.72
+        # paid for; each result's own `usage` holds a sliver of it.
+        (
+            [_progress("a", 999)] * 3
+            + [
+                _result("a", 34.72, 21730, 516797, usage_in=1_226_909, total_in=123_006_150),
+                _progress("a", 5),
+                _result("a", 34.72, 209, 516797, usage_in=156_662, total_in=123_006_150),
+                # Killed again mid-turn, a sub-agent still reporting.
+                _progress("a", 7),
+            ],
+            Usage(123_006_150, 516797, 34.72, "claude-sonnet-5"),
+        ),
+        # A result line reporting nothing (042ce40c: usage all zero, empty
+        # modelUsage, cost 0) is no invocation either: read as the last one,
+        # its $0 and its empty `modelUsage` would have stood for the session.
+        (
+            [
+                _result("a", 1.0, 10, 100),
+                _result("a", 1.0, 5, 100),
+                json.dumps(
+                    {
+                        "type": "result",
+                        "session_id": "a",
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "modelUsage": {},
+                        "total_cost_usd": 0,
+                    }
+                ),
+            ],
+            Usage(10, 100, 1.0, "claude-sonnet-5"),
+        ),
     ],
-    ids=["one-cli-session", "two-cli-sessions", "one-cost-unknown", "no-model-usage"],
+    ids=[
+        "one-cli-session",
+        "two-cli-sessions",
+        "one-cost-unknown",
+        "no-model-usage",
+        "sub-agent-progress-lines",
+        "empty-result-line",
+    ],
 )
 def test_a_log_with_several_result_envelopes_counts_every_invocation(tmp_path, lines, expected):
     log = tmp_path / "s.log"
