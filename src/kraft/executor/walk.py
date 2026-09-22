@@ -1810,7 +1810,7 @@ async def run_once(
         # runs nothing, so it is recognised here rather than after an execution
         # node's own tasks. `maybe_gate` answers False for a gate this item has
         # already cleared, which is what lets a resumed walk pass one.
-        if await gates.maybe_gate(db, work_item_id, node):
+        if await gates.maybe_gate(db, work_item_id, node, run_dirs):
             await _report_if_undelivered(db, work_item_id, carried)
             return "awaiting_gate"
         if isinstance(node.node, GateNode):

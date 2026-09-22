@@ -44,6 +44,17 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     chain.complete_node(conn, work_item_id, gate)
 
 
+def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, rationale) -> None:
+    """Clear a chain revision gate whose proposal changes nothing, without
+    asking anyone (Kraft-oydes): the proposal's rationale on
+    `chain_revision_unchanged`, then an approval by `kraft` -- neither a person
+    nor an agent decided it, so a reader of `by` cannot mistake it for either."""
+    events.append(
+        conn, work_item_id, "chain_revision_unchanged", {"gate": gate, "rationale": rationale}
+    )
+    approve_gate(conn, work_item_id, gate, by="kraft")
+
+
 def reject_gate(
     conn: sqlite3.Connection,
     work_item_id,

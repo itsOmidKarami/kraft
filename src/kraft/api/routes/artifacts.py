@@ -4,11 +4,12 @@ import logging
 
 from fastapi import HTTPException, Request
 
-from kraft import events, review
+from kraft import events, review, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import stops
 from kraft.index import ingest as ingest_mod
+from kraft.templates import revision
 from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,8 @@ async def get_work_item_artifact(wid: str, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
-    rel = board._gate_artifact(st, row, board._pending_gate(st, wid))
+    gate = board._pending_gate(st, wid)
+    rel = board._gate_artifact(st, row, gate)
     if rel is None:
         raise HTTPException(404, "this work item's gate has no artifact")
     result = await _read_worktree_artifact(st, wid, rel)
@@ -177,6 +179,13 @@ async def get_work_item_artifact(wid: str, request: Request):
         raise HTTPException(404, "this work item's gate has no artifact")
     text, truncated = result
     fm, body = ingest_mod.split_front_matter(text)
+    chain = store.materialized_chain_of(row)
+    if chain is not None and any(
+        n.id == gate and n.node.artifact == revision.CHAIN_REVISION for n in chain.chain.nodes
+    ):
+        # A change set is JSON for Kraft to apply; the person deciding reads
+        # it rendered, with the diff it makes and anything that stops it.
+        body = revision.render(text, chain, gate, st.library)
     return {
         "work_item_id": wid,
         "path": rel,
