@@ -73,7 +73,9 @@ def test_open_mr_refuses_a_dirty_worktree_against_real_git(tmp_path, glab):
     (repo / "forgotten.py").write_text("never added\n")
 
     with pytest.raises(forge.ForgeError, match="forgotten.py"):
-        asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
+        asyncio.run(
+            forge.GlabCli().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b")
+        )
 
     assert glab.argv("glab") == [], "glab ran over an uncommitted worktree"
 
@@ -89,7 +91,9 @@ def test_open_mr_ignores_gitignored_paths_against_real_git(tmp_path, glab):
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
 
-    mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
+    mr = asyncio.run(
+        forge.GlabCli().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b")
+    )
 
     assert mr.number == 54
     assert glab.argv("glab")[:2] == ["mr", "create"]
@@ -104,9 +108,13 @@ def test_open_mr_accepts_a_worktree_whose_attachment_was_copied_in(tmp_path, gla
     doc.parent.mkdir(parents=True)
     doc.write_text("# the attached spec\n")
 
-    kraft_builtins._commit_paths(repo, [".engineering/specs/s.md"], "chore: attach spec for w1")
+    kraft_builtins._commit_paths(
+        repo, [".engineering/specs/s.md"], "chore: attach spec for w1", "main"
+    )
 
-    mr = asyncio.run(forge.GlabCli().open_mr(repo=repo, branch=BRANCH, title="t", body="b"))
+    mr = asyncio.run(
+        forge.GlabCli().open_mr(repo=repo, branch=BRANCH, base="main", title="t", body="b")
+    )
 
     assert mr.number == 54
     assert glab.argv("glab")[:2] == ["mr", "create"]
@@ -221,7 +229,9 @@ def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
     (repo / "work.txt").write_text("edited, never committed\n")
     (repo / "forgotten.py").write_text("never added\n")
 
-    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+    committed = asyncio.run(
+        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+    )
 
     assert committed is True
     assert _git(repo, "status", "--porcelain") == ""
@@ -238,7 +248,9 @@ def test_commit_stragglers_leaves_a_clean_worktree_alone(tmp_path):
     repo = _repo_with_origin(tmp_path)
     before = _git(repo, "rev-parse", "HEAD")
 
-    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+    committed = asyncio.run(
+        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+    )
 
     assert committed is False
     assert _git(repo, "rev-parse", "HEAD") == before
@@ -259,17 +271,23 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     (repo / ".engineering" / "sessions").mkdir(parents=True)
     (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
 
-    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
+    assert (
+        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        is False
+    )
     assert _git(repo, "rev-parse", "HEAD") == before
     # ... and open_mr is not blocked by it either
-    asyncio.run(forge.assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo, "main"))
 
     (repo / ".engineering" / "specs").mkdir()
     (repo / ".engineering" / "specs" / "abc.md").write_text("the design\n")
 
-    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is False
+    assert (
+        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        is False
+    )
     assert _git(repo, "rev-parse", "HEAD") == before
-    asyncio.run(forge.assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo, "main"))
     assert _git(repo, "ls-files", ".engineering").split() == []
 
 
@@ -293,7 +311,10 @@ def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
     (repo / ".engineering" / "sessions").mkdir(parents=True)
     (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
 
-    assert asyncio.run(forge.commit_stragglers(repo, message="wip: implementation")) is True
+    assert (
+        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        is True
+    )
     assert "preexisting.md" in _git(repo, "show", "--name-only", "--format=", "HEAD")
     # Kraft's own session note still stays out. A brand-new directory
     # collapses to one line in `git status --porcelain` rather than one line
@@ -330,10 +351,12 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
     doc.parent.mkdir(parents=True)
     doc.write_text("# the attached spec\n")
 
-    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+    committed = asyncio.run(
+        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+    )
 
     assert committed is False
-    asyncio.run(forge.assert_clean(repo))
+    asyncio.run(forge.assert_clean(repo, "main"))
     # Collapses to the first new directory level, `docs/` -- `docs` itself
     # did not exist on the branch before, same collapse `git status` does for
     # any new untracked directory.
@@ -351,7 +374,9 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     (repo / "junk").mkdir()
     (repo / "junk" / "cache.txt").write_text("noise\n")
 
-    committed = asyncio.run(forge.commit_stragglers(repo, message="wip: implementation"))
+    committed = asyncio.run(
+        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+    )
 
     assert committed is False
     assert _git(repo, "rev-parse", "HEAD") == before
@@ -375,14 +400,14 @@ def test_assert_clean_sees_a_submodule_with_ignore_all(tmp_path):
     _git(root / "pkg", "commit", "-q", "-m", "metric change")
 
     with pytest.raises(forge.ForgeError, match="pkg"):
-        asyncio.run(forge.assert_clean(root))
+        asyncio.run(forge.assert_clean(root, "main"))
 
 
 def test_commits_on_a_branch_without_origin_main_is_empty_not_an_error(tmp_path):
     """A description is not worth failing a node over."""
     repo = make_repo(tmp_path)
 
-    assert asyncio.run(forge.commits_on(repo, "kraft/nope")) == ()
+    assert asyncio.run(forge.commits_on(repo, "kraft/nope", "main")) == ()
 
 
 def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):

@@ -426,7 +426,7 @@ async def test_reattach_resumes_a_deferred_self_retry_left_by_an_escalation_turn
         walk_calls.append(kw)
         return "completed"
 
-    async def fake_refresh(worktree, repo, branch):
+    async def fake_refresh(worktree, repo, branch, **_kw):
         return None
 
     monkeypatch.setattr("kraft.executor.walk.run", fake_walk_run)

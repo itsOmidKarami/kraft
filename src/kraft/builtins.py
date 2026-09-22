@@ -11,7 +11,7 @@ from pathlib import Path
 
 from kraft import logs, store
 from kraft.adapters.forge import git
-from kraft.config import git_read, main_ignore_args
+from kraft.config import base_ignore_args, git_read
 from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ class RebaseConflict(RuntimeError):
     one apart from any other git failure without matching on message text."""
 
 
-def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
+def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> None:
     """Commit exactly `paths` in `worktree`, or commit nothing.
 
     Kraft's own commit primitive. A document Kraft put in the worktree is not a
@@ -47,10 +47,10 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     commit becomes a dirty-tree failure at `open_mr` with git's own message
     already in the log, which is strictly better than failing worktree creation.
 
-    `main_ignore_args`, the same override `forge._work_product_pathspec`
+    `base_ignore_args`, the same override `forge._work_product_pathspec`
     relies on, rides along on the `add`: a spec/plan attachment copied to its
     original relative path can land under `docs/superpowers/` or
-    `.engineering/`, and if `main` ignores that root but this worktree's own
+    `.engineering/`, and if the base (`base`) ignores that root but this worktree's own
     checked-out `.gitignore` predates the rule (Kraft-vu26), a plain `git add`
     stages it anyway. Staging nothing here is correct, not a failure -- the
     diff-cached check below already treats "nothing staged" as a no-op, and
@@ -59,7 +59,7 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
     if not paths:
         return
 
-    with main_ignore_args(worktree) as ignore_args:
+    with base_ignore_args(worktree, base) as ignore_args:
 
         def git(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
@@ -85,7 +85,7 @@ def _commit_paths(worktree: Path, paths: list[str], message: str) -> None:
             )
 
 
-def restore_branch(worktree: Path, branch: str) -> None:
+def restore_branch(worktree: Path, branch: str, base: str) -> None:
     """Force the worktree back onto `branch` if an agent task left it
     somewhere else, aborting any in-progress merge first (Kraft-v5qd).
 
@@ -105,7 +105,7 @@ def restore_branch(worktree: Path, branch: str) -> None:
     to fix, and the failure it hides here surfaces the same way it always
     did -- the next node's own git command refuses on the same tree.
     """
-    with main_ignore_args(worktree) as ignore_args:
+    with base_ignore_args(worktree, base) as ignore_args:
 
         def git(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
@@ -130,7 +130,7 @@ def restore_branch(worktree: Path, branch: str) -> None:
 
 
 def _copy_attachments(
-    repo: Path, worktree: Path, attachments: list[dict], work_item_id: str
+    repo: Path, worktree: Path, attachments: list[dict], work_item_id: str, base: str
 ) -> None:
     """Intake attachments that are not committed do not exist in a fresh
     worktree (`git worktree add` branches from HEAD), so copy them in. A
@@ -187,6 +187,7 @@ def _copy_attachments(
             worktree,
             [a["path"] for a in written],
             f"chore: attach {'+'.join(a['kind'] for a in written)} for {work_item_id}",
+            base,
         )
 
 
@@ -205,7 +206,7 @@ def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[lis
     has no way to hold an unignored file out of a commit: a per-worktree
     `info/exclude` is read from the *common* dir, so an entry there would leak
     to every other worktree of the same repo, and a `core.excludesFile` set in
-    the worktree's own config is outranked by `main_ignore_args`' `-c` -- which
+    the worktree's own config is outranked by `base_ignore_args`' `-c` -- which
     is live during `_commit_paths`, exactly where it would have mattered.
     Refusing keeps a carried file clear of `open_mr`'s dirty-worktree guard by
     construction, and an unignored machine-local file is one `git add -A` from
@@ -239,7 +240,7 @@ def _carry_local_files(repo: Path, worktree: Path, rels: list[str]) -> tuple[lis
         resolved = dest.resolve()
         if resolved != worktree_root and worktree_root not in resolved.parents:
             continue
-        # The worktree's own rules, not `main`'s: `main_ignore_args` widens what
+        # The worktree's own rules, not the base's: `base_ignore_args` widens what
         # counts as ignored for Kraft's own commits, but a plain `git add -A`
         # from an agent sees only what is checked out here.
         ignored = subprocess.run(
@@ -482,8 +483,9 @@ async def ensure_worktree(
         ).fetchone()
     )
     head = None
+    base = await base_branch(db, work_item_id, Path(repo))
     if row is not None and row["base_ref"] is None:
-        head = await upstream_head(Path(repo))
+        head = await upstream_head(Path(repo), base)
         if head:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, head))
         else:
@@ -525,7 +527,7 @@ async def ensure_worktree(
         raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
     await asyncio.to_thread(_pin_identity, Path(repo), worktree, work_item_id)
     await asyncio.to_thread(
-        _copy_attachments, Path(repo), worktree, attachments or [], work_item_id
+        _copy_attachments, Path(repo), worktree, attachments or [], work_item_id, base
     )
     # Before the sync, not after: uv chooses an interpreter when it runs, so a
     # pin that lands later is a pin that changed nothing (Kraft-gxcmy).
@@ -616,9 +618,33 @@ async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None)
     return f"$ {cmd}\n{done.stdout}{done.stderr}"
 
 
-async def upstream_head(repo: Path) -> str | None:
-    """The tip of origin's default branch, fetched now; the last fetched tip
-    when the fetch fails; `repo`'s own HEAD only when there is no `origin`
+async def base_branch(db, work_item_id: str, repo: Path, *, member: bool = False) -> str:
+    """The branch `work_item_id`'s work in `repo` -- its own repository, or a
+    workspace's root -- starts from, rebases onto, and merges into: the one
+    frozen on its target at intake (Kraft-v9gbi), else `repo`'s default
+    branch, which is every item filed without one and every item filed
+    before an item could name one.
+
+    The one accessor every "which branch is the base" question goes through.
+    A workspace `member` (`repo` is its checkout) is not the item's
+    repository: it keeps its own default branch, as it always has, because
+    one branch name means nothing across repositories that need not share it.
+    """
+    if member:
+        return await git.default_branch(repo)
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    frozen = snapshot.target.base_branch if snapshot is not None else None
+    return frozen or await git.default_branch(repo)
+
+
+async def upstream_head(repo: Path, branch: str) -> str | None:
+    """The tip of origin's `branch` -- the item's `base_branch` -- fetched now;
+    the last fetched tip when the fetch fails; `repo`'s own HEAD only when there is no `origin`
     or it was never fetched.
 
     An item's MR targets origin's branch, and the connected checkout is only
@@ -631,14 +657,13 @@ async def upstream_head(repo: Path) -> str | None:
     carry unpushed commits that would then ride into the MR unseen.
 
     The refspec is explicit because a `--single-branch` clone's configured
-    one may not cover the default branch, leaving its ref unmoved. No prompt
+    one may not cover the base branch, leaving its ref unmoved. No prompt
     may reach a foreground `kraft`'s terminal: `GIT_TERMINAL_PROMPT=0` for
     git's own, ssh `BatchMode` for passphrases and unknown hosts -- unless the
     user already chose an ssh command, which an env var would override.
     """
     if git_read(repo, "remote", "get-url", "origin", expected_failure=True):
-        default = await git.default_branch(repo)
-        ref = f"refs/remotes/origin/{default}"
+        ref = f"refs/remotes/origin/{branch}"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
         if "GIT_SSH_COMMAND" not in env and not git_read(
             repo, "config", "core.sshCommand", expected_failure=True
@@ -647,7 +672,7 @@ async def upstream_head(repo: Path) -> str | None:
         try:
             done = await asyncio.to_thread(
                 subprocess.run,
-                ["git", "fetch", "-q", "origin", f"+refs/heads/{default}:{ref}"],
+                ["git", "fetch", "-q", "origin", f"+refs/heads/{branch}:{ref}"],
                 cwd=repo,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
@@ -659,7 +684,7 @@ async def upstream_head(repo: Path) -> str | None:
         except subprocess.TimeoutExpired:
             detail = "timed out"
         if detail is not None:
-            logger.warning("could not fetch origin/%s in %s: %s", default, repo, detail)
+            logger.warning("could not fetch origin/%s in %s: %s", branch, repo, detail)
         tip = git_read(repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True)
         if tip:
             return tip
@@ -667,11 +692,12 @@ async def upstream_head(repo: Path) -> str | None:
 
 
 async def refresh_worktree_base(
-    worktree: Path, repo: Path, branch: str, *, force: bool = False
+    worktree: Path, repo: Path, branch: str, *, base: str, force: bool = False
 ) -> str | None:
-    """Rebase `worktree`'s branch onto origin's default branch (`upstream_head`),
-    so a paused or retried item's next commit lands on top of whatever landed
-    while the item sat stopped, not the commit it forked from.
+    """Rebase `worktree`'s branch onto origin's `base` (`upstream_head`) -- the
+    item's `base_branch` -- so a paused or retried item's next commit lands on
+    top of whatever landed while the item sat stopped, not the commit it
+    forked from.
 
     Returns the new HEAD sha when the rebase moved the branch (the caller
     stores it as the item's `base_ref`), or None when there was nothing to
@@ -716,7 +742,7 @@ async def refresh_worktree_base(
     ):
         logger.info("refresh_worktree_base: %s already pushed to origin, skipping", branch)
         return None
-    head = await upstream_head(repo)
+    head = await upstream_head(repo, base)
     if not head:
         logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
         return None
@@ -767,7 +793,7 @@ async def mr_rebase(
     head_sha: str | None = None,
     has_rebase_bounce: bool = False,
 ) -> str:
-    """Rebase onto origin's default branch right before `open_mr`, so an item
+    """Rebase onto the item's base branch right before `open_mr`, so an item
     that ran straight through the chain -- no pause, no `/retry` -- doesn't
     open its MR however many commits behind (Kraft-4bgg). A thin wrapper:
     `refresh_worktree_base` is already the whole implementation, shared with
@@ -786,7 +812,8 @@ async def mr_rebase(
     """
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
-    new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch)
+    base = await base_branch(db, work_item_id, Path(repo))
+    new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch, base=base)
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
         log = f"rebased {branch} onto {new_head}\n"
@@ -807,12 +834,12 @@ async def mr_rebase(
     return BASE_MOVED if (new_head and has_rebase_bounce) else recorded
 
 
-async def mr_rebase_forced(worktree: Path, repo: Path, branch: str) -> str | None:
+async def mr_rebase_forced(worktree: Path, repo: Path, branch: str, base: str) -> str | None:
     """`refresh_worktree_base` with the pushed-branch guard off, for
     `ci_poll`'s conflict path (Kraft-9h7v) -- the one caller that has already
     confirmed, from the forge's own re-fetched read, that this branch cannot
     land as it stands."""
-    return await refresh_worktree_base(worktree, repo, branch, force=True)
+    return await refresh_worktree_base(worktree, repo, branch, base=base, force=True)
 
 
 async def start_session(

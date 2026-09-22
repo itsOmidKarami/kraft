@@ -139,6 +139,14 @@ class WorkItemTarget(BaseModel):
     root_pointer_policy: Annotated[RootPointerPolicy, Field(strict=False)] = (
         RootPointerPolicy.IGNORE
     )
+    #: The branch the item's work starts from, rebases onto and merges into,
+    #: frozen at intake (Kraft-v9gbi); None is the repository's default
+    #: branch. It names the item's own repository, or a workspace's root only:
+    #: each member keeps its own default branch, as it always has, since one
+    #: branch name means nothing across repositories that need not share it.
+    #: Read through `builtins.base_branch`, never here directly. The pattern
+    #: keeps it from ever reaching git as an option.
+    base_branch: Annotated[StrictStr, Field(min_length=1, pattern=r"^[^-]")] | None = None
 
     @model_validator(mode="after")
     def _kind_owns_its_fields(self) -> WorkItemTarget:
@@ -171,9 +179,9 @@ class WorkItemTarget(BaseModel):
         return ((self.root,) if self.root else ()) + members
 
     @classmethod
-    def for_repository(cls, repository: str) -> WorkItemTarget:
+    def for_repository(cls, repository: str, *, base_branch: str | None = None) -> WorkItemTarget:
         """A single-repository target, by the repository's id."""
-        return cls(kind="repository", repository=repository)
+        return cls(kind="repository", repository=repository, base_branch=base_branch)
 
     @classmethod
     def from_selection(
@@ -183,6 +191,7 @@ class WorkItemTarget(BaseModel):
         members: Sequence[str],
         include_root: bool = True,
         root_pointer_policy: RootPointerPolicy | None = None,
+        base_branch: str | None = None,
     ) -> WorkItemTarget:
         """Select some (or all) of `workspace`'s members. Every name must be
         one the workspace actually mounts -- an unknown member is a template
@@ -200,6 +209,7 @@ class WorkItemTarget(BaseModel):
             mounts={m: workspace.members[m] for m in members},
             include_root=include_root,
             root_pointer_policy=root_pointer_policy or workspace.root_pointer_default,
+            base_branch=base_branch,
         )
 
 

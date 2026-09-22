@@ -519,7 +519,10 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # The refresh runs host git in the worktree (Kraft-dshto).
             stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]))
             new_base = await builtins_mod.refresh_worktree_base(
-                worktree, Path(row["repo"]), store.branch_for(row)
+                worktree,
+                Path(row["repo"]),
+                store.branch_for(row),
+                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
             )
         except builtins_mod.RebaseConflict as exc:
             # Handed to the walk, which gives it to the node's `on_conflict`
@@ -805,7 +808,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             # The refresh runs host git in the worktree (Kraft-dshto).
             stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]))
             new_base = await builtins_mod.refresh_worktree_base(
-                worktree, Path(row["repo"]), store.branch_for(row)
+                worktree,
+                Path(row["repo"]),
+                store.branch_for(row),
+                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
             )
         except builtins_mod.RebaseConflict as exc:
             # The retry still forks; the walk hands the conflict to the

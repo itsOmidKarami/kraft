@@ -149,7 +149,7 @@ def test_commit_paths_stages_and_commits_only_the_named_paths(repo):
     (repo / "wanted.md").write_text("attached\n")
     (repo / "unrelated.py").write_text("an agent is mid-edit\n")
 
-    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1")
+    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1", "main")
 
     assert _porcelain(repo) == ["?? unrelated.py"]
     committed = subprocess.run(
@@ -160,7 +160,7 @@ def test_commit_paths_stages_and_commits_only_the_named_paths(repo):
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout
 
-    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1")
+    kraft_builtins._commit_paths(repo, ["wanted.md"], "chore: attach spec for w1", "main")
 
     again = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True

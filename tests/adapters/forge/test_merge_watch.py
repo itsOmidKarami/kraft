@@ -85,7 +85,7 @@ async def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unkno
     `head_sha[:7]` and `GlabCli` silently reports the previous commit's
     pipeline as this merge's result (code-review)."""
 
-    async def _none(repo):
+    async def _none(repo, branch):
         return None
 
     monkeypatch.setattr(_builtins, "upstream_head", _none)

@@ -63,11 +63,12 @@ class GhCli(mr_ops.CliWaits):
         *,
         repo: Path,
         branch: str,
+        base: str,
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
     ) -> MR:
-        await git.assert_clean(repo)
+        await git.assert_clean(repo, base)
         await self.push(repo=repo, branch=branch)
         # `--fill` titles the PR from the commits; see GlabCli.open_mr.
         await git.run_git(
@@ -78,6 +79,8 @@ class GhCli(mr_ops.CliWaits):
                 "create",
                 # See GlabCli.open_mr.
                 "--draft",
+                "--base",
+                base,
                 "--title",
                 mr_ops.mr_title(title),
                 "--body",

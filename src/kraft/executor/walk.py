@@ -551,7 +551,9 @@ async def _resolve_conflict(
     span's approved gates.
     """
     old_base = dispatch._current_base_ref(db, work_item_id)
-    new_base = await _builtins.upstream_head(Path(row["repo"]))
+    new_base = await _builtins.upstream_head(
+        Path(row["repo"]), await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
+    )
     note = prompts.rebase_resolve_note(
         worktree,
         store.branch_for(row),

@@ -20,7 +20,7 @@ RED = [(forge.FailedJob("test", "failed", "script_failure"),)]
 
 async def _opened(fake: forge.FakeForge, repo, *, merged: bool = False) -> forge.FakeForge:
     """`fake` with an MR open on `kraft/w1` in `repo` (and merged, if asked)."""
-    mr = await fake.open_mr(repo=repo, branch="kraft/w1", title="t", body="b")
+    mr = await fake.open_mr(repo=repo, branch="kraft/w1", base="main", title="t", body="b")
     if merged:
         await fake.merge(repo=repo, branch="kraft/w1", mr=mr)
         fake.pushed.clear()
