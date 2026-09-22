@@ -41,7 +41,6 @@ and is outside the stuck set (Ruling 176).
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import logging
 import time
@@ -243,32 +242,6 @@ def _levels(snapshot, path: str) -> list[tuple[str, str]]:
     ]
 
 
-def _explicit(snapshot):
-    """`snapshot` as its enclosing scopes' clocks read it: an instance or
-    repository cap is a default, not a ceiling (Ruling 198), so the work item,
-    its nodes and steps are bound only by a cap the chain or the item's own
-    override set, or by `maxima`. The default binds a task's own run
-    (`at_launch`), where nothing more specific was set."""
-    chain_own = snapshot.chain.chain.policy
-    base = dataclasses.replace(
-        snapshot.policy,
-        **{
-            n: (
-                getattr(chain_own, n)
-                if chain_own is not None and getattr(chain_own, n) is not None
-                else getattr(snapshot.policy.maxima, n)
-            )
-            for n in (*CAP_FIELDS, *BUDGET_FIELDS)
-        },
-    )
-    return dataclasses.replace(snapshot, policy=base)
-
-
-def _root_policy(snapshot):
-    item = snapshot.item_policy
-    return item.apply_to(snapshot.policy, "") if item is not None else snapshot.policy
-
-
 def _tightest(
     snapshot, line: _Timeline, levels: list[tuple[str, str]], fields=CAP_FIELDS
 ) -> Hit | None:
@@ -279,7 +252,7 @@ def _tightest(
     best: Hit | None = None
     above = dict.fromkeys(fields)
     for path, kind in levels:
-        policy = _root_policy(snapshot) if kind == "item" else snapshot.policy_at(path)
+        policy = snapshot.work_item_policy() if kind == "item" else snapshot.policy_at(path)
         since = line.since if kind == "item" else line.node_since(path.split(".")[0])
         for name in fields:
             cap = getattr(policy, name)
@@ -312,10 +285,9 @@ def at_launch(conn, row, task, *, now: str | None = None, ran_s: float = 0.0) ->
 def _with_own_run(snapshot, line: _Timeline, path: str, ran_s: float) -> Hit | None:
     """The tightest cap over the task at `path`, its own run having gone
     `ran_s` so far."""
-    explicit = _explicit(snapshot)
     levels = _levels(snapshot, path)
-    best = _tightest(explicit, line, levels)
-    parent = _root_policy(explicit) if len(levels) == 1 else explicit.policy_at(levels[-1][0])
+    best = _tightest(snapshot, line, levels)
+    parent = snapshot.work_item_policy() if len(levels) == 1 else snapshot.policy_at(levels[-1][0])
     own = snapshot.policy_at(path)
     for name in CAP_FIELDS:
         cap, above = getattr(own, name), getattr(parent, name)
@@ -333,7 +305,7 @@ def for_turn(conn, row, node_id: str, *, now: str | None = None) -> Hit | None:
     if snapshot is None or not node_id:
         return None
     line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
-    return _tightest(_explicit(snapshot), line, _levels(snapshot, f"{node_id}.escalation"))
+    return _tightest(snapshot, line, _levels(snapshot, f"{node_id}.escalation"))
 
 
 def for_session(conn, row, session, *, now: str | None = None) -> Hit | None:
@@ -372,7 +344,7 @@ def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None
     line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
     kinds = {p: k for p, k, _ in snapshot.chain.cap_scopes()}
     levels = [("", "item"), *([(node_id, kinds[node_id])] if node_id in kinds else [])]
-    best = _tightest(_explicit(snapshot), line, levels, fields=("total_time_cap_minutes",))
+    best = _tightest(snapshot, line, levels, fields=("total_time_cap_minutes",))
     node = next((n for n in snapshot.chain.nodes if n.id == gate), None)
     timeout = getattr(node.node, "timeout", None) if node is not None else None
     if timeout is not None:
@@ -406,10 +378,9 @@ def budget_breach(conn, row, path: str) -> dict | None:
     overshot by up to the cost of the launches that started together
     (Kraft-ib2sn). Nothing is reserved ahead of a launch.
 
-    An escalation turn's session is its node's spend (Kraft-h8n21). An
-    instance or repository budget is a default (Ruling 198): it binds a
-    task's own launches where nothing more specific is set, never an
-    enclosing scope."""
+    An escalation turn's session is its node's spend (Kraft-h8n21). Each
+    scope's budget is the one its chain or the item set for it, else its
+    level's default (Ruling 211: `MaterializedChain.policy_at`)."""
     snapshot = store.materialized_chain_of(row)
     if snapshot is None:
         return None
@@ -430,15 +401,9 @@ def budget_breach(conn, row, path: str) -> dict | None:
             (row["id"],),
         ).fetchall()
     ]
-    explicit = _explicit(snapshot)
     above = dict.fromkeys(BUDGET_FIELDS)
     for level in levels:
-        if not level:
-            policy = _root_policy(explicit)
-        elif level == path and kinds[level] == "task":
-            policy = snapshot.policy_at(level)
-        else:
-            policy = explicit.policy_at(level)
+        policy = snapshot.policy_at(level) if level else snapshot.work_item_policy()
         under = [
             s
             for s in sessions

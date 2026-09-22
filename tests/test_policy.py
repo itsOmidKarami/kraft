@@ -419,7 +419,7 @@ def instance_policy() -> policy.InstancePolicy:
                 "allowed_harnesses": ["codex", "claude"],
             },
             "maxima": {
-                "token_budget": 2_000_000,
+                "work_item": {"token_budget": 2_000_000},
                 "allowed_tools": ["git", "shell", "pytest"],
                 "allowed_harnesses": ["codex", "claude"],
             },
@@ -594,18 +594,18 @@ def test_instance_policy_loads_defaults_and_maxima_from_yaml(tmp_path):
         "  allowed_harnesses: [codex]\n"
         "maxima:\n"
         "  timeout_minutes: 90\n"
-        "  token_budget: 500000\n"
+        "  work_item: { token_budget: 500000 }\n"
         "  allowed_tools: [git, shell]\n"
         "  allowed_harnesses: [codex, claude]\n"
     )
     parsed = policy.PolicyInput.from_yaml(p)
     assert parsed.defaults.timeout_minutes == 30
-    assert parsed.maxima.token_budget == 500000
+    assert parsed.maxima.work_item.token_budget == 500000
 
     resolved = parsed.instance_policy()
     assert resolved.timeout_minutes == 30
-    # A ratchet-only safety field with no `defaults:` entry starts at its maximum.
-    assert resolved.token_budget == 500000
+    # A cap with no `defaults:` entry runs at its level's maximum (Ruling 211).
+    assert resolved.at_level("work_item").token_budget == 500000
     assert resolved.allowed_tools == ("git", "shell")
     # Operational-with-a-maximum: widening back up to `maxima` is allowed.
     assert resolved.apply_template_override(

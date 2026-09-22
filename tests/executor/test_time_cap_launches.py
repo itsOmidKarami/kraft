@@ -54,27 +54,49 @@ async def _ran(it, sid, path, minutes, *, node=None, status="done"):
     )
 
 
-# ── Ruling 198: a default binds a task's own run, never an enclosing scope ────
+# ── Ruling 211: a level's default binds every scope of its kind ──────────────
+
+#: Omid's shape (Ruling 211).
+LEVEL_DEFAULTS = {
+    "work_item": {"time_cap_minutes": 480},
+    "nodes": {"time_cap_minutes": 180},
+    "steps": {"time_cap_minutes": 120},
+    "tasks": {"time_cap_minutes": 90},
+}
 
 
-async def test_a_default_cap_leaves_a_longer_scope_its_own_and_binds_the_rest(item_on):
-    """A node that sets 240 minutes runs under 240, not the instance's
-    default of 30; a task nothing configured runs under the default."""
+async def test_each_levels_default_binds_every_scope_of_its_kind_that_set_none(item_on):
+    """A node that sets 240 minutes runs under 240, not the nodes' default,
+    and nothing under it takes a narrower level's default either (it set a
+    value). A node that set nothing runs under the nodes' default, each of
+    its steps under the steps', each task under the tasks'."""
     nodes = [
         {"id": "slow", "kind": "exec", "policy": {"time_cap_minutes": 240}, "tasks": [_agent("a")]},
-        {"id": "plain", "kind": "exec", "tasks": [_agent("b")]},
+        {
+            "id": "plain",
+            "kind": "exec",
+            "steps": [
+                {"id": "one", "tasks": [_agent("b")]},
+                {"id": "two", "tasks": [_agent("c")]},
+            ],
+        },
     ]
-    chain = _materialize(nodes, defaults={"time_cap_minutes": 30}, maxima={"time_cap_minutes": 480})
+    chain = _materialize(
+        nodes, defaults=LEVEL_DEFAULTS, maxima={"work_item": {"time_cap_minutes": 1440}}
+    )
     it = await item_on(chain)
 
     def left(path):
-        return it.database.read(lambda c: caps.at_launch(c, it.row(), _task(chain, path)))
+        hit = it.database.read(lambda c: caps.at_launch(c, it.row(), _task(chain, path)))
+        return hit.scope, hit.remaining_s
 
-    assert (left("slow.main.a").scope, left("slow.main.a").remaining_s) == ("slow", 240 * 60)
-    assert (left("plain.main.b").scope, left("plain.main.b").remaining_s) == (
-        "plain.main.b",
-        30 * 60,
-    )
+    assert left("slow.main.a") == ("slow", 240 * 60)
+    assert left("plain.one.b") == ("plain.one.b", 90 * 60)
+
+    await _ran(it, "s-c", "plain.two.c", 100)
+
+    assert left("plain.two.c") == ("plain.two", pytest.approx(20 * 60, abs=5))
+    assert left("plain.one.b") == ("plain", pytest.approx(80 * 60, abs=5))
 
 
 async def test_raising_the_items_own_cap_unsticks_a_capped_item(item_on):
@@ -82,7 +104,7 @@ async def test_raising_the_items_own_cap_unsticks_a_capped_item(item_on):
     launch has time again, with no config edit."""
     chain = _materialize(
         [{"id": "build", "kind": "exec", "tasks": [_agent("a")]}],
-        maxima={"time_cap_minutes": 600},
+        maxima={"work_item": {"time_cap_minutes": 600}},
     )
     it = await item_on(chain, "build", policy_override={"time_cap_minutes": 5})
     await _ran(it, "s-old", "build.main.a", 6)

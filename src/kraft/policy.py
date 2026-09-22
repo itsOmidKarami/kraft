@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Literal, get_args
+from typing import Annotated, ClassVar, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -567,57 +567,148 @@ def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
 ToolNames = Annotated[list[StrictStr], AfterValidator(_tool_names)]
 
 
-class PolicyDefaultsInput(BaseModel):
-    """`policy.yaml`'s `defaults:` -- inheritable operational starting
-    points, no safety meaning of their own."""
+#: The kinds of scope a cap default or maximum is set for (Ruling 211),
+#: broadest first: the work item (its chain), every node (a gate is one),
+#: every step, every task.
+CAP_LEVELS = ("work_item", "nodes", "steps", "tasks")
+#: The level a scope kind (`ResolvedChain.cap_scopes`) reads its caps at.
+LEVEL_OF = {"node": "nodes", "gate": "nodes", "step": "steps", "task": "tasks"}
 
-    model_config = ConfigDict(strict=True, extra="forbid")
 
-    timeout_minutes: PositiveInt | None = None
-    max_attempts: PositiveInt | None = None
-    allowed_harnesses: list[StrictStr] | None = None
-    #: The caps a scope runs under when nothing in its chain or its work item
-    #: sets one. A default, not a ceiling (Ruling 198): any scope may set more,
-    #: up to `maxima`.
+class CapValues(BaseModel):
+    """One level's caps in `defaults:` or `maxima:` (Ruling 211)."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
     time_cap_minutes: PositiveInt | None = None
     total_time_cap_minutes: PositiveInt | None = None
-    #: Budgets are defaults too (Ruling 198): a task's own spend where nothing
-    #: more specific is set.
     token_budget: PositiveInt | None = None
     budget_usd: PositiveUsd | None = None
 
 
-class PolicyMaximaInput(BaseModel):
+class CapLevels(BaseModel):
+    """The four cap fields (`SCOPE_CAP_FIELDS`), per level of scope (Ruling
+    211): `work_item`, `nodes`, `steps`, `tasks`. A narrower level's value
+    may not exceed a broader one's, and the refusal names both."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    #: The `policy.yaml` section this is, for a refusal to name.
+    section: ClassVar[str] = "caps"
+
+    work_item: CapValues = Field(default_factory=CapValues)
+    nodes: CapValues = Field(default_factory=CapValues)
+    steps: CapValues = Field(default_factory=CapValues)
+    tasks: CapValues = Field(default_factory=CapValues)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _caps_are_per_level(cls, data: object, info: ValidationInfo) -> object:
+        """A flat cap (`defaults: time_cap_minutes: 30`) is refused: the form
+        was rc-only (Rulings 195-198) and never shipped in a release. A
+        snapshot frozen by an rc still reads: its flat maximum bounded every
+        scope, which a `work_item` maximum does now (`nearest`)."""
+        if not isinstance(data, dict):
+            return data
+        flat = [n for n in SCOPE_CAP_FIELDS if n in data]
+        if not flat:
+            return data
+        if not (info.context or {}).get("frozen"):
+            s, n = cls.section, flat[0]
+            raise ValueError(
+                f"{s}.{n} is set per level since Ruling 211: use {s}.tasks.{n} "
+                "(or work_item, nodes, steps)"
+            )
+        data = dict(data)
+        work_item = dict(data.get("work_item") or {})
+        for name in flat:
+            if (value := data.pop(name)) is not None:
+                work_item.setdefault(name, value)
+        return {**data, "work_item": work_item}
+
+    @model_validator(mode="after")
+    def _a_level_within_the_broader_ones(self) -> CapLevels:
+        for name in SCOPE_CAP_FIELDS:
+            above: tuple[str, float] | None = None
+            for level in CAP_LEVELS:
+                value = getattr(getattr(self, level), name)
+                if value is None:
+                    continue
+                if above is not None and value > above[1]:
+                    s = self.section
+                    raise ValueError(
+                        f"{s}.{level}.{name} {value} exceeds {s}.{above[0]}.{name} {above[1]}: "
+                        "a narrower level's cap cannot exceed a broader one's (Ruling 211)"
+                    )
+                above = (level, value)
+        return self
+
+    def nearest(self, level: str, name: str) -> tuple[str, float] | None:
+        """`(level, value)` of `name` set at `level` or the nearest broader
+        level, or None. What bounds a level as a maximum: a broader level's
+        maximum bounds every scope under it."""
+        for at in reversed(CAP_LEVELS[: CAP_LEVELS.index(level) + 1]):
+            value = getattr(getattr(self, at), name)
+            if value is not None:
+                return at, value
+        return None
+
+
+class PolicyDefaultsInput(CapLevels):
+    """`policy.yaml`'s `defaults:` -- inheritable operational starting
+    points, no safety meaning of their own. A cap default is per level
+    (Ruling 211): it applies to every scope of its kind that nothing -- the
+    chain, a node, step or task, or the item's own override -- set a value
+    for. A default, not a ceiling (Ruling 198): any scope may set more, up to
+    its level's maximum."""
+
+    section: ClassVar[str] = "defaults"
+
+    timeout_minutes: PositiveInt | None = None
+    max_attempts: PositiveInt | None = None
+    allowed_harnesses: list[StrictStr] | None = None
+
+
+class PolicyMaximaInput(CapLevels):
     """`policy.yaml`'s `maxima:` -- the administrator ceiling no policy
     override may exceed, checked when a layer is applied (at load, at
     materialization, and on a retry override); the resolved values it bounds
     are what a task launch reads (`MaterializedChain.policy_for`).
     `timeout_minutes`/`max_attempts` here are optional administrator maxima on
     the operational fields of the same name; the design doc's example omits
-    them because most installs never set one."""
+    them because most installs never set one.
 
-    model_config = ConfigDict(strict=True, extra="forbid")
+    A cap's maximum is per level (Ruling 211), and one set on a level bounds
+    every narrower level too (`nearest`). `tasks.total_time_cap_minutes` is
+    also the longest any external wait may wait (Ruling 196: a wait's timeout
+    is its task's total cap), so it replaces the retired
+    `wait_timeout_minutes`."""
 
-    token_budget: PositiveInt | None = None
-    #: The largest dollar cap any scope may set (Ruling 195).
-    budget_usd: PositiveUsd | None = None
+    section: ClassVar[str] = "maxima"
+
     allowed_tools: ToolNames | None = None
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
-    #: The largest time cap any scope may set. `total_time_cap_minutes` is
-    #: also the longest any external wait may wait (Ruling 196: a wait's
-    #: timeout is its task's total cap), so it replaces the retired
-    #: `wait_timeout_minutes`; the design seeds a seven-day approval wait.
-    time_cap_minutes: PositiveInt | None = None
-    total_time_cap_minutes: PositiveInt | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _retired_wait_timeout(cls, data: object) -> object:
         """A `policy.yaml` or a snapshot written before Ruling 196 still reads:
-        its `wait_timeout_minutes` is now `total_time_cap_minutes`."""
-        return _carry_retired(data, "maxima", "total_time_cap_minutes")
+        its `wait_timeout_minutes` is now `tasks.total_time_cap_minutes`."""
+        if not isinstance(data, dict) or RETIRED_WAIT_TIMEOUT not in data:
+            return data
+        data = dict(data)
+        if (value := data.pop(RETIRED_WAIT_TIMEOUT)) is not None:
+            deprecated(
+                "maxima.%s is deprecated (Ruling 196) and read as "
+                "maxima.tasks.total_time_cap_minutes; rename it",
+                RETIRED_WAIT_TIMEOUT,
+            )
+            tasks = dict(data.get("tasks") or {})
+            tasks.setdefault("total_time_cap_minutes", value)
+            data["tasks"] = tasks
+        return data
 
 
 class InstancePolicyInput(BaseModel):
@@ -637,10 +728,19 @@ class InstancePolicyInput(BaseModel):
         escalation -- but `policy-has-defaults-and-administrator-maxima` calls
         maxima non-overridable, and a `defaults:` entry past one is an
         override in all but name. An unset maximum is no bound at all."""
-        for name in (*_OPERATIONAL_NUMERIC_FIELDS, *SCOPE_CAP_FIELDS):
-            value, ceiling = getattr(self.defaults, name, None), getattr(self.maxima, name)
+        for name in _OPERATIONAL_NUMERIC_FIELDS:
+            value, ceiling = getattr(self.defaults, name), getattr(self.maxima, name)
             if value is not None and ceiling is not None and value > ceiling:
                 raise ValueError(f"defaults.{name} {value} exceeds maxima.{name} {ceiling}")
+        for level in CAP_LEVELS:
+            for name in SCOPE_CAP_FIELDS:
+                value = getattr(getattr(self.defaults, level), name)
+                bound = self.maxima.nearest(level, name)
+                if value is not None and bound is not None and value > bound[1]:
+                    raise ValueError(
+                        f"defaults.{level}.{name} {value} exceeds maxima.{bound[0]}.{name} "
+                        f"{bound[1]}"
+                    )
         for name in _OPERATIONAL_LIST_FIELDS:
             value, ceiling = getattr(self.defaults, name), getattr(self.maxima, name)
             if value is not None and ceiling is not None and not set(value) <= set(ceiling):
@@ -899,8 +999,9 @@ class InstancePolicy:
     call must still respect. A ratchet-only safety field with no `defaults:`
     entry (`allowed_tools`) starts *at* its maximum -- there is nothing to
     narrow it from until the first override does. A cap (`SCOPE_CAP_FIELDS`)
-    starts at its default, else its maximum, and any scope may set its own up
-    to the maximum (Ruling 198).
+    holds only what a layer set -- a repository, the chain, a node, step or
+    task, the work item's override -- and `at_level` fills in the rest from
+    its level's default, else its maximum (Ruling 211).
     `allowed_harnesses` is different: it is operational-with-a-maximum, not
     ratchet-only, so its bound for widening is always `maxima`, never the
     current inherited value (see `_OPERATIONAL_LIST_FIELDS`)."""
@@ -918,6 +1019,8 @@ class InstancePolicy:
     sandbox: SandboxPolicy | None = None
     time_cap_minutes: int | None = None
     total_time_cap_minutes: int | None = None
+    #: The per-level cap defaults (Ruling 211), for `at_level`.
+    cap_defaults: CapLevels = field(default_factory=CapLevels)
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -933,14 +1036,30 @@ class InstancePolicy:
                 else (tuple(m.allowed_harnesses) if m.allowed_harnesses is not None else None)
             ),
             allowed_tools=tuple(m.allowed_tools) if m.allowed_tools is not None else None,
+            # A cap holds only what a layer sets; `at_level` fills the rest in.
+            token_budget=None,
             maxima=m,
-            # A cap's default, else its maximum (Ruling 198): a default any
-            # scope may exceed up to the maximum.
-            **{
-                n: getattr(d, n) if getattr(d, n) is not None else getattr(m, n)
-                for n in SCOPE_CAP_FIELDS
-            },
+            cap_defaults=CapLevels(**{level: getattr(d, level) for level in CAP_LEVELS}),
         )
+
+    def at_level(self, level: str) -> InstancePolicy:
+        """This policy's caps as a scope of `level` runs under them (Ruling
+        211): the value a layer set -- its own or one it inherits from the
+        chain, an enclosing node, step or task, or the work item's override --
+        else `level`'s default, else its maximum; and never past that
+        maximum. A scope's own value past it is refused when the chain is
+        checked (`ResolvedChain._check_caps`); an inherited one is held to it
+        here."""
+        updates = {}
+        for name in SCOPE_CAP_FIELDS:
+            value = getattr(self, name)
+            if value is None:
+                value = getattr(getattr(self.cap_defaults, level), name)
+            bound = self.maxima.nearest(level, name)
+            if bound is not None:
+                value = bound[1] if value is None else min(value, bound[1])
+            updates[name] = value
+        return dataclasses.replace(self, **updates)
 
     def layered(self, overrides: Iterable[TaskPolicyOverride]) -> InstancePolicy:
         """This policy with each of `overrides` applied in turn, broadest
@@ -1025,11 +1144,13 @@ class InstancePolicy:
             value = getattr(override, field_name)
             if value is None:
                 continue
-            admin_max = getattr(self.maxima, field_name)
+            bound = self.maxima.nearest("work_item", field_name)
+            admin_max = bound[1] if bound is not None else None
             # Bounded by `maxima` alone here, as an operational value is: a
-            # default is not a ceiling (Ruling 198). That a child's cap stays
-            # at or under its parent scope's is `ResolvedChain._check_caps`,
-            # which names both.
+            # default is not a ceiling (Ruling 198). The work item's maximum is
+            # the broadest; a narrower scope's own level maximum, and a
+            # child's cap staying at or under its parent scope's, are
+            # `ResolvedChain._check_caps`, which knows the scope and names it.
             if admin_max is not None and value > admin_max:
                 raise PolicyError(
                     f"'{field_name}' {value} cannot exceed the administrator maximum {admin_max}",

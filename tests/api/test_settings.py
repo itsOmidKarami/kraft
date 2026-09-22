@@ -354,8 +354,9 @@ def test_a_get_then_put_round_trip_keeps_every_key_and_refreshes_the_ceiling(cli
         "default": {"attempts": 3, "wall_clock_s": 3600},
         "forge_cli_timeout_s": 300,
         "auto_review_attempts": 2,
-        "defaults": {"max_attempts": 2},
-        "maxima": {"token_budget": 1000, "allowed_tools": ["git"]},
+        # The caps are nested per level (Ruling 211), and stay nested.
+        "defaults": {"max_attempts": 2, "tasks": {"time_cap_minutes": 90}},
+        "maxima": {"work_item": {"token_budget": 1000}, "allowed_tools": ["git"]},
     }
     (templates_dir / "policy.yaml").write_text(yaml.safe_dump(written))
     body = client.get("/api/policy").json()
@@ -364,19 +365,24 @@ def test_a_get_then_put_round_trip_keeps_every_key_and_refreshes_the_ceiling(cli
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
     assert on_disk == {**written, "max_concurrent": 3}
     live = client.app.state.instance_policy
-    assert (live.token_budget, live.allowed_tools, live.max_attempts) == (1000, ("git",), 2)
+    assert (live.at_level("work_item").token_budget, live.allowed_tools, live.max_attempts) == (
+        1000,
+        ("git",),
+        2,
+    )
+    assert live.at_level("tasks").time_cap_minutes == 90
 
 
 def test_a_save_that_omits_a_key_keeps_it_on_disk(client, templates_dir):
     """An older SPA build sends only what it knows; the rest stays."""
     (templates_dir / "policy.yaml").write_text(
         "loops: {}\ndefault: { attempts: 3, wall_clock_s: 3600 }\n"
-        "maxima: { token_budget: 1000 }\nforge_cli_timeout_s: 300\n"
+        "maxima: { work_item: { token_budget: 1000 } }\nforge_cli_timeout_s: 300\n"
     )
     body = {"loops": {}, "default": {"attempts": 5, "wall_clock_s": 3600}}
     assert client.put("/api/policy", json=body).status_code == 200
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
-    assert on_disk["maxima"] == {"token_budget": 1000}
+    assert on_disk["maxima"] == {"work_item": {"token_budget": 1000}}
     assert on_disk["forge_cli_timeout_s"] == 300
     assert on_disk["default"]["attempts"] == 5
 
@@ -386,8 +392,25 @@ def test_a_save_that_edits_a_key_the_form_does_not_name_applies_it(client, templ
     not ignored either -- a save that changes `maxima:` must not answer 200
     and leave the old ceiling on disk."""
     body = client.get("/api/policy").json()
-    body["maxima"] = {"token_budget": 2000}
+    body["maxima"] = {"work_item": {"token_budget": 2000}}
     assert client.put("/api/policy", json=body).status_code == 200
     on_disk = yaml.safe_load((templates_dir / "policy.yaml").read_text())
-    assert on_disk["maxima"] == {"token_budget": 2000}
-    assert client.app.state.instance_policy.token_budget == 2000
+    assert on_disk["maxima"] == {"work_item": {"token_budget": 2000}}
+    assert client.app.state.instance_policy.maxima.work_item.token_budget == 2000
+
+
+def test_a_save_with_a_flat_cap_is_refused_naming_its_level_and_writes_nothing(
+    client, templates_dir
+):
+    """Ruling 211: a cap default or maximum is per level. The flat form never
+    shipped in a release, so a save naming one is refused, pointing at the
+    nested form, rather than written for the next load to refuse."""
+    before = (templates_dir / "policy.yaml").read_text()
+    body = client.get("/api/policy").json()
+    body["defaults"] = {"time_cap_minutes": 30}
+
+    refused = client.put("/api/policy", json=body)
+
+    assert refused.status_code == 422
+    assert "use defaults.tasks.time_cap_minutes" in refused.json()["detail"]
+    assert (templates_dir / "policy.yaml").read_text() == before

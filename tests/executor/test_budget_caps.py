@@ -185,24 +185,27 @@ async def test_an_escalation_turns_spend_counts_toward_its_nodes_budget(item_on)
     assert _breach(it)["path"] == "build"
 
 
-async def test_a_default_budget_binds_a_tasks_own_spend_not_an_enclosing_scopes(item_on):
-    """Ruling 198: a `defaults:` budget binds each task's own launches where
-    nothing more specific is set; it is not the whole item's ceiling."""
-    from kraft.templates.models import Chain, ResolvedChain
-
+async def test_each_levels_default_budget_caps_every_scope_of_its_kind(item_on):
+    """Ruling 211: a level's default budget caps the spend of every scope of
+    its kind that nothing set one for -- each task's own launches, and each
+    node's -- the broadest scope reached named first."""
     nodes = [
         {"id": "build", "kind": "exec", "tasks": [_agent("impl"), _agent("other")]},
     ]
     chain = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
         target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(
-            InstancePolicyInput.model_validate({"defaults": {"token_budget": 100}})
+            InstancePolicyInput.model_validate(
+                {"defaults": {"nodes": {"token_budget": 300}, "tasks": {"token_budget": 100}}}
+            )
         ),
     )
     it = await item_on(chain)
-    await _spent(it, "build.main.other", tokens=500)
+    await _spent(it, "build.main.other", tokens=150)
     assert _breach(it, "build.main.impl") is None
 
     await _spent(it, "build.main.impl", tokens=100)
-
     assert _breach(it, "build.main.impl")["path"] == "build.main.impl"
+
+    await _spent(it, "build.main.other", tokens=60)
+    assert _breach(it, "build.main.impl")["path"] == "build"

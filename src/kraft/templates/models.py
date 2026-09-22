@@ -30,7 +30,7 @@ from collections.abc import Container, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -46,6 +46,7 @@ from pydantic import (
 
 from kraft.policy import (
     FROZEN,
+    LEVEL_OF,
     RETIRED_WAIT_TIMEOUT,
     SCOPE_CAP_FIELDS,
     InstancePolicy,
@@ -448,11 +449,11 @@ class ForgeTask(TaskBase):
         Its timeout is the task's `total_time_cap_minutes` (Ruling 196), which
         the ratchet already held under every enclosing cap and the maximum; a
         wait with none anywhere takes `DEFAULT_WAIT`'s, clamped to
-        `maxima.total_time_cap_minutes` rather than refusing a chain whose
-        author chose no number."""
+        its level's maximum rather than refusing a chain whose author chose
+        no number."""
         wait = self.wait or WaitPolicy()
-        ceiling = policy.maxima.total_time_cap_minutes
-        limit = timedelta(minutes=ceiling) if ceiling is not None else None
+        bound = policy.maxima.nearest("tasks", "total_time_cap_minutes")
+        limit = timedelta(minutes=bound[1]) if bound is not None else None
         timeout = (
             timedelta(minutes=policy.total_time_cap_minutes)
             if policy.total_time_cap_minutes is not None
@@ -567,6 +568,7 @@ class ExecutionShape(BaseModel):
                     tasks=tuple(tasks),
                     on_failure=_handler_steps(step.on_failure, path, step_scopes),
                     scopes=step_scopes,
+                    own=step.policy,
                 )
             )
         return tuple(resolved)
@@ -836,15 +838,21 @@ def _dedicated(path: str, task: AnyTask | None, scopes: Scopes) -> ResolvedTask 
 
 
 def _scoped(
-    path: str, policy: InstancePolicy, scopes: Scopes, item: WorkItemPolicy | None = None
+    scope: ResolvedNode | ResolvedStep | ResolvedTask,
+    policy: InstancePolicy,
+    item: WorkItemPolicy | None = None,
 ) -> InstancePolicy:
-    """`policy.layered(scopes)`, then `item`'s layers at `path`, with a
-    refusal prefixed by the scope's path."""
+    """The policy `scope` runs under: `policy` layered with every override
+    enclosing it, then `item`'s layers at its path, its caps read at its level
+    (`InstancePolicy.at_level`, Ruling 211). A refusal is prefixed by the
+    scope's path."""
     try:
-        policy = policy.layered(scopes)
-        return item.apply_to(policy, path, scopes) if item is not None else policy
+        policy = policy.layered(scope.scopes)
+        if item is not None:
+            policy = item.apply_to(policy, scope.path, scope.scopes)
+        return policy.at_level(scope.level)
     except PolicyError as exc:
-        raise PolicyError(f"{path}: {exc}", field=exc.field, path=path) from exc
+        raise PolicyError(f"{scope.path}: {exc}", field=exc.field, path=scope.path) from exc
 
 
 @dataclass(frozen=True)
@@ -860,6 +868,14 @@ class ResolvedTask:
     #: (`MaterializedChain.policy_for`).
     scopes: Scopes = ()
 
+    #: The level its caps' defaults and maxima come from (Ruling 211).
+    level: ClassVar[str] = "tasks"
+
+    @property
+    def own(self) -> TaskPolicyOverride | None:
+        """The override this task sets itself."""
+        return self.task.policy
+
 
 @dataclass(frozen=True)
 class ResolvedStep:
@@ -869,6 +885,10 @@ class ResolvedStep:
     #: The step's own recovery plan, at `<step path>.on_failure`.
     on_failure: tuple[ResolvedStep, ...] = ()
     scopes: Scopes = ()
+    #: The override this step sets itself.
+    own: TaskPolicyOverride | None = None
+
+    level: ClassVar[str] = "steps"
 
 
 @dataclass(frozen=True)
@@ -893,6 +913,18 @@ class ResolvedNode:
     #: The node's own policy override, if it declares one. Its fix loop's
     #: bounds resolve here (`walk.walk_node`).
     scopes: Scopes = ()
+
+    #: A gate is a node, for its caps' level too (Ruling 211).
+    level: ClassVar[str] = "nodes"
+
+    @property
+    def path(self) -> str:
+        return self.id
+
+    @property
+    def own(self) -> TaskPolicyOverride | None:
+        """The override this node sets itself."""
+        return self.node.policy
 
     def steps_in(self) -> Iterator[ResolvedStep]:
         """Every step this node runs, handlers' steps included."""
@@ -1105,7 +1137,7 @@ class ResolvedChain:
         it."""
         self._check_caps(policy, item)
         for node in self.nodes:
-            _scoped(node.id, policy, node.scopes, item)
+            _scoped(node, policy, item)
             loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
             ceiling = policy.maxima.max_attempts
             if loop is not None and loop.max_attempts is not None and ceiling is not None:
@@ -1117,9 +1149,9 @@ class ResolvedChain:
                         path=node.id,
                     )
             for step in node.steps_in():
-                _scoped(step.path, policy, step.scopes, item)
+                _scoped(step, policy, item)
             for task in node.tasks():
-                task_policy = _scoped(task.path, policy, task.scopes, item)
+                task_policy = _scoped(task, policy, item)
                 if isinstance(task.task, ForgeTask) and task.task.target.waits:
                     try:
                         task.task.wait_bounds(task_policy)
@@ -1149,28 +1181,27 @@ class ResolvedChain:
                 field="sandbox",
             )
 
-    def cap_scopes(self) -> list[tuple[str, str, Scopes]]:
-        """`(path, kind, scopes)` for every scope a time cap can sit on, a
+    def cap_scopes(self) -> list[tuple[str, str, ResolvedNode | ResolvedStep | ResolvedTask]]:
+        """`(path, kind, scope)` for every scope a time cap can sit on, a
         parent always before its children: every node, step and task."""
-        found = []
+        found: list[tuple[str, str, ResolvedNode | ResolvedStep | ResolvedTask]] = []
         for node in self.nodes:
-            found.append(
-                (node.id, "gate" if isinstance(node.node, GateNode) else "node", node.scopes)
-            )
-            found += [(s.path, "step", s.scopes) for s in node.steps_in()]
-            found += [(t.path, "task", t.scopes) for t in node.tasks()]
+            found.append((node.id, "gate" if isinstance(node.node, GateNode) else "node", node))
+            found += [(s.path, "step", s) for s in node.steps_in()]
+            found += [(t.path, "task", t) for t in node.tasks()]
         return sorted(found, key=lambda f: f[0].count(PATH_SEPARATOR))
 
     def _check_caps(self, policy: InstancePolicy, item: WorkItemPolicy | None) -> None:
         """Refuse a time cap above its parent's (Rulings 194, 195), naming both
         scopes: "task build.main.impl sets time_cap_minutes 20 > its step
         build.main's 10". The parents are the chain's own scopes -- chain,
-        node, step, task. An instance or repository cap is a default, not a
-        parent (Ruling 198): any scope may set more, up to `maxima`, which
-        the engine checks (`apply_template_override`). A work item's
-        item-wide cap is the work item's own and may exceed the chain's, up to
-        `maxima`; its cap on a path only tightens that scope. A gate's own
-        `timeout` sits under the total cap its chain sets around it."""
+        node, step, task. A level's default is not a parent (Rulings 198,
+        211): any scope may set more, up to its level's maximum, which a
+        scope's own value is refused past here, naming the maximum. A work
+        item's item-wide cap is the work item's own and may exceed the
+        chain's, up to the `work_item` maximum; its cap on a path only
+        tightens that scope. A gate's own `timeout` sits under the total cap
+        its chain sets around it."""
         scopes = self.cap_scopes()
         kinds = {path: kind for path, kind, _ in scopes}
 
@@ -1183,11 +1214,21 @@ class ResolvedChain:
         def named(path: str) -> str:
             return f"{kinds[path]} {path}" if path else "the chain"
 
+        def past_maximum(path: str, name: str, value: object) -> str | None:
+            bound = policy.maxima.nearest(LEVEL_OF[kinds[path]], name)
+            if bound is None or value <= bound[1]:
+                return None
+            return (
+                f"{named(path)} sets {name} {value} > the administrator maximum {bound[1]} "
+                f"(maxima.{bound[0]}.{name}; Ruling 211)"
+            )
+
         chain_own = self.chain.policy
         for name in SCOPE_CAP_FIELDS:
             root = getattr(chain_own, name) if chain_own is not None else None
             authored: dict[str, int | None] = {"": root}
-            for path, _, layers in scopes:
+            for path, _, scope in scopes:
+                layers = scope.scopes
                 value = next(
                     (v for layer in reversed(layers) if (v := getattr(layer, name)) is not None),
                     root,
@@ -1201,34 +1242,52 @@ class ResolvedChain:
                         field=name,
                         path=path,
                     )
+                own = getattr(scope.own, name) if scope.own is not None else None
+                if own is not None and (why := past_maximum(path, name, own)):
+                    raise PolicyError(f"{path}: {why}", field=name, path=path)
                 authored[path] = value
             if item is None:
                 continue
-            ceiling = getattr(policy.maxima, name)
+            bound = policy.maxima.nearest("work_item", name)
             wide = getattr(item, name)
-            if wide is not None and ceiling is not None and wide > ceiling:
+            if wide is not None and bound is not None and wide > bound[1]:
                 raise PolicyError(
-                    f"'{name}' {wide} cannot exceed the administrator maximum {ceiling}",
+                    f"'{name}' {wide} cannot exceed the administrator maximum {bound[1]}",
                     field=name,
                     path="",
                 )
-            for path, _, layers in scopes:
+            for path, _, scope in scopes:
                 if path not in item.paths or getattr(item.paths[path], name) is None:
                     continue
                 own = getattr(item.paths[path], name)
-                without = item.model_copy(
-                    update={"paths": {p: v for p, v in item.paths.items() if p != path}}
-                )
-                below = getattr(_scoped(path, policy, layers, without), name)
+                # What the scope already has: its chain's value, else the
+                # item's own item-wide one, and every enclosing path's.
+                has = [
+                    next(
+                        (
+                            v
+                            for layer in reversed(scope.scopes)
+                            if (v := getattr(layer, name)) is not None
+                        ),
+                        wide if wide is not None else root,
+                    ),
+                    *(
+                        getattr(layer, name)
+                        for where, layer in item.layers_at(path)[1:]
+                        if where != f"policy.paths.{path}"
+                    ),
+                ]
+                below = min((v for v in has if v is not None), default=None)
                 if below is not None and own > below:
-                    what = named(path)
                     raise PolicyError(
-                        f"the work item's override sets {name} {own} on {what}, above the "
+                        f"the work item's override sets {name} {own} on {named(path)}, above the "
                         f"{below} it already has: a work item's override only tightens a cap "
                         "(Rulings 194, 195)",
                         field=name,
                         path=path,
                     )
+                if why := past_maximum(path, name, own):
+                    raise PolicyError(f"the work item's override: {why}", field=name, path=path)
         for node in self.nodes:
             if not isinstance(node.node, GateNode) or node.node.timeout is None:
                 continue
@@ -1260,13 +1319,10 @@ class ResolvedChain:
         if policy.sandbox is not None:
             found[policy.sandbox] = "the chain"
         for node in self.nodes:
-            for path, scopes in [
-                (node.id, node.scopes),
-                *((t.path, t.scopes) for t in node.tasks()),
-            ]:
-                sandbox = _scoped(path, policy, scopes, item).sandbox
+            for scope in (node, *node.tasks()):
+                sandbox = _scoped(scope, policy, item).sandbox
                 if sandbox is not None:
-                    found.setdefault(sandbox, path)
+                    found.setdefault(sandbox, scope.path)
         return found
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
@@ -1474,9 +1530,17 @@ class MaterializedChain:
         # A repository with no policy of its own frozen falls back to the
         # item's, which is the meet of them all: never looser than its own.
         base = self.repository_policies.get(repository, self.policy) if repository else self.policy
-        path = scope.id if isinstance(scope, ResolvedNode) else scope.path
-        policy = base.layered(scope.scopes)
-        return self.item_policy.apply_to(policy, path, scope.scopes) if self.item_policy else policy
+        return _scoped(scope, base, self.item_policy)
+
+    def work_item_policy(self) -> InstancePolicy:
+        """The policy the work item as a whole runs under: this item's, with
+        its own item-wide override on top and its caps read at the
+        `work_item` level (Ruling 211) -- the caps its own clocks and spend
+        are held to (`kraft.caps`)."""
+        policy = self.policy
+        if self.item_policy is not None:
+            policy = self.item_policy.apply_to(policy, "")
+        return policy.at_level("work_item")
 
     def with_item_policy(self, raw: WorkItemPolicy | dict | None) -> MaterializedChain:
         """This snapshot with a work item's own override `raw` layered on, once
