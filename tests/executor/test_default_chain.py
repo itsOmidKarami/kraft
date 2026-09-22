@@ -140,6 +140,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
         "test_changed_scopes",
         "code_review",
         "author",
+        "author",
         "open",
         "await_ci",
         "await_review",

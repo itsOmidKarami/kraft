@@ -31,9 +31,9 @@ rewrites this after you -- write it for the reviewer, not for Kraft.
 
 ## Then read the change, not the plan
 
-`git diff main...HEAD`, the spec, the plan, and the local review findings. A
-description written from the spec describes the change that was planned, not
-the one that was made.
+The diff against the base branch (`git diff <base>...HEAD`), the spec, the
+plan, and the local review findings. A description written from the spec
+describes the change that was planned, not the one that was made.
 
 ## What the description answers, in this order
 
@@ -54,6 +54,9 @@ the one that was made.
 - Do not invent a reviewer or a label. Empty is correct unless the repo names
   one, and a label that does not already exist in this project is a failed
   API call, not a new label.
+- A label the project's rules require is not optional: every one of them goes
+  in `labels`. A merge request opened without it fails CI before anyone reads
+  it.
 - Three lines is a fine description for a three-line diff.
 - Scope deliberately left out belongs in the description -- it is most of
   what gets rejected.

@@ -110,6 +110,15 @@ tasks:
         initial_interval: 30s
         max_interval: 5m
 
+  describe_mr:
+    kind: agent
+    harness: claude
+    prompt: >-
+      Write the merge request's title, labels, reviewers and description,
+      following this repository's own rules for them.
+    produces: mr_meta
+    skill: kraft:mr-metadata
+
   write_work_brief:
     kind: agent
     harness: claude

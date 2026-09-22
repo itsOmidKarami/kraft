@@ -44,6 +44,14 @@ nodes:
     artifact: work_brief
     reject_to: implementation
 
+  # Its own node, not a task before `open`: a node wholly produces one kind or
+  # declares none, and `open` produces nothing.
+  - id: describe_merge_request
+    kind: exec
+    tasks:
+      - id: author
+        extends: describe_mr
+
   - id: draft_merge_request
     kind: exec
     tasks:

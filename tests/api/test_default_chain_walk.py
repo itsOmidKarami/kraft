@@ -37,6 +37,17 @@ def _walk_to_the_end(client, wid, timeout=120):
     return approved, parked
 
 
+def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
+    """Every agent on the fake `claude`, every repo on the returned forge."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    fake = forge.FakeForge(**states)
+    monkeypatch.setattr(forge.run, "_DEV_FAKE", fake)
+    monkeypatch.setattr(
+        deps, "_connected", lambda repos, path: {"setup_command": "", "forge": "fake"}
+    )
+    return fake
+
+
 def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci(
     client, repo, monkeypatch
 ):
@@ -44,17 +55,14 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
     Each of the five waits is pending once, then settles: the pipeline, the
     automated review, the external approval, the merge landing and the
     target branch's pipeline after it."""
-    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    fake = forge.FakeForge(
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_LABELS", "type::fix")
+    fake = _on_a_fake_forge(
+        monkeypatch,
         ci_states=["pending", "success"],
         review_results=["pending", "clean"],
         approval_states=["pending", "approved"],
         merge_delay=1,
         branch_ci_states=["pending", "success"],
-    )
-    monkeypatch.setattr(forge.run, "_DEV_FAKE", fake)
-    monkeypatch.setattr(
-        deps, "_connected", lambda repos, path: {"setup_command": "", "forge": "fake"}
     )
     wid = _post_default(client, repo)
 
@@ -69,6 +77,10 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "post_merge_ci",
     ]
     assert fake.merged == [1]
+    # Ruling 207: the draft opens with the metadata the describe node wrote.
+    assert fake.opened_titles[1] == "fake mr_meta"
+    assert fake.opened_meta[1].labels == ("type::fix",)
+    assert fake.opened_bodies[1].startswith("fake mr_meta body")
     evts = client.get(f"/api/work-items/{wid}/events").json()
     # `default-post-draft-flow-is-ordered`: every node, in the seeded order --
     # the summary and final gate before the approval wait, merge after it.
@@ -81,6 +93,7 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "verification",
         "work_brief",
         "local_review",
+        "describe_merge_request",
         "draft_merge_request",
         "merge_request_feedback",
         "work_item_summary",
@@ -99,3 +112,22 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "post_merge_ci.main.await",
     }
     assert {e["outcome"] for e in ended} == {"settled"}
+
+
+def test_with_no_merge_request_metadata_the_draft_opens_with_the_default_body(
+    client, repo, monkeypatch
+):
+    """Ruling 207's fallback: an item that skipped `describe_merge_request`
+    has no `mr_meta`, and its draft still opens, titled after the work item,
+    unlabelled, with Kraft's own body."""
+    fake = _on_a_fake_forge(monkeypatch)
+    title = "make the failing test pass"
+    body = {"title": title, "repo": str(repo), "chain_template": "default"}
+    r = client.post("/api/work-items", json={**body, "skip_nodes": ["describe_merge_request"]})
+    assert r.status_code == 201
+
+    _walk_to_the_end(client, r.json()["id"])
+
+    assert fake.opened_titles[1] == title
+    assert fake.opened_meta[1] == forge.MRMeta()
+    assert fake.opened_bodies[1].startswith(f"Opened by Kraft for work item {r.json()['id']}.")

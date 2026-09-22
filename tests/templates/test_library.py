@@ -123,6 +123,9 @@ def test_resolution_types_every_task_in_the_design_chain(design):
         by_path["verification.tests.test_changed_scopes"].ref
         is BuiltinAction.VERIFY_CHANGED_TEST_SCOPES
     )
+    # Ruling 207: the draft opens from the metadata the node before it wrote.
+    assert by_path["describe_merge_request.main.author"].produces == "mr_meta"
+    assert by_path["describe_merge_request.main.author"].skill == "kraft:mr-metadata"
     assert by_path["draft_merge_request.main.open"].target is ForgeAction.MR_OPEN_DRAFT
     await_ci = by_path["merge_request_feedback.ci.await_ci"]
     # Its timeout is its own total cap (Ruling 196); `wait:` holds the polling.
@@ -161,6 +164,7 @@ def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(
         "verification",
         "work_brief",
         "local_review",
+        "describe_merge_request",
     ]
     nodes = {n.id: n for n in chain.nodes}
     # Implementing has no fix loop: a repair re-runs verification, not the
