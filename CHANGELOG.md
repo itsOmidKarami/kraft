@@ -4,6 +4,17 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.0.4
+
+- Fix: `kraft item set-overrides` (and MCP `set_agent_overrides`) now refuses
+  a `model`, `escalate_model` or `effort` that any agent task's harness in the
+  item's chain would refuse, at the door instead of hours later when that
+  task launches -- the same check a per-node override already got.
+
+- Fix: `kraft admin doctor` now tells an install first set up on 1.0.1 or
+  1.0.2 to add the pre-MR rebase from 1.0.3. The capability was recorded
+  as 1.0.1, so doctor only flagged installs seeded before that.
+
 ## 1.0.3
 
 - **Fix: the default chain's draft merge request now rebases before it
