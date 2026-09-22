@@ -81,6 +81,10 @@ Chains edits the file itself.
 
 ## `policy.yaml` — caps, budget, archiving
 
+`kraft admin reload` rereads this file with the same validation as startup. A
+file that does not validate is refused, the running policy is kept, and reload
+exits 1 naming why. Loop caps apply to loops that start after the reload.
+
 ```yaml
 loops: {}
 default:             { attempts: 3, wall_clock_s: 3600 }

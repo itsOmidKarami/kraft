@@ -790,16 +790,20 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
 
 
 def _render_reload(result: dict) -> str:
-    lines = [f"reloaded {len(result.get('valid', []))} template(s)"]
+    refused = result.get("refused_policy")
+    policy = "" if refused else " and policy.yaml"
+    lines = [f"reloaded {len(result.get('valid', []))} template(s){policy}"]
     for name, reason in (result.get("invalid_templates") or {}).items():
         lines.append(f"  invalid: {name}: {reason}")
+    if refused:
+        lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
     return "\n".join(lines)
 
 
 def _cmd_reload(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.reload_templates())
     common.emit(payload, _render_reload, ns.json)
-    if payload.get("invalid_templates"):
+    if payload.get("invalid_templates") or payload.get("refused_policy"):
         # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
         raise SystemExit(1)
 
@@ -980,7 +984,9 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reindex.set_defaults(func=_cmd_reindex)
 
     reload_p = subs.add_parser(
-        "reload", parents=[common], help="reread the template library from disk, no restart"
+        "reload",
+        parents=[common],
+        help="reread the template library and policy.yaml from disk, no restart",
     )
     reload_p.set_defaults(func=_cmd_reload)
 

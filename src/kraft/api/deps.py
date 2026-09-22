@@ -23,10 +23,13 @@ from fastapi import FastAPI, HTTPException
 from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import executor, store
+from kraft.adapters.forge import git as forge_git
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
+    Policy,
     PolicyError,
+    PolicyInput,
     TemplatePolicyOverride,
 )
 from kraft.templates.environment import (
@@ -228,6 +231,32 @@ def _live_work_item_row(st, wid):
 def _reload_templates(st) -> None:
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
     lint_loaded(st)
+
+
+def read_policy(templates_dir: Path) -> tuple[Policy, InstancePolicy]:
+    """`policy.yaml`'s legacy loop-cap `Policy` and V1 instance policy, out of
+    one parse (Ruling 37). Raises `PolicyError`."""
+    path = templates_dir / "policy.yaml"
+    parsed = PolicyInput.from_yaml(path)
+    return Policy.from_input(parsed, source=path), parsed.instance_policy()
+
+
+def apply_policy(st, policy: Policy, instance: InstancePolicy) -> None:
+    """Make `policy` the running one: what a Policy save and reload do once
+    the file validated."""
+    st.policy, st.instance_policy, st.invalid_policy = policy, instance, []
+    forge_git.CLI_TIMEOUT_S = policy.forge_cli_timeout_s
+
+
+def reload_policy(st) -> str | None:
+    """Reread `policy.yaml` into the running server (Kraft-m86uq). A file that
+    does not validate is refused and the running policy kept; the reason is
+    returned, not raised."""
+    try:
+        apply_policy(st, *read_policy(st.templates_dir))
+    except PolicyError as exc:
+        return str(exc)
+    return None
 
 
 def lint_loaded(st) -> None:

@@ -265,12 +265,19 @@ async def parse_template_yaml(body: ParseBody):
 async def reload_templates_endpoint(request: Request):
     """Reread the V1 library from disk into the running server. A library that
     does not load is reported, not raised: the daemon keeps running degraded,
-    exactly as it would have started."""
+    exactly as it would have started. `policy.yaml` is reread first, since a
+    chain past a `maxima:` ceiling is a lint issue; a policy that does not
+    validate is refused and the running one kept (Kraft-m86uq)."""
     st = request.app.state
+    refused_policy = deps.reload_policy(st)
     deps._reload_templates(st)
     ids = st.library.chain_ids if st.library is not None else ()
     valid = sorted(id for id in ids if id not in st.invalid_chains)
-    return {"valid": valid, "invalid_templates": deps.invalid_templates(st)}
+    return {
+        "valid": valid,
+        "invalid_templates": deps.invalid_templates(st),
+        "refused_policy": refused_policy,
+    }
 
 
 class PolicyBody(BaseModel):
@@ -340,9 +347,7 @@ async def put_policy(body: PolicyBody, request: Request):
         except policy_mod.PolicyError as exc:
             raise HTTPException(422, str(exc)) from exc
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
-    st.policy = policy_obj
-    st.instance_policy = parsed.instance_policy()
-    st.invalid_policy = []
+    deps.apply_policy(st, policy_obj, parsed.instance_policy())
     deps.lint_loaded(st)
     return data
 

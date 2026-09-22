@@ -95,11 +95,7 @@ async def lifespan(app: FastAPI):
     # `invalid_policy`.
     instance_policy = policy_mod.InstancePolicy.from_input(policy_mod.InstancePolicyInput())
     try:
-        parsed_policy = policy_mod.PolicyInput.from_yaml(templates_dir / "policy.yaml")
-        policy_obj = policy_mod.Policy.from_input(
-            parsed_policy, source=templates_dir / "policy.yaml"
-        )
-        instance_policy = parsed_policy.instance_policy()
+        policy_obj, instance_policy = deps.read_policy(templates_dir)
     except policy_mod.PolicyError as exc:
         invalid_policy = [str(exc)]
 

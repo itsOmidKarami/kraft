@@ -176,7 +176,7 @@ kraft admin restart            # stop, then start again the same way it was runn
 kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
-kraft admin reload             # reread the template library from disk, no restart
+kraft admin reload             # reread the template library and policy.yaml, no restart
 kraft admin update [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
 kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
 kraft admin templates show ID  # one chain file as its author wrote it

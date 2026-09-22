@@ -83,6 +83,34 @@ def test_reload_of_a_broken_library_reports_it_and_degrades(client, templates_di
     assert client.get("/api/health").json()["status"] == "degraded"
 
 
+def test_reload_applies_a_hand_edited_policy(client, templates_dir):
+    """Kraft-m86uq: reload rereads policy.yaml too, validated as at startup,
+    so a hand edit needs no restart."""
+    path = templates_dir / "policy.yaml"
+    policy = yaml.safe_load(path.read_text())
+    policy["max_concurrent"] = 7
+    policy["maxima"] = {"max_attempts": 4}
+    path.write_text(yaml.safe_dump(policy))
+
+    r = client.post("/api/templates/reload").json()
+
+    assert r["refused_policy"] is None
+    assert client.app.state.policy.max_concurrent == 7
+    assert client.app.state.instance_policy.maxima.max_attempts == 4
+
+
+def test_reload_refuses_a_bad_policy_and_keeps_the_running_one(client, templates_dir):
+    running = client.app.state.policy
+    (templates_dir / "policy.yaml").write_text("default: [unclosed\n")
+
+    r = client.post("/api/templates/reload").json()
+
+    assert "policy.yaml" in r["refused_policy"]
+    assert client.app.state.policy is running
+    assert client.app.state.invalid_policy == []
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
 def test_templates_lists_the_v1_chains_intake_materializes(tmp_path, monkeypatch):
     """Kraft-pplyo: the intake preview reads this list, so its nodes are the V1
     chain's own, in `ChainNode` shape, and a chain that does not resolve is
