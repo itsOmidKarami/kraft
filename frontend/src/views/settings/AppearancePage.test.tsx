@@ -11,7 +11,9 @@ beforeEach(() => {
 describe("Settings · appearance", () => {
   it("lists all 5 palettes and the light/dark/system control", async () => {
     renderAt("/settings/appearance");
-    expect(await screen.findByText("Nocturne")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /Nocturne/, pressed: true }),
+    ).toBeInTheDocument();
     for (const name of ["Rose", "Forest", "Amber", "Slate"]) {
       expect(screen.getByText(name)).toBeInTheDocument();
     }
@@ -26,7 +28,7 @@ describe("Settings · appearance", () => {
       board: { group_by: "status", show_done: 5, open_in: "peek" },
     });
     renderAt("/settings/appearance");
-    await screen.findByText("Nocturne");
+    await screen.findByRole("button", { name: /Nocturne/, pressed: true });
 
     fireEvent.click(screen.getByText("Forest"));
     expect(document.documentElement.dataset.palette).toBe("forest");
@@ -46,7 +48,7 @@ describe("Settings · appearance", () => {
       board: { group_by: "status", show_done: 5, open_in: "peek" },
     });
     renderAt("/settings/appearance");
-    await screen.findByText("Nocturne");
+    await screen.findByRole("button", { name: /Nocturne/, pressed: true });
     await userEvent.click(screen.getByRole("radio", { name: "Comfortable" }));
     expect(document.documentElement.dataset.density).toBe("comfortable");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -61,7 +63,7 @@ describe("Settings · appearance", () => {
       board: { group_by: "repo", show_done: 5, open_in: "peek" },
     });
     renderAt("/settings/appearance");
-    await screen.findByText("Nocturne");
+    await screen.findByRole("button", { name: /Nocturne/, pressed: true });
     await userEvent.click(screen.getByRole("radio", { name: "repo" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(put).toHaveBeenCalledWith(
@@ -69,9 +71,18 @@ describe("Settings · appearance", () => {
     );
   });
 
+  it("disables the palette, mode and density controls until the theme loads", async () => {
+    vi.spyOn(api, "getTheme").mockImplementation(() => new Promise(() => {}));
+    renderAt("/settings/appearance");
+    expect(await screen.findByText("Nocturne")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Nocturne/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Light" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Compact" })).toBeDisabled();
+  });
+
   it("Discard reverts the live preview back to the loaded value", async () => {
     renderAt("/settings/appearance");
-    await screen.findByText("Nocturne");
+    await screen.findByRole("button", { name: /Nocturne/, pressed: true });
 
     fireEvent.click(screen.getByText("Rose"));
     expect(document.documentElement.dataset.palette).toBe("rose");

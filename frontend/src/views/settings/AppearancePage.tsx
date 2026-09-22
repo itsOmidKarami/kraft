@@ -77,6 +77,7 @@ export function AppearancePage() {
             type="button"
             className="palette-swatch"
             aria-pressed={theme?.palette === p.id}
+            disabled={!theme}
             onClick={() => theme && preview({ ...theme, palette: p.id })}
           >
             <span
@@ -95,6 +96,7 @@ export function AppearancePage() {
               type="radio"
               name="theme-mode"
               checked={theme?.mode === m.id}
+              disabled={!theme}
               onChange={() => theme && preview({ ...theme, mode: m.id })}
             />
             {m.label}
@@ -110,6 +112,7 @@ export function AppearancePage() {
               type="radio"
               name="theme-density"
               checked={theme?.density === d.id}
+              disabled={!theme}
               onChange={() => theme && preview({ ...theme, density: d.id })}
             />
             {d.label}
