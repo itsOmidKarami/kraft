@@ -85,10 +85,8 @@ def resolve(name: str) -> Forge:
     one and not the other. A `glab` that is installed but unauthenticated also
     looks available and then fails deep inside a node.
 
-    The accepted names are duplicated in `templates._FORGE_BACKENDS`, which
-    validates a registry file without importing this module. Edit both together;
-    that set also carries `auto`, which `backend_for` has already translated by
-    the time anything calls this.
+    Every caller names the backend through `backend_for` from the repo's
+    recorded `forge`; nothing pins one per template or registry.
     """
     match name:
         case "glab":
