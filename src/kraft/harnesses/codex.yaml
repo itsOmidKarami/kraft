@@ -10,6 +10,12 @@
 # 'low', 'medium', 'high', 'xhigh', 'max'. Widening only to add xhigh, the
 # value this bead named -- 'none' and 'max' are a separate widening the brief
 # didn't ask for.
+#
+# Kraft-w3kot: `--json` output read by usage.READERS["codex-json"], verified
+# against codex-cli 0.155.0 on 2026-09-23 with real runs: `thread.started`
+# carries the thread id `exec resume` takes, `turn.completed.usage` the
+# thread's running token total (no cost), `turn.failed.error.message` the
+# reason a turn failed.
 id: codex
 kind: cli
 command: [codex, exec]
@@ -24,10 +30,11 @@ capabilities:
   effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high, xhigh] }
   permission_mode: { cli: ["-s", "{value}"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
   resume:          { via: command_resume }
-  usage:           { source: result_file }
+  usage:             { source: envelope, reader: codex-json }
+  rate_limit_signal: { reader: codex-json }
   # Bare positional -> declared last, or a preceding flag swallows it.
   prompt:          { cli: ["{value}"] }
 
 # Absent, deliberately: deny_tools, allowed_tools, approval_channel,
-# autocompact, rate_limit_signal. A binding naming one of those is rejected
+# autocompact. A binding naming one of those is rejected
 # at load, naming this file.

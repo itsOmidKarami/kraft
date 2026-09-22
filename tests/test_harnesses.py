@@ -430,3 +430,12 @@ def test_harness_profile_id_must_be_nameable_by_a_task():
     parsed = template_environment.HarnessProfileInput(provider="claude")
     with pytest.raises(template_environment.TemplateEnvironmentError, match="Claude-Review"):
         template_environment.HarnessProfile.from_input("Claude-Review", parsed, harness=claude)
+
+
+def test_codex_reads_usage_and_rate_limits_off_its_json_log():
+    """Kraft-w3kot: codex.yaml used to say `usage: result_file`, so a codex
+    run recorded no tokens, no session id and no rate-limit signal."""
+    codex = harness.load(None).valid["codex"]
+    assert codex.capabilities["usage"].source == "envelope"
+    assert codex.capabilities["usage"].reader == "codex-json"
+    assert codex.capabilities["rate_limit_signal"].reader == "codex-json"
