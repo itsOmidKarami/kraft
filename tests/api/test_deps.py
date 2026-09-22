@@ -9,6 +9,8 @@ import warnings
 from types import SimpleNamespace
 
 import pytest
+import yaml
+from fastapi import HTTPException
 
 from kraft.api import deps
 
@@ -202,3 +204,26 @@ def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
 
     assert errors == []
     assert library.lint() == []
+
+
+def test_resolve_chain_or_422_prefixes_the_resolvers_own_message(tmp_path):
+    """Three intake doors (`POST /work-items`, `POST /triggers`, the
+    auto-intake poller) share this function so they answer an unknown chain
+    id the same way. `resolve_chain`'s own `TemplateLibraryError` already
+    names the id -- `chain template {id!r}: ` is what `resolve_chain_or_422`
+    itself adds on top, and that prefix is what says the failure is *this*
+    door's `chain_template` field rather than something buried further in the
+    library."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "library.yaml").write_text(yaml.safe_dump({"tasks": {}}))
+    st = SimpleNamespace(templates_dir=templates, skills_dir=None)
+    st.library, errors = deps.load_library(templates)
+    assert errors == []
+
+    with pytest.raises(HTTPException) as excinfo:
+        deps.resolve_chain_or_422(st, "nope")
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail.startswith("chain template 'nope': ")
+    assert "no chain 'nope'" in excinfo.value.detail
