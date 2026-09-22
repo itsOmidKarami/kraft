@@ -454,9 +454,7 @@ def _broken_repos_yaml(templates_dir: Path) -> None:
     edit, or a steering file deleted after the fact. Written directly, bypassing
     `POST /repos`'s own validation, which would refuse this on the way in."""
     (templates_dir / "repos.yaml").write_text(
-        yaml.safe_dump(
-            {"repos": [{"path": "/r", "test_command": "pytest", "steering": ["deleted"]}]}
-        )
+        yaml.safe_dump({"repos": [{"path": "/r", "steering": ["deleted"]}]})
     )
 
 
@@ -491,12 +489,29 @@ def test_patching_one_repo_does_not_write_enabled_into_an_untouched_entrys_absen
 
 
 @pytest.mark.api_client(edit_templates=_no_enabled_key)
-def test_patch_on_an_entry_with_no_enabled_key_and_no_test_command_is_refused(client):
-    """Kraft-hv4uy: absent `enabled` is enabled (Ruling 212), so the refusal
-    must read it that way too -- not let a PATCH save an enabled repo that
-    has nothing for verification to run."""
+def test_a_rename_on_an_enabled_entry_with_no_test_command_goes_through(client):
+    """Kraft-hv4uy: the refusal is about a PATCH that *makes* a repo enabled
+    with nothing to verify. `/r` is already in that state (absent `enabled`
+    is enabled, Ruling 212); a rename changes neither half of it."""
     r = client.patch("/api/repos?path=/r", json={"name": "renamed"})
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_enabling_an_entry_with_no_enabled_key_and_no_test_command_is_refused(client):
+    r = client.patch("/api/repos?path=/r", json={"enabled": True})
     assert r.status_code == 422, r.text
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_clearing_the_last_test_command_of_an_enabled_entry_is_refused(client, templates_dir):
+    """`/other` has no `enabled` key (so enabled) and a test command."""
+    r = client.patch("/api/repos?path=/other", json={"test_command": None})
+    assert r.status_code == 422, r.text
+    assert "test command" in r.json()["detail"]
+    on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
+    (other,) = [e for e in on_disk["repos"] if e["path"] == "/other"]
+    assert other["test_command"] == "pytest"
 
 
 def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):

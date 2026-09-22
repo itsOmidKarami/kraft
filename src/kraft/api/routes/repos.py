@@ -274,6 +274,10 @@ class RepoPatch(BaseModel):
     intent_dir: str | None = None
 
 
+def _has_tests(entry: dict) -> bool:
+    return bool(entry.get("test_command") or entry.get("test_scopes"))
+
+
 def _refuse_enable_without_test_command(entry: dict) -> None:
     """25's "disabled — new items can't target it" is the read side of this:
     the write side refuses to flip a repo on with nothing for verification to
@@ -284,7 +288,7 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
     neither stops every item (Kraft-vd1ed).
     """
     # Absent means enabled (Ruling 212), as RepoEntry.enabled defaults.
-    if entry.get("enabled", True) and not (entry.get("test_command") or entry.get("test_scopes")):
+    if entry.get("enabled", True) and not _has_tests(entry):
         raise HTTPException(
             422,
             "cannot enable a repo with no test command — set its test command or test scopes first",
@@ -302,12 +306,25 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
     # `null` (clearing forge, test_command, project — the
     # RepoDetail draft round-trips the whole Repo, nulls included) has to
     # actually take effect rather than being silently dropped.
-    entry.update(body.model_dump(exclude_unset=True))
+    had_tests = _has_tests(entry)
+    patch = body.model_dump(exclude_unset=True)
+    entry.update(patch)
     # Any save is a touch -- editing a detected child's test command without
     # enabling it still promotes it out of the Detected section. One-way: a
     # later disable leaves this True, so the row reads as deliberately off.
     entry["managed"] = True
-    _refuse_enable_without_test_command(entry)
+    # Only a PATCH that *makes* the repo enabled-without-tests is refused: one
+    # that turns it on, or clears its last test command. A rename on an entry
+    # already in that state (absent `enabled`, Ruling 212) goes through.
+    if entry.get("enabled", True) and not _has_tests(entry):
+        if patch.get("enabled") is True:
+            _refuse_enable_without_test_command(entry)
+        elif had_tests:
+            raise HTTPException(
+                422,
+                "cannot clear the test command of an enabled repo — "
+                "disable it, or set test scopes, in the same change",
+            )
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     return entry
