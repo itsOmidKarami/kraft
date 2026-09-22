@@ -45,6 +45,7 @@ KNOWN = (
     "approval_channel",
     "deny_tools",
     "allowed_tools",
+    "restrict_tools",
     "resume",
     "autocompact",
     "rate_limit_signal",
@@ -90,6 +91,11 @@ class Capability:
     #: Names a command prefix key that carries this capability's value
     #: instead of a flag -- `resume: {via: command_resume}`.
     via: str | None = None
+    #: `permission_mode` only: the mode a launch under a tool allowlist runs
+    #: in -- one that sends every ask it does not settle itself to the
+    #: approval channel, rather than approving it (Kraft-nt6tt). A harness
+    #: whose `permission_mode` declares none cannot launch under an allowlist.
+    under_allowlist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +168,7 @@ def _capability(name: str, raw: object, where: str) -> Capability:
         source=raw.get("source"),
         reader=raw.get("reader"),
         via=raw.get("via"),
+        under_allowlist=raw.get("under_allowlist"),
     )
 
 

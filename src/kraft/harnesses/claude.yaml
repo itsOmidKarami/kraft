@@ -29,8 +29,19 @@ capabilities:
   # -- there is no later turn for it to resume into -- so it is denied on
   # every launch rather than trusted to prose.
   deny_tools:       { cli: ["--disallowed-tools", "{csv}"], always: [Monitor] }
+  # --allowedTools only pre-approves: it restricts nothing. Under an allowlist
+  # (Kraft-nt6tt) the launch also cuts the built-in tools to the list with
+  # --tools, which "doesn't affect MCP tools" (code.claude.com/docs/en/
+  # cli-reference), and runs in `manual`: in `auto` "everything else goes to
+  # the classifier" (docs/en/permission-modes), which approves an unlisted
+  # tool without ever asking the permission gate. `manual` asks the gate
+  # about every call it does not settle itself. What it settles itself
+  # without asking is read-only work -- file reads (gone unless listed) and
+  # read-only shell commands, so under a scoped rule such as `Bash(git *)`
+  # a read-only `cat` still runs.
   allowed_tools:    { cli: ["--allowedTools", "{csv}"] }
-  permission_mode:  { cli: ["--permission-mode", "{value}"], values: [acceptEdits, auto, bypassPermissions, manual, dontAsk, plan], always: auto }
+  restrict_tools:   { cli: ["--tools", "{csv}"] }
+  permission_mode:  { cli: ["--permission-mode", "{value}"], values: [acceptEdits, auto, bypassPermissions, manual, dontAsk, plan], always: auto, under_allowlist: manual }
   # The CLI calls this MCP tool instead of prompting a human. On an install
   # where `kraft admin init` never registered it, the flag names a tool that
   # does not exist and the CLI completes normally (measured).

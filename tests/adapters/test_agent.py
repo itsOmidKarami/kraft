@@ -398,6 +398,31 @@ def test_an_option_becomes_its_flag(run, overrides, flag, value):
 
 
 @pytest.mark.parametrize(
+    "allowed, tools",
+    [
+        (("Read", "Grep"), "Read,Grep"),
+        # Allow nothing: no built-in tool exists, and every MCP ask is denied.
+        ((), ""),
+        # `--tools` takes bare built-in names and does not govern MCP tools,
+        # which the permission gate answers instead.
+        (("Bash(git *)", "mcp__kraft__report_progress"), "Bash"),
+    ],
+    ids=["listed", "empty", "scoped-rule-and-mcp-tool"],
+)
+def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(run, allowed, tools):
+    """Kraft-nt6tt: `--allowedTools` only pre-approves, and in `auto` mode the
+    CLI's classifier approves an unlisted tool itself, so the ask never reaches
+    the permission gate. Under an allowlist the built-ins are cut to the list
+    (`--tools`) and the mode is `manual`, which sends every other ask to
+    `--permission-prompt-tool` -- the gate, which denies what is not listed."""
+    cmd = run(allowed_tools=allowed)["cmd"]
+    assert cmd[cmd.index("--tools") + 1] == tools
+    assert cmd.count("--permission-mode") == 1
+    assert cmd[cmd.index("--permission-mode") + 1] == "manual"
+    assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
+
+
+@pytest.mark.parametrize(
     "overrides, match",
     [
         ({"harness": "nope"}, "nope"),
@@ -407,8 +432,19 @@ def test_an_option_becomes_its_flag(run, overrides, flag, value):
         # silently dropped.
         ({"harness": "codex", "command": "codex", "deny_tools": ("Monitor",)}, "deny_tools"),
         ({"harness": "gemini", "command": "gemini", "effort": "high"}, "effort"),
+        # Kraft-nt6tt: a harness that cannot restrict its tools launches under
+        # no allowlist at all -- the empty one included, which spells no flag.
+        ({"harness": "codex", "command": "codex", "allowed_tools": ()}, "allowed_tools"),
+        # A mode that approves asks itself would bypass the gate.
+        ({"allowed_tools": ("Read",), "permission_mode": "auto"}, "permission_mode"),
     ],
-    ids=["unknown-harness", "repo-deny-list-on-codex", "effort-on-gemini"],
+    ids=[
+        "unknown-harness",
+        "repo-deny-list-on-codex",
+        "effort-on-gemini",
+        "empty-allowlist-on-codex",
+        "allowlist-under-a-self-approving-mode",
+    ],
 )
 def test_a_launch_the_harness_cannot_express_is_refused(run, overrides, match):
     with pytest.raises(ValueError, match=match):
