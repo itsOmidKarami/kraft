@@ -6,11 +6,12 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## Unreleased
 
-- Fix: an in-flight work item's repository steering no longer silently drops
-  if `repos.yaml`'s `path:` for its repository is hand-edited while it runs.
-  The launch now also checks the repo the item was filed against; if neither
-  that nor the repository's current path matches what the item was filed
-  with, the item stops for you instead of running unsteered.
+- Fix: an in-flight work item's own repository steering no longer silently
+  drops if `repos.yaml`'s `path:` for that repository is hand-edited while it
+  runs. The launch now finds it by the repo the item was filed against, not
+  only by the repository's current path. (A workspace item's fanned-out
+  member repositories are still looked up by their live path only, so a
+  member's path edited mid-flight can still lose its steering -- Kraft-ku1um.)
 - Fix: `kraft admin doctor` now fails a row for a connected repo whose
   `steering:` in repos.yaml names a profile the template library does not
   define, naming the repo and the missing profile. Previously a hand-edited

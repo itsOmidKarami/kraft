@@ -103,27 +103,17 @@ def for_repository(
     own a reliable key into `frozen`, which was built at intake. `item_repo`
     is the item's own repo as recorded at intake (the work item row's `repo`
     column): stable for the item's own repository regardless of what
-    `repos.yaml` says today, so it is tried first. `entry.path` is tried
-    too, for a fanned-out member repository this item's own `item_repo` does
-    not name. When `frozen` has entries but neither key is among them, this
-    stops rather than launch unsteered: an item whose repository path moved
-    since intake gets a human's attention instead of a silently dropped
-    steering text."""
+    `repos.yaml` says today, so a root launch (`item_repo` given) is looked
+    up by it alone -- present or not, that answers the question, since the
+    root was simply unsteered at intake if it is absent. `entry.path` is
+    used only for a fanned-out member repository (`item_repo` is `None`
+    there): a member's path moving mid-flight still silently loses its
+    steering -- pre-existing, and Kraft-ku1um's to fix, not this one's."""
     if entry is None:
         return ()
     if frozen is not None:
-        for key in (item_repo, entry.path):
-            if key is not None and key in frozen:
-                return tuple(frozen[key].values())
-        if frozen:
-            raise SteeringError(
-                f"{entry.path}: this work item's frozen repository steering "
-                f"({sorted(frozen)}) no longer matches this launch's repository -- "
-                "repos.yaml's path for it changed since the item was filed, so the "
-                "frozen steering can no longer be found; stopping rather than "
-                "launching unsteered"
-            )
-        return ()
+        key = item_repo if item_repo is not None else entry.path
+        return tuple(frozen.get(key, {}).values())
     if not entry.steering:
         return ()
     where = f"repos.yaml: {entry.path} (an item filed before repository steering was frozen)"

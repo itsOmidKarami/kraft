@@ -23,6 +23,7 @@ from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import HarnessUnavailable, harness_table
 from kraft.executor.fallback import fallback_list
 from kraft.templates.models import AgentTask, ResolvedNode
+from kraft.worker import steering as _steering
 
 #: The only strings a verdict may be. Anything else -- a typo, a sentence, a
 #: missing key -- is `undecided`, which leaves the gate pending for a human.
@@ -238,25 +239,45 @@ async def review(
         )
         return "undecided", hit.reason
     time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
-    inv = _agent.resolve_agent_task(
-        auto_review.task,
-        launch.repo_entry,
-        launch.library_steering,
-        skills_dir=launch.skills_dir,
-        # Item-wide overrides only -- an item marked cheap stays cheap for its
-        # gate reviews too (Kraft-ui79: no per-gate floor). Deliberately *not*
-        # the per-node `node_overrides` model/effort dial that
-        # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
-        # a different model does not carry that dial into its own gate review.
-        item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
-        # The reviewer's and the repository's steering, frozen at intake.
-        **executor.frozen_steering(row),
-        # The item's own repo as recorded at intake (Kraft-jzdyp): a gate
-        # review runs in the item's own checkout, never a fanned-out member's.
-        item_repo=row["repo"],
-        # The gate scope's policy: its tool lists and sandbox, as for any task.
-        policy=executor.scope_policy(row, auto_review),
-    )
+    try:
+        inv = _agent.resolve_agent_task(
+            auto_review.task,
+            launch.repo_entry,
+            launch.library_steering,
+            skills_dir=launch.skills_dir,
+            # Item-wide overrides only -- an item marked cheap stays cheap for its
+            # gate reviews too (Kraft-ui79: no per-gate floor). Deliberately *not*
+            # the per-node `node_overrides` model/effort dial that
+            # `dispatch.dispatch_node` also merges (Kraft-df4tc): a node dialed to
+            # a different model does not carry that dial into its own gate review.
+            item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
+            # The reviewer's and the repository's steering, frozen at intake.
+            **executor.frozen_steering(row),
+            # The item's own repo as recorded at intake (Kraft-jzdyp): a gate
+            # review runs in the item's own checkout, never a fanned-out member's.
+            item_repo=row["repo"],
+            # The gate scope's policy: its tool lists and sandbox, as for any task.
+            policy=executor.scope_policy(row, auto_review),
+        )
+    except _steering.SteeringError as exc:
+        # Modelled on the `SandboxUnresolved` handler above: recorded as the
+        # reviewer's own session, so the pending gate names why no review ran,
+        # and `gate_auto_review_started` above is not left dangling with no
+        # terminal event for `_gate_review_attempts` to count.
+        await executor.config_error_session(
+            db,
+            run_dirs,
+            dict(
+                session_id=session_id,
+                work_item_id=work_item_id,
+                node_id=node.id,
+                hook_point=auto_review.path,
+                round=0,
+                head_sha=None,
+            ),
+            f"{auto_review.path}: {exc}\n",
+        )
+        return "undecided", str(exc)
     status = await _agent.run_agent_task(
         db,
         run_dirs,

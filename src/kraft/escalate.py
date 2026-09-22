@@ -21,6 +21,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, TaskKind
+from kraft.worker import steering as _steering
 
 _SESSIONS = ".engineering/sessions"
 
@@ -428,6 +429,13 @@ async def dispatch(
             log=f"escalation selects harness {ESCALATION_TASK.harness!r}, which is not "
             f"available: {exc}\n",
         )
+    except _steering.SteeringError as exc:
+        # A snapshot stored before repository steering was frozen selecting a
+        # profile the live library no longer defines (`for_repository`'s
+        # pre-freeze branch) stops this turn the same clean way a harness
+        # problem does, rather than the walk's generic guard catching it.
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
     # A turn that resumes a thread runs on the runtime the thread started on
     # (`resumed-escalation-preserves-original-runtime`): the profile may have
     # changed since, and a resumed conversation on another model or harness is

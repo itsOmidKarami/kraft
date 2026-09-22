@@ -59,14 +59,22 @@ def test_frozen_steering_survives_the_repos_yaml_path_changing():
     assert steering.for_repository(entry, frozen, None, item_repo="/old/path") == ("filed with",)
 
 
-def test_frozen_steering_stops_for_a_human_when_nothing_matches():
-    """Kraft-jzdyp: a multi-repo item whose frozen map has entries but none
-    that match this launch (neither the live entry's path nor the item's own
-    recorded repo) must stop rather than silently run unsteered."""
-    entry = entry_of({"path": "/new/path", "steering": ["house"]})
-    frozen = {"/old/path": {"house": "filed with"}}
-    with pytest.raises(steering.SteeringError, match="no longer matches"):
-        steering.for_repository(entry, frozen, None, item_repo="/other/path")
+def test_an_unsteered_repository_in_a_partly_steered_workspace_gets_nothing_and_does_not_raise():
+    """Kraft-jzdyp regression: `deps.repository_steering` only adds repos
+    that declare `steering:`, so a workspace item with one steered repo and
+    one unsteered one has a non-empty `frozen` that still lacks the
+    unsteered repository's own key. That must answer `()`, on the item's
+    first dispatch, for both an unsteered root and an unsteered member --
+    never raise just because *some other* repository in the item is steered."""
+    frozen = {"/steered": {"house": "filed with"}}
+    # The unsteered repository is the item's own root: item_repo is its path,
+    # simply absent from frozen.
+    unsteered_root = entry_of({"path": "/unsteered", "steering": []})
+    assert steering.for_repository(unsteered_root, frozen, None, item_repo="/unsteered") == ()
+    # The unsteered repository is a fanned-out member: no item_repo, looked
+    # up by its own (live) path, also absent from frozen.
+    unsteered_member = entry_of({"path": "/unsteered-member", "steering": []})
+    assert steering.for_repository(unsteered_member, frozen, None) == ()
 
 
 def test_a_snapshot_from_before_the_freeze_reads_the_live_library():
