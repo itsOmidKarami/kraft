@@ -472,6 +472,52 @@ async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their
     assert _git_out(origin, "rev-parse", "main") == before
 
 
+def _base_ref(database, row) -> str | None:
+    return database.read(
+        lambda c: c.execute("SELECT base_ref FROM work_items WHERE id = ?", (row["id"],)).fetchone()
+    )["base_ref"]
+
+
+@pytest.mark.parametrize("handler", ["ci_poll", "merge"])
+async def test_a_members_conflict_is_rebased_onto_its_own_origin(
+    database, run_dirs, tmp_path, monkeypatch, handler
+):
+    """Kraft-puqxq: a member's conflict rebase reads the member's own origin
+    and default branch, never the root's, though dispatch hands the forge
+    node the root's source repository as `orig_repo`. The item's `base_ref`
+    is the root's, so the member's move is reported as one instead of being
+    written there."""
+    row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
+    (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
+    _git(tmp_path / "pkg", "add", "moved.txt")
+    _git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
+    moved = _git_out(tmp_path / "pkg", "rev-parse", "main")
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+    base_ref = _base_ref(database, row)
+
+    result = await forge.run_task(
+        database,
+        run_dirs,
+        session_id="s-conflict",
+        work_item_id=row["id"],
+        node_id=handler,
+        hook_point=f"{handler}.main.t",
+        handler=handler,
+        backend="fake",
+        repo=worktree,
+        orig_repo=Path(row["repo"]),
+        branch=store.branch_for(row),
+        title="t",
+        has_rebase_bounce=True,
+    )
+
+    member = worktree / "repos" / "pkg"
+    assert _git_out(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert (result, fake.merged) == ("base_moved", [])
+    assert _base_ref(database, row) == base_ref
+
+
 @pytest.mark.parametrize(
     ("legacy", "pointer"),
     [(False, "ignore"), (True, "skip")],
