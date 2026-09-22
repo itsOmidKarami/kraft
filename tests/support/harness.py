@@ -250,8 +250,6 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     `adapters.agent.SAFETY_RULES` instead), so there is none to copy in."""
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
-    steering_dir = d / "steering"
-    steering_dir.mkdir(exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
     seed_v1_library(d, agent_command=agent_command)
     return d
@@ -754,7 +752,6 @@ async def v1_walk(
             # a repo entry without one refuses to cut a worktree at all.
             launch=LaunchContext(
                 repo_entry=entry_of({"setup_command": ""}) if repo_entry is None else repo_entry,
-                steering_dir=None,
             ),
         )
         evts = [dict(e) for e in database.read(lambda c: _events.read_after(c, 0, wid))]

@@ -29,6 +29,7 @@ from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
 from kraft.worker import reattach, sandbox
+from kraft.worker import steering as steering_mod
 from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,17 @@ async def lifespan(app: FastAPI):
     # Where an operator may override a bundled method file. Absent on almost
     # every install; `kraft.skill` falls back to the packaged copy.
     app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
+    # Before the library loads: pre-1.0 `steering/*.md` files become its
+    # steering profiles, once, so a repos.yaml naming them still resolves.
+    try:
+        steering_mod.migrate_files(templates_dir)
+    except OSError:
+        # Not a refused boot: the files stay put and the next start retries.
+        logger.exception("steering migration failed; templates/steering/ left in place")
     library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
+    # Now, not with the rest of app.state below: reattach's launch factory
+    # reads it, for an item filed before repository steering was frozen.
+    app.state.library = library
 
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.

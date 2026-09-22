@@ -5,6 +5,7 @@ import logging
 import re
 import shutil
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from kraft import events, store
@@ -107,6 +108,10 @@ async def intake(
     policy_override: dict | None = None,
     source: str | None = None,
     bead_priority: int | None = None,
+    #: `MaterializedChain.repository_steering`, resolved by the door
+    #: (`api.deps.repository_steering`). `None` freezes none, and the item's
+    #: launches read its repository's names against the live library.
+    repository_steering: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
@@ -134,6 +139,7 @@ async def intake(
         attachment_kinds=frozenset(a["kind"] for a in attachments or []),
         skip_nodes=skip_nodes,
         repository_policies=repository_policies,
+        repository_steering=repository_steering,
     )
     # Everything above is pure; everything below has a side effect. A chain
     # the instance policy refuses (`PolicyError`, a `ValueError`) is refused

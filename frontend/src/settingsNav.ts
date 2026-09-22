@@ -1,7 +1,6 @@
 import {
   Bell,
   DownloadSimple,
-  FileText,
   GitBranch,
   LockKey,
   Palette,
@@ -41,7 +40,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { to: "library", label: "Library", icon: Stack, group: "how", description: "The reusable tasks, nodes and steering chains extend, and who uses each" },
   { to: "harnesses", label: "Harnesses", icon: Robot, group: "how", description: "Which agent CLI each task runs on, with what defaults, and what each provider accepts" },
   { to: "policy", label: "Policy", icon: SlidersHorizontal, group: "how", description: "Loop caps, concurrency, spend budgets and auto-archive" },
-  { to: "steering", label: "Steering", icon: FileText, group: "how", description: "Guidance files that worker sessions read" },
   { to: "intake", label: "Auto-intake", icon: DownloadSimple, group: "instance", description: "Pull ready beads in as work items on a schedule" },
   { to: "notify", label: "Notifications", icon: Bell, group: "instance", description: "Where Kraft tells you an item needs you" },
   { to: "access", label: "Access", icon: LockKey, group: "instance", description: "Password, bind address and signed-in sessions" },

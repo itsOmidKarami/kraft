@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -121,6 +120,19 @@ async def put_library(body: LibraryText, request: Request):
     broken_before = {i.chain for i in library.lint(policy)}
     if issues := [i for i in candidate.lint(policy) if i.chain not in broken_before]:
         raise HTTPException(422, str(issues[0]))
+    # A repository's `steering:` names library profiles too: removing (or
+    # over-growing) one it names is refused like a chain it would break.
+    # A repos.yaml broken for another reason is not this save's to refuse.
+    profiles = {n: p.instructions for n, p in candidate.steering.items()}
+    try:
+        repos = config_mod.load_repos(deps.repos_path(st))
+    except config_mod.ConfigError:
+        repos = []
+    for entry in repos:
+        try:
+            steering_mod.select(entry.steering, profiles, where=f"repos.yaml: {entry.path}")
+        except steering_mod.SteeringError as exc:
+            raise HTTPException(422, str(exc)) from exc
     config_mod.write_text(path, body.text)
     deps._reload_templates(st)
     return _library_view(st, deps.library_or_503(st))
@@ -442,126 +454,6 @@ async def put_theme(body: config_mod.Theme, request: Request):
     return body.model_dump()
 
 
-class SteeringBody(BaseModel):
-    body: str
-
-
-def _steering_dir(st) -> Path:
-    return st.templates_dir / "steering"
-
-
-def _check_steering_change(st, name: str, body: str | None) -> None:
-    """Would the configs still load with this change applied? Raise if not.
-
-    Names resolve at config-load time, not at write time, so the edited file is
-    only half the question: `repos.yaml` names it, and a body
-    that pushes an assembled block past the injection budget -- or a delete that
-    orphans a name -- breaks a launch nowhere near this screen.
-
-    Checked against a scratch *copy* of the steering directory with the change
-    applied (`body=None` means the delete), never by writing the real file and
-    undoing it after. Agent dispatch reads these files straight off disk, so the
-    real directory must never be briefly wrong -- and an undo only undoes the
-    failures it anticipated. Note the inversion versus `_validate_repos`: there
-    the config is the candidate and the steering dir is real; here it is the
-    other way round, which is why both loaders take a `steering_dir`.
-
-    Synchronous and directory-sized, so both callers run it through
-    `asyncio.to_thread` (Kraft-e9a) -- an `HTTPException` raised here propagates
-    out of the thread unchanged. The real write (`config_mod.write_text`) and
-    `path.unlink()` stay on the loop: one file, one syscall, and moving those
-    would be cargo.
-    """
-    real = _steering_dir(st)
-    with tempfile.TemporaryDirectory() as tmp:
-        scratch = Path(tmp)
-        if real.is_dir():
-            for src in real.glob("*.md"):
-                try:
-                    shutil.copy2(src, scratch / src.name)
-                except OSError:
-                    # This directory is hand-editable, so it can hold a broken
-                    # symlink, an unreadable file, or a directory named *.md.
-                    # Skip it rather than failing the save: if a config
-                    # references it, the loaders below reject the save with a
-                    # message naming it; if nothing does, it is none of this
-                    # save's business, and the write path it replaced never
-                    # touched unreferenced entries either.
-                    continue
-        target = scratch / f"{name}.md"
-        if body is None:
-            target.unlink(missing_ok=True)
-        else:
-            target.write_text(body)
-        try:
-            config_mod.load_repos(deps.repos_path(st), steering_dir=scratch)
-        except config_mod.ConfigError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-
-@api_router.get("/steering")
-async def list_steering(request: Request):
-    """Names and sizes, not bodies: the list is a picker, and the assembled
-    budget is the number an operator is actually rationing."""
-    steering_dir = _steering_dir(request.app.state)
-    if not steering_dir.is_dir():
-        return {"files": [], "max_bytes": steering_mod.Steering.MAX_BYTES}
-    files = []
-    for path in sorted(steering_dir.glob("*.md")):
-        try:
-            files.append({"name": path.stem, "bytes": len(path.read_text().encode())})
-        except OSError, ValueError:
-            # Unreadable or not UTF-8: it exists and it is broken, which is
-            # more useful on the screen than a file that silently is not there.
-            files.append({"name": path.stem, "bytes": None})
-    return {"files": files, "max_bytes": steering_mod.Steering.MAX_BYTES}
-
-
-@api_router.get("/steering/{name}")
-async def get_steering(name: str, request: Request):
-    st = request.app.state
-    try:
-        path = steering_mod.Steering(dir=_steering_dir(st)).path(name, where="steering")
-    except steering_mod.SteeringError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    try:
-        return {"name": name, "body": path.read_text()}
-    except FileNotFoundError:
-        raise HTTPException(404, f"unknown steering file {name!r}") from None
-    except (OSError, ValueError) as exc:
-        raise HTTPException(500, f"{name}: cannot read: {exc}") from exc
-
-
-@api_router.put("/steering/{name}")
-async def put_steering(name: str, body: SteeringBody, request: Request):
-    st = request.app.state
-    steering_dir = _steering_dir(st)
-    try:
-        path = steering_mod.Steering(dir=steering_dir).path(name, where="steering")
-    except steering_mod.SteeringError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    await asyncio.to_thread(_check_steering_change, st, name, body.body)
-    config_mod.write_text(path, body.body)
-    # Nothing to reload: no `app.state` holds steering bodies. They are read
-    # from disk at dispatch, and `resolve_invocation` re-checks the assembled
-    # budget at every launch, so the next agent picks this up on its own.
-    return {"name": name, "body": body.body}
-
-
-@api_router.delete("/steering/{name}")
-async def delete_steering(name: str, request: Request):
-    st = request.app.state
-    try:
-        path = steering_mod.Steering(dir=_steering_dir(st)).path(name, where="steering")
-    except steering_mod.SteeringError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if not path.is_file():
-        raise HTTPException(404, f"unknown steering file {name!r}")
-    await asyncio.to_thread(_check_steering_change, st, name, None)
-    path.unlink()
-    return {"deleted": name}
-
-
 class IntakeBody(BaseModel):
     """`intake.yaml`, typed. Unlike `policy.yaml` this file is a flat fixed
     shape, so the bounds live here rather than in a loader that has to accept a
@@ -593,7 +485,7 @@ async def get_intake(request: Request):
         # lifespan already degraded to the defaults. Saving replaces the file.
         data = dict(st.intake)
     try:
-        repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(deps.repos_path(st))
     except config_mod.ConfigError:
         repos = []
     last_picked_up = st.db.read(store.last_auto_pickup_at)

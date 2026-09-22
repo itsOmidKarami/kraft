@@ -75,32 +75,15 @@ test("settings: policy edit saves", async ({ page }) => {
   await expect(page.getByLabel(/max concurrent/i)).toHaveValue("4");
 });
 
-test("settings: steering is editable and diffable", async ({ page }) => {
+test("settings: steering profiles are edited on the Library, and the old Steering address opens it", async ({
+  page,
+}) => {
   await page.goto("/settings/steering");
-  // the fixture instance ships no steering files, so make one
-  page.once("dialog", (d) => d.accept("e2e-steering"));
-  await page.getByRole("button", { name: "New", exact: true }).click({ timeout: scaledTimeout(15_000) });
-  const body = page.getByLabel("steering body");
-  await expect(body).toBeVisible();
-  // A new file's body effect fires a doomed GET for the not-yet-saved name
-  // (404, caught, resets draft/loaded to ""). Under load that GET can still
-  // be in flight when Save lands; its stale catch then wipes the just-saved
-  // draft back to empty. Let it settle before typing.
-  await page.waitForLoadState("networkidle");
-  await body.fill("edited by e2e\n");
-  await page.getByRole("tab", { name: /diff vs saved/i }).click();
-  await expect(page.getByTestId("draft-diff")).toBeVisible();
-  await page.getByRole("tab", { name: "edit" }).click();
-  await page.getByRole("button", { name: "Save" }).click();
-  // Save is async (PUT, then a list reload) -- wait for it to actually land
-  // before the hard reload below, or a slow save's request gets cancelled
-  // mid-flight and the file never persists.
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled({
-    timeout: scaledTimeout(15_000),
-  });
-  await page.reload();
-  await page.locator(".facet-opt", { hasText: "e2e-steering" }).click();
-  await expect(page.getByLabel("steering body")).toHaveValue("edited by e2e\n");
+  await expect(page).toHaveURL(/\/settings\/library/, { timeout: scaledTimeout(15_000) });
+  await expect(page.getByLabel("library yaml")).toBeEditable({ timeout: scaledTimeout(15_000) });
+  // The seeded library's one steering profile, the same store repos.yaml names.
+  await page.locator(".facet-opt", { hasText: "project-standards" }).click();
+  await expect(page.getByText(/frozen into an item at intake/)).toBeVisible();
 });
 
 test("settings: access shows the bind, and allowed-hosts tags round-trip", async ({ page }) => {

@@ -21,7 +21,7 @@ def _walk(it):
         it.database,
         it.run_dirs,
         work_item_id=it.id,
-        launch=executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=NO_SETUP),
     )
 
 

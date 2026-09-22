@@ -184,6 +184,14 @@ assigns it a canonical complete execution path. `tasks` is authoring shorthand
 for one resolved step named `main`, whether it appears on an exec node,
 recovery plan, or fix loop.
 
+`steering` is the one steering store. A task selects profiles with its own
+`steering:`, and a repository with `steering:` in its `repos.yaml` entry; both
+are resolved at intake and frozen into the work item's snapshot (the task's
+with the chain, the repository's as `repository_steering`, keyed by
+repository path). A launch injects the repository's, then the task's. The
+pre-1.0 `templates/steering/*.md` files are folded into this section on the
+first start and moved aside.
+
 ```yaml
 # library.yaml
 steering:

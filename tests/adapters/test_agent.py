@@ -691,48 +691,51 @@ C = {"command": "c"}
 )
 def test_resolve_invocation_picks(binding, repo, kw, field, expected):
     entry = entry_of(repo) if repo is not None else None
-    assert getattr(agent.resolve_invocation(binding, entry, None, **kw), field) == expected
+    assert getattr(agent.resolve_invocation(binding, entry, **kw), field) == expected
 
 
-def test_steering_is_repo_first_then_hook(tmp_path):
-    (tmp_path / "repo-note.md").write_text("repo")
-    (tmp_path / "hook-note.md").write_text("hook")
-    inv = agent.resolve_invocation(
-        {**C, "steering": ["hook-note"]}, entry_of({"steering": ["repo-note"]}), tmp_path
+def test_steering_is_repo_first_then_task():
+    """Both from the snapshot: the repository's frozen profiles, then the
+    task's (`repository-steering-names-library-profiles`)."""
+    _claude_profile()
+    task = _v1_agent_task(id="t", harness="claude", prompt="p", steering=["task-note"])
+    inv = agent.resolve_agent_task(
+        task,
+        entry_of({"path": "/r", "steering": ["repo-note"]}),
+        steering={"task-note": "task"},
+        repository_steering={"/r": {"repo-note": "repo"}},
     )
-    # A tuple: ("repo", "hook") == ["repo", "hook"] is False.
-    assert inv.steering_texts == ("repo", "hook")
+    # A tuple: ("repo", "task") == ["repo", "task"] is False.
+    assert inv.steering_texts == ("repo", "task")
 
 
 def test_a_repo_entry_of_none_behaves_like_an_empty_one(tmp_path):
-    assert agent.resolve_invocation(C, None, tmp_path) == agent.resolve_invocation(
-        C, entry_of({}), tmp_path
-    )
+    assert agent.resolve_invocation(C, None) == agent.resolve_invocation(C, entry_of({}))
 
 
-def test_combined_repo_and_hook_steering_over_budget_raises(tmp_path):
-    """`Steering.validate` runs over repos.yaml's names and a hook's names
-    separately at config-load time -- each valid here. Nothing at load time
-    measures the concatenation `resolve_invocation` builds, which can still
-    blow the shared 8 KB budget."""
-    (tmp_path / "repo-note.md").write_text("x" * (steering.Steering.MAX_BYTES // 2))
-    (tmp_path / "hook-note.md").write_text("y" * (steering.Steering.MAX_BYTES // 2))
-    steering.Steering(dir=tmp_path).validate(["repo-note"], where="repos.yaml")
-    steering.Steering(dir=tmp_path).validate(["hook-note"], where="registry.yaml")
-
+def test_combined_repo_and_task_steering_over_budget_raises():
+    """Each list fits on its own -- the repository's is checked at repo save
+    and intake, the task's at intake -- but nothing before the launch
+    measures their concatenation, which can still blow the shared budget."""
+    half = steering.Steering.MAX_BYTES // 2
+    _claude_profile()
+    task = _v1_agent_task(id="t", harness="claude", prompt="p", steering=["task-note"])
     with pytest.raises(steering.SteeringError, match="8192"):
-        agent.resolve_invocation(
-            {**C, "steering": ["hook-note"]}, entry_of({"steering": ["repo-note"]}), tmp_path
+        agent.resolve_agent_task(
+            task,
+            entry_of({"path": "/r", "steering": ["repo-note"]}),
+            steering={"task-note": "y" * half},
+            repository_steering={"/r": {"repo-note": "x" * half}},
         )
 
 
 def test_resolve_invocation_reads_the_skill(tmp_path):
-    inv = agent.resolve_invocation({**C, "skill": "chain-review"}, None, None, skills_dir=tmp_path)
+    inv = agent.resolve_invocation({**C, "skill": "chain-review"}, None, skills_dir=tmp_path)
     assert inv.method_text.startswith("---")
 
 
 def test_resolve_invocation_without_a_skill_carries_no_method(tmp_path):
-    assert agent.resolve_invocation(C, None, None, skills_dir=tmp_path).method_text is None
+    assert agent.resolve_invocation(C, None, skills_dir=tmp_path).method_text is None
 
 
 # --- Template Schema V1: the provider owns the runtime mechanics --------------------

@@ -43,9 +43,7 @@ def _task(id, **fields):
     return {"id": id, "kind": "subprocess", "command": "true", **fields}
 
 
-LAUNCH = LaunchContext(
-    repo_entry=NO_SETUP, steering_dir=None, repositories={"ws": NO_SETUP, "pkg": NO_SETUP}
-)
+LAUNCH = LaunchContext(repo_entry=NO_SETUP, repositories={"ws": NO_SETUP, "pkg": NO_SETUP})
 
 
 # ── fan-out (`task-may-explicitly-fan-out-by-repository`) ──
@@ -125,9 +123,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
     the root's. Its live sandbox wraps the whole item (Ruling 189), the
     root's run included."""
     member = entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}})
-    launch = LaunchContext(
-        repo_entry=NO_SETUP, steering_dir=None, repositories={"ws": NO_SETUP, "pkg": member}
-    )
+    launch = LaunchContext(repo_entry=NO_SETUP, repositories={"ws": NO_SETUP, "pkg": member})
     row, node, worktree = await workspace_item(
         database, run_dirs, tmp_path, [_task("each", scope="each_repository")]
     )
@@ -213,7 +209,7 @@ async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
         node,
         row,
         worktree,
-        launch=LaunchContext(repo_entry=entry_of(_AREAS), steering_dir=None),
+        launch=LaunchContext(repo_entry=entry_of(_AREAS)),
     )
 
     assert status == "done"

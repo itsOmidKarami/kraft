@@ -68,7 +68,6 @@ async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wi
         it.repo,
         launch=executor.LaunchContext(
             repo_entry=entry_of({"setup_command": "", "test_scopes": test_scopes}),
-            steering_dir=None,
         ),
     )
     return status, it

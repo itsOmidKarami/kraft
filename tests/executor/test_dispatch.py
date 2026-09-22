@@ -33,7 +33,7 @@ from kraft.executor.context import LaunchContext
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 
 
 def _agent(task_id="implement", **fields):
@@ -182,7 +182,7 @@ async def test_a_hook_with_its_own_skill_is_not_told_to_implement(item_on, fake_
         ],
     )
 
-    await _dispatch_each_node(it, launch=LaunchContext(repo_entry=None, steering_dir=None))
+    await _dispatch_each_node(it, launch=LaunchContext(repo_entry=None))
 
     impl_prompt, review_prompt = fake_agent.prompts()
     assert "Do not re-plan." in impl_prompt
@@ -213,7 +213,7 @@ async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fa
     ]
 
     await _dispatch_each_node(
-        it, launch=LaunchContext(repo_entry=entry_of({"test_scopes": scopes}), steering_dir=None)
+        it, launch=LaunchContext(repo_entry=entry_of({"test_scopes": scopes}))
     )
 
     impl_prompt, other_prompt = fake_agent.prompts()
@@ -240,7 +240,7 @@ async def test_dispatch_carries_the_notes_authorship_into_the_prompt(
         it = await item_on([_exec("verify", _agent("review"))], wid=source)
         await _dispatch_each_node(
             it,
-            launch=LaunchContext(repo_entry=None, steering_dir=None),
+            launch=LaunchContext(repo_entry=None),
             steer=executor.Steer("findings left unresolved: x", source=source),
         )
 
@@ -711,7 +711,7 @@ async def _dispatch_seeded(
         run_dirs,
         work_item_id="w1",
         start_index=start,
-        launch=replace(NO_SETUP, steering_dir=templates / "steering"),
+        launch=NO_SETUP,
     )
     sessions = database.read(
         lambda c: c.execute("SELECT * FROM worker_sessions ORDER BY created_at").fetchall()
@@ -751,9 +751,8 @@ async def test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
     """`spec.main.author` selects `steering: [project-standards]`, a profile
-    `library.yaml` declares inline. With no `templates/steering/*.md` on disk
-    -- which is what a fresh install has -- the profile's instructions still
-    reach the agent, after the contract
+    `library.yaml` declares inline, and its instructions reach the agent,
+    after the contract
     (`agent-task-contract-precedes-skill-and-steering`)."""
     sessions, prompt = await _dispatch_seeded(
         tmp_path, repo, database, run_dirs, monkeypatch, "spec"
@@ -771,15 +770,12 @@ async def test_editing_the_library_after_intake_does_not_change_a_running_items_
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
     """`materialized-chain-is-immutable-work-item-input`: steering is chain
-    content, frozen into the snapshot at intake. An edit to `library.yaml` --
-    or a same-named file under `templates/steering/` -- after the item was
-    filed reaches items filed afterwards, never this one."""
+    content, frozen into the snapshot at intake. An edit to `library.yaml`
+    after the item was filed reaches items filed afterwards, never this one."""
 
     def edit(templates):
         lib = templates / "library.yaml"
         lib.write_text(lib.read_text().replace(_PROJECT_STANDARDS, "EDITED AFTER INTAKE"))
-        (templates / "steering").mkdir(exist_ok=True)
-        (templates / "steering" / "project-standards.md").write_text("FILE AFTER INTAKE")
 
     sessions, prompt = await _dispatch_seeded(
         tmp_path, repo, database, run_dirs, monkeypatch, "spec", after_intake=edit
@@ -788,7 +784,6 @@ async def test_editing_the_library_after_intake_does_not_change_a_running_items_
     assert sessions[0]["status"] == "done", Path(sessions[0]["log_path"]).read_text()
     assert _PROJECT_STANDARDS in prompt
     assert "EDITED AFTER INTAKE" not in prompt
-    assert "FILE AFTER INTAKE" not in prompt
 
 
 async def test_a_snapshot_without_frozen_steering_stops_for_a_human(
@@ -845,7 +840,7 @@ async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
 
     templates = _seeded(tmp_path, monkeypatch)
     launched = _capture_launches(monkeypatch)
-    launch = replace(NO_SETUP, steering_dir=templates / "steering")
+    launch = NO_SETUP
     argv: dict[str, str] = {}
     for n, chain_id in enumerate(TemplateLibrary.from_yaml_dir(templates).chain_ids):
         chain = _materialize(templates, chain_id, repo)

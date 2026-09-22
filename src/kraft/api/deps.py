@@ -41,6 +41,7 @@ from kraft.templates.environment import (
     branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
+from kraft.worker import steering as steering_mod
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +381,7 @@ def connected_or_422(st, repo: str) -> RepoEntry:
     make the check an existence oracle on the host's filesystem, and an item in
     an unconnected repo has no entry for dispatch to read its config from."""
     try:
-        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
         raise HTTPException(422, str(exc)) from exc
     entry = _connected(repos, repo)
@@ -455,7 +456,7 @@ def workspace_target(
         return None
     try:
         declared = config_mod.load_workspaces(repos_path(st))
-        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
         raise HTTPException(422, str(exc)) from exc
     ws = declared.get(workspace)
@@ -480,7 +481,7 @@ def _repository_layers(st, repo: str, target: WorkItemTarget | None) -> list[tup
     filed in `repo`: its own entry, or for a workspace target the root's and
     each selected member's. Raises `PolicyError` on an unreadable file."""
     try:
-        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
         raise PolicyError(f"cannot read the repository policy layer: {exc}") from exc
     if target is None or target.kind != "workspace":
@@ -552,6 +553,13 @@ def item_policy_or_422(st, repo: str, target: WorkItemTarget | None = None) -> I
         raise HTTPException(422, str(exc)) from exc
 
 
+def repository_steering_or_422(st, repo: str, target: WorkItemTarget | None = None) -> dict:
+    try:
+        return repository_steering(st, repo, target)
+    except steering_mod.SteeringError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 def repository_policies_or_422(st, target: WorkItemTarget | None) -> dict[str, InstancePolicy]:
     try:
         return repository_policies(st, target)
@@ -600,6 +608,40 @@ class _PoisonedRepoEntry:
         raise self._exc
 
 
+def library_steering(st) -> dict[str, str] | None:
+    """The loaded library's steering profiles, name to instructions; `None`
+    when no library loaded."""
+    library = getattr(st, "library", None)
+    if library is None:
+        return None
+    return {n: p.instructions for n, p in library.steering.items()}
+
+
+def repository_steering(
+    st, repo: str, target: WorkItemTarget | None = None
+) -> dict[str, dict[str, str]]:
+    """What an item filed in `repo` freezes as its repository steering
+    (`MaterializedChain.repository_steering`): each repository it runs in
+    that names steering in `repos.yaml`, by path, to those profiles' texts
+    from the library. Raises `SteeringError` (a `ValueError`) naming a name
+    the library does not define, or an unreadable `repos.yaml`, so an intake
+    door refuses the item rather than filing it unsteered."""
+    try:
+        repos = config_mod.load_repos(repos_path(st))
+    except config_mod.ConfigError as exc:
+        raise steering_mod.SteeringError(str(exc)) from exc
+    entries = [_connected(repos, repo)]
+    if target is not None and target.kind == "workspace":
+        by_id = {r.id: r for r in repos if r.id}
+        entries += [by_id.get(rid) for rid in target.repositories()]
+    profiles = library_steering(st) or {}
+    return {
+        e.path: steering_mod.select(e.steering, profiles, where=f"repos.yaml: {e.path}")
+        for e in entries
+        if e is not None and e.steering
+    }
+
+
 def launch(st, repo: str) -> executor.LaunchContext:
     """The repo config for one agent dispatch.
 
@@ -614,29 +656,25 @@ def launch(st, repo: str) -> executor.LaunchContext:
     needed this repo's config reads it, landing in `guard` as needs_human
     the same way a bad `sandbox:` value would if it were only caught then.
 
-    Steering is deliberately *not* validated here (`validate_steering=False`):
-    a name whose file has since been deleted must still let the repo entry
-    load normally, model/deny_tools intact, rather than losing them along with
-    everything else. The dispatch that actually reads that steering file is
-    what surfaces the problem — `Steering.read` raises `SteeringError` naming
-    the file, and it reaches `guard` from there — needs_human for that one
-    launch, not a crash."""
-    steering_dir = st.templates_dir / "steering"
+    The live library's steering profiles ride along for an item filed before
+    repository steering was frozen into its snapshot
+    (`steering.for_repository`); every other launch reads its snapshot's."""
+    steering = library_steering(st) or {}
     try:
-        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
         logger.warning("repo config invalid, failing dispatch that reads it: %s", exc)
         # The members' entries too: a fanned-out task must fail the same
         # way, never run with no sandbox because its entry was unreadable.
         return executor.LaunchContext(
             repo_entry=cast("RepoEntry", _PoisonedRepoEntry(exc)),
-            steering_dir=steering_dir,
             skills_dir=st.skills_dir,
             repositories=cast("dict[str, RepoEntry]", _PoisonedRepoEntry(exc)),
+            library_steering=steering,
         )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),
-        steering_dir=steering_dir,
         skills_dir=st.skills_dir,
         repositories={r.id: r for r in repos if r.id},
+        library_steering=steering,
     )

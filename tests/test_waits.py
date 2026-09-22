@@ -63,7 +63,7 @@ def walk(database, run_dirs, monkeypatch):
                 default=policy.Cap(attempts=3, wall_clock_s=3600),
                 auto_escalate_stuck=False,
             ),
-            launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
+            launch=executor.LaunchContext(repo_entry=ON_A_FORGE),
         )
 
     return go
@@ -81,7 +81,7 @@ def scheduler(stub_app, tmp_path, monkeypatch):
         monkeypatch.setattr(
             deps,
             "launch",
-            lambda st, repo: executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
+            lambda st, repo: executor.LaunchContext(repo_entry=ON_A_FORGE),
         )
         return stub_app(
             templates_dir=tmp_path / "templates",
@@ -390,7 +390,7 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
         work_item_id=it.id,
         target=ChainPath.parse(store.materialized_chain_of(it.row()), "ci"),
         by_person=True,
-        launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=ON_A_FORGE),
     )
 
     assert result == "waiting", "the retried wait timed out on its first pass's clock"
@@ -510,7 +510,7 @@ async def test_the_repository_s_named_reviewer_reaches_the_review_task(
         database,
         run_dirs,
         work_item_id=it.id,
-        launch=executor.LaunchContext(repo_entry=entry, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=entry),
     )
 
     assert asked == [AutomatedReview(bot="coderabbitai")]

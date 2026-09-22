@@ -17,7 +17,7 @@ from kraft import policy as _policy
 from kraft.executor import dispatch, gates
 
 NO_SETUP = entry_of({"setup_command": ""})
-LAUNCH = executor.LaunchContext(repo_entry=NO_SETUP, steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=NO_SETUP)
 
 
 def _sub(task_id):

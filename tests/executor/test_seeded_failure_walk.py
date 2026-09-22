@@ -53,7 +53,7 @@ async def _walk_from(node, item_on, tmp_path, monkeypatch):
         work_item_id=it.id,
         start_index=start,
         policy=_policy.Policy(loops={}, default=_policy.Cap(9, 3600), auto_escalate_delay_s=0),
-        launch=executor.LaunchContext(repo_entry=ON_A_FORGE, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=ON_A_FORGE),
     )
     records = argv_log.read_text().split("\x00\n") if argv_log.exists() else []
     return it, status, [r.splitlines() for r in records if r.strip()]

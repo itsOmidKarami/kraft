@@ -153,6 +153,7 @@ def validate_retry_override(
         policy=chain.policy,
         repository_policies=chain.repository_policies,
         item_policy=chain.item_policy,
+        repository_steering=chain.repository_steering,
     )
     # A retry is a door onto a new snapshot too: a `sandbox` it adds to a
     # workspace item's task is refused as intake would refuse it (Kraft-dshto).

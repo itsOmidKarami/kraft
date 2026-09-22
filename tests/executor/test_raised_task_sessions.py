@@ -16,7 +16,7 @@ from kraft import builtins as _builtins
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 _BUILTIN = {"id": "scopes", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
 _FORGE = {"id": "sync", "kind": "forge", "target": "mr.sync"}
 

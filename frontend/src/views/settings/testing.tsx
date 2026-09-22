@@ -74,13 +74,19 @@ export function setupSettingsMocks() {
   ]);
   vi.spyOn(api, "getPolicy").mockResolvedValue(policy);
   vi.spyOn(api, "getTheme").mockResolvedValue(theme);
-  vi.spyOn(api, "getSteering").mockResolvedValue({
-    files: [{ name: "house-style", bytes: 14 }],
-    max_bytes: 8192,
-  });
-  vi.spyOn(api, "getSteeringFile").mockResolvedValue({
-    name: "house-style",
-    body: "prefer stdlib\n",
+  vi.spyOn(api, "getLibrary").mockResolvedValue({
+    file: "~/.kraft/templates/library.yaml",
+    text: "steering:\n  house-style:\n    instructions: prefer stdlib\n",
+    components: [
+      {
+        id: "steering.house-style",
+        kind: "steering",
+        name: "house-style",
+        definition: { instructions: "prefer stdlib\n" },
+        used_by: [],
+        issues: [],
+      },
+    ],
   });
   vi.spyOn(api, "getIntake").mockResolvedValue({
     enabled: false,

@@ -9,7 +9,6 @@ import { NotifyPage } from "./NotifyPage";
 import { PolicyPage } from "./PolicyPage";
 import { ReposPage } from "./ReposPage";
 import "./settings.css";
-import { SteeringPage } from "./SteeringPage";
 import { TemplatesPage } from "./TemplatesPage";
 
 /* ── shell ────────────────────────────────────────────────────────────────── */
@@ -45,6 +44,8 @@ export function Settings() {
         <Route path="templates" element={<Navigate to="/settings/chains" replace />} />
         {/* The hook-binding editor went with the registry it edited (Template Schema V1). */}
         <Route path="plugins" element={<Navigate to="/settings/chains" replace />} />
+        {/* Steering is library profiles now (Kraft-91i6p): edited on the Library screen. */}
+        <Route path="steering" element={<Navigate to="/settings/library" replace />} />
         {SETTINGS_NAV.map((n) => (
           <Route
             key={n.to}
@@ -56,7 +57,6 @@ export function Settings() {
                 library: <LibraryPage />,
                 harnesses: <HarnessesPage />,
                 policy: <PolicyPage />,
-                steering: <SteeringPage />,
                 intake: <IntakePage />,
                 notify: <NotifyPage />,
                 access: <AccessPage />,

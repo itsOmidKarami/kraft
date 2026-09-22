@@ -26,7 +26,7 @@ from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, walk
 from kraft.executor.context import CONFIG_ERROR, LaunchContext
 
-NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 _SANDBOX = {"kind": "docker", "image": "kraft/policy:1"}
 _SANDBOXED = pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
 

@@ -116,7 +116,7 @@ def _dispatch_brief(tmp_path, monkeypatch, *, seed_events=()):
                 node,
                 row,
                 repo,
-                launch=executor.LaunchContext(repo_entry=None, steering_dir=None),
+                launch=executor.LaunchContext(repo_entry=None),
             )
         finally:
             await database.close()

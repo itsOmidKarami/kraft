@@ -118,8 +118,7 @@ def test_repo_crud_round_trips_through_the_yaml(tmp_path, client, templates_dir)
 
 
 def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_dir):
-    (templates_dir / "steering").mkdir(exist_ok=True)
-    (templates_dir / "steering" / "house-style.md").write_text("# House style\nBe direct.\n")
+    # `steering:` names a library profile: the seeded library ships this one.
     repo = make_repo(tmp_path)
     created = client.post(
         "/api/repos",
@@ -128,7 +127,7 @@ def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_di
             "enabled": False,
             "models": {"claude": "anything-at-all"},
             "deny_tools": ["WebFetch"],
-            "steering": ["house-style"],
+            "steering": ["project-standards"],
         },
     )
     assert created.status_code == 201, created.text
@@ -137,11 +136,11 @@ def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_di
     assert on_disk["repos"][0]["models"] == {"claude": "anything-at-all"}
     assert "default_model" not in on_disk["repos"][0]
     assert on_disk["repos"][0]["deny_tools"] == ["WebFetch"]
-    assert on_disk["repos"][0]["steering"] == ["house-style"]
+    assert on_disk["repos"][0]["steering"] == ["project-standards"]
 
     fetched = client.get("/api/repos").json()["repos"][0]
     assert fetched["models"] == {"claude": "anything-at-all"}
-    assert fetched["steering"] == ["house-style"]
+    assert fetched["steering"] == ["project-standards"]
 
 
 def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, templates_dir):
@@ -151,7 +150,9 @@ def test_add_repo_with_a_missing_steering_name_is_refused(tmp_path, client, temp
     assert not repos_yaml.exists()
     repo = make_repo(tmp_path)
     r = client.post("/api/repos", json={"path": str(repo), "steering": ["does-not-exist"]})
-    assert 400 <= r.status_code < 500, r.text
+    assert r.status_code == 422, r.text
+    # Naming the name, and where steering profiles live.
+    assert "'does-not-exist' is not a steering profile in templates/library.yaml" in r.text
     # a rejected write never got persisted
     assert not repos_yaml.exists()
     assert client.get("/api/repos").json()["repos"] == []
@@ -450,8 +451,8 @@ def _seed_active_work_item(
 
 
 def _broken_repos_yaml(templates_dir: Path) -> None:
-    """A repo naming a steering file that does not exist — an operator's hand
-    edit, or a steering file deleted after the fact. Written directly, bypassing
+    """A repo naming a steering profile the library does not define — an
+    operator's hand edit, or a profile removed after the fact. Written directly, bypassing
     `POST /repos`'s own validation, which would refuse this on the way in."""
     (templates_dir / "repos.yaml").write_text(
         yaml.safe_dump({"repos": [{"path": "/r", "steering": ["deleted"]}]})
@@ -605,14 +606,18 @@ def test_connected_repos_model_for_its_profile_reaches_the_agent_launch(tmp_path
 
 
 def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch):
-    """The `_launch` -> `resolve_invocation` seam for steering, not just
-    `--model`: connect a repo with `steering: ["house"]` through the real API,
-    post a work item, and check the house body reaches the agent's
-    `--append-system-prompt`. Both executor launch tests pass `steering_dir=None`
-    and never exercise this join; this is the sibling that does."""
+    """The intake -> snapshot -> launch seam for repository steering, not
+    just `--model`: define a library profile `house`, connect a repo with
+    `steering: ["house"]` through the real API, post a work item, and check
+    the house text reaches the agent's `--append-system-prompt`
+    (`repository-steering-names-library-profiles`)."""
     templates_dir = fake_templates_dir(tmp_path, f"{sys.executable} {_FAKE_AGENT}")
-    (templates_dir / "steering").mkdir(exist_ok=True)
-    (templates_dir / "steering" / "house.md").write_text("Prefer tabs over spaces.")
+    library = templates_dir / "library.yaml"
+    library.write_text(
+        library.read_text().replace(
+            "steering:\n", "steering:\n  house:\n    instructions: Prefer tabs over spaces.\n", 1
+        )
+    )
     argv_log = tmp_path / "argv.jsonl"
     monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
     monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
@@ -651,11 +656,11 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
 
 @pytest.mark.api_client(edit_templates=_broken_repos_yaml)
 def test_get_repos_with_a_deleted_steering_file_does_not_lock_out_the_screen(client):
-    """A steering file deleted after the fact (an operator's `rm`, since there is
-    no Settings screen for steering files) must not 422 the only screen that
-    could fix it. `GET /repos` reads without steering validation and returns the
-    entry as-is; `PATCH /repos` clearing the bad name must succeed too — that is
-    how an operator actually recovers, short of hand-editing the YAML."""
+    """A steering profile removed after the fact (a hand edit of
+    `library.yaml`) must not 422 the only screen that could fix it. `GET
+    /repos` reads without steering validation and returns the entry as-is;
+    `PATCH /repos` clearing the bad name must succeed too — that is how an
+    operator actually recovers, short of hand-editing the YAML."""
     got = client.get("/api/repos")
     assert got.status_code == 200
     assert got.json()["repos"][0]["steering"] == ["deleted"]

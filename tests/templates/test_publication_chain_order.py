@@ -139,7 +139,7 @@ async def test_a_pre_draft_gate_keeps_the_work_local(item_on, database, run_dirs
         work_item_id=it.id,
         policy=None,
         launch=LaunchContext(
-            repo_entry=entry_of({"setup_command": "", "forge": "github"}), steering_dir=None
+            repo_entry=entry_of({"setup_command": "", "forge": "github"}),
         ),
     )
 

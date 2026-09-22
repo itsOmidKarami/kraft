@@ -193,7 +193,7 @@ async def test_the_item_sandbox_is_whatever_sandboxes_any_of_it(
 ):
     it = await item_on(_item_policy_sandboxed(repo) if chain == "item-policy" else chain)
     launch = executor.LaunchContext(
-        repo_entry=entry_of({"setup_command": "", **entry}), steering_dir=None
+        repo_entry=entry_of({"setup_command": "", **entry}),
     )
 
     assert dispatch.item_sandbox(it.row(), launch) == expected
@@ -202,7 +202,7 @@ async def test_the_item_sandbox_is_whatever_sandboxes_any_of_it(
 async def test_an_unreadable_repos_yaml_is_never_read_as_no_sandbox(item_on):
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
     poisoned = deps._PoisonedRepoEntry(_config.ConfigError("repos.yaml: broken"))
-    launch = executor.LaunchContext(repo_entry=poisoned, steering_dir=None)
+    launch = executor.LaunchContext(repo_entry=poisoned)
 
     with pytest.raises(RuntimeError, match="cannot tell whether .* runs sandboxed"):
         dispatch.item_sandbox(it.row(), launch)
@@ -303,7 +303,7 @@ async def test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox(
         node,
         it.row(),
         it.repo,
-        launch=executor.LaunchContext(repo_entry=repo_entry, steering_dir=None),
+        launch=executor.LaunchContext(repo_entry=repo_entry),
     )
 
     assert status == "done"
@@ -318,7 +318,6 @@ async def test_repositories_with_different_live_sandboxes_stop_rather_than_pick_
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
     launch = executor.LaunchContext(
         repo_entry=entry_of({"setup_command": "", "sandbox": _SANDBOX}),
-        steering_dir=None,
         repositories={"pkg": entry_of({"sandbox": {"kind": "docker", "image": "member:2"}})},
     )
 
@@ -330,7 +329,6 @@ async def test_a_members_live_sandbox_wraps_the_item(item_on):
     it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
     launch = executor.LaunchContext(
         repo_entry=entry_of({"setup_command": ""}),
-        steering_dir=None,
         repositories={"pkg": entry_of({"sandbox": _SANDBOX})},
     )
 

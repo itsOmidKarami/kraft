@@ -559,7 +559,7 @@ async def test_the_worktree_and_the_forge_agree_on_the_branch(
         ),
         bd_cwd=str(tracker),
     )
-    launch = executor.LaunchContext(repo_entry=wtree.NO_SETUP, steering_dir=None)
+    launch = executor.LaunchContext(repo_entry=wtree.NO_SETUP)
     # one node, no gate: the chain completes and closes its own bead in
     # `tracker`, which is why intake and run are handed the same one
     await executor.run(

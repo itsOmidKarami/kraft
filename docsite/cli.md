@@ -271,7 +271,8 @@ asks, and only then moves the whole directory to a `templates.pre-v1-<time>`
 backup beside it and installs the V1 configuration. `-y` accepts without the
 question; with no terminal and no `-y` it changes nothing. `access.yaml`,
 `notify.yaml`, `theme.yaml`, `repos.yaml`, `intake.yaml`, `steering/` and
-`harnesses/` are carried across. `policy.yaml` starts from the V1 default and
+`harnesses/` are carried across; the next start folds `steering/*.md` into
+`library.yaml` as steering profiles ([Configuration](configuration.md#repository-steering)). `policy.yaml` starts from the V1 default and
 keeps your value for every key V1 still has; each key it drops is printed with
 its old value. The old chains and registry stay only in the backup. There is no
 migration helper. An update interrupted mid-swap is finished by the next start

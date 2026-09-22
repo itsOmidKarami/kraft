@@ -21,7 +21,7 @@ CHAIN = """
     - {id: lint, kind: subprocess, command: "true"}
 """
 
-LAUNCH = executor.LaunchContext(repo_entry=None, steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=None)
 
 
 @pytest.fixture

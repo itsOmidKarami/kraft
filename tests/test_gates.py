@@ -29,11 +29,7 @@ def _payloads(database, wid, etype):
 
 
 def _launch(tmp_path, **repo_entry):
-    # The shipped spec task names a `steering:` profile, which dispatch still
-    # resolves to a file (`seed_v1_library` writes it out beside the library).
-    return executor.LaunchContext(
-        repo_entry=repo_entry or None, steering_dir=tmp_path / "templates" / "steering"
-    )
+    return executor.LaunchContext(repo_entry=repo_entry or None)
 
 
 async def test_walk_stops_at_first_gate(tmp_path, database, run_dirs, repo):
@@ -155,7 +151,7 @@ async def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(
     assert "gate_requested" not in types
     assert "node_completed" not in types
     # ...and for the missing document, not for something incidental:
-    # without a steering dir the spec task fails before it ever runs.
+    # the spec task ran and failed for want of its document.
     stopped = _payloads(database, wid, "worker_session_exited")
     assert [p["status"] for p in stopped] == ["failed"]
     assert not (run_dirs.worktrees / wid / ".engineering" / "specs" / f"{wid}.md").exists()

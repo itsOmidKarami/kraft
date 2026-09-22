@@ -360,10 +360,16 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     return live[0].model_dump() if live else None
 
 
-def _frozen_steering(row) -> dict[str, str] | None:
-    """The steering text frozen into this item's snapshot at intake."""
+def frozen_steering(row) -> dict:
+    """The steering frozen into this item's snapshot at intake: the task
+    steering and the repository steering `resolve_agent_task` takes."""
     snapshot = store.materialized_chain_of(row)
-    return snapshot.chain.steering if snapshot is not None else None
+    if snapshot is None:
+        return {"steering": None, "repository_steering": None}
+    return {
+        "steering": snapshot.chain.steering,
+        "repository_steering": snapshot.repository_steering,
+    }
 
 
 def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Path, LaunchContext]]:
@@ -377,7 +383,7 @@ def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Pat
         return []
     target = snapshot.target
     entries = launch.repositories if launch is not None else {}
-    base = launch or LaunchContext(repo_entry=None, steering_dir=None)
+    base = launch or LaunchContext(repo_entry=None)
     runs = [(target.root, Path(worktree), base)] if target.root else []
     for mount in target.mounts.values():
         entry = entries.get(mount.repository)
@@ -814,12 +820,12 @@ async def _dispatch_task(
         inv = _agent.resolve_agent_task(
             t,
             launch.repo_entry if launch else None,
-            launch.steering_dir if launch else None,
+            launch.library_steering if launch else None,
             skills_dir=launch.skills_dir if launch else None,
             escalate=escalate,
             item_override=merged_override or None,
             harnesses=harnesses,
-            steering=_frozen_steering(work_item_row),
+            **frozen_steering(work_item_row),
             policy=task_policy,
         )
     except _agent.HarnessUnavailable as exc:

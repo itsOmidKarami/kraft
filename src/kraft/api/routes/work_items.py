@@ -238,6 +238,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
     ) or entry.single_repo_target(body.repo, base_branch=base_branch)
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
+    repo_steering = deps.repository_steering_or_422(st, body.repo, target)
     try:
         item_policy = (
             chain.materialize(
@@ -282,6 +283,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             bd_cwd=deps.bd_cwd(),
             target=target,
             repository_policies=per_repository,
+            repository_steering=repo_steering,
             attachments=attachments,
             status="active" if body.autostart else "paused",
             # Folded into intake's own INSERT transaction, not a separate
@@ -398,6 +400,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)
+    repo_steering = deps.repository_steering_or_422(st, body.repo)
     try:
         wid = await executor.intake(
             st.db,
@@ -407,6 +410,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             repo=body.repo,
             chain=chain,
             effective_policy=policy,
+            repository_steering=repo_steering,
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
             status="paused",
@@ -688,6 +692,9 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
                     # top of it stacks the two (Kraft-yaq99).
                     effective_policy=deps.item_policy(st, row["repo"], target),
                     repository_policies=deps.repository_policies(st, target),
+                    # Not the chain's: the repositories' steering the item was
+                    # filed with stays frozen across a template switch.
+                    repository_steering=previous.repository_steering if previous else None,
                     attachment_kinds=kinds,
                 )
                 .to_json()

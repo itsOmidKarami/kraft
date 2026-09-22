@@ -127,7 +127,7 @@ def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | Non
     writer's boundary, where a route edits and re-saves what it read -- and
     the one connected at `path` (`deps._connected`), if any. Loaded through
     `RepoEntry` first, so a legacy shape is migrated on the way."""
-    models = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+    models = config_mod.load_repos(deps.repos_path(st))
     found = deps._connected(models, path) if path is not None else None
     repos = [r.model_dump_repo() for r in models]
     return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
@@ -153,7 +153,9 @@ def _validate_repos(
         candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
             if steering:
-                config_mod.load_repos(candidate, steering_dir=st.templates_dir / "steering")
+                # Against the library's profiles; with no library loaded
+                # there is nothing to name, and intake refuses the item.
+                config_mod.load_repos(candidate, steering=deps.library_steering(st))
             config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -162,15 +164,12 @@ def _validate_repos(
 @api_router.get("/repos")
 async def list_repos(request: Request):
     st = request.app.state
-    # No steering validation on the read path (config.load_repos): a steering
-    # file deleted out from under an entry must not 422 the screen that would
-    # let an operator clear it. See `config.load_repos`'s docstring.
+    # No steering validation on the read path (config.load_repos): a profile
+    # removed out from under an entry must not 422 the screen that would let
+    # an operator clear it. See `config.load_repos`'s docstring.
     path = deps.repos_path(st)
     return {
-        "repos": [
-            r.model_dump_repo(mode="json")
-            for r in config_mod.load_repos(path, validate_steering=False)
-        ],
+        "repos": [r.model_dump_repo(mode="json") for r in config_mod.load_repos(path)],
         "workspaces": {
             ws_id: ws.model_dump(mode="json")
             # Unrefused, so doctor can fail a sandboxed workspace's row by name.
@@ -338,7 +337,7 @@ async def remove_repo(request: Request, path: str):
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]
     # A workspace still naming it would no longer load; refused, not dropped.
-    # Steering is not re-checked: a deleted steering file elsewhere must not
+    # Steering is not re-checked: a profile removed from the library must not
     # block a disconnect.
     _validate_repos(st, kept, steering=False)
     config_mod.save_repos(deps.repos_path(st), kept)
