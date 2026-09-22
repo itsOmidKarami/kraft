@@ -225,6 +225,30 @@ async def test_a_conflict_handler_that_rebases_restarts_the_declared_span(item_o
     assert "A rebase conflict stopped this work item" in script.steers["resolve"][0].take()
 
 
+async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(item_on, script):
+    """A repair that doubts itself stops (Kraft-s7c04.56); a conflict handler
+    is not a repair there: `done_with_concerns` is its "resolved, but upstream
+    touches this item" (`prompts`), and the span's reopened gates carry it."""
+    it = await item_on(_chain(**_with_handler()))
+    script.plan = {"sync": ["conflict", "done"], "resolve": ["done_with_concerns"]}
+    upstream = {}
+
+    async def land_upstream(_row):
+        if not upstream:
+            upstream["sha"] = await _upstream_moves(it)
+
+    async def rebase(_row):
+        _git(it.worktree, "rebase", upstream["sha"])
+        await it.session(
+            "s-resolve", "rebase.on_base_changed.on_conflict.main.resolve", "done_with_concerns"
+        )
+
+    script.effects = {"check": land_upstream, "resolve": rebase}
+
+    assert await _walk(it) == "completed"
+    assert it.row()["base_ref"] == upstream["sha"]
+
+
 @pytest.mark.parametrize(
     ("ending", "reason"),
     [

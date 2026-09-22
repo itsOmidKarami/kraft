@@ -20,6 +20,10 @@ import type {
   SearchResponse,
   ChainFile,
   ChainNode,
+  Harnesses,
+  HarnessProfile,
+  HarnessProfileInput,
+  HarnessProviders,
   Library,
   ResolveResult,
   TemplateSummary,
@@ -304,6 +308,12 @@ export const getLibrary = () => req<Library>("/templates/library");
 /** Save `library.yaml`'s text; the server refuses (422, naming why) a library
  *  that would stop any chain that resolves now from resolving. */
 export const putLibrary = (text: string) => req<Library>("/templates/library", json("PUT", { text }));
+export const getHarnesses = () => req<Harnesses>("/harnesses/profiles");
+export const getHarnessProviders = () => req<HarnessProviders>("/harnesses/providers");
+/** Save one profile; the server refuses (422, naming why) one the loader
+ *  refuses, or one that would stop a resolving chain's agent task launching. */
+export const putHarness = (id: string, body: HarnessProfileInput) =>
+  req<HarnessProfile>(`/harnesses/profiles/${encodeURIComponent(id)}`, json("PUT", body));
 /** Typed YAML into the mapping `resolveTemplate` checks. */
 export const parseTemplateYaml = (text: string) =>
   req<{ chain: Record<string, unknown> | null; error: string | null }>(

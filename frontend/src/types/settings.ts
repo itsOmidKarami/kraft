@@ -91,6 +91,56 @@ export interface Library {
   components: LibraryComponent[];
 }
 
+/** One `harnesses.yaml` profile (`GET /harnesses/profiles`, Kraft-archr). */
+export interface HarnessProfile {
+  id: string;
+  /** The provider package it configures: `claude`, `codex`, `gemini`. */
+  provider: string;
+  enabled: boolean;
+  /** `null`: the provider's own command. */
+  executable: string | null;
+  defaults: Record<string, string>;
+  /** The library tasks that select it, as `tasks.<name>`. */
+  used_by: string[];
+  /** The chains with an agent task selecting it. */
+  chains: string[];
+}
+
+/** What a profile save sends (`PUT /harnesses/profiles/{id}`). */
+export type HarnessProfileInput = Pick<HarnessProfile, "provider" | "enabled" | "defaults"> & {
+  executable?: string;
+};
+
+export interface Harnesses {
+  file: string;
+  /** Why `harnesses.yaml` does not load; `profiles` is then empty. */
+  error: string | null;
+  profiles: HarnessProfile[];
+}
+
+/** One capability a provider declares. `values` are `re.fullmatch` patterns;
+ *  empty means any value. */
+export interface HarnessCapability {
+  values: string[];
+  always: string | string[] | null;
+  channel: string | null;
+}
+
+/** A provider package's read-only capability surface (`GET /harnesses/providers`). */
+export interface HarnessProvider {
+  id: string;
+  kind: string;
+  command: string[];
+  path: string;
+  capabilities: Record<string, HarnessCapability>;
+}
+
+export interface HarnessProviders {
+  valid: Record<string, HarnessProvider>;
+  /** Provider id -> why its file did not load. */
+  invalid: Record<string, string>;
+}
+
 /** One chain file as its author wrote it (`GET /templates/chains/{id}`). */
 export interface ChainFile {
   id: string;

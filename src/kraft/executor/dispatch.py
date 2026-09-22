@@ -6,6 +6,7 @@ import json
 import logging
 import shlex
 import sqlite3
+import traceback
 import uuid
 from collections.abc import Sequence
 from dataclasses import replace
@@ -34,6 +35,7 @@ from kraft.executor.context import (
     CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
+    REPAIR_DOUBTED,
     SCOPE,
     TIME_CAPPED,
     WAIT_TIMED_OUT,
@@ -487,6 +489,72 @@ def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
 
 
 async def dispatch_node(
+    db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
+) -> str:
+    """`_dispatch_task`, and a session row for whatever it raised.
+
+    `measure_node` folds a raised exception into the node's verdict, so the
+    chain stops correctly -- but a task that raised before its session row
+    existed (a rebase conflict, a git error) left nothing for `kraft view
+    logs` or the Tasks tab, and one that raised after left its row running
+    (Kraft-s7c04.55; forge/run.py's Kraft-41b is the same wound). One door
+    for every task kind: the rows this dispatch made that are still open are
+    closed, or one is made, with the traceback as the log. Then it re-raises,
+    so the verdict is unchanged.
+    """
+    since = db.read(
+        lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
+    )
+    try:
+        return await _dispatch_task(db, run_dirs, task, node, work_item_row, worktree, **kw)
+    except Exception as exc:
+        try:
+            await _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc)
+        except Exception:
+            logger.exception("could not record the session %s raised", task.path)
+        raise
+
+
+async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc) -> None:
+    status = "conflict" if isinstance(exc, _builtins.RebaseConflict) else "failed"
+    log = "".join(traceback.format_exception(exc))
+    # This dispatch's own rows, and the `waiting` row a forge wait resumes
+    # rather than mints (Kraft-ivh1): older than `since`, but this episode's
+    # (Kraft-evyc7).
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT id, status, log_path, result_path FROM worker_sessions "
+            "WHERE work_item_id = ? AND hook_point = ? AND (rowid > ? OR "
+            "(status = 'waiting' AND node_id = ? AND round = ?))",
+            (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
+        ).fetchall()
+    )
+    open_rows = [r for r in rows if r["status"] in ("pending", "running", "waiting")]
+    if not rows:
+        sid, log_path, result_path = await _builtins.start_session(
+            db,
+            run_dirs,
+            session_id=uuid.uuid4().hex,
+            work_item_id=work_item_row["id"],
+            node_id=node.id,
+            hook_point=task.path,
+            round=kw.get("round", 0),
+            head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
+        )
+        open_rows = [{"id": sid, "log_path": log_path, "result_path": result_path}]
+    for r in open_rows:
+        await _builtins.finish_session(
+            db,
+            Path(r["log_path"]),
+            Path(r["result_path"]),
+            session_id=r["id"],
+            status=status,
+            log=log,
+            reused=True,
+        )
+
+
+async def _dispatch_task(
     db,
     run_dirs,
     task: ResolvedTask,
@@ -1313,7 +1381,7 @@ async def run_recovery(
         repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
     else:
         repair_steer = Steer(context, source="seeded")
-    return await measure_node(
+    verdict, h_failed, h_excs = await measure_node(
         db,
         run_dirs,
         work_item_id,
@@ -1327,6 +1395,27 @@ async def run_recovery(
         budget=budget,
         loop_severities=loop_severities,
     )
+    if verdict == "ok" and scope != "conflict":
+        doubted = [
+            t for step in handler for t in step.tasks if repair_doubts(db, work_item_id, node, [t])
+        ]
+        if doubted:
+            return REPAIR_DOUBTED, doubted, []
+    return verdict, h_failed, h_excs
+
+
+def repair_doubts(
+    db, work_item_id: str, node: ResolvedNode, tasks: list[ResolvedTask]
+) -> list[str]:
+    """`task: concerns` for each of `tasks` whose latest session ended
+    `done_with_concerns` -- what `REPAIR_DOUBTED` stops on."""
+    doubts = []
+    for task in tasks:
+        session = _latest_session(db, work_item_id, node, task)
+        if session is not None and session["status"] == "done_with_concerns":
+            concerns = _subprocess.read_concerns(Path(session["result_path"]))
+            doubts.append(f"{task.task.id}: {concerns or '(no concerns given)'}")
+    return doubts
 
 
 def measured_tasks(

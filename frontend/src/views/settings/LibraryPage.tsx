@@ -41,6 +41,14 @@ function ComponentDetail({ component }: { component: LibraryComponent }) {
           </>
         )}
       </p>
+      {typeof component.definition.harness === "string" && (
+        <p className="chain-legend">
+          runs on harness{" "}
+          <Link to={`/settings/harnesses?h=${encodeURIComponent(component.definition.harness)}`}>
+            {component.definition.harness}
+          </Link>
+        </p>
+      )}
       <pre className="template-readout">{JSON.stringify(component.definition, null, 2)}</pre>
       {component.issues.length > 0 && (
         <div className="validation" data-valid={false}>

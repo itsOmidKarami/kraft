@@ -610,6 +610,14 @@ enter the declaring execution node's fix loop when one exists, or otherwise
 stop for a human.
 enforced-by: tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[fix-loop], tests/executor/test_recovery.py::test_a_recovery_that_does_not_take_enters_the_fix_loop_or_stops[no-fix-loop]
 
+## REQ a-repair-with-concerns-stops-for-a-human
+
+When a task, step or execution-node recovery handler finishes
+`done_with_concerns`, the system SHALL stop for a human with the handler's
+concerns as the reason and SHALL NOT measure the recovered scope again.
+enforced-by: tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[task], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[step], tests/executor/test_recovery.py::test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring[node], tests/executor/test_base_change.py::test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase
+origin: src/kraft/executor/dispatch.py §run_recovery -- for an ordinary task doubts are information for the next gate (`_ADVANCING`); for a repair they are a verdict on whether repair was possible at all (Kraft-s7c04.56, b5afe84c). A conflict handler is excluded: its `done_with_concerns` means "resolved, but upstream touches this item" and rides `CONFLICT_RESOLVED` into the span's reopened gates.
+
 ## REQ fix-loop-is-an-exec-node-control
 
 A fix loop SHALL be configured only on an execution node and SHALL name its
@@ -1226,3 +1234,23 @@ so that no chain id can shadow the library or an inspection route and none is
 reserved. The pre-1.0 flat `/templates/{id}` paths SHALL NOT remain as aliases.
 enforced-by: tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
 origin: src/kraft/api/routes/settings.py §get_template -- Ruling 204, before 1.0 so the break happens once.
+
+## REQ harness-api-lists-and-guards-profiles
+
+`GET /harnesses/profiles` SHALL list every `harnesses.yaml` profile with its
+provider, executable, enabled flag and defaults, and the library tasks and
+chains that select it; `GET /harnesses/providers` each provider package's
+capability surface. `PUT /harnesses/profiles/{id}` SHALL save one profile only
+through the loader's own parse, and SHALL refuse, writing nothing, a profile
+that would stop an agent task of a chain that resolves now from launching.
+Profiles and providers SHALL each live under their own prefix, so no profile id
+is reserved, and the flat `/harnesses/{id}` paths SHALL NOT remain.
+enforced-by: tests/api/test_harnesses.py::test_a_profile_may_take_the_name_of_a_harnesses_route[providers], tests/api/test_harnesses.py::test_the_flat_profile_paths_are_gone[get-/api/harnesses], tests/api/test_harnesses.py::test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it, tests/api/test_harnesses.py::test_providers_are_each_packages_capability_surface, tests/api/test_harnesses.py::test_a_save_the_loader_refuses_is_refused_and_writes_nothing[bad-value], tests/api/test_harnesses.py::test_a_save_that_stops_a_chain_launching_is_refused[disabled], tests/api/test_harnesses.py::test_a_provider_change_the_selecting_task_cannot_run_on_is_refused, tests/api/test_harnesses.py::test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save, tests/api/test_harnesses.py::test_a_profile_save_is_written_and_read_back
+origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.from_mapping` is `from_yaml`'s parse, and `agent.select_profile` is the rule a launch applies. Kraft-archr, Ruling 206.
+
+## REQ harness-cli-lists-profiles
+
+`kraft admin harnesses` SHALL print every harness profile with its provider and
+the library tasks that select it, and `kraft admin harnesses <id>` one profile's
+settings and users.
+enforced-by: tests/cli/test_admin_harnesses.py::test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it, tests/cli/test_admin_harnesses.py::test_one_profile_prints_its_settings_and_users
