@@ -11,10 +11,17 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   stood when the worktree was cut, not wherever the base moved to while the
   item ran -- Template Schema V1 had dropped the pre-MR rebase every earlier
   chain had. `draft_merge_request` now runs a `kraft.mr_rebase` builtin task
-  first, then opens the draft. **A chain you wrote or customized yourself
-  keeps the old behavior** -- add the same task to your own
-  `draft_merge_request` (or wherever you open a draft) by hand; `kraft admin
-  templates show default --resolved` prints the shipped shape to copy from.
+  first, then opens the draft.
+  - **This does not reach any existing install on its own.**
+    `$KRAFT_HOME/templates/` is seeded once, at first run, and never
+    overwritten -- `kraft admin update` replaces Kraft itself, not your
+    templates. So **every install running before this release**, not only a
+    hand-customized chain, keeps opening draft MRs on a stale base until you
+    add the task yourself: run `kraft admin doctor` after updating, which
+    lists this (and every other capability your templates are missing) with
+    the exact YAML to paste in. An item already running when you update keeps
+    the chain it was filed against; only an item filed after you update the
+    template gets the fix.
 
 - Fix: the Appearance settings page's palette, mode, density and board
   controls now show as disabled while your theme is still loading, instead of
