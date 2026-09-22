@@ -560,7 +560,11 @@ def test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed
     """`external-wait-has-configurable-timeout-and-polling`: "subject to
     applicable policy limits". Refused at filing, naming the task, never
     mid-run."""
-    with pytest.raises(PolicyError, match=r"ci\.main\.ci sets total_time_cap_minutes 120 > .*60"):
+    with pytest.raises(
+        PolicyError,
+        match=r"ci\.main\.ci: 'total_time_cap_minutes' 120 cannot exceed the administrator "
+        r"maximum 60",
+    ):
         _materialize(
             [forge_node("ci", "mr.ci", **_wait(minutes=120))],
             repo,

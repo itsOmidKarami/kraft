@@ -129,10 +129,11 @@ The fields are the ones `policy.yaml` explains (see [Configuration](configuratio
 the chain authored. `allowed_tools`, `deny_tools`, `token_budget` and
 `sandbox` only tighten: a list intersects with what each task already allows,
 a budget takes the lower value. The time caps `time_cap_minutes` and
-`total_time_cap_minutes` only tighten too, and are refused, naming both
-scopes, when they would raise a cap the chain already set: item-wide the work
-item's own cap, on a path that scope's (a wait task's total cap is its
-timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
+`total_time_cap_minutes` are the work item's own item-wide: raising one above
+the chain's, up to the administrator maximum, is how a person unsticks a
+capped item before a retry (Ruling 198). On a path they only tighten, and are
+refused, naming both scopes, above the cap that scope already has (a wait
+task's total cap is its timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
 `total_time_cap_minutes`. An operational value past its maximum, a path
 the chain does not have, or a key that is not a policy field is refused,
 naming the field. `set-policy` works on any item that has not ended: on a

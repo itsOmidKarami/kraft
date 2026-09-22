@@ -9,10 +9,11 @@ from pathlib import Path
 
 import psutil
 
-from kraft import events, store
+from kraft import caps, events, store
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters.subprocess import (
+    _kill_group,
     _progress_usage,
     _resolve_exit_file,
     _resolve_result_file,
@@ -326,7 +327,19 @@ async def _adopt(
     seen_usage: dict[str, _usage.Usage] = {}
     log_offset = 0
     next_progress = time.monotonic() + progress_s
+    # The cap it was launched under still binds it (Kraft-kx2fs): its scope's
+    # time left, from the timeline, with its own run counted from its start.
+    item = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    hit = db.read(lambda c: caps.for_session(c, item, row)) if item is not None else None
+    deadline = caps.monotonic() + hit.remaining_s if hit is not None else None
     while _pid_alive(pid):
+        if deadline is not None and caps.monotonic() >= deadline:
+            await _stop_at_cap(db, row, pid, hit)
+            return
         await asyncio.sleep(poll_s)
         if time.monotonic() < next_progress:
             continue
@@ -360,6 +373,26 @@ async def _adopt(
             bd_cwd=bd_cwd,
             on_approve=on_approve,
         )
+
+
+async def _stop_at_cap(db, row, pid: int, hit) -> None:
+    """Kill an adopted session whose time cap ran out -- its process group,
+    as `run_task` does; `_guarded_adopt`'s `finally` tears down a sandbox's
+    container -- and stop its item for a human under the cap's reason."""
+    await _kill_group(pid, 10.0)
+    session_id = row["id"]
+
+    def _capped(c):
+        store.session_exited(c, session_id, "capped_out")
+        events.append(
+            c,
+            row["work_item_id"],
+            caps.REACHED,
+            hit.payload(node_id=row["node_id"], task=row["hook_point"], session_id=session_id),
+        )
+        store.mark_needs_human(c, row["work_item_id"], row["node_id"], hit.reason)
+
+    await db.write(_capped)
 
 
 async def _guarded_adopt(

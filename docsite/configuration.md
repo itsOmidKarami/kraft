@@ -140,8 +140,8 @@ shipped chain would stop.
 | `rate_limit_retries` | How many times Kraft auto-relaunches a work item after a rejected API rate limit before stopping for a human. Counts attempts, not wall-clock time — a rate-limit wait can run for hours. |
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
-| `defaults` | Template Schema V1's inheritable starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, which a repository, work item, chain or execution node may move in either direction, bounded only by `maxima`; and the time caps `time_cap_minutes`/`total_time_cap_minutes`, which only ever tighten below them, so a default time cap is every scope's ceiling (one below the seeded approval wait's 7 days, 10080 minutes, refuses the default chain). All optional; unset means unbounded. |
-| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`, `time_cap_minutes` and `total_time_cap_minutes`. `total_time_cap_minutes` is also the longest any external wait may wait (a wait with no cap anywhere above it gets 90 minutes or this, whichever is shorter); it replaces `wait_timeout_minutes` (Ruling 196), which a file written before still loads as, with a deprecation warning. A safety field listed only here (`token_budget`, `allowed_tools`, the time caps) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+| `defaults` | Template Schema V1's inheritable starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, which a repository, work item, chain or execution node may move in either direction, bounded only by `maxima`; and the time caps `time_cap_minutes`/`total_time_cap_minutes`, which are defaults too, not ceilings (Ruling 198): any chain, node, step or task may set a longer cap, up to `maxima`, and the default applies where nothing set one. All optional; unset means unbounded. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools`, `time_cap_minutes` and `total_time_cap_minutes`. `total_time_cap_minutes` is also the longest any external wait may wait (a wait with no cap anywhere above it gets 90 minutes or this, whichever is shorter); it replaces `wait_timeout_minutes` (Ruling 196), which a file written before still loads as, with a deprecation warning. A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override; a time cap with no default starts at its maximum too, which any scope may lower. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
 
 **How V1 policy resolves and what it does.** A work item's policy is frozen
 when it is filed, layered broadest first: `defaults`/`maxima` here, the
@@ -159,11 +159,13 @@ loop's own `max_attempts`. Its safety values combine in no order: an
 `allowed_tools` intersects with what the scope already allows, a `deny_tools`
 adds to it, a `token_budget` takes the lower of the two, and a `sandbox` must
 match any already set. So they only ever tighten, and are never refused
-because the chain narrowed the same field first. A time cap there only
-tightens too (Ruling 194): an item-wide one binds the work item and every
-scope that set a looser one, a path's binds that scope, and one above the cap
-it would land on — item-wide the chain's, on a path that scope's own — is
-refused, naming both. `wait_timeout_minutes` is retired (Ruling 196): a write
+because the chain narrowed the same field first. Its item-wide time
+cap is the work item's own (Ruling 198): it replaces the chain's for every
+scope that set none, meets any scope's own that is longer, and may be raised
+above the chain's up to `maxima` -- so a person unsticks a capped item by
+raising it and retrying, with no config edit. A time cap on a path only
+tightens that scope, and one above the cap it would land on is refused,
+naming both. `wait_timeout_minutes` is retired (Ruling 196): a write
 refuses it, naming `total_time_cap_minutes`; an override stored before reads a
 path's value as that path's `total_time_cap_minutes` and an item-wide one as
 every wait task's, with a deprecation warning. It binds that item only, and it
@@ -198,6 +200,14 @@ failure: it spends no recovery or fix-loop attempt, no stuck escalation
 answers it, and analytics counts it as `time_capped`. A gate's own `timeout`
 stops the same way, naming the gate, and the gate stays open to approve or
 reject.
+
+A node's cap bounds everything that runs as that node: its tasks, recovery
+and fix loop, a gate's automated review, and the automatic stuck-escalation
+turn (a person's own escalation chat is not the node running, and is not
+capped). A session Kraft adopts after a restart keeps the deadline it
+launched under. An instance or repository default binds a task's own run
+where nothing more specific was set (Ruling 198); the work item, its nodes and
+its steps are bound only by a cap the chain or the item set, or by `maxima`.
 
 Both tool lists hold tool names, never permission rules: a bare tool (`Bash`,
 `Read`) or one exact MCP tool (`mcp__kraft__report_progress`). The permission

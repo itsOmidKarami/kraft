@@ -842,7 +842,7 @@ def _scoped(
     refusal prefixed by the scope's path."""
     try:
         policy = policy.layered(scopes)
-        return item.apply_to(policy, path) if item is not None else policy
+        return item.apply_to(policy, path, scopes) if item is not None else policy
     except PolicyError as exc:
         raise PolicyError(f"{path}: {exc}", field=exc.field, path=path) from exc
 
@@ -1163,12 +1163,13 @@ class ResolvedChain:
     def _check_caps(self, policy: InstancePolicy, item: WorkItemPolicy | None) -> None:
         """Refuse a time cap above its parent's (Rulings 194, 195), naming both
         scopes: "task build.main.impl sets time_cap_minutes 20 > its step
-        build.main's 10". `policy` is the work item's own, the chain's layer
-        already on it. A work item's override only tightens: its item-wide cap
-        may not exceed the chain's, nor a path's the cap that path already
-        has. A gate's own `timeout` sits under its total cap. Before the
-        engine's generic ratchet refusal (`apply_template_override`), which
-        cannot name the parent."""
+        build.main's 10". The parents are the chain's own scopes -- chain,
+        node, step, task. An instance or repository cap is a default, not a
+        parent (Ruling 198): any scope may set more, up to `maxima`, which
+        the engine checks (`apply_template_override`). A work item's
+        item-wide cap is the work item's own and may exceed the chain's, up to
+        `maxima`; its cap on a path only tightens that scope. A gate's own
+        `timeout` sits under the total cap its chain sets around it."""
         scopes = self.cap_scopes()
         kinds = {path: kind for path, kind, _ in scopes}
 
@@ -1181,8 +1182,9 @@ class ResolvedChain:
         def named(path: str) -> str:
             return f"{kinds[path]} {path}" if path else "the chain"
 
+        chain_own = self.chain.policy
         for name in CAP_FIELDS:
-            root = getattr(policy, name)
+            root = getattr(chain_own, name) if chain_own is not None else None
             authored: dict[str, int | None] = {"": root}
             for path, _, layers in scopes:
                 value = next(
@@ -1201,18 +1203,24 @@ class ResolvedChain:
                 authored[path] = value
             if item is None:
                 continue
-            for path in ("", *(p for p, _, _ in scopes)):
-                layers = item.layers_at(path) if path else item.layers_at("")[:1]
-                if not path:
-                    below = root
-                else:
-                    enclosing = [getattr(layer, name) for _, layer in layers[:-1]]
-                    below = min(
-                        (v for v in (authored[path], *enclosing) if v is not None), default=None
-                    )
-                own = getattr(layers[-1][1], name) if (not path or path in item.paths) else None
-                if own is not None and below is not None and own > below:
-                    what = "the work item" if not path else named(path)
+            ceiling = getattr(policy.maxima, name)
+            wide = getattr(item, name)
+            if wide is not None and ceiling is not None and wide > ceiling:
+                raise PolicyError(
+                    f"'{name}' {wide} cannot exceed the administrator maximum {ceiling}",
+                    field=name,
+                    path="",
+                )
+            for path, _, layers in scopes:
+                if path not in item.paths or getattr(item.paths[path], name) is None:
+                    continue
+                own = getattr(item.paths[path], name)
+                without = item.model_copy(
+                    update={"paths": {p: v for p, v in item.paths.items() if p != path}}
+                )
+                below = getattr(_scoped(path, policy, layers, without), name)
+                if below is not None and own > below:
+                    what = named(path)
                     raise PolicyError(
                         f"the work item's override sets {name} {own} on {what}, above the "
                         f"{below} it already has: a work item's override only tightens a cap "
@@ -1229,7 +1237,7 @@ class ResolvedChain:
                     for layer in reversed(node.scopes)
                     if (v := layer.total_time_cap_minutes) is not None
                 ),
-                policy.total_time_cap_minutes,
+                chain_own.total_time_cap_minutes if chain_own is not None else None,
             )
             if cap is not None and node.node.timeout > timedelta(minutes=cap):
                 raise PolicyError(
@@ -1460,7 +1468,7 @@ class MaterializedChain:
         base = self.repository_policies.get(repository, self.policy) if repository else self.policy
         path = scope.id if isinstance(scope, ResolvedNode) else scope.path
         policy = base.layered(scope.scopes)
-        return self.item_policy.apply_to(policy, path) if self.item_policy else policy
+        return self.item_policy.apply_to(policy, path, scope.scopes) if self.item_policy else policy
 
     def with_item_policy(self, raw: WorkItemPolicy | dict | None) -> MaterializedChain:
         """This snapshot with a work item's own override `raw` layered on, once

@@ -129,11 +129,24 @@ def test_no_scope_may_set_a_cap_past_the_administrator_maximum(field):
 
 
 @pytest.mark.parametrize("field", FIELDS)
-def test_a_chain_cap_above_the_instance_default_is_refused(field):
-    """The instance's default is the work item's cap, so the chain -- the
-    layer on top of it -- only lowers it."""
-    with pytest.raises(PolicyError, match=f"'{field}' 90 cannot exceed its parent scope's 60"):
-        _materialize(_nodes(chain={field: 90}), defaults={field: 60})
+@pytest.mark.parametrize("scope", ["chain", "node", "task"])
+def test_a_scope_may_raise_a_cap_above_the_default_up_to_the_maximum(field, scope):
+    """Ruling 198: an instance `defaults:` cap is a default, not a ceiling.
+    Any scope may set a longer one, up to `maxima:`; a default applies only
+    where nothing set one."""
+    chain = _materialize(_nodes(**{scope: {field: 240}}), defaults={field: 30}, maxima={field: 240})
+    by_path = {t.path: t for n in chain.chain.nodes for t in n.tasks()}
+
+    assert getattr(chain.policy_for(by_path["build.run.impl"]), field) == 240
+    # The gate beside it sets nothing: it keeps the default, or the chain's.
+    expected = 240 if scope == "chain" else 30
+    assert getattr(chain.policy_for(chain.chain.nodes[1]), field) == expected
+
+
+@pytest.mark.parametrize("field", FIELDS)
+def test_a_scope_past_the_maximum_is_refused_even_with_no_parent_cap(field):
+    with pytest.raises(PolicyError, match="administrator maximum 240"):
+        _materialize(_nodes(node={field: 300}), defaults={field: 30}, maxima={field: 240})
 
 
 @pytest.mark.parametrize("field", FIELDS)
@@ -160,15 +173,15 @@ def test_a_gate_timeout_past_its_total_cap_is_refused():
 @pytest.mark.parametrize(
     ("override", "where"),
     [
-        ({"{f}": 90}, "policy.{f}"),
         ({"paths": {"build.run": {"{f}": 20}}}, "policy.paths.build.run.{f}"),
         ({"paths": {"build": {"{f}": 5}, "build.run": {"{f}": 8}}}, "policy.paths.build.run.{f}"),
     ],
-    ids=["item-wide-over-the-chains", "path-over-its-own", "path-over-an-enclosing-override"],
+    ids=["path-over-its-own", "path-over-an-enclosing-override"],
 )
-def test_an_items_cap_above_the_one_it_lands_on_is_refused(field, override, where):
-    """The item override is tighten-only for a time cap (Ruling 194): unlike
-    an operational value (Ruling 188) it cannot raise what the chain set."""
+def test_an_items_path_cap_above_the_one_it_lands_on_is_refused(field, override, where):
+    """An item's override on a path only tightens that inner scope: inner
+    scopes keep their authored caps (Ruling 198). Only its item-wide cap --
+    the work item's own -- may be raised."""
     chain = _materialize(_nodes(chain={field: 60}, step={field: 10}))
     raw = json.loads(json.dumps(override).replace("{f}", field))
 
@@ -177,6 +190,39 @@ def test_an_items_cap_above_the_one_it_lands_on_is_refused(field, override, wher
 
     assert refused.value.field == where.format(f=field)
     assert "only tightens a cap" in str(refused.value)
+
+
+@pytest.mark.parametrize("field", FIELDS)
+def test_an_item_may_raise_its_own_cap_above_the_chains_up_to_the_maximum(field):
+    """Ruling 198: the item is the outer scope, so its own cap may exceed the
+    chain's, up to `maxima:`. A scope that set its own keeps it; one that set
+    none takes the item's; and above the maximum it is refused."""
+    chain = _materialize(_nodes(chain={field: 60}, step={field: 10}), maxima={field: 600})
+    raised = chain.with_item_policy({field: 120})
+    by_path = {t.path: t for n in raised.chain.nodes for t in n.tasks()}
+
+    assert getattr(raised.policy_for(raised.chain.nodes[0]), field) == 120
+    assert getattr(raised.policy_for(raised.chain.nodes[0].steps[0]), field) == 10
+    assert getattr(raised.policy_for(by_path["build.run.impl"]), field) == 10
+    with pytest.raises(PolicyError) as refused:
+        chain.with_item_policy({field: 601})
+    assert refused.value.field == f"policy.{field}"
+    assert "administrator maximum 600" in str(refused.value)
+
+
+@pytest.mark.parametrize("field", FIELDS)
+def test_a_retry_raising_a_cap_above_its_parents_is_refused_naming_both(field):
+    """Kraft-vs3fd: the retry door refuses through the same check as intake,
+    so the refusal names both scopes."""
+    from kraft.templates.retry import RetryOverrideError, validate_retry_override
+
+    chain = _materialize(_nodes(step={field: 10}))
+
+    with pytest.raises(RetryOverrideError) as refused:
+        validate_retry_override(chain, "build.run.impl", policy={field: 20})
+
+    assert refused.value.field == f"policy.{field}"
+    assert f"task build.run.impl sets {field} 20 > its step build.run's 10" in str(refused.value)
 
 
 @pytest.mark.parametrize("field", FIELDS)

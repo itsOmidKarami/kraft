@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from kraft import events, executor, store
+from kraft import caps, events, executor, store
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
@@ -432,6 +432,17 @@ async def dispatch(
     if original is not None:
         inv = inv._replace(**original)
     runtime = {k: getattr(inv, k) for k in _RUNTIME}
+    # An automatic turn is its node running, so the node's time cap bounds it
+    # (Kraft-8en38). A person's turn is a person talking: no cap.
+    time_cap = None
+    if auto:
+        hit = db.read(lambda c: caps.for_turn(c, row, row["current_node_id"]))
+        if hit is not None and hit.remaining_s <= 0:
+            await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+            return await _refused(
+                db, run_dirs, session_id=session_id, row=row, log=f"not started: {hit.reason}\n"
+            )
+        time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
     await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
     try:
         status = await _agent.run_agent_task(
@@ -459,6 +470,7 @@ async def dispatch(
             identify_as_worker=False,
             repo_entry=launch.repo_entry,
             thread=thread,
+            time_cap=time_cap,
         )
     except _agent.LaunchRefused as exc:
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")

@@ -565,9 +565,9 @@ class PolicyDefaultsInput(BaseModel):
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
-    #: The work item's own caps when no layer sets a tighter one. Under the
-    #: ratchet (Ruling 194) a default is every scope's ceiling, so one below a
-    #: seeded wait's own cap (the approval wait's 7 days) refuses that chain.
+    #: The caps a scope runs under when nothing in its chain or its work item
+    #: sets one. A default, not a ceiling (Ruling 198): any scope may set more,
+    #: up to `maxima`.
     time_cap_minutes: PositiveInt | None = None
     total_time_cap_minutes: PositiveInt | None = None
 
@@ -789,15 +789,29 @@ class WorkItemPolicy(TemplatePolicyOverride):
             )
         return data
 
-    def apply_to(self, policy: InstancePolicy, path: str) -> InstancePolicy:
+    def apply_to(
+        self, policy: InstancePolicy, path: str, scopes: Iterable[TaskPolicyOverride] = ()
+    ) -> InstancePolicy:
         """`policy` -- a scope's, every authored layer already applied -- with
         this item's layers at `path` on top (Ruling 188). Operational fields
         apply in order, last, so the item's value wins over the template's
         within the maxima. Safety fields combine in no order: an allowlist
         intersects, a deny list unions, a budget takes the minimum, and a
         sandbox locks -- so an item's safety value only ever tightens, and is
-        never refused because a narrower scope already narrowed it."""
-        for _, layer in self.layers_at(path):
+        never refused because a narrower scope already narrowed it.
+
+        A time cap is the item's own at its level (Ruling 198): item-wide it
+        is the work item's cap, replacing the one the instance, repository or
+        chain gave it for every scope in `scopes` -- the chain's layers over
+        `path` -- that set none, and meeting any scope's own; on a path it
+        only tightens."""
+        own = {n for n in CAP_FIELDS if any(getattr(s, n) is not None for s in scopes)}
+        for where, layer in self.layers_at(path):
+            if where == "policy":
+                for name in CAP_FIELDS:
+                    value = getattr(layer, name)
+                    if value is not None and name not in own:
+                        policy = dataclasses.replace(policy, **{name: value})
             policy = policy.apply_template_override(
                 layer.model_copy(update=dict.fromkeys(_ORDERLESS_SAFETY_FIELDS))
             )
@@ -968,16 +982,14 @@ class InstancePolicy:
             value = getattr(override, field_name)
             if value is None:
                 continue
-            admin_max, inherited = getattr(self.maxima, field_name), getattr(self, field_name)
+            admin_max = getattr(self.maxima, field_name)
+            # Bounded by `maxima` alone here, as an operational value is: a
+            # default is not a ceiling (Ruling 198). That a child's cap stays
+            # at or under its parent scope's is `ResolvedChain._check_caps`,
+            # which names both.
             if admin_max is not None and value > admin_max:
                 raise PolicyError(
                     f"'{field_name}' {value} cannot exceed the administrator maximum {admin_max}",
-                    field=field_name,
-                )
-            if inherited is not None and value > inherited:
-                raise PolicyError(
-                    f"'{field_name}' {value} cannot exceed its parent scope's {inherited}: "
-                    "a scope's time cap only ever lowers the one it sits in (Ruling 194)",
                     field=field_name,
                 )
             updates[field_name] = value

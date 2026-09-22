@@ -114,15 +114,17 @@ archive:
 #                      none gets 90 minutes or the maximum, whichever is
 #                      shorter.
 #                      Both caps are set on any scope, and each caps its own:
-#                      a child's cannot exceed its parent's, and a layer that
-#                      tries is refused when the item is filed. So a default
-#                      here is every scope's ceiling -- one below the seeded
-#                      approval wait's 7 days (10080) refuses the default
-#                      chain.
+#                      a child's cannot exceed its parent's (chain > node >
+#                      step > task), and a layer that tries is refused when
+#                      the item is filed. A default here is a default, not a
+#                      ceiling (Ruling 198): any scope may set more, up to the
+#                      maximum, and the default applies where nothing did.
 #
 # Last of all, a work item's own override (`kraft item create --policy`,
-# `kraft item set-policy`) binds that one item, within these maxima. A time cap
-# there only tightens: it cannot raise one the chain set.
+# `kraft item set-policy`) binds that one item, within these maxima. Its
+# item-wide time cap is the work item's own and may be raised above the
+# chain's, up to the maximum -- so a person unsticks a capped item by raising
+# it and retrying; one on a path only tightens that scope.
 #
 # Everything is commented out, because an uncommented value here is a real
 # ceiling. An unset maximum is no bound at all, which is what a fresh install

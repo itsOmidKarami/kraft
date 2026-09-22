@@ -9,8 +9,9 @@ when the item is filed). Two clocks:
   sessions' spans. So paused, gate, external-wait and rate-limited time never
   counts: no session of the scope is running then. A wait task's own session
   spans its parks, so wait tasks are left out of every running clock (a wait
-  has its own timeout), and so is a human's escalation chat (`escalation`),
-  which runs only while the item is stopped.
+  has its own timeout), and so is a human's escalation chat, which runs only
+  while the item is stopped. An automatic escalation turn is the node running
+  (Kraft-8en38): it counts as its node's.
 * `total_time_cap_minutes` -- wall clock from the scope's start, less only a
   manual pause (`pause_requested` until the next resume or retry).
 
@@ -40,6 +41,7 @@ and is outside the stuck set (Ruling 176).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import time
@@ -142,6 +144,15 @@ class _Timeline:
                 paused_at = None
         if paused_at is not None:
             self.pauses.append((paused_at, now))
+        # An automatic escalation turn is its node running; a person's is not.
+        auto_turns = {
+            json.loads(p).get("session_id")
+            for (p,) in conn.execute(
+                "SELECT payload FROM events WHERE work_item_id = ? AND type = 'escalation_message' "
+                "AND json_extract(payload, '$.auto') = 1",
+                (work_item_id,),
+            ).fetchall()
+        }
         skip = {
             t.path
             for n in snapshot.chain.nodes
@@ -150,21 +161,24 @@ class _Timeline:
         }
         self.sessions = [
             (
-                r["hook_point"],
+                r["node_id"] if r["hook_point"] == "escalation" else r["hook_point"],
                 r["created_at"],
                 _dt(r["started_at"] or r["created_at"]),
                 _dt(r["exited_at"]) if r["exited_at"] else now,
             )
             for r in conn.execute(
-                "SELECT hook_point, created_at, started_at, exited_at FROM worker_sessions "
-                "WHERE work_item_id = ? AND created_at >= ? AND hook_point != 'escalation'",
+                "SELECT id, node_id, hook_point, created_at, started_at, exited_at "
+                "FROM worker_sessions WHERE work_item_id = ? AND created_at >= ?",
                 (work_item_id, self.since),
             ).fetchall()
             if r["hook_point"] not in skip
+            and (r["hook_point"] != "escalation" or r["id"] in auto_turns)
         ]
 
     def node_since(self, node_id: str) -> str:
-        """Where `node_id`'s current pass began."""
+        """Where `node_id`'s current pass began. Any `gate_rejected` of the
+        item ends it: that holds while one node is active per item, which the
+        walk keeps."""
         ends = [
             at
             for kind, p, at in self.events
@@ -229,6 +243,27 @@ def _levels(snapshot, path: str) -> list[tuple[str, str]]:
     ]
 
 
+def _explicit(snapshot):
+    """`snapshot` as its enclosing scopes' clocks read it: an instance or
+    repository cap is a default, not a ceiling (Ruling 198), so the work item,
+    its nodes and steps are bound only by a cap the chain or the item's own
+    override set, or by `maxima`. The default binds a task's own run
+    (`at_launch`), where nothing more specific was set."""
+    chain_own = snapshot.chain.chain.policy
+    base = dataclasses.replace(
+        snapshot.policy,
+        **{
+            n: (
+                getattr(chain_own, n)
+                if chain_own is not None and getattr(chain_own, n) is not None
+                else getattr(snapshot.policy.maxima, n)
+            )
+            for n in CAP_FIELDS
+        },
+    )
+    return dataclasses.replace(snapshot, policy=base)
+
+
 def _root_policy(snapshot):
     item = snapshot.item_policy
     return item.apply_to(snapshot.policy, "") if item is not None else snapshot.policy
@@ -261,7 +296,7 @@ def _tightest(
     return best
 
 
-def at_launch(conn, row, task, *, now: str | None = None) -> Hit | None:
+def at_launch(conn, row, task, *, now: str | None = None, ran_s: float = 0.0) -> Hit | None:
     """The tightest cap over a launch of `task` (a `ResolvedTask`) for the
     item `row`, or None when none applies. `remaining_s <= 0`: spent, refuse
     it. The task's own cap counts from zero: this launch is its one run. (A
@@ -271,17 +306,59 @@ def at_launch(conn, row, task, *, now: str | None = None) -> Hit | None:
     if snapshot is None:
         return None
     line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
-    levels = _levels(snapshot, task.path)
-    best = _tightest(snapshot, line, levels)
-    parent = _root_policy(snapshot) if len(levels) == 1 else snapshot.policy_at(levels[-1][0])
-    own = snapshot.policy_at(task.path)
+    return _with_own_run(snapshot, line, task.path, ran_s)
+
+
+def _with_own_run(snapshot, line: _Timeline, path: str, ran_s: float) -> Hit | None:
+    """The tightest cap over the task at `path`, its own run having gone
+    `ran_s` so far."""
+    explicit = _explicit(snapshot)
+    levels = _levels(snapshot, path)
+    best = _tightest(explicit, line, levels)
+    parent = _root_policy(explicit) if len(levels) == 1 else explicit.policy_at(levels[-1][0])
+    own = snapshot.policy_at(path)
     for name in CAP_FIELDS:
         cap, above = getattr(own, name), getattr(parent, name)
         if cap is not None and (above is None or cap < above):
-            hit = Hit(task.path, name, cap, cap * 60.0)
+            hit = Hit(path, name, cap, cap * 60.0 - ran_s)
             if best is None or hit.remaining_s < best.remaining_s:
                 best = hit
     return best
+
+
+def for_turn(conn, row, node_id: str, *, now: str | None = None) -> Hit | None:
+    """The tightest cap over an automatic escalation turn of `node_id`: its
+    node's and the work item's (Kraft-8en38)."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None or not node_id:
+        return None
+    line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
+    return _tightest(_explicit(snapshot), line, _levels(snapshot, f"{node_id}.escalation"))
+
+
+def for_session(conn, row, session, *, now: str | None = None) -> Hit | None:
+    """The tightest cap over a session already running -- one adopted after a
+    restart (Kraft-kx2fs) -- its own run counted from its start. None for a
+    human's escalation chat, which no cap bounds."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        return None
+    at = _dt(now or store._now())
+    path = session["hook_point"]
+    if path == "escalation":
+        auto = conn.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'escalation_message' "
+            "AND json_extract(payload, '$.session_id') = ? AND json_extract(payload, '$.auto') = 1",
+            (row["id"], session["id"]),
+        ).fetchone()
+        return for_turn(conn, row, session["node_id"], now=now) if auto else None
+    try:
+        snapshot.policy_at(path)
+    except LookupError:
+        return None
+    line = _Timeline(conn, row["id"], snapshot, at)
+    ran = (at - _dt(session["started_at"] or session["created_at"])).total_seconds()
+    return _with_own_run(snapshot, line, path, ran)
 
 
 def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None:
@@ -295,7 +372,7 @@ def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None
     line = _Timeline(conn, row["id"], snapshot, _dt(now or store._now()))
     kinds = {p: k for p, k, _ in snapshot.chain.cap_scopes()}
     levels = [("", "item"), *([(node_id, kinds[node_id])] if node_id in kinds else [])]
-    best = _tightest(snapshot, line, levels, fields=("total_time_cap_minutes",))
+    best = _tightest(_explicit(snapshot), line, levels, fields=("total_time_cap_minutes",))
     node = next((n for n in snapshot.chain.nodes if n.id == gate), None)
     timeout = getattr(node.node, "timeout", None) if node is not None else None
     if timeout is not None:
@@ -377,13 +454,34 @@ async def tick(db, *, now: str | None = None) -> list[str]:
         if hit is None:
             continue
 
-        def _stop(c, r=row, h=hit):
-            events.append(c, r["id"], REACHED, h.payload(node_id=r["current_node_id"]))
-            store.mark_needs_human(c, r["id"], r["current_node_id"], h.reason)
-
-        await db.write(_stop)
-        stopped.append(row["id"])
+        if await db.write(lambda c, r=row, h=hit: stop_if_still_parked(c, r, h)):
+            stopped.append(row["id"])
     return stopped
+
+
+def stop_if_still_parked(conn, seen, hit: Hit) -> bool:
+    """Stop the item `seen` measured for `hit`, in the writer's transaction,
+    only if it is still where it was measured: the same status, the same
+    node, and the same pending gate (Kraft-l5fl2). A resume, an approval or
+    a retry landing between the measurement and this write is left alone."""
+    now = conn.execute(
+        "SELECT w.status, w.current_node_id, (SELECT CASE WHEN e.type = 'gate_requested' "
+        "THEN json_extract(e.payload, '$.gate') END FROM events e "
+        f"WHERE e.work_item_id = w.id AND e.type IN ('gate_requested', "
+        f"{', '.join('?' * len(_GATE_SETTLED))}) ORDER BY e.seq DESC LIMIT 1) AS pending_gate "
+        "FROM work_items w WHERE w.id = ?",
+        (*_GATE_SETTLED, seen["id"]),
+    ).fetchone()
+    if now is None or (now["status"], now["current_node_id"]) != (
+        seen["status"],
+        seen["current_node_id"],
+    ):
+        return False
+    if seen["status"] == "needs_human" and now["pending_gate"] != seen["pending_gate"]:
+        return False
+    events.append(conn, seen["id"], REACHED, hit.payload(node_id=seen["current_node_id"]))
+    store.mark_needs_human(conn, seen["id"], seen["current_node_id"], hit.reason)
+    return True
 
 
 async def poller(app) -> None:
