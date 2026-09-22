@@ -692,3 +692,22 @@ describe("the .board-row grid contract", () => {
     expect(trackCount).toBe(inFlow);
   });
 });
+
+describe("Board: a launch that ran on a fallback (Kraft-0a3h8)", () => {
+  it("marks the card with the timeline's sentence as its tooltip", () => {
+    const fallback = {
+      reason: "known_limited",
+      from: { harness: "claude", model: "opus", effort: null },
+      to: { harness: "codex", model: "gpt-5.6-sol", effort: null },
+      resets_at_iso: null,
+      session_id: "s2",
+    };
+    setItems(wi({ id: "w1", status: "active", fallback }), wi({ id: "w2", status: "active", title: "Plain" }));
+    renderBoard();
+    const [marked, plain] = within(group("Running")).getAllByTestId("board-card");
+    const marker = marked.querySelector(".board-row-fallback")!;
+    expect(marker.textContent).toBe("fallback");
+    expect(marker.getAttribute("title")).toBe("Skipped claude / opus (rate-limited); started on codex / gpt-5.6-sol.");
+    expect(plain.querySelector(".board-row-fallback")).toBeNull();
+  });
+});

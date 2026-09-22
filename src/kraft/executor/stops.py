@@ -175,11 +175,13 @@ def latest_rate_limit(db, work_item_id: str) -> dict | None:
     Same reverse-scan idiom as `kraft.executor.dispatch.last_measurement`/
     `kraft.executor.dispatch.needs_context_question`: the event was just
     written by `_subprocess.run_task` in the same session this verdict came
-    from, so the latest one is always the right one.
+    from, so the latest one is always the right one -- unless a fallback
+    list ran out after it (`launch_fallback_exhausted`), which names the
+    earliest reset among every candidate it found limited.
     """
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
-        if e["type"] == "rate_limit_hit":
+        if e["type"] in ("rate_limit_hit", "launch_fallback_exhausted"):
             return e["payload"]
     return None
 

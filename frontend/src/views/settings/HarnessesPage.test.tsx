@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
@@ -44,6 +44,10 @@ const HARNESSES: Harnesses = {
       used_by: ["tasks.quick"],
       chains: ["default"],
       problems: ["chain 'default' task 'q.main.t': profile 'fast' has no model for provider 'codex' (harness 'codex')"],
+      fallback: [
+        { harness: "codex", problems: [] },
+        { harness: "claude", profile: "strong", problems: ["chain 'default' task 'q.main.t': fallback entry 1 (profile 'fast''s list): no model"] },
+      ],
     },
   ],
 };
@@ -211,6 +215,17 @@ describe("Settings · harnesses", () => {
     const fast = screen.getByText("fast", { selector: ".capability-name" }).closest("li")!;
     expect(fast).toHaveTextContent("profile 'fast' has no model for provider 'codex'");
     expect(strong.querySelector(".form-error")).toBeNull();
+  });
+
+  it("shows an agent profile's fallback list with each entry's pairing problems (Kraft-0a3h8)", async () => {
+    renderAt("/settings/harnesses");
+    const list = await screen.findByRole("list", { name: "fast fallback" });
+    const [codex, strong] = within(list).getAllByRole("listitem");
+    expect(codex).toHaveTextContent("falls back to harness codex");
+    expect(codex.querySelector(".form-error")).toBeNull();
+    expect(strong).toHaveTextContent("falls back to harness claude, profile strong");
+    expect(strong.querySelector(".form-error")).toHaveTextContent("fallback entry 1 (profile 'fast''s list)");
+    expect(screen.queryByRole("list", { name: "strong fallback" })).toBeNull();
   });
 
   it("a harnesses.yaml that does not load says why", async () => {

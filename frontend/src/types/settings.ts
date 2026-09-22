@@ -111,6 +111,15 @@ export type HarnessProfileInput = Pick<HarnessProfile, "provider" | "enabled" | 
   executable?: string;
 };
 
+/** One entry of an agent profile's `fallback:` list, as Settings shows it. */
+export interface FallbackEntryView {
+  harness?: string;
+  profile?: string;
+  model?: string;
+  effort?: string;
+  problems: string[];
+}
+
 /** One `profiles:` entry of `harnesses.yaml` (Kraft-ps1ao): a model tier a
  *  task selects with `profile:`. Read-only here; edited in the file. */
 export interface AgentProfile {
@@ -122,6 +131,9 @@ export interface AgentProfile {
   chains: string[];
   /** Why a task pairing it would not launch, in the launch's words. */
   problems: string[];
+  /** Its default fallback list (Kraft-0a3h8), each entry with the pairing
+   *  problems of the tasks that take it. Optional: an older server sends none. */
+  fallback?: FallbackEntryView[];
 }
 
 export interface Harnesses {

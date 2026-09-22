@@ -136,6 +136,9 @@ export interface WorkItem {
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
+  /** The `launch_fallback` payload when the item's current or last launch ran
+   *  on a fallback candidate (Kraft-0a3h8); null otherwise. */
+  fallback?: Record<string, unknown> | null;
   /** Repo-relative path to the document the pending gate is a decision about,
    *  or null when the agent wrote nothing for a human to review. */
   gate_artifact?: string | null;

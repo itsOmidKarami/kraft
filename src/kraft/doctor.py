@@ -20,6 +20,7 @@ import yaml
 
 from kraft import auth, capabilities, client, config, harness
 from kraft.adapters import forge
+from kraft.executor import fallback
 from kraft.paths import (
     BUNDLED,
     RunDirs,
@@ -368,17 +369,27 @@ def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[d
     for chain in _resolved_chains(live):
         for node in chain.nodes:
             for t in node.tasks():
-                task = t.task
-                if not isinstance(task, AgentTask) or task.profile is None:
+                if not isinstance(t.task, AgentTask):
                     continue
-                harness_profile = table.profiles.get(task.harness)
-                if harness_profile is None or harness_profile.provider not in harnesses.valid:
-                    continue
-                why = table.pairing_problem(task.profile, harness_profile, harnesses.valid)
-                if why:
-                    refused.setdefault(task.profile, []).append(
-                        f"chain {chain.id!r} task {t.path!r}: {why}"
-                    )
+                # The task's own launch, then each fallback entry (Kraft-0a3h8).
+                entries, source = fallback.fallback_list(t.task, table)
+                launches = [(t.task, "")] + [
+                    (fallback.apply(t.task, e), f" fallback entry {n} ({source})")
+                    for n, e in enumerate(entries)
+                ]
+                for task, at in launches:
+                    harness_profile = table.profiles.get(task.harness)
+                    if (
+                        task.profile is None
+                        or harness_profile is None
+                        or harness_profile.provider not in harnesses.valid
+                    ):
+                        continue
+                    why = table.pairing_problem(task.profile, harness_profile, harnesses.valid)
+                    if why:
+                        refused.setdefault(task.profile, []).append(
+                            f"chain {chain.id!r} task {t.path!r}{at}: {why}"
+                        )
     return [_check(f"profile: {p}", False, "; ".join(why)) for p, why in sorted(refused.items())]
 
 

@@ -631,6 +631,7 @@ async def run_agent_task(
     repo_entry: RepoEntry | None = None,
     time_cap=None,
     files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
+    harness_id: str | None = None,  # the harnesses.yaml id; keys `rate_limit_hit`
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
@@ -744,4 +745,5 @@ async def run_agent_task(
         reader=reader,
         time_cap=time_cap,
         files=files,
+        rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
     )

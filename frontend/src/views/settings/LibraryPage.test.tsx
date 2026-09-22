@@ -57,6 +57,19 @@ describe("Settings · library", () => {
     expect(screen.getByRole("link", { name: "claude" })).toHaveAttribute("href", "/settings/harnesses?h=claude");
   });
 
+  it("a task with its own fallback list shows it, in order (Kraft-0a3h8)", async () => {
+    vi.spyOn(api, "getLibrary").mockResolvedValue({
+      ...LIBRARY,
+      components: [
+        component("tasks.implementer", {
+          definition: { kind: "agent", harness: "claude", fallback: [{ model: "sonnet" }, { harness: "codex", effort: "high" }] },
+        }),
+      ],
+    });
+    renderAt("/settings/library?c=tasks.implementer");
+    expect(await screen.findByTestId("task-fallback")).toHaveTextContent("falls back to sonnet, then codex / high");
+  });
+
   it("a component a lint issue names shows the issue", async () => {
     renderAt("/settings/library?c=tasks.lonely");
     expect(await screen.findByText(/lonely: selects skill 'kraft:nope'/)).toBeInTheDocument();

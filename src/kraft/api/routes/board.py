@@ -92,9 +92,20 @@ async def list_work_items(request: Request):
             "  WHERE type IN ('gate_requested', 'gate_approved', 'gate_rejected')"
             "  GROUP BY work_item_id)"
         ).fetchall()
-        return rows, cursor, gates
+        # The latest fallback switch and session start per item: the card
+        # marks an item whose last launch ran on a fallback (Kraft-0a3h8).
+        launches = c.execute(
+            "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events"
+            "  WHERE type IN ('launch_fallback', 'worker_session_started')"
+            "  GROUP BY work_item_id, type)"
+        ).fetchall()
+        return rows, cursor, gates, launches
 
-    rows, cursor, gate_rows = st.db.read(_read)
+    rows, cursor, gate_rows, launch_rows = st.db.read(_read)
+    latest: dict[tuple[str, str], dict] = {
+        (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
+    }
     pending = {
         g["work_item_id"]: json.loads(g["payload"])["gate"]
         for g in gate_rows
@@ -122,10 +133,21 @@ async def list_work_items(request: Request):
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
             "progress": _board_progress(st, r),
+            "fallback": _ran_on_fallback(latest, r["id"]),
         }
         for r in rows
     ]
     return {"items": items, "cursor": cursor}
+
+
+def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
+    """The `launch_fallback` payload whose launch is the item's latest session
+    start, or None: the item's current or last launch ran on a fallback."""
+    switch = latest.get((wid, "launch_fallback"))
+    started = latest.get((wid, "worker_session_started"))
+    if switch is None or started is None or switch.get("to") is None:
+        return None
+    return switch if started.get("session_id") == switch.get("session_id") else None
 
 
 def _board_progress(st, row) -> dict | None:

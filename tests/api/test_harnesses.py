@@ -276,3 +276,40 @@ def test_a_save_over_a_file_that_does_not_parse_is_refused(client, templates_dir
     assert response.status_code == 409
     assert "by hand" in response.json()["detail"]
     assert snapshot(templates_dir) == before
+
+
+def _chain_with_a_fallback(templates_dir):
+    """`fb`'s task runs on claude and falls back to codex at `effort: max`."""
+    _max_effort_chain(templates_dir)
+    task = {
+        "id": "t",
+        "kind": "agent",
+        "harness": "claude",
+        "prompt": "p",
+        "fallback": [{"harness": "codex", "effort": "max"}],
+    }
+    chain = {"id": "fb", "nodes": [{"id": "run", "kind": "exec", "tasks": [task]}]}
+    (templates_dir / "chains" / "fb.yaml").write_text(yaml.safe_dump(chain))
+
+
+@pytest.mark.api_client(edit_templates=_chain_with_a_fallback)
+def test_a_save_a_fallback_entry_cannot_pair_with_is_refused_naming_the_entry(
+    client, templates_dir
+):
+    before = snapshot(templates_dir)
+    response = client.put("/api/harnesses/profiles/codex", json={"provider": "codex"})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "chain 'fb' task 'run.main.t': fallback entry 0 (the task's list)" in detail
+    assert "takes no effort 'max'" in detail
+    assert snapshot(templates_dir) == before
+
+
+@pytest.mark.api_client(edit_templates=_chain_with_a_fallback)
+def test_disabling_a_fallback_harness_is_not_a_pairing_problem(client):
+    """A disabled entry is skipped at launch (`unavailable-candidate-falls-back-
+    to-next`), so turning a fallback harness off breaks no chain."""
+    response = client.put(
+        "/api/harnesses/profiles/codex", json={"provider": "fake", "enabled": False}
+    )
+    assert response.status_code == 200, response.text

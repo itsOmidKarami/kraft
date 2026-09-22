@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -126,6 +126,7 @@ CREATE TABLE events (
 );
 
 CREATE INDEX idx_events_work_item ON events(work_item_id, seq);
+CREATE INDEX idx_events_type ON events(type);
 
 CREATE TABLE worker_sessions (
   id             TEXT PRIMARY KEY,
@@ -767,6 +768,10 @@ FROM worker_sessions""",
         "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_write INTEGER",
         "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_read INTEGER",
     ],
+    # Every agent launch with a fallback list asks for the newest
+    # `rate_limit_hit` of a harness+model across all items
+    # (`executor.fallback.known_limited`), which must not scan the whole table.
+    37: ["CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

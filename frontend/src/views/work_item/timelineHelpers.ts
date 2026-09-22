@@ -7,8 +7,28 @@ import type { Finding, KraftEvent, WorkerSession } from "../../types";
  * of the old `EventTimeline.tsx` unchanged.
  */
 
+/** Kraft-0a3h8: the sentence a `launch_fallback` event reads as, on the
+ *  timeline and as the board card's "fallback" marker. `to` is the next
+ *  candidate; `session_id` is set when it actually launched. */
+export function fallbackSentence(p: Record<string, unknown>): string {
+  const who = (d: unknown): string => {
+    const x = d as { harness?: string; model?: string | null } | null;
+    return !x ? "" : x.model ? `${x.harness} / ${x.model}` : String(x.harness);
+  };
+  const from = who(p.from);
+  const until = typeof p.resets_at_iso === "string" ? ` until ${clock(p.resets_at_iso).slice(0, 5)}` : "";
+  const why =
+    p.reason === "unavailable" ? (typeof p.detail === "string" ? p.detail : "not available") : `rate-limited${until}`;
+  if (!p.to) return `Skipped ${from} (${why}); no fallback is left.`;
+  const to = who(p.to);
+  if (!p.session_id) return `Skipped ${from} (${why}); trying ${to}.`;
+  if (p.reason === "rate_limit_hit") return `Ran on ${to} instead of ${from}: ${from} is ${why}.`;
+  return `Skipped ${from} (${why}); started on ${to}.`;
+}
+
 export function detailOf(e: KraftEvent): string | null {
   const p = e.payload as Record<string, unknown>;
+  if (e.type === "launch_fallback") return fallbackSentence(p);
   // Kraft-qqz8: "3 of 6" beside the plan task's own title, which titleOf gives.
   if (e.type === "plan_progress" && typeof p.task === "number" && typeof p.total === "number") {
     return `${p.task} of ${p.total}`;

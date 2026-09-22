@@ -288,9 +288,91 @@ origin: src/kraft/executor/dispatch.py §_dispatch_task -- the node override's m
 
 ## REQ unavailable-selected-harness-needs-human
 
-When a selected harness profile is unavailable at runtime, the task SHALL stop
-for human action and SHALL NOT silently select a different harness.
+When a selected harness profile is unavailable at runtime and the task declares
+no fallback list, the task SHALL stop for human action and SHALL NOT select a
+different harness.
 enforced-by: tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[absent], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[disabled], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unknown-provider], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[no-file], tests/executor/test_dispatch.py::test_an_unavailable_selected_harness_stops_for_a_human[unapplied-default], tests/skills/test_gate_review.py::test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing
+
+## REQ rate-limited-launch-falls-back-to-next-candidate
+
+When an agent task with a fallback list is rate-limited and a later candidate
+remains, the system SHALL relaunch the task on the next available candidate in
+the same dispatch, as a new session with the task's original instruction, the
+node's `extra_prompt`, and a note that an earlier rate-limited attempt may have
+left partial work. A fallback list SHALL be the task's own when it sets one, else its agent
+profile's, and an entry's profile's own list SHALL NOT be followed. A fallback
+entry SHALL keep from the task's own launch what it omits, its route replacing
+a profile route whole, and SHALL NOT carry the work item's or the node's model and effort
+overrides, nor an escalation model. A switch SHALL spend no `rate_limit_retries`
+and SHALL pass the same pre-launch budget check as any launch. When no
+candidate remains, the task SHALL park as rate-limited until the earliest reset
+among the candidates found limited.
+enforced-by: tests/executor/test_launch_fallback.py::test_a_rate_limited_launch_falls_back_in_the_same_dispatch, tests/executor/test_launch_fallback.py::test_the_fallback_is_told_about_the_limited_attempt_only_after_one_ran, tests/executor/test_launch_fallback.py::test_a_switch_bumps_no_rate_limit_counter, tests/executor/test_launch_fallback.py::test_all_candidates_limited_parks_until_the_earliest_reset, tests/executor/test_launch_fallback.py::test_a_fallback_launch_is_refused_by_the_budget, tests/executor/test_launch_fallback.py::test_overrides_apply_to_the_primary_only_and_extra_prompt_is_carried[item-override], tests/executor/test_launch_fallback.py::test_overrides_apply_to_the_primary_only_and_extra_prompt_is_carried[escalation], tests/templates/test_fallback_entries.py::test_an_entry_keeps_what_it_omits_from_the_task[harness], tests/templates/test_fallback_entries.py::test_an_entry_keeps_what_it_omits_from_the_task[model], tests/templates/test_fallback_entries.py::test_an_entry_keeps_what_it_omits_from_the_task[effort], tests/templates/test_fallback_entries.py::test_an_entry_keeps_what_it_omits_from_the_task[harness-and-model], tests/executor/test_launch_fallback_profiles.py::test_a_profiles_own_list_moves_a_limited_launch_to_another_tier, tests/executor/test_launch_fallback_profiles.py::test_a_model_entry_replaces_a_profile_route_whole, tests/templates/test_fallback_entries.py::test_each_entry_shape_against_both_primary_routes[harness], tests/templates/test_fallback_entries.py::test_each_entry_shape_against_both_primary_routes[profile], tests/templates/test_fallback_entries.py::test_each_entry_shape_against_both_primary_routes[model], tests/templates/test_fallback_entries.py::test_a_profile_task_takes_its_profiles_list_and_lists_do_not_chain, tests/templates/test_fallback_entries.py::test_a_tasks_own_list_replaces_its_profiles[replaces]
+origin: src/kraft/executor/dispatch.py §dispatch_node -- the candidate loop over `executor/fallback.py` §candidates, Kraft-0a3h8; the park reads `launch_fallback_exhausted` in `executor/stops.py` §latest_rate_limit.
+
+## REQ known-limited-candidate-is-skipped-until-reset
+
+A launch of a task with a fallback list SHALL skip a candidate whose harness
+and resolved model were rate-limited, on any work item, with a reset still
+ahead, and SHALL use it again once that reset has passed. A rate-limit event
+recorded without a harness SHALL never match.
+enforced-by: tests/executor/test_launch_fallback.py::test_a_limit_hit_on_one_item_is_skipped_by_another_until_reset, tests/executor/test_launch_fallback.py::test_a_hit_that_does_not_match_is_not_remembered[pre-change-event], tests/executor/test_launch_fallback.py::test_a_hit_that_does_not_match_is_not_remembered[reset-passed], tests/executor/test_launch_fallback.py::test_a_hit_that_does_not_match_is_not_remembered[other-harness], tests/executor/test_launch_fallback.py::test_a_hit_that_does_not_match_is_not_remembered[other-model], tests/executor/test_launch_fallback.py::test_the_relaunch_starts_from_the_top_once_the_first_choice_is_back, tests/executor/test_launch_fallback.py::test_the_known_limited_lookup_uses_the_events_type_index
+origin: src/kraft/executor/fallback.py §known_limited -- the newest `rate_limit_hit` for the harness id and model (written by `adapters/subprocess.py` §run_task), looked up through `idx_events_type` (`db.py` migration 37).
+
+## REQ fallback-is-opt-in
+
+An agent task with no fallback list (none of its own and none on its agent
+profile), or an empty one of its own, SHALL launch, park on a
+rate limit and stop on an unavailable harness exactly as it would without the
+feature, and SHALL NOT consult rate-limit memory. No shipped task or agent
+profile declares a fallback list.
+enforced-by: tests/executor/test_launch_fallback.py::test_a_task_without_a_list_never_consults_memory, tests/executor/test_launch_fallback.py::test_a_task_without_a_list_parks_on_a_limit_as_before, tests/templates/test_fallback_entries.py::test_no_list_is_the_task_alone[unset], tests/templates/test_fallback_entries.py::test_no_list_is_the_task_alone[empty], tests/executor/test_launch_fallback_profiles.py::test_a_tasks_empty_list_overrides_its_profiles, tests/templates/test_fallback_entries.py::test_a_tasks_own_list_replaces_its_profiles[disables]
+origin: src/kraft/executor/dispatch.py §dispatch_node -- `listed` gates every fallback behaviour (Kraft-0a3h8).
+
+## REQ unavailable-candidate-falls-back-to-next
+
+For an agent task with a fallback list, a candidate whose harness is absent,
+disabled or carries a default Kraft cannot apply, whose agent profile is
+missing or names no model for its provider, or whose executable is not
+on `PATH` outside a sandbox, SHALL be skipped for the next candidate, rechecked
+at every launch. When every candidate is unavailable and none was rate-limited,
+the task SHALL stop for human action with a reason naming each candidate and
+why. A disabled fallback harness SHALL NOT count as a pairing problem.
+enforced-by: tests/executor/test_launch_fallback.py::test_an_unavailable_candidate_falls_back_to_the_next[absent], tests/executor/test_launch_fallback.py::test_an_unavailable_candidate_falls_back_to_the_next[disabled], tests/executor/test_launch_fallback.py::test_an_unavailable_candidate_falls_back_to_the_next[unapplied-default], tests/executor/test_launch_fallback.py::test_an_unavailable_candidate_falls_back_to_the_next[not-on-path], tests/executor/test_launch_fallback.py::test_every_candidate_unavailable_stops_for_a_human_naming_each, tests/executor/test_launch_fallback.py::test_a_profile_on_an_unknown_provider_leaves_no_candidate, tests/executor/test_launch_fallback.py::test_an_unavailable_skip_adds_no_rate_limit_note, tests/api/test_harnesses.py::test_disabling_a_fallback_harness_is_not_a_pairing_problem, tests/executor/test_launch_fallback_profiles.py::test_an_entry_profile_with_no_model_for_the_provider_is_skipped, tests/executor/test_launch_fallback.py::test_a_sandboxed_launch_skips_the_host_path_check
+origin: src/kraft/executor/dispatch.py §dispatch_node -- `HarnessUnavailable` and `executor/fallback.py` §require_on_path skip a candidate when the task has a list (Kraft-0a3h8).
+
+## REQ fallback-never-escapes-allowed-harnesses
+
+Materialization SHALL refuse an agent task any of whose own fallback entries
+names a harness outside the task's `allowed_harnesses`, and a launch SHALL
+skip, as unavailable, an entry of its agent profile's list that does.
+enforced-by: tests/templates/test_fallback_entries.py::test_a_fallback_harness_outside_allowed_harnesses_fails_materialization, tests/executor/test_launch_fallback_profiles.py::test_a_profile_list_entry_outside_allowed_harnesses_never_runs
+origin: src/kraft/templates/models.py §MaterializedChain -- next to the task's own `allowed_harnesses` check (Kraft-0a3h8).
+
+## REQ fallback-entry-is-validated
+
+A fallback entry SHALL be refused at load when it names none of harness,
+profile, model and effort, selects a profile and a model or effort together,
+or carries an unknown key, and an agent profile's list SHALL be refused when an
+entry names a profile that is not defined; a gate's review task SHALL NOT declare its own
+fallback list. A harness save SHALL be refused, and `kraft admin doctor` SHALL fail, when a
+fallback entry of a chain's task (from its own list or its profile's) cannot
+pair with its harness, naming the task, the list's source and the entry's
+index; Settings → Harnesses SHALL show a profile's list with each entry's
+problems.
+enforced-by: tests/templates/test_fallback_entries.py::test_a_malformed_entry_is_refused_at_load[empty], tests/templates/test_fallback_entries.py::test_a_malformed_entry_is_refused_at_load[unknown-key], tests/templates/test_fallback_entries.py::test_a_malformed_entry_is_refused_at_load[not-a-string], tests/templates/test_fallback_entries.py::test_an_empty_entry_says_why, tests/templates/test_fallback_entries.py::test_a_gate_review_task_refuses_a_fallback_list, tests/api/test_harnesses.py::test_a_save_a_fallback_entry_cannot_pair_with_is_refused_naming_the_entry, tests/templates/test_fallback_entries.py::test_an_entry_with_a_profile_and_a_model_is_refused, tests/templates/test_fallback_entries.py::test_a_bad_profile_list_is_refused_when_harnesses_yaml_loads[unknown-profile], tests/templates/test_fallback_entries.py::test_a_bad_profile_list_is_refused_when_harnesses_yaml_loads[both-routes], tests/templates/test_fallback_entries.py::test_a_bad_profile_list_is_refused_when_harnesses_yaml_loads[unknown-key], tests/templates/test_fallback_entries.py::test_a_bad_profile_list_is_refused_when_harnesses_yaml_loads[empty], tests/test_fallback_profiles.py::test_a_profiles_list_is_shown_with_each_entrys_problems, tests/test_fallback_profiles.py::test_a_save_that_breaks_a_profile_entrys_pairing_is_refused, tests/test_fallback_profiles.py::test_doctor_fails_a_fallback_entry_the_launch_would_refuse[profile-list], tests/test_fallback_profiles.py::test_doctor_fails_a_fallback_entry_the_launch_would_refuse[task-list], tests/test_fallback_profiles.py::test_doctor_is_quiet_when_every_entry_pairs, frontend/src/views/settings/HarnessesPage.test.tsx::shows an agent profile's fallback list with each entry's pairing problems (Kraft-0a3h8)
+origin: src/kraft/templates/models.py §FallbackEntry, and `api/routes/harnesses.py` §_problems for the pairing (Kraft-0a3h8).
+
+## REQ every-fallback-switch-is-logged
+
+Every skip or switch between candidates SHALL write exactly one
+`launch_fallback` event naming the task, what it moved from and to, the reason
+(`rate_limit_hit`, `known_limited` or `unavailable`), the reset when known and
+whether an override was not carried, and one server log line. The item timeline
+SHALL render it as one sentence, and the board card of an item whose latest
+launch ran on a fallback SHALL carry a marker with that sentence.
+enforced-by: tests/executor/test_launch_fallback.py::test_a_rate_limited_launch_falls_back_in_the_same_dispatch, tests/executor/test_launch_fallback.py::test_all_candidates_limited_parks_until_the_earliest_reset, tests/executor/test_launch_fallback.py::test_every_candidate_unavailable_stops_for_a_human_naming_each, tests/api/test_board.py::test_a_card_marks_an_item_whose_last_launch_ran_on_a_fallback, frontend/src/views/work_item/timelineHelpers.test.ts::reads a switch after a limited launch, frontend/src/views/work_item/timelineHelpers.test.ts::reads a skip from memory, frontend/src/views/work_item/timelineHelpers.test.ts::reads an unavailable harness and a list that ran out, frontend/src/views/Board.test.tsx::marks the card with the timeline's sentence as its tooltip
+origin: src/kraft/executor/fallback.py §Attempts -- one event per candidate left behind, written once the next is known; `api/routes/board.py` §_ran_on_fallback for the card (Kraft-0a3h8).
 
 ## REQ agent-roles-use-ordinary-agent-task-runtime-configuration
 

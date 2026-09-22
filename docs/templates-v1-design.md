@@ -107,6 +107,19 @@ above the repository's `models:` and the harness `defaults:`. The task's
 `profile:` name is chain content, frozen at intake; the profile's body is
 installation configuration, read live at each launch.
 
+A profile may carry a default `fallback:` list, which a task's own list
+replaces (Kraft-0a3h8). None ships; the recommended start is:
+
+```yaml
+profiles:
+  deep:
+    effort: high
+    model: { claude: opus, codex: gpt-5.6-sol }
+    fallback:
+      - { harness: codex }            # same tier, other harness
+      - { profile: strong }           # other tier; strong's own list is not followed
+```
+
 ## Repositories, workspaces, and areas
 
 `repos` lists the real Git repositories, one entry each, found by `path`; an
@@ -432,6 +445,26 @@ nodes:
 The `produces` contract is Kraft-owned. An agent task may select one skill as a
 method, but the contract is supplied before the skill and steering and cannot
 be removed by either.
+
+An agent task may declare a `fallback:` list, tried in order when its launch
+is rate-limited or its harness is unavailable. No shipped task declares one:
+
+```yaml
+  implementer:
+    kind: agent
+    harness: claude
+    model: opus
+    effort: high
+    fallback:
+      - { model: sonnet }                          # keeps harness and effort
+      - { harness: codex, model: gpt-5.6-terra }
+```
+
+An entry takes an optional `harness:` plus one route, `profile:` or
+`model:`/`effort:`. It keeps what it omits from the task's own launch, and
+every entry's harness must be in the task's `allowed_harnesses`. The work item's and the
+node's overrides pick the task's own launch only. Every skip or switch writes
+one `launch_fallback` event.
 
 The provider or recipe behind `automated_review` owns webhooks, forge API
 calls, CLI probes, and other transport details. The task reports only ordinary

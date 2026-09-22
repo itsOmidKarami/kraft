@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { buildItem } from "../../../sweep/fixtures";
 import { streamRows } from "./RightPane/Events";
-import { detailOf, findingsOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
+import { detailOf, fallbackSentence, findingsOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
 import type { KraftEvent, WorkerSession } from "../../types";
 
 const ev = (over: Partial<KraftEvent>): KraftEvent =>
@@ -253,5 +253,40 @@ describe("timelineHelpers: findingsOf and an overridden severity", () => {
       measured([{ severity: "minor", message: "m", file: null, line: null, source_plugin: "p" }]),
     );
     expect(f.reported_severity).toBeUndefined();
+  });
+});
+
+describe("timelineHelpers: launch_fallback (Kraft-0a3h8)", () => {
+  const at = "2026-09-22T13:40:00+00:00";
+  const hhmm = new Date(at).toTimeString().slice(0, 5);
+  const opus = { harness: "claude", model: "opus", effort: "high" };
+  const sol = { harness: "codex", model: "gpt-5.6-sol", effort: "high" };
+  const sentence = (payload: Record<string, unknown>) => detailOf(ev({ type: "launch_fallback", payload }));
+
+  it("reads a switch after a limited launch", () => {
+    expect(sentence({ reason: "rate_limit_hit", from: opus, to: sol, resets_at_iso: at, session_id: "s2" })).toBe(
+      `Ran on codex / gpt-5.6-sol instead of claude / opus: claude / opus is rate-limited until ${hhmm}.`,
+    );
+  });
+
+  it("reads a skip from memory", () => {
+    expect(sentence({ reason: "known_limited", from: opus, to: sol, resets_at_iso: at, session_id: "s2" })).toBe(
+      `Skipped claude / opus (rate-limited until ${hhmm}); started on codex / gpt-5.6-sol.`,
+    );
+  });
+
+  it("reads an unavailable harness and a list that ran out", () => {
+    const codex = { harness: "codex", model: null, effort: null };
+    expect(sentence({ reason: "unavailable", detail: "harness disabled", from: codex, to: null, session_id: null })).toBe(
+      "Skipped codex (harness disabled); no fallback is left.",
+    );
+    expect(sentence({ reason: "unavailable", detail: "harness disabled", from: codex, to: opus, session_id: null })).toBe(
+      "Skipped codex (harness disabled); trying claude / opus.",
+    );
+  });
+
+  it("is the same sentence the board marker shows", () => {
+    const p = { reason: "rate_limit_hit", from: opus, to: sol, resets_at_iso: at, session_id: "s2" };
+    expect(fallbackSentence(p)).toBe(sentence(p));
   });
 });

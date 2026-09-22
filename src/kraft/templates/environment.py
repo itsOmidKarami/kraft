@@ -355,6 +355,37 @@ class HarnessProfile:
         return self.enabled
 
 
+class FallbackEntry(BaseModel):
+    """One entry of a `fallback:` list, on an agent task or an agent profile:
+    where a launch goes next when the one before it is rate-limited or
+    unavailable (`rate-limited-launch-falls-back-to-next-candidate`). An
+    optional `harness:` plus one route, the same either-or a task obeys:
+    `profile:`, or `model:` and/or `effort:`. Whatever it omits is kept from
+    the task's own launch; the item's and the node's overrides are not
+    (`executor.fallback`)."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    harness: Identifier | None = None
+    profile: Identifier | None = None
+    model: StrictStr | None = None
+    effort: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def _one_route(self) -> FallbackEntry:
+        if self.profile is not None and (self.model is not None or self.effort is not None):
+            raise ValueError(
+                f"a fallback entry selects profile {self.profile!r} and sets model/effort "
+                "itself; an entry takes its model from one or the other"
+            )
+        if all(v is None for v in (self.harness, self.profile, self.model, self.effort)):
+            raise ValueError(
+                "a fallback entry names a harness, a profile, a model or an effort: an "
+                "empty one would relaunch the same thing"
+            )
+        return self
+
+
 class AgentProfileInput(BaseModel):
     """One `harnesses.yaml` `profiles:` entry: a named model tier an agent task
     selects with `profile:` (Kraft-ps1ao). `model` is keyed by *provider* id,
@@ -364,6 +395,10 @@ class AgentProfileInput(BaseModel):
 
     model: dict[Identifier, StrictStr] = Field(min_length=1)
     effort: StrictStr | None = None
+    #: The tier's default fallback list, for a task selecting it that sets no
+    #: `fallback:` of its own (Kraft-0a3h8). An entry's profile's own list is
+    #: never followed.
+    fallback: list[FallbackEntry] | None = None
 
 
 @dataclass(frozen=True)
@@ -375,6 +410,7 @@ class AgentProfile:
     id: str
     model: dict[str, str]
     effort: str | None
+    fallback: tuple[FallbackEntry, ...] = ()
 
     @classmethod
     def from_input(
@@ -399,7 +435,9 @@ class AgentProfile:
                 f"profiles.{id}: effort {effort!r} is accepted by none of its providers "
                 f"{sorted(parsed.model)}"
             )
-        return cls(id=id, model=dict(parsed.model), effort=effort)
+        return cls(
+            id=id, model=dict(parsed.model), effort=effort, fallback=tuple(parsed.fallback or ())
+        )
 
 
 # ── `harnesses.yaml`, the V1 file these types are read from ──────────────────
@@ -511,6 +549,13 @@ class HarnessProfileTable:
                 ) from exc
             except TemplateEnvironmentError as exc:
                 raise TemplateEnvironmentError(f"{path}: {exc}") from exc
+        for p in agent_profiles.values():
+            for n, entry in enumerate(p.fallback):
+                if entry.profile is not None and entry.profile not in agent_profiles:
+                    raise TemplateEnvironmentError(
+                        f"{path}: profiles.{p.id}.fallback[{n}]: profile {entry.profile!r} "
+                        f"is not defined; known are {sorted(agent_profiles)}"
+                    )
         return cls(profiles=profiles, agent_profiles=agent_profiles)
 
     def pairing_problem(

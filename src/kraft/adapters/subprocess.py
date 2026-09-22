@@ -472,6 +472,10 @@ async def run_task(
     #: session's own: an escalation thread's, shared by its turns
     #: (`escalate.thread_files`, Kraft-s7c04.54). The log stays per session.
     files: str | None = None,
+    #: `{"harness": <harness id>, "model": <resolved model or None>}`, which a
+    #: `rate_limit_hit` carries so a later launch can skip that pair until its
+    #: reset (`executor.fallback.known_limited`). Only `run_agent_task` sets it.
+    rate_limit_key: dict | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -724,7 +728,10 @@ async def run_task(
         status = "rate_limited"
         await db.write(
             lambda c, rl=rate_limit: events.append(
-                c, work_item_id, "rate_limit_hit", {**rl, "node_id": node_id}
+                c,
+                work_item_id,
+                "rate_limit_hit",
+                {**rl, **(rate_limit_key or {}), "node_id": node_id},
             )
         )
     elif post_resolve is not None:

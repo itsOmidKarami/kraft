@@ -233,6 +233,7 @@ def test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem(tmp_path, monk
         "used_by": ["tasks.claude_fast"],
         "chains": ["c"],
         "problems": [],
+        "fallback": [],
     }
     assert listed["deep"]["used_by"] == ["tasks.codex_deep"]
     assert listed["deep"]["problems"] == []
