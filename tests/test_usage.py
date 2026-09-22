@@ -473,3 +473,64 @@ def test_the_fallback_does_not_invent_usage_from_an_empty_model_usage():
     """A task that reports nothing is still None, not a zero-token run."""
     assert usage.from_envelope({"usage": {}, "modelUsage": {}}) is None
     assert usage.from_envelope({"usage": {}, "modelUsage": {"m": "not a dict"}}) is None
+
+
+def _result(sid, cost, usage_out, total_out, *, usage_in=10, total_in=None):
+    """A claude `result` line: `usage` is this invocation's, `modelUsage` and
+    `total_cost_usd` are cumulative over the CLI session (measured on real
+    multi-invocation logs, Kraft-s7c04.60)."""
+    line = {
+        "type": "result",
+        "session_id": sid,
+        "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
+        "modelUsage": {
+            "claude-sonnet-5": {
+                "inputTokens": usage_in if total_in is None else total_in,
+                "outputTokens": total_out,
+            }
+        },
+    }
+    if cost is not None:
+        line["total_cost_usd"] = cost
+    return json.dumps(line)
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        # Session 56c92568: two invocations, one CLI session. The cost is
+        # already cumulative, so it is the last one's -- summing would say
+        # $1.019 -- while the tokens are both invocations'.
+        (
+            [
+                _result("a", 0.316, 2717, 2717),
+                _result("a", 0.703, 8694, 11411, total_in=20),
+            ],
+            Usage(20, 11411, 0.703, "claude-sonnet-5"),
+        ),
+        # Two CLI sessions in one log: nothing is shared, so both add up.
+        (
+            [_result("a", 0.25, 5, 5), _result("b", 0.5, 7, 7)],
+            Usage(20, 12, 0.75, "claude-sonnet-5"),
+        ),
+        # One of them reported no cost: the total is unknown, never the
+        # other one's figure passed off as the whole.
+        (
+            [_result("a", 0.25, 5, 5), _result("b", None, 7, 7)],
+            Usage(20, 12, None, "claude-sonnet-5"),
+        ),
+        # No cumulative `modelUsage` to diff: each invocation's own block.
+        (
+            [
+                json.dumps({"usage": {"input_tokens": 1, "output_tokens": 2}}),
+                json.dumps({"usage": {"input_tokens": 3, "output_tokens": 4}}),
+            ],
+            Usage(4, 6),
+        ),
+    ],
+    ids=["one-cli-session", "two-cli-sessions", "one-cost-unknown", "no-model-usage"],
+)
+def test_a_log_with_several_result_envelopes_counts_every_invocation(tmp_path, lines, expected):
+    log = tmp_path / "s.log"
+    log.write_text("\n".join(lines) + "\n" + json.dumps({"type": "system"}) + "\n")
+    assert usage.read(log, tmp_path / "none.json", "claude-stream-json") == expected

@@ -232,15 +232,61 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
     )
 
 
+def _combine(envelopes: list[dict]) -> dict:
+    """One envelope standing for every agent invocation a log holds.
+
+    A log can carry several result envelopes -- one per invocation, when the
+    agent is re-launched into the same log (Kraft-s7c04.60). Measured against
+    every such log on the owner's machine: within one CLI `session_id`,
+    `total_cost_usd` and `modelUsage` are *cumulative* across invocations
+    (5.54 -> 6.03 -> 6.08 -> 6.12 over four) while `usage` is that invocation
+    alone. So taking the last envelope kept the cost but dropped every earlier
+    invocation's tokens, and summing costs would double-count them.
+
+    Per CLI session: the first envelope read as before, plus what `modelUsage`
+    grew by after it; cost is the last envelope's. Distinct CLI sessions in one
+    log are summed. A group whose last envelope reports no cost makes the whole
+    cost unknown, never zero.
+    """
+    groups: dict[object, list[dict]] = {}
+    for envelope in envelopes:
+        groups.setdefault(envelope.get("session_id"), []).append(envelope)
+    tokens_in = tokens_out = 0
+    cost: float | None = 0.0
+    for group in groups.values():
+        first, last = group[0], group[-1]
+        u = from_envelope(first) or Usage()
+        tokens_in, tokens_out = tokens_in + u.tokens_in, tokens_out + u.tokens_out
+        grew_from = _from_model_usage(first.get("modelUsage"), None)
+        grew_to = _from_model_usage(last.get("modelUsage"), None)
+        if grew_from is not None and grew_to is not None:
+            tokens_in += grew_to.tokens_in - grew_from.tokens_in
+            tokens_out += grew_to.tokens_out - grew_from.tokens_out
+        else:
+            # No cumulative counts to diff: each later invocation's own block.
+            for envelope in group[1:]:
+                later = from_envelope(envelope) or Usage()
+                tokens_in, tokens_out = tokens_in + later.tokens_in, tokens_out + later.tokens_out
+        last_cost = (from_envelope(last) or Usage()).cost_usd
+        cost = None if cost is None or last_cost is None else cost + last_cost
+    combined: dict = {
+        "usage": {"input_tokens": tokens_in, "output_tokens": tokens_out},
+        "model": _model_of(envelopes[-1]),
+    }
+    if cost is not None:
+        combined["total_cost_usd"] = cost
+    return combined
+
+
 def read_envelope(log_path: Path) -> dict | None:
-    """The agent's final result envelope: the last JSON object that carries a
-    `usage` block, searching from the end of the log.
+    """The agent's result envelope: every JSON object that carries a `usage`
+    block, combined (`_combine`) when there is more than one.
 
     Claude Code's `stream-json` output appends a trailing `system/task_summary`
     line *after* the `result` line that carries `usage` and `total_cost_usd`.
     Taking the literal last line picked up that summary instead and silently
-    dropped a reported cost (Kraft-xob8). Scanning backward for `usage` finds
-    the `result` line regardless of what follows it; a log that never has one
+    dropped a reported cost (Kraft-xob8). Looking for `usage` finds the
+    `result` line regardless of what follows it; a log that never has one
     still gets its last parseable JSON object, unchanged from before.
     """
     try:
@@ -248,18 +294,20 @@ def read_envelope(log_path: Path) -> dict | None:
     except OSError:
         return None
     fallback = None
-    for line in reversed(lines):
+    envelopes = []
+    for line in lines:
         try:
             envelope = json.loads(line)
         except json.JSONDecodeError:
             continue
         if not isinstance(envelope, dict):
             continue
-        if fallback is None:
-            fallback = envelope
+        fallback = envelope
         if isinstance(envelope.get("usage"), dict):
-            return envelope
-    return fallback
+            envelopes.append(envelope)
+    if len(envelopes) > 1:
+        return _combine(envelopes)
+    return envelopes[0] if envelopes else fallback
 
 
 def _rate_limit_claude(log_path: Path) -> dict | None:
