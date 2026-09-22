@@ -1,0 +1,25 @@
+# harnesses.yaml — Template Schema V1
+#
+# A harness *profile* is a configured instance of a provider: which executable
+# to run and what runtime options to start from. It is never provider command
+# syntax or result parsing — those belong to the provider package
+# (`src/kraft/harnesses/<provider>.yaml`), which declares the capability
+# surface a profile may select from. A `defaults:` key the provider does not
+# declare, or a value it does not accept, is refused at load.
+#
+# The ids below are the ones `library.yaml`'s tasks name in their `harness:`.
+# Seeded once and never overwritten, so edit freely.
+harnesses:
+  codex:
+    provider: codex
+    enabled: true
+    executable: codex
+    defaults:
+      effort: medium
+
+  claude:
+    provider: claude
+    enabled: true
+    executable: claude
+    defaults:
+      model: sonnet

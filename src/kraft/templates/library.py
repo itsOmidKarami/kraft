@@ -36,6 +36,7 @@ from kraft.templates.models import (
     ResolvedChain,
     SteeringProfile,
     TaskKind,
+    displaced_route,
     first_error,
 )
 
@@ -683,6 +684,9 @@ class _Resolution:
         # counts as the parent's kind.
         resolved = self._merge_chain(parent.data, namespace, where, loc, seen=(*seen, name))
         self._reject_kind_change(resolved, child, where, name)
+        if namespace is Namespace.TASKS:
+            displaced = displaced_route(child)
+            resolved = {k: v for k, v in resolved.items() if k not in displaced}
         merged = _merge(resolved, child)
         assert isinstance(merged, Mapping)
         self._inherited.setdefault(loc, parent.source)

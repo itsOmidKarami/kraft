@@ -290,6 +290,11 @@ class HarnessUnavailable(Exception):
     (`unavailable-selected-harness-needs-human`). The message says why."""
 
 
+class ProfileUnavailable(HarnessUnavailable):
+    """A task's `profile:` names no agent profile, or one that cannot run on
+    its harness (Kraft-ps1ao). Stops for a human; nothing is substituted."""
+
+
 class LaunchRefused(ValueError):
     """`run_agent_task` refused to start anything: the harness is unknown, or a
     merged option names a capability it does not declare. A configuration
@@ -303,18 +308,35 @@ class LaunchRefused(ValueError):
 _PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
 
 
-def harness_profile(profile_id: str, harnesses: _harness.HarnessSet) -> HarnessProfile:
-    """The enabled `harnesses.yaml` profile `profile_id` names, or
-    `HarnessUnavailable`. Read from the app's templates directory
-    (`KRAFT_TEMPLATES_DIR`, else `$KRAFT_HOME/templates`) on every call, so an
-    edit reaches the next launch. Never a fallback onto a provider of the same
-    name -- a task selects a profile, and a missing one stops for a human."""
+def harness_table(harnesses: _harness.HarnessSet) -> tuple[HarnessProfileTable, Path]:
+    """The live `harnesses.yaml` and its path, or `HarnessUnavailable`. Read
+    from the app's templates directory (`KRAFT_TEMPLATES_DIR`, else
+    `$KRAFT_HOME/templates`) on every call, so an edit reaches the next launch."""
     path = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "harnesses.yaml"
     try:
-        profiles = HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid).profiles
+        return HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid), path
     except TemplateEnvironmentError as exc:
         raise HarnessUnavailable(str(exc)) from exc
-    return select_profile(profiles, profile_id, path)
+
+
+def harness_profile(profile_id: str, harnesses: _harness.HarnessSet) -> HarnessProfile:
+    """The enabled `harnesses.yaml` profile `profile_id` names, read live
+    (`harness_table`), or `HarnessUnavailable`. Never a fallback onto a
+    provider of the same name -- a task selects a profile, and a missing one
+    stops for a human."""
+    table, path = harness_table(harnesses)
+    return select_profile(table.profiles, profile_id, path)
+
+
+def resolve_profile(
+    name: str, harness: HarnessProfile, table: HarnessProfileTable, providers
+) -> tuple[str, str | None]:
+    """The (model, effort) agent profile `name` gives a task on `harness`, or
+    `ProfileUnavailable` in `pairing_problem`'s words."""
+    if why := table.pairing_problem(name, harness, providers):
+        raise ProfileUnavailable(why)
+    profile = table.agent_profiles[name]
+    return profile.model[harness.provider], profile.effort
 
 
 def select_profile(profiles: dict[str, HarnessProfile], pid: str, path: Path) -> HarnessProfile:
@@ -395,17 +417,21 @@ def resolve_agent_task(
         raise HarnessUnavailable(
             f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
-    profile = harness_profile(
-        task.harness, harnesses if harnesses is not None else _harness.load(None)
-    )
+    harnesses = harnesses if harnesses is not None else _harness.load(None)
+    table, path = harness_table(harnesses)
+    profile = select_profile(table.profiles, task.harness, path)
+    # The task's own rung: its agent profile, read live, or its own fields.
+    model, effort = task.model, task.effort
+    if task.profile is not None:
+        model, effort = resolve_profile(task.profile, profile, table, harnesses.valid)
     inv = resolve_invocation(
         {
             "kind": "agent",
             "harness": profile.provider,
             **({"command": profile.executable} if profile.executable else {}),
             **({"skill": task.skill} if task.skill is not None else {}),
-            **({"model": task.model} if task.model is not None else {}),
-            **({"effort": task.effort} if task.effort is not None else {}),
+            **({"model": model} if model is not None else {}),
+            **({"effort": effort} if effort is not None else {}),
             **({"deny_tools": list(policy.deny_tools)} if policy is not None else {}),
         },
         repo_entry,

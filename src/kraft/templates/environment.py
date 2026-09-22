@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
@@ -355,6 +355,53 @@ class HarnessProfile:
         return self.enabled
 
 
+class AgentProfileInput(BaseModel):
+    """One `harnesses.yaml` `profiles:` entry: a named model tier an agent task
+    selects with `profile:` (Kraft-ps1ao). `model` is keyed by *provider* id,
+    not harness id, so two harnesses on one provider share one spelling."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    model: dict[Identifier, StrictStr] = Field(min_length=1)
+    effort: StrictStr | None = None
+
+
+@dataclass(frozen=True)
+class AgentProfile:
+    """An agent profile: what a tier runs on, per provider. It may omit any
+    provider; only a task pairing it with a harness of that provider is
+    refused (`adapters.agent.resolve_profile`)."""
+
+    id: str
+    model: dict[str, str]
+    effort: str | None
+
+    @classmethod
+    def from_input(
+        cls, id: str, parsed: AgentProfileInput, *, harnesses: Mapping[str, Harness]
+    ) -> AgentProfile:
+        if not _IDENTIFIER.match(id):
+            raise TemplateEnvironmentError(
+                f"profile id {id!r} must match {_IDENTIFIER.pattern} to be nameable by a "
+                f"task's 'profile:'"
+            )
+        unknown = sorted(set(parsed.model) - set(harnesses))
+        if unknown:
+            raise TemplateEnvironmentError(
+                f"profiles.{id}: model names {unknown}, which is no installed provider; "
+                f"known: {sorted(harnesses)}"
+            )
+        effort = parsed.effort
+        if effort is not None and not any(
+            harnesses[p].value_ok("effort", effort) for p in parsed.model
+        ):
+            raise TemplateEnvironmentError(
+                f"profiles.{id}: effort {effort!r} is accepted by none of its providers "
+                f"{sorted(parsed.model)}"
+            )
+        return cls(id=id, model=dict(parsed.model), effort=effort)
+
+
 # ── `harnesses.yaml`, the V1 file these types are read from ──────────────────
 #
 # `from_yaml` may do boundary I/O; `from_input` stays pure. It translates a
@@ -399,9 +446,11 @@ def _section(data: object, section: str, path: Path) -> dict[str, object]:
 class HarnessProfileTable:
     """One `harnesses.yaml`: the configured provider instances an agent task's
     `harness:` selects from (`harness-profile-has-safe-instance-
-    configuration`)."""
+    configuration`), and the agent profiles a task's `profile:` selects from."""
 
     profiles: dict[str, HarnessProfile]
+    #: `profiles:`, the named model tiers (Kraft-ps1ao). Absent is `{}`.
+    agent_profiles: dict[str, AgentProfile] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(
@@ -449,4 +498,39 @@ class HarnessProfileTable:
                 profiles[id] = HarnessProfile.from_input(id, parsed, harness=harness)
             except TemplateEnvironmentError as exc:
                 raise TemplateEnvironmentError(f"{path}: {exc}") from exc
-        return cls(profiles=profiles)
+        agent_profiles: dict[str, AgentProfile] = {}
+        for id, body in _section(data, "profiles", path).items():
+            try:
+                parsed_profile = AgentProfileInput.model_validate(body or {})
+                agent_profiles[id] = AgentProfile.from_input(
+                    id, parsed_profile, harnesses=harnesses
+                )
+            except ValidationError as exc:
+                raise TemplateEnvironmentError(
+                    f"{path}: profiles.{id}: {_first_error(exc)}"
+                ) from exc
+            except TemplateEnvironmentError as exc:
+                raise TemplateEnvironmentError(f"{path}: {exc}") from exc
+        return cls(profiles=profiles, agent_profiles=agent_profiles)
+
+    def pairing_problem(
+        self, name: str, harness: HarnessProfile, providers: Mapping[str, Harness]
+    ) -> str | None:
+        """Why agent profile `name` cannot run a task on `harness`, or None: the
+        one reason text the Settings view, doctor and the launch all give
+        (`adapters.agent.resolve_profile`). No model is inferred for a
+        provider the profile does not name."""
+        profile = self.agent_profiles.get(name)
+        if profile is None:
+            return (
+                f"profile {name!r} is not defined in harnesses.yaml; "
+                f"known are {sorted(self.agent_profiles)}"
+            )
+        provider, at = harness.provider, f"(harness {harness.id!r})"
+        model = profile.model.get(provider)
+        if model is None:
+            return f"profile {name!r} has no model for provider {provider!r} {at}"
+        for option, value in (("model", model), ("effort", profile.effort)):
+            if value is not None and not providers[provider].value_ok(option, value):
+                return f"profile {name!r}: provider {provider!r} takes no {option} {value!r} {at}"
+        return None

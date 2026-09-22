@@ -30,6 +30,7 @@ from kraft.templates.models import (
     Chain,
     MaterializedChain,
     ResolvedChain,
+    displaced_route,
 )
 
 #: Task fields a retry cannot touch: identity and kind, the structure hanging
@@ -120,6 +121,10 @@ def validate_retry_override(
             inherited = (scope.get("policy") or {}).get("deny_tools") or []
             merged["deny_tools"] = list(dict.fromkeys([*inherited, *proposed.deny_tools]))
         scope["policy"] = {k: v for k, v in merged.items() if v is not None}
+    # The retry is the nearest layer: its route to a model wins whole, as a
+    # nearer `extends` layer's does (Kraft-ps1ao).
+    for key in displaced_route(task_config):
+        scope.pop(key, None)
     scope.update(task_config)
 
     try:
