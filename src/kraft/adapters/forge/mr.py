@@ -296,6 +296,19 @@ def pick_mr(rows: list[MRRef]) -> MRRef | None:
     return next((r for r in rows if r.state == "open"), rows[0] if rows else None)
 
 
+def same_scope_labels(current: list[str], labels: tuple[str, ...]) -> list[str]:
+    """The labels in `current` that a new label replaces: same `scope::`
+    prefix, and not itself being set. Neither forge enforces a scoped label's
+    exclusivity on its own, and `next_tag.py` raises on more than one
+    `release::` label (Kraft-zfdu8, Kraft-o9xh1)."""
+    scopes = {label.split("::", 1)[0] + "::" for label in labels if "::" in label}
+    return [
+        label
+        for label in current
+        if label not in labels and any(label.startswith(scope) for scope in scopes)
+    ]
+
+
 def parse_json(raw: str, what: str):
     try:
         return json.loads(raw)

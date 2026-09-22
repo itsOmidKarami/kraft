@@ -110,3 +110,20 @@ def test_set_mr_labels_unpins_the_stale_pipeline(client, repo, monkeypatch):
         ).fetchone(),
     )
     assert not row["ci_pipeline_ref"]
+
+
+def test_set_mr_labels_labels_through_the_items_own_forge(client, repo, monkeypatch):
+    """Kraft-hd0gu: the route resolves the forge the item's chain runs against,
+    its repo's recorded `forge` (V1 has no registry backend to pin), not a
+    502 for a backend nobody resolved. The real `backend_for`, so the choice
+    is the route's own."""
+    wid = _completed_item(client, repo)
+    assert client.post("/api/repos", json={"path": str(repo), "enabled": False}).status_code == 201
+    assert client.patch(f"/api/repos?path={repo}", json={"forge": "fake"}).status_code == 200
+    fake = forge_mod.FakeForge()
+    monkeypatch.setattr("kraft.adapters.forge.run._DEV_FAKE", fake)
+
+    r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["release::patch"]})
+
+    assert r.status_code == 200, r.text
+    assert fake.labels == ["release::patch"]

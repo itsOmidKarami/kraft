@@ -85,10 +85,8 @@ def resolve(name: str) -> Forge:
     one and not the other. A `glab` that is installed but unauthenticated also
     looks available and then fails deep inside a node.
 
-    The accepted names are duplicated in `templates._FORGE_BACKENDS`, which
-    validates a registry file without importing this module. Edit both together;
-    that set also carries `auto`, which `backend_for` has already translated by
-    the time anything calls this.
+    Every caller names the backend through `backend_for` from the repo's
+    recorded `forge`; nothing pins one per template or registry.
     """
     match name:
         case "glab":
@@ -186,6 +184,9 @@ async def _run_one(
     has_rebase_bounce: bool = False,
     automated_review: AutomatedReview | None = None,
     merge_requested: bool = False,
+    #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
+    #: records the merge request it opened or reused there (Kraft-mjsf).
+    repo_row_id: int | None = None,
 ) -> tuple[str, str, list[dict] | None]:
     """One forge handler against one repo. Extracted from `run_task` so the
     multi-repo loop there can call it once per `work_item_repos` row; a
@@ -247,16 +248,22 @@ async def _run_one(
                 )
                 number, url = mr.number, mr.url
                 log, status = f"opened {url}\n", "done"
+
             # An event, not a work-item column (Kraft-d2sq): no migration,
             # it reaches the UI through the stream that already exists, and
             # it is timestamped, which a column is not. Both paths emit it,
             # so an item whose open_mr is re-entered after a rejected
             # review still carries a current record.
-            await db.write(
-                lambda c, n=number, u=url: events.append(
-                    c, work_item_id, "mr_opened", {"number": n, "url": u}
-                )
-            )
+            # A multi-repo item's event carries no repo, so each repo's own
+            # merge request is recorded on its row too (Kraft-mjsf).
+            def _record(c, n=number, u=url):
+                events.append(c, work_item_id, "mr_opened", {"number": n, "url": u})
+                if repo_row_id is not None:
+                    store.update_repo_state(
+                        c, repo_row_id, merge_state="open", mr_ref={"number": n, "url": u}
+                    )
+
+            await db.write(_record)
         case "ci_poll":
             # An MR merged outside Kraft -- a human merging by hand, or an
             # auto-merge racing this node's own poll -- usually has its
@@ -1107,6 +1114,7 @@ async def run_task(
                     has_rebase_bounce=has_rebase_bounce,
                     automated_review=automated_review,
                     merge_requested=requested,
+                    repo_row_id=row_id,
                 )
             else:
                 one_log, one_status, one_findings = "", settled, None
