@@ -191,7 +191,7 @@ async def test_a_restart_mid_merge_asks_the_forge_to_merge_only_once(run_forge, 
     of having asked for the merge. The forge still has the request queued, so
     the restarted merge reads that off the merge request and waits for the
     landing rather than asking a second time."""
-    fake = await _opened(_Counting(merge_delay=3), repo)
+    fake = await _opened(_Counting(merge_delay=2), repo)
     assert (await run_forge(fake, "merge", "m1", repo=repo, **_MERGE))[0] == "waiting"
     await run_forge.database.write(lambda c: events.append(c, "w1", restart, {}))
 

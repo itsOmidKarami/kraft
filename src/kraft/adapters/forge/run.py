@@ -515,7 +515,16 @@ async def _run_one(
             # scheduler, never a sleep (Kraft-7jja): the pipeline a late push
             # re-armed, a missing approval, and the merge landing.
             existing = await forge.find_mr(repo=repo, branch=branch)
-            requested = merge_requested
+            # Asked for already: by this wait's own last observation, or --
+            # read off the forge, so a retry, run fork or base-change restart
+            # that ended the wait does not forget it -- a merge the forge
+            # still holds queued (Kraft-l98h6). Every merge request goes
+            # through here, so a merge request is asked to merge at most once
+            # per head: a new head the forge dropped the queue for is asked
+            # again.
+            requested = merge_requested or (
+                existing is not None and existing.state == "open" and existing.merge_queued
+            )
             if existing is not None and existing.state == "merged":
                 log = f"already merged (!{existing.number}); nothing to do\n"
                 status = "done"
@@ -1060,7 +1069,6 @@ async def run_task(
                     title=title,
                     work_item_id=work_item_id,
                     has_source=root_has_changes,
-                    requested=requested,
                 )
                 log += root_log
             if settled is None:
@@ -1257,7 +1265,6 @@ async def _ready_root(
     title: str,
     work_item_id: str,
     has_source: bool,
-    requested: bool,
 ) -> tuple[str, str | None]:
     """The root's turn in `merge`, once every member merged: bump a
     pointer-only root, ready its merge request at the merged revisions, and
@@ -1265,11 +1272,17 @@ async def _ready_root(
     settles it -- `done` for a bump that needed no merge request,
     `approval_pending` -- or None when its merge request goes on to merge.
 
-    A merge already asked for, or landed, is only read for its landing: the
-    source branch may be gone with it, and nothing may be pushed to it."""
+    A merge the forge already holds queued, or has landed, is only read for
+    its landing: the source branch may be gone with it, and nothing may be
+    pushed to it. The forge's record, not the wait's, so a restart of the
+    wait does not forget it (Kraft-l98h6)."""
     root = next(r for r in rows if r["role"] == "root")
-    if requested or root["merge_state"] == "merged":
+    if root["merge_state"] == "merged":
         return "", None
+    if root["merge_state"] == "open":
+        existing = await forge.find_mr(repo=root_repo, branch=branch)
+        if existing is not None and (existing.state == "merged" or existing.merge_queued):
+            return "", None
     log = ""
     if root["merge_state"] == "pending" and not has_source:
         log, opened = await _bump_pointer_only_root(

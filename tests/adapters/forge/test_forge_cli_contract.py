@@ -24,6 +24,7 @@ GLAB = SimpleNamespace(
     update_argv=["mr", "update", "--description", "fresh"],
     merge_verb="mr merge",
     merged_list=outputs.GLAB_MR_LIST_MERGED,
+    queued_list=outputs.GLAB_MR_LIST_AUTO_MERGE,
     find_args={"mr": "list", "--all": None, "--source-branch": "kraft/abc"},
 )
 GH = SimpleNamespace(
@@ -37,6 +38,7 @@ GH = SimpleNamespace(
     update_argv=["pr", "edit", "--body", "fresh"],
     merge_verb="pr merge",
     merged_list=outputs.GH_PR_LIST_MERGED,
+    queued_list=outputs.GH_PR_LIST_AUTO_MERGE,
     find_args={"pr": "list", "--state": "all", "--head": "kraft/abc"},
 )
 
@@ -141,6 +143,17 @@ async def test_find_mr_reads_the_state_of_an_existing_merge_request(be, cli, tmp
     argv = cli.argv(be.name)
     for flag, value in be.find_args.items():
         assert flag in argv and (value is None or argv[argv.index(flag) + 1] == value), flag
+
+
+async def test_find_mr_reads_a_merge_the_forge_already_holds_queued(be, cli, tmp_path):
+    """Kraft-l98h6: auto-merge (gh) or merge-when-pipeline-succeeds (glab) is
+    the forge's own record that its merge was asked for, which a restart of
+    Kraft's wait cannot erase."""
+    cli.stub(be.name, be.queued_list)
+
+    found = await be.cls().find_mr(repo=tmp_path, branch="kraft/abc")
+
+    assert found == forge.MRRef(number=be.number, url=be.url, state="open", merge_queued=True)
 
 
 @pytest.mark.parametrize(
