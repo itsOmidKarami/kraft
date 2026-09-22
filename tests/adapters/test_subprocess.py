@@ -773,3 +773,40 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
 
     assert status == "done"
     assert seen["env"] == {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # docker-cli 29.7.2, probed 2026-09-22 with the daemon actually
+        # stopped on this machine.
+        "failed to connect to the docker API at unix:///var/run/docker.sock; "
+        "check if the path is correct and if the daemon is running: "
+        "dial unix /var/run/docker.sock: connect: no such file or directory",
+        # Older docker-cli's wording for the same failure.
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+        "Is the docker daemon running?",
+    ],
+    ids=["current-cli-wording", "legacy-cli-wording"],
+)
+async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(
+    run, run_dirs, tmp_path, monkeypatch, message
+):
+    """Kraft-nc9gm: `docker run` itself failing (the daemon is down, or an
+    image pull failed) is an infra problem no agent edit can fix -- a fix
+    loop must never spend an attempt on it. Same treatment as a missing
+    binary/cwd (`test_run_task_that_cannot_launch_is_a_config_error`), for
+    the same reason, one step later: `docker run` is Kraft's own launcher
+    failing to launch, not the sandboxed command failing."""
+    bin_dir = tmp_path / "fake-docker-daemon-down"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(f"#!/usr/bin/env bash\necho {shlex.quote(message)} >&2\nexit 1\n")
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    status, row = await run(["echo", "hi"], "s-daemon-down", sandbox=DOCKER)
+
+    assert (status, row["status"]) == ("config_error", "config_error")
+    log = (run_dirs.logs / "s-daemon-down.log").read_text()
+    assert "daemon" in log
