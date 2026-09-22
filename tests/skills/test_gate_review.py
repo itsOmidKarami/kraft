@@ -156,9 +156,9 @@ async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, datab
 
 
 async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database, run_dirs):
-    """Kraft-rki: same drop as `escalate.dispatch` -- `inv.sandbox` is
-    resolved but has to actually reach `run_agent_task`, or a repo's
-    `sandbox:` silently does nothing for its gate reviews.
+    """Kraft-rki: a repo's `sandbox:` reaches the reviewer's `run_agent_task`,
+    through `dispatch.item_sandbox` (Ruling 189), or it silently does nothing
+    for its gate reviews.
     """
     seen = {}
     monkeypatch.setattr(

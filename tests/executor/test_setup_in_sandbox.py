@@ -10,7 +10,6 @@ import json
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 from support.harness import fake_docker_bin, v1_chain, v1_walk
@@ -95,8 +94,34 @@ async def test_a_sandboxed_setup_command_really_runs_in_the_container(tmp_path, 
     assert (worktree / "prepared.txt").exists()
 
 
+def _without_docker(tmp_path, monkeypatch, *tools: str) -> list[dict]:
+    """PATH holds `touch` -- so a host fallback of the setup *would* succeed
+    and be seen -- plus `tools`, and no `docker`. Returns every
+    `subprocess.run` made from here on, recorded and then really run
+    (Kraft-g44n3: a PATH that broke the fallback too proved nothing)."""
+    bin_dir = tmp_path / "no-docker-bin"
+    bin_dir.mkdir()
+    for tool in ("touch", *tools):
+        (bin_dir / tool).symlink_to(shutil.which(tool))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    real = subprocess.run
+    spawned: list[dict] = []
+
+    def run(args, **kwargs):
+        spawned.append({"args": args, "shell": kwargs.get("shell", False)})
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    return spawned
+
+
+def _host_setups(spawned: list[dict]) -> list[dict]:
+    """The spawns that ran the setup on the host, not through docker."""
+    return [s for s in spawned if s["shell"] or s["args"] == _SETUP]
+
+
 async def test_no_docker_means_no_setup_never_a_host_fallback(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    spawned = _without_docker(tmp_path, monkeypatch)
     worktree = tmp_path / "wt"
     worktree.mkdir()
 
@@ -105,6 +130,8 @@ async def test_no_docker_means_no_setup_never_a_host_fallback(tmp_path, monkeypa
             worktree, tmp_path, {"setup_command": _SETUP}, sandbox=_SANDBOX
         )
 
+    assert [s["args"][0] for s in spawned] == ["docker"]
+    assert _host_setups(spawned) == []
     assert not (worktree / "prepared.txt").exists()
 
 
@@ -217,12 +244,10 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
 
 
 async def test_a_sandboxed_item_without_docker_stops_for_a_human(tmp_path, repo, monkeypatch):
-    """Only `git` on PATH: the walk's own git works, the setup's docker does
-    not, and nothing falls back to running the setup on the host."""
-    bin_dir = tmp_path / "git-only-bin"
-    bin_dir.mkdir()
-    (bin_dir / "git").symlink_to(shutil.which("git"))
-    monkeypatch.setenv("PATH", str(bin_dir))
+    """`git` and `touch` on PATH, no `docker`: the walk's own git works, the
+    setup's docker does not, the setup never reaches a host shell, and the
+    item stops naming why."""
+    spawned = _without_docker(tmp_path, monkeypatch, "git")
 
     status, evts, _sessions, _row = await v1_walk(
         tmp_path,
@@ -233,7 +258,8 @@ async def test_a_sandboxed_item_without_docker_stops_for_a_human(tmp_path, repo,
 
     assert status == "needs_human"
     assert any("must run in its sandbox" in json.dumps(e["payload"]) for e in evts)
-    assert not list(Path(tmp_path / "run" / "worktrees").glob("*/prepared.txt"))
+    assert any(s["args"][0] == "docker" for s in spawned)
+    assert _host_setups(spawned) == []
 
 
 # -- test scopes and area setups --------------------------------------------------

@@ -138,6 +138,26 @@ async def review(
         )
     )
 
+    try:
+        # The item's sandbox, as for every launch of it (Ruling 189).
+        sandbox = executor.item_sandbox(row, launch)
+    except executor.SandboxUnresolved as exc:
+        # Recorded as the reviewer's own session, so the pending gate names
+        # why no review ran (Kraft-9t2dp); nothing launches.
+        await executor.config_error_session(
+            db,
+            run_dirs,
+            dict(
+                session_id=session_id,
+                work_item_id=work_item_id,
+                node_id=node.id,
+                hook_point=auto_review.path,
+                round=0,
+                head_sha=None,
+            ),
+            f"{auto_review.path}: {exc}\n",
+        )
+        return "undecided", str(exc)
     snapshot = store.materialized_chain_of(row)
     inv = _agent.resolve_agent_task(
         auto_review.task,
@@ -171,7 +191,7 @@ async def review(
         permission_mode=inv.permission_mode,
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,
-        sandbox=executor.item_sandbox(row, launch),
+        sandbox=sandbox,
         task_instruction=task_instruction,
         title=row["title"],
         repo_path=row["repo"],

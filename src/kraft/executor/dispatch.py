@@ -248,7 +248,7 @@ def _select_scopes(
     return to_run
 
 
-async def _config_error(db, run_dirs, common: dict, log: str) -> str:
+async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
     """A task that could not start, recorded as its own session (Kraft-579).
 
     `CONFIG_ERROR` is terminal at every tier (`context.SCOPE`), so the row is
@@ -280,6 +280,14 @@ def scope_policy(
     return snapshot.policy_for(scope, repository)
 
 
+class SandboxUnresolved(RuntimeError):
+    """`item_sandbox` could not tell which sandbox an item runs in (Kraft-9t2dp).
+    A `RuntimeError`, so the walk's entry keeps stopping on it as before; every
+    launch door (`dispatch_node`, `gate_review.review`, `escalate.dispatch`)
+    catches this type and records a `config_error` session naming the cause,
+    never a host launch and never an unattributed crash."""
+
+
 def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     """The sandbox every project-controlled launch of this item runs in, or
     None for an item nothing sandboxes -- the one resolution (Ruling 189).
@@ -290,10 +298,10 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
 
     Whichever scope of the snapshot froze one wins, and the entry's live value
     -- `false` included -- cannot turn it off (Ruling 105: `sandbox` only
-    tightens); without one, the entry's live value applies. `RuntimeError`,
-    so every caller stops for a human, when that cannot be told: a snapshot
-    freezing two (filed before the ruling), or a poisoned `repos.yaml` --
-    unreadable is never "no sandbox"."""
+    tightens); without one, the entry's live value applies.
+    `SandboxUnresolved` when that cannot be told: a snapshot freezing two
+    (filed before the ruling), repositories setting two live, or a poisoned
+    `repos.yaml` -- unreadable is never "no sandbox"."""
     snapshot = store.materialized_chain_of(row)
     try:
         frozen = snapshot.item_sandbox() if snapshot is not None else None
@@ -305,9 +313,9 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
         live = [s for e in entries if e and (s := _sandbox.resolve({}, e))]
         live = list({json.dumps(s, sort_keys=True): s for s in live}.values())
     except (_policy.PolicyError, _config.ConfigError) as exc:
-        raise RuntimeError(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
+        raise SandboxUnresolved(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
     if len(live) > 1:
-        raise RuntimeError(
+        raise SandboxUnresolved(
             f"{row['id']}'s repositories set different sandboxes {live!r} in repos.yaml: "
             "a sandbox wraps the whole work item (Ruling 189), so they must agree"
         )
@@ -353,6 +361,7 @@ async def _run_changed_test_scopes(
     execution: ExecutionMode,
     launch: LaunchContext | None,
     round: int,
+    sandbox: dict | None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -377,12 +386,11 @@ async def _run_changed_test_scopes(
     scopes, which the repo's own table bounds.
     """
     repo_entry = (launch.repo_entry or {}) if launch else {}
-    sandbox = item_sandbox(work_item_row, launch)
     to_run = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
     if not to_run:
-        return await _config_error(
+        return await config_error_session(
             db,
             run_dirs,
             common,
@@ -522,6 +530,14 @@ async def dispatch_node(
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
+    if not isinstance(t, ForgeTask):
+        # Resolved here, once, for every launch this task makes (Ruling 189):
+        # a sandbox nobody can resolve stops this task for a human, recorded
+        # as its session, and nothing launches (Kraft-9t2dp).
+        try:
+            sandbox = item_sandbox(work_item_row, launch)
+        except SandboxUnresolved as exc:
+            return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     if isinstance(t, BuiltinTask):
         # `BuiltinAction` has exactly one member, so there is no branch to take
         # on `ref`: a reference Kraft does not own was rejected by the type
@@ -537,6 +553,7 @@ async def dispatch_node(
             execution=t.execution,
             launch=launch,
             round=round,
+            sandbox=sandbox,
         )
 
     if isinstance(t, SubprocessTask):
@@ -545,7 +562,7 @@ async def dispatch_node(
         except ValueError as exc:
             # Never started, so not a failure a fix loop could repair
             # (Kraft-hr0xr): it stops naming the command it could not read.
-            return await _config_error(
+            return await config_error_session(
                 db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
             )
         return await _subprocess.run_task(
@@ -555,7 +572,7 @@ async def dispatch_node(
             cwd=worktree,
             repo_entry=(launch.repo_entry or {}) if launch else {},
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            sandbox=item_sandbox(work_item_row, launch),
+            sandbox=sandbox,
             **common,
         )
 
@@ -685,7 +702,7 @@ async def dispatch_node(
             policy=task_policy,
         )
     except _agent.HarnessUnavailable as exc:
-        return await _config_error(
+        return await config_error_session(
             db,
             run_dirs,
             common,
@@ -698,7 +715,7 @@ async def dispatch_node(
         # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
         # to stop with `needs_context` instead. A steering selection the
         # snapshot cannot supply stops the same way rather than run unsteered.
-        return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     # A task an operator paused mid-turn resumes its own provider session when
     # it can, told to carry on with any steer in hand; otherwise it restarts
     # with its original instruction (`resumed-agent-task-preserves-its-
@@ -737,7 +754,7 @@ async def dispatch_node(
             effort=inv.effort,
             allowed_tools=inv.allowed_tools,
             permission_mode=inv.permission_mode,
-            sandbox=item_sandbox(work_item_row, launch),
+            sandbox=sandbox,
             steering_texts=inv.steering_texts,
             artifact=t.produces,
             method_text=inv.method_text,
@@ -759,7 +776,7 @@ async def dispatch_node(
         # Refused before anything started (Kraft-hr0xr): the same stop as an
         # unavailable harness, never a failed task for a fix loop to relaunch
         # into the same refusal.
-        return await _config_error(db, run_dirs, common, f"{task.path}: {exc}\n")
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     # The agent is told to commit everything it changes before it exits.
     # When it does not, the work is still on disk -- so verification passes,
     # and only `_assert_clean` two nodes later notices, by which point the

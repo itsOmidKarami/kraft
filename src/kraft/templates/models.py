@@ -1089,7 +1089,7 @@ class ResolvedChain:
         # A sandbox wraps the whole work item, not the scope that set it
         # (Ruling 189): once one task has run in it the worktree is untrusted
         # for every later launch, so two scopes cannot ask for two.
-        sandboxes = list(self.scope_sandboxes(policy).items())
+        sandboxes = list(self.scope_sandboxes(policy, item).items())
         if len(sandboxes) > 1:
             (first, where), (second, other) = sandboxes[:2]
             raise PolicyError(
@@ -1099,11 +1099,13 @@ class ResolvedChain:
                 field="sandbox",
             )
 
-    def scope_sandboxes(self, policy: InstancePolicy) -> dict[SandboxPolicy, str]:
+    def scope_sandboxes(
+        self, policy: InstancePolicy, item: WorkItemPolicy | None = None
+    ) -> dict[SandboxPolicy, str]:
         """Each distinct sandbox a scope of this chain runs under on top of
-        `policy`, with the first scope that runs under it: `"the chain"` when
-        `policy` itself carries it. At most one for a chain `check_scopes`
-        accepts (Ruling 189)."""
+        `policy`, a work `item`'s own layers last, with the first scope that
+        runs under it: `"the chain"` when `policy` itself carries it. At most
+        one for a chain `check_scopes` accepts (Ruling 189)."""
         found: dict[SandboxPolicy, str] = {}
         if policy.sandbox is not None:
             found[policy.sandbox] = "the chain"
@@ -1112,7 +1114,7 @@ class ResolvedChain:
                 (node.id, node.scopes),
                 *((t.path, t.scopes) for t in node.tasks()),
             ]:
-                sandbox = policy.layered(scopes).sandbox
+                sandbox = _scoped(path, policy, scopes, item).sandbox
                 if sandbox is not None:
                     found.setdefault(sandbox, path)
         return found
@@ -1240,7 +1242,7 @@ class MaterializedChain:
         froze it (Ruling 189), or None. Raises `PolicyError` for a snapshot
         with two, which `check_scopes` refuses to build; only one filed before
         the ruling can carry them."""
-        found = self.chain.scope_sandboxes(self.policy)
+        found = self.chain.scope_sandboxes(self.policy, self.item_policy)
         if len(found) > 1:
             raise PolicyError(
                 "its scopes freeze different sandboxes "
