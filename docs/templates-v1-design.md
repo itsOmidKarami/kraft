@@ -195,7 +195,7 @@ tasks:
   implementer:
     kind: agent
     harness: claude
-    model: gpt-5.6-terra
+    model: sonnet
     effort: high
     prompt: Implement the approved plan.
     policy:
@@ -220,21 +220,21 @@ tasks:
   repair_verification:
     kind: agent
     harness: claude
-    model: gpt-5.6-terra
+    model: sonnet
     effort: high
     prompt: Fix the failing tests and the review findings this node's verification reported.
 
   repair_mr_feedback:
     kind: agent
     harness: claude
-    model: gpt-5.6-terra
+    model: sonnet
     effort: high
     prompt: Resolve the current CI failures and actionable merge-request feedback.
 
   repair_mr_checks:
     kind: agent
     harness: claude
-    model: gpt-5.6-terra
+    model: sonnet
     effort: high
     prompt: >-
       Repair what fails the merge request's checks from outside the code, such

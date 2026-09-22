@@ -36,6 +36,13 @@ MAX_EFFORT_CHAIN = {
 
 def _max_effort_chain(templates_dir):
     (templates_dir / "chains" / "max-effort.yaml").write_text(yaml.safe_dump(MAX_EFFORT_CHAIN))
+    # The library's claude model pins would be refused by codex first; drop
+    # them so `effort: max` is the one thing the provider change breaks.
+    path = templates_dir / "library.yaml"
+    library = yaml.safe_load(path.read_text())
+    for task in library["tasks"].values():
+        task.pop("model", None)
+    path.write_text(yaml.safe_dump(library, sort_keys=False))
 
 
 def _chain_on_missing_profile(templates_dir):
