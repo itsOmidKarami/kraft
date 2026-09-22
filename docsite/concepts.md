@@ -144,6 +144,11 @@ it under *Needs you*. From there:
 An item filed with an attached spec or plan starts without the nodes that
 document covers: the gate that decides it and the node that would have written
 it.
+Intake copies the document into Kraft's own storage, and that copy is what the
+item's worktree gets, so editing the original afterwards changes nothing. Until
+the item starts, `kraft item set-attachments` replaces a document (copied again)
+or drops one, which puts its gate and node back. Once it starts, its documents
+are fixed.
 
 ## Cap and wait
 
