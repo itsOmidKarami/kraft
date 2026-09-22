@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.harness import isolated_bd, v1_seeded_chain
+from support.harness import isolated_bd, v1_seeded_chain, write_harness_profiles
 
 from kraft import events, executor, policy, store
 
@@ -120,6 +120,62 @@ def test_patch_sets_a_node_model_override(client, repo):
     assert r.status_code == 200, r.text
     row = client.get(f"/api/work-items/{wid}").json()
     assert row["node_overrides"]["implementation"] == {"model": "opus", "effort": "high"}
+
+
+def test_patch_sets_a_node_extra_prompt_and_409s_once_the_node_started(client, repo):
+    """Kraft-a7ers: `extra_prompt` is one more per-node field, behind the same
+    lock as the rest."""
+    wid = _paused_item(client, repo)
+    fields = {"model": "opus", "effort": "high", "extra_prompt": "Mind the migration order."}
+    r = client.patch(f"/api/work-items/{wid}", json={"node_overrides": {"implementation": fields}})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["node_overrides"]["implementation"] == fields
+
+    _mark_started(wid, "spec")
+    r = client.patch(
+        f"/api/work-items/{wid}", json={"node_overrides": {"spec": {"extra_prompt": "late"}}}
+    )
+    assert r.status_code == 409, r.text
+
+
+@pytest.mark.parametrize(
+    ("fields", "refused"),
+    [
+        ({"effort": "max"}, "'effort'"),
+        ({"model": "opus"}, "'model'"),
+        ({"escalate_model": "opus"}, "'escalate_model'"),
+        ({"model": "gpt-5", "effort": "high"}, None),
+    ],
+    ids=["effort", "model", "escalate_model", "accepted"],
+)
+def test_a_node_override_the_node_harness_refuses_is_refused_at_both_doors(
+    client, repo, templates_dir, fields, refused
+):
+    """Kraft-a7ers: a node's model/effort is held to the harness each of its
+    agent tasks launches on, at the override rather than at launch. The
+    `claude` profile the default chain's tasks name is put on the bundled
+    `codex` harness, whose `values:` refuse `max` and a non-OpenAI model."""
+    wid = _paused_item(client, repo)
+    write_harness_profiles(templates_dir, {"claude": {"provider": "codex"}})
+
+    patched = client.patch(
+        f"/api/work-items/{wid}", json={"node_overrides": {"implementation": fields}}
+    )
+    filed = client.post(
+        "/api/work-items",
+        json={
+            "title": "t",
+            "repo": str(repo),
+            "autostart": False,
+            "node_overrides": {"implementation": fields},
+        },
+    )
+    for r in (patched, filed):
+        if refused is None:
+            assert r.status_code in (200, 201), r.text
+        else:
+            assert r.status_code == 422, r.text
+            assert refused in r.json()["detail"] and "codex" in r.json()["detail"]
 
 
 @pytest.mark.parametrize(
