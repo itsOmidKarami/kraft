@@ -17,6 +17,7 @@ from kraft import config as config_mod
 from kraft import harness as harness_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
 from kraft.api import api_router, deps
+from kraft.executor import fallback
 from kraft.templates.environment import (
     HarnessProfileTable,
     TemplateEnvironmentError,
@@ -68,6 +69,23 @@ def _problems(
                 problems[chain, task_path] = (
                     f"{where}: provider {profile.provider!r} takes no {option} {value!r}"
                 )
+        # Each `fallback:` entry must pair with its harness too. A disabled one
+        # is not a pairing problem: the launch skips it (`executor.fallback`).
+        for n, cand in enumerate(fallback.candidates(task)[1:]):
+            at = f"chain {chain!r} task {task_path!r}: fallback entry {n} (the task's list)"
+            entry = profiles.get(cand.harness)
+            if entry is None:
+                problems[chain, f"{task_path} fallback[{n}]"] = (
+                    f"{at}: harness {cand.harness!r} is not in {path}"
+                )
+                continue
+            for option in ("model", "effort"):
+                value = getattr(cand, option)
+                if value is not None and not providers[entry.provider].value_ok(option, value):
+                    problems[chain, f"{task_path} fallback[{n}]"] = (
+                        f"{at}: provider {entry.provider!r} (harness {cand.harness!r}) "
+                        f"takes no {option} {value!r}"
+                    )
     return problems
 
 
