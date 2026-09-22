@@ -268,6 +268,23 @@ function AgentProfiles({ profiles }: { profiles: AgentProfile[] }) {
                 {why}
               </p>
             ))}
+            {(p.fallback ?? []).length > 0 && (
+              <ol className="field-hint" aria-label={`${p.id} fallback`}>
+                {p.fallback!.map(({ problems, ...entry }, n) => (
+                  <li key={n}>
+                    falls back to{" "}
+                    {Object.entries(entry)
+                      .map(([k, v]) => `${k} ${v}`)
+                      .join(", ")}
+                    {problems.map((why) => (
+                      <p key={why} className="form-error">
+                        {why}
+                      </p>
+                    ))}
+                  </li>
+                ))}
+              </ol>
+            )}
           </li>
         ))}
       </ul>

@@ -122,6 +122,9 @@ export interface AgentProfile {
   chains: string[];
   /** Why a task pairing it would not launch, in the launch's words. */
   problems: string[];
+  /** Its default fallback list (Kraft-0a3h8), each entry with the pairing
+   *  problems of the tasks that take it. Optional: an older server sends none. */
+  fallback?: (Record<string, string> & { problems: string[] })[];
 }
 
 export interface Harnesses {
