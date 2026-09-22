@@ -157,6 +157,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- none. Layered onto the snapshot",
             "-- (`store.materialized_chain_of`), never written into it.",
         )
+    if version < 37:
+        drop_lines = (*drop_lines, "tokens_cache_", "-- cache writes and reads, apart")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -433,6 +435,8 @@ ADDED_COLUMNS = [
     (34, "work_items", ("run_chain",), None),
     # a work item's own policy override (Kraft-ab1bh); NULL means none
     (35, "work_items", ("policy_override",), None),
+    # NULL: a row written before the split has an unknown one (Ruling 211)
+    (36, "worker_sessions", ("tokens_cache_write", "tokens_cache_read"), None),
 ]
 
 

@@ -603,3 +603,24 @@ async def test_a_session_has_a_start_time_from_birth(database):
     invisible."""
     await _session(database, "s1", node_id="merge", hook_point="on.merge")
     assert _row(database, "s1", "started_at")["started_at"] is not None
+
+
+@pytest.mark.parametrize("writer", ["progress", "pause", "exit"])
+async def test_every_usage_writer_stores_the_cache_kinds_apart(database, writer):
+    """Ruling 211: the live count, a paused session's usage and the final one
+    each store uncached input, cache writes and cache reads in their own
+    columns, and the exit event carries them for the board to patch in."""
+    split = Usage(7, 3, 0.5, "m", tokens_cache_write=40, tokens_cache_read=900)
+    await _running_review(database)
+    if writer == "progress":
+        await database.write(lambda c: store.session_progress(c, "s1", split))
+    elif writer == "pause":
+        await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+        await database.write(lambda c: store.record_pause_usage(c, "s1", split))
+    else:
+        await _exit(database, "s1", "done", None, split)
+    kinds = "tokens_in, tokens_cache_write, tokens_cache_read, tokens_out"
+    assert tuple(_row(database, "s1", kinds)) == (7, 40, 900, 3)
+    if writer == "exit":
+        payload = _last_event(database)["payload"]
+        assert [payload[k] for k in kinds.split(", ")] == [7, 40, 900, 3]
