@@ -230,6 +230,32 @@ jobs:
       - if: always()
         run: cat e2e-server.log || true
 
+  removals-declared:
+    # Kraft-79382: a pull request that reverts merged work stays green when
+    # the tests pinning that work leave with it. Every test and intent
+    # `## REQ` a PR removes must be listed in its body (docs/testing.md,
+    # "Removing a test").
+    name: removals declared
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The body is read live, not off the event payload: a re-run replays the
+      # original payload, and re-running this job after editing the body is
+      # how a declaration is picked up.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/pr-body.md"
+          python3 dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
+
   release-impact:
     # Every pull request declares what it ships. The version comes from the git
     # tag, so there is no bump commit left to forget -- which means the only
