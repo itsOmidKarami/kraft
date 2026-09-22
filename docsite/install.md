@@ -18,6 +18,12 @@ and worth reading before you pipe it to a shell. `kraft admin update` installs t
 newest release later on (`--restart` also restarts a running server, the same
 way it was running), and `kraft --version` says what you have.
 
+An install older than the package's rename to `kraft-sdlc` can still hold a
+`kraft` uv tool next to it; `kraft admin update` stops and names the two
+commands that clear it (`uv tool uninstall kraft`, then `uv tool install
+--force --reinstall kraft-sdlc`, since the uninstall removes the `kraft`
+command both share).
+
 Prefer driving Kraft from a coding agent instead of this shell? `kraft admin
 init` above already installs the `/kraft:*` skills alongside the MCP server —
 or skip it and go straight to the [Claude Code plugin
