@@ -840,9 +840,15 @@ origin: src/kraft/templates/revision.py §_lands -- Kraft-eh5as: without it a re
 
 ## REQ chain-revision-approval-applies-what-was-shown
 
-IF a person's approval of a chain revision carries no digest, or a digest other than that of the revision it would apply, THEN the system SHALL refuse the approval as a conflict and SHALL apply nothing.
-enforced-by: tests/api/test_chain_revision_gate.py::test_an_approval_applies_what_its_approver_saw_not_a_later_render, tests/api/test_chain_revision_gate.py::test_a_revision_approval_that_carries_no_digest_is_refused
-origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15; Kraft-ec66w: the digest is the approver's own, echoed from the artifact they read, not the gate's last render.
+IF an approval of a chain revision -- a person's or a reviewing agent's --
+carries a digest other than that of the revision it would apply, THEN the
+system SHALL refuse the approval as a conflict and SHALL apply nothing. A
+person's approval with no digest at all SHALL be refused the same way. An
+agent's own review SHALL capture its digest immediately before it dispatches
+its reviewer, and its approval SHALL be checked against that digest rather
+than against whatever a person separately rendered.
+enforced-by: tests/api/test_chain_revision_gate.py::test_an_approval_applies_what_its_approver_saw_not_a_later_render, tests/api/test_chain_revision_gate.py::test_a_revision_approval_that_carries_no_digest_is_refused, tests/executor/test_gates_autoreview.py::test_agent_approval_refuses_an_artifact_edited_after_its_read, tests/executor/test_gates_autoreview.py::test_agent_approval_refuses_even_when_a_person_renders_the_new_version, tests/executor/test_gates_autoreview.py::test_agent_approval_of_an_unedited_artifact_still_applies
+origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15; Kraft-ec66w: the digest is the approver's own, echoed from the artifact they read, not the gate's last render. The agent path's own digest is `kraft.executor.gates._chain_revision_seen` (Kraft-rndd1), captured via `LaunchContext.chain_revision_digest` (`revision.artifact_digest` bound to `st.library` in `deps.launch`) and threaded into `apply_approval` as its existing `seen` keyword, which now only falls back to `store.shown_revision` when the caller supplied none.
 
 ## REQ invalid-chain-revision-never-reaches-the-chain
 
@@ -884,6 +890,19 @@ artifact an earlier execution node produced.
 on the *forge's* merge-request review, which is a different subject entirely.
 enforced-by: tests/executor/test_gates.py::test_auto_review_runs_only_with_work_item_opt_in, tests/executor/test_gates.py::test_auto_review_waits_out_its_effective_delay, tests/executor/test_gates.py::test_auto_review_stops_at_its_effective_attempt_limit, tests/executor/test_gates.py::test_auto_review_reports_a_verdict_and_cannot_clear_its_own_gate, tests/executor/test_gates.py::test_a_node_override_permits_or_suppresses_the_declared_auto_review, tests/executor/test_gates.py::test_an_override_cannot_switch_on_a_gate_that_declares_no_auto_review, tests/executor/test_gates.py::test_a_gate_cannot_declare_a_reviewer_that_cannot_report_a_verdict, tests/executor/test_gates.py::test_an_unpaired_skip_counts_as_its_own_attempt, tests/executor/test_gates.py::test_an_override_that_cannot_do_anything_is_refused_at_the_door
 origin: src/kraft/templates/models.py §GateNode -- "declare" is one field, `auto_review: AnyTask | None`, not a boolean plus a name: a bare `auto_escalate: true` could only mean "Kraft's own default reviewer", which is the name indirection V1 deletes. "Effective" is policy vocabulary and stays policy-owned -- the delay is `policy.auto_escalate_delay_s` folded through `store.effective_auto_escalate_delay_s`, the attempt bound is `policy.auto_review_attempts` -- so neither is duplicated onto the node. The per-item override keeps its persisted, publicly exposed key name `auto_escalate` (`db.py`'s `work_items.node_overrides`, `set_node_overrides`) and can only *suppress*: it names no task, so it cannot arm a gate that declares none. "SHALL NOT itself approve or reject" is enforced by dispatching the reviewer as a worker (`run_agent_task`'s `identify_as_worker` default, which sets `KRAFT_WORK_ITEM_ID` and therefore `client.context._forbid_self_action`); the pinned test asserts nothing overrides that default rather than re-testing the client guard.
+
+## REQ gate-auto-review-refuses-a-profiles-fallback-list
+
+`fallback-entry-is-validated` already refuses, at template load, a gate's
+review task that declares its own fallback list, because the review runs
+once and never walks it. It cannot refuse one supplied by the task's
+`profile:` the same way, because a profile's list is read live from
+`harnesses.yaml`, not at template load: a chain that validated clean today
+can select a profile whose list grows one tomorrow. The system SHALL instead
+refuse it at the review's own launch, naming the gate and the profile, and
+SHALL leave the gate pending for a human rather than run the reviewer.
+enforced-by: tests/executor/test_gates_autoreview.py::test_auto_review_refuses_a_profiles_own_fallback_list
+origin: src/kraft/gate_review.py §_profile_fallback_refusal (Kraft-t4y8g) -- reuses `executor/fallback.py` §fallback_list, the same lookup `dispatch.dispatch_node`'s own loop makes; checked at launch rather than template lint or `kraft admin doctor` because both of those would read `harnesses.yaml` once and could go stale the moment an operator edits a profile afterward.
 
 ## REQ attachment-behaviour-is-explicit-gate-configuration
 

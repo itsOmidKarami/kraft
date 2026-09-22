@@ -74,7 +74,10 @@ approving replaces the item's chain with exactly the revision you were shown (a
 `chain_revised` event). The approval sends back the digest of what you read
 (`kraft view artifact` prints the `kraft item approve --digest` to run); if
 the revision changed since, it is refused until you look again, and a proposal that would not validate cannot be approved — reject it
-back to `chain_revision` with the reason the gate gives.
+back to `chain_revision` with the reason the gate gives. If the gate declares
+an `auto_review` task, its approval is bound the same way: the digest is its
+own, captured just before it reads the artifact, not the last one a person
+happened to render.
 
 ## Node
 
