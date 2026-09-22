@@ -34,6 +34,29 @@ def _policy(pairs: list[str]) -> dict | None:
     return policy or None
 
 
+def _node_overrides(pairs: list[str]) -> dict | None:
+    """`--node-override NODE.FIELD=VALUE` pairs as the API's `node_overrides`,
+    each value read as YAML like `--policy`'s. The server checks the fields."""
+    overrides: dict = {}
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        node, dot, field = key.partition(".")
+        if not (sep and dot and node and field):
+            raise ValueError(f"--node-override takes NODE.FIELD=VALUE, not {pair!r}")
+        overrides.setdefault(node, {})[field] = yaml.safe_load(raw)
+    return overrides or None
+
+
+def _budget(raw: str) -> float | None:
+    """`--budget`: dollars, or `none` for an explicit no-cap."""
+    if raw.lower() == "none":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"dollars or `none`, not {raw!r}") from None
+
+
 def _cmd_create(ns: argparse.Namespace) -> None:
     # Resolved here rather than sent as typed: the server joins the path onto a
     # candidate root (the repo, or the worktree we are standing in), never onto
@@ -56,6 +79,9 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 implements_beads=ns.implements or None,
                 policy=_policy(ns.policy),
                 base_branch=ns.base_branch,
+                skip_nodes=[n for v in ns.skip_nodes for n in v.split(",") if n] or None,
+                budget_usd=ns.budget,
+                node_overrides=_node_overrides(ns.node_override),
             )
         ),
         common._render_action,
@@ -223,6 +249,28 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     create.add_argument(
         "--policy", action="append", default=[], metavar="KEY=VALUE", help=_POLICY_HELP
+    )
+    create.add_argument(
+        "--skip-nodes",
+        action="append",
+        default=[],
+        metavar="NODE[,NODE]",
+        help="drop these nodes from the item's chain at intake (repeatable or comma-separated)",
+    )
+    create.add_argument(
+        "--budget",
+        type=_budget,
+        default=...,
+        metavar="USD|none",
+        help="the item's spend cap in dollars; `none` for no cap (default: the policy's)",
+    )
+    create.add_argument(
+        "--node-override",
+        action="append",
+        default=[],
+        metavar="NODE.FIELD=VALUE",
+        help="a per-node override at intake, the fields set-node-override takes "
+        "(repeatable), e.g. plan.auto_escalate=true or implementation.attempts=2",
     )
     create.set_defaults(func=_cmd_create, all=False)
 
