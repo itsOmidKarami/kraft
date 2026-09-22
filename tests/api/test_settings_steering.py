@@ -4,6 +4,7 @@ races around the intake poller."""
 from __future__ import annotations
 
 import asyncio
+import shutil
 import threading
 from pathlib import Path
 
@@ -39,15 +40,13 @@ def _steering_dir(templates_dir):
 
 
 def _files_excluding_fixture(body: dict) -> list[dict]:
-    """`fake_templates_dir` seeds steering files of its own: the legacy
-    `never-signal-processes-you-didnt-start.md`, and -- because dispatch still
-    resolves a task's `steering:` names to files (`seed_v1_library`'s known
-    gap) -- one file per profile the seeded `library.yaml` declares inline.
-    None of them is this test's concern, so drop them before asserting on
-    what the test itself wrote."""
-    seeded = {"never-signal-processes-you-didnt-start"} | set(
-        yaml.safe_load((_REPO_ROOT / "templates" / "library.yaml").read_text())["steering"]
-    )
+    """`fake_templates_dir` seeds steering files of its own: because dispatch
+    still resolves a task's `steering:` names to files (`seed_v1_library`'s
+    known gap), one file per profile the seeded `library.yaml` declares
+    inline. None of them is this test's concern, so drop them before
+    asserting on what the test itself wrote."""
+    library = yaml.safe_load((_REPO_ROOT / "templates" / "library.yaml").read_text())
+    seeded = set(library["steering"])
     return [f for f in body["files"] if f["name"] not in seeded]
 
 
@@ -100,6 +99,19 @@ def test_deleting_a_steering_file_nothing_names_succeeds(client, templates_dir):
     (_steering_dir(templates_dir) / "orphan.md").write_text("unused\n")
     assert client.delete("/api/steering/orphan").status_code == 200
     assert not (templates_dir / "steering" / "orphan.md").exists()
+    assert _files_excluding_fixture(client.get("/api/steering").json()) == []
+
+
+def test_the_shipped_seed_ships_no_steering_md(client, templates_dir):
+    """`templates/steering/` in the repo is what first-run seeding and `just
+    bundle` copy verbatim into an operator's install (Kraft-sj86z): a stray
+    `.md` there shows up as a selectable profile the moment anyone connects a
+    repo. Copy the real directory over the test's own and confirm the picker
+    still lists nothing beyond `seed_v1_library`'s known per-profile files."""
+    shipped = _REPO_ROOT / "templates" / "steering"
+    if shipped.is_dir():
+        for f in shipped.glob("*.md"):
+            shutil.copy(f, _steering_dir(templates_dir) / f.name)
     assert _files_excluding_fixture(client.get("/api/steering").json()) == []
 
 

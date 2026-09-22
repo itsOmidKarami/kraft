@@ -213,17 +213,13 @@ def fake_docker_bin(tmp_path: Path) -> Path:
 def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
     `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
-    launching `agent_command` (`seed_v1_library`). The steering file the seed
-    names is copied in too, and nothing else of the real steering dir: its
-    README is documentation, not a steering file."""
+    launching `agent_command` (`seed_v1_library`). The product seed ships no
+    steering file (Kraft-sj86z: the never-signal rule lives in
+    `adapters.agent.SAFETY_RULES` instead), so there is none to copy in."""
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
     steering_dir = d / "steering"
     steering_dir.mkdir(exist_ok=True)
-    shutil.copy(
-        _REPO_ROOT / "templates" / "steering" / "never-signal-processes-you-didnt-start.md",
-        steering_dir / "never-signal-processes-you-didnt-start.md",
-    )
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")
     seed_v1_library(d, agent_command=agent_command)
     return d
