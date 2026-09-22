@@ -8,6 +8,7 @@ speaks claude's stream-json, so its `rate_limit_event` is read exactly as a real
 claude one; `KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS` limits only the named models."""
 
 import json
+import logging
 import os
 import time
 from datetime import UTC, datetime
@@ -78,9 +79,10 @@ def _profiles(fake_agent, profiles: dict) -> None:
 
 
 async def test_a_rate_limited_launch_falls_back_in_the_same_dispatch(
-    tmp_path, repo, fake_agent, monkeypatch
+    tmp_path, repo, fake_agent, monkeypatch, caplog
 ):
     _limit(monkeypatch, "opus")
+    caplog.set_level(logging.INFO, logger="kraft.executor.fallback")
 
     status, evts, sessions, _ = await _walk(
         tmp_path, repo, _chain(effort="high", fallback=[{"model": "sonnet"}])
@@ -103,6 +105,12 @@ async def test_a_rate_limited_launch_falls_back_in_the_same_dispatch(
         "session_id": sessions[1]["id"],
         "override_not_carried": False,
     }
+    # And one server log line for it.
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "kraft.executor.fallback"]
+    assert line == (
+        "launch_fallback w1 build.main.implement: claude / opus -> claude / sonnet "
+        f"(rate_limit_hit, until {_iso(SOON)})"
+    )
     # The hit names what it limited, for every later launch to skip.
     (hit,) = [e["payload"] for e in evts if e["type"] == "rate_limit_hit"]
     assert (hit["harness"], hit["model"]) == ("claude", "opus")
