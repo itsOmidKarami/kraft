@@ -28,6 +28,7 @@ token counts, not smeared across every session row at write time.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -503,13 +504,126 @@ def _unfinished_jobs_claude(log_path: Path) -> list[str]:
     return at_turn_end
 
 
+def _json_lines(lines: Iterable[str]) -> Iterable[dict]:
+    """Each line that decodes to a JSON object; anything else is skipped."""
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            yield obj
+
+
+def _log_objects(log_path: Path) -> list[dict]:
+    try:
+        return list(_json_lines(log_path.read_text().splitlines()))
+    except OSError:
+        return []
+
+
+def _usage_codex(obj: dict) -> Usage | None:
+    """Tokens off a `codex exec --json` `turn.completed` line.
+
+    Measured against codex-cli 0.155.0 (Kraft-w3kot): this `usage` is the
+    thread's running total, not the turn's own -- a resumed thread's second
+    turn reported output 28 after a first turn of 23 plus its own 5, matching
+    the rollout's `total_token_usage` and not its `last_token_usage`. So the
+    latest line wins; summing turns would count every earlier one again.
+    `cached_input_tokens` is a share of `input_tokens` (the rollout's
+    `total_tokens` is input + output), so it comes off the uncached count.
+    No cost: the stream carries none, and cost is only the agent's own number.
+    """
+    if obj.get("type") != "turn.completed" or not isinstance(obj.get("usage"), dict):
+        return None
+    block = obj["usage"]
+    cache_read = _int(block.get("cached_input_tokens"))
+    cache_write = _int(block.get("cache_write_input_tokens"))
+    return Usage(
+        tokens_in=max(_int(block.get("input_tokens")) - cache_read - cache_write, 0),
+        tokens_out=_int(block.get("output_tokens")),
+        tokens_cache_read=cache_read,
+        tokens_cache_write=cache_write,
+    )
+
+
+def _stream_codex(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+    """Live progress: the newest running total. `seen` is the caller's, kept
+    across calls over a growing log like `from_stream`'s.
+    ponytail: one key for the whole log, so a log holding two codex threads
+    shows only the newer one live; `_envelope_codex` sums them at the end."""
+    for obj in _json_lines(lines):
+        u = _usage_codex(obj)
+        if u is not None:
+            seen["codex"] = u
+    return seen.get("codex")
+
+
+def _envelope_codex(log_path: Path) -> dict | None:
+    """Every codex thread in the log, each at its last `turn.completed`, summed,
+    in Kraft's own names (which `_from_usage_block` reads)."""
+    by_thread: dict[object, Usage] = {}
+    thread = None
+    for obj in _log_objects(log_path):
+        if obj.get("type") == "thread.started":
+            thread = obj.get("thread_id")
+        u = _usage_codex(obj)
+        if u is not None:
+            by_thread[thread] = u
+    if not by_thread:
+        return None
+    u = _sum(by_thread.values())
+    return {"usage": {k: getattr(u, k) for k in KINDS}}
+
+
+def _session_id_codex(log_path: Path) -> str | None:
+    """The thread id `codex exec resume` takes, off the `thread.started` line."""
+    for obj in _log_objects(log_path):
+        sid = obj.get("thread_id") if obj.get("type") == "thread.started" else None
+        if isinstance(sid, str) and sid:
+            return sid
+    return None
+
+
+#: What codex-cli 0.155.0 says when it is limited, found in its binary: the
+#: ChatGPT-plan message ("You've hit your usage limit. ... try again at ..."),
+#: its error codes, and its give-up line after retrying a 429 ("exceeded retry
+#: limit, last status: 429 Too Many Requests").
+_CODEX_LIMITED = re.compile(
+    r"hit your usage limit|usage_limit_(?:reached|exceeded)|rate_limit_exceeded"
+    r"|429 Too Many Requests|\"status\":\s*429\b",
+    re.IGNORECASE,
+)
+
+
+def _rate_limit_codex(log_path: Path) -> dict | None:
+    """A `turn.failed` whose message says the launch was limited, or None.
+
+    Only `turn.failed`, not the bare `error` event: that one also reports
+    problems the turn goes on to survive, and in every failure captured
+    `turn.failed` repeated the `error` message. The message is human text with
+    no machine-readable reset time, so `resets_at` is unknown (None) and the
+    rate-limit poller's own retry cap bounds the retries instead.
+    """
+    for obj in _log_objects(log_path):
+        err = obj.get("error") if obj.get("type") == "turn.failed" else None
+        message = err.get("message") if isinstance(err, dict) else None
+        if isinstance(message, str) and _CODEX_LIMITED.search(message):
+            return {
+                "rate_limit_type": None,
+                "resets_at": None,
+                "resets_at_iso": None,
+                "message": message[:500],
+            }
+    return None
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
 
     In code, never in YAML: an operator must not be able to break a parser by
-    editing config. A harness file names one; adding one is a release
-    (Kraft-qh62w adds codex's).
+    editing config. A harness file names one; adding one is a release.
     """
 
     name: str
@@ -533,6 +647,13 @@ READERS: dict[str, Reader] = {
         rate_limit=_rate_limit_claude,
         session_id=_session_id_claude,
         unfinished_jobs=_unfinished_jobs_claude,
+    ),
+    "codex-json": Reader(
+        name="codex-json",
+        stream=_stream_codex,
+        envelope=_envelope_codex,
+        rate_limit=_rate_limit_codex,
+        session_id=_session_id_codex,
     ),
 }
 

@@ -14,7 +14,7 @@ Kraft ships three harnesses:
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
-| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `autocompact`, or `rate_limit_signal` — a profile or task asking for one of those is rejected at load. |
+| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 
 ## Capabilities, not flags
