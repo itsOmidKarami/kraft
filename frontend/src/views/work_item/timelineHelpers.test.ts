@@ -63,6 +63,16 @@ describe("timelineHelpers: paused_by_broken_base", () => {
   });
 });
 
+describe("timelineHelpers: read_only_violated (Kraft-b8v9a)", () => {
+  it("names the scope and the changed files as the detail line", () => {
+    const e = ev({
+      type: "read_only_violated",
+      payload: { node_id: "verify", scope: "verify", files: ["a.py", "b.py"] },
+    });
+    expect(detailOf(e)).toBe("verify changed: a.py, b.py");
+  });
+});
+
 describe("timelineHelpers: loop_counters_reset", () => {
   it("names the rebase and which nodes are re-running", () => {
     const e = ev({

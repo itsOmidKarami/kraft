@@ -78,6 +78,12 @@ export function detailOf(e: KraftEvent): string | null {
   if (e.type === "sweep_failed" && typeof p.error === "string") {
     return `${p.task_hook}: ${p.error}`;
   }
+  // Kraft-b8v9a: a read_only step or node wrote to the worktree
+  // (`kraft.executor.read_only`) -- name what changed, the way a sibling
+  // stop's payload becomes this row's detail everywhere else here.
+  if (e.type === "read_only_violated" && typeof p.scope === "string" && Array.isArray(p.files)) {
+    return `${p.scope} changed: ${(p.files as string[]).join(", ")}`;
+  }
   if (e.type === "node_recovery_started" && Array.isArray(p.tasks)) {
     const failed = Array.isArray(p.failed_tasks) ? (p.failed_tasks as string[]).join(", ") : "";
     return `${failed} failed → ${(p.tasks as string[]).join(", ")}`;

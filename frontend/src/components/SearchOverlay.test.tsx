@@ -136,6 +136,19 @@ describe("SearchOverlay", () => {
     expect(spy).toHaveBeenCalledWith("w1", "plan_approval");
   });
 
+  it("routes chain_revision_approval to the item page instead of firing a blind approve, same as human_review_approval (Kraft-xyt3x)", async () => {
+    useStore.setState({
+      workItems: { w1: wi({ id: "w1", status: "needs_human", pending_gate: "chain_revision_approval", title: "revise chain" }) },
+    } as never);
+    const spy = vi.spyOn(api, "approveGate").mockResolvedValue();
+    const onClose = vi.fn();
+    renderOverlay({ onClose });
+    expect(screen.getByText(/approve chain_revision_approval/i)).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox"), "{Enter}");
+    expect(spy).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("ArrowDown moves aria-activedescendant and Enter acts on that row, not the first (W6.5)", async () => {
     useStore.setState({
       workItems: {

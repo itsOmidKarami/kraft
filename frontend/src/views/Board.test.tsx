@@ -315,6 +315,22 @@ describe("Board", () => {
     expect(link).toHaveAttribute("href", "/work-items/w6");
   });
 
+  it("does not offer a blind Approve for chain_revision_approval either -- it needs a digest only the item page has (Kraft-xyt3x)", () => {
+    setItems(
+      wi({
+        id: "w10",
+        status: "needs_human",
+        current_node_id: "chain_review",
+        pending_gate: "chain_revision_approval",
+      }),
+    );
+    renderBoard();
+    const row = within(group("Needs you")).getByTestId("board-card");
+    expect(within(row).queryByRole("button", { name: /approve/i })).toBeNull();
+    const link = within(row).getByRole("link", { name: /review to approve/i });
+    expect(link).toHaveAttribute("href", "/work-items/w10");
+  });
+
   it("puts a paused-mid-chain item in Needs you, and a never-started item in Not started", () => {
     setItems(
       wi({ id: "w5", status: "paused", current_node_id: "verify", title: "Paused mid-chain" }),
