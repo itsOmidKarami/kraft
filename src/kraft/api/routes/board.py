@@ -31,13 +31,18 @@ _STOP_BOUNDARY = (
 )
 
 
-def _stop_reason(st, wid: str) -> str | None:
-    """The reason of the stop the item is *currently* sitting on, or None if
-    anything in `_STOP_BOUNDARY` superseded it."""
+def _current_stop(st, wid: str) -> dict | None:
+    """The `work_item_needs_human` payload of the stop the item is *currently*
+    sitting on, or None if anything in `_STOP_BOUNDARY` superseded it."""
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
         if e["type"] in _STOP_BOUNDARY:
-            return e["payload"]["reason"] if e["type"] == "work_item_needs_human" else None
+            return e["payload"] if e["type"] == "work_item_needs_human" else None
     return None
+
+
+def _stop_reason(st, wid: str) -> str | None:
+    stop = _current_stop(st, wid)
+    return stop["reason"] if stop is not None else None
 
 
 def _needs_context_stop(st, wid: str) -> bool:
@@ -360,6 +365,10 @@ async def get_work_item(wid: str, request: Request):
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": _stop_reason(st, wid),
+        # What the chain or a repair concluded a person should do about that
+        # stop -- `{action: skip|retry|abandon, reason}` -- or None
+        # (Kraft-s7c04.27). Each action is one existing verb.
+        "suggested_action": (_current_stop(st, wid) or {}).get("suggested_action"),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),

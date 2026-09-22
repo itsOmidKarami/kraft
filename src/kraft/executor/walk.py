@@ -425,6 +425,8 @@ class _Stuck:
     reason: str
     capped: dict | None = None
     bundle: dict | None = None
+    #: `stops.suggestion`: what the node's last session said to do next.
+    suggested: dict | None = None
 
 
 #: The round a stuck escalation's session is written under. Distinct from every
@@ -444,7 +446,14 @@ async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, 
     reason = stuck.reason + extra
     await db.write(
         lambda c: store.mark_needs_human(
-            c, work_item_id, node.id, reason, stuck.capped, bundle=stuck.bundle, stuck=True
+            c,
+            work_item_id,
+            node.id,
+            reason,
+            stuck.capped,
+            bundle=stuck.bundle,
+            stuck=True,
+            suggested=stuck.suggested,
         )
     )
     return "needs_human"
@@ -773,6 +782,7 @@ async def walk_node(
         )
         if not isinstance(result, _Stuck):
             return result
+        result = replace(result, suggested=stops.suggestion(db, work_item_id, node.id))
         outcome = await _escalate_stuck(
             db,
             run_dirs,
