@@ -329,7 +329,7 @@ def test_an_added_node_stays_within_the_administrator_maxima():
     comes with the library task, and the revised chain is checked whole."""
     added = {"id": "x", "tasks": [{"id": "c", "extends": "costly"}]}
     with pytest.raises(revision.RevisionError, match="token_budget"):
-        _revise(_chain(token_budget=100), add=[_add("build", added)])
+        _revise(_chain(work_item={"token_budget": 100}), add=[_add("build", added)])
 
 
 def test_adding_a_node_needs_the_library():
