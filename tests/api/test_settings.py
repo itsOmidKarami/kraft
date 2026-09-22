@@ -150,9 +150,8 @@ def test_the_configured_bind_is_what_the_server_starts_on(tmp_path, monkeypatch,
 
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     monkeypatch.delenv("KRAFT_HOST", raising=False)
-    config.save_access(
-        templates_dir / "access.yaml",
-        {"bind": "0.0.0.0", "port": 9100, "password_hash": "scrypt$aa$bb"},
+    config.Access(bind="0.0.0.0", port=9100, password_hash="scrypt$aa$bb").save(
+        templates_dir / "access.yaml"
     )
     assert _bind(templates_dir) == ("0.0.0.0", 9100)
     monkeypatch.setenv("KRAFT_PORT", "1234")
@@ -167,7 +166,7 @@ def test_an_unprotected_lan_bind_refuses_to_start(tmp_path, monkeypatch, templat
 
     monkeypatch.delenv("KRAFT_PORT", raising=False)
     monkeypatch.delenv("KRAFT_HOST", raising=False)
-    config.save_access(templates_dir / "access.yaml", {"bind": "0.0.0.0", "port": 8765})
+    config.Access(bind="0.0.0.0", port=8765).save(templates_dir / "access.yaml")
     with pytest.raises(SystemExit, match="no password is set"):
         _bind(templates_dir)
 

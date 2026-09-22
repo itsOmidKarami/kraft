@@ -72,7 +72,7 @@ async def spa(path: str, request: Request):
 
 @app.exception_handler(config_mod.ConfigError)
 async def _bad_config_file(request: Request, exc: config_mod.ConfigError) -> JSONResponse:
-    """A legible 422 for any `load_repos`/`load_intake`/etc. caller that does
+    """A legible 422 for any `load_repos`/`Intake.load`/etc. caller that does
     not catch `ConfigError` itself. `templates/` is a plain directory an
     operator can hand-edit, and the message already names the file and what is
     wrong with it — a global backstop is the fix, not a guard at each call

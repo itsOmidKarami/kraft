@@ -430,15 +430,14 @@ async def put_policy(body: PolicyBody, request: Request):
 @api_router.get("/theme")
 async def get_theme(request: Request):
     st = request.app.state
-    return config_mod.load_theme(st.templates_dir / "theme.yaml").model_dump()
+    return config_mod.Theme.load(st.templates_dir / "theme.yaml").model_dump()
 
 
 @api_router.put("/theme")
 async def put_theme(body: config_mod.Theme, request: Request):
     st = request.app.state
-    data = body.model_dump()
-    config_mod.write_yaml(st.templates_dir / "theme.yaml", data)
-    return data
+    body.save(st.templates_dir / "theme.yaml")
+    return body.model_dump()
 
 
 class SteeringBody(BaseModel):
@@ -586,7 +585,7 @@ async def get_intake(request: Request):
     boot and let the next save overwrite it silently."""
     st = request.app.state
     try:
-        data = config_mod.load_intake(st.templates_dir / "intake.yaml").model_dump()
+        data = config_mod.Intake.load(st.templates_dir / "intake.yaml").model_dump()
     except config_mod.ConfigError:
         # Unreadable: show what the instance is actually running on, which
         # lifespan already degraded to the defaults. Saving replaces the file.
@@ -617,7 +616,7 @@ async def put_intake(body: IntakeBody, request: Request):
     app_ = request.app
     st = app_.state
     data = body.model_dump()
-    config_mod.write_yaml(st.templates_dir / "intake.yaml", data)
+    config_mod.Intake.model_validate(data).save(st.templates_dir / "intake.yaml")
     st.intake = data
     async with st.intake_lock:
         task = st.intake_task
@@ -671,7 +670,7 @@ async def put_access(body: AccessBody, request: Request):
     # agent runner on the office wifi. Refuse it rather than allow it quietly.
     if access["bind"] not in config_mod.LOOPBACK and not access["password_hash"]:
         raise HTTPException(422, "set a password before binding off localhost")
-    config_mod.save_access(st.templates_dir / "access.yaml", access)
+    config_mod.Access.model_validate(access).save(st.templates_dir / "access.yaml")
     st.access = access
     # Only once the new hash is durable: revoking first and then failing to write
     # would sign everyone out while leaving the *old* password live.
@@ -721,7 +720,7 @@ async def get_notify(request: Request):
     # closing it means a file watcher, which this task does not build.
     st = request.app.state
     return _notify_view(
-        config_mod.load_notify(st.templates_dir / "notify.yaml").model_dump(), st.notifier.last_test
+        config_mod.Notify.load(st.templates_dir / "notify.yaml").model_dump(), st.notifier.last_test
     )
 
 
@@ -729,7 +728,7 @@ async def get_notify(request: Request):
 async def put_notify(body: NotifyBody, request: Request):
     st = request.app.state
     path = st.templates_dir / "notify.yaml"
-    cfg = config_mod.load_notify(path).model_dump()
+    cfg = config_mod.Notify.load(path).model_dump()
     if body.enabled is not None:
         cfg["enabled"] = body.enabled
     if body.url is not None:
@@ -750,7 +749,7 @@ async def put_notify(body: NotifyBody, request: Request):
     # URL ever set" (body.url is None and cfg["url"] was already empty).
     if cfg["enabled"] and not cfg["url"]:
         raise HTTPException(422, "set a webhook URL before enabling notifications")
-    config_mod.save_notify(path, cfg)
+    config_mod.Notify.model_validate(cfg).save(path)
     st.notifier.reload()
     return _notify_view(cfg, st.notifier.last_test)
 

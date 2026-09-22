@@ -139,7 +139,7 @@ def _config_checks() -> list[dict]:
         ]
     checks = [_check("templates", True, str(templates))]
     try:
-        config.load_access(templates / "access.yaml")
+        config.Access.load(templates / "access.yaml")
         checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
