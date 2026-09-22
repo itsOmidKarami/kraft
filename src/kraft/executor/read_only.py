@@ -85,10 +85,11 @@ def _entries(status: str) -> set[tuple[str, str]]:
 
 
 def _changed_in(cwd: Path, before, after) -> list[str]:
-    if before == after:
-        return []
+    # Unreadable first: git failing the same way twice is still unverified.
     if None in before or None in after:
         return ["(git could not read it)"]
+    if before == after:
+        return []
     names = set()
     if before[0] != after[0]:
         moved = _config.git_read(cwd, "diff", "--name-only", before[0], after[0])

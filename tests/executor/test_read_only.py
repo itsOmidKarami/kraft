@@ -243,3 +243,11 @@ def test_a_recovery_or_fix_loop_step_cannot_be_read_only(handler):
     shape = {"steps": [{"id": "repair", "read_only": True, "tasks": [_sub("fix")]}]}
     with pytest.raises(ValidationError, match="cannot be read_only: it writes by design"):
         tm.ExecNode.model_validate(_node([{"id": "s", "tasks": [_sub("t")]}], **{handler: shape}))
+
+
+def test_git_failing_the_same_way_twice_still_counts_as_a_change(tmp_path):
+    """Unverified is not read-only: identical failed reads must not compare equal."""
+    from kraft.executor import read_only
+
+    failed = (None, None, None)
+    assert read_only._changed_in(tmp_path, failed, failed) == ["(git could not read it)"]
