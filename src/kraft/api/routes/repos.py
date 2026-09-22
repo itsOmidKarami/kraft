@@ -283,7 +283,8 @@ def _refuse_enable_without_test_command(entry: dict) -> None:
     registry fallback (`executor.dispatch._select_scopes`): a repo declaring
     neither stops every item (Kraft-vd1ed).
     """
-    if entry.get("enabled") and not (entry.get("test_command") or entry.get("test_scopes")):
+    # Absent means enabled (Ruling 212), as RepoEntry.enabled defaults.
+    if entry.get("enabled", True) and not (entry.get("test_command") or entry.get("test_scopes")):
         raise HTTPException(
             422,
             "cannot enable a repo with no test command — set its test command or test scopes first",

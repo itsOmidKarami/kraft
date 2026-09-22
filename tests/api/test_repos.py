@@ -454,7 +454,9 @@ def _broken_repos_yaml(templates_dir: Path) -> None:
     edit, or a steering file deleted after the fact. Written directly, bypassing
     `POST /repos`'s own validation, which would refuse this on the way in."""
     (templates_dir / "repos.yaml").write_text(
-        yaml.safe_dump({"repos": [{"path": "/r", "steering": ["deleted"]}]})
+        yaml.safe_dump(
+            {"repos": [{"path": "/r", "test_command": "pytest", "steering": ["deleted"]}]}
+        )
     )
 
 
@@ -486,6 +488,15 @@ def test_patching_one_repo_does_not_write_enabled_into_an_untouched_entrys_absen
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
     (r,) = [e for e in on_disk["repos"] if e["path"] == "/r"]
     assert "enabled" not in r
+
+
+@pytest.mark.api_client(edit_templates=_no_enabled_key)
+def test_patch_on_an_entry_with_no_enabled_key_and_no_test_command_is_refused(client):
+    """Kraft-hv4uy: absent `enabled` is enabled (Ruling 212), so the refusal
+    must read it that way too -- not let a PATCH save an enabled repo that
+    has nothing for verification to run."""
+    r = client.patch("/api/repos?path=/r", json={"name": "renamed"})
+    assert r.status_code == 422, r.text
 
 
 def test_a_broken_repos_yaml_does_not_prevent_startup(tmp_path, monkeypatch):

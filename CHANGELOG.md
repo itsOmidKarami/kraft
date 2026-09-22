@@ -126,6 +126,8 @@ agent, decides whether to skip, abandon, or give more room.
   `kraft view show --json` returns the full item.
 - The connect probe proposes `just test` only for a real `test` recipe.
 - `install-service` works on Linux runners and reinstalls cleanly.
+- Editing a repo whose `repos.yaml` entry leaves `enabled` unset now refuses
+  to save it enabled with no test command, as for an explicit `enabled: true`.
 
 ### Removed
 
