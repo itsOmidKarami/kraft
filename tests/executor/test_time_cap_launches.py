@@ -207,6 +207,9 @@ async def test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline(
 ):
     real = time.monotonic
     monkeypatch.setattr(caps, "monotonic", lambda: real() * 600)
+    # The test, not init, is this child's parent: on Linux it lingers as a
+    # zombie nothing here reaps, so the group check would sit out the grace.
+    monkeypatch.setattr(reattach, "_KILL_GRACE_S", 0.5)
     chain = _materialize(
         [
             {

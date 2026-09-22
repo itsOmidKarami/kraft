@@ -375,11 +375,16 @@ async def _adopt(
         )
 
 
+#: How long a capped adopted session's group gets after SIGTERM before
+#: SIGKILL, as `run_task`'s own `group_kill_grace`.
+_KILL_GRACE_S = 10.0
+
+
 async def _stop_at_cap(db, row, pid: int, hit) -> None:
     """Kill an adopted session whose time cap ran out -- its process group,
     as `run_task` does; `_guarded_adopt`'s `finally` tears down a sandbox's
     container -- and stop its item for a human under the cap's reason."""
-    await _kill_group(pid, 10.0)
+    await _kill_group(pid, _KILL_GRACE_S)
     session_id = row["id"]
 
     def _capped(c):
