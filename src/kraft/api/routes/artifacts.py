@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 from kraft import events, review
 from kraft.api import api_router, deps
 from kraft.api.routes import board
+from kraft.executor import stops
 from kraft.index import ingest as ingest_mod
 from kraft.worker.worktree_read import read_worktree_file
 
@@ -78,6 +79,14 @@ async def get_work_item_diff(wid: str, request: Request):
     if not worktree.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
 
+    try:
+        # No host git in a sandboxed worktree while its worker can still
+        # write it (Kraft-69rwp): a 409 a reviewer can act on.
+        stops.refuse_live_sandboxed_session(
+            st.db, row, deps.launch(st, row["repo"]), what="the diff"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
     change = review.read_change(worktree, "HEAD")
     landed = review.read_change(worktree, base, head="HEAD")
     if change is None or landed is None:

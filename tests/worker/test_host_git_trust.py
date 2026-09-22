@@ -127,7 +127,7 @@ def test_assert_clean_never_runs_a_filter_planted_behind_a_gitlink(tmp_path, har
     marker = tmp_path / "PWNED"
     _plant_gitlink(wt, {"filter.evil.clean": _run(marker)})
     try:
-        asyncio.run(forge.assert_clean(wt))
+        asyncio.run(forge.assert_clean(wt, "main"))
     except forge.ForgeError:
         pass
     assert not marker.exists()
@@ -208,15 +208,15 @@ async def _every_host_call(wt: Path) -> None:
     review.read_change(wt, "HEAD")
     review.read_change(wt, "HEAD~1", head="HEAD")
     for call in (
-        forge.commit_stragglers(wt, message="wip"),
-        forge.assert_clean(wt),
+        forge.commit_stragglers(wt, base="main", message="wip"),
+        forge.assert_clean(wt, "main"),
         forge.git.push(wt, "kraft/w1"),
     ):
         try:
             await call
         except forge.ForgeError:
             pass
-    builtins.restore_branch(wt, "kraft/other")
+    builtins.restore_branch(wt, "kraft/other", "main")
 
 
 @pytest.mark.parametrize("family", FAMILIES)

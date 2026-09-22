@@ -530,6 +530,13 @@ async def dispatch_node(
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
+    # Before any task runs host git here: a sandboxed worker earlier in this
+    # walk may have left a repository of its own in the worktree (Kraft-nx4id).
+    # `rev-parse` above reads HEAD alone and never looks at a gitlink.
+    try:
+        stops.refuse_planted_repos(work_item_row, launch, Path(worktree))
+    except RuntimeError as exc:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     if not isinstance(t, ForgeTask):
         # Resolved here, once, for every launch this task makes (Ruling 189):
         # a sandbox nobody can resolve stops this task for a human, recorded
@@ -737,11 +744,19 @@ async def dispatch_node(
         )
     # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
     # the change under review, written out for this session.
-    package = (
-        prompts.review_package(db, run_dirs, work_item_row["id"], worktree, task.path, session_id)
-        if AgentInput.REVIEW_PACKAGE in t.inputs
-        else None
-    )
+    package = None
+    if AgentInput.REVIEW_PACKAGE in t.inputs:
+        # The package is read off the worktree with host git, which must not
+        # race a sandboxed co-task still writing it (Kraft-69rwp).
+        try:
+            stops.refuse_live_sandboxed_session(
+                db, work_item_row, launch, what="the review package"
+            )
+        except RuntimeError as exc:
+            return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+        package = prompts.review_package(
+            db, run_dirs, work_item_row["id"], worktree, task.path, session_id
+        )
     try:
         status = await _agent.run_agent_task(
             db,
@@ -803,10 +818,49 @@ async def dispatch_node(
     base = await _builtins.base_branch(
         db, work_item_row["id"], Path(worktree if member else work_item_row["repo"]), member=member
     )
+    #
+    # Not after a sandboxed session that left a repository of its own in the
+    # worktree (Kraft-nx4id): the checkout and the commit would both read its
+    # config. The next dispatch, or the door a human uses, stops the item on
+    # the same check and names the paths.
+    #
+    # Nor while a sandboxed co-task is still live (Kraft-69rwp): it can write
+    # the worktree under the sweep. The last task of the step to finish
+    # sweeps for all of them.
+    try:
+        stops.refuse_live_sandboxed_session(db, work_item_row, launch, what="the straggler sweep")
+    except RuntimeError as exc:
+        await db.write(
+            lambda c, exc=exc: events.append(
+                c,
+                work_item_row["id"],
+                "sweep_failed",
+                {"node_id": node.id, "task": task.path, "error": f"deferred: {exc}"},
+            )
+        )
+        return status
+    if sandbox and _sandbox.planted_repos(Path(worktree), work_item_row["base_ref"]) != []:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_row["id"],
+                "sweep_failed",
+                {
+                    "node_id": node.id,
+                    "task": task.path,
+                    "error": "skipped: the sandboxed worktree holds a git repository "
+                    "Kraft did not create",
+                },
+            )
+        )
+        return status
     _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
     try:
         await _forge.commit_stragglers(
-            Path(worktree), base=base, message=f"wip: uncommitted work from {node.id}"
+            Path(worktree),
+            base=base,
+            message=f"wip: uncommitted work from {node.id}",
+            mounts=_builtins.item_mounts(work_item_row),
         )
     except _forge.ForgeError as exc:
         logger.warning("could not commit stragglers after %s: %r", task.path, exc)

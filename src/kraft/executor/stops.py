@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import config as _config
 from kraft import events, store, waits
 from kraft import policy as _policy
 from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext
@@ -216,34 +216,90 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     return "needs_human"
 
 
-def refuse_sandboxed_submodules(row, launch: LaunchContext | None) -> None:
-    """Raise `RuntimeError` naming why, when `row`'s item mounts submodules and
-    would run sandboxed (Kraft-dshto): refused at intake since Ruling 180, but
-    an item filed before that, or one filed before workspaces (Kraft-zvqwl),
-    can still be in flight. Called before any host-side git touches its
-    worktree -- the walk, and every door that refreshes the worktree first --
+def _item_sandbox(row, launch: LaunchContext | None) -> dict | None:
+    """`dispatch.item_sandbox`, the one resolution of an item's sandbox
+    (Ruling 189). Imported here, not at the top: `dispatch` imports this
+    module. Raises `SandboxUnresolved`, a `RuntimeError`, when it cannot tell
+    -- unreadable is never "no sandbox"."""
+    from kraft.executor.dispatch import item_sandbox
+
+    return item_sandbox(row, launch)
+
+
+def refuse_sandboxed_submodules(
+    row, launch: LaunchContext | None, worktree: Path | None = None
+) -> None:
+    """Raise `RuntimeError` naming why, when `row`'s item runs sandboxed and
+    host git in its `worktree` could reach a submodule's config, which a
+    sandboxed worker writes. Called before any host-side git touches the
+    worktree -- the walk and every door that refreshes the worktree first --
     and each caller already turns a `RuntimeError` into a stop for a human.
 
-    Sandboxed means its frozen snapshot sandboxes a task, or a repository
-    entry it launches against sets one live: an item that froze none reads
-    the entry's own (`dispatch._task_sandbox`)."""
+    Two ways in. The item mounts submodules (Kraft-dshto): refused at intake
+    since Ruling 180, but an item filed before that, or one filed before
+    workspaces (Kraft-zvqwl), can still be in flight. Or the worker made its
+    own (Kraft-nx4id): `refuse_planted_repos`."""
     mounts = _builtins.item_mounts(row)
     if not mounts:
+        refuse_planted_repos(row, launch, worktree)
+        return
+    if _item_sandbox(row, launch) is None:
         return
     snapshot = store.materialized_chain_of(row)
-    refusal = snapshot.sandbox_refusal() if snapshot is not None else None
-    if refusal is None and launch is not None:
-        repositories = snapshot.target.repositories() if snapshot is not None else ()
-        try:
-            # A poisoned `repos.yaml` (`deps._PoisonedRepoEntry`) raises on
-            # `.get`: unreadable is never read as "no sandbox".
-            entries = [launch.repo_entry, *(launch.repositories.get(r) for r in repositories)]
-            live = [e["path"] for e in entries if e and _sandbox.resolve({}, e)]
-        except _config.ConfigError as exc:
-            raise RuntimeError(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
-        if live:
-            refusal = _sandbox.submodule_refusal(
-                f"repos.yaml: repository {', '.join(map(repr, dict.fromkeys(live)))}"
-            )
-    if refusal is not None:
-        raise RuntimeError(f"{refusal}. Its submodules: {', '.join(mounts)}")
+    refusal = (snapshot.sandbox_refusal() if snapshot is not None else None) or (
+        _sandbox.submodule_refusal(f"work item {row['id']}")
+    )
+    raise RuntimeError(f"{refusal}. Its submodules: {', '.join(mounts)}")
+
+
+def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | None) -> None:
+    """Raise `RuntimeError` naming the paths when `row`'s item runs sandboxed
+    and its `worktree` holds a git repository Kraft did not create
+    (`sandbox.planted_repos`): an untracked one, a populated gitlink, or a
+    gitlink the branch added or moved. Host git never enters one
+    (`sandbox.SUBMODULES_UNENTERED`), but a commit or a rebase still reads
+    its config file, and a gitlink in the merge request is not work anyone
+    asked for. Also each task's own dispatch check. An item that mounts
+    submodules is `refuse_sandboxed_submodules`'s.
+
+    An unsandboxed item costs no git at all; one whose sandbox cannot be
+    resolved stops only if its worktree holds something it could matter to."""
+    if worktree is None or not worktree.is_dir() or _builtins.item_mounts(row):
+        return
+    unresolved = None
+    try:
+        sandbox = _item_sandbox(row, launch)
+    except RuntimeError as exc:
+        sandbox, unresolved = None, exc
+    if sandbox is None and unresolved is None:
+        return
+    planted = _sandbox.planted_repos(worktree, row["base_ref"])
+    if planted == []:
+        return
+    if unresolved is not None:
+        raise unresolved
+    if planted is None:
+        raise RuntimeError(f"work item {row['id']} runs sandboxed, and git cannot read its index")
+    raise RuntimeError(_sandbox.planted_refusal(f"work item {row['id']}", planted))
+
+
+def refuse_live_sandboxed_session(db, row, launch: LaunchContext | None, *, what: str) -> None:
+    """Raise `RuntimeError` when `row`'s item runs sandboxed and one of its
+    sessions is still live: `what` -- the diff, the review package, the
+    straggler sweep -- waits until it ends (Kraft-69rwp).
+
+    The one guard for host git a sandboxed worker could race. Every other
+    host git on the worktree runs between sessions, behind
+    `refuse_planted_repos`; these can run while a co-task's container still
+    writes the worktree, and even a git that never enters a gitlink parses
+    the nested repository's config file to read its format. So while a
+    session is live, no host git runs there at all. An unsandboxed item pays
+    one database read and is never refused."""
+    if not db.read(lambda c: store.live_session_ids(c, row["id"])):
+        return
+    if _item_sandbox(row, launch) is None:
+        return
+    raise RuntimeError(
+        f"{what} is available once work item {row['id']}'s sandboxed session ends: "
+        "host git does not read a sandboxed worktree while its worker can still write it"
+    )

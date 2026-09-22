@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import config as _config
+from kraft.worker import sandbox as _sandbox
 
 #: Wider than git's default 3. A reviewer holding ten lines of context per hunk
 #: can judge most changes without opening the file: "the diff's context lines
@@ -55,15 +56,19 @@ def read_change(
     indistinguishable from a clean tree to whoever is about to approve it.
     """
     rev = [base] + ([head] if head else [])
-    diff_args = ["diff"] + ([f"-U{context}"] if context is not None else []) + rev
+    # Never `status` inside a nested repository: a worker's, planted behind a
+    # gitlink, runs its own filters there (Kraft-nx4id). This is the diff
+    # endpoint, readable while a sandboxed worker is still writing.
+    unentered = _sandbox.SUBMODULES_UNENTERED
+    diff_args = ["diff", unentered] + ([f"-U{context}"] if context is not None else []) + rev
     # strip=False: a diff whose last line is blank context is still that diff
     body = _config.git_read(worktree, *diff_args, strip=False)
-    numstat = _config.git_read(worktree, "diff", "--numstat", *rev)
+    numstat = _config.git_read(worktree, "diff", unentered, "--numstat", *rev)
     if body is None or numstat is None:
         return None
     untracked: list[str] = []
     if head is None:
-        status = _config.git_read(worktree, "status", "--porcelain", "-uall")
+        status = _config.git_read(worktree, "status", unentered, "--porcelain", "-uall")
         if status is None:
             return None
         untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
