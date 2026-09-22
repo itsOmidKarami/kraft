@@ -53,15 +53,30 @@ def _item_on(database, repo, base_branch):
     return wtree.make_item(database, repo, materialized_chain=chain.to_json())
 
 
-async def test_an_items_worktree_starts_from_its_base_branch(database, run_dirs, origin):
+async def test_an_items_worktree_starts_from_its_base_branch(
+    database, run_dirs, origin, monkeypatch
+):
+    """The fork point, and the ignore rules its attachments commit under."""
     repo, other = origin
     release = git_read(other, "rev-parse", "origin/release")
+    committed_under = []
+    monkeypatch.setattr(
+        kraft_builtins, "_copy_attachments", lambda *args: committed_under.append(args[-1])
+    )
 
     await _item_on(database, repo, "release")
     worktree = await wtree.ensure(database, run_dirs, repo)
 
     assert wtree.base_ref(database) == release
     assert (worktree / "release.txt").is_file()
+    assert committed_under == ["release"]
+
+
+@pytest.mark.parametrize("name", ["-x", ""], ids=["an-option", "empty"])
+def test_a_target_never_holds_a_base_branch_git_would_read_as_an_option(name):
+    """Whatever door a target came through, including a rehydrated snapshot."""
+    with pytest.raises(ValueError):
+        WorkItemTarget.for_repository("target", base_branch=name)
 
 
 @pytest.mark.parametrize(
@@ -229,3 +244,43 @@ async def test_the_merge_request_lists_the_commits_it_adds_to_its_base(
 
     assert "- the item's work" in fake.opened_bodies[1]
     assert "release.txt" not in fake.opened_bodies[1]
+
+
+async def test_the_straggler_sweep_runs_under_the_items_base_branch(item_on, tmp_path, monkeypatch):
+    """The restore and the sweep after an agent task read the ignore rules of
+    the item's base branch, the one its merge request lands on."""
+    from support.harness import fake_harness_home
+
+    from kraft.executor import LaunchContext, dispatch
+
+    bases = []
+
+    async def agent(_db, _rd, **_kw):
+        return "done"
+
+    async def commit_stragglers(_worktree, *, base, message):
+        bases.append(("sweep", base))
+
+    monkeypatch.setattr(dispatch._agent, "run_agent_task", agent)
+    monkeypatch.setattr(
+        dispatch._builtins, "restore_branch", lambda _w, _b, base: bases.append(("restore", base))
+    )
+    monkeypatch.setattr(dispatch._forge, "commit_stragglers", commit_stragglers)
+    fake_harness_home(tmp_path, [sys.executable, "-c", ""])
+    task = {"id": "t", "kind": "agent", "harness": "fake", "prompt": "do the work"}
+    target = WorkItemTarget.for_repository("target", base_branch="release")
+    it = await item_on([{"id": "n", "kind": "exec", "tasks": [task]}], target=target)
+    node = it.chain.chain.nodes[0]
+
+    status = await dispatch.dispatch_node(
+        it.database,
+        it.run_dirs,
+        node.steps[0].tasks[0],
+        node,
+        it.row(),
+        it.repo,
+        launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+    )
+
+    assert status == "done"
+    assert bases == [("restore", "release"), ("sweep", "release")]

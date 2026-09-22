@@ -435,10 +435,19 @@ async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their
     )
     before = _git_out(origin, "rev-parse", "main")
     fake = _LandingForge()
+    compared = []
+    source_changed = forge.run.git.source_changed
+
+    async def recorded(repo, branch, *, base, exclude):
+        compared.append(base)
+        return await source_changed(repo, branch, base=base, exclude=exclude)
+
+    monkeypatch.setattr(forge.run.git, "source_changed", recorded)
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
 
+    assert set(compared) == {"release"}, "the root's own changes are against its base"
     assert fake.opened_base == {1: "main"}, "the member's merge request, into its own default"
     merged = _git_out(tmp_path / "pkg", "rev-parse", "main")
     assert _git_out(origin, "rev-parse", "release:repos/pkg") == merged
