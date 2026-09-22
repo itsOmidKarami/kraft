@@ -77,6 +77,15 @@ contract before its selected skill and steering profiles. A selected skill or
 steering profile SHALL NOT remove that contract.
 enforced-by: tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_the_seeded_library_steers_from_its_own_profiles_with_no_steering_file
 
+## REQ a-document-contract-names-the-chain-that-carries-it-on
+
+WHEN an agent task produces a spec or a plan, the system SHALL state in its
+Kraft-owned contract, before any selected skill, that the chain implements the
+document and that a verification node runs the repository's test suite, whatever
+skill the task selects.
+enforced-by: tests/skills/test_planning.py::test_a_plan_under_any_method_is_told_verification_runs_the_suite, tests/skills/test_planning.py::test_a_spec_under_any_method_is_told_the_chain_implements_it_headless
+origin: src/kraft/adapters/artifact_notes.py -- Kraft-35u4m.3, Kraft-35u4m.4: `spec_author`/`plan_author` may name any plugin's method in `skill:`, and one written for an interactive session plans a full-suite step and waits on a human; the chain context rides in the contract so swapping the method cannot lose it.
+
 ## REQ every-agent-launch-carries-kraft-safety-rules
 
 Every agent launch -- a chain task, a gate auto-review, an escalation turn --
@@ -941,6 +950,22 @@ unresolved, and that approving opens a draft merge request and starts CI. It
 SHALL NOT contain the diff.
 enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unresolved], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
 origin: src/kraft/skills/work-brief/SKILL.md -- Ruling 87 (Omid). The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
+
+## REQ default-chain-describes-the-merge-request-before-opening-it
+
+The default chain SHALL write the merge request's title, labels, reviewers and
+description in an execution node before the one that opens the draft, and SHALL
+open the draft with them.
+enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_library.py::test_resolution_types_every_task_in_the_design_chain
+origin: templates/chains/default.yaml -- Ruling 207. The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
+
+## REQ a-draft-with-no-metadata-opens-with-the-default-body
+
+IF a work item reaches its draft merge request with no merge-request metadata
+written, THEN the system SHALL still open the draft, titled after the work
+item, unlabelled, with Kraft's default description.
+enforced-by: tests/api/test_default_chain_walk.py::test_with_no_merge_request_metadata_the_draft_opens_with_the_default_body, tests/adapters/forge/test_run.py::test_open_mr_without_the_artifact_opens_the_default_body
+origin: src/kraft/adapters/forge/mr.py §read_mr_meta -- an MR must still open when the metadata is gone; Ruling 207 kept that for an item that skips the describe node.
 
 ## REQ default-chain-retests-a-rebased-head
 

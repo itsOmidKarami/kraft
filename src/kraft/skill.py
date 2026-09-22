@@ -50,9 +50,17 @@ class SkillError(Exception):
     pass
 
 
+#: Shipped methods that were renamed, old name to new. `library.yaml` is seeded
+#: once and never overwritten, so a home seeded before the rename still names
+#: the old one (Kraft-35u4m.1).
+RENAMED = {"mr-checks-repair": "mr-metadata-repair"}
+
+
 def _own_name(value: str) -> str:
-    """`value` with Kraft's own plugin qualifier removed, if it has one."""
-    return value.removeprefix(OWN_PLUGIN)
+    """`value` with Kraft's own plugin qualifier removed, if it has one, and a
+    renamed method's old name read as its new one."""
+    name = value.removeprefix(OWN_PLUGIN)
+    return RENAMED.get(name, name)
 
 
 def is_plugin_ref(value: str) -> bool:

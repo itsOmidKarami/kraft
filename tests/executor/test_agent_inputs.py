@@ -72,7 +72,7 @@ def test_the_seeded_code_review_reads_the_review_package_through_its_method(fake
 
 
 def test_no_seeded_repair_is_told_to_ignore_the_failure_it_was_sent_for(fake_agent):
-    """Kraft-gl2bf. `kraft:mr-checks-repair` says to do nothing on a code
+    """Kraft-gl2bf. `kraft:mr-metadata-repair` says to do nothing on a code
     failure, so it rides only on the task dispatched for merge-request metadata,
     whose own prompt says so; every repair that fixes code carries no method
     that tells it to stand down. And a fix loop's repair is worded for its own
@@ -80,7 +80,7 @@ def test_no_seeded_repair_is_told_to_ignore_the_failure_it_was_sent_for(fake_age
     chain = v1_named_chain(fake_agent.templates, "default")
     nodes = {n.id: n for n in chain.nodes}
     [metadata] = nodes["merge_request_feedback"].on_failure[0].tasks
-    assert metadata.task.skill == "kraft:mr-checks-repair"
+    assert metadata.task.skill == "kraft:mr-metadata-repair"
     assert "label" in metadata.task.prompt
     for node_id in ("verification", "merge_request_feedback"):
         agents = [

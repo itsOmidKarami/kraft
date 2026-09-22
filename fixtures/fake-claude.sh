@@ -123,6 +123,13 @@ case "$status" in
 esac
 if [ -n "${KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT:-}" ]; then write_artifact=""; fi
 
+# The labels an `mr_meta` names, so a test can see them reach the opened MR.
+labels=""
+if [ "$kind" = mr_meta ] && [ -n "${KRAFT_FAKE_CLAUDE_LABELS:-}" ]; then
+  labels="labels: [${KRAFT_FAKE_CLAUDE_LABELS}]
+"
+fi
+
 if [ -n "$kind" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
   mkdir -p ".engineering/${kind}s"
   cat > ".engineering/${kind}s/${item}.md" <<EOF
@@ -131,7 +138,7 @@ work_item_ids: [${item}]
 node_id: $(field 'Node')
 hook_point: ${hook}
 kind: ${kind}s
-title: fake ${kind}
+${labels}title: fake ${kind}
 ---
 
 fake ${kind} body

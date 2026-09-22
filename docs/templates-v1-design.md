@@ -231,7 +231,7 @@ tasks:
       Repair what fails the merge request's checks from outside the code, such
       as a missing or wrong label. A code failure is the fix loop's, which runs
       after you.
-    skill: kraft:mr-checks-repair
+    skill: kraft:mr-metadata-repair
 
   strict_judge:
     kind: agent
@@ -272,6 +272,15 @@ tasks:
       polling:
         initial_interval: 30s
         max_interval: 5m
+
+  describe_mr:
+    kind: agent
+    harness: claude
+    prompt: >-
+      Write the merge request's title, labels, reviewers and description,
+      following this repository's own rules for them.
+    produces: mr_meta
+    skill: kraft:mr-metadata
 
   write_work_brief:
     kind: agent
@@ -439,6 +448,14 @@ nodes:
     message: Approve creating a draft merge request.
     artifact: work_brief
     reject_to: implementation
+
+  # Its own node, not a task before `open`: a node wholly produces one kind or
+  # declares none, and `open` produces nothing.
+  - id: describe_merge_request
+    kind: exec
+    tasks:
+      - id: author
+        extends: describe_mr
 
   - id: draft_merge_request
     kind: exec

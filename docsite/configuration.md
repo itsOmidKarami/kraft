@@ -60,7 +60,7 @@ An `agent` task's keys:
 | `kind` | `agent`. |
 | `harness` | The [harness profile](harnesses.md) it runs on — an id from `harnesses.yaml`. A disabled or missing profile stops the task for a human; nothing substitutes another. |
 | `prompt` | What the task is asked to do. Kraft's own output contract is given before the skill and steering. |
-| `skill` | One skill the agent is launched with, by name (`kraft:code-review`, or a plugin's `plugin:skill`). A skill that cannot be loaded stops the task for a human. |
+| `skill` | One skill the agent is launched with, by name (`kraft:code-review`, or a plugin's `plugin:skill`). A skill that cannot be loaded stops the task for a human. `spec_author` and `plan_author` default to `kraft:spec` and `kraft:plan`; name another (`superpowers:writing-plans`) and the task's contract still tells it the chain implements the document and verification runs the suite. |
 | `steering` | Names from the library's `steering` section. |
 | `produces` | The document kind it writes (`spec`, `plan`, `work_brief`, `review_brief`) — what a gate's `artifact` decides and an attachment covers. |
 | `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. |

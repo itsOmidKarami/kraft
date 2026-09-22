@@ -62,3 +62,12 @@ def test_a_kraft_qualified_name_honours_the_operator_overlay(tmp_path):
 def test_a_kraft_qualified_name_that_resolves_to_nothing_raises(tmp_path, name):
     with pytest.raises(skill.SkillError):
         skill.validate(tmp_path, name, where="library.yaml")
+
+
+def test_a_library_seeded_before_a_rename_still_resolves_the_old_name(tmp_path):
+    """Kraft-35u4m.1: `library.yaml` is seeded once and never overwritten, so
+    a home seeded before `mr-checks-repair` became `mr-metadata-repair` still
+    names the old one -- and must not stop resolving on upgrade."""
+    renamed = (skill.BUNDLED / "mr-metadata-repair" / "SKILL.md").read_text()
+    skill.validate(tmp_path, "kraft:mr-checks-repair", where="library.yaml")
+    assert skill.read(tmp_path, "kraft:mr-checks-repair") == renamed
