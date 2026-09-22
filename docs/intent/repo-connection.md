@@ -9,6 +9,11 @@ IF a work item or a trigger is filed against a repo Kraft has not connected, THE
 enforced-by: tests/api/test_intake_connected.py::test_an_unconnected_repo_is_refused_naming_repo_connect[work-items], tests/api/test_intake_connected.py::test_an_unconnected_repo_is_refused_naming_repo_connect[triggers], tests/api/test_intake_connected.py::test_a_connected_repo_is_filed[work-items], tests/api/test_intake_connected.py::test_a_connected_repo_is_filed[triggers]
 origin: src/kraft/api/deps.py §connected_or_422 (Kraft-ta8nv)
 
+## REQ cron-trigger-requires-a-connected-repo
+IF a `policy.yaml` cron trigger's tick is due and its repo is not connected, THEN the system SHALL skip that trigger with a logged warning naming `kraft repo connect`, and SHALL still fire the other due triggers in the same tick.
+enforced-by: tests/test_triggers.py::test_a_trigger_naming_an_unconnected_repo_is_skipped_not_the_whole_tick
+origin: src/kraft/triggers.py §tick (Kraft-jzhg2)
+
 ## REQ trigger-poller-runs-without-boot-triggers
 WHILE the server is running, the system SHALL run the trigger poller even when no trigger existed at boot, so a trigger added afterward by Settings or `kraft admin reload` fires without a restart.
 enforced-by: tests/test_triggers.py::test_the_poller_runs_with_no_triggers_at_boot
