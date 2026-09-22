@@ -124,6 +124,32 @@ async def test_an_untracked_file_is_a_change_and_an_ignored_one_is_not(
         assert it.events("read_only_violated") == []
 
 
+async def test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_inside_it(
+    item_on, monkeypatch
+):
+    """`t` fails, its on_failure repair writes (by design, unchecked), and the
+    retried `t` writes again: only the retry's file is the violation."""
+    task = {**_sub("t"), "on_failure": {"tasks": [_sub("fix")]}}
+    it = await item_on([_node([{"id": "check", "read_only": True, "tasks": [task]}])])
+    statuses = iter(["failed", "done", "done"])
+    writes = {"build.check.t.on_failure.main.fix": "fixed.txt"}
+    launched: list[str] = []
+
+    async def run_task(*_a, cwd, **kw):
+        launched.append(kw["hook_point"])
+        if len(launched) == 3:
+            (Path(cwd) / "again.txt").write_text("x\n")
+        elif kw["hook_point"] in writes:
+            (Path(cwd) / writes[kw["hook_point"]]).write_text("x\n")
+        return next(statuses)
+
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+
+    assert await _walk(it) == "needs_human"
+    assert launched == ["build.check.t", "build.check.t.on_failure.main.fix", "build.check.t"]
+    assert _reason(it) == "build.check is read_only, but it changed the worktree: again.txt"
+
+
 async def test_a_step_that_is_not_read_only_is_not_checked(item_on, monkeypatch):
     it = await item_on([_node([{"id": "check", "tasks": [_sub("t")]}])])
     _launches(monkeypatch, _write("new.txt"))
