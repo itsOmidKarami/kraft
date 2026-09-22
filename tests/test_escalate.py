@@ -667,10 +667,16 @@ async def test_an_escalation_launch_carries_the_rule_only_when_the_repo_names_it
             "tasks": [{"id": "work", "kind": "subprocess", "command": "true"}],
         }
     ]
+    # Keyed by `str(run_dirs.base)`, not an arbitrary path: `_seed_needs_human`
+    # files the item's `repo` column as `str(rd.base)`, and `escalate.dispatch`
+    # now looks frozen steering up by that recorded `item_repo` (Kraft-jzdyp,
+    # #187), not by the launch's live `repo_entry.path`.
     chain = v1_resolved(nodes).materialize(
         target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
-        repository_steering={"/repo": ({NEVER_SIGNAL: NEVER_SIGNAL_TEXT} if named else {})},
+        repository_steering={
+            str(run_dirs.base): ({NEVER_SIGNAL: NEVER_SIGNAL_TEXT} if named else {})
+        },
     )
     await _seed_needs_human(database, run_dirs, "w1", chain=chain)
     await escalate.dispatch(
