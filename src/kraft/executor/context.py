@@ -69,6 +69,13 @@ CONFLICT_RESOLVED = "conflict_resolved"
 #: no agent turn on infrastructure a fix loop cannot fix.
 INFRA_STOP = "infra_stop"
 
+#: A recovery handler finished `done_with_concerns` (Kraft-s7c04.56). For an
+#: ordinary task doubts are information for the next gate (`_ADVANCING`); for
+#: a repair they are a verdict on whether repair was possible at all, so the
+#: node is not measured again and a human reads them instead. A conflict
+#: handler is not a repair here: its concerns ride `CONFLICT_RESOLVED`.
+REPAIR_DOUBTED = "repair_doubted"
+
 
 #: The tier that handles each status, in one place so a new status cannot be
 #: added without declaring where it is handled.
@@ -93,6 +100,7 @@ SCOPE: dict[str, str] = {
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
     WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
+    REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
     TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates

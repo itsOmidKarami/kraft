@@ -473,3 +473,119 @@ def test_the_fallback_does_not_invent_usage_from_an_empty_model_usage():
     """A task that reports nothing is still None, not a zero-token run."""
     assert usage.from_envelope({"usage": {}, "modelUsage": {}}) is None
     assert usage.from_envelope({"usage": {}, "modelUsage": {"m": "not a dict"}}) is None
+
+
+def _result(sid, cost, usage_out, total_out, *, usage_in=10, total_in=None):
+    """A claude `result` line: `usage` is this invocation's, `modelUsage` and
+    `total_cost_usd` are cumulative over the CLI session (measured on real
+    multi-invocation logs, Kraft-s7c04.60)."""
+    line = {
+        "type": "result",
+        "session_id": sid,
+        "usage": {"input_tokens": usage_in, "output_tokens": usage_out},
+        "modelUsage": {
+            "claude-sonnet-5": {
+                "inputTokens": usage_in if total_in is None else total_in,
+                "outputTokens": total_out,
+            }
+        },
+    }
+    if cost is not None:
+        line["total_cost_usd"] = cost
+    return json.dumps(line)
+
+
+def _progress(sid, tokens):
+    """A claude `system/task_progress` line: a Task-tool sub-agent's running
+    tally, `usage` and all, which is not an invocation of this session."""
+    return json.dumps(
+        {
+            "type": "system",
+            "subtype": "task_progress",
+            "session_id": sid,
+            "usage": {"total_tokens": tokens, "tool_uses": 1, "duration_ms": 10},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        # Session 56c92568: two invocations, one CLI session. The cost is
+        # already cumulative, so it is the last one's -- summing would say
+        # $1.019 -- while the tokens are both invocations'.
+        (
+            [
+                _result("a", 0.316, 2717, 2717),
+                _result("a", 0.703, 8694, 11411, total_in=20),
+            ],
+            Usage(20, 11411, 0.703, "claude-sonnet-5"),
+        ),
+        # Two CLI sessions in one log: nothing is shared, so both add up.
+        (
+            [_result("a", 0.25, 5, 5), _result("b", 0.5, 7, 7)],
+            Usage(20, 12, 0.75, "claude-sonnet-5"),
+        ),
+        # One of them reported no cost: the total is unknown, never the
+        # other one's figure passed off as the whole.
+        (
+            [_result("a", 0.25, 5, 5), _result("b", None, 7, 7)],
+            Usage(20, 12, None, "claude-sonnet-5"),
+        ),
+        # No cumulative `modelUsage` to diff: each invocation's own block.
+        (
+            [
+                json.dumps({"usage": {"input_tokens": 1, "output_tokens": 2}}),
+                json.dumps({"usage": {"input_tokens": 3, "output_tokens": 4}}),
+            ],
+            Usage(4, 6),
+        ),
+        # Shaped like 6c235b8c (Kraft-lp01z): Task-tool progress lines carry a
+        # `usage` of their own ({total_tokens, tool_uses, duration_ms}) and
+        # are no invocation. Its first turn was killed before writing a
+        # result, so only the cumulative `modelUsage` holds what the $34.72
+        # paid for; each result's own `usage` holds a sliver of it.
+        (
+            [_progress("a", 999)] * 3
+            + [
+                _result("a", 34.72, 21730, 516797, usage_in=1_226_909, total_in=123_006_150),
+                _progress("a", 5),
+                _result("a", 34.72, 209, 516797, usage_in=156_662, total_in=123_006_150),
+                # Killed again mid-turn, a sub-agent still reporting.
+                _progress("a", 7),
+            ],
+            Usage(123_006_150, 516797, 34.72, "claude-sonnet-5"),
+        ),
+        # A result line reporting nothing (042ce40c: usage all zero, empty
+        # modelUsage, cost 0) is no invocation either: read as the last one,
+        # its $0 and its empty `modelUsage` would have stood for the session.
+        (
+            [
+                _result("a", 1.0, 10, 100),
+                _result("a", 1.0, 5, 100),
+                json.dumps(
+                    {
+                        "type": "result",
+                        "session_id": "a",
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                        "modelUsage": {},
+                        "total_cost_usd": 0,
+                    }
+                ),
+            ],
+            Usage(10, 100, 1.0, "claude-sonnet-5"),
+        ),
+    ],
+    ids=[
+        "one-cli-session",
+        "two-cli-sessions",
+        "one-cost-unknown",
+        "no-model-usage",
+        "sub-agent-progress-lines",
+        "empty-result-line",
+    ],
+)
+def test_a_log_with_several_result_envelopes_counts_every_invocation(tmp_path, lines, expected):
+    log = tmp_path / "s.log"
+    log.write_text("\n".join(lines) + "\n" + json.dumps({"type": "system"}) + "\n")
+    assert usage.read(log, tmp_path / "none.json", "claude-stream-json") == expected
