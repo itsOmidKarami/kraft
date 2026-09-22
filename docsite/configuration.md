@@ -26,7 +26,7 @@ Four sections, each a map of name to definition, which any chain takes with
 | Section | Holds |
 |---|---|
 | `tasks` | Reusable tasks of any kind — `agent`, `subprocess`, `builtin`, `forge`. |
-| `steps` | Reusable ordered groups of tasks. |
+| `steps` | Reusable ordered groups of tasks. A step may set `read_only: true` ([Concepts](concepts.md#node)). |
 | `nodes` | Reusable nodes, with their own steps, `on_failure`, `fix_loop` and `escalation`. |
 | `steering` | Named guidance an agent task selects with `steering: [name]`: `{instructions: "..."}`. |
 
@@ -69,6 +69,9 @@ An `agent` task's keys:
 | `on_failure` | A recovery pass for this task alone. |
 | `policy` | This task's own policy layer. |
 | `skippable` | `false` to refuse an operator's skip. |
+
+A task takes no `read_only`: set it on the step (or the node) instead, which
+checks all of its tasks together ([Concepts](concepts.md#node)).
 
 A recovery that concludes no repair can help reports `failed` with
 `"suggested_action": {"action": "skip" | "retry" | "abandon", "reason": "..."}`

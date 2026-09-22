@@ -87,6 +87,9 @@ agent, decides whether to skip, abandon, or give more room.
   set-node-override`, `--node-override`, MCP `set_node_overrides`). The node's
   values beat the item-wide `set-overrides`; one the node's harness refuses is
   refused when you set it.
+- `read_only: true` on a step or an exec node: Kraft checks the worktree
+  before and after, and stops the item naming any file it changed. It is
+  opt-in, and no shipped chain sets it.
 
 ### Changed
 
