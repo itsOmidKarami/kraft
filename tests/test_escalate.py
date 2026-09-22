@@ -10,11 +10,24 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import write_harness_profiles
+from support.harness import v1_chain, write_harness_profiles
 
 from kraft import escalate, events, executor, store
 from kraft.db import Database
 from kraft.paths import RunDirs
+
+#: The chain every item here is on: an escalation turn runs under the policy of
+#: the node its item stopped at, read from the item's snapshot (Kraft-l8ype).
+_CHAIN = v1_chain(
+    [
+        {
+            "id": "implementation",
+            "kind": "exec",
+            "tasks": [{"id": "work", "kind": "subprocess", "command": "true"}],
+        }
+    ],
+    repo="/r",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +54,7 @@ async def _seed_needs_human(database, rd, wid: str) -> None:
             repo=str(rd.base),
             chain_template="quick-task",
             chain_definition="{}",
+            materialized_chain=_CHAIN.to_json(),
         )
     )
     await database.write(lambda c: store.enter_node(c, wid, "implementation"))
@@ -64,6 +78,7 @@ async def _seed_paused(database, rd, wid: str) -> None:
             repo=str(rd.base),
             chain_template="quick-task",
             chain_definition="{}",
+            materialized_chain=_CHAIN.to_json(),
         )
     )
     await database.write(lambda c: store.enter_node(c, wid, "implementation"))

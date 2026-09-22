@@ -192,12 +192,20 @@ def test_permission_request_denies_a_session_whose_grant_cannot_be_resolved(
         assert "is no agent task" in body["message"], body
 
 
-def test_permission_request_allows_the_escalation_turn(client):
-    """An escalation turn is not a chain task: it launches on a minimal binding
-    with no allowlist (`escalate.dispatch`), so it declares none."""
-    _seed_session(hook_point="escalation")
+@pytest.mark.parametrize(
+    ("policy", "decision"),
+    [(None, "allow"), ({"allowed_tools": ["Read"]}, "deny")],
+    ids=["node-sets-no-allowlist", "outside-the-nodes-allowlist"],
+)
+def test_permission_request_answers_the_escalation_turn_from_its_nodes_policy(
+    client, policy, decision
+):
+    """Kraft-l8ype: an escalation turn is node-scoped, so its asks are answered
+    from the policy of the node its session sits at -- the one
+    `escalate.dispatch` launched it under -- not allowed wholesale."""
+    _seed_session(hook_point="escalation", policy=policy)
     body = _ask(client).json()
-    assert body["behavior"] == "allow"
+    assert body["behavior"] == decision, body
 
 
 def test_permission_decision_is_recorded_as_an_event(monkeypatch, client):

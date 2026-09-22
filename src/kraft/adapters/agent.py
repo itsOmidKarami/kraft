@@ -362,8 +362,10 @@ def resolve_agent_task(
     `allowed_tools` is the policy's (unbounded only when no layer set it),
     `deny_tools` the policy's plus the repository entry's live ones (a later
     denial still applies), and a policy `sandbox` wins over the entry's, which
-    cannot turn it off. `None` -- the escalation turn, which is no chain task
-    -- leaves all three to the repository entry.
+    cannot turn it off. A profile outside the policy's `allowed_harnesses`
+    raises `HarnessUnavailable`. `None` leaves the tool lists and sandbox to
+    the repository entry; no launch passes it (Kraft-l8ype: the escalation
+    turn runs under its node's policy too).
 
     `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
     and the only place a task's `steering:` names are read from -- never
@@ -383,6 +385,13 @@ def resolve_agent_task(
     if missing:
         raise _steering.SteeringError(
             f"selects steering {missing!r}, which this work item's snapshot does not carry"
+        )
+    allowed = policy.allowed_harnesses if policy is not None else None
+    if allowed is not None and task.harness not in allowed:
+        # A snapshot materialization never checked (an older build's, a
+        # hand-edited row) is held to its policy here, at every launch.
+        raise HarnessUnavailable(
+            f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
     profile = harness_profile(
         task.harness, harnesses if harnesses is not None else _harness.load(None)
@@ -588,6 +597,36 @@ def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> st
     )
 
 
+def _restricted(
+    h: _harness.Harness, harness: str, allowed: tuple[str, ...], mode: str | None
+) -> dict[str, str | tuple[str, ...]]:
+    """The options that hold a launch to its allowlist (Kraft-nt6tt), or
+    `LaunchRefused`: a tool outside `allowed` must not run, and pre-approving
+    the listed ones (`allowed_tools`) is not that. The harness's own tool
+    restriction removes the unlisted built-ins, and its `under_allowlist` mode
+    sends every other ask to the permission gate instead of approving it. A
+    harness missing either half (no `restrict_tools` is refused with every
+    other undeclared option), or a launch that chose a mode of its own, is
+    refused rather than run with the bound unenforced."""
+    cap = h.capabilities.get("permission_mode")
+    asking = cap.under_allowlist if cap is not None else None
+    if cap is not None and asking is None:
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) cannot hold an agent to a tool list, and this "
+            f"launch's policy sets allowed_tools={list(allowed)!r}"
+        )
+    if mode is not None and mode != asking:
+        raise LaunchRefused(
+            f"this launch's policy sets allowed_tools={list(allowed)!r}, but it asks for "
+            f"permission_mode={mode!r}; under an allowlist harness {harness!r} runs in "
+            f"{asking!r}, the mode that asks the permission gate"
+        )
+    # Bare built-in names: a scoped rule restricts its tool through the gate,
+    # and an `mcp__` tool is not the restriction flag's to govern.
+    names = tuple(dict.fromkeys(t.split("(", 1)[0] for t in allowed if not t.startswith("mcp__")))
+    return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -664,13 +703,15 @@ async def run_agent_task(
             ("effort", effort),
             ("permission_mode", permission_mode),
             ("deny_tools", tuple(deny_tools) or None),
-            # `()` -- allow nothing -- cannot be spelled as a flag, so it passes
-            # none and every ask reaches the permission gate, which denies it.
+            # `()` -- allow nothing -- pre-approves nothing, so it passes no
+            # flag; `_restricted` below is what holds it to nothing.
             ("allowed_tools", tuple(allowed_tools or ()) or None),
             ("autocompact", autocompact),
         )
         if v
     }
+    if allowed_tools is not None:
+        options |= _restricted(h, harness, allowed_tools, permission_mode)
     # Loading the library and `harnesses.yaml` checks that a task's or a
     # profile's own options name capabilities its harness declares -- but
     # `resolve_invocation` folds in values that load never sees: a

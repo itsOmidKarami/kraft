@@ -88,10 +88,12 @@ archive:
 # task's. A layer that relaxes what it inherits is refused then, not mid-run.
 # What each field does to a running task:
 #
-#   allowed_tools      tools an agent may use; asked through the permission
-#                      gate and passed as --allowedTools. Unset allows every
-#                      tool; `[]` allows none. A harness that cannot enforce
-#                      a tool list (codex, gemini) refuses to launch under one.
+#   allowed_tools      tools an agent may use. Claude launches with only the
+#                      listed built-ins (--tools) in a mode that asks the
+#                      permission gate about everything else. Unset allows
+#                      every tool; `[]` allows none. A harness that cannot
+#                      enforce a tool list (codex, gemini) refuses to launch
+#                      under one.
 #   token_budget       tokens a work item may spend before its next agent task
 #                      is refused, checked like budget.work_item_usd.
 #   allowed_harnesses  profiles an agent task may select; checked at intake

@@ -11,11 +11,11 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
-from kraft import events, store
+from kraft import escalate, events, store
 from kraft import logs as logs_mod
 from kraft.adapters import agent as _agent
 from kraft.api import api_router, deps, perimeter
-from kraft.executor.dispatch import ESCALATION_HOOK
+from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
 from kraft.templates.models import AgentTask
 
 
@@ -92,11 +92,10 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
     the same `resolve_agent_task` the launch passed to `--allowedTools`/
     `--disallowed-tools` -- never the legacy registry keyed by hook name, which
     no V1 path matches (Kraft-hwrks). An allowlist of `None` is unbounded: no
-    layer set one. The escalation turn is not a chain task: it launches on a
-    minimal binding with no allowlist (`escalate.dispatch`).
+    layer set one. An escalation turn is node-scoped (Kraft-l8ype): it is
+    answered from the policy of the node its session sits at, as
+    `escalate.dispatch` launched it.
     """
-    if row["hook_point"] == ESCALATION_HOOK:
-        return None, ()
     item = st.db.read(
         lambda c: c.execute(
             "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
@@ -105,20 +104,27 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
     snapshot = store.materialized_chain_of(item) if item is not None else None
     if snapshot is None:
         raise LookupError("its work item has no materialized chain")
-    task = next(
-        (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
-        None,
-    )
-    if task is None or not isinstance(task.task, AgentTask):
-        raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
+    if row["hook_point"] == ESCALATION_HOOK:
+        scope = next((n for n in snapshot.chain.nodes if n.id == row["node_id"]), None)
+        if scope is None:
+            raise LookupError(f"no node {row['node_id']!r} in its work item's chain")
+        agent_task = escalate.ESCALATION_TASK
+    else:
+        scope = next(
+            (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
+            None,
+        )
+        if scope is None or not isinstance(scope.task, AgentTask):
+            raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
+        agent_task = scope.task
     launch = deps.launch(st, item["repo"])
     inv = _agent.resolve_agent_task(
-        task.task,
+        agent_task,
         launch.repo_entry,
         launch.steering_dir,
         skills_dir=launch.skills_dir,
         steering=snapshot.chain.steering,
-        policy=snapshot.policy_for(task),
+        policy=scope_policy(item, scope),
     )
     return inv.allowed_tools, inv.deny_tools
 

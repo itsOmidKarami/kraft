@@ -14,15 +14,15 @@ Kraft ships three harnesses:
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
-| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `approval_channel`, `autocompact`, or `rate_limit_signal` — a profile or task asking for one of those is rejected at load. |
+| `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `autocompact`, or `rate_limit_signal` — a profile or task asking for one of those is rejected at load. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 
 ## Capabilities, not flags
 
 A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
-`deny_tools`, `allowed_tools`, `approval_channel`, `resume`, `autocompact`,
-`structured_log`, `usage`, `rate_limit_signal` — and each harness's own YAML
+`deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
+`autocompact`, `structured_log`, `usage`, `rate_limit_signal` — and each harness's own YAML
 (`src/kraft/harnesses/*.yaml` in the package) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
 acceptEdits|auto|...` for Claude, `-s read-only|workspace-write|...` for
@@ -74,8 +74,8 @@ capabilities:
 
 `prompt`, `context`, and `usage` are required — nothing can dispatch without
 them. Every other capability (`model`, `effort`, `permission_mode`,
-`deny_tools`, `allowed_tools`, `approval_channel`, `resume`, `autocompact`,
-`structured_log`, `rate_limit_signal`) is optional: omit what the CLI can't
+`deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
+`autocompact`, `structured_log`, `rate_limit_signal`) is optional: omit what the CLI can't
 do, and a binding naming it is rejected at load, pointing at this file.
 
 A capability needs a `cli:` argv fragment unless it's `usage`/
@@ -93,6 +93,17 @@ itself would reject is worse than no default). `resume` can bind `via:
 command_resume` instead of `cli:`, when a resume needs its own command
 prefix rather than a trailing flag (see `codex.yaml`'s `command_resume:
 [codex, exec, resume, "{value}"]`).
+
+A launch whose policy sets `allowed_tools` (an empty list included) must not
+let a tool outside the list run, and pre-approving the listed ones is not
+that. It needs two things from its harness: `restrict_tools`, the CLI's own
+flag for which built-in tools exist (Claude's `--tools`, given the bare names
+from the list), and, when the harness declares `permission_mode`, an
+`under_allowlist:` mode that asks the approval channel about everything else
+instead of approving it (Claude's `manual`; its `auto` lets a classifier
+approve an unlisted tool without asking). A harness missing either refuses
+to launch under an allowlist, and so does a launch whose own
+`permission_mode` differs from that mode.
 
 Validate with `kraft admin doctor` — it loads every harness a live binding
 names and reports a PATH check for each, plus the load error for any file
