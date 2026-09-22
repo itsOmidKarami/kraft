@@ -564,8 +564,7 @@ async def test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the
     its member merged, never while it was a draft at the chain's approval
     node -- and the merge node waits on it, then on its merge landing,
     through the one wait scheduler. The item completes only once the root
-    merged. The forge lands every merge a read late, so the root's merge is
-    asked for after the member's landed, not taken for already requested."""
+    merged. The forge lands every merge a read late."""
     row, worktree, _ = await _publishable(
         database, run_dirs, tmp_path, pointer="ignore", root_source=True, nodes=_PUBLISH
     )
@@ -705,6 +704,8 @@ async def test_a_restart_mid_the_root_merge_asks_the_forge_to_merge_it_once(
         )
         if ("merge", root) in fake.order:
             break
+    # Asked for once the member landed late, not taken for asked already.
+    assert ("merge", root) in fake.order
     await database.write(lambda c: events.append(c, root, "work_item_retried", {}))
 
     assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "waiting"
