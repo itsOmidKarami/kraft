@@ -347,3 +347,30 @@ def test_a_stored_override_reads_its_retired_wait_timeouts_as_the_caps_that_repl
     assert item.total_time_cap_minutes is None
     assert item.paths["feedback.main.ci"].total_time_cap_minutes == 20
     assert item.paths["build.run.impl"].total_time_cap_minutes == 7
+
+
+# ── a spend cap is the same mechanism (Ruling 195) ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("field", "big", "small"), [("token_budget", 20, 10), ("budget_usd", 2.5, 1)]
+)
+def test_a_child_budget_above_its_parents_is_refused_naming_both(field, big, small):
+    with pytest.raises(PolicyError) as refused:
+        _materialize(_nodes(step={field: small}, task={field: big}))
+
+    assert f"task build.run.impl sets {field} {big} > its step build.run's {small}" in str(
+        refused.value
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "big", "small"), [("token_budget", 20, 10), ("budget_usd", 2.5, 1)]
+)
+def test_an_items_budget_above_the_chains_is_refused(field, big, small):
+    chain = _materialize(_nodes(chain={field: small}))
+
+    with pytest.raises(PolicyError) as refused:
+        chain.with_item_policy({field: big})
+
+    assert refused.value.field == f"policy.{field}"

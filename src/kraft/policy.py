@@ -447,7 +447,7 @@ def check(*, count: int, started_at: str, cap: Cap, now: str) -> str:
 #: widen it (`template-policy-cannot-relax-safety-ceilings`: "budgets,
 #: allowed tools, permissions, and repository access" -- not harnesses).
 _SAFETY_LIST_FIELDS = ("allowed_tools",)
-_SAFETY_NUMERIC_FIELDS = ("token_budget",)
+_SAFETY_NUMERIC_FIELDS = ("token_budget", "budget_usd")
 #: Fields that may move freely in either direction, bounded only by an
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
@@ -458,6 +458,15 @@ _OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
 #: its wall clock less a manual pause (`kraft.caps`). A ratchet: a layer may
 #: only lower what it inherits, never raise it, and never past `maxima`.
 CAP_FIELDS = ("time_cap_minutes", "total_time_cap_minutes")
+#: Per-scope spend caps (Ruling 195): each scope that sets one caps the spend
+#: of the launches inside it -- `token_budget` its tokens, `budget_usd` its
+#: dollars (`kraft.caps.budget_breach`). The same ratchet as a time cap.
+BUDGET_FIELDS = ("token_budget", "budget_usd")
+#: Every field a scope's own cap is checked on against its parent's, naming
+#: both (`ResolvedChain._check_caps`).
+SCOPE_CAP_FIELDS = (*CAP_FIELDS, *BUDGET_FIELDS)
+#: A dollar figure: an int in YAML is a legal amount.
+PositiveUsd = Annotated[StrictFloat | StrictInt, Field(gt=0)]
 #: Retired by Ruling 196: a wait's timeout is its task's own
 #: `total_time_cap_minutes`.
 RETIRED_WAIT_TIMEOUT = "wait_timeout_minutes"
@@ -584,6 +593,8 @@ class PolicyMaximaInput(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     token_budget: PositiveInt | None = None
+    #: The largest dollar cap any scope may set (Ruling 195).
+    budget_usd: PositiveUsd | None = None
     allowed_tools: ToolNames | None = None
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
@@ -660,7 +671,14 @@ class TaskPolicyOverride(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     allowed_harnesses: list[StrictStr] | None = None
+    #: The tokens, input plus output, the launches inside this scope may
+    #: spend before the next one is refused (Ruling 195: this scope's own
+    #: spend, not the whole item's).
     token_budget: PositiveInt | None = None
+    #: The same, in dollars. A launch whose cost the harness never reported
+    #: is unknown spend, never free: a scope with some cannot be shown to be
+    #: under this cap, so its next launch stops for a human.
+    budget_usd: PositiveUsd | None = None
     allowed_tools: ToolNames | None = None
     #: Tools no task under this scope may use, on top of whatever
     #: `allowed_tools` permits (Ruling 105: the repository's `deny_tools`).
@@ -729,7 +747,7 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             sandbox=sandboxes[0] if sandboxes else None,
             **{
                 n: min(values) if (values := present(n)) else None
-                for n in ("token_budget", "timeout_minutes", "max_attempts", *CAP_FIELDS)
+                for n in (*BUDGET_FIELDS, "timeout_minutes", "max_attempts", *CAP_FIELDS)
             },
         )
 
@@ -740,7 +758,7 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 #: item's cap tightens every scope under it that set a looser one, and an item
 #: cap above the one it lands on is refused where the item is filed
 #: (`ResolvedChain.check_scopes`), never met.
-_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "token_budget", *CAP_FIELDS)
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", *BUDGET_FIELDS, *CAP_FIELDS)
 
 
 class WorkItemPolicy(TemplatePolicyOverride):
@@ -825,7 +843,7 @@ class WorkItemPolicy(TemplatePolicyOverride):
                         if t in layer.allowed_tools
                     ),
                 )
-            for name in ("token_budget", *CAP_FIELDS):
+            for name in (*BUDGET_FIELDS, *CAP_FIELDS):
                 value, current = getattr(layer, name), getattr(policy, name)
                 if value is not None:
                     policy = dataclasses.replace(
@@ -869,6 +887,7 @@ class InstancePolicy:
     token_budget: int | None
     allowed_tools: tuple[str, ...] | None
     maxima: PolicyMaximaInput
+    budget_usd: float | None = None
     #: Instance policy sets neither: `maxima:` has no deny list and no sandbox,
     #: so both start empty and only a repository or narrower layer adds them.
     deny_tools: tuple[str, ...] = ()
@@ -890,6 +909,7 @@ class InstancePolicy:
                 else (tuple(m.allowed_harnesses) if m.allowed_harnesses is not None else None)
             ),
             token_budget=m.token_budget,
+            budget_usd=m.budget_usd,
             allowed_tools=tuple(m.allowed_tools) if m.allowed_tools is not None else None,
             maxima=m,
             # A ratchet: an unset default starts at the maximum, as a safety

@@ -273,7 +273,7 @@ def build() -> MCPServer:
         `allowed_harnesses`, and the fields that can only tighten: the time
         caps `time_cap_minutes` and `total_time_cap_minutes` -- a wait's total
         cap is its timeout -- and `allowed_tools`, `deny_tools`,
-        `token_budget`, `sandbox`) and `paths`, a map from a canonical path
+        `token_budget`, `budget_usd`, `sandbox`) and `paths`, a map from a canonical path
         (`node`, `node.step` or `node.step.task`) to the same fields for that
         scope: `{"paths": {"merge_request_feedback.ci.await_ci":
         {"total_time_cap_minutes": 60}}}`. It replaces the whole stored

@@ -155,16 +155,18 @@ async def test_a_rule_frozen_into_a_snapshot_stops_its_launch_naming_the_field(
     assert f"{field}: 'Bash(git *)' is a permission rule" in Path(session["log_path"]).read_text()
 
 
-async def _spend(it, tokens_in: int, tokens_out: int) -> None:
-    """A finished session of this item that spent these tokens."""
+async def _spend(
+    it, tokens_in: int, tokens_out: int, path: str = "implementation.main.earlier"
+) -> None:
+    """A finished session of this item, at `path`, that spent these tokens."""
 
     def write(c):
         store.create_session(
             c,
             id="spent",
             work_item_id=it.id,
-            node_id="implementation",
-            hook_point="implementation.main.earlier",
+            node_id=path.split(".")[0],
+            hook_point=path,
             log_path="/dev/null",
             result_path="/dev/null",
         )
@@ -179,9 +181,10 @@ async def _spend(it, tokens_in: int, tokens_out: int) -> None:
 @pytest.mark.parametrize(("spent", "launched"), [(99, True), (100, False)], ids=["under", "at"])
 async def test_token_budget_refuses_the_next_agent_launch(item_on, fake_agent, spent, launched):
     """`token_budget` is enforced where the dollar budget is: before an agent
-    launch, against everything the item has spent so far, input and output.
-    The stop names the token cap, not a dollar one."""
-    it = await item_on(_node(_agent(policy={"token_budget": 100})))
+    launch, against everything the launches inside its scope -- the node here
+    -- have spent so far, input and output (Ruling 195). The stop names the
+    token cap and its scope, not a dollar one."""
+    it = await item_on(_node(_agent(), policy={"token_budget": 100}))
     await _spend(it, spent - 40, 40)
 
     status = await _dispatch(it)
@@ -191,7 +194,7 @@ async def test_token_budget_refuses_the_next_agent_launch(item_on, fake_agent, s
     if not launched:
         await stops.stop_for_budget(it.database, it.id, it.chain.chain.nodes[0], _policy.NO_BUDGET)
         (stopped,) = it.events("work_item_needs_human")
-        assert "100 tokens spent" in stopped["payload"]["reason"], stopped
+        assert "100 tokens spent in `implementation`" in stopped["payload"]["reason"], stopped
         assert "cap 100 tokens" in stopped["payload"]["reason"], stopped
 
 
@@ -374,7 +377,8 @@ async def test_a_gate_reviewer_is_not_launched_past_its_token_budget(item_on, mo
 
     monkeypatch.setattr(gates.gate_review, "review", never)
     it = await item_on(_reviewed_gate({"token_budget": 50}), auto_gate=True)
-    await _spend(it, 30, 20)
+    # The gate's own spend: its reviewer's earlier launches (Ruling 195).
+    await _spend(it, 30, 20, path="spec_approval.auto_review")
     await _requested(it)
 
     status = await gates.review_gates("awaiting_gate", it.database, it.run_dirs, work_item_id=it.id)

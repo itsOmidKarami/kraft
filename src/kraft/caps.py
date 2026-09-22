@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from kraft import events, store
-from kraft.policy import CAP_FIELDS
+from kraft.policy import BUDGET_FIELDS, CAP_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +387,73 @@ def parked(conn, row, *, gate: str | None, now: str | None = None) -> Hit | None
             if best is None or hit.remaining_s < best.remaining_s:
                 best = hit
     return best if best is not None and best.remaining_s <= 0 else None
+
+
+def budget_breach(conn, row, path: str) -> dict | None:
+    """The first spend cap already reached over a launch at `path` (a task's,
+    or a node's for its escalation turn), broadest scope first, or None
+    (Ruling 195). A scope's spend is what the launches inside it have spent,
+    since the item was filed: `token_budget` its tokens in and out (a running
+    session's live count included), `budget_usd` its dollars. A finished
+    launch that spent tokens and reported no cost is unknown spend, which is
+    never counted as free: a scope with any is refused under a dollar cap,
+    and the stop says why. A launch still running reports its cost when it
+    exits, so it is not unknown yet; the overshoot is one launch, as with
+    `budget.work_item_usd`."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        return None
+    kinds = {p: k for p, k, _ in snapshot.chain.cap_scopes()}
+    segments = path.split(".")
+    levels = [
+        "",
+        *(p for i in range(1, len(segments) + 1) if (p := ".".join(segments[:i])) in kinds),
+    ]
+    sessions = conn.execute(
+        "SELECT hook_point, status, tokens_in, tokens_out, cost_usd FROM worker_sessions "
+        "WHERE work_item_id = ?",
+        (row["id"],),
+    ).fetchall()
+    above = dict.fromkeys(BUDGET_FIELDS)
+    for level in levels:
+        policy = _root_policy(snapshot) if not level else snapshot.policy_at(level)
+        under = [
+            s
+            for s in sessions
+            if not level or s["hook_point"] == level or s["hook_point"].startswith(level + ".")
+        ]
+        for name in BUDGET_FIELDS:
+            cap = getattr(policy, name)
+            if cap is None or (above[name] is not None and cap >= above[name]):
+                continue
+            above[name] = cap
+            if name == "token_budget":
+                spent = sum((s["tokens_in"] or 0) + (s["tokens_out"] or 0) for s in under)
+                if spent >= cap:
+                    return {
+                        "scope": "tokens",
+                        "path": level,
+                        "spent_tokens": spent,
+                        "cap_tokens": cap,
+                    }
+                continue
+            unknown = sum(
+                1
+                for s in under
+                if s["cost_usd"] is None
+                and ((s["tokens_in"] or 0) + (s["tokens_out"] or 0)) > 0
+                and s["status"] not in ("pending", "running")
+            )
+            spent = sum(s["cost_usd"] or 0.0 for s in under)
+            if unknown or spent >= cap:
+                return {
+                    "scope": "usd",
+                    "path": level,
+                    "spent_usd": spent,
+                    "cap_usd": float(cap),
+                    "unknown_launches": unknown,
+                }
+    return None
 
 
 def reason_of(conn, work_item_id: str) -> str:

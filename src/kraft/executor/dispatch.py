@@ -662,14 +662,14 @@ async def dispatch_node(
 
     # Only agent tasks. A subprocess or builtin costs nothing, and stopping
     # verification for a budget would strand the item mid-node for no saving.
-    breach = stops.budget_breach(
-        db, work_item_row["id"], budget, token_budget=task_policy.token_budget
-    )
+    breach = stops.budget_breach(db, work_item_row["id"], budget, row=work_item_row, path=task.path)
     if breach is not None:
-        if breach["scope"] == "tokens":
+        # A scope's own cap (Ruling 195) is known only here, where the scope
+        # is: recorded for the stop to name.
+        if breach["scope"] in ("tokens", "usd"):
             await db.write(
                 lambda c: events.append(
-                    c, work_item_row["id"], "token_budget_reached", {**breach, "task": task.path}
+                    c, work_item_row["id"], "scope_budget_reached", {**breach, "task": task.path}
                 )
             )
         return BUDGET

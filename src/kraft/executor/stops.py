@@ -85,7 +85,7 @@ async def claimed_or_stopped(
 
 
 def budget_breach(
-    db, work_item_id: str, budget: _policy.Budget, *, token_budget: int | None = None
+    db, work_item_id: str, budget: _policy.Budget, *, row=None, path: str | None = None
 ) -> dict | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
 
@@ -93,20 +93,15 @@ def budget_breach(
     only known once that agent's session has exited (`usage.read_envelope`) — so
     the overshoot is bounded by the cost of one task, not by the cap.
 
-    `token_budget` is the launching task's resolved V1 `token_budget`, checked
-    against every token this work item's sessions have spent so far, input and
-    output (a running session's are its live progress).
+    `row` and `path` are the item and the scope launching (a task's path, or a
+    node's for its escalation turn): every scope enclosing it that sets a
+    `token_budget` or `budget_usd` caps its own launches' spend (Ruling 195,
+    `caps.budget_breach`), under `budget`'s instance-wide ceilings.
     """
-    if token_budget is not None:
-        spent = db.read(
-            lambda c: c.execute(
-                "SELECT COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) "
-                "FROM worker_sessions WHERE work_item_id = ?",
-                (work_item_id,),
-            ).fetchone()[0]
-        )
-        if spent >= token_budget:
-            return {"scope": "tokens", "spent_tokens": spent, "cap_tokens": token_budget}
+    if row is not None and path is not None:
+        scoped = db.read(lambda c: _caps.budget_breach(c, row, path))
+        if scoped is not None:
+            return scoped
     if budget.work_item_usd is None and budget.daily_usd is None:
         return None
     since = store.local_midnight_utc() if budget.daily_usd is not None else None
@@ -119,17 +114,28 @@ def budget_breach(
 
 
 def budget_reason(breach: dict) -> str:
+    where = f"`{breach['path']}`" if breach.get("path") else "the work item"
+    tail = " Nothing new was started; a running agent was not interrupted."
     if breach["scope"] == "tokens":
         return (
-            f"token budget reached: {breach['spent_tokens']} tokens spent on this work item, "
-            f"cap {breach['cap_tokens']} tokens. Nothing new was started; a running agent "
-            "was not interrupted."
+            f"token budget reached: {breach['spent_tokens']} tokens spent in {where}, "
+            f"cap {breach['cap_tokens']} tokens." + tail
+        )
+    if breach["scope"] == "usd":
+        if breach.get("unknown_launches"):
+            return (
+                f"budget_usd cannot be checked: {breach['unknown_launches']} launch(es) in "
+                f"{where} reported no cost, and unknown spend is never counted as free "
+                f"(${breach['spent_usd']:.2f} known, cap ${breach['cap_usd']:.2f})." + tail
+            )
+        return (
+            f"budget_usd reached: ${breach['spent_usd']:.2f} spent in {where}, "
+            f"cap ${breach['cap_usd']:.2f}." + tail
         )
     where = "this work item" if breach["scope"] == "work_item" else "today, across every work item"
     return (
         f"budget cap reached: ${breach['spent_usd']:.2f} spent on {where}, "
-        f"cap ${breach['cap_usd']:.2f}. Nothing new was started; a running agent "
-        "was not interrupted."
+        f"cap ${breach['cap_usd']:.2f}." + tail
     )
 
 
@@ -137,13 +143,14 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     # The fallback cannot fire in practice — sums only grow between the dispatch
     # that returned BUDGET and here — but a None would crash the escalation path
     # rather than stop the item, which is the wrong failure.
-    # A token breach is the launching task's own cap, which only dispatch
-    # knew: it recorded it as `token_budget_reached` on the way out.
+    # A scope's own cap (Ruling 195) is one only dispatch knew: it recorded
+    # it as `scope_budget_reached` on the way out.
     tokens = next(
         (
             e["payload"]
             for e in reversed(db.read(lambda c: events.read_after(c, 0, work_item_id)))
-            if e["type"] == "token_budget_reached"
+            if e["type"] in ("token_budget_reached", "scope_budget_reached")
+            # `token_budget_reached` was its name before Ruling 195.
         ),
         None,
     )

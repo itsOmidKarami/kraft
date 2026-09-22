@@ -157,15 +157,15 @@ the chain authored, so its operational values win over the template's — a
 `max_attempts` or `timeout_minutes` on an execution node wins over its fix
 loop's own `max_attempts`. Its safety values combine in no order: an
 `allowed_tools` intersects with what the scope already allows, a `deny_tools`
-adds to it, a `token_budget` takes the lower of the two, and a `sandbox` must
-match any already set. So they only ever tighten, and are never refused
-because the chain narrowed the same field first. Its item-wide time
-cap is the work item's own (Ruling 198): it replaces the chain's for every
-scope that set none, meets any scope's own that is longer, and may be raised
-above the chain's up to `maxima` -- so a person unsticks a capped item by
-raising it and retrying, with no config edit. A time cap on a path only
-tightens that scope, and one above the cap it would land on is refused,
-naming both. `wait_timeout_minutes` is retired (Ruling 196): a write
+adds to it, and a `sandbox` must match any already set. So they only ever
+tighten, and are never refused because the chain narrowed the same field
+first. Its item-wide caps -- `time_cap_minutes`, `total_time_cap_minutes`,
+`token_budget`, `budget_usd` -- are the work item's own (Rulings 195, 198):
+each replaces the chain's for every scope that set none, meets any scope's own
+that is larger, and may be raised above the chain's up to `maxima` -- so a
+person unsticks a capped item by raising it and retrying, with no config
+edit. A cap on a path only tightens that scope, and one above the cap it would
+land on is refused, naming both. `wait_timeout_minutes` is retired (Ruling 196): a write
 refuses it, naming `total_time_cap_minutes`; an override stored before reads a
 path's value as that path's `total_time_cap_minutes` and an item-wide one as
 every wait task's, with a deprecation warning. It binds that item only, and it
@@ -180,7 +180,8 @@ node; a gate's `auto_review` inherits its gate. At runtime:
 | `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. Allowing `Bash` allows its read-only use without a gate ask: Claude's `manual` mode runs a read-only shell command (`cat`, `ls`, `git status`) itself and asks the gate only about the rest, so a read-only command can read any file the worktree holds, gitignored ones included. |
 | `deny_tools` | only accumulates | Denied by the permission gate and passed as `--disallowed-tools`, on top of `allowed_tools`. |
 | `sandbox` | set once, never changed or removed | Wraps the whole work item, not only the scope that sets it (Ruling 189): every process it launches (agents, subprocesses, builtins, recoveries, judges, escalations, gate reviews, test scopes, area setups and `setup_command`) runs in `docker run`. Two scopes setting different sandboxes are refused when the chain is built. |
-| `token_budget` | only narrows | Before each agent launch, gate reviewers included: once the work item's sessions have spent this many tokens (input plus output) the next agent task is refused and the item stops for a human. Like `budget`, it cannot interrupt a running agent. |
+| `token_budget` | only narrows; a child's never above its parent's | The spend of the scope that sets it (Ruling 195): the tokens, input plus output, of every launch inside that scope — a task's own launches, a step's or a node's, the whole work item's. Before each agent launch, gate reviewers and escalation turns included, the launch is refused, and the item stops for a human naming the scope, once its own scope or any scope around it has reached its cap. Like `budget`, it cannot interrupt a running agent. |
+| `budget_usd` | only narrows; a child's never above its parent's | The same, in dollars, under `budget.work_item_usd`/`budget.daily_usd`, which stay the outer ceilings. A finished launch whose harness reported no cost is unknown spend and never counted as free: a scope with any cannot be shown to be under its cap, so its next launch stops for a human, saying so. A launch still running reports its cost when it exits. |
 | `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |
 | `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |
 | `time_cap_minutes` | only lowers what it inherits, within `maxima` | The running time of the scope that sets it: a task's one run, a step's or a node's task runs since it started (a node's recovery, fix loop and escalation included), the work item's since it started. Paused, external-wait, gate and rate-limited time does not count. A launch past it is refused; a running process is killed at it, a sandbox's container too. |

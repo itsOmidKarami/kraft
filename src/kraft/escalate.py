@@ -367,7 +367,9 @@ async def dispatch(
     # it, is no policy anyone could know, and refused rather than run unbounded.
     policy = _node_policy(row)
     breach = (
-        stops.budget_breach(db, work_item_id, _policy.NO_BUDGET, token_budget=policy.token_budget)
+        stops.budget_breach(
+            db, work_item_id, _policy.NO_BUDGET, row=row, path=row["current_node_id"]
+        )
         if policy is not None
         else None
     )
