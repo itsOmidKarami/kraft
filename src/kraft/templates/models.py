@@ -409,11 +409,39 @@ class AgentTask(TaskBase):
     #: The Kraft-owned output contract, supplied before skill and steering
     #: (`agent-task-contract-precedes-skill-and-steering`).
     produces: Identifier | None = None
+    #: The two routes to a model, one per task: `profile:` (an agent profile
+    #: in `harnesses.yaml`, read live at launch -- Kraft-ps1ao), or its own
+    #: `model:`/`effort:`. `extends` keeps them apart (`displaced_route`).
+    profile: Identifier | None = None
     model: StrictStr | None = None
     effort: StrictStr | None = None
     #: Inputs Kraft delivers to this task (`AgentInput`), e.g.
     #: `inputs: [review_package]`.
     inputs: list[Annotated[AgentInput, _LOOSE]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _one_route(self) -> Self:
+        if self.profile is not None and (self.model is not None or self.effort is not None):
+            raise ValueError(
+                f"selects profile {self.profile!r} and sets model/effort itself; a task "
+                "takes its model from one or the other"
+            )
+        return self
+
+
+#: An agent task's two routes to a model (`AgentTask.profile`).
+_ROUTES = (("profile",), ("model", "effort"))
+
+
+def displaced_route(nearer: Mapping[str, object]) -> tuple[str, ...]:
+    """The keys an inherited task loses under `nearer`, a layer that picks a
+    route: the nearer layer's route wins whole, so a `profile:` drops the
+    inherited `model`/`effort` and either of those drops the inherited
+    `profile` (Kraft-ps1ao). Empty when `nearer` picks neither."""
+    for route, other in (_ROUTES, _ROUTES[::-1]):
+        if any(k in nearer for k in route):
+            return other
+    return ()
 
 
 class SubprocessTask(TaskBase):

@@ -1,0 +1,36 @@
+# chains/quick-task.yaml
+#
+# The V1 port of the legacy `templates/quick-task.yaml`, node for node:
+# `env_setup` -> `implementation` -> `verify`, every one of them gateless.
+#
+# **No `kind: gate` node, ever.** This is the one shipped chain that runs to
+# completion unattended, which is what `frontend/e2e/chain.spec.ts` watches and
+# what makes it the chain to reach for when confirming an install works at all.
+# A gate added here does not fail loudly; it silently re-breaks that spec, and
+# `playwright` is a required check. `tests/templates/test_materialization.py`
+# pins the absence.
+#
+# `env_setup` has no V1 node, on purpose and not as an omission: its work is
+# implicit runtime preparation now (`builtins.prepare_runtime`, run by
+# `walk.run_once` right after `ensure_worktree`, before the first node
+# dispatches), and `BuiltinAction` deliberately names no action to bind it to.
+#
+# The two nodes it does have are the legacy nodes' own single hooks --
+# `on.implementation.start` and `on.test.run` -- as the library tasks that
+# replaced them. Not `extends: implementation`: that reusable node carries a
+# verification step and a fix loop the legacy chain never had, and this is a
+# port, not a redesign.
+id: quick-task
+
+nodes:
+  - id: implementation
+    kind: exec
+    tasks:
+      - id: implement
+        extends: implementer
+
+  - id: verify
+    kind: exec
+    tasks:
+      - id: test_changed_scopes
+        extends: verify_changed_scopes

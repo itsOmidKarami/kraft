@@ -2,7 +2,13 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { SectionLabel, Switch } from "../../components/ui";
-import type { HarnessCapability, HarnessProfile, HarnessProfileInput, HarnessProvider } from "../../types";
+import type {
+  AgentProfile,
+  HarnessCapability,
+  HarnessProfile,
+  HarnessProfileInput,
+  HarnessProvider,
+} from "../../types";
 import "./templates.css";
 import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared";
 
@@ -17,7 +23,7 @@ import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared"
  * provider's capability surface (`GET /harnesses/providers`) is read-only: it
  * is what a CLI accepts, not a setting. */
 
-/** The profile defaults a launch applies (`agent._PROFILE_DEFAULTS`). */
+/** The profile defaults a launch applies (`adapters.profiles._PROFILE_DEFAULTS`). */
 const DEFAULT_KEYS = ["model", "effort", "permission_mode"] as const;
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -232,6 +238,43 @@ function ProfileEditor({
   );
 }
 
+/** `profiles:`, the model tiers a task selects with `profile:` (Kraft-ps1ao).
+ *  Read-only: the file is where they are edited. */
+function AgentProfiles({ profiles }: { profiles: AgentProfile[] }) {
+  if (profiles.length === 0) return null;
+  return (
+    <>
+      <SectionLabel>agent profiles</SectionLabel>
+      <p className="field-hint">
+        Model tiers a library task selects with <code>profile:</code>, spelled per provider. Edit them in
+        harnesses.yaml; the next launch reads it.
+      </p>
+      <ul className="capability-list">
+        {profiles.map((p) => (
+          <li key={p.id}>
+            <code className="capability-name">{p.id}</code>
+            {p.effort && ` · effort ${p.effort}`}
+            <div className="field-hint">
+              {Object.entries(p.model)
+                .map(([provider, model]) => `${provider}: ${model}`)
+                .join(" · ")}
+            </div>
+            <div className="field-hint">
+              used by{" "}
+              <Links ids={p.used_by} to={(id) => `/settings/library?c=${encodeURIComponent(id)}`} none="no library task" />
+            </div>
+            {p.problems.map((why) => (
+              <p key={why} className="form-error">
+                {why}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 export function HarnessesPage() {
   const { value, error, reload } = useResource(() => Promise.all([api.getHarnesses(), api.getHarnessProviders()]));
   const phone = usePhone();
@@ -277,6 +320,7 @@ export function HarnessesPage() {
                 ))}
               </div>
             )}
+            <AgentProfiles profiles={harnesses?.agent_profiles ?? []} />
           </div>
           <div className="template-draft">
             {selected && providers && (

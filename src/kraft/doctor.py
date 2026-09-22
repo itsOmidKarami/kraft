@@ -317,12 +317,11 @@ def _agent_checks() -> list[dict]:
     harnesses = harness.load(None)
     checks: list[dict] = []
     try:
-        profiles = HarnessProfileTable.from_yaml(
-            live / "harnesses.yaml", harnesses=harnesses.valid
-        ).profiles
+        table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
     except TemplateEnvironmentError as exc:
         checks.append(_check("harnesses.yaml", False, str(exc)))
-        profiles = {}
+        table = HarnessProfileTable(profiles={})
+    profiles = table.profiles
     for pid in sorted(_selected_profiles(live)):
         profile = profiles.get(pid)
         if profile is None:
@@ -357,7 +356,30 @@ def _agent_checks() -> list[dict]:
         checks.append(_check(f"agent: {pid}", True, detail))
     for hid, reason in sorted(harnesses.invalid.items()):
         checks.append(_check(f"harness: {hid}", False, reason))
-    return checks
+    return checks + _pairing_checks(live, table, harnesses)
+
+
+def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[dict]:
+    """One failure per agent profile a task selects and the launch would
+    refuse on that task's harness (Kraft-ps1ao), naming every such task in the
+    launch's words. A harness that does not
+    resolve already has its own row above."""
+    refused: dict[str, list[str]] = {}
+    for chain in _resolved_chains(live):
+        for node in chain.nodes:
+            for t in node.tasks():
+                task = t.task
+                if not isinstance(task, AgentTask) or task.profile is None:
+                    continue
+                harness_profile = table.profiles.get(task.harness)
+                if harness_profile is None or harness_profile.provider not in harnesses.valid:
+                    continue
+                why = table.pairing_problem(task.profile, harness_profile, harnesses.valid)
+                if why:
+                    refused.setdefault(task.profile, []).append(
+                        f"chain {chain.id!r} task {t.path!r}: {why}"
+                    )
+    return [_check(f"profile: {p}", False, "; ".join(why)) for p, why in sorted(refused.items())]
 
 
 def _resolved_chains(live: Path) -> list:

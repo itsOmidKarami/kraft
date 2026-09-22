@@ -28,6 +28,24 @@ const HARNESSES: Harnesses = {
     }),
     profile("codex", { enabled: false, executable: "codex", defaults: { effort: "medium" } }),
   ],
+  agent_profiles: [
+    {
+      id: "strong",
+      effort: "high",
+      model: { claude: "sonnet", codex: "gpt-5.6-terra" },
+      used_by: ["tasks.repair"],
+      chains: ["default"],
+      problems: [],
+    },
+    {
+      id: "fast",
+      effort: "low",
+      model: { claude: "haiku" },
+      used_by: ["tasks.quick"],
+      chains: ["default"],
+      problems: ["chain 'default' task 'q.main.t': profile 'fast' has no model for provider 'codex' (harness 'codex')"],
+    },
+  ],
 };
 
 const cap = (values: string[] = [], always: string | string[] | null = null, extra: Partial<HarnessCapability> = {}) => ({
@@ -181,6 +199,18 @@ describe("Settings · harnesses", () => {
     await userEvent.type(model, "x");
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(model).toHaveValue("sonnet");
+  });
+
+  it("lists the agent profiles under the harnesses read-only with any pairing problem", async () => {
+    renderAt("/settings/harnesses");
+    const strong = (await screen.findByText("strong", { selector: ".capability-name" })).closest("li")!;
+    expect(strong).toHaveTextContent("effort high");
+    expect(strong).toHaveTextContent("claude: sonnet · codex: gpt-5.6-terra");
+    expect(strong.querySelector("a")).toHaveAttribute("href", "/settings/library?c=tasks.repair");
+    expect(screen.getByText(/Edit them in harnesses.yaml/)).toBeInTheDocument();
+    const fast = screen.getByText("fast", { selector: ".capability-name" }).closest("li")!;
+    expect(fast).toHaveTextContent("profile 'fast' has no model for provider 'codex'");
+    expect(strong.querySelector(".form-error")).toBeNull();
   });
 
   it("a harnesses.yaml that does not load says why", async () => {

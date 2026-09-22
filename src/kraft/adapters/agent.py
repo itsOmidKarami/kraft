@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -10,14 +9,16 @@ from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import subprocess as _subprocess
-from kraft.config import RepoEntry
-from kraft.paths import default_templates_dir
-from kraft.policy import InstancePolicy
-from kraft.templates.environment import (
-    HarnessProfile,
-    HarnessProfileTable,
-    TemplateEnvironmentError,
+from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use `agent.<name>`
+    HarnessUnavailable,
+    ProfileUnavailable,
+    harness_profile,
+    harness_table,
+    resolve_profile,
+    select_profile,
 )
+from kraft.config import RepoEntry
+from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import steering as _steering
 
@@ -285,52 +286,11 @@ def resolve_invocation(
     )
 
 
-class HarnessUnavailable(Exception):
-    """A task's `harness:` names no enabled profile this instance can launch
-    (`unavailable-selected-harness-needs-human`). The message says why."""
-
-
 class LaunchRefused(ValueError):
     """`run_agent_task` refused to start anything: the harness is unknown, or a
     merged option names a capability it does not declare. A configuration
     stop that names its cause, never a task failure a fix loop could repair
     (Kraft-hr0xr). A `ValueError` still, for callers that catch that."""
-
-
-#: The profile defaults `resolve_agent_task` applies. Each is a scalar option
-#: `run_agent_task` takes; a default outside this set would be dropped without
-#: a word, so it is refused instead.
-_PROFILE_DEFAULTS = ("model", "effort", "permission_mode")
-
-
-def harness_profile(profile_id: str, harnesses: _harness.HarnessSet) -> HarnessProfile:
-    """The enabled `harnesses.yaml` profile `profile_id` names, or
-    `HarnessUnavailable`. Read from the app's templates directory
-    (`KRAFT_TEMPLATES_DIR`, else `$KRAFT_HOME/templates`) on every call, so an
-    edit reaches the next launch. Never a fallback onto a provider of the same
-    name -- a task selects a profile, and a missing one stops for a human."""
-    path = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "harnesses.yaml"
-    try:
-        profiles = HarnessProfileTable.from_yaml(path, harnesses=harnesses.valid).profiles
-    except TemplateEnvironmentError as exc:
-        raise HarnessUnavailable(str(exc)) from exc
-    return select_profile(profiles, profile_id, path)
-
-
-def select_profile(profiles: dict[str, HarnessProfile], pid: str, path: Path) -> HarnessProfile:
-    """`harness_profile` over a loaded table, which a save checks (Kraft-archr)."""
-    profile = profiles.get(pid)
-    if profile is None:
-        raise HarnessUnavailable(f"{path} defines no such profile; known are {sorted(profiles)}")
-    if not profile.is_available():
-        raise HarnessUnavailable(f"profile {pid!r} is disabled in {path}")
-    unapplied = sorted(set(profile.defaults) - set(_PROFILE_DEFAULTS))
-    if unapplied:
-        raise HarnessUnavailable(
-            f"profile {pid!r} sets defaults {unapplied}, which Kraft does not "
-            f"apply; only {list(_PROFILE_DEFAULTS)} are"
-        )
-    return profile
 
 
 def resolve_agent_task(
@@ -395,17 +355,21 @@ def resolve_agent_task(
         raise HarnessUnavailable(
             f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
         )
-    profile = harness_profile(
-        task.harness, harnesses if harnesses is not None else _harness.load(None)
-    )
+    harnesses = harnesses if harnesses is not None else _harness.load(None)
+    table, path = harness_table(harnesses)
+    profile = select_profile(table.profiles, task.harness, path)
+    # The task's own rung: its agent profile, read live, or its own fields.
+    model, effort = task.model, task.effort
+    if task.profile is not None:
+        model, effort = resolve_profile(task.profile, profile, table, harnesses.valid)
     inv = resolve_invocation(
         {
             "kind": "agent",
             "harness": profile.provider,
             **({"command": profile.executable} if profile.executable else {}),
             **({"skill": task.skill} if task.skill is not None else {}),
-            **({"model": task.model} if task.model is not None else {}),
-            **({"effort": task.effort} if task.effort is not None else {}),
+            **({"model": model} if model is not None else {}),
+            **({"effort": effort} if effort is not None else {}),
             **({"deny_tools": list(policy.deny_tools)} if policy is not None else {}),
         },
         repo_entry,

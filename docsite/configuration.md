@@ -63,7 +63,8 @@ An `agent` task's keys:
 | `skill` | One skill the agent is launched with, by name (`kraft:code-review`, or a plugin's `plugin:skill`). A skill that cannot be loaded stops the task for a human. `spec_author` and `plan_author` default to `kraft:spec` and `kraft:plan`; name another (`superpowers:writing-plans`) and the task's contract still tells it the chain implements the document and verification runs the suite. |
 | `steering` | Names from the library's `steering` section. |
 | `produces` | The document kind it writes (`spec`, `plan`, `work_brief`, `review_brief`) — what a gate's `artifact` decides and an attachment covers. |
-| `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. |
+| `profile` | An [agent profile](harnesses.md#agent-profiles) from `harnesses.yaml`'s `profiles:` (`strong`): the model tier, spelled per provider, read live at each launch. Not with `model`/`effort`; through `extends`, the nearer layer's choice of the two wins whole. |
+| `model` / `effort` | This task's runtime options, checked against what the profile's provider accepts. Not with `profile`. |
 | `inputs` | What Kraft hands the task: `review_package` (the change under review), `carried_findings` (its previous round's findings) and `previous_review` (its previous session's result). |
 | `scope` | `each_repository` fans the task out once per selected repository of a workspace item; the default runs once. |
 | `on_failure` | A recovery pass for this task alone. |
@@ -325,18 +326,38 @@ harnesses:
 | `provider` | The harness this profile configures. Must be an installed harness id (`claude`, `codex`, `gemini`) — the provider id *is* the harness id. |
 | `enabled` | `false` takes the profile out of service. A task selecting a disabled profile stops for a human; Kraft never substitutes another. Defaults `true`. |
 | `executable` | The command to launch, when it differs from the provider's own default. It replaces the executable only: the provider's own subcommand (`codex exec`) is kept after it. |
-| `defaults` | Runtime options every task using this profile starts from: `model`, `effort` and `permission_mode`. Checked against what the provider declares it accepts. They are the lowest rung: a work item's own override, the task's own field and the repo's `default_model` all win over them. Any other key stops the task for a human rather than being ignored. |
+| `defaults` | Runtime options every task using this profile starts from: `model`, `effort` and `permission_mode`. Checked against what the provider declares it accepts. They are the lowest rung: a work item's own override, the task's own field or agent profile, and the repo's `models:` all win over them. Any other key stops the task for a human rather than being ignored. |
+
+The same file's optional `profiles:` section holds the
+[agent profiles](harnesses.md#agent-profiles), the model tiers a task selects
+with `profile:`. A file without it loads as before.
+
+```yaml
+profiles:
+  strong:
+    effort: high
+    model: { claude: sonnet, codex: gpt-5.6-terra }
+```
+
+| Key | Means |
+|---|---|
+| `<profile id>` | The name a task's `profile:` selects. Lowercase, digits, `_` and `-`. |
+| `model` | Required, at least one entry: provider id (`claude`, `codex`, `gemini`) to model id. A provider left out can't run this profile. Only a task pairing the two is refused. |
+| `effort` | Optional. One effort for every provider. At least one of the providers it names must accept it, and a task on a provider that refuses it is refused. |
 
 `kraft admin harnesses` lists every profile with its provider and the library
-tasks that select it, and `kraft admin harnesses ID` shows one. Settings →
+tasks that select it, then each agent profile with its effort, its model per
+provider and any pairing problem; `kraft admin harnesses ID` shows one harness
+profile. Settings →
 Harnesses shows the same, beside each provider's read-only capability surface
 (`GET /api/harnesses/providers`, `GET /api/harnesses/providers/{id}`), and
 edits one profile at a time (`GET /api/harnesses/profiles`,
 `GET`/`PUT /api/harnesses/profiles/{id}`). A save goes through the same parse as
 loading the file, and is refused, with the reason and nothing written, if an
 agent task of a chain that resolves now would stop launching: its profile
-disabled, a default no launch applies, or a provider that does not take
-the task's own `model` or `effort`. A save rewrites the file, so comments in it
+disabled, a default no launch applies, a provider that does not take
+the task's own `model` or `effort`, or one its agent profile names no model
+for. Agent profiles are listed read-only there; edit them in the file. A save rewrites the file, so comments in it
 are not kept.
 
 ## `repos.yaml` — connected repos
@@ -373,7 +394,7 @@ repos:
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
-| `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
+| `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` or agent `profile:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
 | `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |

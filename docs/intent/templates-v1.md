@@ -158,6 +158,73 @@ An agent task MAY select a harness profile and override its runtime defaults
 only with options supported by the selected provider and allowed by policy.
 enforced-by: tests/test_harnesses.py::test_harness_profile_selects_only_provider_declared_options, tests/test_harnesses.py::test_harness_profile_rejects_a_value_the_provider_rejects, tests/adapters/test_agent.py::test_a_task_overrides_its_harness_profiles_defaults, tests/templates/test_policy_scopes.py::test_materialization_refuses_an_agent_task_on_a_harness_its_policy_disallows[task-scope], tests/executor/test_policy_enforcement.py::test_a_harness_its_policy_disallows_never_launches
 
+## REQ agent-profile-is-a-provider-keyed-model-tier
+
+`harnesses.yaml` MAY declare `profiles:`, named model tiers. Each SHALL name a
+model per provider id (at least one, every key an installed provider) and MAY
+name one effort, which at least one of its providers SHALL accept. A profile
+MAY omit any provider. A file with no `profiles:` SHALL load as before, with no
+agent profiles. The shipped `harnesses.yaml` SHALL declare `deep`, `strong` and
+`fast`.
+enforced-by: tests/test_agent_profiles.py::test_the_shipped_harnesses_file_ships_deep_strong_and_fast, tests/test_agent_profiles.py::test_an_absent_profiles_section_is_an_empty_table, tests/test_agent_profiles.py::test_a_bad_profile_definition_is_refused_at_load[unknown-provider], tests/test_agent_profiles.py::test_a_bad_profile_definition_is_refused_at_load[empty-model], tests/test_agent_profiles.py::test_a_bad_profile_definition_is_refused_at_load[no-model], tests/test_agent_profiles.py::test_a_bad_profile_definition_is_refused_at_load[bad-effort], tests/test_agent_profiles.py::test_a_bad_profile_definition_is_refused_at_load[extra-key], tests/test_agent_profiles.py::test_a_profile_id_must_be_an_identifier, tests/test_agent_profiles.py::test_one_named_provider_accepting_the_effort_is_enough
+origin: src/kraft/templates/environment.py §AgentProfile -- Kraft-ps1ao. Keyed by provider, not harness id, so two harnesses on one provider share one spelling; parsed by `HarnessProfileTable.from_mapping` beside the harness profiles.
+
+## REQ agent-task-selects-one-model-route
+
+An agent task SHALL take its model from exactly one route: `profile:`, or its
+own `model:`/`effort:`. A resolved task setting both SHALL be refused naming
+the task. Through `extends`, and through a retry's or revision's task
+override, the nearer layer's route SHALL win whole: a `profile:` drops the
+inherited `model`/`effort`, and a `model:` or `effort:` drops the inherited
+`profile`.
+enforced-by: tests/test_agent_profiles.py::test_a_task_selecting_a_profile_and_a_model_is_refused, tests/test_agent_profiles.py::test_a_library_task_selecting_both_routes_is_refused_naming_it, tests/test_agent_profiles.py::test_the_nearer_layers_route_wins_whole_through_extends[profile-over-fields], tests/test_agent_profiles.py::test_the_nearer_layers_route_wins_whole_through_extends[model-over-profile], tests/test_agent_profiles.py::test_the_nearer_layers_route_wins_whole_through_extends[effort-over-profile], tests/test_agent_profiles.py::test_the_nearer_layers_route_wins_whole_through_extends[fields-merge], tests/test_agent_profiles.py::test_a_retry_override_of_the_model_displaces_the_profile
+origin: src/kraft/templates/models.py §displaced_route -- Kraft-ps1ao. Applied in `templates/library.py` §_merge_chain for the tasks namespace and in `templates/retry.py` §validate_retry_override, so the XOR check on `AgentTask` never trips on inheritance.
+
+## REQ agent-profile-fills-the-tasks-own-rung
+
+A task's agent profile SHALL supply the model for its harness's provider and
+the profile's effort at the rung the task's own `model:`/`effort:` occupy: the
+node override, the item override and escalation SHALL still beat it, and it
+SHALL beat the repository's `models:` and the harness's `defaults:`. The
+profile's name SHALL be frozen with the chain and its body SHALL be read from
+`harnesses.yaml` at every launch.
+enforced-by: tests/test_agent_profiles.py::test_a_profile_fills_the_tasks_own_rung, tests/test_agent_profiles.py::test_the_profile_body_is_read_live_and_its_name_is_frozen
+origin: src/kraft/adapters/agent.py §resolve_agent_task -- Kraft-ps1ao. `resolve_invocation` is unchanged; the profile's values enter the binding where `task.model`/`task.effort` did.
+
+## REQ agent-profile-pairing-is-checked-and-never-substituted
+
+A task whose profile is missing, names no model for its harness's provider, or
+names a model or effort that provider refuses SHALL be reported naming the
+chain, task, profile, provider and harness: on the Settings view of
+`harnesses.yaml`, as a failing `kraft admin doctor` check, and by refusing a
+harness save that would cause it. At launch such a task SHALL stop for a human
+(`ProfileUnavailable`) and SHALL NOT run a substituted model. A profile that
+omits a provider no task pairs it with SHALL be no problem.
+enforced-by: tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_only_the_task_pairing_a_missing_provider_is_refused, tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[missing], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[no-provider], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[effort], tests/test_agent_profiles.py::test_doctor_fails_a_pairing_the_launch_would_refuse[model], tests/test_agent_profiles.py::test_doctor_is_quiet_about_a_clean_pairing, tests/test_agent_profiles.py::test_a_harness_save_that_breaks_a_pairing_is_refused, tests/test_agent_profiles.py::test_a_profile_missing_at_launch_stops_the_task_for_a_human, tests/test_agent_profiles.py::test_the_shipped_library_on_an_rc_harnesses_file_is_named_not_substituted
+origin: src/kraft/templates/environment.py §pairing_problem -- Kraft-ps1ao. The one reason text; `api/routes/harnesses.py` §_problems, `doctor.py` §_pairing_checks and `adapters/profiles.py` §resolve_profile all call it.
+
+## REQ agent-profiles-are-listed-read-only
+
+`GET /harnesses/profiles`, `kraft admin harnesses` and Settings → Harnesses
+SHALL list each agent profile with its effort, its model per provider, the
+library tasks that select it (as `extends` resolves them) and any pairing
+problem. Profiles SHALL be edited in the file only.
+enforced-by: tests/test_agent_profiles.py::test_a_profile_omitting_a_provider_nobody_pairs_is_no_problem, tests/test_agent_profiles.py::test_a_task_overriding_its_parents_profile_does_not_use_it, tests/cli/test_admin_harnesses.py::test_the_agent_profiles_follow_with_their_model_per_provider, frontend/src/views/settings/HarnessesPage.test.tsx::lists the agent profiles under the harnesses read-only with any pairing problem
+origin: src/kraft/api/routes/harnesses.py §_agent_profiles_view -- Kraft-ps1ao. Settings → Harnesses renders it in `HarnessesPage`'s agent profiles panel.
+
+## REQ shipped-library-selects-profiles-and-upgrades-unchanged
+
+The shipped library's `implementer`, `repair_verification`,
+`repair_mr_feedback`, `repair_mr_checks` and `strict_judge` SHALL select
+`profile: strong`, and every shipped agent task SHALL launch with the same
+harness, model and effort as before profiles existed. An install seeded
+before then SHALL keep its `library.yaml` and `harnesses.yaml` (nothing is
+migrated) and SHALL launch every task as before; a fresh seed SHALL get the
+library and the profiles it selects together; the capability manifest SHALL
+tell an older home how to adopt profiles.
+enforced-by: tests/test_agent_profiles.py::test_the_shipped_library_selects_profiles_and_launches_as_before, tests/test_agent_profiles.py::test_an_rc_home_keeps_its_files_and_launches_as_before, tests/test_agent_profiles.py::test_a_fresh_seed_gets_the_library_and_its_profiles_together, tests/test_agent_profiles.py::test_the_capability_manifest_tells_an_rc_home_about_profiles
+origin: templates/library.yaml -- Kraft-ps1ao. `templates/harnesses.yaml` ships the tiers; `cli/admin.py` §seed_home copies the bundle whole; `capabilities.py` §MANIFEST carries the adoption line.
+
 ## REQ node-override-extra-prompt-is-appended
 
 A work item's per-node override MAY carry an `extra_prompt`. The system SHALL
@@ -183,8 +250,8 @@ origin: src/kraft/overrides.py §harness_refusal -- Kraft-a7ers. Called from `ap
 
 An agent task's model, escalate model and effort SHALL come from its node's
 per-item override when one is set. Otherwise they SHALL come from the work
-item's own item-wide override, and only then from the task's own binding and
-the defaults beneath it.
+item's own item-wide override, and only then from the task's own route (its
+agent profile, or its own `model:`/`effort:`) and the defaults beneath it.
 enforced-by: tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[model], tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[effort], tests/executor/test_dispatch.py::test_node_override_beats_item_override_beats_the_task[escalate_model]
 origin: src/kraft/executor/dispatch.py §_dispatch_task -- the node override's model/effort keys are merged over the item's `agent_overrides` and handed to `adapters/agent.py` §resolve_agent_task as the one item override, which beats the task's binding, the repository's `models:` and the profile's `defaults:` (Kraft-df4tc, Kraft-a7ers).
 

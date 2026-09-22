@@ -68,6 +68,15 @@ agent, decides whether to skip, abandon, or give more room.
 
 ### Added
 
+- **Agent profiles:** `harnesses.yaml` gains `profiles:`, named model tiers
+  (`deep`, `strong`, `fast`) with a model per provider. A library task picks
+  one with `profile:` instead of its own `model:`/`effort:`. The profile is
+  read live at each launch. A task whose profile names no model for its
+  harness's provider fails `kraft admin doctor` and stops for a human, and no
+  other model is substituted. The shipped `implementer`, `repair_*` and
+  `strict_judge` tasks use `profile: strong`, which is the same `sonnet` at
+  `high` effort as before. An existing install keeps its files and runs
+  unchanged. `kraft admin doctor` says how to adopt profiles.
 - `kraft item create` matches intake: `--skip-nodes`, `--budget`,
   `--node-override`, `--autostart`. An agent asking for autostart is refused.
 - Attachments can be replaced until the item starts

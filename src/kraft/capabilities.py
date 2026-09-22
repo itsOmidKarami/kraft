@@ -53,7 +53,16 @@ def _key(version: str) -> tuple[int, ...]:
 #: adopt a capability in the legacy `registry.yaml` and hook-chain files, which
 #: V1 does not read. A V1 home is seeded from the V1 bundle (or replaced by
 #: `kraft admin update`), so it already has everything those entries described.
-MANIFEST: tuple[Capability, ...] = ()
+MANIFEST: tuple[Capability, ...] = (
+    Capability(
+        version="1.0.0",
+        name="profiles",
+        what="named model tiers (deep, strong, fast) a library agent task selects "
+        "instead of spelling out model/effort",
+        how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
+        "set `profile: strong` on a task in place of its `model:`/`effort:`",
+    ),
+)
 
 
 def added_since(version: str | None) -> list[Capability]:

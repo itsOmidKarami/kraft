@@ -75,6 +75,17 @@ harnesses:
     executable: claude
     defaults:
       model: sonnet
+
+profiles:
+  deep:
+    effort: high
+    model: { claude: opus, codex: gpt-5.6-sol }
+  strong:
+    effort: high
+    model: { claude: sonnet, codex: gpt-5.6-terra }
+  fast:
+    effort: low
+    model: { claude: haiku }
 ```
 
 The provider package declares its typed capability and runtime-option schema.
@@ -82,6 +93,19 @@ It owns invocation, context injection, session resumption, skill loading,
 usage parsing, and validation of those capabilities. A profile selects only
 from that provider-declared surface; it does not contain arbitrary command
 fragments or result-parser definitions.
+
+`profiles:` holds the **agent profiles**: named model tiers an agent task
+selects with `profile:` instead of its own `model:`/`effort:` (Kraft-ps1ao).
+`model` is keyed by provider id, so a tier means the same thing on every
+harness of that provider; a profile may omit a provider, and only a task that
+pairs it with a harness of that provider is refused -- at the Settings view,
+in `doctor`, and at launch (`ProfileUnavailable`, a `HarnessUnavailable`),
+never by substituting a model. A task takes exactly one route, and through
+`extends` the nearer layer's route wins whole. The profile fills the rung the
+task's own fields would: below the node and item overrides and escalation,
+above the repository's `models:` and the harness `defaults:`. The task's
+`profile:` name is chain content, frozen at intake; the profile's body is
+installation configuration, read live at each launch.
 
 ## Repositories, workspaces, and areas
 
@@ -195,8 +219,7 @@ tasks:
   implementer:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Implement the approved plan.
     policy:
       # One run's running time. Every successful implementer run on record
@@ -220,22 +243,19 @@ tasks:
   repair_verification:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Fix the failing tests and the review findings this node's verification reported.
 
   repair_mr_feedback:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Resolve the current CI failures and actionable merge-request feedback.
 
   repair_mr_checks:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: >-
       Repair what fails the merge request's checks from outside the code, such
       as a missing or wrong label. A code failure is the fix loop's, which runs
@@ -245,7 +265,7 @@ tasks:
   strict_judge:
     kind: agent
     harness: claude
-    effort: high
+    profile: strong
     prompt: Decide whether another repair attempt is justified.
     skill: kraft:fix-loop-judge
     inputs: [review_package]

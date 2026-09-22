@@ -18,7 +18,6 @@ from kraft import harness as harness_mod
 from kraft.adapters.agent import HarnessUnavailable, select_profile
 from kraft.api import api_router, deps
 from kraft.templates.environment import (
-    HarnessProfile,
     HarnessProfileTable,
     TemplateEnvironmentError,
 )
@@ -42,21 +41,26 @@ def _selections(library: TemplateLibrary | None) -> list[tuple[str, str, AgentTa
 
 
 def _problems(
-    selections, profiles: dict[str, HarnessProfile] | None, path, providers
+    selections, table: HarnessProfileTable | None, path, providers
 ) -> dict[tuple[str, str], str]:
     """Why each selecting task, keyed (chain, task path), could not launch on
-    `profiles` (`None`: the file does not load, so none can): the launch's own
-    checks, plus a task's own `model`/`effort` against its profile's provider."""
+    `table` (`None`: the file does not load, so none can): the launch's own
+    checks, including its agent profile's pairing (Kraft-ps1ao), plus a task's
+    own `model`/`effort` against its profile's provider."""
     problems = {}
     for chain, task_path, task in selections:
         where = f"chain {chain!r} task {task_path!r}: harness {task.harness!r}"
-        if profiles is None:
+        if table is None:
             problems[chain, task_path] = f"{where}: {path} does not load"
             continue
         try:
-            profile = select_profile(profiles, task.harness, path)
+            profile = select_profile(table.profiles, task.harness, path)
         except HarnessUnavailable as exc:
             problems[chain, task_path] = f"{where}: {exc}"
+            continue
+        if task.profile is not None:
+            if why := table.pairing_problem(task.profile, profile, providers):
+                problems[chain, task_path] = f"chain {chain!r} task {task_path!r}: {why}"
             continue
         for option in ("model", "effort"):
             value = getattr(task, option)
@@ -78,15 +82,52 @@ def _task_harness(library: TemplateLibrary, name: str) -> str | None:
     return None
 
 
+def _task_profile(library: TemplateLibrary, name: str) -> str | None:
+    """The agent profile library task `name` selects: the nearest layer that
+    picks a route decides, as `extends` resolves it (`displaced_route`)."""
+    seen = set()
+    while name not in seen and (component := library.component(Namespace.TASKS, name)):
+        seen.add(name)
+        if "profile" in component.data:
+            return component.data["profile"]
+        if "model" in component.data or "effort" in component.data:
+            return None
+        name = component.data.get("extends")
+    return None
+
+
+def _agent_profiles_view(table, library, selections, path, providers) -> list[dict]:
+    """`profiles:`, each with the tasks and chains selecting it and why any
+    pairing of it would not launch. Read-only: edited in the file."""
+    tasks = library.component_names(Namespace.TASKS) if library is not None else ()
+    used_by = {name: _task_profile(library, name) for name in tasks}
+    problems = _problems(selections, table, path, providers)
+    return [
+        {
+            "id": p.id,
+            "effort": p.effort,
+            "model": p.model,
+            "used_by": [f"tasks.{t}" for t, pid in used_by.items() if pid == p.id],
+            "chains": sorted({c for c, _, t in selections if t.profile == p.id}),
+            "problems": [
+                problems[c, tp]
+                for c, tp, t in selections
+                if t.profile == p.id and (c, tp) in problems
+            ],
+        }
+        for p in table.agent_profiles.values()
+    ]
+
+
 def _view(st) -> dict:
     path = st.templates_dir / FILE
     providers = harness_mod.load(None).valid
     library = getattr(st, "library", None)
     try:
-        profiles = HarnessProfileTable.from_yaml(path, harnesses=providers).profiles
-        error = None
+        table = HarnessProfileTable.from_yaml(path, harnesses=providers)
+        profiles, error = table.profiles, None
     except TemplateEnvironmentError as exc:
-        profiles, error = {}, str(exc)
+        table, profiles, error = HarnessProfileTable(profiles={}), {}, str(exc)
     tasks = library.component_names(Namespace.TASKS) if library is not None else ()
     used_by = {name: _task_harness(library, name) for name in tasks}
     chains: dict[str, set[str]] = {}
@@ -104,7 +145,14 @@ def _view(st) -> dict:
         }
         for p in profiles.values()
     ]
-    return {"file": str(path), "error": error, "profiles": listed}
+    return {
+        "file": str(path),
+        "error": error,
+        "profiles": listed,
+        "agent_profiles": _agent_profiles_view(
+            table, library, _selections(library), path, providers
+        ),
+    }
 
 
 @api_router.get("/harnesses/profiles")
@@ -181,7 +229,7 @@ async def put_harness(pid: str, body: dict, request: Request):
     providers = harness_mod.load(None).valid
     try:
         data = (yaml.safe_load(path.read_text()) if path.is_file() else None) or {}
-        current = HarnessProfileTable.from_mapping(data, path, harnesses=providers).profiles
+        current = HarnessProfileTable.from_mapping(data, path, harnesses=providers)
     except yaml.YAMLError as exc:
         raise HTTPException(409, f"{path} does not parse; fix it by hand: {exc}") from exc
     except TemplateEnvironmentError:
@@ -190,12 +238,12 @@ async def put_harness(pid: str, body: dict, request: Request):
         raise HTTPException(409, f"{path} is not a mapping of profiles; fix it by hand")
     candidate = {**data, "harnesses": {**(data.get("harnesses") or {}), pid: body}}
     try:
-        profiles = HarnessProfileTable.from_mapping(candidate, path, harnesses=providers).profiles
+        table = HarnessProfileTable.from_mapping(candidate, path, harnesses=providers)
     except TemplateEnvironmentError as exc:
         raise HTTPException(422, str(exc)) from exc
     selections = _selections(library)
     before = _problems(selections, current, path, providers)
-    after = _problems(selections, profiles, path, providers)
+    after = _problems(selections, table, path, providers)
     if broken := [message for key, message in sorted(after.items()) if key not in before]:
         raise HTTPException(422, broken[0])
     config_mod.write_yaml(path, candidate)

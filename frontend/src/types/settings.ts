@@ -111,11 +111,25 @@ export type HarnessProfileInput = Pick<HarnessProfile, "provider" | "enabled" | 
   executable?: string;
 };
 
+/** One `profiles:` entry of `harnesses.yaml` (Kraft-ps1ao): a model tier a
+ *  task selects with `profile:`. Read-only here; edited in the file. */
+export interface AgentProfile {
+  id: string;
+  effort: string | null;
+  /** Provider id -> model id. A provider it omits cannot run it. */
+  model: Record<string, string>;
+  used_by: string[];
+  chains: string[];
+  /** Why a task pairing it would not launch, in the launch's words. */
+  problems: string[];
+}
+
 export interface Harnesses {
   file: string;
   /** Why `harnesses.yaml` does not load; `profiles` is then empty. */
   error: string | null;
   profiles: HarnessProfile[];
+  agent_profiles: AgentProfile[];
 }
 
 /** One capability a provider declares. `values` are `re.fullmatch` patterns;

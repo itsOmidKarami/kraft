@@ -23,20 +23,3 @@ harnesses:
     executable: claude
     defaults:
       model: sonnet
-
-# An agent *profile* is a named model tier a library task selects with
-# `profile:` instead of spelling out `model:`/`effort:` itself. `model` is keyed
-# by provider id, so one tier means the same thing on every harness of that
-# provider. A profile may omit a provider; only a task pairing it with a
-# harness of that provider is refused. Read live at every launch: editing a
-# tier changes every later launch that selects it.
-profiles:
-  deep:
-    effort: high
-    model: { claude: opus, codex: gpt-5.6-sol }
-  strong:
-    effort: high
-    model: { claude: sonnet, codex: gpt-5.6-terra }
-  fast:
-    effort: low
-    model: { claude: haiku }

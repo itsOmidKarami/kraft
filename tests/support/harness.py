@@ -267,8 +267,10 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     templates_dir.mkdir(parents=True, exist_ok=True)
     library = (_REPO_ROOT / "templates" / "library.yaml").read_text()
     shipped_profiles = yaml.safe_load((_REPO_ROOT / "templates" / "harnesses.yaml").read_text())
+    agent_profiles = shipped_profiles.get("profiles") or {}
     if agent_command is None:
         write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
+        write_agent_profiles(templates_dir, agent_profiles)
     else:
         # The library keeps its real `harness:` ids -- `codex`,
         # `claude` -- and only the *profiles* they name change: each is
@@ -343,8 +345,17 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # `KRAFT_TEMPLATES_DIR` is set (`agent.harness_profile`) -- the same
         # two-directory split as the harness files above.
         write_harness_profiles(templates_dir, profiles)
+        # An agent profile's model is keyed by provider, and every profile
+        # above is now on `fake`: give each tier claude's model there too, so
+        # a shipped task launches the model it would in production.
+        on_fake = {
+            pid: {**body, "model": {**body["model"], "fake": body["model"]["claude"]}}
+            for pid, body in agent_profiles.items()
+        }
+        write_agent_profiles(templates_dir, on_fake)
         if home:
             write_harness_profiles(Path(home) / "templates", profiles)
+            write_agent_profiles(Path(home) / "templates", on_fake)
     (templates_dir / "library.yaml").write_text(library)
     chains = templates_dir / "chains"
     chains.mkdir(exist_ok=True)
@@ -362,7 +373,16 @@ def write_harness_profiles(templates_dir: Path, profiles: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
     merged = {**(existing.get("harnesses") or {}), **profiles}
-    path.write_text(yaml.safe_dump({"harnesses": merged}, sort_keys=False))
+    path.write_text(yaml.safe_dump({**existing, "harnesses": merged}, sort_keys=False))
+
+
+def write_agent_profiles(templates_dir: Path, profiles: dict) -> None:
+    """Set `templates_dir/harnesses.yaml`'s `profiles:` (the agent profiles,
+    Kraft-ps1ao), keeping its `harnesses:`."""
+    path = Path(templates_dir) / "harnesses.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = (yaml.safe_load(path.read_text()) or {}) if path.is_file() else {}
+    path.write_text(yaml.safe_dump({**existing, "profiles": profiles}, sort_keys=False))
 
 
 def harness_without(capability: str, harness_id: str = "claude"):

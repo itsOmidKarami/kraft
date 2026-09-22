@@ -15,12 +15,24 @@ def test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it(app, c
     # task the shipped library gives `claude`.
     monkeypatch.setenv("COLUMNS", "400")
     cli.main(["admin", "harnesses"])
-    lines = capsys.readouterr().out.splitlines()
+    lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
     assert lines[0].split() == ["ID", "PROVIDER", "ENABLED", "USED", "BY"]
     rows = {line.split()[0]: line.split() for line in lines[1:]}
     assert rows["codex"][1:] == ["fake", "yes", "-"]
     assert rows["claude"][1:3] == ["fake", "yes"]
     assert "tasks.implementer," in rows["claude"]
+
+
+def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, monkeypatch):
+    """Kraft-ps1ao: the tiers `profile:` selects, under the harnesses."""
+    monkeypatch.setenv("COLUMNS", "400")
+    cli.main(["admin", "harnesses"])
+    tiers = capsys.readouterr().out.split("\n\n")[1].splitlines()
+    assert tiers[0].split() == ["PROFILE", "EFFORT", "MODEL", "USED", "BY"]
+    rows = {line.split()[0]: line.split() for line in tiers[1:]}
+    assert set(rows) == {"deep", "strong", "fast"}
+    assert rows["fast"][1:] == ["low", "claude=haiku,", "fake=haiku", "-"]
+    assert "tasks.implementer," in rows["strong"]
 
 
 def test_one_profile_prints_its_settings_and_users(app, capsys):
