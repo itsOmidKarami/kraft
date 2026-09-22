@@ -5,11 +5,12 @@ a `FakeForge`; git is real."""
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 
 import pytest
-from support.harness import isolated_bd, make_repo_with_submodule
+from support.harness import isolated_bd, make_repo_with_submodule, v1_resolved
 from support.workspace import workspace_target
 
 from kraft import builtins as _builtins
@@ -156,16 +157,29 @@ async def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(
     bd, database, run_dirs, repo, tmp_path, monkeypatch
 ):
     """Kraft-43kw: `work_item_completed` and the bead close land after
-    `post_merge_watch`'s own `node_completed`, not after `merge`'s."""
+    `post_merge_watch`'s own `node_completed`, not after `merge`'s. The item
+    commits a change first: a bead closes only on one (Kraft-iaou3)."""
     fake = forge.FakeForge(ci_states=["success"])
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
     tracker = isolated_bd(tmp_path)
+    edit = "echo '# x' >> calc.py && git commit -qam edit"
+    implement = {
+        "id": "implementation",
+        "kind": "exec",
+        "tasks": [{"id": "edit", "kind": "subprocess", "command": f"sh -c {shlex.quote(edit)}"}],
+    }
+    forge_half = [
+        forge_node("open_mr", "mr.open_draft"),
+        forge_node("mr_checks", "mr.ci"),
+        forge_node("merge", "mr.merge"),
+        forge_node("post_merge_watch", "mr.post_merge_ci"),
+    ]
     wid = await executor.intake(
         database,
         run_dirs,
         title="watch after merge",
         repo=str(repo),
-        chain=back_half(forge_node("post_merge_watch", "mr.post_merge_ci")),
+        chain=v1_resolved([implement, *forge_half]),
         bd_cwd=str(tracker),
     )
 
@@ -184,7 +198,7 @@ async def test_post_merge_watch_delays_completion_and_bead_close_until_it_runs(
     assert it_row["status"] == "completed"
     evts = database.read(lambda c: events.read_after(c, 0, wid))
     nodes = [e["payload"]["node_id"] for e in evts if e["type"] == "node_completed"]
-    assert nodes == ["open_mr", "mr_checks", "merge", "post_merge_watch"]
+    assert nodes == ["implementation", "open_mr", "mr_checks", "merge", "post_merge_watch"]
     assert evts[-1]["type"] == "work_item_completed"
     assert bd.status(it_row["bead_id"], cwd=tracker) == "closed"
 

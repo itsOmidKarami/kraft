@@ -157,6 +157,28 @@ one of the five shapes above.
 state what it uniquely pinned — "nothing, proven by mutation" is a valid
 answer, but it has to be checked, not assumed.
 
+CI holds a pull request to that. `dev/check_removals.py`, run by the
+`removals declared` job, fails when the PR deletes a test function (or a
+frontend test file) or drops an intent `## REQ` heading that its body does
+not list under a `Removed tests` or `Removed requirements` heading, one id
+per line with the reason after it:
+
+```markdown
+## Removed tests
+- tests/test_old.py::test_gone -- replaced by tests/test_new.py::test_here
+- tests/test_dead_file.py -- the whole file went with the feature
+
+## Removed requirements
+- some-req-name -- superseded by other-req-name
+```
+
+A renamed test counts as removed plus added, so list its old id. A deleted
+file may be listed by its path; a file that only loses some tests may not.
+The failure prints the missing block ready to paste. Edit the body, then
+re-run the job: it reads the body fresh, not from the push that triggered
+it. This exists because a PR once silently reverted two merged PRs with CI
+green — their tests left with them (Kraft-79382).
+
 **Intent pins:** `docs/intent/*.md` reference test ids by name. Renaming or
 parametrizing a pinned test means repointing it in the same change. Run
 `just intent` and `tests/test_intent_origins.py`.

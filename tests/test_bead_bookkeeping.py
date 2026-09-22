@@ -3,19 +3,22 @@
 Kraft-p8q1: close every bead a work item's description names, not just the
 tracking bead. Kraft-dr3n: an item filed while bd was down still gets a bead
 by completion. Kraft-t5g: no test may reach the operator's real `~/.beads`.
-Kraft-ikze: a recorded decision, not code -- no test here.
+Kraft-ikze: a recorded decision, not code -- no test here. Kraft-iaou3: a bead
+closes only when the item's change carries it.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import make_repo, v1_named_chain
+import pytest
+from support.harness import isolated_bd, make_repo, v1_named_chain, v1_resolved
 
-from kraft import db, executor
+from kraft import db, events, executor, store
 from kraft.adapters import beads
 from kraft.paths import RunDirs
 
@@ -142,3 +145,120 @@ async def test_no_app_fixture_still_avoids_the_operators_real_home(
 
     after = real_beads.exists() and set(real_beads.iterdir())
     assert before == after, "intake touched the operator's real ~/.beads"
+
+
+# -- Kraft-iaou3: a bead closes only when the item's change carries it --------
+
+_IMPLEMENT = """
+- id: implementation
+  kind: exec
+  tasks: [{id: implement, kind: agent, harness: fake, prompt: do it}]
+"""
+
+
+def _git(cwd, *args):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit(worktree, rel, text):
+    (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
+    (worktree / rel).write_text(text)
+    _git(worktree, "add", "-f", rel)
+    _git(worktree, "commit", "-qm", f"change {rel}")
+
+
+async def _nothing(database, wid, worktree):
+    pass
+
+
+async def _only_its_attachment(database, wid, worktree):
+    _commit(worktree, ".engineering/spec.md", "# spec\n")
+    attached = json.dumps([{"kind": "spec", "path": ".engineering/spec.md"}])
+    await database.write(
+        lambda c: c.execute("UPDATE work_items SET attachments = ? WHERE id = ?", (attached, wid))
+    )
+
+
+async def _a_code_change(database, wid, worktree):
+    _commit(worktree, "calc.py", "def add(a, b):\n    return a + b\n")
+
+
+async def _someone_elses_change_rebased_in(database, wid, worktree):
+    # A rebase mid-walk moves `base_ref` onto the new base; the row the walk
+    # read at its start still names the old one.
+    _commit(worktree, "calc.py", "def add(a, b):\n    return a + b\n")
+    await database.write(lambda c: store.set_base_ref(c, wid, _git(worktree, "rev-parse", "HEAD")))
+
+
+async def _a_merged_submodule(database, wid, worktree):
+    def add(c):
+        row_id = store.add_repo(
+            c, work_item_id=wid, repo_path=str(worktree / "sub"), role="submodule", merge_rank=1
+        )
+        store.update_repo_state(c, row_id, merge_state="merged")
+
+    await database.write(add)
+
+
+@pytest.mark.parametrize(
+    ("change", "by_hand", "closes"),
+    [
+        (_nothing, False, False),
+        (_only_its_attachment, False, False),
+        (_someone_elses_change_rebased_in, False, False),
+        (_a_code_change, False, True),
+        (_a_merged_submodule, False, True),
+        # Ruling 167: a person completing by hand and asking for the close has
+        # said where the work landed; Kraft has nothing of its own to check.
+        (_nothing, True, True),
+    ],
+    ids=[
+        "nothing-committed",
+        "only-its-attachment",
+        "someone-elses-change-rebased-in",
+        "a-code-change",
+        "a-merged-submodule",
+        "by-hand-when-asked",
+    ],
+)
+async def test_a_bead_closes_only_when_the_items_change_carries_it(
+    bd, database, run_dirs, repo, tmp_path, change, by_hand, closes
+):
+    """Kraft-iaou3: a completed chain is not evidence on its own -- a bead
+    closed with no code behind it is how the board came to say two P1s were
+    done. Kraft closes the item's beads only when its branch changed something
+    besides its own attachments, or a member's merge request merged; otherwise
+    they stay open and the item says why."""
+    tracker = isolated_bd(tmp_path)
+    sub = await beads.intake("the stated sub-bead", cwd=str(tracker))
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="t",
+        repo=str(repo),
+        chain=v1_resolved(_IMPLEMENT),
+        bd_cwd=str(tracker),
+        implements_beads=[sub],
+    )
+    worktree = run_dirs.worktrees / wid
+    _git(repo, "worktree", "add", "-q", "-b", f"kraft/{wid}", str(worktree))
+    base = _git(worktree, "rev-parse", "HEAD")
+    await database.write(lambda c: store.set_base_ref(c, wid, base))
+    row = database.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+
+    await change(database, wid, worktree)
+    await executor.close_beads(database, row, str(tracker), run_dirs, by_hand=by_hand)
+
+    want = "closed" if closes else "open"
+    assert [bd.status(b, cwd=tracker) for b in (row["bead_id"], sub)] == [want, want]
+    left = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "beads_left_open"
+    ]
+    assert [p["beads"] for p in left] == ([] if closes else [[row["bead_id"], sub]])
+    assert all(p["reason"] for p in left)

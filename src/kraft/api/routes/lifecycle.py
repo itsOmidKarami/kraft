@@ -1175,7 +1175,7 @@ async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request)
     row = await _end_work_item(request, wid, "complete", body.reason)
     if body.close_beads:
         await executor.close_beads(
-            request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs
+            request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs, by_hand=True
         )
     return deps._work_item_row(request.app.state, wid)
 

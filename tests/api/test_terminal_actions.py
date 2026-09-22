@@ -117,15 +117,15 @@ def test_manual_completion_closes_beads_only_when_asked(client, repo, monkeypatc
 
     closed = []
 
-    async def fake_close(db, row, bd_cwd, run_dirs):
-        closed.append(row["id"])
+    async def fake_close(db, row, bd_cwd, run_dirs, *, by_hand=False):
+        closed.append((row["id"], by_hand))
 
     monkeypatch.setattr(executor, "close_beads", fake_close)
     wid = _stopped(client, repo)
     body = {"reason": "done by hand", **({"close_beads": True} if close else {})}
 
     assert client.post(f"/api/work-items/{wid}/complete", json=body).status_code == 200
-    assert closed == ([wid] if close else [])
+    assert closed == ([(wid, True)] if close else [])
 
 
 # -- Kraft-dncfg: no action on an ended item runs its chain again -------------

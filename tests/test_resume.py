@@ -300,7 +300,9 @@ async def test_resume_awaits_adopted_task_before_reading_status(tmp_path, databa
     assert result == "completed"
     t = _types(database, wid)
     assert "node_completed" in t
-    assert t[-1] == "work_item_completed"
+    # The worktree here is an empty directory, so no change carries the
+    # item's bead and it stays open (Kraft-iaou3).
+    assert t[-2:] == ["work_item_completed", "beads_left_open"]
 
 
 async def test_resume_after_gate_approval_does_not_re_request_gate(

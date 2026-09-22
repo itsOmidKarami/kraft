@@ -244,8 +244,11 @@ async def test_intake_refuses_an_attachment_it_cannot_copy(database, run_dirs, t
         ),
         # Same discipline as the description: mentioning an id promises nothing.
         (["fix: touches Kraft-abc12 in passing"], []),
+        # A trailer is a line of its own. The word mid-sentence -- a body
+        # retelling the brief -- is prose, not a promise (Kraft-iaou3).
+        (["fix: y\n\nThe old path closes Kraft-abc12 too early."], []),
     ],
-    ids=["fixes-and-closes-trailers", "a-bare-id-in-a-body"],
+    ids=["fixes-and-closes-trailers", "a-bare-id-in-a-body", "the-word-mid-sentence"],
 )
 def test_only_a_fixes_or_closes_trailer_names_a_bead_to_close(messages, beads):
     assert executor.entry._trailer_beads(messages) == beads
