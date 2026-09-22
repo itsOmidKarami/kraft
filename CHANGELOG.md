@@ -12,6 +12,9 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   request that always 409s (the gate's Approve needs a digest only the
   artifact pane carries).
 
+- Fix: a `read_only_violated` event (a read_only step or node changed the
+  worktree) now shows what changed on the Timeline instead of the bare event
+  name with no detail.
 ## 1.0.7
 
 - Fix: an in-flight work item's own repository steering no longer silently
