@@ -8,6 +8,7 @@ from typing import NamedTuple
 from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import skill as _skill
+from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import subprocess as _subprocess
 from kraft.paths import default_templates_dir
 from kraft.policy import InstancePolicy
@@ -130,8 +131,8 @@ def artifact_path(kind: str, work_item_id: str) -> str:
 
 #: The contract a hook with an `artifact:` binding is held to. Not part of the
 #: method: the method says *how* to think about a spec, this says where the
-#: result goes and how a reviewer will find it. Swapping the method must not be
-#: able to lose the contract.
+#: result goes, how a reviewer finds it and what the chain does with it next
+#: (`artifact_notes`). Swapping the method must not be able to lose the contract.
 _ARTIFACT = (
     "\n\nWrite your {kind} to {path}, relative to the repo root, creating that "
     "directory if it does not exist, and to no other path. Start it with YAML "
@@ -526,7 +527,7 @@ def build_context(
             node_id=node_id,
             hook_point=hook_point,
             title_line=title_line,
-        )
+        ) + _artifact_notes.NOTES.get(artifact, "")
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
