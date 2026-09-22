@@ -65,7 +65,7 @@ def test_a_plan_under_any_method_is_told_verification_runs_the_suite():
     note = ctx.index("do not add a step that runs the whole suite")
     assert "a verification node after it runs the repository's test suite" in ctx
     assert note < ctx.index("INTERACTIVE-METHOD")
-    assert "whole suite" not in _context("work_brief")
+    assert "This plan is carried out by Kraft" not in _context("work_brief")
 
 
 def test_a_spec_under_any_method_is_told_the_chain_implements_it_headless():
