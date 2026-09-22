@@ -62,6 +62,12 @@ async def guard(db, wid: str, coro) -> None:
         await coro
     except asyncio.CancelledError:
         raise
+    except AssertionError:
+        # Kraft's own broken invariant (and, under pytest, the real-agent
+        # guard) -- never evidence of an executor crash, so it must not
+        # become a needs_human stop. `dispatch.measure_node` carves out the
+        # same exception for the same reason (Kraft-cpotk); mirror it here.
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("executor task crashed for %s", wid)
         reason = f"executor crashed: {exc!r}"
