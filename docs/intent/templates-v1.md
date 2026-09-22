@@ -217,6 +217,14 @@ earlier turn's result and summary readable from that turn's own session row.
 enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
 origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b), Ruling 207: a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
 
+## REQ an-escalation-turn-hands-a-skip-to-the-person
+
+The system SHALL tell every escalation turn, manual or automatic, that it is
+not allowed to skip or abandon its work item itself, and SHALL give it the
+exact commands that do, for the person to run.
+enforced-by: tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[manual], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[automatic], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[paused]
+origin: src/kraft/escalate.py §_HANDS_OFF -- Ruling 209 (Kraft-s7c04.67): no verb is pre-approved for an escalation agent.
+
 ## REQ builtin-task-references-code-owned-actions
 
 A built-in task SHALL name its action through `ref`, and the system SHALL

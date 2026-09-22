@@ -67,6 +67,18 @@ _PAUSED_ACTION = (
     "clearly whether you think it's ready to resume, and let a human run "
     "`kraft item resume` themselves.\n"
 )
+#: After `{action_line}` on every turn, manual or automatic, needs_human or
+#: paused (Ruling 209, Kraft-s7c04.67): nothing pre-approves these verbs for
+#: an escalation agent, so a person's own classifier would refuse the call,
+#: and the turn hands the person the one command instead of trying.
+_HANDS_OFF = (
+    "You are not allowed to skip or abandon this work item yourself, for "
+    "safety. If a person asks you to skip it, or you conclude skipping is "
+    "right, say plainly that you may not take that action yourself, and give "
+    "them the one command that does: `kraft item skip {work_item_id}` (or the "
+    "Skip action on the board). Abandoning is theirs as well: `kraft item "
+    "abandon --yes {work_item_id}`.\n"
+)
 _STATE = (
     "{opening}"
     "Status: {status}\n"
@@ -76,6 +88,7 @@ _STATE = (
     "{description_line}"
     "\n"
     "{action_line}"
+    "{hands_off}"
     "\n"
     "The human's message:\n{message}"
 )
@@ -340,6 +353,7 @@ async def dispatch(
         judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
+        hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
         message=message,
     )
 
