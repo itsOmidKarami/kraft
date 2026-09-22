@@ -20,7 +20,13 @@ def bounded(client):
     (the wait maximum a week, as the seeded approval wait needs)."""
     client.app.state.instance_policy = InstancePolicy.from_input(
         InstancePolicyInput.model_validate(
-            {"maxima": {"max_attempts": 5, "timeout_minutes": 120, "wait_timeout_minutes": 10080}}
+            {
+                "maxima": {
+                    "max_attempts": 5,
+                    "timeout_minutes": 120,
+                    "total_time_cap_minutes": 10080,
+                }
+            }
         )
     )
     return client
@@ -50,7 +56,7 @@ def _set_status(client, wid, status):
 def test_intake_and_a_patch_set_the_items_own_override(bounded, repo):
     """Filed with one, replaced by a PATCH while the item waits, cleared by
     `{}`. Each change is on the item's timeline."""
-    override = {"max_attempts": 4, "paths": {_CI: {"wait_timeout_minutes": 240}}}
+    override = {"max_attempts": 4, "paths": {_CI: {"total_time_cap_minutes": 60}}}
     filed = _file(bounded, repo, policy=override)
     assert filed.status_code == 201, filed.text
     wid = filed.json()["id"]
@@ -75,11 +81,25 @@ def test_intake_and_a_patch_set_the_items_own_override(bounded, repo):
 
 _REFUSALS = [
     ({"max_attempts": 6}, "policy.max_attempts"),
-    ({"paths": {_CI: {"wait_timeout_minutes": 10081}}}, f"policy.paths.{_CI}.wait_timeout_minutes"),
+    # A wait's cap is its timeout (Ruling 196), and an item's only tightens it.
+    (
+        {"paths": {_CI: {"total_time_cap_minutes": 240}}},
+        f"policy.paths.{_CI}.total_time_cap_minutes",
+    ),
     ({"paths": {"verification": {"kind": "gate"}}}, "policy.paths.verification.kind"),
     ({"paths": {"nowhere": {"max_attempts": 2}}}, "policy.paths.nowhere"),
+    (
+        {"paths": {_CI: {"wait_timeout_minutes": 30}}},
+        f"policy.paths.{_CI}.wait_timeout_minutes",
+    ),
 ]
-_REFUSAL_IDS = ["attempts-over-maximum", "wait-over-maximum", "structural", "unknown-path"]
+_REFUSAL_IDS = [
+    "attempts-over-maximum",
+    "wait-cap-raised",
+    "structural",
+    "unknown-path",
+    "retired-wait-timeout",
+]
 
 
 @pytest.mark.parametrize(("override", "field"), _REFUSALS, ids=_REFUSAL_IDS)
@@ -183,3 +203,11 @@ def test_an_override_stored_before_tool_names_were_checked_still_reads(bounded, 
     )
     assert refused.status_code == 422, refused.text
     assert refused.json()["detail"].startswith("policy.deny_tools: ")
+
+
+def test_the_server_runs_the_time_cap_poller(client):
+    """A parked item's total cap and a gate's own timeout run out while
+    nothing of the item runs, so the lifespan starts `caps.poller` beside the
+    wait scheduler."""
+    assert client.app.state.caps_task is not None
+    assert not client.app.state.caps_task.done()

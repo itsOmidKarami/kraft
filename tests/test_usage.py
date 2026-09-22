@@ -349,6 +349,7 @@ async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database
         "sessions": 0,
         "capped_out": 0,
         "wait_timed_out": 0,
+        "time_capped": 0,
         "rounds": 0,
         # nothing ran, so nothing is missing
         "cost_complete": True,

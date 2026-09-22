@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
+from kraft import caps as _caps
 from kraft import events, store, waits
 from kraft import policy as _policy
 from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext
@@ -213,6 +214,16 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
         ),
         "CI infrastructure failed and retrying it did not recover",
     )
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
+async def stop_for_time_cap(db, work_item_id: str, node: ResolvedNode) -> str:
+    """A scope's time cap ran out (Rulings 194, 195): the item stops for a
+    human under the reason `caps.REACHED` recorded -- "`<scope>` hit its time
+    cap of N minutes". Not a failure: no recovery, no fix attempt, and not in
+    the stuck set, so no escalation turn answers it."""
+    reason = db.read(lambda c: _caps.reason_of(c, work_item_id))
     await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
     return "needs_human"
 

@@ -24,6 +24,7 @@ still reads the legacy `kraft.templates` shapes.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Container, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -44,13 +45,16 @@ from pydantic import (
 )
 
 from kraft.policy import (
+    CAP_FIELDS,
     FROZEN,
+    RETIRED_WAIT_TIMEOUT,
     InstancePolicy,
     PolicyError,
     SandboxPolicy,
     TaskPolicyOverride,
     TemplatePolicyOverride,
     WorkItemPolicy,
+    deprecated,
 )
 from kraft.templates.environment import Identifier, WorkItemTarget
 
@@ -285,11 +289,13 @@ class PollingPolicy(BaseModel):
 
 
 class WaitPolicy(BaseModel):
-    """`external-wait-has-configurable-timeout-and-polling`."""
+    """`external-wait-has-configurable-timeout-and-polling`: a wait's polling.
+    Its timeout is its task's own `policy: total_time_cap_minutes` (Ruling
+    196); a `timeout:` written here before that is read as one
+    (`ForgeTask._retired_wait_timeout`)."""
 
     model_config = _CONFIG
 
-    timeout: Duration | None = None
     polling: PollingPolicy = Field(default_factory=PollingPolicy)
 
 
@@ -329,6 +335,26 @@ DEFAULT_WAIT = WaitBounds(
     initial_interval=timedelta(seconds=30),
     max_interval=timedelta(minutes=5),
 )
+
+
+def retired_keys(data: object, at: str = "") -> list[str]:
+    """Where `data` -- an authored chain or library mapping -- still writes a
+    key Ruling 196 retired: a wait's `timeout` and `wait_timeout_minutes`.
+    They still read, with a warning; a write that sets one is refused
+    (`PUT /templates/{id}`), naming what replaced it."""
+    found: list[str] = []
+    if isinstance(data, dict):
+        for key, value in data.items():
+            where = f"{at}.{key}" if at else str(key)
+            if key == RETIRED_WAIT_TIMEOUT or (
+                key == "timeout" and at.rsplit(".", 1)[-1] == "wait"
+            ):
+                found.append(where)
+            found += retired_keys(value, where)
+    elif isinstance(data, list):
+        for i, value in enumerate(data):
+            found += retired_keys(value, f"{at}[{i}]")
+    return found
 
 
 class TaskBase(BaseModel):
@@ -388,28 +414,50 @@ class ForgeTask(TaskBase):
     target: Annotated[ForgeAction, _LOOSE]
     wait: WaitPolicy | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_wait_timeout(cls, data: object) -> object:
+        """A `wait: timeout:` written before Ruling 196 -- an installed
+        `library.yaml` seeded before it, a snapshot frozen before it -- reads
+        as the task's own `policy: total_time_cap_minutes`, rounded up to a
+        whole minute, unless the task already sets one. `PUT /templates`
+        refuses it in a chain being saved (`retired_keys`)."""
+        if not isinstance(data, dict) or not isinstance(data.get("wait"), dict):
+            return data
+        wait = dict(data["wait"])
+        if "timeout" not in wait:
+            return data
+        raw = wait.pop("timeout")
+        data = {**data, "wait": wait}
+        if raw is None:
+            return data
+        minutes = math.ceil(_duration(raw).total_seconds() / 60)
+        deprecated(
+            "%s: wait.timeout is deprecated (Ruling 196) and read as "
+            "policy.total_time_cap_minutes %s; move it there",
+            data.get("id", "a forge task"),
+            minutes,
+        )
+        policy = data.get("policy")
+        policy = dict(policy) if isinstance(policy, dict) else {}
+        policy.setdefault("total_time_cap_minutes", minutes)
+        return {**data, "policy": policy}
+
     def wait_bounds(self, policy: InstancePolicy) -> WaitBounds:
-        """This wait's bounds under `policy`, the task's own resolved policy
-        (Kraft-5p69g). A `wait_timeout_minutes` a policy layer set -- a work
-        item's own override, most often -- replaces the authored timeout; the
-        layer already held it to the maximum. An authored timeout past
-        `maxima.wait_timeout_minutes` is refused; an unauthored one takes
-        `DEFAULT_WAIT`'s, clamped to that maximum rather than refusing a chain
-        whose author chose no number."""
+        """This wait's bounds under `policy`, the task's own resolved policy.
+        Its timeout is the task's `total_time_cap_minutes` (Ruling 196), which
+        the ratchet already held under every enclosing cap and the maximum; a
+        wait with none anywhere takes `DEFAULT_WAIT`'s, clamped to
+        `maxima.total_time_cap_minutes` rather than refusing a chain whose
+        author chose no number."""
         wait = self.wait or WaitPolicy()
-        if policy.wait_timeout_minutes is not None:
-            wait = wait.model_copy(
-                update={"timeout": timedelta(minutes=policy.wait_timeout_minutes)}
-            )
-        ceiling = policy.maxima.wait_timeout_minutes
+        ceiling = policy.maxima.total_time_cap_minutes
         limit = timedelta(minutes=ceiling) if ceiling is not None else None
-        if wait.timeout is not None and limit is not None and wait.timeout > limit:
-            raise PolicyError(
-                f"wait timeout {_duration_text(wait.timeout)} cannot exceed the administrator "
-                f"maximum wait_timeout_minutes {ceiling}",
-                field="wait_timeout_minutes",
-            )
-        timeout = wait.timeout or min(DEFAULT_WAIT.timeout, limit or DEFAULT_WAIT.timeout)
+        timeout = (
+            timedelta(minutes=policy.total_time_cap_minutes)
+            if policy.total_time_cap_minutes is not None
+            else min(DEFAULT_WAIT.timeout, limit or DEFAULT_WAIT.timeout)
+        )
         initial = wait.polling.initial_interval or DEFAULT_WAIT.initial_interval
         maximum = wait.polling.max_interval or max(DEFAULT_WAIT.max_interval, initial)
         return WaitBounds(timeout=timeout, initial_interval=initial, max_interval=maximum)
@@ -794,7 +842,7 @@ def _scoped(
     refusal prefixed by the scope's path."""
     try:
         policy = policy.layered(scopes)
-        return item.apply_to(policy, path) if item is not None else policy
+        return item.apply_to(policy, path, scopes) if item is not None else policy
     except PolicyError as exc:
         raise PolicyError(f"{path}: {exc}", field=exc.field, path=path) from exc
 
@@ -1054,6 +1102,7 @@ class ResolvedChain:
         already layered -- with a work `item`'s own layers last, and every
         agent task's harness and every fix loop's `max_attempts` is within
         it."""
+        self._check_caps(policy, item)
         for node in self.nodes:
             _scoped(node.id, policy, node.scopes, item)
             loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
@@ -1098,6 +1147,106 @@ class ResolvedChain:
                 "so every scope that sets one must set the same one",
                 field="sandbox",
             )
+
+    def cap_scopes(self) -> list[tuple[str, str, Scopes]]:
+        """`(path, kind, scopes)` for every scope a time cap can sit on, a
+        parent always before its children: every node, step and task."""
+        found = []
+        for node in self.nodes:
+            found.append(
+                (node.id, "gate" if isinstance(node.node, GateNode) else "node", node.scopes)
+            )
+            found += [(s.path, "step", s.scopes) for s in node.steps_in()]
+            found += [(t.path, "task", t.scopes) for t in node.tasks()]
+        return sorted(found, key=lambda f: f[0].count(PATH_SEPARATOR))
+
+    def _check_caps(self, policy: InstancePolicy, item: WorkItemPolicy | None) -> None:
+        """Refuse a time cap above its parent's (Rulings 194, 195), naming both
+        scopes: "task build.main.impl sets time_cap_minutes 20 > its step
+        build.main's 10". The parents are the chain's own scopes -- chain,
+        node, step, task. An instance or repository cap is a default, not a
+        parent (Ruling 198): any scope may set more, up to `maxima`, which
+        the engine checks (`apply_template_override`). A work item's
+        item-wide cap is the work item's own and may exceed the chain's, up to
+        `maxima`; its cap on a path only tightens that scope. A gate's own
+        `timeout` sits under the total cap its chain sets around it."""
+        scopes = self.cap_scopes()
+        kinds = {path: kind for path, kind, _ in scopes}
+
+        def parent_of(path: str) -> str:
+            segments = path.split(PATH_SEPARATOR)[:-1]
+            while segments and PATH_SEPARATOR.join(segments) not in kinds:
+                segments.pop()
+            return PATH_SEPARATOR.join(segments)
+
+        def named(path: str) -> str:
+            return f"{kinds[path]} {path}" if path else "the chain"
+
+        chain_own = self.chain.policy
+        for name in CAP_FIELDS:
+            root = getattr(chain_own, name) if chain_own is not None else None
+            authored: dict[str, int | None] = {"": root}
+            for path, _, layers in scopes:
+                value = next(
+                    (v for layer in reversed(layers) if (v := getattr(layer, name)) is not None),
+                    root,
+                )
+                parent = parent_of(path)
+                if value is not None and authored[parent] is not None and value > authored[parent]:
+                    whose = f"its {named(parent)}'s" if parent else "the chain's"
+                    raise PolicyError(
+                        f"{named(path)} sets {name} {value} > {whose} {authored[parent]}: "
+                        "a scope's cap cannot exceed its parent's (Ruling 194)",
+                        field=name,
+                        path=path,
+                    )
+                authored[path] = value
+            if item is None:
+                continue
+            ceiling = getattr(policy.maxima, name)
+            wide = getattr(item, name)
+            if wide is not None and ceiling is not None and wide > ceiling:
+                raise PolicyError(
+                    f"'{name}' {wide} cannot exceed the administrator maximum {ceiling}",
+                    field=name,
+                    path="",
+                )
+            for path, _, layers in scopes:
+                if path not in item.paths or getattr(item.paths[path], name) is None:
+                    continue
+                own = getattr(item.paths[path], name)
+                without = item.model_copy(
+                    update={"paths": {p: v for p, v in item.paths.items() if p != path}}
+                )
+                below = getattr(_scoped(path, policy, layers, without), name)
+                if below is not None and own > below:
+                    what = named(path)
+                    raise PolicyError(
+                        f"the work item's override sets {name} {own} on {what}, above the "
+                        f"{below} it already has: a work item's override only tightens a cap "
+                        "(Ruling 194)",
+                        field=name,
+                        path=path,
+                    )
+        for node in self.nodes:
+            if not isinstance(node.node, GateNode) or node.node.timeout is None:
+                continue
+            cap = next(
+                (
+                    v
+                    for layer in reversed(node.scopes)
+                    if (v := layer.total_time_cap_minutes) is not None
+                ),
+                chain_own.total_time_cap_minutes if chain_own is not None else None,
+            )
+            if cap is not None and node.node.timeout > timedelta(minutes=cap):
+                raise PolicyError(
+                    f"gate {node.id}'s timeout {_duration_text(node.node.timeout)} > its "
+                    f"total_time_cap_minutes {cap}: a gate's timeout sits under the total caps "
+                    "around it (Ruling 195)",
+                    field="timeout",
+                    path=node.id,
+                )
 
     def scope_sandboxes(
         self, policy: InstancePolicy, item: WorkItemPolicy | None = None
@@ -1198,6 +1347,33 @@ class _StoredMaterialization(BaseModel):
     chain: Chain
     target: WorkItemTarget
     policy: InstancePolicy
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_wait_timeout(cls, data: object) -> object:
+        """A snapshot frozen before Ruling 196 resolved a `wait_timeout_minutes`
+        into its policy. It meant "every wait", which a scope's total cap does
+        not, so it is dropped: each wait keeps its own task's cap."""
+        if not isinstance(data, dict):
+            return data
+
+        def drop(policy: object) -> object:
+            if isinstance(policy, dict) and policy.get(RETIRED_WAIT_TIMEOUT) is not None:
+                deprecated("a stored snapshot's %s is dropped (Ruling 196)", RETIRED_WAIT_TIMEOUT)
+            return (
+                {k: v for k, v in policy.items() if k != RETIRED_WAIT_TIMEOUT}
+                if isinstance(policy, dict)
+                else policy
+            )
+
+        if "policy" in data:
+            data = {**data, "policy": drop(data["policy"])}
+        if isinstance(data.get("repository_policies"), dict):
+            data["repository_policies"] = {
+                r: drop(p) for r, p in data["repository_policies"].items()
+            }
+        return data
+
     #: `ResolvedChain.steering`. Absent from a snapshot stored before steering
     #: was frozen, which reads back as `None`.
     steering: dict[str, str] | None = None
@@ -1292,7 +1468,7 @@ class MaterializedChain:
         base = self.repository_policies.get(repository, self.policy) if repository else self.policy
         path = scope.id if isinstance(scope, ResolvedNode) else scope.path
         policy = base.layered(scope.scopes)
-        return self.item_policy.apply_to(policy, path) if self.item_policy else policy
+        return self.item_policy.apply_to(policy, path, scope.scopes) if self.item_policy else policy
 
     def with_item_policy(self, raw: WorkItemPolicy | dict | None) -> MaterializedChain:
         """This snapshot with a work item's own override `raw` layered on, once
@@ -1313,6 +1489,13 @@ class MaterializedChain:
         if raw is None or isinstance(raw, WorkItemPolicy):
             item = raw
         else:
+            if retired := retired_keys(raw):
+                where = f"policy.{retired[0]}"
+                raise PolicyError(
+                    f"{where}: retired (Ruling 196): a wait's timeout is its task's own "
+                    "total_time_cap_minutes, so set that on the wait task's path",
+                    field=where,
+                )
             try:
                 item = WorkItemPolicy.model_validate(raw)
             except ValidationError as exc:

@@ -250,8 +250,9 @@ tasks:
     kind: forge
     target: mr.ci
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 90
     wait:
-      timeout: 90m
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -260,8 +261,9 @@ tasks:
     kind: forge
     target: mr.automated_review
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 30
     wait:
-      timeout: 30m
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -289,8 +291,9 @@ tasks:
     kind: forge
     target: mr.external_approval
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 10080
     wait:
-      timeout: 7d
       polling:
         initial_interval: 5m
         max_interval: 1h
@@ -304,8 +307,9 @@ tasks:
     kind: forge
     target: mr.post_merge_ci
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 90
     wait:
-      timeout: 90m
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -569,7 +573,16 @@ context.
 External waits persist their condition and next observation time, then release
 the worker. A shared due scheduler performs later observations with bounded
 backoff. A wait timeout requires human action rather than becoming a code
-failure.
+failure. A wait's timeout is its task's own `total_time_cap_minutes`
+(Ruling 196); its `wait:` block holds only the polling bounds.
+
+Time caps sit on any scope: the work item (instance, repository, chain or the
+item's own override), a node, a step or a task. Each one caps that scope's own
+time, and a child's cap cannot exceed its parent's (Rulings 194, 195).
+`time_cap_minutes` counts running time only; `total_time_cap_minutes` counts
+the wall clock, waits, gates and rate limits included, less a manual pause. A
+gate's `timeout` sits under the total caps around it. Hitting any of them stops
+for a human, naming the scope, and is never a code failure.
 
 ## Publication order
 

@@ -125,7 +125,8 @@ def test_resolution_types_every_task_in_the_design_chain(design):
     )
     assert by_path["draft_merge_request.main.open"].target is ForgeAction.MR_OPEN_DRAFT
     await_ci = by_path["merge_request_feedback.ci.await_ci"]
-    assert await_ci.wait.timeout.total_seconds() == 90 * 60
+    # Its timeout is its own total cap (Ruling 196); `wait:` holds the polling.
+    assert await_ci.policy.total_time_cap_minutes == 90
     assert await_ci.wait.polling.initial_interval.total_seconds() == 30
 
 
@@ -220,7 +221,8 @@ def test_extends_merges_maps_recursively(tmp_path):
             "base": {
                 "kind": "forge",
                 "target": "mr.ci",
-                "wait": {"timeout": "10m", "polling": {"initial_interval": "30s"}},
+                "policy": {"total_time_cap_minutes": 10},
+                "wait": {"polling": {"initial_interval": "30s"}},
             }
         }
     }
@@ -237,7 +239,7 @@ def test_extends_merges_maps_recursively(tmp_path):
         ],
     }
     task = only_task(write(tmp_path, library, chain))
-    assert task.wait.timeout.total_seconds() == 600
+    assert task.policy.total_time_cap_minutes == 10
     assert task.wait.polling.initial_interval.total_seconds() == 30
     assert task.wait.polling.max_interval.total_seconds() == 300
 

@@ -270,12 +270,13 @@ def build() -> MCPServer:
         """Set or clear a Kraft work item's own policy override, for that item
         only -- never its chain template or any other item. `policy` holds
         item-wide fields (`max_attempts`, `timeout_minutes`,
-        `wait_timeout_minutes`, `allowed_harnesses`, and the safety fields
-        `allowed_tools`, `deny_tools`, `token_budget`, `sandbox`, which can
-        only tighten) and `paths`, a map from a canonical path (`node`,
-        `node.step` or `node.step.task`) to the same fields for that scope:
-        `{"paths": {"merge_request_feedback.ci.await_ci":
-        {"wait_timeout_minutes": 180}}}`. It replaces the whole stored
+        `allowed_harnesses`, and the fields that can only tighten: the time
+        caps `time_cap_minutes` and `total_time_cap_minutes` -- a wait's total
+        cap is its timeout -- and `allowed_tools`, `deny_tools`,
+        `token_budget`, `sandbox`) and `paths`, a map from a canonical path
+        (`node`, `node.step` or `node.step.task`) to the same fields for that
+        scope: `{"paths": {"merge_request_feedback.ci.await_ci":
+        {"total_time_cap_minutes": 60}}}`. It replaces the whole stored
         override; `clear` removes it. Refused, naming the field, past an
         administrator maximum. On a running or waiting item it binds from the
         next node entered and the next observation of a wait."""

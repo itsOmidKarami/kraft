@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from kraft import events, executor, store
+from kraft import caps, events, executor, store
 from kraft.adapters import agent as _agent
 from kraft.adapters import subprocess as _subprocess
 from kraft.templates.models import AgentTask, ResolvedNode
@@ -158,6 +158,26 @@ async def review(
             f"{auto_review.path}: {exc}\n",
         )
         return "undecided", str(exc)
+    # The gate's time cap bounds its review, as a node's does its tasks
+    # (Kraft-8en38): spent refuses the launch; otherwise the one run is killed
+    # at the deadline.
+    hit = db.read(lambda c: caps.at_launch(c, row, auto_review))
+    if hit is not None and hit.remaining_s <= 0:
+        await executor.time_capped_session(
+            db,
+            run_dirs,
+            dict(
+                session_id=session_id,
+                work_item_id=work_item_id,
+                node_id=node.id,
+                hook_point=auto_review.path,
+                round=0,
+                head_sha=None,
+            ),
+            hit,
+        )
+        return "undecided", hit.reason
+    time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
     snapshot = store.materialized_chain_of(row)
     inv = _agent.resolve_agent_task(
         auto_review.task,
@@ -197,6 +217,7 @@ async def review(
         repo_path=row["repo"],
         cwd=run_dirs.worktrees / work_item_id,
         repo_entry=launch.repo_entry,
+        time_cap=time_cap,
     )
 
     result_path = run_dirs.results / f"{session_id}.json"

@@ -12,7 +12,7 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, MaterializedChain, ResolvedChain
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
-_WAIT = {"timeout": "90m", "polling": {"initial_interval": "30s", "max_interval": "5m"}}
+_WAIT = {"polling": {"initial_interval": "30s", "max_interval": "5m"}}
 
 
 def _chain(**maxima) -> MaterializedChain:
@@ -31,9 +31,16 @@ def _chain(**maxima) -> MaterializedChain:
         {
             "id": "feedback",
             "kind": "exec",
-            "policy": {"wait_timeout_minutes": 60},
+            "policy": {"total_time_cap_minutes": 120},
             "tasks": [
-                {"id": "ci", "kind": "forge", "target": "mr.ci", "wait": _WAIT},
+                {
+                    "id": "ci",
+                    "kind": "forge",
+                    "target": "mr.ci",
+                    # The wait's timeout is its own total cap (Ruling 196).
+                    "policy": {"total_time_cap_minutes": 90},
+                    "wait": _WAIT,
+                },
                 {
                     "id": "approval",
                     "kind": "forge",
@@ -61,24 +68,25 @@ def _task(chain: MaterializedChain, path: str):
 def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored():
     """Item-wide fields reach every scope; a path's reach that path and
     everything under it, narrowest last. An operational value wins over the
-    one the chain authored -- the node's own 60-minute wait policy here
-    (Ruling 188). The snapshot itself is untouched: the override is a layer
-    on it, not an edit of it."""
+    one the chain authored (Ruling 188); a time cap -- a wait's timeout is its
+    task's own total cap (Ruling 196) -- only tightens the one the chain
+    authored (Ruling 194). The snapshot itself is untouched: the override is
+    a layer on it, not an edit of it."""
     chain = _chain()
     item = chain.with_item_policy(
         {
             "allowed_tools": ["Read", "Bash"],
             "paths": {
-                "feedback": {"wait_timeout_minutes": 120},
-                "feedback.main.ci": {"wait_timeout_minutes": 180},
+                "feedback": {"total_time_cap_minutes": 100},
+                "feedback.main.ci": {"total_time_cap_minutes": 45},
                 "verification": {"max_attempts": 5, "timeout_minutes": 90},
             },
         }
     )
 
     ci, approval = _task(item, "feedback.main.ci"), _task(item, "feedback.main.approval")
-    assert ci.task.wait_bounds(item.policy_for(ci)).timeout.total_seconds() == 180 * 60
-    assert approval.task.wait_bounds(item.policy_for(approval)).timeout.total_seconds() == 120 * 60
+    assert ci.task.wait_bounds(item.policy_for(ci)).timeout.total_seconds() == 45 * 60
+    assert approval.task.wait_bounds(item.policy_for(approval)).timeout.total_seconds() == 100 * 60
     verification = item.chain.nodes[0]
     assert (
         item.policy_for(verification).max_attempts,
@@ -86,12 +94,12 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
     ) == (5, 90)
     assert item.policy_for(_task(item, "verification.check.test")).allowed_tools == ("Read", "Bash")
     assert item.to_json() == chain.to_json()
-    # Without the layer, the chain's own value: its node policy's 60 minutes.
+    # Without the layer, the chain's own value: the wait task's 90 minutes.
     assert (
         _task(chain, "feedback.main.ci")
         .task.wait_bounds(chain.policy_for(_task(chain, "feedback.main.ci")))
         .timeout.total_seconds()
-        == 60 * 60
+        == 90 * 60
     )
 
 
@@ -104,16 +112,18 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
             "policy.paths.verification.timeout_minutes",
         ),
         (
-            {"paths": {"feedback.main.ci": {"wait_timeout_minutes": 999}}},
-            "policy.paths.feedback.main.ci.wait_timeout_minutes",
+            {"paths": {"verification": {"total_time_cap_minutes": 999}}},
+            "policy.paths.verification.total_time_cap_minutes",
         ),
     ],
-    ids=["attempts-over-maximum", "node-timeout-over-maximum", "wait-timeout-over-maximum"],
+    ids=["attempts-over-maximum", "node-timeout-over-maximum", "total-time-cap-over-maximum"],
 )
 def test_an_override_past_its_bounds_is_refused_naming_the_field(override, field):
     """Operational values move only within the administrator maxima. The
     refusal names the one field, as data."""
-    chain = _chain(max_attempts=5, timeout_minutes=120, wait_timeout_minutes=600, token_budget=1000)
+    chain = _chain(
+        max_attempts=5, timeout_minutes=120, total_time_cap_minutes=600, token_budget=1000
+    )
 
     with pytest.raises(PolicyError) as refused:
         chain.with_item_policy(override)

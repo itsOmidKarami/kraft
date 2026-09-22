@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from kraft import (
     archive,
     auto_escalate_delay,
+    caps,
     executor,
     rate_limit_retry,
     waits,
@@ -216,6 +217,9 @@ async def lifespan(app: FastAPI):
     # something cannot be the coroutine that used to sit in the wait
     # (Kraft-ru98). One scheduler for every wait kind.
     app.state.wait_task = asyncio.ensure_future(waits.poller(app))
+    # Always on: a parked item's total time cap and a gate's own timeout run
+    # out while nothing of the item runs, so no launch is there to see it.
+    app.state.caps_task = asyncio.ensure_future(caps.poller(app))
     # Always on, for the same reason rate-limit/waits are: an item sitting
     # past its own auto_escalate_delay_s has to be re-checked by something,
     # and that something cannot be the coroutine that made the original
@@ -261,6 +265,8 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         app.state.wait_task.cancel()
         await asyncio.gather(app.state.wait_task, return_exceptions=True)
+        app.state.caps_task.cancel()
+        await asyncio.gather(app.state.caps_task, return_exceptions=True)
         app.state.auto_escalate_delay_task.cancel()
         await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()

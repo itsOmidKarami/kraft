@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-from kraft import events, logs, store
+from kraft import caps, events, logs, store
 from kraft import usage as _usage
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
@@ -392,6 +392,10 @@ async def run_task(
     #: contract.
     require_result_file: bool = False,
     repo_entry: dict | None = None,
+    #: The tightest time cap over this launch (`caps.at_launch`): past its
+    #: deadline the process group, and a sandbox's container, is killed and
+    #: the session exits `capped_out` with `caps.REACHED` naming the scope.
+    time_cap: caps.Deadline | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, session_id)
@@ -526,8 +530,14 @@ async def run_task(
         seen_usage: dict[str, _usage.Usage] = {}
         log_offset = 0
         next_progress = time.monotonic() + progress_s
+        capped = False
         while proc.poll() is None:
             await asyncio.sleep(poll_s)
+            if time_cap is not None and caps.monotonic() >= time_cap.at:
+                # Left through the `finally` below, which kills the group and
+                # tears down a sandbox's container.
+                capped = True
+                break
             if time.monotonic() < next_progress:
                 continue
             next_progress = time.monotonic() + progress_s
@@ -591,6 +601,24 @@ async def run_task(
                     c, session_id, _usage.read(log_path, result_path, reader)
                 )
             )
+    if capped:
+        hit = time_cap.hit
+
+        def _capped(c):
+            store.session_exited(
+                c, session_id, "capped_out", None, _usage.read(log_path, result_path, reader)
+            )
+            events.append(
+                c,
+                work_item_id,
+                caps.REACHED,
+                hit.payload(node_id=node_id, task=hook_point, session_id=session_id),
+            )
+
+        with open(log_path, "a") as fh:
+            fh.write(f"\nkraft: stopped: {hit.reason}\n")
+        await db.write(_capped)
+        return caps.TIME_CAPPED
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
     # `docker run` itself failing to launch (daemon down, image pull failed)

@@ -33,8 +33,13 @@ def forge_node(node_id: str, target: str, **task) -> dict:
     }
 
 
-def _wait(timeout="10m", initial="30s", maximum="2m") -> dict:
-    return {"timeout": timeout, "polling": {"initial_interval": initial, "max_interval": maximum}}
+def _wait(minutes=10, initial="30s", maximum="2m") -> dict:
+    """A wait task's fields: its timeout is its own total cap (Ruling 196),
+    and `wait:` holds its polling."""
+    return {
+        "policy": {"total_time_cap_minutes": minutes},
+        "wait": {"polling": {"initial_interval": initial, "max_interval": maximum}},
+    }
 
 
 @pytest.fixture
@@ -103,7 +108,7 @@ async def test_pending_wait_releases_worker_and_reschedules_with_backoff(walk, i
     """`external-wait-does-not-hold-an-active-worker`: one observation, then
     the walk returns. The item is parked with its next observation time, and
     the wait's condition and timeout are on record for whoever looks next."""
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait())])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait())])
 
     assert await walk(forge.FakeForge(ci_states=["pending"]), it) == "waiting"
 
@@ -129,7 +134,7 @@ async def test_pending_wait_releases_worker_and_reschedules_with_backoff(walk, i
 async def test_interval_grows_from_initial_to_max_while_pending(walk, item_on, wait_clock):
     """`external-waits-use-a-shared-due-scheduler`: 30s, then doubling, and
     never past the 2m maximum while the condition stays pending."""
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait())])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait())])
     fake = forge.FakeForge(ci_states=["pending"])
     gaps = []
     for _ in range(5):
@@ -156,9 +161,9 @@ async def test_a_node_waiting_on_two_conditions_is_due_at_the_earlier_one(
                 "id": "ci",
                 "kind": "forge",
                 "target": "mr.ci",
-                "wait": _wait(initial="5m", maximum="5m"),
+                **_wait(initial="5m", maximum="5m"),
             },
-            {"id": "approval", "kind": "forge", "target": "mr.external_approval", "wait": _wait()},
+            {"id": "approval", "kind": "forge", "target": "mr.external_approval", **_wait()},
         ],
     }
     it = await item_on([node])
@@ -177,7 +182,7 @@ async def test_wait_timeout_stops_for_human_and_is_not_a_code_failure(walk, item
     deadline, is still pending, so the item stops for a person. No recovery
     handler and no fix cycle runs -- nothing about the code failed -- and the
     session reads neither done nor failed."""
-    node = forge_node("ci", "mr.ci", wait=_wait(timeout="1m", initial="45s", maximum="45s"))
+    node = forge_node("ci", "mr.ci", **_wait(minutes=1, initial="45s", maximum="45s"))
     node["on_failure"] = {"tasks": [{"id": "repair", "kind": "subprocess", "command": "true"}]}
     node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
     it = await item_on([node])
@@ -201,13 +206,15 @@ async def test_wait_timeout_stops_for_human_and_is_not_a_code_failure(walk, item
     assert _trail(it, "ci.main.ci")[-1] == ("external_wait_ended", "timed_out")
 
 
-async def test_an_items_policy_override_lengthens_its_own_wait_and_no_other_items(walk, item_on):
-    """Kraft-ab1bh: one item's override, addressed to its CI node, replaces
-    the wait's authored timeout for that item alone. Another item on the same
-    chain keeps the chain's."""
-    chain = [forge_node("ci", "mr.ci", wait=_wait())]
+async def test_an_items_policy_override_shortens_its_own_wait_and_no_other_items(walk, item_on):
+    """Kraft-ab1bh: one item's override, addressed to its CI wait, tightens
+    the wait's own total cap -- its timeout (Ruling 196) -- for that item
+    alone. Another item on the same chain keeps the chain's."""
+    chain = [forge_node("ci", "mr.ci", **_wait())]
     mine = await item_on(
-        chain, wid="mine", policy_override={"paths": {"ci": {"wait_timeout_minutes": 30}}}
+        chain,
+        wid="mine",
+        policy_override={"paths": {"ci.main.ci": {"total_time_cap_minutes": 5}}},
     )
     other = await item_on(chain, wid="other")
     fake = forge.FakeForge(ci_states=["pending"])
@@ -218,26 +225,22 @@ async def test_an_items_policy_override_lengthens_its_own_wait_and_no_other_item
     timeouts = [
         it.events("external_wait_started")[0]["payload"]["timeout_s"] for it in (mine, other)
     ]
-    assert timeouts == [1800.0, 600.0]
+    assert timeouts == [300.0, 600.0]
 
 
 async def test_a_policy_change_rebounds_an_open_wait_from_its_next_observation(
     walk, item_on, wait_clock
 ):
     """A PATCH to an item parked on a wait binds from the wait's next
-    observation: the new timeout counts from the wait's own start, so a wait
-    about to run out gets the extra time instead of stopping for a human."""
-    it = await item_on(
-        [forge_node("ci", "mr.ci", wait=_wait(timeout="1m", initial="45s", maximum="45s"))]
-    )
+    observation: the wait's new cap -- its timeout (Ruling 196) -- counts from
+    the wait's own start, and the wait goes on under it."""
+    it = await item_on([forge_node("ci", "mr.ci", **_wait(initial="45s", maximum="45s"))])
     fake = forge.FakeForge(ci_states=["pending"])
     assert await walk(fake, it) == "waiting"
-    item = policy.WorkItemPolicy(paths={"ci": {"wait_timeout_minutes": 5}})
+    item = policy.WorkItemPolicy(paths={"ci.main.ci": {"total_time_cap_minutes": 5}})
     await it.database.write(lambda c: store.set_policy_override(c, it.id, item))
 
     wait_clock.advance(45)
-    assert await walk(fake, it) == "waiting"
-    wait_clock.advance(15)  # the old deadline
 
     assert await walk(fake, it) == "waiting"
     (rebounded,) = it.events("external_wait_rebounded")
@@ -251,11 +254,11 @@ async def test_a_policy_change_below_the_time_already_waited_times_the_wait_out(
     """Kraft-x7yl6: the rebounded deadline counts from the wait's own start,
     so shrinking the timeout below what has already elapsed ends the wait
     at its next observation -- a stop for a human, not a code failure."""
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait())])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait())])
     fake = forge.FakeForge(ci_states=["pending"])
     assert await walk(fake, it) == "waiting"
     wait_clock.advance(5 * 60)
-    item = policy.WorkItemPolicy(paths={"ci": {"wait_timeout_minutes": 1}})
+    item = policy.WorkItemPolicy(paths={"ci.main.ci": {"total_time_cap_minutes": 1}})
     await it.database.write(lambda c: store.set_policy_override(c, it.id, item))
 
     assert await walk(fake, it) == "needs_human"
@@ -271,7 +274,7 @@ async def test_a_wait_timeout_and_a_loop_cap_are_reported_apart(walk, item_on, w
     them apart, from the wait's own `external_wait_ended` record."""
     from kraft import analytics
 
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m", initial="1m"))])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait(minutes=1, initial="1m"))])
     fake = forge.FakeForge(ci_states=["pending"])
     assert await walk(fake, it) == "waiting"
     wait_clock.advance(60)
@@ -375,7 +378,7 @@ async def test_a_retry_on_a_run_fork_starts_a_fresh_wait(walk, item_on, wait_clo
     timing out on the one the first pass started an hour ago."""
     from kraft.templates.forks import ChainPath
 
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m"))])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait(minutes=1))])
     fake = forge.FakeForge(ci_states=["pending"])
     assert await walk(fake, it) == "waiting"
     wait_clock.advance(3600)
@@ -400,7 +403,7 @@ async def test_each_restart_on_its_own_ends_an_open_wait(walk, item_on, restart)
     writes `work_item_retried` and `run_forked` together, so a walk through it
     cannot tell whether `run_forked` is honoured (final review 2 D): a fork
     written by any other path must still start a fresh wait."""
-    it = await item_on([forge_node("ci", "mr.ci", wait=_wait(timeout="1m"))])
+    it = await item_on([forge_node("ci", "mr.ci", **_wait(minutes=1))])
     assert await walk(forge.FakeForge(ci_states=["pending"]), it) == "waiting"
     [started] = it.events("external_wait_started")
     task = started["payload"]["task"]
@@ -557,11 +560,15 @@ def test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed
     """`external-wait-has-configurable-timeout-and-polling`: "subject to
     applicable policy limits". Refused at filing, naming the task, never
     mid-run."""
-    with pytest.raises(PolicyError, match=r"ci\.main\.ci.*wait_timeout_minutes 60"):
+    with pytest.raises(
+        PolicyError,
+        match=r"ci\.main\.ci: 'total_time_cap_minutes' 120 cannot exceed the administrator "
+        r"maximum 60",
+    ):
         _materialize(
-            [forge_node("ci", "mr.ci", wait=_wait(timeout="2h"))],
+            [forge_node("ci", "mr.ci", **_wait(minutes=120))],
             repo,
-            {"wait_timeout_minutes": 60},
+            {"total_time_cap_minutes": 60},
         )
 
 
@@ -570,20 +577,20 @@ def test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed
     [
         # Authored values win, within the maximum.
         (
-            _wait(timeout="45m", initial="10s", maximum="1m"),
-            {"wait_timeout_minutes": 60},
+            _wait(minutes=45, initial="10s", maximum="1m"),
+            {"total_time_cap_minutes": 60},
             (2700, 10, 60),
         ),
         # Nothing authored: the seed default, 90 minutes (Kraft-7xpv4).
         (None, {}, (5400, 30, 300)),
         # Nothing authored, under a lower maximum: the default is clamped to
         # it rather than refusing a chain whose author never chose a number.
-        (None, {"wait_timeout_minutes": 20}, (1200, 30, 300)),
+        (None, {"total_time_cap_minutes": 20}, (1200, 30, 300)),
     ],
     ids=["authored", "seed-default", "default-clamped-to-maximum"],
 )
 def test_a_wait_resolves_its_bounds_through_the_task_policy(repo, wait, maxima, expected):
-    task = {"wait": wait} if wait else {}
+    task = wait or {}
     chain = _materialize([forge_node("ci", "mr.ci", **task)], repo, maxima)
     (resolved,) = [t for n in chain.chain.nodes for t in n.tasks()]
 

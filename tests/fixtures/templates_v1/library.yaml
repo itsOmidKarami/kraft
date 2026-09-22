@@ -87,8 +87,9 @@ tasks:
     kind: forge
     target: mr.ci
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 90
     wait:
-      timeout: 90m
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -97,8 +98,9 @@ tasks:
     kind: forge
     target: mr.automated_review
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 30
     wait:
-      timeout: 30m
       polling:
         initial_interval: 30s
         max_interval: 5m
@@ -126,8 +128,9 @@ tasks:
     kind: forge
     target: mr.external_approval
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 10080
     wait:
-      timeout: 7d
       polling:
         initial_interval: 5m
         max_interval: 1h
@@ -141,8 +144,9 @@ tasks:
     kind: forge
     target: mr.post_merge_ci
     scope: each_repository
+    policy:
+      total_time_cap_minutes: 90
     wait:
-      timeout: 90m
       polling:
         initial_interval: 30s
         max_interval: 5m

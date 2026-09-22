@@ -99,8 +99,8 @@ A **task** is one unit of execution, of one of four kinds:
 - **`forge`** (`src/kraft/adapters/forge/`) — a merge-request action on GitHub
   or GitLab, named by its `target` (`mr.open_draft`, `mr.ci`, `mr.merge`, …),
   resolved per repo from the `forge` recorded in that repo's `repos.yaml`
-  entry. A task that waits on the forge declares its own `wait:` timeout and
-  polling.
+  entry. A task that waits on the forge declares its own polling in `wait:`
+  and its timeout as its `policy: total_time_cap_minutes`.
 
 ## The library and `extends`
 
@@ -145,9 +145,15 @@ it.
 Every retry loop is bounded. A fix loop stops at its own `max_attempts`, and at
 the wall clock `policy.yaml`'s `loops:` map gives its key (or `default:`). An
 external wait — CI, an automated review, an approval, a merge landing — is
-bounded by its task's own `wait: timeout` instead, and running out stops for a
-person. Hitting either bound stops the chain and escalates with the full trace,
-rather than looping forever on a defect the agent can't actually fix.
+bounded by its task's own `total_time_cap_minutes` instead, and running out
+stops for a person. Hitting either bound stops the chain and escalates with the
+full trace, rather than looping forever on a defect the agent can't actually
+fix.
+
+Time is capped per scope too. `time_cap_minutes` bounds a scope's running time
+and `total_time_cap_minutes` its wall clock, waits and gates included, on the
+work item, a node, a step or a task; each caps its own scope, a child's cannot
+exceed its parent's, and running out stops for a person, naming the scope.
 
 ## Where this is enforced
 

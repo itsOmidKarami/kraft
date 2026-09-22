@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from kraft import caps as _caps
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
@@ -31,6 +32,8 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         (work_item_id,),
     ).fetchall()
     timed_out = wait_timed_out_sessions(conn, [work_item_id])
+    # A time cap's stop is its own outcome too (Ruling 194), never a loop's cap.
+    time_capped = _caps.time_capped_sessions(conn, [work_item_id])
     by_node: dict[str, dict] = {}
     rounds: dict[str, set[int]] = {}
     for r in rows:
@@ -46,6 +49,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "rounds": 0,
                 "capped_out": 0,
                 "wait_timed_out": 0,
+                "time_capped": 0,
                 "cost_complete": True,
             },
         )
@@ -63,8 +67,10 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         node["sessions"] += 1
         # A wait that ran out is not a loop that ran out (Kraft-uwbc8).
         waited_out = r["id"] in timed_out
+        cut = r["id"] in time_capped
         node["wait_timed_out"] += 1 if waited_out else 0
-        node["capped_out"] += 1 if r["status"] == "capped_out" and not waited_out else 0
+        node["time_capped"] += 1 if cut else 0
+        node["capped_out"] += 1 if r["status"] == "capped_out" and not (waited_out or cut) else 0
         rounds.setdefault(r["node_id"], set()).add(r["round"] or 0)
     for node_id, seen in rounds.items():
         by_node[node_id]["rounds"] = len(seen)
@@ -80,6 +86,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
             "sessions",
             "capped_out",
             "wait_timed_out",
+            "time_capped",
         )
     }
     # An item's rounds is the deepest a single node had to loop, not the sum:

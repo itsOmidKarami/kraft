@@ -89,7 +89,7 @@ kraft item set-chain --template quick-task        # switch a not-yet-started ite
 kraft item set-overrides --model opus --effort high
 kraft item set-overrides --clear                  # back to the template's own binding
 kraft item set-node-override --node verify --auto-escalate-stuck
-kraft item set-policy --policy merge_request_feedback.ci.await_ci.wait_timeout_minutes=180
+kraft item set-policy --policy merge_request_feedback.ci.await_ci.total_time_cap_minutes=60
 kraft item set-policy --clear                     # drop the item's own policy override
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
 kraft item abandon --yes                          # drops the item, reclaims its worktree
@@ -116,18 +116,25 @@ everything under it. A value is read as YAML, so `deny_tools=[WebFetch]` is a
 list.
 
 ```bash
-kraft item create "slow pipeline" \
-  --policy merge_request_feedback.ci.await_ci.wait_timeout_minutes=180 \
+kraft item create "quick fix" \
+  --policy time_cap_minutes=45 \
+  --policy merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 \
   --policy verification.max_attempts=4
 kraft item set-policy <id> --policy max_attempts=2   # replaces the whole override
 ```
 
 The fields are the ones `policy.yaml` explains (see [Configuration](configuration.md)):
-`timeout_minutes`, `max_attempts` (execution nodes only), `wait_timeout_minutes`
-and `allowed_harnesses` move within the administrator `maxima`, and win over
-what the chain authored. `allowed_tools`, `deny_tools`, `token_budget` and
+`timeout_minutes`, `max_attempts` (execution nodes only) and
+`allowed_harnesses` move within the administrator `maxima`, and win over what
+the chain authored. `allowed_tools`, `deny_tools`, `token_budget` and
 `sandbox` only tighten: a list intersects with what each task already allows,
-a budget takes the lower value. An operational value past its maximum, a path
+a budget takes the lower value. The time caps `time_cap_minutes` and
+`total_time_cap_minutes` are the work item's own item-wide: raising one above
+the chain's, up to the administrator maximum, is how a person unsticks a
+capped item before a retry (Ruling 198). On a path they only tighten, and are
+refused, naming both scopes, above the cap that scope already has (a wait
+task's total cap is its timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
+`total_time_cap_minutes`. An operational value past its maximum, a path
 the chain does not have, or a key that is not a policy field is refused,
 naming the field. `set-policy` works on any item that has not ended: on a
 running or waiting one it binds from the next node the item enters and from

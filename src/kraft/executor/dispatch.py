@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
+from kraft import caps as _caps
 from kraft import config as _config
 from kraft import events, store
 from kraft import findings as _findings
@@ -34,6 +35,7 @@ from kraft.executor.context import (
     INFRA_STOP,
     RATE_LIMITED,
     SCOPE,
+    TIME_CAPPED,
     WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
@@ -267,6 +269,34 @@ async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
     )
 
 
+async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str:
+    """A launch a spent time cap refused, recorded as its own session: it
+    exits `capped_out`, and `caps.REACHED` names the scope and the cap, so the
+    stop and analytics read it the same as a run killed at its deadline."""
+    _, log_path, result_path = await _builtins.start_session(db, run_dirs, **common)
+    await _builtins.finish_session(
+        db,
+        log_path,
+        result_path,
+        session_id=common["session_id"],
+        status="capped_out",
+        log=f"not started: {hit.reason}\n",
+    )
+    await db.write(
+        lambda c: events.append(
+            c,
+            common["work_item_id"],
+            _caps.REACHED,
+            hit.payload(
+                node_id=common["node_id"],
+                task=common["hook_point"],
+                session_id=common["session_id"],
+            ),
+        )
+    )
+    return TIME_CAPPED
+
+
 def scope_policy(
     row, scope: ResolvedNode | ResolvedStep | ResolvedTask, repository: str | None = None
 ) -> _policy.InstancePolicy:
@@ -363,6 +393,7 @@ async def _run_changed_test_scopes(
     launch: LaunchContext | None,
     round: int,
     sandbox: dict | None,
+    time_cap: _caps.Deadline | None = None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -414,6 +445,7 @@ async def _run_changed_test_scopes(
             # never see the fix. Never writing bytecode keeps every cycle honest.
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             sandbox=sandbox,
+            time_cap=time_cap,
             **{**common, "session_id": uuid.uuid4().hex},
         )
 
@@ -538,6 +570,13 @@ async def dispatch_node(
         stops.refuse_planted_repos(work_item_row, launch, Path(worktree))
     except RuntimeError as exc:
         return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+    # Every enclosing scope's time cap, and this task's own (`kraft.caps`):
+    # spent already refuses the launch; otherwise the one run is killed at
+    # the tightest deadline. One deadline for every process the task starts.
+    hit = db.read(lambda c: _caps.at_launch(c, work_item_row, task))
+    if hit is not None and hit.remaining_s <= 0:
+        return await time_capped_session(db, run_dirs, common, hit)
+    time_cap = _caps.Deadline(_caps.monotonic() + hit.remaining_s, hit) if hit else None
     if not isinstance(t, ForgeTask):
         # Resolved here, once, for every launch this task makes (Ruling 189):
         # a sandbox nobody can resolve stops this task for a human, recorded
@@ -562,6 +601,7 @@ async def dispatch_node(
             launch=launch,
             round=round,
             sandbox=sandbox,
+            time_cap=time_cap,
         )
 
     if isinstance(t, SubprocessTask):
@@ -581,6 +621,7 @@ async def dispatch_node(
             repo_entry=(launch.repo_entry or {}) if launch else {},
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             sandbox=sandbox,
+            time_cap=time_cap,
             **common,
         )
 
@@ -786,6 +827,7 @@ async def dispatch_node(
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
             review_package=package,
+            time_cap=time_cap,
             **common,
         )
     except _agent.LaunchRefused as exc:
@@ -1126,6 +1168,10 @@ async def measure_node(
     # could not even start (Kraft-579).
     if any(r == CONFIG_ERROR for r in results):
         return CONFIG_ERROR, [t for t, r in outcomes if r == CONFIG_ERROR], []
+    # A scope's time ran out (Ruling 194): nothing about the code failed, and
+    # no recovery or fix cycle may spend more of the time that is gone.
+    if any(r == TIME_CAPPED for r in results):
+        return TIME_CAPPED, [t for t, r in outcomes if r == TIME_CAPPED], []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
     if any(r == WAIT_TIMED_OUT for r in results):
