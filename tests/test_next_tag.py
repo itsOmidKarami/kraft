@@ -7,6 +7,7 @@ cannot be run here. This is the part that can be wrong quietly.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -47,6 +48,22 @@ def test_a_tag_without_three_components_is_refused():
     """Better to fail the job than to guess and tag something wrong."""
     with pytest.raises(ValueError):
         next_tag("v0.3", "patch")
+
+
+@pytest.mark.parametrize(
+    "previous",
+    ["v1.0.0rc1", "v1.0.0.rc1", "v1.0.0-rc.1"],
+    ids=["no-separator", "dot-separator", "dash-separator"],
+)
+def test_a_prerelease_tag_is_refused_by_name(previous):
+    """release.yml's previous-tag lookup is meant to keep prerelease tags like
+    these from ever reaching `next_tag`, but a repo can carry more than one
+    malformed rc tag on the same commit (a ruleset can block deleting one), so
+    this is the last line of defence: the error must name the exact tag it
+    choked on, not just say "a tag" in the abstract.
+    """
+    with pytest.raises(ValueError, match=re.escape(previous)):
+        next_tag(previous, "patch")
 
 
 def test_an_unknown_impact_is_refused():
