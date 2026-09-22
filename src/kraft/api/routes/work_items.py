@@ -17,6 +17,7 @@ from kraft.api.routes import board, gates
 from kraft.executor import entry
 from kraft.overrides import (
     harness_refusal,
+    item_harness_refusal,
     validate_agent_overrides,
     validate_node_override_fields,
 )
@@ -710,6 +711,11 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         errs = validate_agent_overrides(body.agent_overrides)
         if errs:
             raise HTTPException(422, errs[0])
+        v1 = store.materialized_chain_of(row)
+        if v1 is not None:
+            nodes = {n.id: n for n in v1.chain.nodes}
+            if (why := item_harness_refusal(nodes, body.agent_overrides)) is not None:
+                raise HTTPException(422, why)
 
     def apply(c):
         # One write, so a multi-field patch is one transaction and cannot land half.
