@@ -416,12 +416,12 @@ def instance_policy() -> policy.InstancePolicy:
             "defaults": {
                 "timeout_minutes": 60,
                 "max_attempts": 3,
-                "allowed_harnesses": ["codex_default", "claude_review"],
+                "allowed_harnesses": ["codex", "claude"],
             },
             "maxima": {
                 "token_budget": 2_000_000,
                 "allowed_tools": ["git", "shell", "pytest"],
-                "allowed_harnesses": ["codex_default", "claude_review"],
+                "allowed_harnesses": ["codex", "claude"],
             },
         }
     )
@@ -460,22 +460,20 @@ def test_token_budget_moves_within_the_maximum_not_the_inherited_value(instance_
 
 
 def test_template_policy_can_narrow_allowed_harnesses(instance_policy):
-    narrowed = instance_policy.apply_template_override({"allowed_harnesses": ["codex_default"]})
-    assert narrowed.allowed_harnesses == ("codex_default",)
+    narrowed = instance_policy.apply_template_override({"allowed_harnesses": ["codex"]})
+    assert narrowed.allowed_harnesses == ("codex",)
 
 
 def test_template_policy_can_widen_allowed_harnesses_within_maximum(instance_policy):
     """Unlike `allowed_tools`, `allowed_harnesses` may widen -- as long as it
     stays within `maxima.allowed_harnesses`."""
-    widened = instance_policy.apply_template_override(
-        {"allowed_harnesses": ["codex_default", "claude_review"]}
-    )
-    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+    widened = instance_policy.apply_template_override({"allowed_harnesses": ["codex", "claude"]})
+    assert set(widened.allowed_harnesses) == {"codex", "claude"}
 
 
 def test_template_policy_cannot_widen_allowed_harnesses_past_maximum(instance_policy):
     with pytest.raises(policy.PolicyError, match="allowed_harnesses"):
-        instance_policy.apply_template_override({"allowed_harnesses": ["codex_default", "gemini"]})
+        instance_policy.apply_template_override({"allowed_harnesses": ["codex", "gemini"]})
 
 
 # ── maxima means maxima: `defaults:` is bounded by `maxima:` too
@@ -500,8 +498,8 @@ def test_default_harnesses_outside_its_maximum_are_rejected():
     with pytest.raises(ValidationError, match="defaults.allowed_harnesses"):
         policy.InstancePolicyInput.model_validate(
             {
-                "defaults": {"allowed_harnesses": ["codex_default", "gemini"]},
-                "maxima": {"allowed_harnesses": ["codex_default"]},
+                "defaults": {"allowed_harnesses": ["codex", "gemini"]},
+                "maxima": {"allowed_harnesses": ["codex"]},
             }
         )
 
@@ -511,7 +509,7 @@ def test_unset_harness_maximum_bounds_nothing():
     `defaults:` list is accepted and any override may name any harness."""
     pol = policy.InstancePolicy.from_input(
         policy.InstancePolicyInput.model_validate(
-            {"defaults": {"allowed_harnesses": ["codex_default"], "timeout_minutes": 500}}
+            {"defaults": {"allowed_harnesses": ["codex"], "timeout_minutes": 500}}
         )
     )
     widened = pol.apply_template_override({"allowed_harnesses": ["anything_at_all"]})
@@ -526,14 +524,14 @@ def test_defaults_narrower_than_maxima_can_still_widen_back_to_maxima():
     allowed -- an operator could never widen back toward `maxima`."""
     parsed = policy.InstancePolicyInput.model_validate(
         {
-            "defaults": {"allowed_harnesses": ["codex_default"]},
-            "maxima": {"allowed_harnesses": ["codex_default", "claude_review"]},
+            "defaults": {"allowed_harnesses": ["codex"]},
+            "maxima": {"allowed_harnesses": ["codex", "claude"]},
         }
     )
     pol = policy.InstancePolicy.from_input(parsed)
-    assert pol.allowed_harnesses == ("codex_default",)
-    widened = pol.apply_template_override({"allowed_harnesses": ["codex_default", "claude_review"]})
-    assert set(widened.allowed_harnesses) == {"codex_default", "claude_review"}
+    assert pol.allowed_harnesses == ("codex",)
+    widened = pol.apply_template_override({"allowed_harnesses": ["codex", "claude"]})
+    assert set(widened.allowed_harnesses) == {"codex", "claude"}
 
 
 def test_template_policy_may_replace_operational_defaults_either_direction(instance_policy):
@@ -593,12 +591,12 @@ def test_instance_policy_loads_defaults_and_maxima_from_yaml(tmp_path):
         "default: { attempts: 3, wall_clock_s: 60 }\n"
         "defaults:\n"
         "  timeout_minutes: 30\n"
-        "  allowed_harnesses: [codex_default]\n"
+        "  allowed_harnesses: [codex]\n"
         "maxima:\n"
         "  timeout_minutes: 90\n"
         "  token_budget: 500000\n"
         "  allowed_tools: [git, shell]\n"
-        "  allowed_harnesses: [codex_default, claude_review]\n"
+        "  allowed_harnesses: [codex, claude]\n"
     )
     parsed = policy.PolicyInput.from_yaml(p)
     assert parsed.defaults.timeout_minutes == 30
@@ -611,8 +609,8 @@ def test_instance_policy_loads_defaults_and_maxima_from_yaml(tmp_path):
     assert resolved.allowed_tools == ("git", "shell")
     # Operational-with-a-maximum: widening back up to `maxima` is allowed.
     assert resolved.apply_template_override(
-        {"allowed_harnesses": ["codex_default", "claude_review"]}
-    ).allowed_harnesses == ("codex_default", "claude_review")
+        {"allowed_harnesses": ["codex", "claude"]}
+    ).allowed_harnesses == ("codex", "claude")
 
 
 @pytest.mark.parametrize(
@@ -767,7 +765,7 @@ def test_repository_layers_with_two_different_sandboxes_have_no_meet():
 def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
     """Review E #2 (Kraft-6pbq4): a `maxima.allowed_tools` binds every task,
     and codex cannot enforce a tool list, so it refuses to launch -- copying the
-    docs' example stopped every `codex_default` task on the shipped chain."""
+    docs' example stopped every `codex` task on the shipped chain."""
     import re
 
     page = (Path(__file__).resolve().parents[1] / "docsite" / "configuration.md").read_text()

@@ -15,7 +15,7 @@ from kraft.templates.environment import (
 
 
 def agent(id: str = "author", **kw) -> dict:
-    return {"id": id, "kind": "agent", "harness": "codex_default", "prompt": "do it", **kw}
+    return {"id": id, "kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 def exec_node(id: str = "spec", **kw) -> dict:
@@ -683,13 +683,13 @@ def test_agent_task_selects_a_harness_profile_by_id():
     for the runtime mechanics the provider owns."""
     claude = harness_mod.load(None).valid["claude"]
     profile = HarnessProfile.from_input(
-        "claude_review",
+        "claude",
         HarnessProfileInput(provider="claude", defaults={"effort": "low"}),
         harness=claude,
     )
     assert profile.provider == claude.id
     task = tm.AgentTask.model_validate(agent("review", harness=profile.id))
-    assert task.harness == profile.id == "claude_review"
+    assert task.harness == profile.id == "claude"
     assert "provider" not in tm.AgentTask.model_fields
 
 

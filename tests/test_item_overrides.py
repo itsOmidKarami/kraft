@@ -543,7 +543,7 @@ def _reviewed_chain(tdir):
         "kind": "exec",
         "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
     }
-    reviewer = {"id": "r", "kind": "agent", "harness": "codex_default", "prompt": "review"}
+    reviewer = {"id": "r", "kind": "agent", "harness": "codex", "prompt": "review"}
     (tdir / "chains" / "reviewed.yaml").write_text(
         yaml.safe_dump(
             {

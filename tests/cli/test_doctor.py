@@ -42,7 +42,7 @@ def test_doctor_on_a_live_instance_reaches_every_check(app, tmp_path):
         "access.yaml",
         "pidfile",
         "mcp token",
-        "agent: codex_default",
+        "agent: claude",
         "mcp server",
         "shell completion",
         "bd",

@@ -22,7 +22,7 @@ def _instance(**maxima) -> InstancePolicy:
 
 
 def _agent(id: str, **kw) -> dict:
-    return {"id": id, "kind": "agent", "harness": "codex_default", "prompt": "do it", **kw}
+    return {"id": id, "kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 def _materialize(nodes: list[dict], *, instance: InstancePolicy | None = None, **chain):
@@ -216,8 +216,8 @@ def test_an_execution_node_accepts_the_loop_bounds():
 @pytest.mark.parametrize(
     ("chain_policy", "task_policy"),
     [
-        ({"allowed_harnesses": ["claude_review"]}, None),
-        (None, {"allowed_harnesses": ["claude_review"]}),
+        ({"allowed_harnesses": ["claude"]}, None),
+        (None, {"allowed_harnesses": ["claude"]}),
     ],
     ids=["chain-scope", "task-scope"],
 )
@@ -227,7 +227,7 @@ def test_materialization_refuses_an_agent_task_on_a_harness_its_policy_disallows
     """`allowed_harnesses` is checked where the task is bound to its policy,
     so a disallowed profile never launches."""
     task = _agent("t", **({"policy": task_policy} if task_policy else {}))
-    with pytest.raises(PolicyError, match=r"^n\.main\.t: .*'codex_default'") as refused:
+    with pytest.raises(PolicyError, match=r"^n\.main\.t: .*'codex'") as refused:
         _materialize(
             [{"id": "n", "kind": "exec", "tasks": [task]}],
             **({"policy": chain_policy} if chain_policy else {}),

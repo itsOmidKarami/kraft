@@ -302,9 +302,7 @@ def test_harness_profile_selects_only_provider_declared_options():
     parsed = template_environment.HarnessProfileInput(
         provider="claude", executable="claude", defaults={"effort": "low"}
     )
-    profile = template_environment.HarnessProfile.from_input(
-        "claude_review", parsed, harness=claude
-    )
+    profile = template_environment.HarnessProfile.from_input("claude", parsed, harness=claude)
     assert profile.defaults == {"effort": "low"}
     assert profile.provider == "claude"
 
@@ -332,9 +330,7 @@ def test_harness_profile_reports_unavailable_when_disabled():
     it does not itself decide what happens next -- that is Phase 6's."""
     claude = harness.load(None).valid["claude"]
     parsed = template_environment.HarnessProfileInput(provider="claude", enabled=False)
-    profile = template_environment.HarnessProfile.from_input(
-        "claude_review", parsed, harness=claude
-    )
+    profile = template_environment.HarnessProfile.from_input("claude", parsed, harness=claude)
     assert profile.is_available() is False
 
 

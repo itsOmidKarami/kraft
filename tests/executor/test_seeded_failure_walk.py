@@ -104,8 +104,8 @@ def _option(argv: list[str], flag: str) -> str | None:
 
 async def test_the_judge_launches_on_its_own_runtime_not_the_fixers(failed_walk):
     """`judge-runtime-is-independent-from-fixer-runtime`: the seeded judge
-    (`strict_judge`, profile `claude_review`) and the repair it judges
-    (`repair_mr_feedback`, profile `codex_default` with its own model) each
+    (`strict_judge`, profile `claude`) and the repair it judges
+    (`repair_mr_feedback`, profile `codex` with its own model) each
     launch on their own task's configuration."""
     _it, _status, launches = failed_walk
 

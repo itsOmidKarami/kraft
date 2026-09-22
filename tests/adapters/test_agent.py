@@ -601,7 +601,7 @@ C = {"command": "c"}
     [
         ({**C, "model": "opus"}, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "opus"),
         (C, {"models": {"p": "haiku"}}, {"profile": "p"}, "model", "haiku"),
-        (C, {"models": {"p": "haiku"}}, {"profile": "codex_default"}, "model", None),
+        (C, {"models": {"p": "haiku"}}, {"profile": "codex"}, "model", None),
         (C, {}, {}, "model", None),
         # Precedence lives here and only here (spec §6): a fix cycle past
         # `escalate_after` asks for the bump, it does not name a model.
@@ -783,7 +783,7 @@ def test_a_task_overrides_its_harness_profiles_defaults():
     assert (inv.harness, inv.command) == ("claude", "/opt/claude-wrapper")
     assert (inv.model, inv.effort, inv.permission_mode) == ("sonnet", "high", "plan")
 
-    repo = {"models": {"review": "haiku", "codex_default": "gpt-5"}}
+    repo = {"models": {"review": "haiku", "codex": "gpt-5"}}
     assert agent.resolve_agent_task(task, repo, None).model == "haiku"
     item = {"model": "opus", "effort": "low"}
     overridden = agent.resolve_agent_task(task, repo, None, item_override=item)

@@ -42,11 +42,11 @@ resolving (`GET`/`PUT /api/templates/library`).
 tasks:
   implementer:
     kind: agent
-    harness: codex_default
+    harness: codex
     prompt: Implement the approved plan.
   code_review:
     kind: agent
-    harness: claude_review
+    harness: claude
     prompt: Review this work item's change for defects its passing tests do not catch.
     skill: kraft:code-review
     inputs: [review_package]
@@ -129,16 +129,16 @@ triggers:
 defaults:
   timeout_minutes: 60
   max_attempts: 3
-  allowed_harnesses: [codex_default, claude_review]
+  allowed_harnesses: [codex, claude]
 maxima:
   timeout_minutes: 180
   token_budget: 2000000
-  allowed_harnesses: [codex_default, claude_review]
+  allowed_harnesses: [codex, claude]
 ```
 
 The example sets no `maxima.allowed_tools`, on purpose: a safety field set
 only in `maxima` binds every task, and codex and gemini cannot enforce a tool
-list, so they refuse to launch under one — every `codex_default` task on the
+list, so they refuse to launch under one — every `codex` task on the
 shipped chain would stop.
 
 | Key | Means |
@@ -267,14 +267,14 @@ same name.
 
 ```yaml
 harnesses:
-  codex_default:
+  codex:
     provider: codex
     enabled: true
     executable: codex
     defaults:
       effort: medium
 
-  claude_review:
+  claude:
     provider: claude
     enabled: true
     executable: claude
@@ -323,7 +323,7 @@ repos:
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
 | `project` | `null` | The GitLab project path, when `forge: gitlab`. Renamed from the legacy `gitlab_project` key, which a hand-edited file may still carry — read transparently, never rewritten out from under you. |
-| `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude_review: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
+| `models` | `{}` | The model an agent task runs with on this repo, per harness profile id (`claude: opus`): above the profile's own `defaults:`, below a task's `model:` and the work item's override. Keyed by profile because one model name means nothing to another provider. Replaces the retired `default_model`, which a loaded file drops with a warning. |
 | `test_command` | `null` | The command CI actually runs for this repo — what the changed-test-scope verification runs, as one scope over every path. A repo with neither this nor `test_scopes` stops that verification for a human rather than inventing a command. |
 | `areas` | `{}` | Path-scoped contexts inside this repo, keyed by id: `{paths: [...], setup: "...", verification: {test_scopes: [...]}}`. An area's test scopes join the repo's and are selected by changed paths the same way; its `setup` runs once before the first of its scopes runs. Areas are never forge targets. |
 | `test_scopes` | `null` | A monorepo's per-directory test commands: a list of `{paths: [...], command: "..."}` mappings, each `paths` non-empty and each `command` a non-empty string. Not synthesized from `test_command` — the two stay independently editable. |

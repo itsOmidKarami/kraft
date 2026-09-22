@@ -1567,7 +1567,7 @@ class MaterializedChain:
         afterwards and never one already running.
 
         What is NOT frozen: harness profile configuration. A task carries
-        `harness: codex_default`, a `harnesses.yaml` profile id, and dispatch
+        `harness: codex`, a `harnesses.yaml` profile id, and dispatch
         resolves it live (`adapters.agent.harness_profile`). That is intended:
         `harnesses.yaml` holds settings for this Kraft install -- which
         executable, which defaults -- not the chain's content.

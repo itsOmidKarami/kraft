@@ -124,7 +124,7 @@ async def test_a_harness_its_policy_disallows_never_launches(item_on, fake_agent
     narrowed = MaterializedChain(
         chain=materialized.chain,
         target=materialized.target,
-        policy=dataclasses.replace(materialized.policy, allowed_harnesses=("claude_review",)),
+        policy=dataclasses.replace(materialized.policy, allowed_harnesses=("claude",)),
     )
     it = await item_on(narrowed)
 
@@ -477,7 +477,7 @@ async def test_a_gate_reviewer_on_a_harness_its_policy_disallows_never_launches(
     materialized = (await item_on(_reviewed_gate({}), wid="source")).chain
     narrowed = dataclasses.replace(
         materialized,
-        policy=dataclasses.replace(materialized.policy, allowed_harnesses=("claude_review",)),
+        policy=dataclasses.replace(materialized.policy, allowed_harnesses=("claude",)),
     )
     it = await item_on(narrowed, auto_gate=True)
     seen = _capture(monkeypatch)

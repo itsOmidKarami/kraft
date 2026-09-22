@@ -53,7 +53,7 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
             {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
             {"areas": {"api": {"paths": ["a/**"], "setup": "uv sync"}}},
         ),
-        ({"models": {"claude_review": "opus"}}, {"models": {"claude_review": "opus"}}),
+        ({"models": {"claude": "opus"}}, {"models": {"claude": "opus"}}),
         # Anything already in a repos.yaml was connected by a human --
         # auto-connect did not exist when it was written. Defaulting to False
         # would hide every repo behind the Detected section on first load.
@@ -109,7 +109,7 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
         ({"env": {"A": 1}}, "'env'"),
         ({"env_passthrough": ["", "OK"]}, "env_passthrough"),
         ({"models": {"Claude Review": "opus"}}, "models"),
-        ({"models": {"claude_review": 4}}, "models"),
+        ({"models": {"claude": 4}}, "models"),
         ({"areas": {"api": {"paths": []}}}, "areas"),
         ({"areas": {"api": {"paths": ["a/**"], "forge": {"kind": "github"}}}}, "areas"),
         ({"test_scopes": [{"paths": ["src/**"]}]}, "command"),

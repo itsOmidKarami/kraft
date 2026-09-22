@@ -13,7 +13,7 @@ from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
 
 def _agent(id: str, **kw) -> dict:
-    return {"id": id, "kind": "agent", "harness": "codex_default", "prompt": "do it", **kw}
+    return {"id": id, "kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 def _chain(**maxima) -> MaterializedChain:
@@ -150,11 +150,9 @@ def test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field(
 
 
 def test_a_harness_change_is_held_to_the_paths_allowed_harnesses():
-    chain = _chain(allowed_harnesses=["codex_default"])
+    chain = _chain(allowed_harnesses=["codex"])
     with pytest.raises(RetryOverrideError) as refused:
-        validate_retry_override(
-            chain, "build.work.implement", task_config={"harness": "claude_review"}
-        )
+        validate_retry_override(chain, "build.work.implement", task_config={"harness": "claude"})
     assert refused.value.field == "task_config.harness"
 
 

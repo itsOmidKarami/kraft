@@ -37,7 +37,7 @@ def escalation_profile(tmp_path, monkeypatch):
     so without one every turn here would stop as a config error."""
     templates = tmp_path / "escalation-templates"
     write_harness_profiles(
-        templates, {"claude_review": {"provider": "claude", "defaults": {"model": "sonnet"}}}
+        templates, {"claude": {"provider": "claude", "defaults": {"model": "sonnet"}}}
     )
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
     return templates
@@ -633,7 +633,7 @@ async def test_dispatch_resolves_its_agent_through_its_harness_profile(
     write_harness_profiles(
         escalation_profile,
         {
-            "claude_review": {
+            "claude": {
                 "provider": "claude",
                 "executable": "/opt/fake-claude",
                 "defaults": {"model": "opus", "effort": "high"},
@@ -668,9 +668,7 @@ async def test_an_escalation_on_an_unavailable_profile_launches_nothing(
     """`unavailable-selected-harness-needs-human`, for the escalation role too:
     the turn is recorded as a config error naming the profile, and nothing is
     substituted for it."""
-    write_harness_profiles(
-        escalation_profile, {"claude_review": {"provider": "claude", "enabled": False}}
-    )
+    write_harness_profiles(escalation_profile, {"claude": {"provider": "claude", "enabled": False}})
     launched = []
 
     async def fake_run_agent_task(*a, **kw):
@@ -693,7 +691,7 @@ async def test_an_escalation_on_an_unavailable_profile_launches_nothing(
         ).fetchall()
     )
     assert session["status"] == "config_error"
-    assert "'claude_review'" in open(session["log_path"]).read()
+    assert "'claude'" in open(session["log_path"]).read()
 
 
 async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, database, run_dirs):

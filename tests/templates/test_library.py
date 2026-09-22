@@ -28,7 +28,7 @@ def write(root: Path, library: dict, chain: dict, chain_id: str = "default") -> 
 
 
 def agent_task(**kw) -> dict:
-    return {"kind": "agent", "harness": "codex_default", "prompt": "do it", **kw}
+    return {"kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 # ── the library is components plus one chain per file
