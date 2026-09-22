@@ -15,10 +15,11 @@ import json
 import uuid
 from pathlib import Path
 
-from kraft import events, store
+from kraft import events, executor, store
+from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
-from kraft.executor import LaunchContext
+from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, TaskKind
 
 #: Prepended to every turn's prompt, regenerated fresh each call rather than
@@ -385,12 +386,37 @@ async def dispatch(
         message=message,
     )
 
-    # A minimal binding, no hook: `resolve_invocation` still folds in repo-level
-    # deny_tools/steering/models, which is all "full tools" means here --
-    # repo policy still applies, only a hook's own narrowing is absent because
-    # there is no hook. Its own `escalate:` kwarg (left at the `False` default)
-    # is the fix loop's unrelated "buy a stronger model" bump -- same word,
-    # different feature; not to be confused with this module.
+    # Node-scoped (Kraft-l8ype, `stuck-escalation-is-an-exec-node-control`):
+    # the turn runs under the policy of the node the item stopped at, resolved
+    # from its snapshot like every other agent launch -- instance, repository,
+    # work item, chain and node. Its tool lists, frozen sandbox, harness
+    # allowlist and token budget all bound it; no snapshot, or no such node in
+    # it, is no policy anyone could know, and refused rather than run unbounded.
+    policy = _node_policy(row)
+    breach = (
+        stops.budget_breach(db, work_item_id, _policy.NO_BUDGET, token_budget=policy.token_budget)
+        if policy is not None
+        else None
+    )
+    if policy is None or breach is not None:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(
+            db,
+            run_dirs,
+            session_id=session_id,
+            row=row,
+            log=(
+                stops.budget_reason(breach)
+                if breach is not None
+                else f"escalation has no policy to run under: work item {work_item_id} has "
+                f"no node {row['current_node_id']!r} in a materialized chain"
+            )
+            + "\n",
+        )
+
+    # Its own `escalate:` kwarg (left at the `False` default) is the fix loop's
+    # unrelated "buy a stronger model" bump -- same word, different feature;
+    # not to be confused with this module.
     #
     # `harness:`, **not** `command: "claude"`. Same shape Task 4b removed from
     # `gate_review.py`, and removed here for the same reason: a hardcoded
@@ -406,6 +432,7 @@ async def dispatch(
             launch.repo_entry,
             launch.steering_dir,
             skills_dir=launch.skills_dir,
+            policy=policy,
         )
     except _agent.HarnessUnavailable as exc:
         await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
@@ -427,33 +454,46 @@ async def dispatch(
         inv = inv._replace(**original)
     runtime = {k: getattr(inv, k) for k in _RUNTIME}
     await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
-    status = await _agent.run_agent_task(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=row["current_node_id"],
-        hook_point="escalation",
-        command=inv.command,
-        harness=inv.harness,
-        model=inv.model,
-        effort=inv.effort,
-        permission_mode=inv.permission_mode,
-        deny_tools=inv.deny_tools,
-        steering_texts=inv.steering_texts,
-        sandbox=inv.sandbox,
-        task_instruction=task_instruction,
-        title=row["title"],
-        repo_path=row["repo"],
-        cwd=worktree,
-        resume_session_id=resume_session_id,
-        autocompact="auto",
-        identify_as_worker=False,
-        repo_entry=launch.repo_entry,
-        thread=thread,
-    )
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=row["current_node_id"],
+            hook_point="escalation",
+            command=inv.command,
+            harness=inv.harness,
+            model=inv.model,
+            effort=inv.effort,
+            permission_mode=inv.permission_mode,
+            deny_tools=inv.deny_tools,
+            allowed_tools=inv.allowed_tools,
+            steering_texts=inv.steering_texts,
+            sandbox=inv.sandbox,
+            task_instruction=task_instruction,
+            title=row["title"],
+            repo_path=row["repo"],
+            cwd=worktree,
+            resume_session_id=resume_session_id,
+            autocompact="auto",
+            identify_as_worker=False,
+            repo_entry=launch.repo_entry,
+            thread=thread,
+        )
+    except _agent.LaunchRefused as exc:
+        return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
 
     cli_session_id = _extract_cli_session_id(run_dirs.logs / f"{session_id}.log")
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))
     return status
+
+
+def _node_policy(row) -> _policy.InstancePolicy | None:
+    """The policy of the node `row` stopped at, from its snapshot; None when
+    there is no snapshot or no such node in it."""
+    snapshot = store.materialized_chain_of(row)
+    nodes = snapshot.chain.nodes if snapshot is not None else ()
+    node = next((n for n in nodes if n.id == row["current_node_id"]), None)
+    return executor.scope_policy(row, node) if node is not None else None

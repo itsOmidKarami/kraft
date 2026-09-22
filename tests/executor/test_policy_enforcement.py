@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft import events, executor, gate_review, store
+from kraft import escalate, events, executor, gate_review, store
 from kraft import policy as _policy
 from kraft.adapters import agent as agent_mod
 from kraft.executor import dispatch, gates, stops, walk
@@ -313,3 +313,169 @@ async def test_a_gate_reviewer_is_not_launched_past_its_token_budget(item_on, mo
 
     assert status == "awaiting_gate"
     assert [e["payload"]["reason"] for e in it.events("gate_auto_review_skipped")] == ["budget"]
+
+
+# -- every agent launch resolves its policy from the snapshot (Kraft-l8ype) ------------
+
+
+def _capture(monkeypatch) -> dict:
+    """`run_agent_task`'s kwargs for the one launch the test makes; empty if
+    nothing launched."""
+    seen: dict = {}
+
+    async def launch(_db, _rd, **kw):
+        seen.update(kw)
+        return "done"
+
+    monkeypatch.setattr(agent_mod, "run_agent_task", launch)
+    return seen
+
+
+async def _escalate(it, auto):
+    return await escalate.dispatch(
+        it.database, it.run_dirs, work_item_id=it.id, message="help", launch=NO_SETUP, auto=auto
+    )
+
+
+_BOUNDED = {"allowed_tools": ["Read"], "deny_tools": ["WebFetch"], "sandbox": _SANDBOX}
+
+
+@pytest.mark.parametrize("auto", [False, True], ids=["manual", "auto"])
+async def test_an_escalation_turn_launches_under_its_nodes_policy(
+    item_on, fake_agent, monkeypatch, auto
+):
+    """Decision on Kraft-l8ype: an escalation turn is node-scoped
+    (`stuck-escalation-is-an-exec-node-control`), so it runs under the policy
+    of the node its item stopped at -- the node's tool lists and frozen
+    sandbox, not only the repository entry's live ones."""
+    it = await item_on(_node(_agent(), policy=_BOUNDED), "implementation")
+    seen = _capture(monkeypatch)
+
+    await _escalate(it, auto)
+
+    assert seen["allowed_tools"] == ("Read",)
+    assert "WebFetch" in seen["deny_tools"]
+    assert seen["sandbox"] == _SANDBOX
+
+
+@pytest.mark.parametrize(
+    ("policy", "spent", "names"),
+    [
+        ({"token_budget": 50}, 50, "token budget"),
+        ({"allowed_harnesses": ["fake"]}, 0, "allowed_harnesses"),
+    ],
+    ids=["token-budget-spent", "harness-outside-allowed-harnesses"],
+)
+async def test_an_escalation_turn_its_nodes_policy_refuses_never_launches(
+    item_on, fake_agent, monkeypatch, policy, spent, names
+):
+    it = await item_on(_node(_agent(), policy=policy), "implementation")
+    await _spend(it, spent, 0)
+    seen = _capture(monkeypatch)
+
+    assert await _escalate(it, auto=False) == CONFIG_ERROR
+
+    assert seen == {}
+    (session,) = [s for s in it.sessions("implementation") if s["hook_point"] == "escalation"]
+    assert names in Path(session["log_path"]).read_text()
+
+
+async def test_an_escalation_turn_on_an_item_with_no_snapshot_never_launches(
+    item_on, fake_agent, monkeypatch
+):
+    """No snapshot, no policy anyone could know: refused, never unbounded."""
+    it = await item_on(_node(_agent(policy=_BOUNDED)), "implementation")
+    await it.database.write(
+        lambda c: c.execute(
+            "UPDATE work_items SET materialized_chain = NULL WHERE id = ?", (it.id,)
+        )
+    )
+    seen = _capture(monkeypatch)
+
+    assert await _escalate(it, auto=False) == CONFIG_ERROR
+    assert seen == {}
+
+
+async def test_a_gate_reviewer_on_a_harness_its_policy_disallows_never_launches(
+    item_on, fake_agent, monkeypatch
+):
+    """Like `test_a_harness_its_policy_disallows_never_launches`: a snapshot
+    materialization would refuse is held to its policy again at the launch,
+    and the refusal reaches `deps.guard` as an unavailable harness does."""
+    materialized = (await item_on(_reviewed_gate({}), wid="source")).chain
+    narrowed = dataclasses.replace(
+        materialized,
+        policy=dataclasses.replace(materialized.policy, allowed_harnesses=("claude_review",)),
+    )
+    it = await item_on(narrowed, auto_gate=True)
+    seen = _capture(monkeypatch)
+    await _requested(it)
+
+    with pytest.raises(agent_mod.HarnessUnavailable, match="allowed_harnesses"):
+        await gate_review.review(
+            it.database,
+            it.run_dirs,
+            work_item_id=it.id,
+            gate="spec_approval",
+            node=it.chain.chain.nodes[1],
+            launch=NO_SETUP,
+        )
+    assert seen == {}
+
+
+def _fixing_node(where: str) -> list[dict]:
+    """A node allowing `Read`, whose recovery or judge narrows to nothing."""
+    narrow = _agent(where, policy={"allowed_tools": []})
+    failing = {"id": "check", "kind": "subprocess", "command": "false"}
+    fields = (
+        {"on_failure": {"tasks": [narrow]}}
+        if where == "repair"
+        else {"fix_loop": {"tasks": [_agent("fix")], "judge": narrow}}
+    )
+    return _node(failing, policy={"allowed_tools": ["Read"]}, **fields)
+
+
+@pytest.mark.parametrize("where", ["repair", "judge"])
+async def test_a_recovery_and_a_judge_launch_under_their_own_scopes_policy(
+    item_on, fake_agent, where
+):
+    """Both launch through `dispatch_node`, so each resolves at its own scope:
+    the handler's narrowing reaches its argv, not the node's allowlist."""
+    it = await item_on(_fixing_node(where), "implementation")
+    node = it.chain.chain.nodes[0]
+    common = dict(launch=NO_SETUP, budget=_policy.NO_BUDGET)
+    if where == "repair":
+        await dispatch.run_recovery(
+            it.database,
+            it.run_dirs,
+            it.id,
+            node,
+            it.row(),
+            it.repo,
+            handler=node.on_failure,
+            scope="node",
+            failed=[node.steps[0].tasks[0]],
+            note="it failed",
+            steer=None,
+            measured_round=0,
+            round=1,
+            **common,
+        )
+    else:
+        await dispatch.judge_verdict(
+            it.database,
+            it.run_dirs,
+            it.id,
+            node,
+            it.row(),
+            it.repo,
+            round=1,
+            key="implementation.fix_loop",
+            cap=_policy.Cap(3, 3600),
+            policy=_policy.Policy(loops={}, default=_policy.Cap(3, 3600)),
+            **common,
+        )
+
+    (argv,) = fake_agent.argv()
+    assert argv[argv.index("--tools") + 1] == ""
+    assert "--allowedTools" not in argv

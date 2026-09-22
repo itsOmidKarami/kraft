@@ -584,18 +584,6 @@ async def dispatch_node(
                 )
             )
         return BUDGET
-    # A snapshot materialization never checked (an older build's, a hand-edited
-    # row) is held to its policy here too: a profile outside
-    # `allowed_harnesses` never launches.
-    allowed = task_policy.allowed_harnesses
-    if allowed is not None and t.harness not in allowed:
-        return await _config_error(
-            db,
-            run_dirs,
-            common,
-            f"{task.path} selects harness {t.harness!r}, which its policy's allowed_harnesses "
-            f"{sorted(allowed)!r} does not include\n",
-        )
     # A harness the runtime cannot offer stops for a human and never silently
     # substitutes another (`unavailable-selected-harness-needs-human`): the
     # profile lookup in `resolve_agent_task` raises `HarnessUnavailable`,
