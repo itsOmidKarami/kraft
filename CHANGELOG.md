@@ -4,7 +4,7 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
-## 1.0.1
+## 1.0.3
 
 - **Fix: the default chain's draft merge request now rebases before it
   opens.** `draft_merge_request` opened against the item's base branch as it
@@ -22,6 +22,16 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
     the exact YAML to paste in. An item already running when you update keeps
     the chain it was filed against; only an item filed after you update the
     template gets the fix.
+
+## 1.0.2
+
+- Fix: a session log too big to read whole now shows where it was cut off,
+  with a link to the full plain-text log, and offers a download instead of
+  copying the whole log into the page (Kraft-qmjk1).
+- Codex: Kraft reads codex's `--json` log for token usage, the session id
+  and usage limits (Kraft-w3kot).
+
+## 1.0.1
 
 - Fix: the Appearance settings page's palette, mode, density and board
   controls now show as disabled while your theme is still loading, instead of
