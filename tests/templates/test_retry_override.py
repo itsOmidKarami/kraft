@@ -178,3 +178,17 @@ def test_a_workspace_items_fork_keeps_each_repositorys_policy():
 
     assert fork.repository_policies == workspace_chain.repository_policies
     assert fork.to_json() == workspace_chain.to_json()
+
+
+def test_a_retry_fork_keeps_the_items_base_branch():
+    """Kraft-ielvs: the fork's target is the item's, base branch and all
+    (Kraft-v9gbi) -- a retry never retargets the merge request."""
+    chain = _chain()
+    on_release = chain.chain.materialize(
+        target=WorkItemTarget.for_repository("target", base_branch="release"),
+        effective_policy=chain.policy,
+    )
+
+    fork = validate_retry_override(on_release, "build.work.implement").chain
+
+    assert fork.target.base_branch == "release"

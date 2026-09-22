@@ -62,3 +62,16 @@ def test_intake_refuses_a_base_branch_on_a_repository_with_no_origin(client, tmp
 
     assert r.status_code == 422
     assert "has no origin remote" in r.json()["detail"]
+
+
+def test_a_chain_switch_keeps_the_items_base_branch(client, repo):
+    """Kraft-ielvs: switching an unstarted item's chain re-materializes it on
+    the same target, base branch and all."""
+    wid = _file(client, repo, base_branch="release", chain_template="quick-task").json()["id"]
+
+    r = client.patch(f"/api/work-items/{wid}", json={"chain_template": "default"})
+
+    assert r.status_code == 200, r.text
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["chain_template"] == "default"
+    assert json.loads(item["materialized_chain"])["target"]["base_branch"] == "release"
