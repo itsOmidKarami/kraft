@@ -258,6 +258,8 @@ def test_patch_switches_chain_template_before_the_chain_starts(client, repo):
         "spec_approval",
         "plan",
         "plan_approval",
+        "chain_revision",
+        "chain_revision_approval",
         "implementation",
         "verification",
         "work_brief",
@@ -520,7 +522,8 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(client, tmp_path
     """The trimmed node must be absent from the run, not merely from the
     chain_definition the UI reads (see the _trims_the_chain_and_reports_it
     test above for that check). V1 trims the plan node and its gate together,
-    so the node after the spec gate is `implementation`."""
+    so the node after the spec gate is the chain revision, which reads the
+    attached plan."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
     wid = client.post(
         "/api/work-items",
@@ -538,7 +541,7 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(client, tmp_path
     events = _poll_events(client, wid, "node_started", count=3)
     started = [e["payload"]["node_id"] for e in events if e["type"] == "node_started"]
     assert "plan" not in started
-    assert started[2] == "implementation"
+    assert started[2] == "chain_revision"
 
 
 def _outside(repo, tmp_path):

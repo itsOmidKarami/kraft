@@ -159,7 +159,7 @@ def test_extends_expands_a_library_node_into_the_chain(design):
 def test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft(design):
     chain = design.resolve_chain("default")
     ids = [n.id for n in chain.nodes]
-    assert ids[ids.index("plan_approval") + 1 : ids.index("draft_merge_request")] == [
+    assert ids[ids.index("chain_revision_approval") + 1 : ids.index("draft_merge_request")] == [
         "implementation",
         "verification",
         "work_brief",

@@ -99,8 +99,13 @@ def _write_artifact(argv: list[str]) -> None:
         f"hook_point: {fields.get('Hook point', '')}\n"
         f"kind: {kind}s\n"
         f"title: fake {kind}\n"
-        f"---\n\nfake agent {kind}\n"
+        f"---\n\n{_BODIES.get(kind, f'fake agent {kind}')}\n"
     )
+
+
+#: An artifact Kraft parses rather than shows: a fake chain revision proposes no
+#: change, the common real answer, so its gate passes without a human.
+_BODIES = {"chain_revision": '```json\n{"rationale": "fake: the chain fits the plan"}\n```'}
 
 
 def _prompt(argv: list[str]) -> str:

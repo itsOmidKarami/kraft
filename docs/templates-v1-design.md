@@ -183,6 +183,15 @@ tasks:
     produces: plan
     skill: kraft:plan
 
+  revise_chain:
+    kind: agent
+    harness: claude
+    prompt: >-
+      Decide whether the rest of this chain still fits the approved spec and
+      plan, and propose the smallest change set if it does not.
+    produces: chain_revision
+    skill: kraft:chain-review
+
   implementer:
     kind: agent
     harness: claude
@@ -430,6 +439,22 @@ nodes:
     message: Review and approve the implementation plan.
     artifact: plan
     reject_to: plan
+
+  # Kraft-oydes: the chain was chosen at intake, before the spec and plan
+  # existed. Now both are approved, one agent reads them against the nodes
+  # still to run and proposes a change set -- or, usually, none, which passes
+  # the gate below without asking anyone.
+  - id: chain_revision
+    kind: exec
+    tasks:
+      - id: revise
+        extends: revise_chain
+
+  - id: chain_revision_approval
+    kind: gate
+    message: Review the proposed change to the rest of this chain.
+    artifact: chain_revision
+    reject_to: chain_revision
 
   - id: implementation
     extends: implementation

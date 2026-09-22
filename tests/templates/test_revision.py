@@ -375,3 +375,34 @@ def test_the_revising_task_is_shown_only_the_nodes_it_may_change():
     tail = json.loads(note[note.index("```json") + 7 : note.rindex("```")])
     assert [n["node"]["id"] for n in tail][:2] == ["build", "brief"]
     assert tail[0]["task_paths"] == ["build.main.run"]
+
+
+# ── the shipped chains ──
+
+SHIPPED = Path(__file__).resolve().parents[2] / "templates"
+
+
+def test_the_default_chain_revises_itself_right_after_the_plan_is_approved():
+    chain = TemplateLibrary.from_yaml_dir(SHIPPED).resolve_chain("default")
+    ids = [n.id for n in chain.nodes]
+    at = ids.index("plan_approval") + 1
+
+    assert ids[at : at + 2] == ["chain_revision", "chain_revision_approval"]
+    [revise] = chain.nodes[at].tasks()
+    assert (revise.task.produces, revise.task.skill, revise.task.harness) == (
+        revision.CHAIN_REVISION,
+        "kraft:chain-review",
+        "claude",
+    )
+    gate = chain.nodes[at + 1].node
+    assert (gate.artifact, gate.reject_to) == (revision.CHAIN_REVISION, "chain_revision")
+    # The final gate is still the one it was.
+    assert [n.id for n in chain.nodes if getattr(n.node, "chain_finalized", False)] == [
+        "chain_review"
+    ]
+
+
+def test_the_quick_task_chain_has_no_revision():
+    chain = TemplateLibrary.from_yaml_dir(SHIPPED).resolve_chain("quick-task")
+
+    assert revision.CHAIN_REVISION not in {n.covered_by for n in chain.nodes}

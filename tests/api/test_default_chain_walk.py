@@ -90,6 +90,10 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "spec_approval",
         "plan",
         "plan_approval",
+        # Kraft-oydes: the fake revision proposes no change, so its gate
+        # completes without being approved by anyone above.
+        "chain_revision",
+        "chain_revision_approval",
         "implementation",
         "verification",
         "work_brief",

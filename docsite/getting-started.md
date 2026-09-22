@@ -93,7 +93,9 @@ kraft view docs        # read the spec and plan Kraft wrote
 kraft item approve     # or Approve on the board
 ```
 
-Approving walks it to `plan_approval`, then on into implementation. Reject
+Approving walks it to `plan_approval`, then to a chain revision (which
+usually proposes nothing and passes on its own; see
+[Concepts](concepts.md#chain)), then on into implementation. Reject
 instead, with `kraft item reject --note "..."`, and the producing node re-runs
 with your note as its steer — see
 [Concepts → Gate](concepts.md#gate).

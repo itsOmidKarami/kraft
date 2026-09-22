@@ -130,6 +130,12 @@ if [ "$kind" = mr_meta ] && [ -n "${KRAFT_FAKE_CLAUDE_LABELS:-}" ]; then
 "
 fi
 
+# A chain revision is a change set Kraft parses, not prose: a fake one proposes
+# no change, the common real answer, so its gate passes without a human.
+body="fake ${kind} body"
+if [ "$kind" = chain_revision ]; then
+  body="$(printf '%s\n%s\n%s' '```json' '{"rationale": "fake: the chain fits the plan"}' '```')"
+fi
 if [ -n "$kind" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
   mkdir -p ".engineering/${kind}s"
   cat > ".engineering/${kind}s/${item}.md" <<EOF
@@ -141,7 +147,7 @@ kind: ${kind}s
 ${labels}title: fake ${kind}
 ---
 
-fake ${kind} body
+${body}
 EOF
   git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
   git -c user.name=fake -c user.email=fake@kraft \

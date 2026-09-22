@@ -411,8 +411,9 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
 
     V1's default chain runs its own spec and plan agents (the legacy fixture
     bound both hooks to a noop), so the question is switched on only once
-    they are through: the node under test is `implementation`, and the gate
-    after it is `local_review`."""
+    they are through: the node under test is the first agent after the plan
+    gate, `chain_revision`, and the gate after it is `local_review` (its own
+    revision gate passes unasked: the fake proposes no change)."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which database should this target?")
     wid = client.post(
@@ -425,7 +426,7 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "needs_context")
     _approve_retrying(client, wid, "plan_approval")
 
-    # implementation asks its question and stops.
+    # chain_revision asks its question and stops.
     _wait(
         lambda: (lambda b: b if b["needs_context_question"] else None)(
             client.get(f"/api/work-items/{wid}").json()
@@ -434,7 +435,7 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
     )
     item = client.get(f"/api/work-items/{wid}").json()
     assert item["needs_context_question"] == "which database should this target?"
-    assert item["current_node_id"] == "implementation"
+    assert item["current_node_id"] == "chain_revision"
 
     # answered — the chain runs on to the next gate.
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_STATUS", "done")
