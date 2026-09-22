@@ -82,6 +82,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 skip_nodes=[n for v in ns.skip_nodes for n in v.split(",") if n] or None,
                 budget_usd=ns.budget,
                 node_overrides=_node_overrides(ns.node_override),
+                autostart=ns.autostart,
             )
         ),
         common._render_action,
@@ -214,7 +215,9 @@ def _cmd_set_policy(ns: argparse.Namespace) -> None:
 
 def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
-    create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
+    create = subs.add_parser(
+        "create", parents=[common], help="file a work item (paused unless --autostart)"
+    )
     create.add_argument("title")
     create.add_argument(
         "--description",
@@ -271,6 +274,11 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         metavar="NODE.FIELD=VALUE",
         help="a per-node override at intake, the fields set-node-override takes "
         "(repeatable), e.g. plan.auto_escalate=true or implementation.attempts=2",
+    )
+    create.add_argument(
+        "--autostart",
+        action="store_true",
+        help="start it now instead of leaving it paused for a human; refused from a Kraft worker",
     )
     create.set_defaults(func=_cmd_create, all=False)
 

@@ -285,6 +285,23 @@ def test_create_refuses_a_malformed_intake_flag(flag, says, capsys):
     assert flag[0] in err and says in err
 
 
+@pytest.mark.parametrize(
+    "flag, autostart", [([], False), (["--autostart"], True)], ids=["default", "autostart"]
+)
+def test_create_lands_paused_unless_a_human_asks_to_start_it(monkeypatch, flag, autostart):
+    """Kraft-s7c04.31: paused is the default, on purpose; `--autostart` is the
+    human's way to skip pressing Start."""
+    sent = {}
+
+    async def fake_post(path, payload):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "active" if autostart else "paused"}
+
+    monkeypatch.setattr(client.transport, "_post", fake_post)
+    cli.main(["item", "create", "t", "--repo", "/r", *flag])
+    assert sent["autostart"] is autostart
+
+
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):
     stranger = make_repo(tmp_path, name="stranger")
     monkeypatch.chdir(stranger)

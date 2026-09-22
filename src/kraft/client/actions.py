@@ -25,8 +25,13 @@ async def create_work_item(
     skip_nodes: list[str] | None = None,
     budget_usd: float | None | EllipsisType = ...,
     node_overrides: dict | None = None,
+    autostart: bool = False,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
+
+    `autostart` is the human's shortcut past pressing Start (Kraft-s7c04.31).
+    The server refuses it (403) from a Kraft session or an MCP client, so a
+    worker asking for it files nothing; the default stays paused on purpose.
 
     `policy` is the item's own policy override (`set_work_item_policy`).
 
@@ -67,7 +72,7 @@ async def create_work_item(
             "title": title,
             "repo": repo,
             "chain_template": chain_template,
-            "autostart": False,
+            "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
             **({"policy": policy} if policy else {}),

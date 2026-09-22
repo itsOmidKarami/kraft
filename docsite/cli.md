@@ -16,6 +16,7 @@ kraft view list                      # the board, scoped to the repo you are in
 kraft view list --all --status=paused
 kraft view show                      # the work item whose worktree you are in
 kraft item create "fix the flaky test" --description "..."   # files it paused; a human starts it
+kraft item create "fix it now" --autostart   # starts it at once; refused (403) from a Kraft worker
 kraft item create "ship the thing" --spec .engineering/specs/x.md   # skips the spec node
 kraft item create "backport the fix" --base-branch release/1.2   # starts from, and merges into, release/1.2
 kraft item create "small fix" --skip-nodes spec,plan --budget 5 \

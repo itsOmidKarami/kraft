@@ -67,6 +67,8 @@ def test_create_work_item_tells_the_agent_it_will_not_run():
     """An agent that thinks create means start will file work and walk away."""
     create = next(t for t in _tools() if t.name == "create_work_item")
     assert "paused" in create.description.lower()
+    # and it cannot ask otherwise: autostart is a person's flag (Kraft-s7c04.31)
+    assert "autostart" not in create.input_schema["properties"]
 
 
 def test_create_work_item_offers_a_description_and_says_what_it_is_for():

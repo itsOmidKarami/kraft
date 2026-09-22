@@ -39,7 +39,7 @@ surface. `--json` on any verb prints the raw API payload.
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate]  # files it paused
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate] [--autostart]  # files it paused unless --autostart
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
