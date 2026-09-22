@@ -103,6 +103,29 @@ async def test_the_back_half_walks_to_merge_only_on_a_green_pipeline(
     assert all("worktrees" in str(cwd) for cwd in fake.cwds), fake.cwds
 
 
+async def test_an_implementation_that_committed_nothing_stops_before_any_merge_request(
+    walk, item_on, database, run_dirs, repo, tmp_path
+):
+    """Kraft-vz8e: the worker committed nothing, `open_mr` opened an empty
+    MR anyway, and `mr_checks` waited out its cap on CI that never ran. The
+    item stops at `open_mr` for a human, naming why, with nothing opened."""
+    subprocess.run(["git", "clone", "--bare", "-q", str(repo), str(tmp_path / "o.git")], check=True)
+    _git(repo, "remote", "add", "origin", str(tmp_path / "o.git"))
+    it = await item_on([forge_node("open_mr", "mr.open_draft"), forge_node("mr_checks", "mr.ci")])
+    await _builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
+    )
+    fake = forge.FakeForge(ci_states=["success"])
+
+    assert await walk(fake, it) == "needs_human"
+
+    assert not fake.opened and not fake.pushed
+    assert not it.sessions("mr_checks"), "mr_checks must never wait on an empty merge request"
+    (stop,) = it.events("work_item_needs_human")
+    assert stop["payload"]["node_id"] == "open_mr"
+    assert "has no commits beyond origin/main" in stop["payload"]["reason"]
+
+
 async def test_the_executor_hands_the_task_s_resolved_wait_to_the_forge(walk, item_on, monkeypatch):
     """A task's `wait:` reaches `run_task` resolved (`ForgeTask.wait_bounds`):
     the authored timeout and initial interval, and the default maximum it
@@ -324,6 +347,9 @@ async def test_run_task_opens_a_merge_request_per_repo_deepest_first(
         item_on, database, run_dirs, tmp_path, policy_name
     )
     _with_origin(tmp_path, it, worktree)
+    # Both halves change: a member with nothing beyond its base opens no
+    # merge request at all (Kraft-vz8e).
+    _commit(worktree / "repos" / "pkg", "new.txt", "x\n")
     _commit(worktree, "root-change.txt", "x\n", "root change")
     fake = _RecordingForge(ci_states=["success"])
 

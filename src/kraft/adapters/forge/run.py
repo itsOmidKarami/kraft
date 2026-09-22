@@ -213,8 +213,20 @@ async def _run_one(
     """
     findings: list[dict] | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
+    # Kraft-vz8e: an MR with no commits runs no CI, so `mr_checks` would wait
+    # out its cap on a pipeline that never starts. Refused before it is
+    # opened or readied, as a `config_error`: a fix loop has nothing to fix.
+    # Read after the "already merged" shortcuts, which a merged branch --
+    # empty against its base -- must still take.
+    verb = "open" if handler == "open_mr" else "ready"
+    empty = (
+        f"refusing to {verb} a merge request for {branch}: it has no commits beyond "
+        f"origin/{base} -- the implementation committed nothing\n"
+    )
     match handler:
         case "open_mr":
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             # Ask first: a rejected review re-entering the chain at
             # implementation walks back through this node, and a retry of
             # an open_mr that crashed after the create lands here too. A
@@ -463,6 +475,8 @@ async def _run_one(
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "merged":
                 return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             # Undraft before anything else: every MR opens as a draft now
             # (open_mr always does), and mr_sync is the one node every
             # chain shape runs before merge, gated or not -- see the
@@ -502,6 +516,8 @@ async def _run_one(
                     "done",
                     findings,
                 )
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             await forge.mark_ready(
                 repo=repo,
                 branch=branch,
