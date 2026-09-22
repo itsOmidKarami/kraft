@@ -44,6 +44,11 @@ class NewWorkItem(BaseModel):
     workspace: str | None = None
     members: list[str] = []
     root_pointer_policy: RootPointerPolicy | None = None
+    #: The branch the item's work starts from and its merge request targets
+    #: (Kraft-v9gbi), frozen into its target; a workspace item's root's only.
+    #: None is the repository's default branch. Refused (422) unless origin
+    #: has it.
+    base_branch: str | None = None
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
     #: the caller's working directory, sent only when there are attachment paths
@@ -207,19 +212,21 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # The repository layer, once: the dry run and the intake below must
     # materialize from the same policy (`repository-policy-cannot-relax-
     # instance-safety`).
+    base_branch = await deps.base_branch_or_422(body.repo, body.base_branch)
     target = deps.workspace_target(
         st,
         body.repo,
         workspace=body.workspace,
         members=body.members,
         root_pointer_policy=body.root_pointer_policy,
-    )
+        base_branch=base_branch,
+    ) or entry.single_repo_target(body.repo, base_branch=base_branch)
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
     try:
         item_policy = (
             chain.materialize(
-                target=target or entry.single_repo_target(body.repo),
+                target=target,
                 effective_policy=policy,
                 repository_policies=per_repository,
                 attachment_kinds=attachment_kinds,

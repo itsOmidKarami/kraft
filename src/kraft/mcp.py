@@ -58,6 +58,7 @@ def build() -> MCPServer:
         auto_gate: bool = True,
         implements_beads: list[str] | None = None,
         policy: dict | None = None,
+        base_branch: str | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -83,7 +84,11 @@ def build() -> MCPServer:
         naming a bead in prose promises nothing.
 
         `policy` is the item's own policy override, as `set_work_item_policy`
-        takes it. Leave it out unless a human asked for one."""
+        takes it. Leave it out unless a human asked for one.
+
+        `base_branch` is the branch the work starts from and its merge request
+        targets -- a release branch, say. Unset, it is the repo's default
+        branch. It must already exist on the repo's origin."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -93,6 +98,7 @@ def build() -> MCPServer:
             auto_gate=auto_gate,
             implements_beads=implements_beads,
             policy=policy,
+            base_branch=base_branch,
         )
 
     @server.tool()

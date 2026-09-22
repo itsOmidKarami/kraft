@@ -68,11 +68,12 @@ class GlabCli(mr_ops.CliWaits):
         *,
         repo: Path,
         branch: str,
+        base: str,
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
     ) -> MR:
-        await git.assert_clean(repo)
+        await git.assert_clean(repo, base)
         # Both forges refuse to create against an unpushed branch. `--fill --yes`
         # would push too, but pushing explicitly keeps the failure legible when
         # it is the push that fails rather than the create.
@@ -91,6 +92,8 @@ class GlabCli(mr_ops.CliWaits):
                 # the gate that decides it's ready, not this call (draft-MR
                 # workflow spec). `mr_sync` un-drafts it after the gate.
                 "--draft",
+                "--target-branch",
+                base,
                 "--title",
                 mr_ops.mr_title(title),
                 "--description",

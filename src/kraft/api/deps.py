@@ -15,10 +15,12 @@ import functools
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 
+from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import executor, store
 from kraft.policy import (
@@ -31,6 +33,7 @@ from kraft.templates.environment import (
     RootPointerPolicy,
     TemplateEnvironmentError,
     WorkItemTarget,
+    branch_name_problem,
 )
 from kraft.templates.library import LIBRARY_FILE, TemplateLibrary, TemplateLibraryError
 
@@ -333,6 +336,50 @@ def _connected(repos: list[dict], path: str) -> dict | None:
     return next((r for r in repos if r["path"] == resolved), None)
 
 
+async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
+    """`branch`, once origin is known to have it (Kraft-v9gbi) -- an item's
+    work starts from it, so a branch that is not there would only fail at the
+    first node, after the bead is filed. None names no branch: the
+    repository's default, which needs no check."""
+    if branch is None:
+        return None
+    path = Path(repo)
+    # The model's own rules, checked here first so the refusal is one
+    # sentence rather than pydantic's error list, and before any git call.
+    if (problem := branch_name_problem(branch)) is not None:
+        raise HTTPException(422, f"base branch {branch!r} is not a valid branch name: it {problem}")
+    if not config_mod.git_read(path, "remote", "get-url", "origin", expected_failure=True):
+        raise HTTPException(
+            422, f"base branch {branch!r} cannot be checked: {repo} has no origin remote"
+        )
+    try:
+        done = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{branch}"],
+            cwd=path,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=builtins_mod.promptless_git_env(path),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            422, f"could not reach {repo}'s origin to check base branch {branch!r}: timed out"
+        ) from None
+    if done.returncode == 2:
+        raise HTTPException(
+            422,
+            f"no branch {branch!r} on origin of {repo}; push it first, or name a branch origin has",
+        )
+    if done.returncode != 0:
+        detail = done.stderr.strip() or "failed"
+        raise HTTPException(
+            422, f"could not reach {repo}'s origin to check base branch {branch!r}: {detail}"
+        )
+    return branch
+
+
 def workspace_target(
     st,
     repo: str,
@@ -340,6 +387,7 @@ def workspace_target(
     workspace: str | None,
     members: list[str],
     root_pointer_policy: RootPointerPolicy | None,
+    base_branch: str | None = None,
 ) -> WorkItemTarget | None:
     """The workspace target an intake selects, or None for a plain repository
     item. Raises a 422 for a selection that cannot assemble: an undeclared
@@ -368,7 +416,7 @@ def workspace_target(
         )
     try:
         return WorkItemTarget.from_selection(
-            ws, members=members, root_pointer_policy=root_pointer_policy
+            ws, members=members, root_pointer_policy=root_pointer_policy, base_branch=base_branch
         )
     except TemplateEnvironmentError as exc:
         raise HTTPException(422, str(exc)) from exc

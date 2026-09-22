@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -44,6 +45,50 @@ Identifier = Annotated[StrictStr, Field(pattern=_IDENTIFIER.pattern)]
 
 class TemplateEnvironmentError(Exception):
     pass
+
+
+#: What `git check-ref-format` never allows anywhere in a ref name: control
+#: characters, space and DEL, `~ ^ : ? * [ \\`, `..`, `@{` and `//`.
+_REF_FORBIDDEN = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]|\.\.|@\{|//")
+
+
+def branch_name_problem(name: str) -> str | None:
+    """Why `git check-ref-format --branch` would refuse `name`, or None.
+
+    Pure Python, so the model can refuse a bad name at validation whatever
+    door built it -- intake, a rehydrated snapshot, a retry fork, a script --
+    with no git call (Kraft-j4adz). A leading `-` is refused first by name:
+    it is the one that would reach `gh pr create --base` and friends as an
+    option. Stricter than git only on `@`, which `--branch` reads as the
+    current branch."""
+    if not name:
+        return "is empty"
+    if name.startswith("-"):
+        return "starts with '-', which a command would read as an option"
+    if name in ("@", "HEAD"):
+        return f"is {name!r}, which git reserves"
+    if (found := _REF_FORBIDDEN.search(name)) is not None:
+        return f"contains {found.group()!r}"
+    if name.startswith("/") or name.endswith("/"):
+        return "starts or ends with '/'"
+    if name.endswith("."):
+        return "ends with '.'"
+    for part in name.split("/"):
+        if part.startswith("."):
+            return f"has a component {part!r} starting with '.'"
+        if part.endswith(".lock"):
+            return f"has a component {part!r} ending with '.lock'"
+    return None
+
+
+def _valid_branch(name: str) -> str:
+    problem = branch_name_problem(name)
+    if problem is not None:
+        raise ValueError(f"base branch {name!r} is not a valid branch name: it {problem}")
+    return name
+
+
+BranchName = Annotated[StrictStr, AfterValidator(_valid_branch)]
 
 
 class RootPointerPolicy(StrEnum):
@@ -139,6 +184,16 @@ class WorkItemTarget(BaseModel):
     root_pointer_policy: Annotated[RootPointerPolicy, Field(strict=False)] = (
         RootPointerPolicy.IGNORE
     )
+    #: The branch the item's work starts from, rebases onto and merges into,
+    #: frozen at intake (Kraft-v9gbi); None is the repository's default
+    #: branch. It names the item's own repository, or a workspace's root only:
+    #: each member keeps its own default branch, as it always has, since one
+    #: branch name means nothing across repositories that need not share it.
+    #: Read through `builtins.base_branch`, never here directly. `BranchName`
+    #: holds it to git's own branch-name rules, and off a leading `-`, on
+    #: every validation -- a snapshot rehydrated or a target built by any door
+    #: is checked, not only intake's (Kraft-j4adz).
+    base_branch: BranchName | None = None
 
     @model_validator(mode="after")
     def _kind_owns_its_fields(self) -> WorkItemTarget:
@@ -171,9 +226,9 @@ class WorkItemTarget(BaseModel):
         return ((self.root,) if self.root else ()) + members
 
     @classmethod
-    def for_repository(cls, repository: str) -> WorkItemTarget:
+    def for_repository(cls, repository: str, *, base_branch: str | None = None) -> WorkItemTarget:
         """A single-repository target, by the repository's id."""
-        return cls(kind="repository", repository=repository)
+        return cls(kind="repository", repository=repository, base_branch=base_branch)
 
     @classmethod
     def from_selection(
@@ -183,6 +238,7 @@ class WorkItemTarget(BaseModel):
         members: Sequence[str],
         include_root: bool = True,
         root_pointer_policy: RootPointerPolicy | None = None,
+        base_branch: str | None = None,
     ) -> WorkItemTarget:
         """Select some (or all) of `workspace`'s members. Every name must be
         one the workspace actually mounts -- an unknown member is a template
@@ -200,6 +256,7 @@ class WorkItemTarget(BaseModel):
             mounts={m: workspace.members[m] for m in members},
             include_root=include_root,
             root_pointer_policy=root_pointer_policy or workspace.root_pointer_default,
+            base_branch=base_branch,
         )
 
 

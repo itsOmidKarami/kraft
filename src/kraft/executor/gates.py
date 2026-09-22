@@ -994,7 +994,10 @@ async def resume_after_escalation(
             # The refresh runs host git in the worktree (Kraft-dshto).
             stops.refuse_sandboxed_submodules(row, launch)
             new_base = await _builtins.refresh_worktree_base(
-                worktree, Path(row["repo"]), store.branch_for(row)
+                worktree,
+                Path(row["repo"]),
+                store.branch_for(row),
+                base=await _builtins.base_branch(db, work_item_id, Path(row["repo"])),
             )
         except RuntimeError as exc:
             reason = str(exc)

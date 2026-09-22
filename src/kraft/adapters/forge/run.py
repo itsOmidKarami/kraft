@@ -138,9 +138,9 @@ def backend_for(backend: str, repo_forge: str | None) -> str:
 
 
 async def _rebase_conflict_away(
-    db, forge: Forge, *, repo: Path, orig_repo: Path, branch: str, work_item_id: str
+    db, forge: Forge, *, repo: Path, orig_repo: Path, branch: str, base: str, work_item_id: str
 ) -> tuple[str, str]:
-    """Force-rebase onto the target's current default branch -- the one
+    """Force-rebase onto `base`'s current tip -- the item's base branch, the one
     thing that can turn a real conflict into nothing left to fix, since a
     conflict against wherever main was when this branch was cut may not
     exist against main's current tip. Shared by `ci_poll` (Kraft-9h7v, the
@@ -155,11 +155,10 @@ async def _rebase_conflict_away(
     its own status. Returns ("<what changed>\\n", "done") when it worked,
     with the branch already rebased, `base_ref` persisted, and pushed.
     """
-    default = await git.default_branch(orig_repo)
     try:
-        new_head = await _builtins.mr_rebase_forced(repo, orig_repo, default)
+        new_head = await _builtins.mr_rebase_forced(repo, orig_repo, branch, base)
     except RuntimeError as exc:
-        return f"rebase onto {default} failed: {exc}\n", "conflict"
+        return f"rebase onto {base} failed: {exc}\n", "conflict"
     if not new_head:
         return "", "conflict"
     await db.write(lambda c, h=new_head: store.set_base_ref(c, work_item_id, h))
@@ -174,6 +173,10 @@ async def _run_one(
     repo: Path,
     orig_repo: Path,
     branch: str,
+    #: The branch `repo`'s merge request targets (`builtins.base_branch`):
+    #: the item's base branch for its own repository or a workspace root, a
+    #: member's own default branch for a member.
+    base: str,
     title: str,
     work_item_id: str,
     node_id: str,
@@ -209,7 +212,7 @@ async def _run_one(
     asked for *this* repo's merge (`run_task` works out which repo that was).
     """
     findings: list[dict] | None = None
-    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch), meta)
+    body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
     match handler:
         case "open_mr":
             # Ask first: a rejected review re-entering the chain at
@@ -237,6 +240,7 @@ async def _run_one(
                 mr = await forge.open_mr(
                     repo=repo,
                     branch=branch,
+                    base=base,
                     title=mr_ops.mr_title_for(title, meta),
                     body=body,
                     meta=meta,
@@ -365,6 +369,7 @@ async def _run_one(
                     repo=repo,
                     orig_repo=orig_repo,
                     branch=branch,
+                    base=base,
                     work_item_id=work_item_id,
                 )
                 log += rebase_log
@@ -568,6 +573,7 @@ async def _run_one(
                         repo=repo,
                         orig_repo=orig_repo,
                         branch=branch,
+                        base=base,
                         work_item_id=work_item_id,
                     )
                     log += rebase_log
@@ -637,8 +643,8 @@ async def _run_one(
             from kraft import policy as _policy
             from kraft.store import _now as _now
 
-            default = await git.default_branch(orig_repo)
-            head_sha = await _builtins.upstream_head(orig_repo)
+            # `base`: the item's base branch, what its merge landed on.
+            head_sha = await _builtins.upstream_head(orig_repo, base)
             if head_sha is None:
                 # Peer callers (`ensure_worktree`, `refresh_worktree_base`) treat a
                 # failed `rev-parse HEAD` as "nothing to report yet", not a value to
@@ -667,7 +673,7 @@ async def _run_one(
                 # head above, not whatever this checkout's local HEAD happens to
                 # be if it has not been pulled (code-review, second finding).
                 ci_status = await forge.branch_ci_status(
-                    repo=orig_repo, branch=default, head_sha=head_sha, pipeline_id=pipeline_id
+                    repo=orig_repo, branch=base, head_sha=head_sha, pipeline_id=pipeline_id
                 )
                 # Only pin a read that is actually *for* head_sha (plan-review
                 # finding 2). Right after a merge, the target branch usually has
@@ -685,7 +691,7 @@ async def _run_one(
                         )
                     )
                 log, status = await ci.render_ci(
-                    ci_status, forge=forge, repo=orig_repo, branch=default, head_sha=head_sha
+                    ci_status, forge=forge, repo=orig_repo, branch=base, head_sha=head_sha
                 )
                 if status == "infra":
                     # Same counter, same key format, as `ci_poll`'s own
@@ -725,7 +731,7 @@ async def _run_one(
                     log, status = await ci.retry_infra_once(
                         forge,
                         repo=orig_repo,
-                        branch=default,
+                        branch=base,
                         head_sha=head_sha,
                         first=ci_status,
                         # Same reason the first read above uses
@@ -748,8 +754,7 @@ async def _run_one(
                         or log
                     )
                     title = (
-                        f"post-merge pipeline broke on {default}: "
-                        f"{job.name if job else 'unknown job'}"
+                        f"post-merge pipeline broke on {base}: {job.name if job else 'unknown job'}"
                     )[: beads.MAX_TITLE]
                     info = db.read(
                         lambda c: c.execute(
@@ -874,7 +879,7 @@ async def run_task(
     repo_forge: str | None = None,
     repo: Path,
     #: The original repo, not the worktree -- `ci_poll`'s confirmed-conflict
-    #: rebase (Kraft-9h7v) needs origin's current default branch tip, which
+    #: rebase (Kraft-9h7v) needs origin's current base branch tip, which
     #: `refresh_worktree_base` fetches from here. None (every test call site
     #: that predates this, and any future one that never exercises the
     #: conflict path) falls back to `repo` -- harmless, since that path is
@@ -958,10 +963,16 @@ async def run_task(
         legacy = item["root_merge_policy"] if item is not None else None
         bumps = legacy in ("bump", "bump_no_mr")
         root_policy = RootPointerPolicy.BUMP if bumps else RootPointerPolicy.IGNORE
+    # The item's base branch (Kraft-v9gbi): its own repository's, or a
+    # workspace root's. A member's merge request targets the member's own
+    # default branch (`builtins.base_branch(member=True)`, per target below).
+    item_base = await _builtins.base_branch(db, work_item_id, orig_repo or repo)
     if multi:
         root_repo = next(t for _, t, role in targets if role == "root")
         mounts = {r["submodule_path"] for r in rows if r["role"] == "submodule"}
-        root_has_changes = await git.source_changed(root_repo, branch, exclude=mounts)
+        root_has_changes = await git.source_changed(
+            root_repo, branch, base=item_base, exclude=mounts
+        )
         root_state = next(r["merge_state"] for r in rows if r["role"] == "root")
         # `merge` publishes the root whenever it has something to publish: its
         # source, a merge request it already has (opened while it had source,
@@ -983,7 +994,7 @@ async def run_task(
 
     if handler == "merge_watch" and targets:
         # `merge_watch` ignores the per-target `repo` entirely -- it reads
-        # `orig_repo`'s own default branch. One pass, not one per target: a
+        # the item's base branch in `orig_repo`. One pass, not one per target: a
         # multi-repo item would otherwise poll the same branch N times and
         # file N identical follow-up beads (gate review). Root by preference,
         # first target when `root_policy == "skip"` already dropped it -- the
@@ -1066,11 +1077,15 @@ async def run_task(
                     rows,
                     root_repo=target_repo,
                     branch=branch,
+                    base=item_base,
                     title=title,
                     work_item_id=work_item_id,
                     has_source=root_has_changes,
                 )
                 log += root_log
+            # `merge_watch` reads the item's own base whichever target it
+            # was handed (above); every other handler targets this one's.
+            member = role == "submodule" and handler != "merge_watch"
             if settled is None:
                 one_log, one_status, one_findings = await _run_one(
                     live_forge,
@@ -1078,6 +1093,11 @@ async def run_task(
                     repo=target_repo,
                     orig_repo=orig_repo or target_repo,
                     branch=branch,
+                    base=(
+                        await _builtins.base_branch(db, work_item_id, target_repo, member=True)
+                        if member
+                        else item_base
+                    ),
                     title=title,
                     work_item_id=work_item_id,
                     node_id=node_id,
@@ -1212,16 +1232,17 @@ async def _observed(
     return ("waiting" if state == "pending" else status), log
 
 
-async def _point_at_merged_members(rows, root_repo: Path, work_item_id: str) -> list[str]:
+async def _point_at_merged_members(db, rows, root_repo: Path, work_item_id: str) -> list[str]:
     """Move each member's pointer in `root_repo` to the revision its origin's
     default branch has now -- what its merge landed -- and commit them.
-    Returns the mount paths that moved."""
+    Returns the mount paths that moved. A member's base is its own default
+    branch, whatever the item's base branch is (`builtins.base_branch`)."""
     bumped = []
     for r in rows:
         if r["role"] != "submodule":
             continue
         sub_path = Path(r["repo_path"])
-        default = await git.default_branch(sub_path)
+        default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
         await git.run_git(sub_path, ["git", "fetch", "origin", default])
         merged_sha = (
             await git.run_git(sub_path, ["git", "rev-parse", f"origin/{default}"])
@@ -1240,12 +1261,12 @@ async def _point_at_merged_members(rows, root_repo: Path, work_item_id: str) -> 
 
 
 async def _ready_root_at_merged_members(
-    forge: Forge, rows, *, root_repo: Path, branch: str, work_item_id: str
+    forge: Forge, db, rows, *, root_repo: Path, branch: str, work_item_id: str
 ) -> str:
     """A root with source changes of its own, once its members merged: point
     it at their merged revisions, push, and only now mark its merge request
     ready (`root-source-merge-request-readiness-waits-for-child-merges`)."""
-    bumped = await _point_at_merged_members(rows, root_repo, work_item_id)
+    bumped = await _point_at_merged_members(db, rows, root_repo, work_item_id)
     await forge.push(repo=root_repo, branch=branch)
     existing = await forge.find_mr(repo=root_repo, branch=branch)
     await forge.mark_ready(
@@ -1262,6 +1283,7 @@ async def _ready_root(
     *,
     root_repo: Path,
     branch: str,
+    base: str,
     title: str,
     work_item_id: str,
     has_source: bool,
@@ -1286,12 +1308,12 @@ async def _ready_root(
     log = ""
     if root["merge_state"] == "pending" and not has_source:
         log, opened = await _bump_pointer_only_root(
-            forge, db, rows, branch=branch, title=title, work_item_id=work_item_id
+            forge, db, rows, branch=branch, base=base, title=title, work_item_id=work_item_id
         )
         if not opened:
             return log, "done"
     log += await _ready_root_at_merged_members(
-        forge, rows, root_repo=root_repo, branch=branch, work_item_id=work_item_id
+        forge, db, rows, root_repo=root_repo, branch=branch, work_item_id=work_item_id
     )
     if await forge.approval_state(repo=root_repo, branch=branch) == "pending":
         return log + f"[{root_repo.name}] waiting for its required approval\n", "approval_pending"
@@ -1299,10 +1321,10 @@ async def _ready_root(
 
 
 async def _bump_pointer_only_root(
-    forge: Forge, db, rows, *, branch: str, title: str, work_item_id: str
+    forge: Forge, db, rows, *, branch: str, base: str, title: str, work_item_id: str
 ) -> tuple[str, bool]:
     """A requested bump of a root with no source changes: straight onto the
-    root's default branch when it takes the push
+    item's base branch in the root (`base`) when it takes the push
     (`workspace-pointer-bump-prefers-direct-push`), otherwise as a merge
     request from the item's branch in the root
     (`workspace-pointer-bump-falls-back-to-merge-request`). Returns the log
@@ -1310,14 +1332,13 @@ async def _bump_pointer_only_root(
     follows to its merge like any root merge request (Kraft-srt9v)."""
     root = next(r for r in rows if r["role"] == "root")
     root_repo = Path(root["repo_path"])
-    bumped = await _point_at_merged_members(rows, root_repo, work_item_id)
+    bumped = await _point_at_merged_members(db, rows, root_repo, work_item_id)
     if not bumped:
         return "every member pointer already names its merged revision\n", False
-    root_default = await git.default_branch(root_repo)
     try:
-        await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{root_default}"])
+        await git.run_git(root_repo, ["git", "push", "origin", f"HEAD:{base}"])
         return (
-            f"bumped {', '.join(bumped)} directly on {root_default}, no root merge request\n",
+            f"bumped {', '.join(bumped)} directly on {base}, no root merge request\n",
             False,
         )
     except ForgeError as exc:
@@ -1326,6 +1347,7 @@ async def _bump_pointer_only_root(
     mr = await forge.open_mr(
         repo=root_repo,
         branch=branch,
+        base=base,
         title=f"chore: bump submodule pointers for {title}",
         body=f"Moves {', '.join(bumped)} to the revisions merged for work item {work_item_id}.",
     )
@@ -1335,6 +1357,6 @@ async def _bump_pointer_only_root(
         )
     )
     return (
-        f"{root_default} refused the direct push ({refused}); opened !{mr.number} "
+        f"{base} refused the direct push ({refused}); opened !{mr.number} "
         f"to bump {', '.join(bumped)}\n"
     ), True

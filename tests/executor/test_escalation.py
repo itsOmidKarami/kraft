@@ -229,7 +229,7 @@ def no_rebase_no_walk(monkeypatch):
     """`resume_after_escalation`'s rebase and walk, stood in for; returns the
     kwargs each `walk.run` call got."""
 
-    async def fake_refresh(worktree, repo, branch):
+    async def fake_refresh(worktree, repo, branch, **_kw):
         return None
 
     walk_calls = []

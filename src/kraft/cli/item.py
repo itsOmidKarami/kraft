@@ -55,6 +55,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
                 policy=_policy(ns.policy),
+                base_branch=ns.base_branch,
             )
         ),
         common._render_action,
@@ -195,6 +196,12 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     )
     create.add_argument("--repo", help="default: the repo you are standing in")
     create.add_argument("--chain", default="default", help="chain template (default `default`)")
+    create.add_argument(
+        "--base-branch",
+        metavar="BRANCH",
+        help="the branch the work starts from and its merge request targets "
+        "(default: the repo's default branch); must exist on origin",
+    )
     # Two flags rather than a repeatable `--attach kind=path`: there are exactly
     # two kinds, the server refuses a duplicate kind, and these document
     # themselves in --help.

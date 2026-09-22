@@ -57,7 +57,7 @@ def test_restore_branch_recovers_from_a_stranded_mid_merge_diagnostic_branch(rep
         "the scenario did not actually conflict"
     )
 
-    kraft_builtins.restore_branch(repo, "kraft/w1")
+    kraft_builtins.restore_branch(repo, "kraft/w1", "main")
 
     current = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -77,7 +77,7 @@ def test_restore_branch_recovers_from_a_stranded_mid_merge_diagnostic_branch(rep
 def test_restore_branch_is_a_no_op_when_already_on_the_right_branch(repo):
     _git(repo, "checkout", "-b", "kraft/w1")
 
-    kraft_builtins.restore_branch(repo, "kraft/w1")
+    kraft_builtins.restore_branch(repo, "kraft/w1", "main")
 
     current = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -91,7 +91,9 @@ def test_restore_branch_is_a_no_op_when_already_on_the_right_branch(repo):
 
 def test_refresh_worktree_base_returns_none_when_no_worktree(tmp_path, repo):
     worktree = tmp_path / "nope"
-    result = asyncio.run(kraft_builtins.refresh_worktree_base(worktree, repo, "kraft/w1"))
+    result = asyncio.run(
+        kraft_builtins.refresh_worktree_base(worktree, repo, "kraft/w1", base="main")
+    )
     assert result is None
 
 
@@ -101,7 +103,7 @@ async def test_refresh_worktree_base_returns_none_when_already_up_to_date(databa
     branch = wtree.branch(database)
     # no origin remote exists here at all -- the already-pushed probe's
     # failure must be swallowed (expected_failure), not raised
-    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result is None
 
 
@@ -121,7 +123,7 @@ async def test_refresh_worktree_base_skips_when_branch_already_pushed(
 
     _commit(repo, "moved.txt", "moved on\n", "moved on")
 
-    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result is None
     assert git_read(worktree, "rev-parse", "HEAD") == before
 
@@ -136,7 +138,7 @@ async def test_refresh_worktree_base_rebases_and_returns_new_head(database, run_
     _commit(repo, "moved.txt", "moved on\n", "moved on")
     new_head = git_read(repo, "rev-parse", "HEAD")
 
-    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == new_head
     assert (worktree / "worktree_work.txt").is_file()
     assert (worktree / "moved.txt").is_file()
@@ -194,7 +196,7 @@ async def test_refresh_worktree_base_rebases_onto_origin_when_the_local_checkout
     _commit(worktree, "worktree_work.txt", "done in the worktree\n", "worktree work")
     upstream = _land_upstream(other, "upstream.txt")
 
-    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == upstream
     assert (worktree / "upstream.txt").is_file()
     assert (worktree / "worktree_work.txt").is_file()
@@ -213,7 +215,7 @@ async def test_refresh_worktree_base_falls_back_to_local_head_when_origin_is_unr
     _commit(repo, "moved.txt", "moved on\n", "moved on")
     local = git_read(repo, "rev-parse", "HEAD")
 
-    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result == local
     assert (worktree / "moved.txt").is_file()
 
@@ -227,7 +229,7 @@ def test_upstream_head_falls_back_to_the_last_fetched_origin_ref_before_local_he
     _commit(repo, "local_only.txt", "never pushed\n", "local only")
     _git(repo, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
 
-    assert asyncio.run(kraft_builtins.upstream_head(repo)) == fetched
+    assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == fetched
 
 
 def test_upstream_head_sees_origin_even_when_the_fetch_refspec_skips_the_default(tmp_path):
@@ -237,7 +239,7 @@ def test_upstream_head_sees_origin_even_when_the_fetch_refspec_skips_the_default
     _git(repo, "config", "remote.origin.fetch", "+refs/heads/other:refs/remotes/origin/other")
     upstream = _land_upstream(other, "upstream.txt")
 
-    assert asyncio.run(kraft_builtins.upstream_head(repo)) == upstream
+    assert asyncio.run(kraft_builtins.upstream_head(repo, "main")) == upstream
 
 
 async def test_refresh_worktree_base_raises_and_aborts_on_conflict(database, run_dirs, repo):
@@ -261,7 +263,7 @@ async def test_refresh_worktree_base_raises_and_aborts_on_conflict(database, run
     )
 
     with pytest.raises(RuntimeError, match="git rebase failed"):
-        await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
     assert git_read(worktree, "status", "--porcelain") == ""
     assert git_read(worktree, "rev-parse", "HEAD") == worktree_head
@@ -382,12 +384,12 @@ async def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subcl
     )
 
     with pytest.raises(kraft_builtins.RebaseConflict):
-        await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
     # The compatibility claim itself: a bare `except RuntimeError` --
     # every call site that predates this bead -- still catches it.
     try:
-        await kraft_builtins.refresh_worktree_base(worktree, repo, branch)
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
         raised = False
     except RuntimeError:
         raised = True

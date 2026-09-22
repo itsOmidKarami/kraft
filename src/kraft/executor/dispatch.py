@@ -796,10 +796,17 @@ async def dispatch_node(
     # Before the sweep, not after: a straggler committed while HEAD sat on
     # a diagnostic branch an agent forgot to check out of would land on
     # that branch instead of the item's own (Kraft-v5qd).
-    _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row))
+    # A fanned-out member run stands in the member's checkout, whose base is
+    # its own default branch; every other run is on the item's base branch.
+    snapshot = store.materialized_chain_of(work_item_row)
+    member = repository is not None and snapshot is not None and repository != snapshot.target.root
+    base = await _builtins.base_branch(
+        db, work_item_row["id"], Path(worktree if member else work_item_row["repo"]), member=member
+    )
+    _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
     try:
         await _forge.commit_stragglers(
-            Path(worktree), message=f"wip: uncommitted work from {node.id}"
+            Path(worktree), base=base, message=f"wip: uncommitted work from {node.id}"
         )
     except _forge.ForgeError as exc:
         logger.warning("could not commit stragglers after %s: %r", task.path, exc)

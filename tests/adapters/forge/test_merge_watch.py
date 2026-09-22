@@ -74,6 +74,38 @@ async def test_merge_watch_settles_without_reading_the_merged_away_mr(
     assert len(fake.retried) == retries
 
 
+class _Watching(_NoMrForge):
+    """Records the branch each post-merge pipeline read was for."""
+
+    def __init__(self):
+        super().__init__(ci_states=["success"])
+        self.watched: list[str] = []
+
+    async def branch_ci_status(self, *, repo, branch, head_sha="", pipeline_id=""):
+        self.watched.append(branch)
+        return await super().branch_ci_status(
+            repo=repo, branch=branch, head_sha=head_sha, pipeline_id=pipeline_id
+        )
+
+
+async def test_merge_watch_watches_the_items_base_branch(run_forge, item_on, repo):
+    """Kraft-v9gbi: the item merged into its base branch, so that branch's
+    pipeline is the one its merge can have broken."""
+    from kraft.templates.environment import WorkItemTarget
+
+    bare = repo.parent / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:release"], cwd=repo, check=True)
+    target = WorkItemTarget.for_repository("target", base_branch="release")
+    run_forge.item = await item_on(back_half(), repo=repo, target=target)
+    fake = _Watching()
+
+    assert (await run_forge(fake, "merge_watch", repo=repo))[0] == "done"
+
+    assert fake.watched == ["release"]
+
+
 async def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unknown(
     run_forge, repo, monkeypatch
 ):
@@ -85,7 +117,7 @@ async def test_merge_watch_waits_instead_of_crashing_when_upstream_head_is_unkno
     `head_sha[:7]` and `GlabCli` silently reports the previous commit's
     pipeline as this merge's result (code-review)."""
 
-    async def _none(repo):
+    async def _none(repo, branch):
         return None
 
     monkeypatch.setattr(_builtins, "upstream_head", _none)

@@ -123,8 +123,19 @@ class CIStatus:
 
 class Forge(Protocol):
     async def open_mr(
-        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
-    ) -> MR: ...
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        meta: MRMeta | None = None,
+    ) -> MR:
+        """A draft merge request from `branch` into `base`, the item's base
+        branch in `repo` (`builtins.base_branch`)."""
+        ...
+
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
@@ -230,6 +241,8 @@ class FakeForge:
     #: Body each `open_mr` call was given, alongside `bodies` (which only
     #: `update_mr`/`sync_mr` write to).
     opened_bodies: dict[int, str] = field(default_factory=dict)
+    #: The branch each opened merge request targets, by number.
+    opened_base: dict[int, str] = field(default_factory=dict)
     #: `automated_review`'s answers, consumed like `ci_states`. A bare state
     #: string is shorthand for a `ReviewResult` with nothing else to say.
     review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
@@ -256,12 +269,20 @@ class FakeForge:
         return script.pop(0) if len(script) > 1 else script[0]
 
     async def open_mr(
-        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        meta: MRMeta | None = None,
     ) -> MR:
         from kraft.adapters.forge.mr import MRMeta
 
         number = len(self.opened) + 1
         self.opened[number] = branch
+        self.opened_base[number] = base
         self._opened_repo[number] = str(repo)
         self.opened_titles[number] = title
         self.opened_draft[number] = True
