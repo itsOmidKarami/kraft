@@ -134,6 +134,7 @@ export function AppearancePage() {
                 type="radio"
                 name="board-group-by"
                 checked={theme?.board.group_by === g.id}
+                disabled={!theme}
                 onChange={() =>
                   theme && preview({ ...theme, board: { ...theme.board, group_by: g.id } })
                 }
@@ -149,6 +150,7 @@ export function AppearancePage() {
           id="board-show-done"
           className="input"
           value={theme?.board.show_done ?? 5}
+          disabled={!theme}
           onChange={(e) =>
             theme &&
             preview({ ...theme, board: { ...theme.board, show_done: Number(e.target.value) } })
@@ -171,6 +173,7 @@ export function AppearancePage() {
                 type="radio"
                 name="board-open-in"
                 checked={theme?.board.open_in === o}
+                disabled={!theme}
                 onChange={() =>
                   theme && preview({ ...theme, board: { ...theme.board, open_in: o } })
                 }

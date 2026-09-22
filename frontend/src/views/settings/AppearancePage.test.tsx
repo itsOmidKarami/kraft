@@ -71,13 +71,16 @@ describe("Settings · appearance", () => {
     );
   });
 
-  it("disables the palette, mode and density controls until the theme loads", async () => {
+  it("disables the palette, mode, density and board controls until the theme loads", async () => {
     vi.spyOn(api, "getTheme").mockImplementation(() => new Promise(() => {}));
     renderAt("/settings/appearance");
     expect(await screen.findByText("Nocturne")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Nocturne/ })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "Light" })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "Compact" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "repo" })).toBeDisabled();
+    expect(screen.getByLabelText("show done")).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "peek" })).toBeDisabled();
   });
 
   it("Discard reverts the live preview back to the loaded value", async () => {
