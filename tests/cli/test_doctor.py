@@ -243,6 +243,25 @@ def test_degraded_health_is_spelled_out_one_reason_per_line(app, monkeypatch):
     assert any("quick-task.yaml" in d for d in details)
 
 
+def test_a_missing_vector_extra_is_advice_not_a_failure():
+    """Kraft-rj8cn: semantic search is an opt-in extra, so /health stays `ok`
+    without it and doctor agrees -- an ok line carrying the advice, like shell
+    completion's, not a FAIL that pins the exit code at 1."""
+    from kraft.index.embed import _MISSING
+
+    rows = doctor._health_checks(
+        {
+            "status": "ok",
+            "index": {"errors": [], "embeddings": {"available": False, "reason": _MISSING}},
+            "reattach_summary": {"unknown": []},
+        }
+    )
+
+    assert all(row["ok"] for row in rows)
+    assert _by_name(rows, "health")["detail"] == "ok"
+    assert "uv sync --extra vector" in _by_name(rows, "embeddings")["detail"]
+
+
 def test_doctor_exits_1_and_prints_the_failures(app, tmp_path, capsys):
     _prime(tmp_path)
     (tmp_path / "run" / "worktrees" / "wi-ghost").mkdir(parents=True)

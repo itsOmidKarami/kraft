@@ -99,14 +99,24 @@ def _health_checks(payload: dict) -> list[dict]:
     if payload.get("invalid_policy"):
         reasons.append(f"invalid policy: {payload['invalid_policy']}")
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
-    if not embeddings.get("available"):
-        reasons.append(f"embeddings unavailable: {embeddings.get('reason') or 'no reason given'}")
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
         reasons.append(f"orphaned agent sessions: {', '.join(orphaned)}")
+    # Semantic search is an opt-in extra (`available` is whether it imports),
+    # so /health stays `ok` without it and so does doctor: an ok line carrying
+    # the advice, never a FAIL on something the operator never asked for
+    # (Kraft-rj8cn).
+    extra = _check(
+        "embeddings",
+        True,
+        f"available ({embeddings.get('model')})"
+        if embeddings.get("available")
+        else f"not installed: {embeddings.get('reason') or 'no reason given'}",
+    )
     if not reasons:
-        return [_check("health", payload.get("status") == "ok", str(payload.get("status", "?")))]
-    return [_check("health", False, reason) for reason in reasons]
+        status = str(payload.get("status", "?"))
+        return [_check("health", payload.get("status") == "ok", status), extra]
+    return [*(_check("health", False, reason) for reason in reasons), extra]
 
 
 def _config_checks() -> list[dict]:
