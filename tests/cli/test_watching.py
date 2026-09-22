@@ -411,6 +411,23 @@ def test_log_backlog_limits_live_in_client(monkeypatch):
     assert asyncio.run(client.log_backlog("sess-1", 0)) == []
 
 
+def test_log_backlog_keeps_the_truncation_marker_the_cap_put_there(monkeypatch):
+    """`-n` asks for the last N lines; the server's size cap is a different cut,
+    and slicing must not drop the one line that says it happened (Kraft-2vvus)."""
+    marker = {"n": -1, "text": "…", "truncated": {"lines": 10, "bytes": 99}}
+    rows = [{"n": i, "text": f"line{i}"} for i in range(10, 13)]
+
+    async def fake_get(path, **params):
+        return {"lines": [marker, *rows]}
+
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    # the cap hid what -n would have shown: the marker says so
+    assert asyncio.run(client.log_backlog("sess-1", 3)) == [marker, *rows]
+    assert asyncio.run(client.log_backlog("sess-1")) == [marker, *rows]
+    # -n itself hid lines the reader asked not to see: no marker to explain
+    assert asyncio.run(client.log_backlog("sess-1", 2)) == rows[1:]
+
+
 def test_events_follow_json_is_one_object_per_line(app, monkeypatch, capsys, make_item, repo):
     """`kraft logs -f --json` is NDJSON and CLAUDE.md documents that contract.
     A followed stream that emits pretty-printed arrays breaks `read -r`, a
