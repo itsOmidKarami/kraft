@@ -394,7 +394,7 @@ async def _publishable(
     return row, worktree, origin
 
 
-async def _run(database, run_dirs, row, worktree, fake, monkeypatch, handler):
+async def _run(database, run_dirs, row, worktree, fake, monkeypatch, handler, **kw):
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
     return await forge.run_task(
         database,
@@ -408,6 +408,7 @@ async def _run(database, run_dirs, row, worktree, fake, monkeypatch, handler):
         repo=worktree,
         branch=store.branch_for(row),
         title="t",
+        **kw,
     )
 
 
@@ -496,19 +497,9 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
     base_ref = _base_ref(database, row)
 
-    result = await forge.run_task(
-        database,
-        run_dirs,
-        session_id="s-conflict",
-        work_item_id=row["id"],
-        node_id=handler,
-        hook_point=f"{handler}.main.t",
-        handler=handler,
-        backend="fake",
-        repo=worktree,
+    result = await _run(
+        *(database, run_dirs, row, worktree, fake, monkeypatch, handler),
         orig_repo=Path(row["repo"]),
-        branch=store.branch_for(row),
-        title="t",
         has_rebase_bounce=True,
     )
 
