@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { SectionLabel, Switch } from "../../components/ui";
-import type { HarnessProfile, HarnessProfileInput, HarnessProvider } from "../../types";
+import type { HarnessCapability, HarnessProfile, HarnessProfileInput, HarnessProvider } from "../../types";
 import "./templates.css";
 import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared";
 
@@ -36,24 +36,82 @@ function Links({ ids, to, none }: { ids: string[]; to: (id: string) => string; n
   );
 }
 
+/** One sentence per capability Kraft ships, from the comments in
+ *  src/kraft/harnesses/*.yaml. A name not here renders without one. */
+const CAPABILITY_HELP: Record<string, string> = {
+  prompt: "The task instruction the agent is started with.",
+  context: "Kraft's steering and context, handed over as system prompt.",
+  structured_log: "Makes the CLI write the machine-readable event log Kraft reads.",
+  model: "Which model runs; any name the CLI accepts.",
+  effort: "How much reasoning effort the model spends.",
+  deny_tools: "Tools the agent may never call.",
+  allowed_tools: "Tools a tool allowlist pre-approves.",
+  restrict_tools: "Cuts the built-in tools down to the allowlist (MCP tools unaffected).",
+  permission_mode: "How the CLI decides whether a tool call needs approval.",
+  approval_channel: "The MCP tool the CLI asks instead of prompting a human.",
+  resume: "Continues an earlier session by its id.",
+  autocompact: "When the CLI compacts its context window.",
+  usage: "Where Kraft reads the run's token usage from.",
+  rate_limit_signal: "How Kraft notices the provider rate-limiting the run.",
+};
+
+/** `{value}`/`{csv}` in a `cli:` fragment, as a reader would write them. */
+const readable = (argv: string[]) =>
+  argv.map((a) => a.replaceAll("{value}", "<value>").replaceAll("{csv}", "<a,b,…>")).join(" ");
+
+/** What a capability becomes: its flag(s), or what carries or reads it. */
+function becomes(c: HarnessCapability): string {
+  if (c.cli.length) return readable(c.cli);
+  if (c.via) return `carried by the ${c.via} command`;
+  if (c.source === "result_file") return "reported by the agent in its result file";
+  if (c.reader) return `read from the output stream (${c.reader})`;
+  return "";
+}
+
 function ProviderReadout({ id, provider }: { id: string; provider: HarnessProvider | undefined }) {
   if (!provider) return <p className="form-error">provider {id} is not installed</p>;
+  const file = provider.path.split("/").pop();
   return (
     <>
       <div className="chain-head">
         <h2 className="chain-head-name">provider {id}</h2>
         <span className="chain-head-counts">{provider.command.join(" ")}</span>
       </div>
-      <span className="field-hint">{provider.path}</span>
-      <pre className="template-readout">
-        {Object.entries(provider.capabilities)
-          .map(([name, c]) =>
-            [name, c.values.length ? `values: ${c.values.join(" | ")}` : "", c.always ? `always: ${c.always}` : ""]
-              .filter(Boolean)
-              .join("  "),
-          )
-          .join("\n")}
-      </pre>
+      <span className="field-hint">
+        {provider.override ? "Your override" : "Packaged definition"}: {provider.path}
+      </span>
+      <span className="field-hint">
+        {provider.override
+          ? "Delete it to go back to the packaged definition."
+          : `To change it, drop a ${file} into $KRAFT_HOME/templates/harnesses/; yours replaces this one.`}
+      </span>
+      <SectionLabel>Capabilities</SectionLabel>
+      <p className="chain-legend">Kraft's neutral option names, and the flags this CLI receives for them.</p>
+      <ul className="capability-list">
+        {Object.entries(provider.capabilities).map(([name, c]) => {
+          const to = becomes(c);
+          const always = Array.isArray(c.always) ? c.always.join(", ") : c.always;
+          const facts = [
+            c.values.length ? `accepts ${c.values.join(" | ")}` : "",
+            always ? `every launch: ${always}` : "",
+            c.under_allowlist ? `under a tool allowlist: ${c.under_allowlist}` : "",
+            c.channel ? `channel: ${c.channel}` : "",
+          ].filter(Boolean);
+          return (
+            <li key={name}>
+              <code className="capability-name">{name}</code>
+              {to && (
+                <>
+                  {" → "}
+                  <code>{to}</code>
+                </>
+              )}
+              {CAPABILITY_HELP[name] && <div className="field-hint">{CAPABILITY_HELP[name]}</div>}
+              {facts.length > 0 && <div className="field-hint">{facts.join(" · ")}</div>}
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }

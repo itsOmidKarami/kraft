@@ -49,7 +49,17 @@ function ComponentDetail({ component }: { component: LibraryComponent }) {
           </Link>
         </p>
       )}
-      <pre className="template-readout">{JSON.stringify(component.definition, null, 2)}</pre>
+      {component.kind === "steering" && typeof component.definition.instructions === "string" ? (
+        <>
+          <p className="chain-legend">
+            Steering profiles here are selected by tasks and frozen into an item's chain at intake. Repository
+            steering files live on the <Link to="/settings/steering">Steering page</Link>.
+          </p>
+          <pre className="template-readout">{component.definition.instructions}</pre>
+        </>
+      ) : (
+        <pre className="template-readout">{JSON.stringify(component.definition, null, 2)}</pre>
+      )}
       {component.issues.length > 0 && (
         <div className="validation" data-valid={false}>
           {component.issues.map((i) => (
