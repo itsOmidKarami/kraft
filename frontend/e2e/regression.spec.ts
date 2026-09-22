@@ -40,6 +40,16 @@ test("settings: chain templates page loads the chain file and resolves it", asyn
   await expect(page.getByText("valid", { exact: true })).toBeVisible();
 });
 
+test("settings: library shows a component's chains, and a chain links back to it", async ({ page }) => {
+  await page.goto("/settings/library?c=tasks.implementer");
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await expect(page.getByLabel("library yaml")).toHaveValue(/implementer:/);
+  await page.getByRole("link", { name: "quick-task", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "quick-task" })).toBeVisible();
+  await page.getByRole("link", { name: "tasks.implementer" }).first().click();
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
+});
+
 test("settings: policy edit saves", async ({ page }) => {
   await page.goto("/settings/policy");
   const attempts = page.getByLabel(/attempts/).first();

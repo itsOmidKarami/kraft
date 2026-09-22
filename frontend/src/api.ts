@@ -20,6 +20,7 @@ import type {
   SearchResponse,
   ChainFile,
   ChainNode,
+  Library,
   ResolveResult,
   TemplateSummary,
   WorkItem,
@@ -299,6 +300,10 @@ export const putTemplate = (id: string, text: string) =>
     `/templates/${encodeURIComponent(id)}`,
     json("PUT", { text }),
   );
+export const getLibrary = () => req<Library>("/templates/library");
+/** Save `library.yaml`'s text; the server refuses (422, naming why) a library
+ *  that would stop any chain that resolves now from resolving. */
+export const putLibrary = (text: string) => req<Library>("/templates/library", json("PUT", { text }));
 /** Typed YAML into the mapping `resolveTemplate` checks. */
 export const parseTemplateYaml = (text: string) =>
   req<{ chain: Record<string, unknown> | null; error: string | null }>(

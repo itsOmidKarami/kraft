@@ -48,6 +48,17 @@ describe("Settings · chains (Template Schema V1)", () => {
     expect(screen.queryByTestId("chain-flag-spec")).toBeNull();
   });
 
+  it("links each node to the library components it is built from", async () => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { ...DEFAULT, uses: { verification: ["nodes.verification", "tasks.code_review"] } },
+    ]);
+    renderAt("/settings/chains");
+    const link = await screen.findByRole("link", { name: "tasks.code_review" });
+    expect(link).toHaveAttribute("href", "/settings/library?c=tasks.code_review");
+    expect(link.closest("[data-node]")).toHaveAttribute("data-node", "verification");
+    expect(screen.getByRole("link", { name: "nodes.verification" })).toBeInTheDocument();
+  });
+
   it("heads the page with the chain's name, its counts, the template menu, Revert and Save", async () => {
     renderAt("/settings/chains");
     const head = (await screen.findByRole("heading", { name: "default" })).closest(".chain-head") as HTMLElement;
