@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 import yaml
 from pydantic import (
@@ -660,6 +660,22 @@ class SandboxPolicy(BaseModel):
 
     kind: Literal["docker"]
     image: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _said_plainly(cls, data: object) -> object:
+        """The refusals an operator has always read for a malformed
+        `sandbox:`, rather than pydantic's literal and union prose."""
+        if isinstance(data, SandboxPolicy):
+            return data
+        if not isinstance(data, dict):
+            raise ValueError(f"must be a mapping, not {data!r}")
+        known = sorted(get_args(cls.model_fields["kind"].annotation))
+        if data.get("kind") not in known:
+            raise ValueError(f"kind {data.get('kind')!r} is not supported; known: {known}")
+        if not isinstance(data.get("image"), str) or not data["image"]:
+            raise ValueError("needs a non-empty string 'image'")
+        return data
 
 
 class TaskPolicyOverride(BaseModel):

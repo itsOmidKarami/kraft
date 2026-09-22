@@ -94,7 +94,7 @@ def test_a_sandbox_without_submodule_members_still_loads(tmp_path):
         {"ws": {"root": "ws"}},
     )
     assert set(config.load_workspaces(path)) == {"ws"}
-    assert config.load_repos(path)[0].sandbox == SANDBOX
+    assert config.load_repos(path)[0].sandbox.model_dump() == SANDBOX
 
 
 def _repos_yaml(tmp_path):

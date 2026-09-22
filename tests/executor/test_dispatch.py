@@ -403,7 +403,7 @@ async def test_a_sandboxed_subprocess_hook_actually_runs_through_docker(
     checks the sentinel only the fake `docker` itself touches.
 
     V1: a task declares no sandbox of its own; the repo entry is the one
-    source (`dispatch_node`'s subprocess branch, `sandbox.resolve({}, ...)`)."""
+    source (`dispatch_node`'s subprocess branch, `RepoEntry.effective_sandbox`)."""
     monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
     called = tmp_path / "docker-was-called"
     monkeypatch.setenv("FAKE_DOCKER_CALLED", str(called))

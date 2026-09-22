@@ -344,16 +344,16 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
         # Every repository the item launches against, members included: a
         # member's live sandbox wraps the root's runs too.
         entries = [launch.repo_entry, *launch.repositories.values()] if launch else []
-        live = [s for e in entries if e and (s := e.sandbox)]
-        live = list({json.dumps(s, sort_keys=True): s for s in live}.values())
+        live = list(dict.fromkeys(s for e in entries if e and (s := e.effective_sandbox)))
     except (_policy.PolicyError, _config.ConfigError) as exc:
         raise SandboxUnresolved(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
     if len(live) > 1:
         raise SandboxUnresolved(
-            f"{row['id']}'s repositories set different sandboxes {live!r} in repos.yaml: "
+            f"{row['id']}'s repositories set different sandboxes "
+            f"{[s.model_dump() for s in live]!r} in repos.yaml: "
             "a sandbox wraps the whole work item (Ruling 189), so they must agree"
         )
-    return live[0] if live else None
+    return live[0].model_dump() if live else None
 
 
 def _frozen_steering(row) -> dict[str, str] | None:

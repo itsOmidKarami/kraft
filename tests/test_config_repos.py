@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from support.harness import make_repo
 
 from kraft import config
+from kraft.policy import SandboxPolicy
 
 
 def _load(tmp_path, *entries):
@@ -46,7 +47,7 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"forge": None, "project": None}),
         ({"forge": "gitea", "project": "t/r"}, {"forge": "gitea"}),
         ({}, {"sandbox": None}),
-        ({"sandbox": _SANDBOX}, {"sandbox": _SANDBOX}),
+        ({"sandbox": _SANDBOX}, {"sandbox": SandboxPolicy(**_SANDBOX)}),
         ({"sandbox": False}, {"sandbox": False}),
         ({}, {"models": {}, "areas": {}}),
         (
@@ -97,6 +98,9 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     ("entry", "match"),
     [
         ({"sandbox": {"kind": "docker"}}, "image"),
+        ({"sandbox": "docker"}, "sandbox: must be a mapping, not 'docker'"),
+        ({"sandbox": {"kind": "podman", "image": "y"}}, r"known: \['docker'\]"),
+        ({"sandbox": {**_SANDBOX, "network": "none"}}, "'network'"),
         ({"steering": ["missing"]}, "missing"),
         ({"managed": "yes"}, "'managed' must be a boolean"),
         ({"local_files": ".python-version"}, "'local_files' must be a list"),
@@ -120,6 +124,9 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     ],
     ids=[
         "a-malformed-sandbox",
+        "a-sandbox-that-is-no-mapping",
+        "a-sandbox-of-an-unknown-kind",
+        "a-sandbox-key-nothing-reads",
         "a-missing-steering-file",
         "a-non-boolean-managed",
         "a-non-list-local-files",
@@ -215,6 +222,37 @@ def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
     assert isinstance(entry, config.RepoEntry)
     assert isinstance(entry.automated_review, AutomatedReview)
     assert isinstance(entry.test_scopes[0], config.TestScope)
+
+
+def test_a_malformed_sandbox_is_refused_naming_its_entry(tmp_path):
+    """Kraft-5d510.1: typed as `SandboxPolicy`, refused in its words, not as
+    a three-way union error."""
+    with pytest.raises(config.ConfigError) as refused:
+        _load(tmp_path, {"path": "/r", "sandbox": {"kind": "podman", "image": "y"}})
+
+    assert str(refused.value) == (
+        "repos.yaml: /r: sandbox: kind 'podman' is not supported; known: ['docker']"
+    )
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({}, None),
+        ({"sandbox": _SANDBOX}, _SANDBOX),
+        ({"sandbox": False}, None),
+        ({"policy": {"sandbox": _SANDBOX}}, _SANDBOX),
+    ],
+    ids=["sets-none", "sets-one", "says-off", "sets-one-in-its-policy-block"],
+)
+def test_an_entrys_sandbox_is_whichever_key_set_it(tmp_path, entry, expected):
+    """One answer for both spellings (`_one_sandbox` refuses both at once):
+    what the repository layer folds in is what a live launch reads."""
+    (repo,) = _load(tmp_path, {"path": "/r", **entry})
+
+    assert repo.effective_sandbox == (SandboxPolicy(**expected) if expected else None)
+    layer = repo.repository_override()
+    assert (layer.sandbox if layer else None) == repo.effective_sandbox
 
 
 # ── the legacy `submodules:` edge migration ──

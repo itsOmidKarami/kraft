@@ -156,6 +156,11 @@ def _item_policy_sandboxed(repo):
         ([{"id": "work", "kind": "exec", "tasks": [_agent()]}], {"sandbox": _SANDBOX}, _SANDBOX),
         ([{"id": "work", "kind": "exec", "tasks": [_agent()]}], {"sandbox": False}, None),
         (
+            [{"id": "work", "kind": "exec", "tasks": [_agent()]}],
+            {"policy": {"sandbox": _SANDBOX}},
+            _SANDBOX,
+        ),
+        (
             [{"id": "work", "kind": "exec", "tasks": [_agent(policy={"sandbox": _SANDBOX})]}],
             {},
             _SANDBOX,
@@ -176,6 +181,7 @@ def _item_policy_sandboxed(repo):
         "nothing",
         "live-entry",
         "entry-says-off",
+        "live-entry-policy-block",
         "one-task-froze-one",
         "one-task-and-entry-says-off",
         "item-policy-beats-a-changed-entry",

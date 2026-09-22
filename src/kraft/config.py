@@ -216,7 +216,9 @@ class RepoEntry(BaseModel):
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: ToolNames = []
     steering: list[str] = []
-    sandbox: Any = None
+    #: Where this repository's tasks run (`kraft.worker.sandbox`). `false` is
+    #: an explicit "none", kept as written so a re-save round-trips.
+    sandbox: SandboxPolicy | Literal[False] | None = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-
     #: safety`): applied after the instance policy and before everything a
     #: work item or chain adds, and allowed only to tighten what it inherits.
@@ -302,15 +304,24 @@ class RepoEntry(BaseModel):
             )
         return self
 
-    @field_validator("sandbox")
+    @field_validator("sandbox", mode="before")
     @classmethod
-    def _valid_sandbox(cls, v: Any) -> Any:
-        if v not in (None, False):
-            try:
-                _sandbox.validate(v, where="repos.yaml")
-            except _sandbox.SandboxError as exc:
-                raise ValueError(str(exc)) from exc
-        return v
+    def _typed_sandbox(cls, v: Any, info: ValidationInfo) -> Any:
+        """Typed here, so a refusal names the entry and says what is wrong in
+        `SandboxPolicy`'s own words rather than as a three-way union error."""
+        if v is None or v is False:
+            return v
+        try:
+            return SandboxPolicy.model_validate(v)
+        except ValidationError as exc:
+            where = f"repos.yaml: {info.data.get('path')}: sandbox"
+            raise ValueError(first_error(exc, where)) from exc
+
+    @property
+    def effective_sandbox(self) -> SandboxPolicy | None:
+        """The sandbox this entry sets, under either key (`_one_sandbox`
+        refuses both), or None: `false` sets none."""
+        return self.sandbox or (self.policy.sandbox if self.policy is not None else None)
 
     @model_validator(mode="after")
     def _no_unrecognised_key_passes_silently(self, info: ValidationInfo) -> RepoEntry:
@@ -355,8 +366,7 @@ class RepoEntry(BaseModel):
         if deny:
             block["deny_tools"] = list(dict.fromkeys(deny))
         if self.sandbox:
-            # Validated at load; only `kind` and `image` are read.
-            block["sandbox"] = SandboxPolicy(kind=self.sandbox["kind"], image=self.sandbox["image"])
+            block["sandbox"] = self.sandbox
         return TemplatePolicyOverride.model_validate(block) if block else None
 
 
@@ -475,7 +485,7 @@ def load_repos(
         except ValidationError as exc:
             err = exc.errors()[0]
             # A custom validator's message is already a whole sentence naming
-            # the file (`_sandbox`, `_steering`); do not wrap it twice.
+            # the file (`_typed_sandbox`, `_steering_exists`); do not wrap it twice.
             msg = err["msg"].removeprefix("Value error, ")
             if msg.startswith("repos.yaml"):
                 raise ConfigError(msg) from exc
@@ -497,13 +507,7 @@ def sandboxed_members(ws: Workspace, repos: list[RepoEntry]) -> list[str]:
         return []
     by_id = {r.id: r for r in repos if r.id}
     ids = dict.fromkeys([ws.root, *(m.repository for m in ws.members.values())])
-    return [
-        i
-        for i in ids
-        if i in by_id
-        and (layer := by_id[i].repository_override()) is not None
-        and layer.sandbox is not None
-    ]
+    return [i for i in ids if i in by_id and by_id[i].effective_sandbox is not None]
 
 
 def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[str, Workspace]:

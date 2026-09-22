@@ -135,7 +135,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
 
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
 
-    assert [sandbox for _, sandbox in ran] == [member.sandbox] * 2
+    assert [sandbox for _, sandbox in ran] == [member.sandbox.model_dump()] * 2
 
 
 # ── areas (`repository-area-can-declare-setup-and-test-scopes`) ──
