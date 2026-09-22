@@ -143,7 +143,7 @@ def _wait_for_status(client, wid, status, timeout=30):
 def _approve_gate(client, wid, gate, timeout=30):
     """Approve a gate, retrying past a 409.
 
-    An `auto_escalate` node's own walk (chain_review, in the shipped `default`
+    An `auto_escalate` node's own walk (final_review, in the shipped `default`
     template) can still be inside its own auto-review agent call when this
     gate first becomes pending -- `deps.spawn`'s `AlreadyRunning` refusal
     (Kraft-11e0) then 409s a manual approve that lands in that window. Retry

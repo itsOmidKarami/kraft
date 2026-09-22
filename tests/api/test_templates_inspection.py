@@ -117,7 +117,7 @@ def test_resolved_names_the_attachment_kind_each_node_is_covered_by(client):
     assert covered["spec"] == covered["spec_approval"] == "spec"
     assert covered["plan"] == covered["plan_approval"] == "plan"
     assert covered["implementation"] is None
-    assert covered["chain_review"] is None
+    assert covered["final_review"] is None
 
 
 def test_resolved_of_an_unknown_chain_is_404(client):

@@ -110,7 +110,7 @@ kraft view diff          # the coloured body, through $PAGER
 Two gates stand between the work and a merge. `local_review` comes first, with
 the work brief the chain wrote: approving it opens a draft merge request, and
 Kraft then watches CI and the automated review, repairing what they report.
-`chain_review` is the last gate, with the review brief: approving it marks the
+`final_review` is the last gate, with the review brief: approving it marks the
 merge request ready, waits for its external approval, merges, and watches the
 post-merge pipeline — no further input needed unless something goes red. A
 rebase that moves the base re-runs `verification` rather than merging over

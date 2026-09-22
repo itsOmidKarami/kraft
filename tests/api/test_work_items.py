@@ -268,7 +268,7 @@ def test_patch_switches_chain_template_before_the_chain_starts(client, repo):
         "draft_merge_request",
         "merge_request_feedback",
         "work_item_summary",
-        "chain_review",
+        "final_review",
         "mark_ready",
         "external_approval",
         "merge",

@@ -47,8 +47,9 @@ seeded chain's own draft-merge-request gate undescribed.)
   stronger evidence than an added one. A proposal the document says cannot be
   applied is a reject: put the reason it gives in your concerns, so the revision
   is rewritten. (A proposal that changes nothing never reaches this gate.)
-- **A gate about a review brief or work-item summary** — the chain's final
-  review. Does the finished work match what was approved, and does its size match
+- **A gate about a review brief or work-item summary** — the final review of
+  the finished item and its merge request (`final_review` in the shipped
+  chain). Does the finished work match what was approved, and does its size match
   the plan's? This is the one gate whose own document must exist; without it
   there is nothing to finalize.
 - **A gate with no document at all** — a checkpoint before something

@@ -398,7 +398,7 @@ def test_the_default_chain_revises_itself_right_after_the_plan_is_approved():
     assert (gate.artifact, gate.reject_to) == (revision.CHAIN_REVISION, "chain_revision")
     # The final gate is still the one it was.
     assert [n.id for n in chain.nodes if getattr(n.node, "chain_finalized", False)] == [
-        "chain_review"
+        "final_review"
     ]
 
 

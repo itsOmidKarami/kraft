@@ -499,7 +499,7 @@ nodes:
       - id: author
         extends: write_summary
 
-  - id: chain_review
+  - id: final_review
     kind: gate
     chain_finalized: true
     message: Review the complete work item and merge-request summary.

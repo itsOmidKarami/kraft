@@ -53,7 +53,7 @@ The shipped `default` chain is the real one: a spec and a plan, each with its
 own approval gate; a chain revision (below); implementation; verification (the changed test scopes, then
 a code review) inside a fix loop; a work brief and a `local_review` gate before
 a draft merge request exists; CI and automated review on the draft, with its own
-fix loop; a summary and the final `chain_review` gate; then ready, external
+fix loop; a summary and the final `final_review` gate; then ready, external
 approval, merge, and the post-merge pipeline. `kraft admin templates show
 default --resolved` prints it with every library component expanded.
 
