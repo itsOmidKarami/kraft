@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import EllipsisType
 from urllib.parse import quote
 
 from kraft import config
@@ -21,8 +22,16 @@ async def create_work_item(
     implements_beads: list[str] | None = None,
     policy: dict | None = None,
     base_branch: str | None = None,
+    skip_nodes: list[str] | None = None,
+    budget_usd: float | None | EllipsisType = ...,
+    node_overrides: dict | None = None,
+    autostart: bool = False,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
+
+    `autostart` is the human's shortcut past pressing Start (Kraft-s7c04.31).
+    The server refuses it (403) from a Kraft session or an MCP client, so a
+    worker asking for it files nothing; the default stays paused on purpose.
 
     `policy` is the item's own policy override (`set_work_item_policy`).
 
@@ -40,6 +49,11 @@ async def create_work_item(
 
     `base_branch` is the branch the work starts from and its merge request
     targets; unset, the repo's default branch (Kraft-v9gbi).
+
+    `skip_nodes`, `budget_usd` and `node_overrides` are POST /work-items' own
+    intake fields (Kraft-s7c04.33), validated there. `budget_usd` keeps the
+    API's presence rule: left at `...` it is not sent and the policy default
+    applies; `None` is an explicit "no cap".
     """
     if repo is None:
         work_item_id, _origin = context.resolve_context()
@@ -58,11 +72,14 @@ async def create_work_item(
             "title": title,
             "repo": repo,
             "chain_template": chain_template,
-            "autostart": False,
+            "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
             **({"policy": policy} if policy else {}),
             **({"base_branch": base_branch} if base_branch else {}),
+            **({"skip_nodes": skip_nodes} if skip_nodes else {}),
+            **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
+            **({"node_overrides": node_overrides} if node_overrides else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },

@@ -242,6 +242,66 @@ def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
     assert stored() is None
 
 
+@pytest.mark.parametrize(
+    "budget, cap",
+    [
+        (["--budget", "7.5"], {"cap_usd": 7.5, "source": "item"}),
+        (["--budget", "none"], {"cap_usd": None, "source": "item"}),
+        ([], {"source": "policy"}),
+    ],
+    ids=["cap", "explicit-no-cap", "policy-default"],
+)
+def test_create_skips_nodes_caps_spend_and_overrides_a_node(
+    app, monkeypatch, capsys, repo, budget, cap
+):
+    """Kraft-s7c04.33: the three intake fields POST /work-items takes, from the
+    terminal. `--budget none` is the API's explicit null, not an omission."""
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    cli.main(["item", "create", "t", "--skip-nodes", "spec",
+              "--node-override", "plan.auto_escalate_stuck=false",
+              "--node-override", "implementation.attempts=2", *budget, "--json"])  # fmt: skip
+    wid = json.loads(capsys.readouterr().out)["id"]
+    cli.main(["view", "show", wid, "--json"])
+    item = json.loads(capsys.readouterr().out)
+    nodes = [n["id"] for n in item["chain_definition"]["nodes"]]
+    assert "spec" not in nodes and "plan" in nodes
+    assert item["node_overrides"] == {
+        "plan": {"auto_escalate_stuck": False},
+        "implementation": {"attempts": 2},
+    }
+    assert cap.items() <= item["budget_cap"].items()
+
+
+@pytest.mark.parametrize(
+    "flag, says",
+    [(["--node-override", "plan=1"], "NODE.FIELD=VALUE"), (["--budget", "lots"], "dollars")],
+    ids=["override", "budget"],
+)
+def test_create_refuses_a_malformed_intake_flag(flag, says, capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["item", "create", "t", "--repo", "/r", *flag])
+    err = capsys.readouterr().err
+    assert flag[0] in err and says in err
+
+
+@pytest.mark.parametrize(
+    "flag, autostart", [([], False), (["--autostart"], True)], ids=["default", "autostart"]
+)
+def test_create_lands_paused_unless_a_human_asks_to_start_it(monkeypatch, flag, autostart):
+    """Kraft-s7c04.31: paused is the default, on purpose; `--autostart` is the
+    human's way to skip pressing Start."""
+    sent = {}
+
+    async def fake_post(path, payload):
+        sent.update(payload)
+        return 201, {"id": "w1", "status": "active" if autostart else "paused"}
+
+    monkeypatch.setattr(client.transport, "_post", fake_post)
+    cli.main(["item", "create", "t", "--repo", "/r", *flag])
+    assert sent["autostart"] is autostart
+
+
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):
     stranger = make_repo(tmp_path, name="stranger")
     monkeypatch.chdir(stranger)

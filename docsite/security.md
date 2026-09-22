@@ -18,7 +18,9 @@ things worth being deliberate about:
   (Tailscale / a named tunnel), not a bare `--host 0.0.0.0`.
 - **An agent cannot start work or approve its own gate.** Everything a coding
   agent files through the MCP tools or `kraft item create` lands paused; a
-  human clicks Start. A worker session cannot approve, reject, pause, or
+  human clicks Start. `kraft item create --autostart` is a person's shortcut
+  past that click, and the server refuses it (403, nothing filed) from a
+  Kraft worker session or an MCP client. A worker session cannot approve, reject, pause, or
   resume the work item it is itself running — enforced in code, not by
   convention. See [Agent integration](agent-integration.md).
 - **Worker environment is allowlisted, not inherited.** A worker's process

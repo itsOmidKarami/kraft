@@ -75,3 +75,23 @@ def test_pausing_a_never_started_item_is_refused(client, tmp_path):
         "/api/work-items", json={"title": "already waiting", "repo": str(repo), "autostart": False}
     ).json()["id"]
     assert client.post(f"/api/work-items/{wid}/pause").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "caller",
+    [{"X-Kraft-Session-Id": "s1"}, {"X-Kraft-Client": "mcp"}],
+    ids=["worker", "mcp-assistant"],
+)
+def test_an_agent_files_work_paused_and_cannot_autostart_it(client, tmp_path, caller):
+    """Kraft-s7c04.31: `autostart` is a human's choice. A Kraft session (its
+    `X-Kraft-Session-Id`) or an MCP client asking for it is refused before
+    anything is filed; the same caller filing paused is still let through."""
+    repo = make_repo(tmp_path)
+    body = {"title": "t", "repo": str(repo)}
+    refused = client.post("/api/work-items", json={**body, "autostart": True}, headers=caller)
+    assert refused.status_code == 403, refused.text
+    assert "paused" in refused.json()["detail"]
+    assert client.get("/api/work-items").json()["items"] == []
+
+    filed = client.post("/api/work-items", json={**body, "autostart": False}, headers=caller)
+    assert filed.status_code == 201 and filed.json()["status"] == "paused"
