@@ -510,6 +510,33 @@ def test_the_system_prompt_carries_in_order(run, overrides, in_order):
     assert firsts == sorted(firsts)
 
 
+def test_the_intent_block_sits_after_the_method_and_before_steering(run):
+    prompt = _system_prompt(
+        run(
+            repo_entry={"intent_dir": "docs/intent"},
+            method_text="Write it in one page.",
+            steering_texts=("Use tabs.",),
+        )["cmd"]
+    )
+    in_order = (
+        skill.HEADING + "Write it in one page.",
+        agent.INTENT_HEADING + "This repository states its intended behaviour in `docs/intent/`",
+        "`docs/intent/README.md`",
+        steering.HEADING + "Use tabs.",
+    )
+    firsts = [prompt.index(p) for p in in_order]
+    assert firsts == sorted(firsts)
+
+
+@pytest.mark.parametrize(
+    "repo_entry",
+    [None, {}, {"intent_dir": None}],
+    ids=["no-entry", "empty-entry", "null-intent-dir"],
+)
+def test_no_intent_dir_no_intent_block(run, repo_entry):
+    assert agent.INTENT_HEADING not in _system_prompt(run(repo_entry=repo_entry)["cmd"])
+
+
 @pytest.mark.parametrize(
     "overrides, tail",
     [

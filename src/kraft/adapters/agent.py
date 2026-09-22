@@ -94,6 +94,16 @@ SAFETY_RULES = (
     "already there."
 )
 
+#: Intent-process design §4. Kraft-authored, and its only input is the repo's
+#: own repos.yaml entry: it names a directory and inlines no file from the repo,
+#: so the context-injection boundary below is not crossed.
+INTENT_HEADING = "\n\n## Intent tree\n\n"
+_INTENT = (
+    "This repository states its intended behaviour in `{dir}/`, one file per "
+    "capability. Read `{dir}/README.md` for the format before you change "
+    "anything there."
+)
+
 #: Asked only of a harness whose `usage` capability says `result_file` -- the
 #: agent is then the only source of its own numbers, and without this the row
 #: stores NULL tokens as well as NULL cost. `usage._from_usage_block` already
@@ -484,9 +494,12 @@ def build_context(
     #: `inputs: [review_package]` (`AgentTask.inputs`); None for every other.
     review_package: str | None = None,
     method_text: str | None = None,
+    #: The repo's `intent_dir` (`RepoEntry.intent_dir`); None names no tree.
+    intent_dir: str | None = None,
     steering_texts: tuple[str, ...] = (),
 ) -> str:
-    """Kraft's contract, method and steering, folded into one block of text.
+    """Kraft's contract, method, intent tree and steering, folded into one
+    block of text.
 
     A pure function of its arguments -- it takes the two resolved harness
     *facts* (`usage_source`, `context_channel`) rather than a harness id, so a
@@ -545,6 +558,10 @@ def build_context(
         # produce, then how to produce it, then the house rules that apply to
         # everything. Steering stays last so it is never buried.
         ctx += _skill.HEADING + method_text + _skill.UNAVAILABLE
+    if intent_dir:
+        # After the method, before steering: a property of the repo, like
+        # steering, but Kraft's own text (design §4).
+        ctx += INTENT_HEADING + _INTENT.format(dir=intent_dir.rstrip("/"))
     if steering_texts:
         # The context-injection boundary (00_overview.md glossary) bans
         # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
@@ -695,6 +712,7 @@ async def run_agent_task(
         artifact=artifact,
         review_package=review_package,
         method_text=method_text,
+        intent_dir=(repo_entry or {}).get("intent_dir"),
         steering_texts=steering_texts,
     )
     options = {
