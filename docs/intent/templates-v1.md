@@ -709,6 +709,18 @@ maximum rather than by the inherited value: timeouts, retry and wait timing, and
 `allowed_harnesses`. A field absent from `maxima:` is unbounded.
 enforced-by: tests/test_policy.py::test_template_policy_cannot_widen_allowed_tools, tests/test_policy.py::test_template_policy_can_narrow_allowed_tools, tests/test_policy.py::test_template_policy_cannot_exceed_token_budget_ceiling, tests/test_policy.py::test_token_budget_ratchets_against_the_inherited_value_not_the_maximum, tests/test_policy.py::test_deny_tools_only_accumulate_down_the_layers, tests/test_policy.py::test_a_sandbox_once_set_cannot_be_changed_by_a_narrower_layer, tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[node-widens-chain], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[task-widens-step], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[step-raises-node-budget], tests/templates/test_policy_scopes.py::test_materialization_refuses_a_scope_that_relaxes_what_it_inherits[task-swaps-step-sandbox], tests/test_permissions.py::test_permission_request_answers_from_the_tasks_resolved_policy[empty-allowlist], tests/test_permissions.py::test_permission_request_answers_from_the_tasks_resolved_policy[denied-beats-allowlisted], tests/executor/test_policy_enforcement.py::test_a_tasks_resolved_tool_policy_reaches_its_launch, tests/executor/test_policy_enforcement.py::test_token_budget_refuses_the_next_agent_launch[at]
 
+## REQ sandbox-wraps-the-whole-work-item
+
+A sandbox set at any scope of a work item SHALL wrap every project-controlled
+launch of that item: every task, recovery, judge, escalation turn, gate review,
+test scope, area setup and the repository's `setup_command`. No launch SHALL
+run on the host once the item has a sandbox, and a missing sandbox runtime
+SHALL stop the item for a human rather than fall back to the host. Two
+scopes setting different sandboxes SHALL be refused when the chain is built,
+naming both scopes.
+enforced-by: tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[sandbox0-expected0], tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[None-None], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_runs_in_a_sandbox_another_node_set[manual], tests/executor/test_policy_enforcement.py::test_a_gate_reviewer_runs_in_a_sandbox_another_node_set, tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-task], tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-node], tests/executor/test_policy_enforcement.py::test_an_item_filed_with_two_sandboxes_stops_rather_than_pick_one, tests/executor/test_setup_in_sandbox.py::test_the_walk_runs_both_setups_in_the_items_sandbox[entry0-expected0], tests/executor/test_setup_in_sandbox.py::test_a_sandboxed_item_without_docker_stops_for_a_human, tests/executor/test_setup_in_sandbox.py::test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox[entry0-expected0]
+origin: src/kraft/executor/dispatch.py §item_sandbox -- Omid's decision (Ruling 189, Kraft-h10e5, Kraft-p8nem): a sandbox is a safety ceiling that only tightens, and once one task has run in it the worktree is the worker's to write, so every later host-side launch would run what it wrote. `item_sandbox` is the one resolution every launch reads; `ResolvedChain.check_scopes` refuses two.
+
 ## REQ repository-policy-cannot-relax-instance-safety
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and

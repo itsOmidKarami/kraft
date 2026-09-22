@@ -154,7 +154,7 @@ node; a gate's `auto_review` inherits its gate. At runtime:
 |---|---|---|
 | `allowed_tools` | only narrows | The permission gate answers a worker's ask from it, and it is passed as `--allowedTools`. Unset (no layer sets it) allows every tool; `[]` allows none. A harness with no tool-list capability (codex, gemini) refuses to launch under one rather than run unrestricted. |
 | `deny_tools` | only accumulates | Denied by the permission gate and passed as `--disallowed-tools`, on top of `allowed_tools`. |
-| `sandbox` | set once, never changed or removed | Wraps the task's process (agent, subprocess, builtin) in `docker run`. |
+| `sandbox` | set once, never changed or removed | Wraps the whole work item, not only the scope that sets it (Ruling 189): every process it launches (agents, subprocesses, builtins, recoveries, judges, escalations, gate reviews, test scopes, area setups and `setup_command`) runs in `docker run`. Two scopes setting different sandboxes are refused when the chain is built. |
 | `token_budget` | only narrows | Before each agent launch, gate reviewers included: once the work item's sessions have spent this many tokens (input plus output) the next agent task is refused and the item stops for a human. Like `budget`, it cannot interrupt a running agent. |
 | `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |
 | `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item node override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |

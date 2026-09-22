@@ -156,10 +156,10 @@ def _select_scopes(
     task_hook: str,
     round: int,
     repo_entry: dict,
-) -> tuple[list[dict], dict | None]:
-    """The scopes the `kraft.verify_changed_test_scopes` builtin should run, and
-    the sandbox to run them under (test-scope design §3.2-3.3, C7
-    Kraft-s7c04.14).
+) -> list[dict]:
+    """The scopes the `kraft.verify_changed_test_scopes` builtin should run
+    (test-scope design §3.2-3.3, C7 Kraft-s7c04.14). Their sandbox is the
+    item's (`item_sandbox`).
 
     Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3).
     C1 briefly gave `implementation` its own `on.test.run` dispatch through
@@ -199,7 +199,6 @@ def _select_scopes(
     only the one(s) that failed. Selecting less is only ever safe for a
     scope that passed.
     """
-    sandbox = _sandbox.resolve({}, repo_entry)
     repo_scopes = repo_entry.get("test_scopes")
     if not repo_scopes and repo_entry.get("test_command"):
         # `config.load_repos` already wraps a bare `test_command` into a
@@ -216,7 +215,7 @@ def _select_scopes(
         for scope in (area.get("verification") or {}).get("test_scopes") or []
     ]
     if not repo_scopes and not area_scopes:
-        return [], sandbox
+        return []
     scopes = [
         {
             "paths": s["paths"],
@@ -246,7 +245,7 @@ def _select_scopes(
         else None
     )
     to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
-    return to_run, sandbox
+    return to_run
 
 
 async def _config_error(db, run_dirs, common: dict, log: str) -> str:
@@ -281,34 +280,38 @@ def scope_policy(
     return snapshot.policy_for(scope, repository)
 
 
-def _task_sandbox(frozen: _policy.SandboxPolicy | None, repo_entry: dict | None) -> dict | None:
-    """The sandbox a task's process runs in. One its policy froze wins, and the
-    repository entry's live value -- `false` included -- cannot turn it off
-    (Ruling 105: `sandbox` only tightens); without one, the entry's live value
-    applies as it always has."""
-    return frozen.model_dump() if frozen is not None else _sandbox.resolve({}, repo_entry)
-
-
 def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
-    """The sandbox an item's own launches outside any task run in -- its
-    repository's `setup_command` (Kraft-p8nem) -- or None for an item nothing
-    sandboxes. The same "sandboxed item" #107's walk guard reads
-    (`stops.refuse_sandboxed_submodules`): the snapshot's item policy, else
-    the entry's live value, else any task's frozen one, since once a
-    sandboxed task has run the worktree is the worker's to write. A poisoned
-    `repos.yaml` raises `RuntimeError`: unreadable is never "no sandbox"."""
+    """The sandbox every project-controlled launch of this item runs in, or
+    None for an item nothing sandboxes -- the one resolution (Ruling 189).
+    Every task, recovery, judge, escalation turn, gate review, test scope,
+    area setup and the repository's `setup_command` reads it here: a sandbox
+    wraps the item, not the scope that set it, because once one task has run
+    in it the worktree is the worker's to write (Kraft-p8nem, Kraft-h10e5).
+
+    Whichever scope of the snapshot froze one wins, and the entry's live value
+    -- `false` included -- cannot turn it off (Ruling 105: `sandbox` only
+    tightens); without one, the entry's live value applies. `RuntimeError`,
+    so every caller stops for a human, when that cannot be told: a snapshot
+    freezing two (filed before the ruling), or a poisoned `repos.yaml` --
+    unreadable is never "no sandbox"."""
     snapshot = store.materialized_chain_of(row)
     try:
-        sandbox = _task_sandbox(
-            snapshot.policy.sandbox if snapshot is not None else None,
-            launch.repo_entry if launch is not None else None,
-        )
-    except _config.ConfigError as exc:
+        frozen = snapshot.item_sandbox() if snapshot is not None else None
+        if frozen is not None:
+            return frozen.model_dump()
+        # Every repository the item launches against, members included: a
+        # member's live sandbox wraps the root's runs too.
+        entries = [launch.repo_entry, *launch.repositories.values()] if launch else []
+        live = [s for e in entries if e and (s := _sandbox.resolve({}, e))]
+        live = list({json.dumps(s, sort_keys=True): s for s in live}.values())
+    except (_policy.PolicyError, _config.ConfigError) as exc:
         raise RuntimeError(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
-    if sandbox or snapshot is None:
-        return sandbox
-    frozen = (snapshot.policy_for(t).sandbox for n in snapshot.chain.nodes for t in n.tasks())
-    return next((s.model_dump() for s in frozen if s is not None), None)
+    if len(live) > 1:
+        raise RuntimeError(
+            f"{row['id']}'s repositories set different sandboxes {live!r} in repos.yaml: "
+            "a sandbox wraps the whole work item (Ruling 189), so they must agree"
+        )
+    return live[0] if live else None
 
 
 def _frozen_steering(row) -> dict[str, str] | None:
@@ -350,7 +353,6 @@ async def _run_changed_test_scopes(
     execution: ExecutionMode,
     launch: LaunchContext | None,
     round: int,
-    policy_sandbox: _policy.SandboxPolicy | None = None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
     the branch's changed paths select, and report one aggregate result.
@@ -375,10 +377,10 @@ async def _run_changed_test_scopes(
     scopes, which the repo's own table bounds.
     """
     repo_entry = (launch.repo_entry or {}) if launch else {}
-    to_run, sandbox = _select_scopes(
+    sandbox = item_sandbox(work_item_row, launch)
+    to_run = _select_scopes(
         db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
     )
-    sandbox = _task_sandbox(policy_sandbox, repo_entry) if policy_sandbox else sandbox
     if not to_run:
         return await _config_error(
             db,
@@ -535,7 +537,6 @@ async def dispatch_node(
             execution=t.execution,
             launch=launch,
             round=round,
-            policy_sandbox=task_policy.sandbox,
         )
 
     if isinstance(t, SubprocessTask):
@@ -554,7 +555,7 @@ async def dispatch_node(
             cwd=worktree,
             repo_entry=(launch.repo_entry or {}) if launch else {},
             env={"PYTHONDONTWRITEBYTECODE": "1"},
-            sandbox=_task_sandbox(task_policy.sandbox, launch.repo_entry if launch else None),
+            sandbox=item_sandbox(work_item_row, launch),
             **common,
         )
 
@@ -736,7 +737,7 @@ async def dispatch_node(
             effort=inv.effort,
             allowed_tools=inv.allowed_tools,
             permission_mode=inv.permission_mode,
-            sandbox=inv.sandbox,
+            sandbox=item_sandbox(work_item_row, launch),
             steering_texts=inv.steering_texts,
             artifact=t.produces,
             method_text=inv.method_text,

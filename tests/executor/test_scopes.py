@@ -41,7 +41,7 @@ async def _on_a_branch(item_on, repo):
 
 
 def _selected(it, round, scopes=(_FRONTEND, _BACKEND)):
-    to_run, _sandbox = dispatch._select_scopes(
+    to_run = dispatch._select_scopes(
         it.database, it.id, it.repo, "verify", "verify.main.t", round, {"test_scopes": list(scopes)}
     )
     return [tuple(s["cmd"]) for s in to_run]

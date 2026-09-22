@@ -171,7 +171,7 @@ async def review(
         permission_mode=inv.permission_mode,
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,
-        sandbox=inv.sandbox,
+        sandbox=executor.item_sandbox(row, launch),
         task_instruction=task_instruction,
         title=row["title"],
         repo_path=row["repo"],

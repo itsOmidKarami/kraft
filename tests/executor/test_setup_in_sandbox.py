@@ -146,6 +146,11 @@ class _Poisoned(dict):
             _SANDBOX,
         ),
         ("item-policy", {"sandbox": {"kind": "docker", "image": "since/changed:2"}}, _SANDBOX),
+        (
+            [{"id": "work", "kind": "exec", "tasks": [_agent(policy={"sandbox": _SANDBOX})]}],
+            {"sandbox": {"kind": "docker", "image": "since/changed:2"}},
+            _SANDBOX,
+        ),
     ],
     ids=[
         "nothing",
@@ -154,6 +159,7 @@ class _Poisoned(dict):
         "one-task-froze-one",
         "one-task-and-entry-says-off",
         "item-policy-beats-a-changed-entry",
+        "a-tasks-beats-a-changed-entry",
     ],
 )
 async def test_the_item_sandbox_is_whatever_sandboxes_any_of_it(
@@ -275,3 +281,26 @@ async def test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox(
         (["true", "ui-setup"], expected),
         (["true", "ui"], expected),
     ]
+
+
+async def test_repositories_with_different_live_sandboxes_stop_rather_than_pick_one(item_on):
+    it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
+    launch = executor.LaunchContext(
+        repo_entry={"setup_command": "", "sandbox": _SANDBOX},
+        steering_dir=None,
+        repositories={"pkg": {"sandbox": {"kind": "docker", "image": "member:2"}}},
+    )
+
+    with pytest.raises(RuntimeError, match="different sandboxes"):
+        dispatch.item_sandbox(it.row(), launch)
+
+
+async def test_a_members_live_sandbox_wraps_the_item(item_on):
+    it = await item_on([{"id": "work", "kind": "exec", "tasks": [_agent()]}])
+    launch = executor.LaunchContext(
+        repo_entry={"setup_command": ""},
+        steering_dir=None,
+        repositories={"pkg": {"sandbox": _SANDBOX}},
+    )
+
+    assert dispatch.item_sandbox(it.row(), launch) == _SANDBOX

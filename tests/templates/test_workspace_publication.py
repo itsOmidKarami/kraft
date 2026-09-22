@@ -155,9 +155,10 @@ async def test_each_repository_binds_its_own_task_and_the_checkout_binds_all(
     database, run_dirs, tmp_path, ran
 ):
     """Kraft-jc39p, at launch: a task fanned out to a member runs under that
-    member's frozen policy -- here, its sandbox -- and the root's run under
-    the root's; the assembled checkout's task under the item's policy, the
-    meet of them all."""
+    member's frozen policy, and the assembled checkout's task under the
+    item's, the meet of them all. The sandbox is the one field that does not
+    bind per repository: it wraps the whole item (Ruling 189), so the root's
+    run is sandboxed by the member's too."""
     row, node, worktree = await _workspace_item(
         database,
         run_dirs,
@@ -171,12 +172,13 @@ async def test_each_repository_binds_its_own_task_and_the_checkout_binds_all(
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=LAUNCH)
     await dispatch.dispatch_node(database, run_dirs, once, node, row, worktree, launch=LAUNCH)
 
-    assert [sandbox for _, sandbox in ran] == [None, _SANDBOX.model_dump(), _SANDBOX.model_dump()]
+    assert [sandbox for _, sandbox in ran] == [_SANDBOX.model_dump()] * 3
 
 
 async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_dirs, tmp_path, ran):
-    """A member's run is configured by the member's `repos.yaml` entry -- its
-    live sandbox here -- never the root's."""
+    """A member's run is configured by the member's `repos.yaml` entry, never
+    the root's. Its live sandbox wraps the whole item (Ruling 189), the
+    root's run included."""
     member = {"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}}
     launch = LaunchContext(
         repo_entry=NO_SETUP, steering_dir=None, repositories={"ws": NO_SETUP, "pkg": member}
@@ -188,7 +190,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
 
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
 
-    assert [sandbox for _, sandbox in ran] == [None, member["sandbox"]]
+    assert [sandbox for _, sandbox in ran] == [member["sandbox"]] * 2
 
 
 # ── areas (`repository-area-can-declare-setup-and-test-scopes`) ──
