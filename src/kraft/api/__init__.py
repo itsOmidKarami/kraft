@@ -43,6 +43,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     auth,
     board,
     gates,
+    harnesses,
     lifecycle,
     repos,
     search,

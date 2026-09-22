@@ -417,3 +417,14 @@ async def library() -> dict:
 async def library_component(component_id: str) -> dict:
     """One library component, by `tasks.implementer` or a bare unique name."""
     return await transport._get(f"/templates/library/{component_id}")
+
+
+async def harnesses() -> dict:
+    """`harnesses.yaml`'s profiles, each with the library tasks and chains
+    that select it (Kraft-archr)."""
+    return await transport._get("/harnesses/profiles")
+
+
+async def harness(profile_id: str) -> dict:
+    """One harness profile."""
+    return await transport._get(f"/harnesses/profiles/{profile_id}")

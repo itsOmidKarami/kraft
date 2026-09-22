@@ -1,5 +1,6 @@
 """`kraft admin templates ...`: the chain template library, read-only from a
-terminal -- lint it, print one chain, list its reusable components."""
+terminal -- lint it, print one chain, list its reusable components. And
+`kraft admin harnesses`, the `harnesses.yaml` profiles its agent tasks select."""
 
 from __future__ import annotations
 
@@ -57,7 +58,48 @@ def _cmd_library(ns: argparse.Namespace) -> None:
         common.emit(asyncio.run(client.library()), _render_components, ns.json)
 
 
+def _render_profiles(payload: dict) -> str:
+    rows = [
+        {**p, "enabled": "yes" if p["enabled"] else "no", "used_by": ", ".join(p["used_by"]) or "-"}
+        for p in payload["profiles"]
+    ]
+    table = render.table(
+        rows,
+        [("ID", "id"), ("PROVIDER", "provider"), ("ENABLED", "enabled"), ("USED BY", "used_by")],
+    )
+    return f"{payload['file']}: {payload['error']}" if payload["error"] else table
+
+
+def _render_profile(p: dict) -> str:
+    defaults = ", ".join(f"{k}={v}" for k, v in p["defaults"].items())
+    return render.kv(
+        [
+            ("id", p["id"]),
+            ("provider", p["provider"]),
+            ("enabled", "yes" if p["enabled"] else "no"),
+            ("executable", p["executable"] or "the provider's own"),
+            ("defaults", defaults or "none"),
+            ("used by", ", ".join(p["used_by"]) or "no library task"),
+            ("chains", ", ".join(p["chains"]) or "no chain"),
+        ]
+    )
+
+
+def _cmd_harnesses(ns: argparse.Namespace) -> None:
+    if ns.profile_id:
+        common.emit(asyncio.run(client.harness(ns.profile_id)), _render_profile, ns.json)
+    else:
+        common.emit(asyncio.run(client.harnesses()), _render_profiles, ns.json)
+
+
 def add(subs, common_parser: argparse.ArgumentParser) -> None:
+    harnesses_p = subs.add_parser(
+        "harnesses",
+        parents=[common_parser],
+        help="the harness profiles in harnesses.yaml and the library tasks that select each",
+    )
+    harnesses_p.add_argument("profile_id", metavar="ID", nargs="?", help="one profile")
+    harnesses_p.set_defaults(func=_cmd_harnesses)
     templates_p = subs.add_parser("templates", help="inspect the chain template library")
     verbs = templates_p.add_subparsers(dest="templates_verb", required=True)
     lint_p = verbs.add_parser(

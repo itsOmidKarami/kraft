@@ -18,7 +18,7 @@ const LIBRARY: Library = {
   components: [
     component("steering.house", { definition: { instructions: "Be brief." } }),
     component("tasks.implementer", {
-      definition: { kind: "agent", prompt: "Implement the approved plan." },
+      definition: { kind: "agent", harness: "claude", prompt: "Implement the approved plan." },
       used_by: ["default", "quick-task"],
     }),
     component("tasks.lonely", {
@@ -54,6 +54,7 @@ describe("Settings · library", () => {
     expect(screen.getByText(/Implement the approved plan\./)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "quick-task" })).toHaveAttribute("href", "/settings/chains?tpl=quick-task");
     expect(screen.getByRole("link", { name: "default" })).toHaveAttribute("href", "/settings/chains?tpl=default");
+    expect(screen.getByRole("link", { name: "claude" })).toHaveAttribute("href", "/settings/harnesses?h=claude");
   });
 
   it("a component a lint issue names shows the issue", async () => {

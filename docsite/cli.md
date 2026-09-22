@@ -188,6 +188,8 @@ kraft admin templates show ID  # one chain file as its author wrote it
 kraft admin templates show ID --resolved  # the same chain with its library components expanded
 kraft admin templates library      # every library.yaml component, its kind, and the chains using it
 kraft admin templates library ID   # one component: its definition, users and lint issues (tasks.implementer, or a unique bare name)
+kraft admin harnesses         # every harnesses.yaml profile, its provider, and the library tasks selecting it
+kraft admin harnesses ID      # one profile: provider, executable, defaults, the tasks and chains using it
 kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
 kraft admin mcp                # serve the MCP tools over stdio
 ```
