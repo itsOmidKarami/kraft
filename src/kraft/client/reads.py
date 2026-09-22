@@ -419,9 +419,9 @@ async def library_component(component_id: str) -> dict:
 async def harnesses() -> dict:
     """`harnesses.yaml`'s profiles, each with the library tasks and chains
     that select it (Kraft-archr)."""
-    return await transport._get("/harnesses")
+    return await transport._get("/harnesses/profiles")
 
 
 async def harness(profile_id: str) -> dict:
     """One harness profile."""
-    return await transport._get(f"/harnesses/{profile_id}")
+    return await transport._get(f"/harnesses/profiles/{profile_id}")

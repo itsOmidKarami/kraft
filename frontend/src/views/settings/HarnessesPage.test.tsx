@@ -34,12 +34,14 @@ const cap = (values: string[] = [], always: string | null = null) => ({ values, 
 const PROVIDERS: HarnessProviders = {
   valid: {
     claude: {
+      id: "claude",
       kind: "cli",
       command: ["claude"],
       path: "/pkg/harnesses/claude.yaml",
       capabilities: { model: cap(), effort: cap(["low", "high", "max"]), permission_mode: cap(["auto"], "auto") },
     },
     codex: {
+      id: "codex",
       kind: "cli",
       command: ["codex", "exec"],
       path: "/pkg/harnesses/codex.yaml",

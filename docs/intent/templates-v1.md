@@ -1229,13 +1229,15 @@ origin: src/kraft/api/routes/settings.py §get_template -- Ruling 204, before 1.
 
 ## REQ harness-api-lists-and-guards-profiles
 
-`GET /harnesses` SHALL list every `harnesses.yaml` profile with its provider,
-executable, enabled flag and defaults, and the library tasks and chains that
-select it; `GET /harnesses/providers` each provider package's capability
-surface. `PUT /harnesses/{id}` SHALL save one profile only through the loader's
-own parse, and SHALL refuse, writing nothing, a profile that would stop an agent
-task of a chain that resolves now from launching.
-enforced-by: tests/api/test_harnesses.py::test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it, tests/api/test_harnesses.py::test_providers_are_each_packages_capability_surface, tests/api/test_harnesses.py::test_a_save_the_loader_refuses_is_refused_and_writes_nothing[bad-value], tests/api/test_harnesses.py::test_a_save_that_stops_a_chain_launching_is_refused[disabled], tests/api/test_harnesses.py::test_a_provider_change_the_selecting_task_cannot_run_on_is_refused, tests/api/test_harnesses.py::test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save, tests/api/test_harnesses.py::test_a_profile_save_is_written_and_read_back
+`GET /harnesses/profiles` SHALL list every `harnesses.yaml` profile with its
+provider, executable, enabled flag and defaults, and the library tasks and
+chains that select it; `GET /harnesses/providers` each provider package's
+capability surface. `PUT /harnesses/profiles/{id}` SHALL save one profile only
+through the loader's own parse, and SHALL refuse, writing nothing, a profile
+that would stop an agent task of a chain that resolves now from launching.
+Profiles and providers SHALL each live under their own prefix, so no profile id
+is reserved, and the flat `/harnesses/{id}` paths SHALL NOT remain.
+enforced-by: tests/api/test_harnesses.py::test_a_profile_may_take_the_name_of_a_harnesses_route[providers], tests/api/test_harnesses.py::test_the_flat_profile_paths_are_gone[get-/api/harnesses], tests/api/test_harnesses.py::test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it, tests/api/test_harnesses.py::test_providers_are_each_packages_capability_surface, tests/api/test_harnesses.py::test_a_save_the_loader_refuses_is_refused_and_writes_nothing[bad-value], tests/api/test_harnesses.py::test_a_save_that_stops_a_chain_launching_is_refused[disabled], tests/api/test_harnesses.py::test_a_provider_change_the_selecting_task_cannot_run_on_is_refused, tests/api/test_harnesses.py::test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save, tests/api/test_harnesses.py::test_a_profile_save_is_written_and_read_back
 origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.from_mapping` is `from_yaml`'s parse, and `agent.select_profile` is the rule a launch applies. Kraft-archr, Ruling 206.
 
 ## REQ harness-cli-lists-profiles

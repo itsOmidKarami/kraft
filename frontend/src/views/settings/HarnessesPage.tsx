@@ -10,9 +10,9 @@ import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared"
  * task's `harness:` selects -- which provider CLI runs, from which executable,
  * with which defaults.
  *
- * The list is `GET /harnesses`: every profile with the library tasks and chains
+ * The list is `GET /harnesses/profiles`: every profile with the library tasks and chains
  * that select it. A profile is edited as a form and saved on its own
- * (`PUT /harnesses/{id}`); the server refuses, naming why, what its loader
+ * (`PUT /harnesses/profiles/{id}`); the server refuses, naming why, what its loader
  * refuses or what would stop a resolving chain's agent task launching. Each
  * provider's capability surface (`GET /harnesses/providers`) is read-only: it
  * is what a CLI accepts, not a setting. */

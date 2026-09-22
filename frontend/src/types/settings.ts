@@ -91,7 +91,7 @@ export interface Library {
   components: LibraryComponent[];
 }
 
-/** One `harnesses.yaml` profile (`GET /harnesses`, Kraft-archr). */
+/** One `harnesses.yaml` profile (`GET /harnesses/profiles`, Kraft-archr). */
 export interface HarnessProfile {
   id: string;
   /** The provider package it configures: `claude`, `codex`, `gemini`. */
@@ -106,7 +106,7 @@ export interface HarnessProfile {
   chains: string[];
 }
 
-/** What a profile save sends (`PUT /harnesses/{id}`). */
+/** What a profile save sends (`PUT /harnesses/profiles/{id}`). */
 export type HarnessProfileInput = Pick<HarnessProfile, "provider" | "enabled" | "defaults"> & {
   executable?: string;
 };
@@ -128,6 +128,7 @@ export interface HarnessCapability {
 
 /** A provider package's read-only capability surface (`GET /harnesses/providers`). */
 export interface HarnessProvider {
+  id: string;
   kind: string;
   command: string[];
   path: string;

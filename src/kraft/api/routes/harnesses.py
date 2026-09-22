@@ -107,36 +107,50 @@ def _view(st) -> dict:
     return {"file": str(path), "error": error, "profiles": listed}
 
 
-@api_router.get("/harnesses")
+@api_router.get("/harnesses/profiles")
 async def list_harnesses(request: Request):
     return _view(request.app.state)
+
+
+def _provider_view(h: harness_mod.Harness) -> dict:
+    return {
+        "id": h.id,
+        "kind": h.kind,
+        "command": list(h.command),
+        "path": str(h.path),
+        "capabilities": {
+            name: {"values": list(c.values), "always": c.always, "channel": c.channel}
+            for name, c in h.capabilities.items()
+        },
+    }
+
+
+# Profiles and providers each have their own prefix (the Ruling 204 shape), so
+# no profile or provider id can shadow a route, and none is reserved.
 
 
 @api_router.get("/harnesses/providers")
 async def list_providers():
     """Each provider package (`src/kraft/harnesses/*.yaml`, or its
     `$KRAFT_HOME` overlay) as the capabilities a profile may select from.
-    Read-only: a provider is a fact about a CLI, not a setting. Declared before
-    `/harnesses/{pid}`, which is why `providers` is no profile id."""
+    Read-only: a provider is a fact about a CLI, not a setting."""
     loaded = harness_mod.load(None)
     return {
-        "valid": {
-            h.id: {
-                "kind": h.kind,
-                "command": list(h.command),
-                "path": str(h.path),
-                "capabilities": {
-                    name: {"values": list(c.values), "always": c.always, "channel": c.channel}
-                    for name, c in h.capabilities.items()
-                },
-            }
-            for h in loaded.valid.values()
-        },
+        "valid": {h.id: _provider_view(h) for h in loaded.valid.values()},
         "invalid": loaded.invalid,
     }
 
 
-@api_router.get("/harnesses/{pid}")
+@api_router.get("/harnesses/providers/{hid}")
+async def get_provider(hid: str):
+    """One provider. One whose file did not load is a 404 that says why."""
+    loaded = harness_mod.load(None)
+    if hid not in loaded.valid:
+        raise HTTPException(404, loaded.invalid.get(hid, f"no harness provider {hid!r}"))
+    return _provider_view(loaded.valid[hid])
+
+
+@api_router.get("/harnesses/profiles/{pid}")
 async def get_harness(pid: str, request: Request):
     found = next((p for p in _view(request.app.state)["profiles"] if p["id"] == pid), None)
     if found is None:
@@ -144,7 +158,7 @@ async def get_harness(pid: str, request: Request):
     return found
 
 
-@api_router.put("/harnesses/{pid}")
+@api_router.put("/harnesses/profiles/{pid}")
 async def put_harness(pid: str, body: dict, request: Request):
     """Save one profile, added or replaced, into `harnesses.yaml`. Refused,
     writing nothing, when the whole file would not load, or when an agent task
@@ -152,10 +166,6 @@ async def put_harness(pid: str, body: dict, request: Request):
     could not launch before the edit is not the edit's to fix."""
     st = request.app.state
     library = deps.library_or_503(st)
-    if pid == "providers":
-        raise HTTPException(
-            422, "'providers' is reserved: GET /harnesses/providers is the providers"
-        )
     path = st.templates_dir / FILE
     providers = harness_mod.load(None).valid
     try:

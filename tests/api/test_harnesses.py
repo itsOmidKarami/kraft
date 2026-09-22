@@ -52,18 +52,18 @@ def _extending_task(templates_dir):
 
 
 def _profiles(client) -> dict[str, dict]:
-    response = client.get("/api/harnesses")
+    response = client.get("/api/harnesses/profiles")
     assert response.status_code == 200, response.text
     return {p["id"]: p for p in response.json()["profiles"]}
 
 
-# ── GET /harnesses ──
+# ── GET /harnesses/profiles ──
 
 
 def test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it(
     client, templates_dir
 ):
-    body = client.get("/api/harnesses").json()
+    body = client.get("/api/harnesses/profiles").json()
     profiles = {p["id"]: p for p in body["profiles"]}
     on_disk = yaml.safe_load((templates_dir / "harnesses.yaml").read_text())["harnesses"]
 
@@ -89,15 +89,15 @@ def test_a_library_task_uses_the_profile_it_inherits(client):
 
 
 def test_one_profile_by_id_and_an_unknown_one_is_404(client):
-    assert client.get("/api/harnesses/claude").json()["defaults"] == {"model": "sonnet"}
-    response = client.get("/api/harnesses/nope")
+    assert client.get("/api/harnesses/profiles/claude").json()["defaults"] == {"model": "sonnet"}
+    response = client.get("/api/harnesses/profiles/nope")
     assert response.status_code == 404
     assert "nope" in response.json()["detail"]
 
 
 def test_a_file_that_does_not_load_is_named_not_a_500(client, templates_dir):
     (templates_dir / "harnesses.yaml").write_text("harnesses: [a list]\n")
-    body = client.get("/api/harnesses").json()
+    body = client.get("/api/harnesses/profiles").json()
     assert body["profiles"] == []
     assert "must be a mapping keyed by id" in body["error"]
 
@@ -121,12 +121,37 @@ def test_providers_are_each_packages_capability_surface(client):
     assert providers["invalid"] == {}
 
 
-# ── PUT /harnesses/{id} ──
+def test_one_provider_by_id_and_an_unknown_one_is_404(client):
+    assert client.get("/api/harnesses/providers/codex").json()["command"] == ["codex", "exec"]
+    response = client.get("/api/harnesses/providers/nope")
+    assert response.status_code == 404
+    assert "nope" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("pid", ["providers", "profiles"])
+def test_a_profile_may_take_the_name_of_a_harnesses_route(client, pid):
+    """Profiles and providers each have their own prefix, so no id is reserved."""
+    response = client.put(f"/api/harnesses/profiles/{pid}", json={"provider": "codex"})
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/harnesses/profiles/{pid}").json()["provider"] == "codex"
+    assert pid in _profiles(client)
+
+
+@pytest.mark.parametrize(
+    "method, path",
+    [("get", "/api/harnesses"), ("get", "/api/harnesses/claude"), ("put", "/api/harnesses/claude")],
+)
+def test_the_flat_profile_paths_are_gone(client, method, path):
+    kwargs = {"json": {"provider": "codex"}} if method == "put" else {}
+    assert getattr(client, method)(path, **kwargs).status_code in (404, 405)
+
+
+# ── PUT /harnesses/profiles/{id} ──
 
 
 def test_a_profile_save_is_written_and_read_back(client, templates_dir):
     body = {"provider": "codex", "executable": "codex", "defaults": {"effort": "high"}}
-    response = client.put("/api/harnesses/codex", json=body)
+    response = client.put("/api/harnesses/profiles/codex", json=body)
 
     assert response.status_code == 200, response.text
     assert response.json()["defaults"] == {"effort": "high"}
@@ -137,7 +162,7 @@ def test_a_profile_save_is_written_and_read_back(client, templates_dir):
 
 
 def test_a_new_profile_is_added(client):
-    response = client.put("/api/harnesses/gem", json={"provider": "gemini"})
+    response = client.put("/api/harnesses/profiles/gem", json={"provider": "gemini"})
     assert response.status_code == 200, response.text
     assert _profiles(client)["gem"]["provider"] == "gemini"
 
@@ -151,7 +176,6 @@ def test_a_new_profile_is_added(client):
         ("codex", {"provider": "codex", "colour": "red"}, "colour"),
         ("codex", {"provider": "codex", "enabled": "yes"}, "enabled"),
         ("a.b", {"provider": "codex"}, "must match"),
-        ("providers", {"provider": "codex"}, "reserved"),
     ],
     ids=[
         "bad-value",
@@ -160,14 +184,13 @@ def test_a_new_profile_is_added(client):
         "unknown-key",
         "not-strict",
         "bad-id",
-        "reserved",
     ],
 )
 def test_a_save_the_loader_refuses_is_refused_and_writes_nothing(
     client, templates_dir, pid, body, reason
 ):
     before = snapshot(templates_dir)
-    response = client.put(f"/api/harnesses/{pid}", json=body)
+    response = client.put(f"/api/harnesses/profiles/{pid}", json=body)
     assert response.status_code == 422
     assert reason in response.json()["detail"]
     assert snapshot(templates_dir) == before
@@ -184,7 +207,7 @@ def test_a_save_the_loader_refuses_is_refused_and_writes_nothing(
 )
 def test_a_save_that_stops_a_chain_launching_is_refused(client, templates_dir, body, reason):
     before = snapshot(templates_dir)
-    response = client.put("/api/harnesses/claude", json=body)
+    response = client.put("/api/harnesses/profiles/claude", json=body)
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert reason in detail
@@ -196,7 +219,7 @@ def test_a_save_that_stops_a_chain_launching_is_refused(client, templates_dir, b
 def test_a_provider_change_the_selecting_task_cannot_run_on_is_refused(client, templates_dir):
     """codex takes no `effort: max`, which `max-effort`'s task asks for."""
     before = snapshot(templates_dir)
-    response = client.put("/api/harnesses/claude", json={"provider": "codex"})
+    response = client.put("/api/harnesses/profiles/claude", json={"provider": "codex"})
     assert response.status_code == 422
     assert "max-effort" in response.json()["detail"]
     assert "'max'" in response.json()["detail"]
@@ -208,14 +231,14 @@ def test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save(client):
     """`orphan` selects a profile that does not exist before the edit or after
     it: the edit is not what broke it -- though adding a profile changes how
     that failure reads ("known are [...]")."""
-    response = client.put("/api/harnesses/gem", json={"provider": "gemini"})
+    response = client.put("/api/harnesses/profiles/gem", json={"provider": "gemini"})
     assert response.status_code == 200, response.text
 
 
 def test_a_save_over_a_file_that_does_not_parse_is_refused(client, templates_dir):
     (templates_dir / "harnesses.yaml").write_text("harnesses: [unclosed\n")
     before = snapshot(templates_dir)
-    response = client.put("/api/harnesses/codex", json={"provider": "codex"})
+    response = client.put("/api/harnesses/profiles/codex", json={"provider": "codex"})
     assert response.status_code == 409
     assert "by hand" in response.json()["detail"]
     assert snapshot(templates_dir) == before

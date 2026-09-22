@@ -293,14 +293,14 @@ harnesses:
 `kraft admin harnesses` lists every profile with its provider and the library
 tasks that select it, and `kraft admin harnesses ID` shows one. Settings →
 Harnesses shows the same, beside each provider's read-only capability surface
-(`GET /api/harnesses/providers`), and edits one profile at a time
-(`GET`/`PUT /api/harnesses/{id}`). A save goes through the same parse as
+(`GET /api/harnesses/providers`, `GET /api/harnesses/providers/{id}`), and
+edits one profile at a time (`GET /api/harnesses/profiles`,
+`GET`/`PUT /api/harnesses/profiles/{id}`). A save goes through the same parse as
 loading the file, and is refused, with the reason and nothing written, if an
 agent task of a chain that resolves now would stop launching: its profile
 disabled, a default no launch applies, or a provider that does not take
 the task's own `model` or `effort`. A save rewrites the file, so comments in it
-are not kept. `providers` cannot be a profile id, since the providers route
-has that path.
+are not kept.
 
 ## `repos.yaml` — connected repos
 
