@@ -89,7 +89,7 @@ def policy_fields() -> set[str]:
 def access_fields() -> set[str]:
     from kraft import config
 
-    return set(config.ACCESS_DEFAULT)
+    return set(config.Access.model_fields)
 
 
 def agent_task_keys() -> set[str]:

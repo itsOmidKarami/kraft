@@ -28,7 +28,7 @@ def base_url() -> str:
     listen on, never one to connect to.
     """
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    access = config.load_access(templates_dir / "access.yaml")
+    access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)
     if host in ("0.0.0.0", "::"):

@@ -21,7 +21,7 @@ from configparser import ConfigParser
 from configparser import Error as ConfigParserError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 
 import yaml
 from pydantic import (
@@ -337,7 +337,7 @@ class RepoEntry(BaseModel):
         steering_dir = (info.context or {}).get("steering_dir")
         if steering_dir is not None:
             try:
-                _steering.validate(steering_dir, self.steering, where="repos.yaml")
+                _steering.Steering(dir=steering_dir).validate(self.steering, where="repos.yaml")
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self
@@ -839,12 +839,34 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
 
 
 class _Model(BaseModel):
-    """`extra="forbid"`: a key nobody reads is a typo an operator wants told about."""
+    """One settings file under `templates/`, read and written only through its
+    model. `extra="forbid"`: a key nobody reads is a typo an operator wants
+    told about."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    #: The file's name in an error message.
+    FILE: ClassVar[str]
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self:
+        """The file at `path`, every missing key defaulted. A missing file is
+        all defaults. Raises `ConfigError` naming the file."""
+        try:
+            return cls.model_validate(read_yaml(path))
+        except ValidationError as exc:
+            raise ConfigError(first_error(exc, cls.FILE)) from exc
+
+    def save(self, path: str | Path) -> None:
+        """Write every field, atomically. `write_yaml` stages through
+        `mkstemp`, which creates at 0600, and `os.replace` carries that mode
+        onto the target -- which is what `notify.yaml`'s token relies on."""
+        write_yaml(path, self.model_dump())
+
 
 class Access(_Model):
+    FILE = "access.yaml"
+
     bind: str = "127.0.0.1"
     port: int = 8765
     password_hash: str | None = None
@@ -852,25 +874,7 @@ class Access(_Model):
     allowed_hosts: list[str] = []
 
 
-ACCESS_DEFAULT: dict = Access().model_dump()
-
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
-
-
-def _dict(cfg) -> dict:
-    return cfg.model_dump() if isinstance(cfg, BaseModel) else cfg
-
-
-def load_access(path: str | Path) -> Access:
-    try:
-        return Access.model_validate(read_yaml(path, ACCESS_DEFAULT))
-    except ValidationError as exc:
-        raise ConfigError(first_error(exc, "access.yaml")) from exc
-
-
-def save_access(path: str | Path, access: dict | Access) -> None:
-    access = _dict(access)
-    write_yaml(path, {k: access.get(k, v) for k, v in ACCESS_DEFAULT.items()})
 
 
 # ── notify ───────────────────────────────────────────────────────────────────
@@ -880,55 +884,49 @@ def save_access(path: str | Path, access: dict | Access) -> None:
 #: reason: it holds a secret and a hostname that belong to one machine. A
 #: missing file reads as this, and the first `PUT /notify` creates it.
 class Notify(_Model):
+    FILE = "notify.yaml"
+
     enabled: bool = False
     url: str | None = None
     base_url: str | None = None
     events: list[str] = ["gate_requested", "work_item_needs_human"]
 
-
-NOTIFY_DEFAULT: dict = Notify().model_dump()
-
-
-def load_notify(path: str | Path) -> Notify:
-    try:
-        overrides = read_yaml(path, {})
-    except ConfigError as exc:
-        # notify.yaml holds a webhook URL. read_yaml's ConfigError message embeds
-        # the underlying exception, which for a YAML/decode error quotes the
-        # offending source line verbatim -- for this file that line is the
-        # secret. Every other config file wants that parser detail back; only
-        # this one gets a sanitized message instead, and `from None` drops the
-        # chained original (and its embedded token) out of any traceback.
-        #
-        # An OSError (permission denied, e.g.) carries no file content -- its
-        # `strerror` is a libc message -- so it is safe to surface, and doing
-        # so keeps "the file is unreadable" from being misreported as "the
-        # file is not valid YAML".
-        cause = exc.__cause__
-        if isinstance(cause, OSError):
-            raise ConfigError(f"notify.yaml: cannot be read: {cause.strerror}") from None
-        raise ConfigError("notify.yaml: not valid YAML") from None
-    try:
-        return Notify.model_validate(overrides)
-    except ValidationError as exc:
-        # `input` echoes the offending value, which for `url` is the secret --
-        # so name only the field and pydantic's message, never the value.
-        err = exc.errors()[0]
-        where = ".".join(str(p) for p in err["loc"])
-        raise ConfigError(f"notify.yaml: {where}: {err['msg']}") from None
-
-
-def save_notify(path: str | Path, notify: dict | Notify) -> None:
-    """Written 0600 — `write_yaml` stages through `mkstemp`, which creates at
-    0600, and `os.replace` carries that mode onto the target."""
-    notify = _dict(notify)
-    write_yaml(path, {k: notify.get(k, v) for k, v in NOTIFY_DEFAULT.items()})
+    @classmethod
+    def load(cls, path: str | Path) -> Notify:
+        try:
+            overrides = read_yaml(path, {})
+        except ConfigError as exc:
+            # notify.yaml holds a webhook URL. read_yaml's ConfigError message embeds
+            # the underlying exception, which for a YAML/decode error quotes the
+            # offending source line verbatim -- for this file that line is the
+            # secret. Every other config file wants that parser detail back; only
+            # this one gets a sanitized message instead, and `from None` drops the
+            # chained original (and its embedded token) out of any traceback.
+            #
+            # An OSError (permission denied, e.g.) carries no file content -- its
+            # `strerror` is a libc message -- so it is safe to surface, and doing
+            # so keeps "the file is unreadable" from being misreported as "the
+            # file is not valid YAML".
+            cause = exc.__cause__
+            if isinstance(cause, OSError):
+                raise ConfigError(f"notify.yaml: cannot be read: {cause.strerror}") from None
+            raise ConfigError("notify.yaml: not valid YAML") from None
+        try:
+            return cls.model_validate(overrides)
+        except ValidationError as exc:
+            # `input` echoes the offending value, which for `url` is the secret --
+            # so name only the field and pydantic's message, never the value.
+            err = exc.errors()[0]
+            where = ".".join(str(p) for p in err["loc"])
+            raise ConfigError(f"notify.yaml: {where}: {err['msg']}") from None
 
 
 # ── auto-intake ──────────────────────────────────────────────────────────────
 
 
 class Intake(_Model):
+    FILE = "intake.yaml"
+
     enabled: bool = False
     interval_s: int = 300
     repos: list[str] = []
@@ -939,14 +937,6 @@ class Intake(_Model):
 
 
 INTAKE_DEFAULT: dict = Intake().model_dump(exclude={"max_concurrent"})
-
-
-def load_intake(path: str | Path) -> Intake:
-    """`intake.yaml`, with every missing key defaulted. A missing file is off."""
-    try:
-        return Intake.model_validate(read_yaml(path, INTAKE_DEFAULT))
-    except ValidationError as exc:
-        raise ConfigError(first_error(exc, "intake.yaml")) from exc
 
 
 # ── theme ────────────────────────────────────────────────────────────────────
@@ -961,6 +951,8 @@ class BoardPrefs(_Model):
 
 
 class Theme(_Model):
+    FILE = "theme.yaml"
+
     palette: str = "nocturne"
     mode: Literal["light", "dark", "system"] = "dark"
     density: Literal["compact", "comfortable"] = "compact"
@@ -972,10 +964,3 @@ class Theme(_Model):
         if v not in PALETTE_IDS:
             raise ValueError(f"unknown palette: {v!r}")
         return v
-
-
-def load_theme(path: str | Path) -> Theme:
-    try:
-        return Theme.model_validate(read_yaml(path))
-    except ValidationError as exc:
-        raise ConfigError(first_error(exc, "theme.yaml")) from exc

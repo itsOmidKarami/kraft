@@ -15,16 +15,16 @@ def _dir(tmp_path, files):
 
 def test_read_returns_bodies_in_the_order_named(tmp_path):
     d = _dir(tmp_path, {"a": "alpha", "b": "beta"})
-    assert steering.read(d, ["b", "a"]) == ("beta", "alpha")
+    assert steering.Steering(dir=d).read(["b", "a"]) == ("beta", "alpha")
 
 
 def test_no_names_never_touches_the_directory(tmp_path):
     """Keeps every existing fixture green: none of them ship a steering/ dir."""
-    assert steering.read(tmp_path / "absent", []) == ()
-    steering.validate(tmp_path / "absent", [], where="x")
+    assert steering.Steering(dir=tmp_path / "absent").read([]) == ()
+    steering.Steering(dir=tmp_path / "absent").validate([], where="x")
 
 
-_HALF = "x" * (steering.MAX_BYTES // 2 + 10)
+_HALF = "x" * (steering.Steering.MAX_BYTES // 2 + 10)
 
 
 @pytest.mark.parametrize(
@@ -55,11 +55,12 @@ _HALF = "x" * (steering.MAX_BYTES // 2 + 10)
 )
 def test_validate_rejects(tmp_path, names, match):
     d = _dir(
-        tmp_path, {"a": "alpha", "big": "x" * steering.MAX_BYTES, "half1": _HALF, "half2": _HALF}
+        tmp_path,
+        {"a": "alpha", "big": "x" * steering.Steering.MAX_BYTES, "half1": _HALF, "half2": _HALF},
     )
     (d / "binary.md").write_bytes(b"\xff\xfe\x00")
     with pytest.raises(steering.SteeringError, match=match):
-        steering.validate(d, names, where="registry.yaml")
+        steering.Steering(dir=d).validate(names, where="registry.yaml")
 
 
 @pytest.mark.skipif(os.getuid() == 0, reason="root ignores the mode bits")
@@ -68,18 +69,18 @@ def test_a_permissions_error_is_not_reported_as_missing(tmp_path):
     (d / "a.md").chmod(0o000)
     try:
         with pytest.raises(steering.SteeringError, match="cannot read"):
-            steering.validate(d, ["a"], where="x")
+            steering.Steering(dir=d).validate(["a"], where="x")
     finally:
         (d / "a.md").chmod(0o644)
 
 
 def test_validate_accepts_a_total_exactly_at_the_budget(tmp_path):
-    body = "x" * (steering.MAX_BYTES - steering._OVERHEAD)
+    body = "x" * (steering.Steering.MAX_BYTES - len(steering.Steering.HEADING.encode()))
     d = _dir(tmp_path, {"a": body})
-    steering.validate(d, ["a"], where="x")
+    steering.Steering(dir=d).validate(["a"], where="x")
     # validate() returns nothing on success; read() is what proves the file
     # `validate` just accepted is actually the one at the boundary.
-    assert steering.read(d, ["a"]) == (body,)
+    assert steering.Steering(dir=d).read(["a"]) == (body,)
 
 
 def test_read_reports_a_file_deleted_after_validation_as_a_steering_error(tmp_path):
@@ -89,4 +90,17 @@ def test_read_reports_a_file_deleted_after_validation_as_a_steering_error(tmp_pa
     d = _dir(tmp_path, {"a": "alpha"})
     (d / "a.md").unlink()
     with pytest.raises(steering.SteeringError, match="cannot read 'a'"):
-        steering.read(d, ["a"])
+        steering.Steering(dir=d).read(["a"])
+
+
+def test_the_budget_measures_the_block_a_launch_injects(tmp_path):
+    """Kraft-5d510.3: `Steering.block` is both what a launch's context carries
+    and what `check_budget` measures, separators included, so the two cannot
+    drift. Two bodies filling the budget exactly pass; one byte more fails."""
+    fixed = len(steering.Steering.block(["", ""]).encode())
+    half = (steering.Steering.MAX_BYTES - fixed) // 2
+    bodies = ["x" * half, "y" * (steering.Steering.MAX_BYTES - fixed - half)]
+    assert len(steering.Steering.block(bodies).encode()) == steering.Steering.MAX_BYTES
+    steering.Steering.check_budget(bodies, where="x")
+    with pytest.raises(steering.SteeringError, match="x: steering totals 8193 bytes"):
+        steering.Steering.check_budget([*bodies[:1], bodies[1] + "z"], where="x")

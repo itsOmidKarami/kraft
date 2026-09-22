@@ -226,19 +226,13 @@ def resolve_invocation(
     # repo first, then hook: the wider context before the narrower one, and
     # fixed rather than merged cleverly — a reader debugging a prompt has to
     # be able to predict what the agent saw.
-    steering_texts = (_steering.read(steering_dir, names) if names else ()) + steering_texts
-    if steering_texts:
-        # `steering.validate` (config load) checked repos.yaml's names and the
-        # hook's names as two separate lists, each against the budget on its
-        # own — two individually-valid lists can still blow the shared budget
-        # once combined here, which is the only place the real concatenation
-        # exists. Re-check it here, over what run_agent_task actually injects.
-        total = _steering.assembled_bytes(steering_texts)
-        if total > _steering.MAX_BYTES:
-            raise _steering.SteeringError(
-                f"resolve_invocation: steering {names!r} totals {total} bytes combined, "
-                f"over the {_steering.MAX_BYTES} byte budget"
-            )
+    read = _steering.Steering(dir=steering_dir).read(names) if names else ()
+    steering_texts = read + steering_texts
+    # `Steering.validate` (config load) checked repos.yaml's names and the
+    # hook's names as two separate lists, each against the budget on its own
+    # — two individually-valid lists can still blow the shared budget once
+    # combined here, which is the only place the real concatenation exists.
+    _steering.Steering.check_budget(steering_texts, where=f"resolve_invocation: {names!r} combined")
     # Hook-level only, deliberately: a method is what this *hook* does, where
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
@@ -572,7 +566,7 @@ def build_context(
         # the target repo to build this. Written here because a future
         # reader finding a steering feature beside a rule banning steering
         # files would otherwise assume the rule was forgotten.
-        ctx += _steering.HEADING + "\n\n".join(steering_texts)
+        ctx += _steering.Steering.block(steering_texts)
     if usage_source == "result_file":
         ctx += _USAGE_REQUEST
     return ctx
@@ -762,7 +756,7 @@ async def run_agent_task(
     )
     # One name serves usage-envelope reading, live progress and rate-limit
     # detection alike (usage.READERS): every shipped harness that declares
-    # either gives it the same reader, and `harness.parse` requires
+    # either gives it the same reader, and `Harness.from_input` requires
     # `structured_log` behind both, so there is one schema to pick from.
     usage_cap = h.capabilities["usage"]
     rate_limit_cap = h.capabilities.get("rate_limit_signal")

@@ -354,7 +354,7 @@ def _warn_if_pre_v1(templates_dir: Path) -> None:
 def _bind(templates_dir: Path) -> tuple[str, int]:
     """Bind address from access.yaml — this is the "takes effect on restart" in
     Settings → Access (design 5e). Env still wins, for a one-off run."""
-    access = config.load_access(templates_dir / "access.yaml")
+    access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)
     if host not in config.LOOPBACK and not access.password_hash:

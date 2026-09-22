@@ -413,7 +413,7 @@ def test_unreadable_intake_yaml_raises_configerror(tmp_path):
     path = tmp_path / "intake.yaml"
     path.write_bytes(b"enabled: \xff\xfe\n")
     with pytest.raises(config.ConfigError):
-        config.load_intake(path)
+        config.Intake.load(path)
 
 
 async def test_a_nonsense_interval_does_not_kill_the_poller(tmp_path, monkeypatch, stub_app):

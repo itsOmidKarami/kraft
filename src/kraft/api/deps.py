@@ -589,7 +589,7 @@ def launch(st, repo: str) -> executor.LaunchContext:
     a name whose file has since been deleted must still let the repo entry
     load normally, model/deny_tools intact, rather than losing them along with
     everything else. The dispatch that actually reads that steering file is
-    what surfaces the problem — `steering.read` raises `SteeringError` naming
+    what surfaces the problem — `Steering.read` raises `SteeringError` naming
     the file, and it reaches `guard` from there — needs_human for that one
     launch, not a crash."""
     steering_dir = st.templates_dir / "steering"

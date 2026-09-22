@@ -332,7 +332,7 @@ def test_a_failed_write_does_not_sign_everyone_out(client, monkeypatch):
     assert len(before) == 1
 
     monkeypatch.setattr(
-        "kraft.config.save_access",
+        "kraft.config.Access.save",
         lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")),
     )
     with pytest.raises(OSError):

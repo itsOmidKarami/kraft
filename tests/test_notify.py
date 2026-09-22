@@ -12,7 +12,9 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from support.harness import fake_templates_dir, isolated_bd
 
 from kraft import config, events, notify
@@ -20,7 +22,7 @@ from kraft import db as kdb
 
 
 def test_missing_notify_yaml_reads_as_the_shipped_default(tmp_path):
-    cfg = config.load_notify(tmp_path / "notify.yaml")
+    cfg = config.Notify.load(tmp_path / "notify.yaml")
     assert cfg.model_dump() == {
         "enabled": False,
         "url": None,
@@ -32,7 +34,7 @@ def test_missing_notify_yaml_reads_as_the_shipped_default(tmp_path):
 def test_partial_notify_yaml_fills_in_the_rest(tmp_path):
     path = tmp_path / "notify.yaml"
     path.write_text("enabled: true\n")
-    cfg = config.load_notify(path)
+    cfg = config.Notify.load(path)
     assert cfg.enabled is True
     assert cfg.url is None
     assert cfg.events == ["gate_requested", "work_item_needs_human"]
@@ -40,14 +42,17 @@ def test_partial_notify_yaml_fills_in_the_rest(tmp_path):
 
 def test_saved_notify_yaml_is_0600_because_it_holds_a_token(tmp_path):
     path = tmp_path / "notify.yaml"
-    config.save_notify(path, {**config.NOTIFY_DEFAULT, "url": "https://ntfy.sh/secret-topic"})
+    config.Notify(url="https://ntfy.sh/secret-topic").save(path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-def test_save_notify_writes_only_the_known_keys(tmp_path):
+def test_a_saved_notify_yaml_holds_only_the_known_keys(tmp_path):
+    """A stray key cannot reach the file: the model refuses it before `save`."""
+    with pytest.raises(ValidationError, match="nonsense"):
+        config.Notify.model_validate({"nonsense": 1})
     path = tmp_path / "notify.yaml"
-    config.save_notify(path, {**config.NOTIFY_DEFAULT, "nonsense": 1})
-    assert set(config.load_notify(path).model_dump()) == set(config.NOTIFY_DEFAULT)
+    config.Notify().save(path)
+    assert set(yaml.safe_load(path.read_text())) == set(config.Notify.model_fields)
 
 
 async def _database(tmp_path):
@@ -69,10 +74,7 @@ def _notifier(tmp_path, database, sends, *, status=200, **kw):
     """A Notifier whose transport is a recording stub. `sends` collects
     (url, body) tuples; `status` is what the endpoint answers."""
     cfg = tmp_path / "notify.yaml"
-    config.save_notify(
-        cfg,
-        {**config.NOTIFY_DEFAULT, "enabled": True, "url": "https://hook.invalid/t0ken"},
-    )
+    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
 
     async def transport(request: httpx.Request) -> httpx.Response:
         sends.append((str(request.url), json.loads(request.content)))
@@ -279,7 +281,7 @@ async def test_disabled_sends_nothing_and_still_keeps_up(tmp_path, database):
     await _seed_item(database)
     sends: list = []
     n = _notifier(tmp_path, database, sends)
-    config.save_notify(tmp_path / "notify.yaml", {**config.NOTIFY_DEFAULT, "enabled": False})
+    config.Notify(enabled=False).save(tmp_path / "notify.yaml")
     n.reload()
     await n.start()
     await database.write(
@@ -346,9 +348,7 @@ def test_a_hanging_endpoint_does_not_block_the_drain_pass(tmp_path):
             return httpx.Response(200)
 
         cfg = tmp_path / "notify.yaml"
-        config.save_notify(
-            cfg, {**config.NOTIFY_DEFAULT, "enabled": True, "url": "https://hook.invalid/t0ken"}
-        )
+        config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
         n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765")
         n._transport = httpx.MockTransport(hang)
         await n.start()
@@ -373,15 +373,9 @@ async def test_base_url_from_config_wins_over_the_bind_fallback(tmp_path, databa
     await _seed_item(database)
     sends: list = []
     n = _notifier(tmp_path, database, sends)
-    config.save_notify(
-        tmp_path / "notify.yaml",
-        {
-            **config.NOTIFY_DEFAULT,
-            "enabled": True,
-            "url": "https://hook.invalid/t0ken",
-            "base_url": "https://kraft.tail1234.ts.net/",
-        },
-    )
+    config.Notify(
+        enabled=True, url="https://hook.invalid/t0ken", base_url="https://kraft.tail1234.ts.net/"
+    ).save(tmp_path / "notify.yaml")
     n.reload()
     await n.start()
     await database.write(
@@ -401,17 +395,13 @@ async def test_a_malformed_base_url_is_rejected_at_load_and_sends_nothing(tmp_pa
     await _seed_item(database)
     sends: list = []
     n = _notifier(tmp_path, database, sends)
-    config.save_notify(
+    # Written as an operator would, by hand: the model refuses to save it.
+    config.write_yaml(
         tmp_path / "notify.yaml",
-        {
-            **config.NOTIFY_DEFAULT,
-            "enabled": True,
-            "url": "https://hook.invalid/t0ken",
-            "base_url": 8080,
-        },
+        {"enabled": True, "url": "https://hook.invalid/t0ken", "base_url": 8080},
     )
     with pytest.raises(config.ConfigError, match="base_url"):
-        config.load_notify(tmp_path / "notify.yaml")
+        config.Notify.load(tmp_path / "notify.yaml")
     n.reload()
     await n.start()
     await database.write(
@@ -437,9 +427,7 @@ async def test_a_transport_error_records_the_class_name_never_the_message(
         raise httpx.ConnectError("boom to https://hook.invalid/t0ken")
 
     cfg = tmp_path / "notify.yaml"
-    config.save_notify(
-        cfg, {**config.NOTIFY_DEFAULT, "enabled": True, "url": "https://hook.invalid/t0ken"}
-    )
+    config.Notify(enabled=True, url="https://hook.invalid/t0ken").save(cfg)
     n = notify.Notifier(database, cfg, fallback_base_url="http://127.0.0.1:8765", retry_delay=0.0)
     n._transport = httpx.MockTransport(boom)
     await n.start()
@@ -486,7 +474,7 @@ def test_put_omitting_url_preserves_the_stored_secret(client):
     client.put("/api/notify", json={"enabled": True, "url": "https://hook.invalid/t0ken"})
     client.put("/api/notify", json={"events": ["gate_requested"]})
     templates_dir = Path(client.app.state.templates_dir)
-    saved = config.load_notify(templates_dir / "notify.yaml")
+    saved = config.Notify.load(templates_dir / "notify.yaml")
     assert saved.url == "https://hook.invalid/t0ken"
     assert saved.events == ["gate_requested"]
     assert saved.enabled is True
@@ -514,7 +502,7 @@ def test_clearing_the_url_while_enabled_disables_instead_of_422ing(client):
     assert body["enabled"] is False
 
     templates_dir = Path(client.app.state.templates_dir)
-    saved = config.load_notify(templates_dir / "notify.yaml")
+    saved = config.Notify.load(templates_dir / "notify.yaml")
     assert saved.url is None
     assert saved.enabled is False
 
@@ -538,7 +526,7 @@ def test_put_refuses_enabling_without_a_url(client):
     # half-applied config on disk -- `enabled` did not get written even though
     # it was the only field the request set.
     templates_dir = Path(client.app.state.templates_dir)
-    saved = config.load_notify(templates_dir / "notify.yaml")
+    saved = config.Notify.load(templates_dir / "notify.yaml")
     assert saved.enabled is False
     assert saved.url is None
 
@@ -606,7 +594,7 @@ def test_notifier_stops_before_the_database_closes(tmp_path, monkeypatch):
 
 def test_get_notify_with_a_malformed_yaml_file_returns_a_clean_422(client):
     """`read_yaml`'s `ConfigError` normally quotes the offending source line --
-    for `notify.yaml` that line is the webhook URL. `config.load_notify`
+    for `notify.yaml` that line is the webhook URL. `config.Notify.load`
     sanitizes it before the route (and the global `ConfigError` handler) ever
     see it."""
     templates_dir = Path(client.app.state.templates_dir)
@@ -620,7 +608,7 @@ def test_get_notify_with_a_malformed_yaml_file_returns_a_clean_422(client):
 
 
 def test_a_malformed_notify_yaml_does_not_crash_startup(tmp_path, monkeypatch, caplog):
-    """`Notifier.__init__` calls `load_notify` before `lifespan`'s `try:` --
+    """`Notifier.__init__` calls `Notify.load` before `lifespan`'s `try:` --
     letting a malformed file raise there would abort startup over an entirely
     optional config, and leak the broadcaster, indexer, `index_conn` and
     database un-stopped on the way out."""
@@ -700,7 +688,7 @@ def test_get_notify_with_invalid_utf8_returns_a_clean_422_and_disables(
 
 def test_get_notify_with_a_permission_denied_file_reports_that_not_bad_yaml(client):
     """`read_yaml` folds a genuine `OSError` into the same `ConfigError` as a
-    YAML syntax error; `load_notify` must not blanket both into "not valid
+    YAML syntax error; `Notify.load` must not blanket both into "not valid
     YAML" -- an operator who cannot read their own file needs to be told
     that, not sent hunting for a typo that is not there."""
     if os.geteuid() == 0:
@@ -721,7 +709,7 @@ def test_get_notify_with_a_permission_denied_file_reports_that_not_bad_yaml(clie
 
 
 def test_put_notify_with_a_malformed_yaml_file_returns_a_clean_422(client):
-    """`put_notify` also calls `config_mod.load_notify` -- before it ever
+    """`put_notify` also calls `config_mod.Notify.load` -- before it ever
     touches the request body -- so the same sanitizing path `GET /notify`
     uses must cover it too."""
     templates_dir = Path(client.app.state.templates_dir)
