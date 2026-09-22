@@ -413,6 +413,9 @@ async def dispatch(
             skills_dir=launch.skills_dir,
             # The repository's steering, frozen with the item at intake.
             **executor.frozen_steering(row),
+            # The item's own repo as recorded at intake (Kraft-jzdyp): an
+            # escalation turn runs in the item's own checkout.
+            item_repo=row["repo"],
             policy=policy,
         )
     except _agent.HarnessUnavailable as exc:

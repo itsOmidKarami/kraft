@@ -201,7 +201,11 @@ recovery plan, or fix loop.
 `steering:`, and a repository with `steering:` in its `repos.yaml` entry; both
 are resolved at intake and frozen into the work item's snapshot (the task's
 with the chain, the repository's as `repository_steering`, keyed by
-repository path). A launch injects the repository's, then the task's. The
+repository path). A launch injects the repository's, then the task's. Each
+launch looks itself up first by the item's own repo as recorded at intake, so
+editing `repos.yaml`'s `path:` for a repository does not drop an in-flight
+item's frozen steering; a launch whose frozen map has entries but none that
+match its repository stops for a human rather than run unsteered. The
 pre-1.0 `templates/steering/*.md` files are folded into this section on the
 first start and moved aside.
 

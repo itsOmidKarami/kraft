@@ -143,6 +143,10 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
         skills_dir=launch.skills_dir,
         steering=snapshot.chain.steering,
         repository_steering=snapshot.repository_steering,
+        # The item's own repo as recorded at intake (Kraft-jzdyp): the tool
+        # lists reported here are the item's own launch's, never a fanned-out
+        # member's.
+        item_repo=item["repo"],
         policy=scope_policy(item, scope),
     )
     return inv.allowed_tools, inv.deny_tools

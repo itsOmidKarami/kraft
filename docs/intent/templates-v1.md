@@ -96,8 +96,12 @@ steering profile or a repository's `steering:` list reaches items filed
 afterwards and never one already filed. A snapshot stored before repository
 steering was frozen SHALL read its repository's names against the current
 library at each launch, and SHALL stop for a human naming a name the library
-does not define.
-enforced-by: tests/api/test_repository_steering.py::test_repository_steering_is_frozen_into_the_snapshot_at_intake, tests/worker/test_steering.py::test_a_frozen_snapshot_answers_whatever_the_live_library_says, tests/api/test_repository_steering.py::test_a_snapshot_from_before_the_freeze_runs_on_the_live_library, tests/worker/test_steering.py::test_a_snapshot_from_before_the_freeze_reads_the_live_library
+does not define. A launch SHALL find its frozen text by the item's own repo
+as recorded at intake, not only by `repos.yaml`'s current `path:` for it, so
+that a hand-edited path does not silently drop an in-flight item's frozen
+steering; when the frozen map has entries but none match this launch's
+repository, the launch SHALL stop for a human rather than run unsteered.
+enforced-by: tests/api/test_repository_steering.py::test_repository_steering_is_frozen_into_the_snapshot_at_intake, tests/worker/test_steering.py::test_a_frozen_snapshot_answers_whatever_the_live_library_says, tests/api/test_repository_steering.py::test_a_snapshot_from_before_the_freeze_runs_on_the_live_library, tests/worker/test_steering.py::test_a_snapshot_from_before_the_freeze_reads_the_live_library, tests/worker/test_steering.py::test_frozen_steering_survives_the_repos_yaml_path_changing, tests/worker/test_steering.py::test_frozen_steering_stops_for_a_human_when_nothing_matches
 
 ## REQ pre-1-0-steering-files-become-library-profiles
 

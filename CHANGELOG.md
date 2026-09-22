@@ -4,6 +4,14 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## Unreleased
+
+- Fix: an in-flight work item's repository steering no longer silently drops
+  if `repos.yaml`'s `path:` for its repository is hand-edited while it runs.
+  The launch now also checks the repo the item was filed against; if neither
+  that nor the repository's current path matches what the item was filed
+  with, the item stops for you instead of running unsteered.
+
 ## 1.0.6
 
 - Fix: a gate's agent reviewer no longer approves a chain revision that

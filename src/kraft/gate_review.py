@@ -251,6 +251,9 @@ async def review(
         item_override=json.loads(row["agent_overrides"]) if row["agent_overrides"] else None,
         # The reviewer's and the repository's steering, frozen at intake.
         **executor.frozen_steering(row),
+        # The item's own repo as recorded at intake (Kraft-jzdyp): a gate
+        # review runs in the item's own checkout, never a fanned-out member's.
+        item_repo=row["repo"],
         # The gate scope's policy: its tool lists and sandbox, as for any task.
         policy=executor.scope_policy(row, auto_review),
     )
