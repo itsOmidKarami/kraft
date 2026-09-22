@@ -12,7 +12,7 @@ Via a `triggers:` entry in `policy.yaml`:
 ```yaml
 triggers:
   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
-    repo: /path/to/repo
+    repo: /path/to/repo          # connect it first (`kraft repo connect`); an unconnected repo here is not refused today
     chain: default              # a chain_template id from templates/
     title: "Nightly dependency check"
     description: "Filed by the 9am weekday trigger"  # optional, defaults to ""
@@ -20,7 +20,10 @@ triggers:
 
 Checked once a minute against the current time; a missed minute (server down,
 clock skew) is not backfilled — that is treated as acceptable rather than an
-incident.
+incident. The poller itself runs for the life of the server, whether or not
+any trigger existed at boot, so a trigger added afterward — through Settings,
+or by hand followed by `kraft admin reload` — starts firing on its own
+schedule without a restart.
 
 ## An HTTP call
 
@@ -30,8 +33,13 @@ can't wait for the next minute-tick:
 
 ```
 POST /api/triggers
-{"title": "...", "repo": "/path/to/repo", "chain_template": "default", "description": "..."}
+{"title": "...", "repo": "/path/to/a/connected/repo", "chain_template": "default", "description": "..."}
 ```
+
+`repo` must already be connected (`kraft repo connect`); a path Kraft has not
+seen is refused with a 422 naming that command. A cron entry in
+`policy.yaml` does not go through this door and is not refused the same way
+today — connect the repo yourself before scheduling one against it.
 
 It needs the same auth as every other mutating route — the session cookie a
 browser holds after logging in, or an MCP bearer token — nothing

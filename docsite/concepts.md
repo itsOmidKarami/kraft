@@ -9,6 +9,9 @@ A **work item** is one unit of work and produces one merge request. You create
 one from the UI, the CLI (`kraft item create`), or an MCP tool
 (`create_work_item`). It always lands **paused** — see
 [Agent integration](agent-integration.md) for why an agent can never skip that.
+Its repo must already be connected (`kraft repo connect`); intake refuses one
+that isn't, naming that command — the same refusal a trigger's `POST
+/api/triggers` door gets (see [Triggers](triggers.md)).
 
 Its work starts from the repository's default branch, and its merge request
 targets it, unless it names a **base branch** (`--base-branch`, the MCP tool's
