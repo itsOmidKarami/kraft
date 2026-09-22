@@ -5,10 +5,11 @@ from pathlib import Path
 
 from kraft import builtins as kraft_builtins
 from kraft import store
+from support.harness import entry_of
 
 #: A repo that deliberately needs no preparation. Most of these tests are about
 #: git and attachments, not environments.
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 async def prepare(database, rd, repo, *, repo_entry=None, attachments=None, work_item_id="w1"):

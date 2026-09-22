@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI, HTTPException
 
@@ -24,6 +25,7 @@ from kraft import builtins as builtins_mod
 from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters.forge import git as forge_git
+from kraft.config import RepoEntry
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -356,7 +358,7 @@ def repos_path(st) -> Path:
     return st.templates_dir / "repos.yaml"
 
 
-def _connected(repos: list[dict], path: str) -> dict | None:
+def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
     """Find a connected repo by path.
 
     `POST /repos` stores git's `--show-toplevel`, which resolves symlinks (on
@@ -364,11 +366,11 @@ def _connected(repos: list[dict], path: str) -> dict | None:
     the path stored. Match either, or a caller cannot patch or delete the repo
     it just connected.
     """
-    entry = next((r for r in repos if r["path"] == path), None)
+    entry = next((r for r in repos if r.path == path), None)
     if entry is not None:
         return entry
     resolved = str(Path(path).expanduser().resolve())
-    return next((r for r in repos if r["path"] == resolved), None)
+    return next((r for r in repos if r.path == resolved), None)
 
 
 async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
@@ -441,14 +443,12 @@ def workspace_target(
     ws = declared.get(workspace)
     if ws is None:
         raise HTTPException(422, f"no workspace {workspace!r} is declared in repos.yaml")
-    root = next(r for r in repos if r.get("id") == ws.root)
+    root = next(r for r in repos if r.id == ws.root)
     # A string comparison, never a filesystem lookup on the request's path:
     # the stored root is git's own `--show-toplevel`, which is what every
     # client (the intake modal, `kraft item create`) sends back.
-    if root["path"] != os.path.normpath(os.path.expanduser(repo)):
-        raise HTTPException(
-            422, f"workspace {workspace!r} is rooted at {root['path']}, not at {repo}"
-        )
+    if root.path != os.path.normpath(os.path.expanduser(repo)):
+        raise HTTPException(422, f"workspace {workspace!r} is rooted at {root.path}, not at {repo}")
     try:
         return WorkItemTarget.from_selection(
             ws, members=members, root_pointer_policy=root_pointer_policy, base_branch=base_branch
@@ -457,7 +457,7 @@ def workspace_target(
         raise HTTPException(422, str(exc)) from exc
 
 
-def _repository_layers(st, repo: str, target: WorkItemTarget | None) -> list[tuple[str, dict]]:
+def _repository_layers(st, repo: str, target: WorkItemTarget | None) -> list[tuple[str, RepoEntry]]:
     """`(repository id, entry)` for every repository whose layer binds an item
     filed in `repo`: its own entry, or for a workspace target the root's and
     each selected member's. Raises `PolicyError` on an unreadable file."""
@@ -467,19 +467,19 @@ def _repository_layers(st, repo: str, target: WorkItemTarget | None) -> list[tup
         raise PolicyError(f"cannot read the repository policy layer: {exc}") from exc
     if target is None or target.kind != "workspace":
         entry = _connected(repos, repo)
-        return [(entry.get("id") or "", entry)] if entry is not None else []
-    by_id = {r["id"]: r for r in repos if r.get("id")}
+        return [(entry.id or "", entry)] if entry is not None else []
+    by_id = {r.id: r for r in repos if r.id}
     return [(rid, by_id[rid]) for rid in target.repositories() if rid in by_id]
 
 
-def _layered(base: InstancePolicy, entry: dict) -> InstancePolicy:
-    override = config_mod.repository_override(entry)
+def _layered(base: InstancePolicy, entry: RepoEntry) -> InstancePolicy:
+    override = entry.repository_override()
     if override is None:
         return base
     try:
         return base.apply_template_override(override)
     except PolicyError as exc:
-        raise PolicyError(f"repos.yaml: {entry['path']}: {exc}", field=exc.field) from exc
+        raise PolicyError(f"repos.yaml: {entry.path}: {exc}", field=exc.field) from exc
 
 
 def instance_policy(st) -> InstancePolicy:
@@ -489,7 +489,7 @@ def instance_policy(st) -> InstancePolicy:
 
 def item_policy(st, repo: str, target: WorkItemTarget | None = None) -> InstancePolicy:
     """The policy a work item filed in `repo` starts from: the instance policy
-    with that repository's layer on top (`config.repository_override`), which
+    with that repository's layer on top (`RepoEntry.repository_override`), which
     may only tighten it (`repository-policy-cannot-relax-instance-safety`).
     Every intake door materializes from this, so the layer is frozen into every
     item filed in the repository.
@@ -507,7 +507,7 @@ def item_policy(st, repo: str, target: WorkItemTarget | None = None) -> Instance
     layers = _repository_layers(st, repo, target)
     for _rid, entry in layers:
         _layered(base, entry)
-    overrides = [o for _rid, e in layers if (o := config_mod.repository_override(e)) is not None]
+    overrides = [o for _rid, e in layers if (o := e.repository_override()) is not None]
     if not overrides:
         return base
     return base.apply_template_override(TemplatePolicyOverride.meet(overrides))
@@ -549,25 +549,36 @@ def _on_approve(st) -> executor.OnApprove:
     return functools.partial(gates.apply_approval, st)
 
 
-class _PoisonedRepoEntry(dict):
-    """Stand-in `repo_entry` for a `repos.yaml` that failed to load.
+class _PoisonedRepoEntry:
+    """Stand-in `repo_entry` (and `repositories`) for a `repos.yaml` that
+    failed to load.
 
-    Every real reader of `repo_entry` -- `sandbox.resolve`,
-    `adapters.agent.resolve_invocation`, `dispatch`'s own test-scope fallback
-    -- reads it with `.get(...)`. Raising from that `.get` surfaces the
-    original `ConfigError` from *inside* the dispatch this entry was actually
-    needed for, which is already wrapped in `guard`'s blanket `except
-    Exception` -- the same needs_human treatment a `SteeringError` raised
-    deep in a dispatch already gets. Non-empty (the `_poisoned` key), so
-    `launch.repo_entry or {}` never discards it for a fresh, harmless `{}`
-    before that `.get` runs -- a repo config a caller can't parse must not
-    quietly resolve to "no sandbox, no deny_tools, no steering" instead."""
+    Any read of it -- an attribute (`entry.sandbox`, `entry.env`), a key or
+    a membership test on the `repositories` mapping -- raises the original
+    `ConfigError` from *inside* the dispatch this entry was actually needed
+    for, which is already wrapped in `guard`'s blanket `except Exception` --
+    the same needs_human treatment a `SteeringError` raised deep in a
+    dispatch already gets. Truthy, so `if launch.repo_entry` never skips it
+    for "nothing configured" before that read runs -- a repo config a caller
+    can't parse must not quietly resolve to "no sandbox, no deny_tools, no
+    steering" instead."""
 
     def __init__(self, exc: config_mod.ConfigError) -> None:
-        super().__init__(_poisoned=True)
         self._exc = exc
 
-    def get(self, *_args, **_kwargs):
+    def __bool__(self) -> bool:
+        return True
+
+    def __getattr__(self, _name):
+        raise self._exc
+
+    def __getitem__(self, _key):
+        raise self._exc
+
+    def __contains__(self, _key):
+        raise self._exc
+
+    def __iter__(self):
         raise self._exc
 
 
@@ -600,14 +611,14 @@ def launch(st, repo: str) -> executor.LaunchContext:
         # The members' entries too: a fanned-out task must fail the same
         # way, never run with no sandbox because its entry was unreadable.
         return executor.LaunchContext(
-            repo_entry=_PoisonedRepoEntry(exc),
+            repo_entry=cast("RepoEntry", _PoisonedRepoEntry(exc)),
             steering_dir=steering_dir,
             skills_dir=st.skills_dir,
-            repositories=_PoisonedRepoEntry(exc),
+            repositories=cast("dict[str, RepoEntry]", _PoisonedRepoEntry(exc)),
         )
     return executor.LaunchContext(
         repo_entry=_connected(repos, repo),
         steering_dir=steering_dir,
         skills_dir=st.skills_dir,
-        repositories={r["id"]: r for r in repos if r.get("id")},
+        repositories={r.id: r for r in repos if r.id},
     )

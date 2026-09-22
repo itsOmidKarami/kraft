@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo, v1_library
+from support.harness import entry_of, fake_templates_dir, isolated_bd, make_repo, v1_library
 
 from kraft import config, policy, store
 from kraft import intake as intake_mod
@@ -163,7 +163,7 @@ async def test_an_auto_intaken_item_is_bound_by_its_repositorys_policy(
     monkeypatch.setattr(
         intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
     )
-    app = stub_app(**_state(tmp_path, repo_entry={"deny_tools": ["WebFetch"]}))
+    app = stub_app(**_state(tmp_path, repo_entry=entry_of({"deny_tools": ["WebFetch"]})))
 
     (wid,) = await intake_mod.tick(app)
 
@@ -309,7 +309,7 @@ async def test_skips_a_repo_that_is_not_enabled(tmp_path, monkeypatch, stub_app)
         _ready([{"id": "B-1", "title": "t", "priority": 3}], seen=seen),
     )
 
-    app = stub_app(**_state(tmp_path, repo_entry={"enabled": False}))
+    app = stub_app(**_state(tmp_path, repo_entry=entry_of({"enabled": False})))
     assert await intake_mod.tick(app) == []
     assert seen == []
 
@@ -336,7 +336,7 @@ async def test_refuses_a_template_with_no_gate(tmp_path, monkeypatch, stub_app):
         "      - { id: build, kind: subprocess, command: 'true' }\n"
     )
 
-    app = stub_app(**_state(tmp_path, repo_entry={"default_chain_template": "gateless"}))
+    app = stub_app(**_state(tmp_path, repo_entry=entry_of({"default_chain_template": "gateless"})))
     assert app.state.library.resolve_chain("gateless"), "the fixture chain must resolve"
     assert await intake_mod.tick(app) == []
     assert _work_items(app) == []

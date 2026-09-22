@@ -302,7 +302,7 @@ def test_repos_yaml_round_trips_a_test_command(tmp_path):
     p = tmp_path / "repos.yaml"
     config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_command"] == "just ci"
+    assert entry.test_command == "just ci"
 
 
 @pytest.mark.parametrize("field", ["test_command", "test_scopes"])
@@ -312,7 +312,7 @@ def test_repos_yaml_defaults_an_absent_test_field_to_none(tmp_path, field):
     p = tmp_path / "repos.yaml"
     p.write_text("repos:\n  - path: /r\n")
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry[field] is None
+    assert getattr(entry, field) is None
 
 
 @pytest.mark.parametrize(
@@ -352,8 +352,8 @@ def test_repos_yaml_does_not_synthesize_test_scopes_from_test_command(tmp_path):
     p = tmp_path / "repos.yaml"
     config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_scopes"] is None
-    assert entry["test_command"] == "just ci"
+    assert entry.test_scopes is None
+    assert entry.test_command == "just ci"
 
 
 def test_repos_yaml_test_command_edit_is_not_shadowed_by_a_stale_scope(tmp_path):
@@ -365,11 +365,10 @@ def test_repos_yaml_test_command_edit_is_not_shadowed_by_a_stale_scope(tmp_path)
     p = tmp_path / "repos.yaml"
     config.save_repos(p, [{"path": "/r", "test_command": "just ci"}])
     (entry,) = config.load_repos(p, validate_steering=False)
-    entry["test_command"] = "just ci-v2"
-    config.save_repos(p, [entry])
+    config.save_repos(p, [{**entry.model_dump(), "test_command": "just ci-v2"}])
     (reloaded,) = config.load_repos(p, validate_steering=False)
-    assert reloaded["test_command"] == "just ci-v2"
-    assert reloaded["test_scopes"] is None
+    assert reloaded.test_command == "just ci-v2"
+    assert reloaded.test_scopes is None
 
 
 def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
@@ -382,7 +381,7 @@ def test_repos_yaml_round_trips_explicit_test_scopes(tmp_path):
     ]
     config.save_repos(p, [{"path": "/r", "test_scopes": scopes}])
     (entry,) = config.load_repos(p, validate_steering=False)
-    assert entry["test_scopes"] == scopes
+    assert [s.model_dump() for s in entry.test_scopes] == scopes
 
 
 def test_probe_repo_excludes_the_nested_scope_from_the_root_scope(repo):

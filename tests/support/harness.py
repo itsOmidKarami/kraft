@@ -28,6 +28,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
 
 
+def entry_of(fields: dict) -> Any:
+    """A `repos.yaml` entry as `config.load_repos` hands it over: `fields`
+    validated through `RepoEntry`, at a placeholder path unless they name one."""
+    from kraft.config import RepoEntry
+
+    return RepoEntry.model_validate({"path": "/repo", **fields})
+
+
 #: Commits are made at a fixed time so that building the same tree twice gives
 #: the same SHA. A commit hash covers its own timestamp at one-second
 #: granularity, so two `make_repo()` calls either side of a second boundary used
@@ -664,7 +672,7 @@ async def v1_walk(
     chain,
     *,
     repo: Path | str,
-    repo_entry: dict | None = None,
+    repo_entry: Any = None,
     policy=None,
     wid: str = "w1",
     title: str = "t",
@@ -701,7 +709,7 @@ async def v1_walk(
             # `setup_command: ""` is the repo declaring it needs no preparation;
             # a repo entry without one refuses to cut a worktree at all.
             launch=LaunchContext(
-                repo_entry={"setup_command": ""} if repo_entry is None else repo_entry,
+                repo_entry=entry_of({"setup_command": ""}) if repo_entry is None else repo_entry,
                 steering_dir=None,
             ),
         )

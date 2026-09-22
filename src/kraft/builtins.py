@@ -11,7 +11,7 @@ from pathlib import Path
 
 from kraft import logs, store
 from kraft.adapters.forge import git
-from kraft.config import base_ignore_args, git_read
+from kraft.config import RepoEntry, base_ignore_args, git_read
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
 
@@ -433,7 +433,7 @@ async def ensure_worktree(
     *,
     repo: str,
     work_item_id: str,
-    repo_entry: dict | None,
+    repo_entry: RepoEntry | None,
     attachments: list[dict] | None = None,
     sandbox: dict | None = None,
 ) -> Path:
@@ -464,13 +464,12 @@ async def ensure_worktree(
     if worktree.is_dir():
         return worktree
     # Read from repo_entry before `git worktree add` runs, not after: a
-    # poisoned entry (malformed repos.yaml) raises ConfigError on `.get`, and
+    # poisoned entry (malformed repos.yaml) raises ConfigError on any read, and
     # reading it only after the worktree exists would leave that worktree
     # behind for a later `kraft item retry` to find via the early return
     # above -- skipping setup_command entirely and dispatching into an
     # unprepared worktree.
-    entry = repo_entry or {}
-    local_files = entry.get("local_files") or []
+    local_files = repo_entry.local_files if repo_entry is not None else []
     # Pin the base before the worktree exists, so the early return above
     # guarantees a crashed-and-retried run never re-pins to a moved HEAD.
     row = db.read(
@@ -591,7 +590,7 @@ def item_mounts(row) -> list[str]:
 
 
 async def run_setup_command(
-    worktree: Path, repo: Path, repo_entry: dict | None, *, sandbox: dict | None = None
+    worktree: Path, repo: Path, repo_entry: RepoEntry | None, *, sandbox: dict | None = None
 ) -> str:
     """Prepare `worktree` the way its repo declares, and say what happened.
 
@@ -609,7 +608,7 @@ async def run_setup_command(
     `sandbox` is the item's (`dispatch.item_sandbox`): given one, the command
     runs inside it or not at all.
     """
-    cmd = (repo_entry or {}).get("setup_command")
+    cmd = repo_entry.setup_command if repo_entry is not None else None
     if cmd is None:
         raise RuntimeError(
             f"no setup_command declared for {repo} in repos.yaml, so {worktree.name}'s "
@@ -629,7 +628,7 @@ async def run_setup_command(
             worktree,
             sandbox,
             None,
-            env=(repo_entry or {}).get("env") or {},
+            env=repo_entry.env if repo_entry is not None else {},
         )
         run = dict(args=argv)
     else:
@@ -1060,7 +1059,7 @@ async def _record_done(
 
 
 async def prepare_runtime(
-    worktree: Path, repo: Path, repo_entry: dict | None, *, sandbox: dict | None = None
+    worktree: Path, repo: Path, repo_entry: RepoEntry | None, *, sandbox: dict | None = None
 ) -> str:
     """Re-prepare an existing worktree and say what happened.
 
@@ -1088,7 +1087,7 @@ async def prepare_runtime(
     # exists but whose copy does not was refused, root-level or nested -- and
     # it is the operator's own config, so it is named apart from the noise
     # below rather than only in the server's logger (Kraft-hro48).
-    local_files = (repo_entry or {}).get("local_files") or []
+    local_files = repo_entry.local_files if repo_entry is not None else []
     refused = [r for r in local_files if (repo / r).exists() and not (worktree / r).exists()]
     missing = [
         n

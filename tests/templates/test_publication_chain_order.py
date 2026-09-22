@@ -8,11 +8,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.harness import entry_of
 
 from kraft.adapters import forge
 from kraft.executor.context import LaunchContext
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _chain(*nodes):
@@ -137,7 +138,9 @@ async def test_a_pre_draft_gate_keeps_the_work_local(item_on, database, run_dirs
         run_dirs,
         work_item_id=it.id,
         policy=None,
-        launch=LaunchContext(repo_entry={**NO_SETUP, "forge": "github"}, steering_dir=None),
+        launch=LaunchContext(
+            repo_entry=entry_of({"setup_command": "", "forge": "github"}), steering_dir=None
+        ),
     )
 
     assert it.row()["current_node_id"] == "local_review"

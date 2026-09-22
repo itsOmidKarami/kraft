@@ -13,13 +13,13 @@ import asyncio
 from datetime import datetime
 
 import pytest
-from support.harness import v1_chain, v1_item, v1_resolved
+from support.harness import entry_of, v1_chain, v1_item, v1_resolved
 
 from kraft import events, executor, policy, store, waits
 from kraft.adapters import forge
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
 
-ON_A_FORGE = {"setup_command": "", "forge": "github"}
+ON_A_FORGE = entry_of({"setup_command": "", "forge": "github"})
 #: A `now` every parked wait is due by.
 LATER = "2999-01-01T00:00:00+00:00"
 
@@ -497,7 +497,13 @@ async def test_the_repository_s_named_reviewer_reaches_the_review_task(
 
     monkeypatch.setattr(forge.run, "resolve", lambda name: Recording())
     it = await item_on([forge_node("review", "mr.automated_review")])
-    entry = {**ON_A_FORGE, "automated_review": {"bot": "coderabbitai", "check": None}}
+    entry = entry_of(
+        {
+            "setup_command": "",
+            "forge": "github",
+            "automated_review": {"bot": "coderabbitai", "check": None},
+        }
+    )
 
     await executor.run(
         database,

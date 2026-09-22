@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from support.harness import entry_of
 
 from kraft import caps, escalate, events, executor, gate_review, store
 from kraft.adapters import agent as agent_mod
@@ -18,7 +19,7 @@ from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
 from kraft.worker import reattach
 
-LAUNCH = executor.LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 
 
 def _agent(task_id: str, **fields) -> dict:

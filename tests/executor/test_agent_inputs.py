@@ -5,12 +5,12 @@ and a reviewer's continuity: its last round's findings and its own last
 session."""
 
 import pytest
-from support.harness import v1_named_chain
+from support.harness import entry_of, v1_named_chain
 
 from kraft import executor
 from kraft.templates.models import AgentInput
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _node(**agent_fields):

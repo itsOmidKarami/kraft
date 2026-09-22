@@ -216,7 +216,9 @@ class RepoEntry(BaseModel):
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: ToolNames = []
     steering: list[str] = []
-    sandbox: Any = None
+    #: Where this repository's tasks run (`kraft.worker.sandbox`). `false` is
+    #: an explicit "none", kept as written so a re-save round-trips.
+    sandbox: SandboxPolicy | Literal[False] | None = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-
     #: safety`): applied after the instance policy and before everything a
     #: work item or chain adds, and allowed only to tighten what it inherits.
@@ -302,32 +304,44 @@ class RepoEntry(BaseModel):
             )
         return self
 
-    @field_validator("sandbox")
+    @field_validator("sandbox", mode="before")
     @classmethod
-    def _valid_sandbox(cls, v: Any) -> Any:
-        if v not in (None, False):
-            try:
-                _sandbox.validate(v, where="repos.yaml")
-            except _sandbox.SandboxError as exc:
-                raise ValueError(str(exc)) from exc
-        return v
+    def _typed_sandbox(cls, v: Any, info: ValidationInfo) -> Any:
+        """Typed here, so a refusal names the entry and says what is wrong in
+        `SandboxPolicy`'s own words rather than as a three-way union error."""
+        if v is None or v is False:
+            return v
+        try:
+            return SandboxPolicy.model_validate(v)
+        except ValidationError as exc:
+            where = f"repos.yaml: {info.data.get('path')}: sandbox"
+            raise ValueError(first_error(exc, where)) from exc
+
+    @property
+    def effective_sandbox(self) -> SandboxPolicy | None:
+        """The sandbox this entry sets, under either key (`_one_sandbox`
+        refuses both), or None: `false` sets none."""
+        return self.sandbox or (self.policy.sandbox if self.policy is not None else None)
 
     @model_validator(mode="after")
-    def _no_unrecognised_key_passes_silently(self) -> RepoEntry:
+    def _no_unrecognised_key_passes_silently(self, info: ValidationInfo) -> RepoEntry:
         """`extra="allow"` keeps keys Kraft writes but does not type, and a
         retired key an older install still carries. None may pass silently
         (Kraft-4hn34): a key one typo away from a real field is refused,
         naming the field -- `automated_reviews:` would otherwise read as "no
-        reviewer configured" -- and any other is a warning naming it."""
+        reviewer configured" -- and any other is a warning naming it, unless
+        the caller reports them itself (`kraft admin doctor` fails a row)."""
+        quiet = (info.context or {}).get("unrecognised_keys_reported", False)
         for key in unrecognised_repo_keys(self.model_extra or {}):
             meant = _near_miss(key)
             if meant is not None:
                 raise ValueError(
                     f"repos.yaml: {self.path}: unknown key {key!r}: did you mean {meant!r}?"
                 )
-            logger.warning(
-                "repos.yaml: %s: unrecognised key %r binds nothing; remove it", self.path, key
-            )
+            if not quiet:
+                logger.warning(
+                    "repos.yaml: %s: unrecognised key %r binds nothing; remove it", self.path, key
+                )
         return self
 
     @model_validator(mode="after")
@@ -341,6 +355,19 @@ class RepoEntry(BaseModel):
             except _steering.SteeringError as exc:
                 raise ValueError(str(exc)) from exc
         return self
+
+    def repository_override(self) -> TemplatePolicyOverride | None:
+        """This entry's repository policy layer, or None when it restricts
+        nothing: its `policy:` block with the entry's own `deny_tools` and
+        `sandbox` folded in (Ruling 105), so everything downstream reads one
+        policy rather than a policy and two stray keys."""
+        block = self.policy.model_dump(exclude_none=True) if self.policy is not None else {}
+        deny = [*(block.get("deny_tools") or ()), *self.deny_tools]
+        if deny:
+            block["deny_tools"] = list(dict.fromkeys(deny))
+        if self.sandbox:
+            block["sandbox"] = self.sandbox
+        return TemplatePolicyOverride.model_validate(block) if block else None
 
 
 #: Keys a `repos.yaml` entry carries that `RepoEntry` does not type but Kraft
@@ -373,22 +400,6 @@ def _near_miss(key: str) -> str | None:
         (_edit_distance(key, f), f) for f in (*RepoEntry.model_fields, *_UNTYPED_KEYS)
     )
     return field if distance <= 2 else None
-
-
-def repository_override(entry: dict) -> TemplatePolicyOverride | None:
-    """One loaded `repos.yaml` entry's repository policy layer, or None when it
-    restricts nothing: its `policy:` block with the entry's own `deny_tools`
-    and `sandbox` folded in (Ruling 105), so everything downstream reads one
-    policy rather than a policy and two stray keys."""
-    block = dict(entry.get("policy") or {})
-    deny = [*(block.get("deny_tools") or ()), *(entry.get("deny_tools") or ())]
-    if deny:
-        block["deny_tools"] = list(dict.fromkeys(deny))
-    sandbox = entry.get("sandbox")
-    if sandbox:
-        # `load_repos` validated its shape; only `kind` and `image` are read.
-        block["sandbox"] = SandboxPolicy(kind=sandbox["kind"], image=sandbox["image"])
-    return TemplatePolicyOverride.model_validate(block) if block else None
 
 
 def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
@@ -439,8 +450,8 @@ def _migrate_submodule_edges(repos: list[dict]) -> list[dict]:
 
 def load_repos(
     path: str | Path, *, steering_dir: Path | None = None, validate_steering: bool = True
-) -> list[dict]:
-    """Parse `repos.yaml`, or raise `ConfigError`.
+) -> list[RepoEntry]:
+    """Parse `repos.yaml` into its entries, or raise `ConfigError`.
 
     `validate_steering` defaults on for direct/library callers, but the API's
     read routes (`GET /repos`, `PATCH`/`DELETE /repos`, template validation)
@@ -467,26 +478,26 @@ def load_repos(
     if not isinstance(repos, list) or not all(isinstance(r, dict) for r in repos):
         raise ConfigError("repos.yaml: 'repos' must be a list of mappings")
     ctx = {"steering_dir": steering_dir} if validate_steering else None
-    out: list[dict] = []
+    out: list[RepoEntry] = []
     for r in _migrate_submodule_edges(repos):
         try:
-            out.append(RepoEntry.model_validate(r, context=ctx).model_dump())
+            out.append(RepoEntry.model_validate(r, context=ctx))
         except ValidationError as exc:
             err = exc.errors()[0]
             # A custom validator's message is already a whole sentence naming
-            # the file (`_sandbox`, `_steering`); do not wrap it twice.
+            # the file (`_typed_sandbox`, `_steering_exists`); do not wrap it twice.
             msg = err["msg"].removeprefix("Value error, ")
             if msg.startswith("repos.yaml"):
                 raise ConfigError(msg) from exc
             raise ConfigError(first_error(exc, "repos.yaml")) from exc
-    ids = [r["id"] for r in out if r.get("id")]
+    ids = [r.id for r in out if r.id]
     twice = sorted({i for i in ids if ids.count(i) > 1})
     if twice:
         raise ConfigError(f"repos.yaml: repository id(s) {twice} name more than one entry")
     return out
 
 
-def sandboxed_members(ws: Workspace, repos: list[dict]) -> list[str]:
+def sandboxed_members(ws: Workspace, repos: list[RepoEntry]) -> list[str]:
     """The repository ids in `ws` whose entry sets a sandbox, when `ws` mounts
     members at all (Kraft-dshto): a sandbox on the root or on any member binds
     the item's whole checkout, submodules included. Empty when the pairing is
@@ -494,15 +505,9 @@ def sandboxed_members(ws: Workspace, repos: list[dict]) -> list[str]:
     row on it; one definition serves both."""
     if not ws.members:
         return []
-    by_id = {r["id"]: r for r in repos if r.get("id")}
+    by_id = {r.id: r for r in repos if r.id}
     ids = dict.fromkeys([ws.root, *(m.repository for m in ws.members.values())])
-    return [
-        i
-        for i in ids
-        if i in by_id
-        and (layer := repository_override(by_id[i])) is not None
-        and layer.sandbox is not None
-    ]
+    return [i for i in ids if i in by_id and by_id[i].effective_sandbox is not None]
 
 
 def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[str, Workspace]:
@@ -520,7 +525,7 @@ def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[
     from kraft.templates.environment import Workspace
 
     repos = load_repos(path, validate_steering=False)
-    ids = {r["id"] for r in repos if r.get("id")}
+    ids = {r.id for r in repos if r.id}
     raw = read_yaml(path, REPOS_DEFAULT).get("workspaces") or {}
     if not isinstance(raw, dict):
         raise ConfigError("repos.yaml: 'workspaces' must be a mapping keyed by workspace id")

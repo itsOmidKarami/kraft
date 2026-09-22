@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from support.harness import make_repo
 
 from kraft import config
+from kraft.policy import SandboxPolicy
 
 
 def _load(tmp_path, *entries):
@@ -46,7 +47,7 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
         ({}, {"forge": None, "project": None}),
         ({"forge": "gitea", "project": "t/r"}, {"forge": "gitea"}),
         ({}, {"sandbox": None}),
-        ({"sandbox": _SANDBOX}, {"sandbox": _SANDBOX}),
+        ({"sandbox": _SANDBOX}, {"sandbox": SandboxPolicy(**_SANDBOX)}),
         ({"sandbox": False}, {"sandbox": False}),
         ({}, {"models": {}, "areas": {}}),
         (
@@ -89,14 +90,17 @@ _SANDBOX = {"kind": "docker", "image": "kraft-worker:node"}
 )
 def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     (repo,) = _load(tmp_path, {"path": "/r", **entry})
-    assert {key: repo[key] for key in expected} == expected
-    assert "gitlab_project" not in repo
+    assert {key: getattr(repo, key) for key in expected} == expected
+    assert "gitlab_project" not in repo.model_dump()
 
 
 @pytest.mark.parametrize(
     ("entry", "match"),
     [
         ({"sandbox": {"kind": "docker"}}, "image"),
+        ({"sandbox": "docker"}, "sandbox: must be a mapping, not 'docker'"),
+        ({"sandbox": {"kind": "podman", "image": "y"}}, r"known: \['docker'\]"),
+        ({"sandbox": {**_SANDBOX, "network": "none"}}, "'network'"),
         ({"steering": ["missing"]}, "missing"),
         ({"managed": "yes"}, "'managed' must be a boolean"),
         ({"local_files": ".python-version"}, "'local_files' must be a list"),
@@ -120,6 +124,9 @@ def test_load_repos_reads_an_entry(tmp_path, entry, expected):
     ],
     ids=[
         "a-malformed-sandbox",
+        "a-sandbox-that-is-no-mapping",
+        "a-sandbox-of-an-unknown-kind",
+        "a-sandbox-key-nothing-reads",
         "a-missing-steering-file",
         "a-non-boolean-managed",
         "a-non-list-local-files",
@@ -161,13 +168,13 @@ def test_a_retired_repo_key_is_dropped_on_read_and_gone_after_a_save(tmp_path, c
     (key,) = legacy
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
         (entry,) = _load(tmp_path, {"path": "/r", **legacy})
-    assert key not in entry
-    assert entry["models"] == {}
+    assert key not in entry.model_dump()
+    assert entry.models == {}
     assert key in caplog.text
     # Its own warning, never the unrecognised-key one (nor its near-miss
     # refusal): a retired key is known, and where it went is named.
     assert "unrecognised" not in caplog.text
-    config.save_repos(tmp_path / "repos.yaml", [entry])
+    config.save_repos(tmp_path / "repos.yaml", [entry.model_dump()])
     assert key not in (tmp_path / "repos.yaml").read_text()
 
 
@@ -193,9 +200,59 @@ def test_repo_entry_empty_string_items_use_pydantic_inner_constraints(field):
 def test_save_repos_round_trip_drops_legacy_key(tmp_path):
     path = tmp_path / "repos.yaml"
     config.write_yaml(path, {"repos": [{"path": "/r", "gitlab_project": "group/repo"}]})
-    config.save_repos(path, config.load_repos(path))
+    config.save_repos(path, [r.model_dump() for r in config.load_repos(path)])
     assert "gitlab_project" not in path.read_text()
     assert "forge: gitlab" in path.read_text()
+
+
+def test_load_repos_hands_over_the_model_not_a_dump_of_it(tmp_path):
+    """Kraft-5d510.6: every reader gets `RepoEntry`, its nested fields typed,
+    so no caller re-parses a dict the loader already validated."""
+    from kraft.automated_review import AutomatedReview
+
+    (entry,) = _load(
+        tmp_path,
+        {
+            "path": "/r",
+            "test_scopes": [{"paths": ["**"], "command": "just test"}],
+            "automated_review": {"bot": "coderabbitai", "check": None},
+        },
+    )
+
+    assert isinstance(entry, config.RepoEntry)
+    assert isinstance(entry.automated_review, AutomatedReview)
+    assert isinstance(entry.test_scopes[0], config.TestScope)
+
+
+def test_a_malformed_sandbox_is_refused_naming_its_entry(tmp_path):
+    """Kraft-5d510.1: typed as `SandboxPolicy`, refused in its words, not as
+    a three-way union error."""
+    with pytest.raises(config.ConfigError) as refused:
+        _load(tmp_path, {"path": "/r", "sandbox": {"kind": "podman", "image": "y"}})
+
+    assert str(refused.value) == (
+        "repos.yaml: /r: sandbox: kind 'podman' is not supported; known: ['docker']"
+    )
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({}, None),
+        ({"sandbox": _SANDBOX}, _SANDBOX),
+        ({"sandbox": False}, None),
+        ({"policy": {"sandbox": _SANDBOX}}, _SANDBOX),
+    ],
+    ids=["sets-none", "sets-one", "says-off", "sets-one-in-its-policy-block"],
+)
+def test_an_entrys_sandbox_is_whichever_key_set_it(tmp_path, entry, expected):
+    """One answer for both spellings (`_one_sandbox` refuses both at once):
+    what the repository layer folds in is what a live launch reads."""
+    (repo,) = _load(tmp_path, {"path": "/r", **entry})
+
+    assert repo.effective_sandbox == (SandboxPolicy(**expected) if expected else None)
+    layer = repo.repository_override()
+    assert (layer.sandbox if layer else None) == repo.effective_sandbox
 
 
 # ── the legacy `submodules:` edge migration ──
@@ -209,21 +266,21 @@ def test_a_configured_submodule_edge_becomes_a_child_repo_entry(tmp_path):
         "chain_override": "quick",
     }
     repos = _load(tmp_path, {"path": "/ws", "name": "ws", "submodules": [edge]})
-    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
+    assert [r.path for r in repos] == ["/ws", "/ws/libs/a"]
     child = repos[1]
-    assert child["name"] == "a"
-    assert child["enabled"] is True
-    assert child["test_command"] == "cargo test"
-    assert child["default_chain_template"] == "quick"
+    assert child.name == "a"
+    assert child.enabled is True
+    assert child.test_command == "cargo test"
+    assert child.default_chain_template == "quick"
     # a human had set these values, so the child is a decision, not noise
-    assert child["managed"] is True
+    assert child.managed is True
 
 
 def test_an_all_default_submodule_edge_is_dropped(tmp_path):
     # Carries no human decision, so there is nothing to preserve. Task 3's
     # auto-connect re-creates it as managed: false.
     repos = _load(tmp_path, {"path": "/ws", "submodules": [{"path": "libs/a", "enabled": False}]})
-    assert [r["path"] for r in repos] == ["/ws"]
+    assert [r.path for r in repos] == ["/ws"]
 
 
 def test_an_existing_child_entry_wins_over_a_legacy_edge(tmp_path):
@@ -232,20 +289,20 @@ def test_an_existing_child_entry_wins_over_a_legacy_edge(tmp_path):
         {"path": "/ws", "submodules": [{"path": "libs/a", "test_command": "stale"}]},
         {"path": "/ws/libs/a", "test_command": "real"},
     )
-    assert [r["path"] for r in repos] == ["/ws", "/ws/libs/a"]
-    assert repos[1]["test_command"] == "real"
+    assert [r.path for r in repos] == ["/ws", "/ws/libs/a"]
+    assert repos[1].test_command == "real"
 
 
 def test_migration_drops_submodules_and_allow_cross_repo_keys(tmp_path):
     edge = {"path": "libs/a", "enabled": True}
     for entry in _load(tmp_path, {"path": "/ws", "allow_cross_repo": True, "submodules": [edge]}):
-        assert "submodules" not in entry
-        assert "allow_cross_repo" not in entry
+        assert "submodules" not in entry.model_dump()
+        assert "allow_cross_repo" not in entry.model_dump()
 
 
 def test_migration_is_idempotent(tmp_path):
     once = _load(tmp_path, {"path": "/ws", "submodules": [{"path": "libs/a", "enabled": True}]})
-    config.save_repos(tmp_path / "repos.yaml", once)
+    config.save_repos(tmp_path / "repos.yaml", [r.model_dump() for r in once])
     assert config.load_repos(tmp_path / "repos.yaml") == once
 
 
@@ -462,8 +519,19 @@ def test_an_unrecognised_key_loads_with_a_warning_naming_it_and_the_repo(tmp_pat
     with caplog.at_level(logging.WARNING, logger="kraft.config"):
         (entry,) = config.load_repos(_entry(tmp_path, legacy_widget=1), validate_steering=False)
 
-    assert entry["path"] == "/r"
+    assert entry.path == "/r"
     assert any("legacy_widget" in r.message and "/r" in r.message for r in caplog.records)
+
+
+def test_a_caller_that_reports_unrecognised_keys_itself_gets_no_warning(caplog):
+    """`kraft admin doctor` retypes `GET /repos` and fails a row per key; the
+    loader's own warning would say it twice, on a terminal."""
+    with caplog.at_level(logging.WARNING, logger="kraft.config"):
+        config.RepoEntry.model_validate(
+            {"path": "/r", "legacy_widget": 1}, context={"unrecognised_keys_reported": True}
+        )
+
+    assert not caplog.records
 
 
 def test_the_keys_kraft_itself_writes_are_not_unrecognised(tmp_path, caplog):
@@ -586,7 +654,7 @@ def test_save_repos_keeps_the_workspaces_section(tmp_path):
     alone; it must not drop the workspaces declared beside it."""
     workspaces = {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a", "path": "libs/a"}}}}
     path = _write(tmp_path, _WS_REPOS, workspaces)
-    config.save_repos(path, config.load_repos(path))
+    config.save_repos(path, [r.model_dump() for r in config.load_repos(path)])
     assert yaml.safe_load(path.read_text())["workspaces"] == workspaces
 
 

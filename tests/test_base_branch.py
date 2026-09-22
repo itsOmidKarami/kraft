@@ -7,7 +7,7 @@ import sys
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, make_repo, v1_chain
+from support.harness import _git, entry_of, make_repo, v1_chain
 
 from kraft import builtins as kraft_builtins
 from kraft.config import base_ignore_args, git_read
@@ -337,7 +337,7 @@ async def test_the_straggler_sweep_runs_under_the_items_base_branch(item_on, tmp
         node,
         it.row(),
         it.repo,
-        launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None),
+        launch=LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None),
     )
 
     assert status == "done"
