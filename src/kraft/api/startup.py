@@ -232,11 +232,10 @@ async def lifespan(app: FastAPI):
     # the other ticks on, uncancellable, past shutdown.
     app.state.intake_lock = asyncio.Lock()
     app.state.trigger_last_fired = {}
-    app.state.trigger_task = (
-        asyncio.ensure_future(triggers_mod.poller(app))
-        if app.state.policy and app.state.policy.triggers
-        else None
-    )
+    # Always, not only for boot-time triggers: each tick reads st.policy, so a
+    # trigger added by PUT /policy or `kraft admin reload` fires without a
+    # restart (Kraft-ygnw6). A tick with no triggers files nothing.
+    app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     try:
         yield
     finally:
@@ -256,9 +255,8 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(live_intake_task, return_exceptions=True)
         app.state.rate_limit_task.cancel()
         await asyncio.gather(app.state.rate_limit_task, return_exceptions=True)
-        if app.state.trigger_task is not None:
-            app.state.trigger_task.cancel()
-            await asyncio.gather(app.state.trigger_task, return_exceptions=True)
+        app.state.trigger_task.cancel()
+        await asyncio.gather(app.state.trigger_task, return_exceptions=True)
         app.state.wait_task.cancel()
         await asyncio.gather(app.state.wait_task, return_exceptions=True)
         app.state.caps_task.cancel()

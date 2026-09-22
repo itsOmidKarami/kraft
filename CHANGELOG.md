@@ -130,6 +130,8 @@ agent, decides whether to skip, abandon, or give more room.
   to save it enabled with no test command, as for an explicit `enabled: true`.
 - `kraft view logs -n 0 -f` prints only lines written after it started, not the
   log's tail.
+- A trigger added to a policy that had none at startup (Settings, or
+  `kraft admin reload`) fires without a restart.
 
 ### Removed
 
