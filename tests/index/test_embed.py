@@ -43,6 +43,28 @@ def test_try_encode_swallows_and_records(monkeypatch):
     assert "download failed" in (e.reason or "")
 
 
+def test_the_last_encode_failure_is_kept_until_a_later_success(monkeypatch):
+    """Kraft-pm2rj: health reads `reason` to say a configured embedder is
+    broken, so a model that fails after it loaded is recorded, and a later
+    success clears it rather than leave a stale FAIL."""
+    outcomes = [RuntimeError("onnx session died"), [[1.0]]]
+
+    class _Model:
+        def embed(self, texts):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    e = Embedder()
+    monkeypatch.setattr(e, "available", lambda: True)
+    e._model = _Model()
+    assert e.try_encode(["hello"]) is None
+    assert e.reason == "onnx session died"
+    assert e.try_encode(["hello"]) == [[1.0]]
+    assert e.reason is None
+
+
 def test_available_is_true_with_the_extra_installed():
     pytest.importorskip("fastembed")
     assert Embedder().available() is True

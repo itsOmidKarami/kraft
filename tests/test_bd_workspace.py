@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from support.fake_beads import ON_FAKE_AND_REAL_BD
-from support.harness import isolated_bd, v1_named_chain
+from support.harness import connect_repo, isolated_bd, v1_named_chain
 
 from kraft import executor
 
@@ -90,6 +90,7 @@ async def test_kraft_bd_cwd_still_overrides_the_repo(bd, tmp_path, monkeypatch, 
 def test_a_repo_with_no_beads_workspace_still_files_a_work_item(client, repo):
     """The Kraft-ibwj repro, inverted: this must not be a 502. bd's own words
     reach the caller, and the timeline records why there is no bead."""
+    connect_repo(repo)
     resp = client.post(
         "/api/work-items", json={"title": "no tracker here", "repo": str(repo), "autostart": False}
     )
@@ -113,6 +114,7 @@ def test_no_bd_on_path_still_files_a_work_item(client, tmp_path, monkeypatch, re
     installed is not an intake failure."""
     # After the fixtures, which need the real bd to build their workspaces.
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    connect_repo(repo)
     resp = client.post(
         "/api/work-items", json={"title": "no bd at all", "repo": str(repo), "autostart": False}
     )

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import connected_repo, fake_templates_dir, isolated_bd
 
 from kraft import client
 
@@ -76,7 +76,7 @@ async def _create(repo, title="read me") -> str:
 
 
 def test_list_work_items_is_trimmed(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         await _create(repo)
@@ -97,7 +97,7 @@ def test_list_work_items_is_trimmed(wired, tmp_path):
 
 
 def test_list_work_items_filters_by_status(wired, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         await _create(repo)
@@ -107,7 +107,7 @@ def test_list_work_items_filters_by_status(wired, tmp_path):
 
 
 def test_get_work_item_defaults_to_the_resolved_context(wired, tmp_path, monkeypatch):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         wid = await _create(repo, title="mine")
@@ -143,7 +143,7 @@ def test_get_work_item_names_the_next_node(wired, tmp_path):
     said what comes next — which is the one thing a status report needs
     (Kraft-9rs). A NULL current node means "not started": node zero is next, the
     same rule resume follows."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         async with client.transport.http() as http:
@@ -168,7 +168,7 @@ def test_the_last_node_has_no_next_node(wired, tmp_path):
     """There is no route that parks an item on its last node without running the
     whole chain, so this calls the helper directly on a doctored copy of the
     item's own chain definition."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
 
     async def scenario():
         async with client.transport.http() as http:

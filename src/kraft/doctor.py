@@ -107,14 +107,16 @@ def _health_checks(payload: dict) -> list[dict]:
     # Semantic search is an opt-in extra (`available` is whether it imports),
     # so /health stays `ok` without it and so does doctor: an ok line carrying
     # the advice, never a FAIL on something the operator never asked for
-    # (Kraft-rj8cn).
-    extra = _check(
-        "embeddings",
-        True,
-        f"available ({embeddings.get('model')})"
-        if embeddings.get("available")
-        else f"not installed: {embeddings.get('reason') or 'no reason given'}",
-    )
+    # (Kraft-rj8cn). Installed but failing to load or encode is a FAIL: the
+    # operator did ask for it (Kraft-pm2rj).
+    if not embeddings.get("available"):
+        extra = _check(
+            "embeddings", True, f"not installed: {embeddings.get('reason') or 'no reason given'}"
+        )
+    elif embeddings.get("reason"):
+        extra = _check("embeddings", False, f"installed but broken: {embeddings['reason']}")
+    else:
+        extra = _check("embeddings", True, f"available ({embeddings.get('model')})")
     if not reasons:
         status = str(payload.get("status", "?"))
         return [_check("health", payload.get("status") == "ok", status), extra]

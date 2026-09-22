@@ -183,3 +183,16 @@ def test_the_backlog_endpoint_reads_off_the_event_loop(tmp_path, monkeypatch):
     body = asyncio.run(sessions.get_log("s", request, format="jsonl"))
     assert [r["text"] for r in body["lines"]] == ["one"]
     assert on_loop and not any(on_loop), "a log read ran on the event loop"
+
+
+def test_the_backlog_payload_says_where_the_next_line_starts(tmp_path, monkeypatch):
+    """Kraft-tbnse: a `-n 0 -f` reader has no printed line to resume after,
+    so the payload names the next line number (past any lines the cap hid)."""
+    log = tmp_path / "s.log"
+    log.write_text("one\ntwo\n")
+    monkeypatch.setattr(
+        sessions, "_session_row", lambda st, sid: {"status": "running", "log_path": str(log)}
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=None))
+    body = asyncio.run(sessions.get_log("s", request, format="jsonl"))
+    assert body["next_line"] == 2

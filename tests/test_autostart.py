@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo
+from support.harness import connected_repo
 
 #: No default repo entry: an autostarted item stops where an unconfigured repo stops.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -31,7 +31,7 @@ def _poll_for(client, wid, event_type, timeout=30):
 
 
 def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "wait for me", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -44,7 +44,7 @@ def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
 
 
 def test_autostart_defaults_true_so_the_ui_is_unaffected(client, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post("/api/work-items", json={"title": "go now", "repo": str(repo)}).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
 
@@ -54,7 +54,7 @@ def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
     what makes a NULL current_node_id resolve to the first node. Nothing else
     was written for this case, so if that expression is ever refactored, this
     test is the thing that notices."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "start me", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -70,7 +70,7 @@ def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
 
 def test_pausing_a_never_started_item_is_refused(client, tmp_path):
     """It is already paused; /pause requires an active item."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "already waiting", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -86,7 +86,7 @@ def test_an_agent_files_work_paused_and_cannot_autostart_it(client, tmp_path, ca
     """Kraft-s7c04.31: `autostart` is a human's choice. A Kraft session (its
     `X-Kraft-Session-Id`) or an MCP client asking for it is refused before
     anything is filed; the same caller filing paused is still let through."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     body = {"title": "t", "repo": str(repo)}
     refused = client.post("/api/work-items", json={**body, "autostart": True}, headers=caller)
     assert refused.status_code == 403, refused.text

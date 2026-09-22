@@ -186,6 +186,14 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
     return kept
 
 
+async def log_next_line(session_id: str) -> int:
+    """The number the log's next line will get: a follow's cursor for "only
+    what is written from now on", which no backlog line can give when none
+    was printed (`-n 0`)."""
+    payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
+    return payload["next_line"]
+
+
 async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
     """Follow one worker session's log until the session stops.
 

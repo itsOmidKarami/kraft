@@ -9,7 +9,7 @@ import asyncio
 import pytest
 import yaml
 from support.api import _client
-from support.harness import fake_templates_dir
+from support.harness import connect_repo, fake_templates_dir
 
 from kraft import store
 from kraft.templates.library import TemplateLibrary
@@ -213,6 +213,7 @@ def test_every_door_names_the_broken_file_rather_than_the_chain_id(client, repo,
     from kraft import intake as intake_mod
     from kraft import triggers as triggers_mod
 
+    connect_repo(repo)
     # An item filed while the library was still readable -- the state a
     # PATCH arrives in after an operator hand-edits a chain file badly.
     wid = client.post(
@@ -287,6 +288,7 @@ def test_a_chain_that_does_not_resolve_is_visible_everywhere(client, repo):
     assert "no_such_node" in reload["invalid_templates"]["chain broken"]
     assert "broken" not in reload["valid"] and "default" in reload["valid"]
 
+    connect_repo(repo)
     r = client.post(
         "/api/work-items", json={"title": "t", "repo": str(repo), "chain_template": "broken"}
     )

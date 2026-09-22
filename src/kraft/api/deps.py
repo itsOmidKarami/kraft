@@ -373,6 +373,24 @@ def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
     return next((r for r in repos if r.path == resolved), None)
 
 
+def connected_or_422(st, repo: str) -> RepoEntry:
+    """`repo`'s entry, or a 422 saying how to connect it (Kraft-ta8nv).
+
+    Both intake doors file only against a connected repo: any directory would
+    make the check an existence oracle on the host's filesystem, and an item in
+    an unconnected repo has no entry for dispatch to read its config from."""
+    try:
+        repos = config_mod.load_repos(repos_path(st), validate_steering=False)
+    except config_mod.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    entry = _connected(repos, repo)
+    if entry is None:
+        raise HTTPException(
+            422, f"{repo} is not a connected repo; connect it first: kraft repo connect {repo}"
+        )
+    return entry
+
+
 async def base_branch_or_422(repo: str, branch: str | None) -> str | None:
     """`branch`, once origin is known to have it (Kraft-v9gbi) -- an item's
     work starts from it, so a branch that is not there would only fail at the

@@ -262,6 +262,25 @@ def test_a_missing_vector_extra_is_advice_not_a_failure():
     assert "uv sync --extra vector" in _by_name(rows, "embeddings")["detail"]
 
 
+def test_an_installed_but_broken_embedder_fails():
+    """Kraft-pm2rj: the extra is there and the operator asked for semantic
+    search, but the model will not load: a FAIL, unlike a missing extra."""
+    rows = doctor._health_checks(
+        {
+            "status": "ok",
+            "index": {
+                "errors": [],
+                "embeddings": {"available": True, "model": "m", "reason": "download failed"},
+            },
+            "reattach_summary": {"unknown": []},
+        }
+    )
+
+    row = _by_name(rows, "embeddings")
+    assert row["ok"] is False
+    assert "download failed" in row["detail"]
+
+
 def test_doctor_exits_1_and_prints_the_failures(app, tmp_path, capsys):
     _prime(tmp_path)
     (tmp_path / "run" / "worktrees" / "wi-ghost").mkdir(parents=True)

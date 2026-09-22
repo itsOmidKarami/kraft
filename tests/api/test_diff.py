@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import make_repo, v1_chain, v1_item
+from support.harness import connected_repo, make_repo, v1_chain, v1_item
 
 from kraft import store
 from kraft.paths import RunDirs
@@ -46,7 +46,7 @@ def seeded_item(client, tmp_path):
     §6). The cache dir is pure noise, so it is swept here; the session summary
     is real, untracked content and is left for the endpoint to report.
     """
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},

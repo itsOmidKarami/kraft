@@ -313,6 +313,35 @@ def test_logs_n_zero_prints_no_backlog(app, monkeypatch, capsys, make_item, repo
     assert capsys.readouterr().out == ""
 
 
+def test_logs_n_zero_follow_starts_after_the_lines_already_written(
+    app, monkeypatch, capsys, make_item, repo
+):
+    """Kraft-tbnse: `-n 0 -f` prints only what is written after it started.
+    The follow endpoint replays the log's bounded tail, so with no backlog
+    line to resume after, the cursor comes from the payload's `next_line`."""
+    wid = make_item(repo)
+    asked = []
+
+    async def fake_latest(work_item_id=None):
+        return {"id": "sess-1", "status": "running"}
+
+    async def fake_get(path, **params):
+        rows = [{"n": i, "t": None, "src": "stdout", "text": f"l{i}"} for i in range(5)]
+        return {"lines": rows, "next_line": 5}
+
+    async def fake_stream(session_id, after_line=0):
+        asked.append(after_line)
+        yield {"n": 5, "t": None, "src": "stdout", "text": "new"}
+
+    monkeypatch.setattr(client, "latest_session", fake_latest)
+    monkeypatch.setattr(client.transport, "_get", fake_get)
+    monkeypatch.setattr(client, "stream_log", fake_stream)
+    cli.main(["view", "logs", wid, "-n", "0", "-f"])
+    assert asked == [5]
+    out = capsys.readouterr().out
+    assert "new" in out and "l4" not in out
+
+
 def test_watch_draws_a_frame_per_event_and_starts_at_the_live_cursor(
     app, monkeypatch, capsys, make_item, repo
 ):

@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from support.harness import fake_templates_dir, make_repo
+from support.harness import connected_repo, fake_templates_dir
 
 #: No default repo entry for an unconnected repo, as before this used the shared client.
 pytestmark = pytest.mark.api_client(default_setup=False)
@@ -50,7 +50,7 @@ def _await_gate(client, wid, gate, timeout=60):
 
 @pytest.mark.slow
 def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path, prompt_log):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
@@ -80,7 +80,7 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
 def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_log):
     """Kraft-bol end to end: the plan node's re-run is told to edit the file it
     already wrote, not to start again from the brief."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},

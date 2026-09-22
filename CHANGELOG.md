@@ -126,6 +126,18 @@ agent, decides whether to skip, abandon, or give more room.
   `kraft view show --json` returns the full item.
 - The connect probe proposes `just test` only for a real `test` recipe.
 - `install-service` works on Linux runners and reinstalls cleanly.
+- A repo edit that turns on a repo with no test command, or clears the last test
+  command of an enabled one, is refused, also when `enabled` is unset in
+  `repos.yaml` (unset means enabled).
+- `kraft view logs -n 0 -f` prints only lines written after it started, not the
+  log's tail.
+- A trigger added to a policy that had none at startup (Settings, or
+  `kraft admin reload`) fires without a restart.
+- `kraft admin doctor` fails when the embeddings extra is installed but its
+  model will not load or encode; `/health` reports the last such failure.
+- Filing a work item (`POST /work-items`, `POST /triggers`, `kraft item create`,
+  MCP `create_work_item`) against a repo that isn't connected is refused with a
+  422 that names `kraft repo connect`, instead of accepting any directory.
 
 ### Removed
 

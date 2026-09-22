@@ -134,7 +134,7 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
         for entry in lines:
             _print_log(entry, ns.json)
         if ns.follow:
-            seen = lines[-1]["n"] + 1 if lines else 0
+            seen = lines[-1]["n"] + 1 if lines else await client.log_next_line(session_id)
             async for entry in client.stream_log(session_id, after_line=seen):
                 _print_log(entry, ns.json)
 

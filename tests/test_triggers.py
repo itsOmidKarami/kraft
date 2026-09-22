@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 
+import pytest
 from support.harness import isolated_bd, v1_library
 
 from kraft import policy, triggers
@@ -130,3 +132,28 @@ async def test_a_triggered_item_is_bound_by_its_repositorys_policy(tmp_path, stu
         lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
     )
     assert store.materialized_chain_of(row).policy.deny_tools == ("WebFetch",)
+
+
+@pytest.fixture
+def fast_trigger_poller(monkeypatch):
+    """Ticks every 10 ms and counts them; set before `client` starts the app."""
+    ticks = []
+
+    async def counting_tick(app, **_):
+        ticks.append(len(app.state.policy.triggers))
+        return []
+
+    monkeypatch.setattr(triggers, "_INTERVAL_S", 0.01)
+    monkeypatch.setattr(triggers, "tick", counting_tick)
+    return ticks
+
+
+def test_the_poller_runs_with_no_triggers_at_boot(fast_trigger_poller, client):
+    """Kraft-ygnw6: a trigger added later (PUT /policy, `kraft admin reload`)
+    is read by the next tick -- only if a poller is ticking. One that started
+    only for a boot-time trigger never fires a trigger added after it."""
+    assert client.app.state.policy.triggers == []
+    deadline = time.monotonic() + 5
+    while not fast_trigger_poller and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert fast_trigger_poller, "no trigger poller is running"
