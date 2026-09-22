@@ -110,6 +110,14 @@ async def _revise(st, row, gate: str) -> str | None:
         return f"{gate}: {exc}"
     if revised is chain:
         return None
+    # Bound to what the gate showed (Kraft-ze1yj): an `add` resolves out of the
+    # live library, which may have been edited and reloaded since. Nobody
+    # having looked binds nothing; the approval applies what it computes.
+    shown = st.db.read(lambda c: store.shown_revision(c, row["id"], gate))
+    if shown is not None and shown != revision.digest(revised):
+        raise revision.StaleRevision(
+            f"{gate}: the library changed since this revision was shown; review it again"
+        )
     payload = {
         "gate": gate,
         "changes": changes.model_dump(mode="json", exclude_none=True),
@@ -182,7 +190,12 @@ async def approve_gate(wid: str, gate: str, request: Request):
     if deps.task_is_live(request.app, wid):
         await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
 
-    nodes, reason = await apply_approval(st, row, gate)
+    try:
+        nodes, reason = await apply_approval(st, row, gate)
+    except revision.StaleRevision as exc:
+        # Nothing applied and nothing stopped: the gate is still pending, and
+        # reading its document again shows what an approval would now write.
+        raise HTTPException(409, str(exc)) from exc
     if nodes is None:
         # Kraft-iv4y: a human hitting `approve` again after this exact failure
         # used to get a 200 back with nothing changed -- the same reason

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from kraft import executor, store
 from kraft.api.routes import gates as gates_route
 from kraft.executor.context import LaunchContext
@@ -269,3 +271,25 @@ async def test_a_revision_computed_from_a_chain_that_has_since_changed_is_refuse
     assert nodes is None and "changed" in reason
     assert it.row()["run_chain"] == forked
     assert it.events("chain_revised") == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "the chain fits, no changes",
+        '```json\n{"rationale": "fits"\n```',
+        '```json\n{"rationale": "fits", "note": "x"}\n```',
+        "",
+    ],
+    ids=["prose", "truncated-json", "unknown-key", "empty"],
+)
+async def test_a_malformed_revision_is_never_read_as_no_change(item_on, tmp_path, body):
+    """The mirror of the unchanged pass: only a change set that parses, and is
+    empty, clears the gate unasked. Anything unreadable stops for a person."""
+    it = await item_on(_chain(tmp_path, {"rationale": "placeholder"}))
+    (tmp_path / "proposal.md").write_text(f"---\nwork_item_ids: [w1]\n---\n{body}\n")
+
+    assert await _walk(it) == "awaiting_gate"
+
+    assert [e["payload"]["gate"] for e in it.events("gate_requested")] == [GATE]
+    assert it.events("chain_revision_unchanged") == []

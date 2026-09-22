@@ -54,10 +54,11 @@ the person at the gate can find it.
 
 - **`skip`** a node that has become pointless. Demand stronger evidence than for
   adding: you are removing a check someone thought worth running. Never skip the
-  merge, the draft or ready merge request, or the last verification of a change
-  to executable code. A node marked `skippable: false`, a node another node
-  restarts from, and a node a gate rejects back to cannot be skipped; the
-  proposal is refused if you try.
+  last verification of a change to executable code. A node that opens,
+  describes, syncs, readies or merges the merge request or waits on its checks,
+  a node marked `skippable: false`, a node another node restarts from, and a
+  node a gate rejects back to cannot be skipped; the proposal is refused if you
+  try.
 - **`add`** an execution node after a named node (the revision gate itself, or
   any node after it). An added node is built **only from library components**:
   either `{"id": ..., "extends": "<library node>"}`, or

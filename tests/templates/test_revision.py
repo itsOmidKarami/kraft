@@ -348,7 +348,7 @@ def test_adding_a_node_needs_the_library():
 def test_the_gate_reads_the_rationale_each_change_with_its_evidence_then_the_diff():
     text = _artifact({"rationale": "docs only", "skip": [_skip("brief")]})
 
-    shown = revision.render(text, _chain(), GATE, LIBRARY)
+    shown, _ = revision.render(text, _chain(), GATE, LIBRARY)
 
     assert shown.index("docs only") < shown.index("- skip `brief` -- plan: not needed")
     assert shown.index("plan: not needed") < shown.index("```diff") < shown.index("- brief")
@@ -363,7 +363,7 @@ def test_the_gate_reads_the_rationale_each_change_with_its_evidence_then_the_dif
     ids=["unreadable", "unappliable"],
 )
 def test_the_gate_says_why_a_proposal_cannot_be_approved(text, heading, reason):
-    shown = revision.render(text, _chain(), GATE, LIBRARY)
+    shown, _ = revision.render(text, _chain(), GATE, LIBRARY)
 
     assert heading in shown and reason in shown and "```diff" not in shown
 
@@ -446,3 +446,60 @@ def test_a_revision_keeps_the_untrimmed_chain_consistent():
 
 def test_a_chain_with_nothing_attached_stays_without_an_untrimmed_copy():
     assert _revise(_chain(), skip=[_skip("brief")]).untrimmed is None
+
+
+# ── a revision never takes the merge request's life out of a chain (Kraft-eh5as) ──
+
+LANDING = [
+    "describe_merge_request",
+    "draft_merge_request",
+    "merge_request_feedback",
+    "mark_ready",
+    "external_approval",
+    "merge",
+    "post_merge_ci",
+]
+
+
+@pytest.mark.parametrize("node", LANDING)
+def test_a_revision_cannot_skip_a_step_of_the_default_chains_merge_request(node):
+    library = TemplateLibrary.from_yaml_dir(SHIPPED)
+    chain = library.resolve_chain("default").materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+    )
+
+    with pytest.raises(revision.RevisionError, match="merge request"):
+        revision.revise(
+            chain, _changes(skip=[_skip(node)]), gate="chain_revision_approval", library=library
+        )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"id": "t", "kind": "forge", "target": "mr.sync"},
+        {"id": "t", "kind": "forge", "target": "mr.ci"},
+        {"id": "t", "kind": "agent", "harness": "f", "prompt": "p", "produces": "mr_meta"},
+    ],
+    ids=["a-forge-action", "a-forge-wait", "the-mr-description"],
+)
+def test_a_revision_cannot_skip_a_merge_request_node_of_any_chain(task):
+    """Keyed on what the node runs, not on its id: a custom chain's node under
+    a name no shipped chain uses is held the same way."""
+    nodes = [
+        _run("plan"),
+        {"id": GATE, "kind": "gate", "artifact": "chain_revision"},
+        {"id": "ship_it_somehow", "kind": "exec", "tasks": [task]},
+        _run("after"),
+    ]
+    chain = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes})).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+    )
+
+    with pytest.raises(revision.RevisionError, match="merge request"):
+        _revise(chain, skip=[_skip("ship_it_somehow")])
+    assert [n.id for n in _revise(chain, skip=[_skip("after")]).chain.nodes][
+        -1
+    ] == "ship_it_somehow"

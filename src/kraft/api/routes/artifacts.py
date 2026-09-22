@@ -185,7 +185,11 @@ async def get_work_item_artifact(wid: str, request: Request):
     ):
         # A change set is JSON for Kraft to apply; the person deciding reads
         # it rendered, with the diff it makes and anything that stops it.
-        body = revision.render(text, chain, gate, st.library)
+        body, revised = revision.render(text, chain, gate, st.library)
+        # What an approval must still apply (Kraft-ze1yj).
+        if revised is not None and revised is not chain:
+            shown = revision.digest(revised)
+            await st.db.write(lambda c: store.show_revision(c, wid, gate, shown))
     return {
         "work_item_id": wid,
         "path": rel,

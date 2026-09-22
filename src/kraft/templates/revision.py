@@ -15,6 +15,7 @@ Kraft-gnn1); a change set cannot drop what it does not name.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import replace
@@ -39,6 +40,7 @@ from kraft.templates.models import (
     PATH_SEPARATOR,
     Chain,
     ExecNode,
+    ForgeTask,
     GateNode,
     MaterializedChain,
     ResolvedChain,
@@ -267,6 +269,12 @@ def revise(
         node = open_node(chain.chain.nodes, skip.node, f"skip {skip.node}")
         if not node.node.skippable:
             raise RevisionError(f"skip {skip.node}: {skip.node!r} is not skippable")
+        if _lands(node):
+            raise RevisionError(
+                f"skip {skip.node}: {skip.node!r} is part of the merge request's life (opening, "
+                "describing, syncing, readying, merging it or waiting on its checks), which a "
+                "revision never removes"
+            )
         skipped.add(skip.node)
     after: dict[str, list] = {}
     steering = chain.chain.steering
@@ -335,6 +343,26 @@ def revise(
     return revised
 
 
+#: The artifact a merge request's title, body and labels come from
+#: (`forge.mr.read_mr_meta`).
+_MR_META = "mr_meta"
+
+
+def _lands(node: ResolvedNode) -> bool:
+    """Whether `node` does part of the work of landing the change (Kraft-eh5as):
+    any forge task -- open, sync, ready, merge, or a wait on CI, review or
+    approval -- or the description the merge request opens with. Keyed on what
+    the node runs, never its id, so a custom chain's own names are held too.
+    The node's own steps, as `ResolvedNode.produces` reads: a recovery pass
+    that syncs the merge request repairs a node, it is not what the node is for.
+    A skip would let an item "complete" with nothing landed."""
+    return any(
+        isinstance(t.task, ForgeTask) or getattr(t.task, "produces", None) == _MR_META
+        for step in node.steps
+        for t in step.tasks
+    )
+
+
 def _added_nodes(
     adds: list[Add], library: TemplateLibrary | None
 ) -> tuple[list[ExecNode], dict[str, str] | None]:
@@ -396,15 +424,18 @@ def diff(before: ResolvedChain, after: ResolvedChain) -> list[str]:
 _REJECT = "Approving it is refused; reject it back to the node that wrote it, with this reason."
 
 
-def render(text: str, chain: MaterializedChain, gate: str, library: TemplateLibrary | None) -> str:
-    """The gate's document for a person: the rationale, each change with its
-    evidence, then the diff against the chain the item runs -- or, when the
-    proposal cannot be read or applied, why not, which is also what the
-    approval would refuse with."""
+def render(
+    text: str, chain: MaterializedChain, gate: str, library: TemplateLibrary | None
+) -> tuple[str, MaterializedChain | None]:
+    """The gate's document for a person, and the revised chain it shows (None
+    when it shows none): the rationale, each change with its evidence, every
+    added node as it will run (resolved out of `library` now), then the diff --
+    or, when the proposal cannot be read or applied, why not, which is also
+    what the approval would refuse with."""
     try:
         changes = parse(text)
     except RevisionError as exc:
-        return f"# Chain revision\n\n## Cannot be read\n\n**{exc}**\n\n{_REJECT}\n"
+        return f"# Chain revision\n\n## Cannot be read\n\n**{exc}**\n\n{_REJECT}\n", None
     lines = ["# Chain revision", "", changes.rationale, "", "## Changes", ""]
     lines += [f"- skip `{s.node}` -- {s.evidence}" for s in changes.skip]
     lines += [f"- add `{a.node.id}` after `{a.after}` -- {a.evidence}" for a in changes.add]
@@ -418,10 +449,29 @@ def render(text: str, chain: MaterializedChain, gate: str, library: TemplateLibr
     try:
         revised = revise(chain, changes, gate=gate, library=library)
     except RevisionError as exc:
-        return "\n".join([*lines, "", "## Cannot be applied", "", f"**{exc}**", "", _REJECT, ""])
-    return "\n".join(
-        [*lines, "", "## Diff", "", "```diff", *diff(chain.chain, revised.chain), "```", ""]
-    )
+        return "\n".join(
+            [*lines, "", "## Cannot be applied", "", f"**{exc}**", "", _REJECT, ""]
+        ), None
+    added = {a.node.id for a in changes.add}
+    for node in revised.chain.nodes:
+        if node.id in added:
+            authored = node.node.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+            lines += ["", f"### `{node.id}`, as it will run", "", "```json"]
+            lines += [json.dumps(authored, indent=1), "```"]
+    lines += ["", "## Diff", "", "```diff", *diff(chain.chain, revised.chain), "```", ""]
+    return "\n".join(lines), revised
+
+
+def digest(revised: MaterializedChain) -> str:
+    """What a person approving a revision was shown, as one value: the whole
+    revised chain, added nodes resolved (Kraft-ze1yj). The diff alone would not
+    do -- it names an added node without what it runs."""
+    return hashlib.sha256(revised.to_json().encode()).hexdigest()
+
+
+class StaleRevision(RevisionError):
+    """The revision would apply something other than what its gate showed: the
+    library changed between the two (Kraft-ze1yj)."""
 
 
 def context_note(chain: MaterializedChain | None, node_id: str) -> str:
