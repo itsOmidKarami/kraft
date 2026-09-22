@@ -1,6 +1,7 @@
 """`kraft admin templates ...`: the chain template library, read-only from a
 terminal -- lint it, print one chain, list its reusable components. And
-`kraft admin harnesses`, the `harnesses.yaml` profiles its agent tasks select."""
+`kraft admin harnesses`, the `harnesses.yaml` profiles its agent tasks select,
+and the agent profiles (model tiers) under them."""
 
 from __future__ import annotations
 
@@ -67,7 +68,25 @@ def _render_profiles(payload: dict) -> str:
         rows,
         [("ID", "id"), ("PROVIDER", "provider"), ("ENABLED", "enabled"), ("USED BY", "used_by")],
     )
-    return f"{payload['file']}: {payload['error']}" if payload["error"] else table
+    if payload["error"]:
+        return f"{payload['file']}: {payload['error']}"
+    tiers = [
+        {
+            **p,
+            "effort": p["effort"] or "-",
+            "model": ", ".join(f"{k}={v}" for k, v in p["model"].items()),
+            "used_by": ", ".join(p["used_by"]) or "-",
+        }
+        for p in payload.get("agent_profiles", [])
+    ]
+    if not tiers:
+        return table
+    agent = render.table(
+        tiers,
+        [("PROFILE", "id"), ("EFFORT", "effort"), ("MODEL", "model"), ("USED BY", "used_by")],
+    )
+    problems = [why for p in payload["agent_profiles"] for why in p["problems"]]
+    return "\n\n".join([table, agent, *(["\n".join(problems)] if problems else [])])
 
 
 def _render_profile(p: dict) -> str:

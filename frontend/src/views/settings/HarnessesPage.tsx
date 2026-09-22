@@ -2,9 +2,21 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { SectionLabel, Switch } from "../../components/ui";
-import type { HarnessCapability, HarnessProfile, HarnessProfileInput, HarnessProvider } from "../../types";
+import type {
+  AgentProfile,
+  HarnessCapability,
+  HarnessProfile,
+  HarnessProfileInput,
+  HarnessProvider,
+} from "../../types";
 import "./templates.css";
-import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared";
+import {
+  PageHead,
+  PhoneHeader,
+  SaveRow,
+  usePhone,
+  useResource,
+} from "./shared";
 
 /* ── Harnesses (Kraft-archr): `templates/harnesses.yaml`, the profiles an agent
  * task's `harness:` selects -- which provider CLI runs, from which executable,
@@ -17,12 +29,20 @@ import { PageHead, PhoneHeader, SaveRow, usePhone, useResource } from "./shared"
  * provider's capability surface (`GET /harnesses/providers`) is read-only: it
  * is what a CLI accepts, not a setting. */
 
-/** The profile defaults a launch applies (`agent._PROFILE_DEFAULTS`). */
+/** The profile defaults a launch applies (`adapters.profiles._PROFILE_DEFAULTS`). */
 const DEFAULT_KEYS = ["model", "effort", "permission_mode"] as const;
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-function Links({ ids, to, none }: { ids: string[]; to: (id: string) => string; none: string }) {
+function Links({
+  ids,
+  to,
+  none,
+}: {
+  ids: string[];
+  to: (id: string) => string;
+  none: string;
+}) {
   if (ids.length === 0) return <>{none}</>;
   return (
     <>
@@ -41,12 +61,14 @@ function Links({ ids, to, none }: { ids: string[]; to: (id: string) => string; n
 const CAPABILITY_HELP: Record<string, string> = {
   prompt: "The task instruction the agent is started with.",
   context: "Kraft's steering and context, handed over as system prompt.",
-  structured_log: "Makes the CLI write the machine-readable event log Kraft reads.",
+  structured_log:
+    "Makes the CLI write the machine-readable event log Kraft reads.",
   model: "Which model runs; any name the CLI accepts.",
   effort: "How much reasoning effort the model spends.",
   deny_tools: "Tools the agent may never call.",
   allowed_tools: "Tools a tool allowlist pre-approves.",
-  restrict_tools: "Cuts the built-in tools down to the allowlist (MCP tools unaffected).",
+  restrict_tools:
+    "Cuts the built-in tools down to the allowlist (MCP tools unaffected).",
   permission_mode: "How the CLI decides whether a tool call needs approval.",
   approval_channel: "The MCP tool the CLI asks instead of prompting a human.",
   resume: "Continues an earlier session by its id.",
@@ -57,19 +79,31 @@ const CAPABILITY_HELP: Record<string, string> = {
 
 /** `{value}`/`{csv}` in a `cli:` fragment, as a reader would write them. */
 const readable = (argv: string[]) =>
-  argv.map((a) => a.replaceAll("{value}", "<value>").replaceAll("{csv}", "<a,b,…>")).join(" ");
+  argv
+    .map((a) =>
+      a.replaceAll("{value}", "<value>").replaceAll("{csv}", "<a,b,…>"),
+    )
+    .join(" ");
 
 /** What a capability becomes: its flag(s), or what carries or reads it. */
 function becomes(c: HarnessCapability): string {
   if (c.cli.length) return readable(c.cli);
   if (c.via) return `carried by the ${c.via} command`;
-  if (c.source === "result_file") return "reported by the agent in its result file";
+  if (c.source === "result_file")
+    return "reported by the agent in its result file";
   if (c.reader) return `read from the output stream (${c.reader})`;
   return "";
 }
 
-function ProviderReadout({ id, provider }: { id: string; provider: HarnessProvider | undefined }) {
-  if (!provider) return <p className="form-error">provider {id} is not installed</p>;
+function ProviderReadout({
+  id,
+  provider,
+}: {
+  id: string;
+  provider: HarnessProvider | undefined;
+}) {
+  if (!provider)
+    return <p className="form-error">provider {id} is not installed</p>;
   const file = provider.path.split("/").pop();
   return (
     <>
@@ -78,7 +112,8 @@ function ProviderReadout({ id, provider }: { id: string; provider: HarnessProvid
         <span className="chain-head-counts">{provider.command.join(" ")}</span>
       </div>
       <span className="field-hint">
-        {provider.override ? "Your override" : "Packaged definition"}: {provider.path}
+        {provider.override ? "Your override" : "Packaged definition"}:{" "}
+        {provider.path}
       </span>
       <span className="field-hint">
         {provider.override
@@ -86,15 +121,21 @@ function ProviderReadout({ id, provider }: { id: string; provider: HarnessProvid
           : `To change it, drop a ${file} into $KRAFT_HOME/templates/harnesses/; yours replaces this one.`}
       </span>
       <SectionLabel>Capabilities</SectionLabel>
-      <p className="chain-legend">Kraft's neutral option names, and the flags this CLI receives for them.</p>
+      <p className="chain-legend">
+        Kraft's neutral option names, and the flags this CLI receives for them.
+      </p>
       <ul className="capability-list">
         {Object.entries(provider.capabilities).map(([name, c]) => {
           const to = becomes(c);
-          const always = Array.isArray(c.always) ? c.always.join(", ") : c.always;
+          const always = Array.isArray(c.always)
+            ? c.always.join(", ")
+            : c.always;
           const facts = [
             c.values.length ? `accepts ${c.values.join(" | ")}` : "",
             always ? `every launch: ${always}` : "",
-            c.under_allowlist ? `under a tool allowlist: ${c.under_allowlist}` : "",
+            c.under_allowlist
+              ? `under a tool allowlist: ${c.under_allowlist}`
+              : "",
             c.channel ? `channel: ${c.channel}` : "",
           ].filter(Boolean);
           return (
@@ -106,8 +147,12 @@ function ProviderReadout({ id, provider }: { id: string; provider: HarnessProvid
                   <code>{to}</code>
                 </>
               )}
-              {CAPABILITY_HELP[name] && <div className="field-hint">{CAPABILITY_HELP[name]}</div>}
-              {facts.length > 0 && <div className="field-hint">{facts.join(" · ")}</div>}
+              {CAPABILITY_HELP[name] && (
+                <div className="field-hint">{CAPABILITY_HELP[name]}</div>
+              )}
+              {facts.length > 0 && (
+                <div className="field-hint">{facts.join(" · ")}</div>
+              )}
             </li>
           );
         })}
@@ -136,7 +181,8 @@ function ProfileEditor({
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const provider = providers[draft.provider];
-  const set = (patch: Partial<HarnessProfileInput>) => setDraft({ ...draft, ...patch });
+  const set = (patch: Partial<HarnessProfileInput>) =>
+    setDraft({ ...draft, ...patch });
   const setDefault = (key: string, value: string) => {
     const { [key]: _, ...rest } = draft.defaults;
     set({ defaults: value ? { ...rest, [key]: value } : rest });
@@ -147,7 +193,10 @@ function ProfileEditor({
     setMessage(null);
     try {
       const { executable, ...body } = draft;
-      await api.putHarness(profile.id, executable ? { ...body, executable } : body);
+      await api.putHarness(
+        profile.id,
+        executable ? { ...body, executable } : body,
+      );
       await onSaved();
       setMessage("saved");
     } catch (e) {
@@ -161,13 +210,23 @@ function ProfileEditor({
     <>
       <div className="chain-head">
         <h2 className="chain-head-name">{profile.id}</h2>
-        <span className="chain-head-counts">{profile.enabled ? profile.provider : "disabled"}</span>
+        <span className="chain-head-counts">
+          {profile.enabled ? profile.provider : "disabled"}
+        </span>
       </div>
       <p className="chain-legend">
         used by{" "}
-        <Links ids={profile.used_by} to={(id) => `/settings/library?c=${encodeURIComponent(id)}`} none="no library task" />
+        <Links
+          ids={profile.used_by}
+          to={(id) => `/settings/library?c=${encodeURIComponent(id)}`}
+          none="no library task"
+        />
         {" · chains "}
-        <Links ids={profile.chains} to={(id) => `/settings/chains?tpl=${encodeURIComponent(id)}`} none="none" />
+        <Links
+          ids={profile.chains}
+          to={(id) => `/settings/chains?tpl=${encodeURIComponent(id)}`}
+          none="none"
+        />
       </p>
       <div className="field">
         <Switch
@@ -176,7 +235,9 @@ function ProfileEditor({
           label={`${draft.enabled ? "disable" : "enable"} ${profile.id}`}
         />
         <span className="field-hint">
-          {draft.enabled ? "enabled" : "disabled — a task selecting it stops for a human"}
+          {draft.enabled
+            ? "enabled"
+            : "disabled — a task selecting it stops for a human"}
         </span>
       </div>
       <div className="field">
@@ -187,11 +248,13 @@ function ProfileEditor({
           value={draft.provider}
           onChange={(e) => set({ provider: e.target.value })}
         >
-          {[...new Set([draft.provider, ...Object.keys(providers)])].map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
+          {[...new Set([draft.provider, ...Object.keys(providers)])].map(
+            (id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ),
+          )}
         </select>
       </div>
       <div className="field">
@@ -204,12 +267,17 @@ function ProfileEditor({
           onChange={(e) => set({ executable: e.target.value })}
         />
       </div>
-      {DEFAULT_KEYS.filter((key) => provider?.capabilities[key] || draft.defaults[key]).map((key) => {
+      {DEFAULT_KEYS.filter(
+        (key) => provider?.capabilities[key] || draft.defaults[key],
+      ).map((key) => {
         const values = provider?.capabilities[key]?.values ?? [];
         return (
           <div className="field" key={key}>
             <label htmlFor={`harness-${key}`}>
-              default {key} <span className="field-hint">· {values.length ? values.join(" | ") : "any"}</span>
+              default {key}{" "}
+              <span className="field-hint">
+                · {values.length ? values.join(" | ") : "any"}
+              </span>
             </label>
             <input
               id={`harness-${key}`}
@@ -232,20 +300,72 @@ function ProfileEditor({
   );
 }
 
+/** `profiles:`, the model tiers a task selects with `profile:` (Kraft-ps1ao).
+ *  Read-only: the file is where they are edited. */
+function AgentProfiles({ profiles }: { profiles: AgentProfile[] }) {
+  if (profiles.length === 0) return null;
+  return (
+    <>
+      <SectionLabel>agent profiles</SectionLabel>
+      <p className="field-hint">
+        Model tiers a library task selects with <code>profile:</code>, spelled
+        per provider. Edit them in harnesses.yaml; the next launch reads it.
+      </p>
+      <ul className="capability-list">
+        {profiles.map((p) => (
+          <li key={p.id}>
+            <code className="capability-name">{p.id}</code>
+            {p.effort && ` · effort ${p.effort}`}
+            <div className="field-hint">
+              {Object.entries(p.model)
+                .map(([provider, model]) => `${provider}: ${model}`)
+                .join(" · ")}
+            </div>
+            <div className="field-hint">
+              used by{" "}
+              <Links
+                ids={p.used_by}
+                to={(id) => `/settings/library?c=${encodeURIComponent(id)}`}
+                none="no library task"
+              />
+            </div>
+            {p.problems.map((why) => (
+              <p key={why} className="form-error">
+                {why}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 export function HarnessesPage() {
-  const { value, error, reload } = useResource(() => Promise.all([api.getHarnesses(), api.getHarnessProviders()]));
+  const { value, error, reload } = useResource(() =>
+    Promise.all([api.getHarnesses(), api.getHarnessProviders()]),
+  );
   const phone = usePhone();
   const [params, setParams] = useSearchParams();
   const [harnesses, providers] = value ?? [null, null];
   const profiles = harnesses?.profiles ?? [];
-  const selected = profiles.find((p) => p.id === params.get("h")) ?? profiles[0] ?? null;
+  const selected =
+    profiles.find((p) => p.id === params.get("h")) ?? profiles[0] ?? null;
 
   return (
     <>
       {phone ? (
-        <PhoneHeader back="Settings" backTo="/settings" title="Harnesses" subtitle="~/.kraft/templates/harnesses.yaml" />
+        <PhoneHeader
+          back="Settings"
+          backTo="/settings"
+          title="Harnesses"
+          subtitle="~/.kraft/templates/harnesses.yaml"
+        />
       ) : (
-        <PageHead title="Harnesses" note="Which agent CLI each task runs on, and with what defaults" />
+        <PageHead
+          title="Harnesses"
+          note="Which agent CLI each task runs on, and with what defaults"
+        />
       )}
       {error && <p className="form-error">{error}</p>}
       {harnesses?.error && <p className="form-error">{harnesses.error}</p>}
@@ -262,12 +382,16 @@ export function HarnessesPage() {
               >
                 <span className="steering-row-name">{p.id}</span>
                 <span className="facet-count">
-                  {p.used_by.length ? plural(p.used_by.length, "task") : "unused"}
+                  {p.used_by.length
+                    ? plural(p.used_by.length, "task")
+                    : "unused"}
                   {!p.enabled && " · disabled"}
                 </span>
               </button>
             ))}
-            {harnesses && !harnesses.error && profiles.length === 0 && <p className="empty">no profiles yet</p>}
+            {harnesses && !harnesses.error && profiles.length === 0 && (
+              <p className="empty">no profiles yet</p>
+            )}
             {providers && Object.keys(providers.invalid).length > 0 && (
               <div className="validation" data-valid={false}>
                 {Object.entries(providers.invalid).map(([id, reason]) => (
@@ -277,16 +401,25 @@ export function HarnessesPage() {
                 ))}
               </div>
             )}
+            <AgentProfiles profiles={harnesses?.agent_profiles ?? []} />
           </div>
           <div className="template-draft">
             {selected && providers && (
-              <ProfileEditor key={selected.id} profile={selected} providers={providers.valid} onSaved={reload} />
+              <ProfileEditor
+                key={selected.id}
+                profile={selected}
+                providers={providers.valid}
+                onSaved={reload}
+              />
             )}
           </div>
         </div>
         {selected && providers && (
           <div className="chain-yaml-pane">
-            <ProviderReadout id={selected.provider} provider={providers.valid[selected.provider]} />
+            <ProviderReadout
+              id={selected.provider}
+              provider={providers.valid[selected.provider]}
+            />
           </div>
         )}
       </div>
