@@ -16,11 +16,12 @@ rewrites this after you -- write it for the reviewer, not for Kraft.
   (and `.github/PULL_REQUEST_TEMPLATE/*.md`): if the project ships a template,
   fill *that*, section for section, rather than this skill's own headings
   below.
-- `CONTRIBUTING.md` for stated title and description rules, **and for the
-  label taxonomy CI enforces**. In this repo that file defines the
-  `release::` scoped labels (`major` / `minor` / `patch` / `none`) and the
-  job that fails a merge request carrying none of them -- you must pick one,
-  and that file is where the choices are written down.
+- `CONTRIBUTING.md` for stated title and description rules, **and for any
+  label CI requires**. Some projects fail a merge request that carries no
+  label of a given kind (a release or change-type label, say). If this one
+  does, you must pick one: its CONTRIBUTING, or the CI job that checks, is
+  where the choices are written down. If it states no label rule, there is
+  none to satisfy.
 - `CODEOWNERS` for who reviews the paths this diff touches.
 - What the project already does: `git log --oneline -30` for the title
   pattern (Conventional Commits or not), `glab mr list --merged` / `gh
@@ -38,9 +39,9 @@ the one that was made.
 
 - **What** this introduces, in the repo's own terms -- files, functions,
   behaviour.
-- **Why** -- the problem being solved, inlined. Kraft's specs and plans live in
-  gitignored `.engineering/` and `docs/superpowers/`: a reviewer cannot open
-  them, so a link or a spec id is not an answer.
+- **Why** -- the problem being solved, inlined. This work item's spec and plan
+  are not committed: a reviewer cannot open them, so a link or a spec id is
+  not an answer.
 - **How** -- the approach, and the alternatives rejected, if a reviewer would
   otherwise ask "why not X".
 - **Evidence** -- the commands run and what they printed. Test counts, lint,

@@ -16,13 +16,15 @@ three.
 
 ## When the trace names a missing or wrong label
 
-A job that refuses to run without a label of a given kind names the kind and
-the choices in its own message (for example: `no release:: label; expected
-one of ('major', 'minor', 'patch', 'none')`). Pick the label from the diff
-this item made, not from habit — a wrong guess ships a wrong version, which
-is worse than stopping to ask. If the diff does not make the choice obvious,
-leave it: reporting "I could not tell if this is a major or minor change" is
-correct output; a guess is not.
+A job that refuses to run without a label of a given kind usually names the
+kind and the choices in its own message (for example: `no type label;
+expected one of feature, fix, docs`). If it does not, the project's
+CONTRIBUTING or the job's own definition in its CI config says what they
+are. Pick the label from the diff this item made, not from habit — a wrong
+label mislabels what ships (a release label picks the version), which is
+worse than stopping to ask. If the diff does not make the choice obvious,
+leave it: reporting "I could not tell which of these labels this change
+takes" is correct output; a guess is not.
 
 Apply your choice with the `set_mr_labels` tool (`kraft item mr-label
 <label>...` from the shell works the same way) — not `glab`/`gh` directly. It
@@ -46,7 +48,7 @@ conflict`, or similar) — you do not need to re-derive that by hand. Do not
 check out another branch or attempt a local `git merge` to look for
 conflicts yourself: this worktree is the item's own, the next task after you
 resolves the merge request from whatever branch is checked out, and a merge
-left mid-conflict when your pass ends strands it there (Kraft-v5qd). If
+left mid-conflict when your pass ends strands it there. If
 you need more than the log line gives you, use a read-only command that does
 not change what is checked out (`git merge-tree`, `git log`, `glab mr
 diff`) — and in any case there is nothing this task can do about a real
