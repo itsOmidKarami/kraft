@@ -36,6 +36,11 @@ session recorded before cache tokens were split out has only one input figure;
 it is counted under `in`, and the line says `(cache not split on older
 sessions)`. A `token_budget` counts all four kinds.
 
+`--repo` (and the MCP tool's `repo`) must already be a connected repo — run
+`kraft repo connect` there first. A path Kraft has not connected is refused
+with a 422 naming that command, rather than filing an item Kraft cannot set
+up a worktree for.
+
 ### Addressing work by path
 
 Retry, skip and resume address chain work by its canonical path: `node`,
@@ -74,6 +79,10 @@ kraft view watch              # a live board, redrawn on every event
 
 `kraft view logs --json` emits NDJSON — one object per line — because a stream has
 no end to close an array on.
+
+`-n 0 -f` prints nothing already written and only what is written after it
+starts: with no backlog line to resume after, it follows from wherever the
+log already is, not from its start.
 
 ## Reviewing before you approve
 
@@ -248,6 +257,12 @@ Agent registrations run `kraft admin mcp` by name, so they get whichever
 formula beside a `uv tool` install, say) keeps every MCP session on its code
 after an update. `kraft admin update` warns when that is the case, and
 `kraft admin doctor` fails its `kraft on PATH` row.
+
+Semantic search's embedder is an opt-in extra: `available` on `/health` and in
+`doctor` only means it imports. An installed embedder whose model won't load
+or encode is a different state from a missing extra — `/health` still reports
+it available, with the failure reason alongside it, but `kraft admin doctor`
+FAILs its `embeddings` row until a later encode call succeeds.
 
 A home still holding the pre-V1 template configuration (a `registry.yaml` and
 no `library.yaml`) is not converted and not overwritten. The server starts

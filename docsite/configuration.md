@@ -368,7 +368,7 @@ repos:
 | `path` | *(required)* | Absolute path to the repo. The only field with no default. |
 | `name` | — | Display name; set at connect time, not otherwise validated. |
 | `id` | — | The repository id a workspace names this entry by (`[a-z][a-z0-9_-]*`, unique). Only a workspace's root and members need one; connecting a repo with submodules writes it for them. |
-| `enabled` | `true` | Set `false` to take this repo out of service without disconnecting it: new items can't target it and auto-intake skips it, while running items keep going. An absent key counts as enabled. |
+| `enabled` | `true` | Set `false` to take this repo out of service without disconnecting it: new items can't target it and auto-intake skips it, while running items keep going. An absent key counts as enabled. An edit is refused (422) when it would leave the repo enabled with neither a `test_command` nor `test_scopes`: turning `enabled` on with none set, or clearing an enabled repo's last test command. Anything else — a rename included — goes through even on an entry already in that state. |
 | `managed` | `true` | Keeps a human-connected repo out of Settings' "Detected" section; auto-connected submodules are written with `managed: false`. |
 | `default_chain_template` | — | Which chain template a work item on this repo uses when none is named explicitly. |
 | `forge` | `null` | `github` or `gitlab`, which forge adapter `backend: auto` resolves to for this repo. `fake` is **dev-only**: an in-process forge that opens nothing, which `just dev`'s seeded repo uses. `null` at load time — `kraft repo connect` is what actually resolves it, from the repo's remote. |
