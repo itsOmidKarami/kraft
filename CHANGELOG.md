@@ -4,7 +4,7 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
-## Unreleased
+## 1.0.8
 
 - Fix: a `chain_revision_approval` gate now gets the same board, action-bar
   and search Approve treatment `human_review_approval` has -- its own prompt
@@ -15,6 +15,7 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 - Fix: a `read_only_violated` event (a read_only step or node changed the
   worktree) now shows what changed on the Timeline instead of the bare event
   name with no detail.
+
 ## 1.0.7
 
 - Fix: an in-flight work item's own repository steering no longer silently
