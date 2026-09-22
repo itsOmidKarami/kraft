@@ -32,6 +32,50 @@ _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
 _flush_sleep = asyncio.sleep
 
 
+#: The event naming the background jobs a worker's turn left running.
+JOBS_ABANDONED = "background_jobs_abandoned"
+
+#: How much of one job's command a reason quotes.
+_JOB_NAME_MAX = 200
+
+
+async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, reader) -> str:
+    """`status`, or `failed` when the agent's turn ended with a background job
+    still running (Kraft-xvugd): the session ends with its turn, so nothing
+    would ever read that job's result. The prose in `agent._CTX` alone did not
+    hold (Kraft-nxqft); this is the check behind it. The jobs are named in the
+    log's last line and a `JOBS_ABANDONED` event rather than left to a generic
+    missing-result failure.
+
+    A `needs_context` stop keeps its status -- it is a person's stop already,
+    and failing it would lose the question -- but the jobs are still named.
+    The one door both `run_task` and `reattach` exit an agent session through.
+    """
+    if reader is None or status not in _AGENT_STATUSES:
+        return status
+    jobs = _usage.READERS[reader].unfinished_jobs(log_path)
+    if not jobs:
+        return status
+    named = "; ".join(j if len(j) <= _JOB_NAME_MAX else j[: _JOB_NAME_MAX - 1] + "…" for j in jobs)
+    reason = (
+        f"the turn ended with {len(jobs)} background job(s) still running: {named}. "
+        "The session ends with its turn, so nothing reads a job's result: run it in "
+        "the foreground."
+    )
+    with open(log_path, "a") as fh:
+        fh.write(f"\nkraft: failed: {reason}\n")
+
+    def _record(c):
+        row = c.execute(
+            "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        payload = {"session_id": session_id, "node_id": row["node_id"], "jobs": jobs}
+        events.append(c, row["work_item_id"], JOBS_ABANDONED, {**payload, "reason": reason})
+
+    await db.write(_record)
+    return status if status == "needs_context" else "failed"
+
+
 def result_path_for(run_dirs, session_id: str) -> Path:
     """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
     caller that needs to predict it ahead of dispatch (`escalate.dispatch`'s
@@ -638,6 +682,8 @@ async def run_task(
     # unconditional overwrite is what protects it, not an exclusion here.
     if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
         status = "failed"
+    if require_result_file:
+        status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
     rate_limit = _rate_limit_rejection(log_path, reader=reader)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this

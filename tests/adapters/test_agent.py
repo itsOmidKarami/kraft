@@ -466,7 +466,7 @@ def test_identify_as_worker_sets_the_work_item_env_var(run, identify, work_item_
         ("ask for all of them in that one question",),
         # Kraft-avpe: a headless session has no next turn to receive a
         # background job's notification.
-        ("there is no notification", "background"),
+        ("nothing runs after you stop", "background"),
         # Kraft-brq: the node that writes the code was never told to commit it.
         ("Commit everything you change before you exit", "destroyed with the worktree"),
         # Kraft is the only pusher (spec §1, §4).

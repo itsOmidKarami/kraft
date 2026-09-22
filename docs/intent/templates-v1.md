@@ -87,6 +87,25 @@ configuration SHALL be able to remove them.
 enforced-by: tests/executor/test_dispatch.py::test_every_seeded_agent_task_launches_with_the_never_signal_rule, tests/executor/test_dispatch.py::test_an_operator_agent_task_with_no_skill_or_steering_gets_the_never_signal_rule, tests/executor/test_gates.py::test_a_gate_auto_review_launch_carries_the_never_signal_rule, tests/test_escalate.py::test_an_escalation_launch_carries_the_never_signal_rule
 origin: src/kraft/adapters/agent.py §SAFETY_RULES -- Kraft-5x93b: the legacy registry's `defaults: {agent: {steering: [never-signal-processes-you-didnt-start]}}` gave every agent the rule born of Kraft-f8u3 (a worker SIGKILLed the daemon); V1 has no registry default, so the rule became contract text appended by `build_context`, the one builder every launch path uses.
 
+## REQ a-turn-left-with-a-running-background-job-fails
+
+IF an agent task's turn ends with a background job still running, THEN the
+system SHALL fail the session when it exits, naming each job in the session
+log and in a `background_jobs_abandoned` event, and SHALL NOT wait for a
+missing result file to say so. A `needs_context` stop SHALL keep its status
+and question, with the jobs still named. Every agent launch SHALL be told this
+rule, and that the full test suite is the verification node's to run.
+enforced-by: tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[incident], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[run-in-background], tests/adapters/test_background_jobs.py::test_the_claude_reader_names_the_jobs_still_running_when_the_turn_ended[waited-on], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[claims-done], tests/adapters/test_background_jobs.py::test_a_turn_left_with_a_running_job_fails_naming_it[no-result-file], tests/adapters/test_background_jobs.py::test_a_question_keeps_its_stop_and_still_names_the_job, tests/adapters/test_background_jobs.py::test_a_clean_turn_is_left_alone[nothing-left-running], tests/adapters/test_background_jobs.py::test_a_session_adopted_after_a_restart_is_held_to_the_same_rule, tests/adapters/test_background_jobs.py::test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs
+origin: src/kraft/adapters/subprocess.py §fail_abandoned_jobs -- Kraft-xvugd, Kraft-nxqft: a worker backgrounded a full-suite run and ended its turn, 68 minutes and $9.46, and the prose rule in agent._CTX had not held
+
+## REQ the-shipped-implementer-runs-under-a-time-cap
+
+The shipped `implementer` task SHALL carry a `time_cap_minutes` default of
+120, so a runaway implementation run in either shipped chain stops for a
+person.
+enforced-by: tests/templates/test_time_caps.py::test_the_shipped_implementer_runs_under_a_default_time_cap[default], tests/templates/test_time_caps.py::test_the_shipped_implementer_runs_under_a_default_time_cap[quick-task]
+origin: templates/library.yaml §implementer -- Kraft-nxqft; every successful implementer run on record finished inside 96 minutes (p99 73)
+
 ## REQ selected-skill-must-be-available
 
 When an agent task selects a skill that its execution environment cannot load,

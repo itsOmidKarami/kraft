@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 import yaml
@@ -392,3 +393,25 @@ def test_a_budget_may_be_raised_above_the_default_up_to_the_maximum(field, value
     assert getattr(chain.policy_for(chain.chain.nodes[0]), field) == value
     with pytest.raises(PolicyError, match="administrator maximum"):
         _materialize(_nodes(node={field: value * 2}), maxima={field: value})
+
+
+# ── the shipped default (Kraft-nxqft) ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize("chain_id", ["default", "quick-task"])
+def test_the_shipped_implementer_runs_under_a_default_time_cap(chain_id):
+    """A worker that runs away is stopped for a person rather than left to
+    spend: the incident ran 68 minutes and $9.46 with nothing bounding it.
+    The value clears every successful implementer run on record (the longest
+    96 minutes), so it binds only a run that has already gone wrong."""
+    seeded = Path(__file__).resolve().parents[2] / "templates"
+    chain = (
+        TemplateLibrary.from_yaml_dir(seeded)
+        .resolve_chain(chain_id)
+        .materialize(
+            target=WorkItemTarget.for_repository("target"),
+            effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        )
+    )
+
+    assert chain.policy_at("implementation.main.implement").time_cap_minutes == 120

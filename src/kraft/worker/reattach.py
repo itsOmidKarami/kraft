@@ -17,6 +17,7 @@ from kraft.adapters.subprocess import (
     _progress_usage,
     _resolve_exit_file,
     _resolve_result_file,
+    fail_abandoned_jobs,
     read_result_fields,
 )
 from kraft.executor import gates
@@ -127,6 +128,8 @@ async def _exit_from_file(
     # across a restart still gets the result file `usage.read` always tries
     # first, and this reader simply finds nothing in a log it cannot parse.
     seen = _usage.read(log_path, result_path, "claude-stream-json")
+    # The same reader assumption, holding an adopted turn to `run_task`'s rule.
+    status = await fail_abandoned_jobs(db, session_id, log_path, status, "claude-stream-json")
     await db.write(
         lambda c: store.session_exited(
             c,

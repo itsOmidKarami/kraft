@@ -324,6 +324,62 @@ def _session_id_claude(log_path: Path) -> str | None:
     return None
 
 
+#: A job's own terminal states, as `task_updated` reports them.
+_JOB_ENDED = ("completed", "failed", "killed", "stopped")
+
+
+def _unfinished_jobs_claude(log_path: Path) -> list[str]:
+    """What each background job still running when the agent's last turn
+    ended was running, oldest first; `[]` when none was, or no turn ended.
+
+    A job is backgrounded two ways, and the log shows both: the agent asks
+    (`run_in_background` on a Bash call), or Claude Code moves a foreground
+    command that outlived its timeout (`task_updated` with `is_backgrounded`)
+    -- the second is how a full-suite run left the turn in Kraft-nxqft. A
+    job ends with its `task_notification`. Read as of the last `result` line,
+    the turn's end: the CLI kills what is left on its way out, which the log
+    reports after that line, and that kill is not the agent waiting on it.
+    """
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return []
+    running: dict[object, str] = {}  # tool_use_id -> the command it runs
+    started: dict[object, tuple[object, str]] = {}  # task_id -> (tool_use_id, command)
+    at_turn_end: list[str] = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        kind, sub = obj.get("type"), obj.get("subtype")
+        if kind == "result":
+            at_turn_end = list(running.values())
+        elif kind == "assistant" and isinstance(obj.get("message"), dict):
+            for block in obj["message"].get("content") or ():
+                args = block.get("input") if isinstance(block, dict) else None
+                if isinstance(args, dict) and args.get("run_in_background") is True:
+                    running[block.get("id")] = str(args.get("command") or block.get("name"))
+        elif kind != "system":
+            continue
+        elif sub == "task_started":
+            job = (obj.get("tool_use_id"), str(obj.get("description")))
+            started[obj.get("task_id")] = job
+            if obj.get("is_backgrounded") is True:
+                running.setdefault(*job)
+        elif sub == "task_updated" and isinstance(obj.get("patch"), dict):
+            job = started.get(obj.get("task_id"))
+            if job is not None and obj["patch"].get("is_backgrounded") is True:
+                running.setdefault(*job)
+            elif job is not None and obj["patch"].get("status") in _JOB_ENDED:
+                running.pop(job[0], None)
+        elif sub == "task_notification":
+            running.pop(obj.get("tool_use_id"), None)
+    return at_turn_end
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -341,6 +397,9 @@ class Reader:
     #: from Kraft's own `worker_sessions.id` (Kraft-cvnx1). None for a schema
     #: with no such id to extract.
     session_id: Callable[[Path], str | None] = lambda _log_path: None
+    #: What each background job still running when the last turn ended was
+    #: running (Kraft-xvugd). `[]` for a schema that cannot tell.
+    unfinished_jobs: Callable[[Path], list[str]] = lambda _log_path: []
 
 
 READERS: dict[str, Reader] = {
@@ -350,6 +409,7 @@ READERS: dict[str, Reader] = {
         envelope=read_envelope,
         rate_limit=_rate_limit_claude,
         session_id=_session_id_claude,
+        unfinished_jobs=_unfinished_jobs_claude,
     ),
 }
 
