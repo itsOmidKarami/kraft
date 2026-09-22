@@ -44,13 +44,26 @@ def _progress_text(p: dict) -> str:
     return "\n".join(lines)
 
 
+#: The one command each `suggested_action` names (Kraft-s7c04.27).
+_SUGGESTED_VERBS = {"skip": "skip", "retry": "retry", "abandon": "abandon --yes"}
+
+
+def _suggestion_text(item: dict) -> str:
+    s = item["suggested_action"]
+    head = f"{s['action']}: {s['reason']}" if s["reason"] else s["action"]
+    return f"{head}\nrun: kraft item {_SUGGESTED_VERBS[s['action']]} {item['id']}"
+
+
+def _show_value(item: dict, key: str, value) -> str:
+    if key == "progress" and value:
+        return _progress_text(value)
+    if key == "suggested_action" and value:
+        return _suggestion_text(item)
+    return str(value)
+
+
 def _render_show(item: dict) -> str:
-    return render.kv(
-        [
-            (key, _progress_text(value) if key == "progress" and value else str(value))
-            for key, value in item.items()
-        ]
-    )
+    return render.kv([(key, _show_value(item, key, value)) for key, value in item.items()])
 
 
 def _render_search(payload: dict) -> str:

@@ -153,6 +153,7 @@ def mark_needs_human(
     bundle: dict | None = None,
     *,
     stuck: bool = False,
+    suggested: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
 
@@ -172,6 +173,10 @@ def mark_needs_human(
     human would otherwise reconstruct by hand from the worktree and the
     event log, gathered once at the moment Kraft gives up rather than asked
     for later.
+
+    `suggested` is the next action the chain or a repair concluded
+    (`{action, reason}`, Kraft-s7c04.27): recorded as `suggested_action`, so
+    the stop offers it as one command instead of only prose in the reason.
     """
     if not write_status(
         conn,
@@ -208,6 +213,8 @@ def mark_needs_human(
         payload["bundle"] = bundle
     if stuck:
         payload["stuck"] = True
+    if suggested is not None:
+        payload["suggested_action"] = suggested
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 

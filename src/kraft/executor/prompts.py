@@ -113,6 +113,20 @@ def failure_note(node, failed: list[str]) -> str:
     )
 
 
+#: Appended to every recovery's note (`dispatch.run_recovery`): how a repair
+#: that concludes no repair can help says what a person should do instead, in
+#: a form the stop offers as one command (`stops.suggestion`, Kraft-s7c04.27).
+#: On 2026-09-15 a repair concluded "a human should skip" in prose twice, and
+#: nothing could offer it.
+SUGGEST_ACTION = (
+    "If you conclude that no repair can make it pass -- a person should skip "
+    "this node, retry it later, or abandon the work item -- do not force it: "
+    'report status "failed" and add to your result file "suggested_action": '
+    '{"action": "skip" | "retry" | "abandon", "reason": "<why, one sentence>"}. '
+    "Kraft offers it to the person as one command."
+)
+
+
 def task_failure_note(task: str, status: str, session=None) -> str:
     """What a task-level recovery (`TaskBase.on_failure`,
     `task-recovery-retries-only-the-task`) is told about the task it repairs:

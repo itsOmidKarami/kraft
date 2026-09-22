@@ -1302,6 +1302,7 @@ async def run_recovery(
     )
     found, _reported = collect_findings(db, work_item_id, node, measured_round)
     seeded = prompts.seeded_findings_note(found) if found else None
+    note = f"{note}\n{prompts.SUGGEST_ACTION}"
     context = f"{note}\n\n{seeded}" if seeded else note
     if steer is not None and steer and not steer.targeted:
         # A steer addressed to tasks by path is theirs, never a repair's.
