@@ -519,6 +519,19 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
             },
             "member 'x' at 'libs/a/vendor/x' is inside member 'a' at 'libs/a'",
         ),
+        (
+            _WS_REPOS,
+            {
+                "ws": {
+                    "root": "ws",
+                    "members": {
+                        "a": {"repository": "lib-a", "path": "libs/a"},
+                        "b": {"repository": "lib-a", "path": "./libs/a/"},
+                    },
+                }
+            },
+            "member 'b' at 'libs/a' is mounted where member 'a' is",
+        ),
     ],
     ids=[
         "an-unknown-root",
@@ -527,6 +540,7 @@ def test_a_workspace_is_read_from_repos_yaml_by_repository_id(tmp_path):
         "two-repositories-with-one-id",
         "an-id-no-reference-can-name",
         "a-member-nested-inside-another",
+        "two-members-at-one-mount",
     ],
 )
 def test_a_workspace_that_cannot_assemble_is_refused_at_load(tmp_path, repos, workspaces, match):

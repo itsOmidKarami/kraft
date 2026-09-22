@@ -784,10 +784,11 @@ origin: src/kraft/config.py §load_workspaces -- both ends of every declaration 
 ## REQ workspace-members-are-not-nested
 
 A workspace SHALL NOT declare a member whose mount path is inside another
-member's. Loading `workspaces:` and filing a work item against such a workspace
-SHALL be refused, naming the nested member and the member that encloses it.
-enforced-by: tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[a-member-nested-inside-another], tests/api/test_workspace_intake.py::test_a_workspace_nesting_one_member_inside_another_is_a_422, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id
-origin: src/kraft/templates/environment.py §Workspace -- the root's `git submodule update` cannot reach a submodule inside a submodule, so a nested member failed only when its checkout was assembled (Kraft-z0wzd, option A). Supporting nesting is Kraft-37gnq.
+member's, or is another member's. Loading `workspaces:` and filing a work item
+against such a workspace SHALL be refused, naming the nested member and the
+member that encloses it, or the two members sharing the mount.
+enforced-by: tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[a-member-nested-inside-another], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[two-members-at-one-mount], tests/api/test_workspace_intake.py::test_a_workspace_nesting_one_member_inside_another_is_a_422, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id
+origin: src/kraft/templates/environment.py §Workspace -- the root's `git submodule update` cannot reach a submodule inside a submodule, so a nested member failed only when its checkout was assembled (Kraft-z0wzd, option A). Supporting nesting is Kraft-37gnq. Two members at one mount cannot both be checked out there (Kraft-rx4n5).
 
 ## REQ work-item-target-selection-is-immutable
 
