@@ -8,6 +8,7 @@ import time
 from functools import partial
 
 from support.api import _approve_gate, _post_default
+from support.harness import entry_of
 
 from kraft import waits
 from kraft.adapters import forge
@@ -43,7 +44,7 @@ def _on_a_fake_forge(monkeypatch, **states) -> forge.FakeForge:
     fake = forge.FakeForge(**states)
     monkeypatch.setattr(forge.run, "_DEV_FAKE", fake)
     monkeypatch.setattr(
-        deps, "_connected", lambda repos, path: {"setup_command": "", "forge": "fake"}
+        deps, "_connected", lambda repos, path: entry_of({"setup_command": "", "forge": "fake"})
     )
     return fake
 

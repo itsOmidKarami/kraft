@@ -10,11 +10,13 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from support.harness import (
+    entry_of,
     fake_docker_bin,
     fake_harness_home,
     seed_v1_library,
@@ -31,7 +33,7 @@ from kraft.executor.context import LaunchContext
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FAKE_AGENT = Path(__file__).resolve().parents[1] / "support" / "fake_agent.py"
-NO_SETUP = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None)
+NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}), steering_dir=None)
 
 
 def _agent(task_id="implement", **fields):
@@ -211,7 +213,7 @@ async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fa
     ]
 
     await _dispatch_each_node(
-        it, launch=LaunchContext(repo_entry={"test_scopes": scopes}, steering_dir=None)
+        it, launch=LaunchContext(repo_entry=entry_of({"test_scopes": scopes}), steering_dir=None)
     )
 
     impl_prompt, other_prompt = fake_agent.prompts()
@@ -262,7 +264,7 @@ async def test_repo_model_for_the_profile_reaches_the_agent_launch(tmp_path, rep
         tmp_path,
         repo,
         [_exec("implementation", _agent())],
-        repo_entry={"models": {"fake": "haiku"}, "setup_command": ""},
+        repo_entry=entry_of({"models": {"fake": "haiku"}, "setup_command": ""}),
     )
 
     assert status == "completed"
@@ -401,19 +403,17 @@ async def test_a_sandboxed_subprocess_hook_actually_runs_through_docker(
     checks the sentinel only the fake `docker` itself touches.
 
     V1: a task declares no sandbox of its own; the repo entry is the one
-    source (`dispatch_node`'s subprocess branch, `sandbox.resolve({}, ...)`)."""
+    source (`dispatch_node`'s subprocess branch, `RepoEntry.effective_sandbox`)."""
     monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
     called = tmp_path / "docker-was-called"
     monkeypatch.setenv("FAKE_DOCKER_CALLED", str(called))
     marker = tmp_path / "ran.txt"
     command = f"{sys.executable} -c \"open({str(marker)!r}, 'w').write('ran')\""
 
-    await _walk(
-        tmp_path,
-        repo,
-        [_exec("verify", {"id": "suite", "kind": "subprocess", "command": command})],
-        repo_entry={"setup_command": "", "sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
-    )
+    suite = _exec("verify", {"id": "suite", "kind": "subprocess", "command": command})
+    sandbox = {"kind": "docker", "image": "kraft-worker:py"}
+    entry = entry_of({"setup_command": "", "sandbox": sandbox})
+    await _walk(tmp_path, repo, [suite], repo_entry=entry)
 
     assert marker.read_text() == "ran"
     assert called.exists()
@@ -496,7 +496,7 @@ async def test_each_task_kind_reaches_its_own_adapter(item_on, tmp_path, monkeyp
         ({"id": "t", "kind": "forge", "target": "mr.open_draft"}, None),
     ):
         it = await item_on(_one_task(raw), wid=raw["kind"])
-        launch = LaunchContext(repo_entry=entry or {"setup_command": ""}, steering_dir=None)
+        launch = replace(NO_SETUP, repo_entry=entry_of(entry)) if entry else NO_SETUP
         assert await _dispatch_one(it, launch) == "done", raw
 
     assert set(seen) == {"subprocess", "agent", "forge"}
@@ -542,7 +542,7 @@ async def test_an_agent_task_contract_precedes_its_skill_and_steering(
 
     status = await _dispatch_one(
         it,
-        LaunchContext(repo_entry={"setup_command": ""}, steering_dir=None, skills_dir=skills),
+        replace(NO_SETUP, skills_dir=skills),
     )
 
     assert status == "done"
@@ -711,7 +711,7 @@ async def _dispatch_seeded(
         run_dirs,
         work_item_id="w1",
         start_index=start,
-        launch=LaunchContext(repo_entry={"setup_command": ""}, steering_dir=templates / "steering"),
+        launch=replace(NO_SETUP, steering_dir=templates / "steering"),
     )
     sessions = database.read(
         lambda c: c.execute("SELECT * FROM worker_sessions ORDER BY created_at").fetchall()
@@ -845,7 +845,7 @@ async def test_every_seeded_agent_task_launches_with_the_never_signal_rule(
 
     templates = _seeded(tmp_path, monkeypatch)
     launched = _capture_launches(monkeypatch)
-    launch = LaunchContext(repo_entry={"setup_command": ""}, steering_dir=templates / "steering")
+    launch = replace(NO_SETUP, steering_dir=templates / "steering")
     argv: dict[str, str] = {}
     for n, chain_id in enumerate(TemplateLibrary.from_yaml_dir(templates).chain_ids):
         chain = _materialize(templates, chain_id, repo)

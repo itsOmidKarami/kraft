@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, make_repo, v1_chain
+from support.harness import _git, entry_of, make_repo, v1_chain
 from support.workspace import workspace_item
 
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
 from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 _SANDBOX = SandboxPolicy(kind="docker", image="kraft/member:1")
 
 
@@ -124,7 +124,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
     """A member's run is configured by the member's `repos.yaml` entry, never
     the root's. Its live sandbox wraps the whole item (Ruling 189), the
     root's run included."""
-    member = {"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}}
+    member = entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}})
     launch = LaunchContext(
         repo_entry=NO_SETUP, steering_dir=None, repositories={"ws": NO_SETUP, "pkg": member}
     )
@@ -135,7 +135,7 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
 
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
 
-    assert [sandbox for _, sandbox in ran] == [member["sandbox"]] * 2
+    assert [sandbox for _, sandbox in ran] == [member.sandbox.model_dump()] * 2
 
 
 # ── areas (`repository-area-can-declare-setup-and-test-scopes`) ──
@@ -213,7 +213,7 @@ async def test_a_changed_path_in_an_area_runs_its_setup_then_its_scope(
         node,
         row,
         worktree,
-        launch=LaunchContext(repo_entry=_AREAS, steering_dir=None),
+        launch=LaunchContext(repo_entry=entry_of(_AREAS), steering_dir=None),
     )
 
     assert status == "done"

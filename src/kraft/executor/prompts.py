@@ -7,7 +7,7 @@ from kraft import findings as _findings
 from kraft import progress as _progress
 from kraft import review as _review
 from kraft.adapters import agent as _agent
-from kraft.config import git_read
+from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
 
 FIX_PROMPT = (
@@ -419,21 +419,20 @@ _SCOPE_NOTE = (
 )
 
 
-def scope_note(task: AgentTask, repo_entry: dict | None) -> str:
+def scope_note(task: AgentTask, repo_entry: RepoEntry | None) -> str:
     """The repo's path->command test mapping, for the task working from the
     brief only -- the same "no skill of its own" rule `progress_note` applies,
     and never a node id: a chain whose implementing node is called `build` must
     still get this (Kraft-s7c04.45).
     """
-    if task.skill is not None:
+    if task.skill is not None or repo_entry is None:
         return ""
-    repo = repo_entry or {}
-    scopes = repo.get("test_scopes")
-    if not scopes and repo.get("test_command"):
-        scopes = [{"paths": ["**"], "command": repo["test_command"]}]
+    scopes = [(s.paths, s.command) for s in repo_entry.test_scopes or ()]
+    if not scopes and repo_entry.test_command:
+        scopes = [(["**"], repo_entry.test_command)]
     if not scopes:
         return ""
-    rows = "\n".join(f"  {', '.join(s['paths'])}\n      {s['command']}" for s in scopes)
+    rows = "\n".join(f"  {', '.join(paths)}\n      {command}" for paths, command in scopes)
     return _SCOPE_NOTE.format(rows=rows)
 
 

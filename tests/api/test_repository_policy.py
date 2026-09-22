@@ -81,7 +81,7 @@ def test_an_entrys_policy_block_round_trips_without_nulls(tmp_path):
     not come back as a `null` the operator never wrote."""
     _connect(tmp_path, "/r", policy={"allowed_tools": ["Read"]})
     (entry,) = config.load_repos(tmp_path / "repos.yaml")
-    assert entry["policy"] == {"allowed_tools": ["Read"]}
+    assert entry.model_dump()["policy"] == {"allowed_tools": ["Read"]}
 
 
 def _snapshot(client, wid) -> dict:

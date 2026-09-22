@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import v1_chain, write_harness_profiles
+from support.harness import entry_of, v1_chain, write_harness_profiles
 
 from kraft import escalate, events, executor, store
 from kraft.db import Database
@@ -494,7 +494,7 @@ def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
             wid = "w1"
             await _seed_needs_human(database, rd, wid)
             launch = executor.LaunchContext(
-                repo_entry={"sandbox": {"kind": "docker", "image": "kraft-worker:py"}},
+                repo_entry=entry_of({"sandbox": {"kind": "docker", "image": "kraft-worker:py"}}),
                 steering_dir=None,
                 skills_dir=None,
             )

@@ -1,11 +1,11 @@
-from support.harness import _git, make_repo, v1_named_chain
+from support.harness import _git, entry_of, make_repo, v1_named_chain
 
 from kraft import executor, policy, store
 from kraft.config import git_read
 
 #: A repo that deliberately needs no preparation. Most tests here are about
 #: resuming a chain, not environments.
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _quick_task(tmp_path):
@@ -148,6 +148,6 @@ async def test_resume_threads_local_files_from_the_launch_context(
         repo=repo,
     )
 
-    repo_entry = {"local_files": [".python-version"], "setup_command": ""}
+    repo_entry = entry_of({"local_files": [".python-version"], "setup_command": ""})
     assert await _resume(database, run_dirs, it, repo_entry=repo_entry) == "completed"
     assert (it.worktree / ".python-version").read_text() == "3.11\n"

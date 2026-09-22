@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import harness_without, write_harness_profiles
+from support.harness import entry_of, harness_without, write_harness_profiles
 
 from kraft import skill, store
 from kraft.adapters import agent
@@ -690,21 +690,24 @@ C = {"command": "c"}
     ],
 )
 def test_resolve_invocation_picks(binding, repo, kw, field, expected):
-    assert getattr(agent.resolve_invocation(binding, repo, None, **kw), field) == expected
+    entry = entry_of(repo) if repo is not None else None
+    assert getattr(agent.resolve_invocation(binding, entry, None, **kw), field) == expected
 
 
 def test_steering_is_repo_first_then_hook(tmp_path):
     (tmp_path / "repo-note.md").write_text("repo")
     (tmp_path / "hook-note.md").write_text("hook")
     inv = agent.resolve_invocation(
-        {**C, "steering": ["hook-note"]}, {"steering": ["repo-note"]}, tmp_path
+        {**C, "steering": ["hook-note"]}, entry_of({"steering": ["repo-note"]}), tmp_path
     )
     # A tuple: ("repo", "hook") == ["repo", "hook"] is False.
     assert inv.steering_texts == ("repo", "hook")
 
 
 def test_a_repo_entry_of_none_behaves_like_an_empty_one(tmp_path):
-    assert agent.resolve_invocation(C, None, tmp_path) == agent.resolve_invocation(C, {}, tmp_path)
+    assert agent.resolve_invocation(C, None, tmp_path) == agent.resolve_invocation(
+        C, entry_of({}), tmp_path
+    )
 
 
 def test_combined_repo_and_hook_steering_over_budget_raises(tmp_path):
@@ -719,7 +722,7 @@ def test_combined_repo_and_hook_steering_over_budget_raises(tmp_path):
 
     with pytest.raises(steering.SteeringError, match="8192"):
         agent.resolve_invocation(
-            {**C, "steering": ["hook-note"]}, {"steering": ["repo-note"]}, tmp_path
+            {**C, "steering": ["hook-note"]}, entry_of({"steering": ["repo-note"]}), tmp_path
         )
 
 
@@ -783,7 +786,7 @@ def test_a_task_overrides_its_harness_profiles_defaults():
     assert (inv.harness, inv.command) == ("claude", "/opt/claude-wrapper")
     assert (inv.model, inv.effort, inv.permission_mode) == ("sonnet", "high", "plan")
 
-    repo = {"models": {"review": "haiku", "codex": "gpt-5"}}
+    repo = entry_of({"models": {"review": "haiku", "codex": "gpt-5"}})
     assert agent.resolve_agent_task(task, repo, None).model == "haiku"
     item = {"model": "opus", "effort": "low"}
     overridden = agent.resolve_agent_task(task, repo, None, item_override=item)

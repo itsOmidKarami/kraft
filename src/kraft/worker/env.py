@@ -10,8 +10,12 @@ maintain.
 """
 
 import os
+from typing import TYPE_CHECKING
 
 from kraft.worker.sandbox import FORWARDED_ENV
+
+if TYPE_CHECKING:
+    from kraft.config import RepoEntry
 
 #: What a host process needs to run at all, plus network reachability. Forge
 #: credentials are deliberately absent: Kraft's own forge calls go through
@@ -61,14 +65,14 @@ BASELINE = frozenset(
 )
 
 
-def worker_env(repo_entry: dict | None, extra: dict | None = None) -> dict[str, str]:
+def worker_env(repo_entry: RepoEntry | None, extra: dict | None = None) -> dict[str, str]:
     """The environment for one worker process.
 
     Two steps that must not blur: copy a set of *names* out of `os.environ`,
     then overlay literal key-value pairs. A copied name absent from the
     daemon's environment is left unset rather than set empty.
     """
-    entry = repo_entry or {}
-    names = BASELINE | set(FORWARDED_ENV) | set(entry.get("env_passthrough") or [])
+    passthrough = repo_entry.env_passthrough if repo_entry is not None else []
+    names = BASELINE | set(FORWARDED_ENV) | set(passthrough)
     base = {k: os.environ[k] for k in names if k in os.environ}
-    return base | (entry.get("env") or {}) | (extra or {})
+    return base | (repo_entry.env if repo_entry is not None else {}) | (extra or {})

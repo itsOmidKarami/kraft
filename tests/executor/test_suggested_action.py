@@ -8,11 +8,12 @@ import shlex
 from types import SimpleNamespace
 
 import pytest
+from support.harness import entry_of
 
 from kraft import executor
 from kraft.executor import prompts, stops
 
-NO_SETUP = {"setup_command": ""}
+NO_SETUP = entry_of({"setup_command": ""})
 
 
 def _walk(it):

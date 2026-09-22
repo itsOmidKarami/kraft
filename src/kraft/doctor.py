@@ -502,25 +502,29 @@ def _runs_forge_tasks() -> bool:
     )
 
 
-def _forge_check(repo: dict) -> dict:
+def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
     Fails rather than reporting with detail: a chain that runs a forge task
     means the operator intends to run it, and the alternative is finding out
     three nodes into a work item.
     """
-    name = f"forge {repo.get('name') or repo['path']}"
+    name = f"forge {_label(repo)}"
     try:
         # The same call `run_task` makes, so doctor and the runtime cannot
         # disagree about either the answer or the wording of the failure.
-        cli = forge.backend_for("auto", repo.get("forge"))
+        cli = forge.backend_for("auto", repo.forge)
     except forge.ForgeError as exc:
         return _check(name, False, str(exc))
     if cli == "fake":
         return _check(name, True, "fake · dev only: opens, merges and pushes nothing", warn=True)
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
-    return _check(name, True, f"{repo['forge']} · {cli}")
+    return _check(name, True, f"{repo.forge} · {cli}")
+
+
+def _label(repo: config.RepoEntry) -> str:
+    return getattr(repo, "name", None) or repo.path
 
 
 async def _repo_checks() -> list[dict]:
@@ -530,7 +534,13 @@ async def _repo_checks() -> list[dict]:
     # Read once, not per repo: whether any chain runs a forge task is a fact
     # about the install, and every repo is measured against the same answer.
     auto = _runs_forge_tasks()
-    repos = await client.repos()
+    # Retyped from the wire: the checks below read the entry the loader
+    # models, not a dict whose keys each one must spell right. The loader's
+    # own unrecognised-key warning stays quiet: doctor fails a row on them.
+    repos = [
+        config.RepoEntry.model_validate(r, context={"unrecognised_keys_reported": True})
+        for r in await client.repos()
+    ]
     # Kraft-dshto: `GET /repos` lists a sandboxed workspace rather than
     # refusing it, so the repository that sets the sandbox fails its own row.
     sandboxed = {
@@ -539,8 +549,8 @@ async def _repo_checks() -> list[dict]:
         for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
     }
     for repo in repos:
-        path = Path(repo["path"])
-        name = f"repo {repo.get('name') or repo['path']}"
+        path = Path(repo.path)
+        name = f"repo {_label(repo)}"
         if not path.is_dir():
             checks.append(_check(name, False, f"{path} no longer exists"))
         elif not (path / ".git").exists():
@@ -551,7 +561,7 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
-        if repo.get("setup_command") is None:
+        if repo.setup_command is None:
             # No default stands behind this key: an undeclared repo stops its
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
@@ -559,30 +569,30 @@ async def _repo_checks() -> list[dict]:
             suggestion = config._first_setup_command(path) if path.is_dir() else None
             checks.append(
                 _check(
-                    f"setup {repo.get('name') or repo['path']}",
+                    f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
                     ' (use "" if this repo deliberately needs no preparation)',
                 )
             )
-        unrecognised = config.unrecognised_repo_keys(repo)
+        unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
         if unrecognised:
             # Loaded, with a warning nobody may be reading: a key that binds
             # nothing is exactly what a typo looks like (Kraft-4hn34).
             checks.append(
                 _check(
-                    f"keys {repo.get('name') or repo['path']}",
+                    f"keys {_label(repo)}",
                     False,
                     f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
                 )
             )
-        if repo.get("id") in sandboxed:
+        if repo.id in sandboxed:
             checks.append(
                 _check(
-                    f"sandbox {repo.get('name') or repo['path']}",
+                    f"sandbox {_label(repo)}",
                     False,
                     sandbox.submodule_refusal(
-                        f"workspaces.{sandboxed[repo['id']]}: repository {repo['id']!r}"
+                        f"workspaces.{sandboxed[repo.id]}: repository {repo.id!r}"
                     ),
                 )
             )
