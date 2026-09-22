@@ -36,6 +36,12 @@ def entry_of(fields: dict) -> Any:
     return RepoEntry.model_validate({"path": "/repo", **fields})
 
 
+#: `steering.migrate_files`' name for the pre-1.0 seeded never-signal file
+#: (Kraft-c82sp) -- shared by the launch-path tests proving it is opt-in now.
+NEVER_SIGNAL = "never-signal-processes-you-didnt-start"
+NEVER_SIGNAL_TEXT = "never signal a process you did not start\n"
+
+
 #: Commits are made at a fixed time so that building the same tree twice gives
 #: the same SHA. A commit hash covers its own timestamp at one-second
 #: granularity, so two `make_repo()` calls either side of a second boundary used

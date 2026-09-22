@@ -5,6 +5,28 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## Unreleased
+
+- **Behaviour change: the never-signal rule is no longer appended to every
+  agent launch automatically.** `adapters.agent.SAFETY_RULES` -- the
+  never-kill-a-process-you-didn't-start text every dispatch, gate
+  auto-review and escalation launch carried unconditionally -- is gone. It
+  is now an opt-in `never-signal-processes-you-didnt-start` steering profile
+  in `library.yaml`, selected the same way any other steering is: by naming
+  it under a repository's `steering:` in `repos.yaml`.
+  - **This does not reach any existing install on its own, and the
+    protection is silently gone either way.** `$KRAFT_HOME/templates/` is
+    seeded once and never overwritten: an install first set up on 1.0.x has
+    no `never-signal-processes-you-didnt-start` profile at all, and one
+    upgraded from a pre-1.0 install has the profile (the upgrade's
+    `steering.migrate_files` already carried its old
+    `templates/steering/*.md` file into `library.yaml` under this same
+    name) but no repository names it, because it used to be automatic. If
+    any of your repositories run tests that start servers of their own, run
+    `kraft admin doctor` after updating -- it lists the exact YAML to add,
+    both the library profile (skip that part if `migrate_files` already
+    added it) and the `repos.yaml` `steering:` line.
+
 ## 1.0.8
 
 - Fix: a `chain_revision_approval` gate now gets the same board, action-bar

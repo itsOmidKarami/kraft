@@ -663,32 +663,12 @@ async def test_auto_review_launches_with_the_method_mode_and_tools_it_resolved(
     assert tuple(seen.get("allowed_tools") or ()) == ("Read", "Grep"), "allowed_tools dropped"
 
 
-#: The name `steering.migrate_files` gives the pre-1.0 seeded
-#: `templates/steering/never-signal-processes-you-didnt-start.md` when it
-#: folds that file into a fresh `library.yaml`'s `steering:` -- reused here so
-#: a repo naming it resolves to the same profile on an upgraded install.
-_NEVER_SIGNAL = "never-signal-processes-you-didnt-start"
-_NEVER_SIGNAL_TEXT = "never signal a process you did not start\n"
-
-
 @pytest.mark.parametrize("named", [False, True], ids=["unnamed", "named"])
 async def test_a_gate_auto_review_launch_carries_the_rule_only_when_the_repo_names_it(
     item_on, tmp_path, monkeypatch, named
 ):
-    """`every-agent-launch-carries-kraft-safety-rules`: the gate's reviewer is
-    launched by `gate_review`, not `dispatch_node`, and still resolves
-    repository steering the same way -- the rule when the repo names
-    `never-signal-processes-you-didnt-start`, none of it when it doesn't."""
-    from kraft.policy import InstancePolicy, InstancePolicyInput
-    from kraft.templates.environment import WorkItemTarget
-
-    resolved = v1_resolved(_reviewed())
-    materialized = resolved.materialize(
-        target=WorkItemTarget.for_repository("target"),
-        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
-        repository_steering={"/repo": ({_NEVER_SIGNAL: _NEVER_SIGNAL_TEXT} if named else {})},
-    )
-    it = await item_on(materialized, auto_gate=True)
+    """Launched by `gate_review`, not `dispatch_node`: gets the rule only when the repo names it."""
+    it = await item_on(_reviewed(), auto_gate=True)
     fake_harness_home(tmp_path, ["true"])
     launched = {}
 
@@ -698,14 +678,10 @@ async def test_a_gate_auto_review_launch_carries_the_rule_only_when_the_repo_nam
 
     monkeypatch.setattr(agent_mod._subprocess, "run_task", _spawn)
     await _requested(it)
-
-    entry_fields = {"setup_command": ""}
-    if named:
-        entry_fields["steering"] = [_NEVER_SIGNAL]
-    launch = LaunchContext(repo_entry=entry_of(entry_fields))
-    await _launch_review(it, launch=launch)
-
-    assert (_NEVER_SIGNAL_TEXT in launched["argv"]) == named
+    text, name = "never signal a process\n", "never-signal-processes-you-didnt-start"
+    entry = entry_of({"steering": [name]} if named else {})
+    await _launch_review(it, launch=LaunchContext(repo_entry=entry, library_steering={name: text}))
+    assert (text in launched["argv"]) == named
 
 
 async def test_a_gate_declaring_no_agent_reviewer_is_left_to_a_human(item_on):
