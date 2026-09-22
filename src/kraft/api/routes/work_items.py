@@ -15,7 +15,7 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.executor import entry
 from kraft.overrides import validate_agent_overrides, validate_node_override_fields
-from kraft.policy import PolicyError
+from kraft.policy import PolicyError, PolicyMaximaInput
 from kraft.templates.environment import RootPointerPolicy
 from kraft.templates.models import MaterializedChain
 
@@ -226,7 +226,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
         ).with_item_policy(body.policy)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    _check_node_overrides(body.node_overrides, node_ids, {n.id: n.auto_review for n in chain.nodes})
+    _check_node_overrides(
+        body.node_overrides,
+        node_ids,
+        {n.id: n.auto_review for n in chain.nodes},
+        deps.instance_policy(st).maxima,
+    )
     try:
         wid = await executor.intake(
             st.db,
@@ -420,7 +425,10 @@ class WorkItemPatch(BaseModel):
 
 
 def _check_node_overrides(
-    overrides: dict[str, dict], node_ids: set[str], reviewers: dict[str, object] | None
+    overrides: dict[str, dict],
+    node_ids: set[str],
+    reviewers: dict[str, object] | None,
+    maxima: PolicyMaximaInput | None = None,
 ) -> None:
     """422 on an override naming no node of the chain, an unknown field, or an
     `auto_escalate: true` on a gate declaring no `auto_review`. One check for
@@ -440,6 +448,24 @@ def _check_node_overrides(
         field_errs = validate_node_override_fields(fields)
         if field_errs:
             raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        # A per-item fix-loop bound is an operational value, held to the
+        # administrator maximum like the item's own policy override is
+        # (Kraft-3br6j): the two doors must not bound it differently.
+        for key, name, seconds in (
+            ("attempts", "max_attempts", 1),
+            ("wall_clock_s", "timeout_minutes", 60),
+        ):
+            ceiling = getattr(maxima, name, None)
+            if (
+                fields.get(key) is not None
+                and ceiling is not None
+                and fields[key] > ceiling * seconds
+            ):
+                raise HTTPException(
+                    422,
+                    f"node {node_id!r}: {key} {fields[key]} cannot exceed the administrator "
+                    f"maximum {name} {ceiling}",
+                )
         if (
             reviewers is not None
             and fields.get("auto_escalate") is True
@@ -469,7 +495,7 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
         return
 
-    _check_node_overrides(patch, node_ids, reviewers)
+    _check_node_overrides(patch, node_ids, reviewers, deps.instance_policy(st).maxima)
 
     def check(c):
         for node_id in patch:

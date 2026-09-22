@@ -19,8 +19,11 @@ async def create_work_item(
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
     implements_beads: list[str] | None = None,
+    policy: dict | None = None,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
+
+    `policy` is the item's own policy override (`set_work_item_policy`).
 
     `repo` defaults to the repo of the work item this session is standing in,
     which is the common case for a worker filing follow-up work.
@@ -54,6 +57,7 @@ async def create_work_item(
             "autostart": False,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
+            **({"policy": policy} if policy else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },
@@ -404,6 +408,24 @@ async def set_node_overrides(
                 "--auto-escalate-delay-s, or --clear"
             )
     return await transport._patch(f"/work-items/{target}", {"node_overrides": {node_id: fields}})
+
+
+async def set_work_item_policy(
+    policy: dict | None = None, *, clear: bool = False, work_item_id: str | None = None
+) -> dict:
+    """Set or clear a work item's own policy override (Kraft-ab1bh): item-wide
+    fields (`max_attempts`, `timeout_minutes`, `wait_timeout_minutes`,
+    `allowed_harnesses`, and the safety fields, which only tighten) plus
+    `paths: {canonical path: {field: value}}` for one node, step or task. It
+    *replaces* the whole stored override; `clear` sends `{}`. Held to the
+    same bounds as every policy layer, and 422s naming the field it refuses.
+    On a running or waiting item it binds from the next node entered and the
+    next observation of a wait. `_forbid_self_action`: a worker raising its
+    own caps is exactly the self-action the other verbs refuse."""
+    target = context._forbid_self_action(work_item_id)
+    if not clear and not policy:
+        raise ValueError("kraft: set-policy needs --policy FIELD=VALUE or --clear")
+    return await transport._patch(f"/work-items/{target}", {"policy": {} if clear else policy})
 
 
 async def reload_templates() -> dict:

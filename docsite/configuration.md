@@ -139,13 +139,25 @@ shipped chain would stop.
 | `archive.after_days` | Completed/abandoned items older than this auto-archive. The board's Done group header states this number — keep them in sync if you change it. Defaults to `30` in the shipped template, but disables auto-archiving entirely (`None`/absent) if you remove the key rather than edit it. |
 | `triggers` | Optional list of cron-fired chain starts. See [Inbound triggers](triggers.md). |
 | `defaults` | Template Schema V1's inheritable operational starting points — `timeout_minutes`, `max_attempts`, `allowed_harnesses`. No safety meaning of their own: a repository, work item, chain or execution node may move any of them in either direction, bounded only by `maxima`. All optional; unset means unbounded. |
-| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools` — and `wait_timeout_minutes`, the longest any external wait's `wait: timeout` may be (a longer one is refused when the item is filed; a wait with no timeout of its own gets 90 minutes or this, whichever is shorter). A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
+| `maxima` | The administrator ceiling on policy overrides — `timeout_minutes`, `max_attempts`, `allowed_harnesses`, `token_budget`, `allowed_tools` — and `wait_timeout_minutes`, the longest any external wait may wait, whether its `wait: timeout` or a policy's `wait_timeout_minutes` says so (a longer one is refused when the item is filed or the override is set; a wait with no timeout of its own gets 90 minutes or this, whichever is shorter). A safety field listed only here (`token_budget`, `allowed_tools`) starts *at* its maximum and can only ever be narrowed by an override. An unset maximum is no bound at all, which is what a fresh install ships with. A `defaults` entry past a `maxima` ceiling is refused when the file is read. |
 
 **How V1 policy resolves and what it does.** A work item's policy is frozen
 when it is filed, layered broadest first: `defaults`/`maxima` here, the
 repository's `policy:` in `repos.yaml`, then the chain's, each node's, each
 step's and each task's own `policy:`. A layer that relaxes what it inherits is
-refused at intake, naming the scope. A
+refused at intake, naming the scope.
+
+Last comes the work item's own override, set with `kraft item create --policy`
+or `kraft item set-policy` (the MCP `create_work_item(policy=)` and
+`set_work_item_policy`): item-wide fields, and a `paths:` map from a
+canonical path to the fields for that scope. It is applied after every scope
+the chain authored, so its operational values win over the template's — a
+`wait_timeout_minutes` there replaces the wait's own `wait: timeout`, and a
+`max_attempts` or `timeout_minutes` on an execution node wins over its fix
+loop's own `max_attempts` — while its safety values still only tighten, so it
+cannot widen what the chain narrowed either. It binds that item only, and it
+is the one layer that can change after filing: on a running or waiting item a
+change binds from the next node entered and the next observation of a wait. A
 recovery plan inherits the task, step or node that declares it; a fix loop,
 its judge, a node's escalation task and its conflict handler inherit their
 node; a gate's `auto_review` inherits its gate. At runtime:
@@ -165,7 +177,8 @@ names the field and the name to write instead.
 | `sandbox` | set once, never changed or removed | Wraps the task's process (agent, subprocess, builtin) in `docker run`. |
 | `token_budget` | only narrows | Before each agent launch, gate reviewers included: once the work item's sessions have spent this many tokens (input plus output) the next agent task is refused and the item stops for a human. Like `budget`, it cannot interrupt a running agent. |
 | `allowed_harnesses` | within `maxima` | An agent task selecting another profile is refused at intake, and again at launch. |
-| `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item node override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |
+| `max_attempts`, `timeout_minutes` | within `maxima`; execution node or broader only | Bound the node's fix loop (attempts, wall clock). The loop's own `max_attempts` and an operator's per-item override win over them; they win over `loops:`/`default:`. A step, task or gate refuses them. |
+| `wait_timeout_minutes` | within `maxima` | How long every external wait under the scope waits, replacing each wait's own `wait: timeout`. |
 
 ## `harnesses.yaml` — harness profiles
 

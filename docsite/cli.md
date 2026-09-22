@@ -88,6 +88,8 @@ kraft item set-chain --template quick-task        # switch a not-yet-started ite
 kraft item set-overrides --model opus --effort high
 kraft item set-overrides --clear                  # back to the template's own binding
 kraft item set-node-override --node verify --auto-escalate-stuck
+kraft item set-policy --policy merge_request_feedback.ci.await_ci.wait_timeout_minutes=180
+kraft item set-policy --clear                     # drop the item's own policy override
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
 kraft item abandon --yes                          # drops the item, reclaims its worktree
 kraft item complete --reason "shipped by hand"    # end it as completed; add --close-beads to close its beads
@@ -102,6 +104,32 @@ uncommitted work in the item's worktree; `--yes` is required, not optional,
 on purpose. `complete` and `cancel` are the explicit terminal actions: each
 needs a `--reason`, stops whatever is running, and records the reason on the
 item's timeline.
+
+### A work item's own policy
+
+`kraft item create --policy KEY=VALUE` (repeatable) and `kraft item
+set-policy` give one work item its own policy override, without touching its
+chain template or any other item. `FIELD=VALUE` applies item-wide;
+`PATH.FIELD=VALUE` applies to one node, step or task by canonical path and
+everything under it. A value is read as YAML, so `deny_tools=[WebFetch]` is a
+list.
+
+```bash
+kraft item create "slow pipeline" \
+  --policy merge_request_feedback.ci.await_ci.wait_timeout_minutes=180 \
+  --policy verification.max_attempts=4
+kraft item set-policy <id> --policy max_attempts=2   # replaces the whole override
+```
+
+The fields are the ones `policy.yaml` explains (see [Configuration](configuration.md)):
+`timeout_minutes`, `max_attempts` (execution nodes only), `wait_timeout_minutes`
+and `allowed_harnesses` move within the administrator `maxima`; `allowed_tools`,
+`deny_tools`, `token_budget` and `sandbox` only tighten. A value past a bound,
+a path the chain does not have, or a key that is not a policy field is refused,
+naming the field. `set-policy` works on any item that has not ended: on a
+running or waiting one it binds from the next node the item enters and from
+the next observation of a wait it is parked on, whose new timeout counts from
+when the wait started.
 
 ## Repos and worktrees
 

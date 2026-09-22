@@ -399,7 +399,8 @@ def _layered(base: InstancePolicy, entry: dict) -> InstancePolicy:
         raise PolicyError(f"repos.yaml: {entry['path']}: {exc}", field=exc.field) from exc
 
 
-def _instance(st) -> InstancePolicy:
+def instance_policy(st) -> InstancePolicy:
+    """The instance's V1 policy, or the empty one when none was loaded."""
     return getattr(st, "instance_policy", None) or InstancePolicy.from_input(InstancePolicyInput())
 
 
@@ -419,7 +420,7 @@ def item_policy(st, repo: str, target: WorkItemTarget | None = None) -> Instance
     restrictions nobody can see, and filing an item without them is exactly
     the relaxation the layer exists to prevent. A `PolicyError`, so each door
     answers it the way it answers a chain policy past a ceiling."""
-    base = _instance(st)
+    base = instance_policy(st)
     layers = _repository_layers(st, repo, target)
     for _rid, entry in layers:
         _layered(base, entry)
@@ -436,7 +437,7 @@ def repository_policies(st, target: WorkItemTarget | None) -> dict[str, Instance
     whose one repository's layer is already `item_policy`'s."""
     if target is None or target.kind != "workspace":
         return {}
-    base = _instance(st)
+    base = instance_policy(st)
     by_id = dict(_repository_layers(st, "", target))
     return {
         rid: _layered(base, by_id[rid]) if rid in by_id else base for rid in target.repositories()

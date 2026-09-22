@@ -136,3 +136,25 @@ def test_a_chain_switch_rechecks_the_stored_override(client, repo):
     assert refused.status_code == 422, refused.text
     assert refused.json()["detail"].startswith("policy.paths.work: ")
     assert client.get(f"/api/work-items/{wid}").json()["chain_template"] == "one"
+
+
+@pytest.mark.parametrize(
+    ("fields", "named"),
+    [({"attempts": 6}, "max_attempts 5"), ({"wall_clock_s": 120 * 60 + 1}, "timeout_minutes 120")],
+    ids=["attempts", "wall-clock"],
+)
+@pytest.mark.parametrize("door", ["intake", "patch"])
+def test_the_older_node_override_door_is_held_to_the_same_maxima(
+    bounded, repo, door, fields, named
+):
+    """Kraft-3br6j: `node_overrides`' `attempts`/`wall_clock_s` bound the
+    same fix loop, so they answer to the same administrator maximum."""
+    override = {"verification": fields}
+    if door == "intake":
+        refused = _file(bounded, repo, node_overrides=override)
+    else:
+        wid = _file(bounded, repo).json()["id"]
+        refused = bounded.patch(f"/api/work-items/{wid}", json={"node_overrides": override})
+
+    assert refused.status_code == 422, refused.text
+    assert named in refused.json()["detail"]

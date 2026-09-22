@@ -156,15 +156,44 @@ def test_create_carries_the_description(app, monkeypatch, capsys, repo):
 def test_item_create_passes_auto_gate(monkeypatch):
     seen = {}
 
-    async def fake_create(
-        title, repo, chain, description, attachments, auto_gate=False, implements_beads=None
-    ):
+    async def fake_create(title, repo, chain, description, attachments, auto_gate=False, **_rest):
         seen["auto_gate"] = auto_gate
         return {"id": "w1"}
 
     monkeypatch.setattr("kraft.client.create_work_item", fake_create)
     cli.main(["item", "create", "t", "--repo", "/r", "--auto-gate"])
     assert seen["auto_gate"] is True
+
+
+def test_an_items_own_policy_is_set_at_create_and_replaced_by_set_policy(
+    app, monkeypatch, capsys, repo
+):
+    """Kraft-ab1bh: `--policy FIELD=VALUE` item-wide, `PATH.FIELD=VALUE` for
+    one scope, a value read as YAML; `set-policy` replaces the whole override
+    and `--clear` drops it."""
+    _connect(repo)
+    monkeypatch.chdir(repo)
+    ci = "merge_request_feedback.ci.await_ci"
+    cli.main(["item", "create", "t", "--policy", "max_attempts=3",
+              "--policy", f"{ci}.wait_timeout_minutes=180",
+              "--policy", "deny_tools=[WebFetch]", "--json"])  # fmt: skip
+    wid = json.loads(capsys.readouterr().out)["id"]
+
+    def stored():
+        cli.main(["view", "show", wid, "--json"])
+        return json.loads(capsys.readouterr().out).get("policy_override")
+
+    assert stored() == {
+        "max_attempts": 3,
+        "deny_tools": ["WebFetch"],
+        "paths": {ci: {"wait_timeout_minutes": 180}},
+    }
+    cli.main(["item", "set-policy", wid, "--policy", "verification.max_attempts=2", "--json"])
+    capsys.readouterr()
+    assert stored() == {"paths": {"verification": {"max_attempts": 2}}}
+    cli.main(["item", "set-policy", wid, "--clear", "--json"])
+    capsys.readouterr()
+    assert stored() is None
 
 
 def test_create_outside_a_connected_repo_says_how_to_fix_it(app, tmp_path, monkeypatch, capsys):

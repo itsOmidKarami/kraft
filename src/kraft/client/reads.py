@@ -112,7 +112,12 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         # where the implementer is in its plan, "3 of 6 · title" (None off that node)
         "progress",
     )
-    return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}
+    return {
+        **{k: item[k] for k in keep if k in item},
+        # The item's own policy override (Kraft-ab1bh), only when it has one.
+        **({"policy_override": item["policy_override"]} if item.get("policy_override") else {}),
+        "next_node_id": _next_node_id(item),
+    }
 
 
 async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
