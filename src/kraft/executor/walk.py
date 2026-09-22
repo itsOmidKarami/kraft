@@ -650,8 +650,10 @@ def fix_loop_cap(
        them (`template-policy-may-replace-operational-defaults`);
     3. the loop's own `max_attempts`, which materialization already held to
        `maxima.max_attempts`;
-    4. an operator's per-item node override (`node_overrides`), which wins over
-       all of them.
+    4. an operator's per-item override, which wins over all of them: the
+       work item's own policy override (`_item_cap`), then the older
+       `node_overrides` door's `attempts`/`wall_clock_s`, merged into
+       `override` by the caller.
     """
     cap = policy.cap_for(key)
     # Replaced only where set: `replace` re-validates the whole `Cap`.
@@ -662,6 +664,16 @@ def fix_loop_cap(
     if loop_attempts is not None:
         cap = replace(cap, attempts=loop_attempts)
     return _policy.with_cap_override(cap, override)
+
+
+def _item_cap(item: _policy.WorkItemPolicy | None, node_id: str) -> dict:
+    """A work item's own `max_attempts` for `node_id` as a cap override
+    (Kraft-ab1bh): an operator's per-item value, so it wins over the loop's
+    own `max_attempts` the way `node_overrides` does. Its `timeout_minutes`
+    needs no help: the node's policy carries it, and nothing authored sits
+    above that. Already held to the administrator maxima."""
+    attempts = item.value_at(node_id, "max_attempts") if item is not None else None
+    return {"attempts": attempts} if attempts is not None else {}
 
 
 async def walk_node(
@@ -697,6 +709,11 @@ async def walk_node(
     budget = store.effective_budget(
         fresh_row if fresh_row is not None else row, policy.budget if policy else _policy.NO_BUDGET
     )
+    # The whole node runs off the fresh row, not only its budget: a work
+    # item's own policy override set by a PATCH while it ran binds from the
+    # next node it enters -- every task that node dispatches, and every wait
+    # it observes (Kraft-ab1bh).
+    row = fresh_row if fresh_row is not None else row
     while True:
         result = await _walk_node_once(
             db,
@@ -871,7 +888,10 @@ async def _walk_node_once(
         key,
         dispatch.scope_policy(override_row, node),
         loop.max_attempts,
-        store.node_overrides_of(override_row).get(node.id),
+        {
+            **_item_cap(store.policy_override_of(override_row), node.id),
+            **(store.node_overrides_of(override_row).get(node.id) or {}),
+        },
     )
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.

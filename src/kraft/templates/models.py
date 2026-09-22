@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Container, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from enum import StrEnum
 from typing import Annotated, Literal, Self
@@ -49,6 +49,7 @@ from kraft.policy import (
     PolicyError,
     TaskPolicyOverride,
     TemplatePolicyOverride,
+    WorkItemPolicy,
 )
 from kraft.templates.environment import Identifier, WorkItemTarget
 
@@ -388,10 +389,17 @@ class ForgeTask(TaskBase):
 
     def wait_bounds(self, policy: InstancePolicy) -> WaitBounds:
         """This wait's bounds under `policy`, the task's own resolved policy
-        (Kraft-5p69g). An authored timeout past `maxima.wait_timeout_minutes`
-        is refused; an unauthored one takes `DEFAULT_WAIT`'s, clamped to that
-        maximum rather than refusing a chain whose author chose no number."""
+        (Kraft-5p69g). A `wait_timeout_minutes` a policy layer set -- a work
+        item's own override, most often -- replaces the authored timeout; the
+        layer already held it to the maximum. An authored timeout past
+        `maxima.wait_timeout_minutes` is refused; an unauthored one takes
+        `DEFAULT_WAIT`'s, clamped to that maximum rather than refusing a chain
+        whose author chose no number."""
         wait = self.wait or WaitPolicy()
+        if policy.wait_timeout_minutes is not None:
+            wait = wait.model_copy(
+                update={"timeout": timedelta(minutes=policy.wait_timeout_minutes)}
+            )
         ceiling = policy.maxima.wait_timeout_minutes
         limit = timedelta(minutes=ceiling) if ceiling is not None else None
         if wait.timeout is not None and limit is not None and wait.timeout > limit:
@@ -778,12 +786,16 @@ def _dedicated(path: str, task: AnyTask | None, scopes: Scopes) -> ResolvedTask 
     return ResolvedTask(path=path, task=task, scopes=(*scopes, *_own(task.policy)))
 
 
-def _scoped(path: str, policy: InstancePolicy, scopes: Scopes) -> InstancePolicy:
-    """`policy.layered(scopes)`, with a refusal prefixed by the scope's path."""
+def _scoped(
+    path: str, policy: InstancePolicy, scopes: Scopes, item: WorkItemPolicy | None = None
+) -> InstancePolicy:
+    """`policy.layered(scopes)`, then `item`'s layers at `path`, with a
+    refusal prefixed by the scope's path."""
     try:
-        return policy.layered(scopes)
+        policy = policy.layered(scopes)
+        return item.apply_to(policy, path) if item is not None else policy
     except PolicyError as exc:
-        raise PolicyError(f"{path}: {exc}", field=exc.field) from exc
+        raise PolicyError(f"{path}: {exc}", field=exc.field, path=path) from exc
 
 
 @dataclass(frozen=True)
@@ -1035,13 +1047,14 @@ class ResolvedChain:
         self.check_scopes(policy)
         return policy
 
-    def check_scopes(self, policy: InstancePolicy) -> None:
+    def check_scopes(self, policy: InstancePolicy, item: WorkItemPolicy | None = None) -> None:
         """Raise `PolicyError`, naming the scope, unless every node, step and
         task scope resolves on top of `policy` -- the chain's own policy,
-        already layered -- and every agent task's harness and every fix loop's
-        `max_attempts` is within it."""
+        already layered -- with a work `item`'s own layers last, and every
+        agent task's harness and every fix loop's `max_attempts` is within
+        it."""
         for node in self.nodes:
-            _scoped(node.id, policy, node.scopes)
+            _scoped(node.id, policy, node.scopes, item)
             loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
             ceiling = policy.maxima.max_attempts
             if loop is not None and loop.max_attempts is not None and ceiling is not None:
@@ -1050,16 +1063,19 @@ class ResolvedChain:
                         f"{node.id}: fix_loop.max_attempts {loop.max_attempts} cannot exceed "
                         f"the administrator maximum max_attempts {ceiling}",
                         field="max_attempts",
+                        path=node.id,
                     )
             for step in node.steps_in():
-                _scoped(step.path, policy, step.scopes)
+                _scoped(step.path, policy, step.scopes, item)
             for task in node.tasks():
-                task_policy = _scoped(task.path, policy, task.scopes)
+                task_policy = _scoped(task.path, policy, task.scopes, item)
                 if isinstance(task.task, ForgeTask) and task.task.target.waits:
                     try:
                         task.task.wait_bounds(task_policy)
                     except PolicyError as exc:
-                        raise PolicyError(f"{task.path}: {exc}", field=exc.field) from exc
+                        raise PolicyError(
+                            f"{task.path}: {exc}", field=exc.field, path=task.path
+                        ) from exc
                 allowed = task_policy.allowed_harnesses
                 if isinstance(task.task, AgentTask) and allowed is not None:
                     if task.task.harness not in allowed:
@@ -1067,6 +1083,7 @@ class ResolvedChain:
                             f"{task.path}: harness {task.task.harness!r} is not in its "
                             f"allowed_harnesses {sorted(allowed)!r}",
                             field="allowed_harnesses",
+                            path=task.path,
                         )
 
     def trim_for_attachments(self, kinds: frozenset[str]) -> ResolvedChain:
@@ -1169,6 +1186,14 @@ class MaterializedChain:
     #: A workspace item's policy per selected repository id, what a task
     #: fanned out to that repository runs under. Empty for one repository.
     repository_policies: Mapping[str, InstancePolicy] = field(default_factory=dict)
+    #: The work item's own override (Kraft-ab1bh), layered after every scope
+    #: the chain authored (`policy_for`). Held on the item's row
+    #: (`work_items.policy_override`) and attached when the row is read
+    #: (`store.materialized_chain_of`), never written into the snapshot:
+    #: the snapshot does not change while the item executes
+    #: (`materialized-chain-is-immutable-work-item-input`), and a `PATCH` may
+    #: change this.
+    item_policy: WorkItemPolicy | None = None
 
     # Fork lineage is deliberately NOT a field here. `RunFork.parent`
     # (`kraft.templates.forks`, the `run_forks` table) is the one place a fork's
@@ -1217,7 +1242,74 @@ class MaterializedChain:
         # A repository with no policy of its own frozen falls back to the
         # item's, which is the meet of them all: never looser than its own.
         base = self.repository_policies.get(repository, self.policy) if repository else self.policy
-        return base.layered(scope.scopes)
+        path = scope.id if isinstance(scope, ResolvedNode) else scope.path
+        policy = base.layered(scope.scopes)
+        return self.item_policy.apply_to(policy, path) if self.item_policy else policy
+
+    def with_item_policy(self, raw: WorkItemPolicy | dict | None) -> MaterializedChain:
+        """This snapshot with a work item's own override `raw` layered on, once
+        it is valid here (Kraft-ab1bh) -- the check every door that sets one
+        makes: intake, a `PATCH`, a chain switch. Raises `PolicyError` whose
+        `field` names the one field refused: `policy.<name>` for an item-wide
+        field, `policy.paths.<path>[.<name>]` for one addressed by path.
+
+        The same rules as every other layer, by the same engine: each path
+        names a node, step or task of this chain (`ChainPath`); a fix loop's
+        bounds sit on an execution node only; a safety value only tightens and
+        an operational one stays within the administrator maxima, at every
+        scope, for every repository a workspace item selects
+        (`check_scopes`). Nothing else can be expressed: the override's model
+        has no structural key, so it cannot change the chain's shape."""
+        from kraft.templates.forks import ChainPath, ControlScope, PathError
+
+        if raw is None or isinstance(raw, WorkItemPolicy):
+            item = raw
+        else:
+            try:
+                item = WorkItemPolicy.model_validate(raw)
+            except ValidationError as exc:
+                error = exc.errors()[0]
+                where = ".".join(["policy", *(str(p) for p in error["loc"])])
+                raise PolicyError(
+                    f"{where}: {error['msg']} (a work item's policy override sets policy "
+                    "fields only; it cannot change the chain's structure)",
+                    field=where,
+                ) from exc
+        if item is None:
+            return replace(self, item_policy=None)
+        for path, layer in item.paths.items():
+            where = f"policy.paths.{path}"
+            try:
+                at = ChainPath.parse(self, path)
+            except PathError as exc:
+                raise PolicyError(f"{where}: {exc}", field=where) from exc
+            on_exec_node = at.scope is ControlScope.NODE and isinstance(at.node.node, ExecNode)
+            for name in ("max_attempts", "timeout_minutes"):
+                if getattr(layer, name) is not None and not on_exec_node:
+                    raise PolicyError(
+                        f"{where}.{name}: bounds an execution node's fix loop, and {path!r} "
+                        "is not an execution node",
+                        field=f"{where}.{name}",
+                    )
+        layered = replace(self, item_policy=item)
+        try:
+            for base in (self.policy, *self.repository_policies.values()):
+                self.chain.check_scopes(base, item)
+        except PolicyError as exc:
+            where = next(
+                (
+                    w
+                    for w, layer in reversed(item.layers_at(exc.path or ""))
+                    if getattr(layer, exc.field or "", None) is not None
+                ),
+                "policy",
+            )
+            where = f"{where}.{exc.field}"
+            raise PolicyError(f"{where}: {exc}", field=where, path=exc.path) from exc
+        refusal = layered.sandbox_refusal()
+        if refusal is not None:
+            raise PolicyError(f"policy.sandbox: {refusal}", field="policy.sandbox")
+        return layered
 
     def policy_at(self, path: str) -> InstancePolicy:
         """`policy_for` the node, step or task at canonical `path`, or

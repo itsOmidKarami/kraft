@@ -39,9 +39,12 @@ class PolicyError(ValueError):
     retry-override validator can point at it without parsing the message.
     `None` for a refusal of a whole file."""
 
-    def __init__(self, message: str, *, field: str | None = None) -> None:
+    def __init__(self, message: str, *, field: str | None = None, path: str | None = None) -> None:
         super().__init__(message)
         self.field = field
+        #: The canonical path of the scope refused, when a chain check made
+        #: the refusal (`ResolvedChain.check_scopes`).
+        self.path = path
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
@@ -446,7 +449,7 @@ _SAFETY_NUMERIC_FIELDS = ("token_budget",)
 #: administrator maximum when one is explicitly configured
 #: (`template-policy-may-replace-operational-defaults`,
 #: `work-item-policy-may-exceed-default-ceilings-within-admin-maximum`).
-_OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
+_OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts", "wait_timeout_minutes")
 #: Same rule as `_OPERATIONAL_NUMERIC_FIELDS`, for a list-valued field: bounded
 #: by `maxima`, not by the current inherited value, so a `defaults:` entry
 #: narrower than `maxima:` doesn't permanently lower the real ceiling. The
@@ -560,7 +563,9 @@ class InstancePolicyInput(BaseModel):
         maxima non-overridable, and a `defaults:` entry past one is an
         override in all but name. An unset maximum is no bound at all."""
         for name in _OPERATIONAL_NUMERIC_FIELDS:
-            value, ceiling = getattr(self.defaults, name), getattr(self.maxima, name)
+            # `wait_timeout_minutes` has no `defaults:` entry: a wait with no
+            # timeout of its own already has one (`templates.models.DEFAULT_WAIT`).
+            value, ceiling = getattr(self.defaults, name, None), getattr(self.maxima, name)
             if value is not None and ceiling is not None and value > ceiling:
                 raise ValueError(f"defaults.{name} {value} exceeds maxima.{name} {ceiling}")
         for name in _OPERATIONAL_LIST_FIELDS:
@@ -606,6 +611,10 @@ class TaskPolicyOverride(BaseModel):
     #: Only ever accumulates down the layers.
     deny_tools: ToolNames | None = None
     sandbox: SandboxPolicy | None = None
+    #: How long every external wait under this scope waits, replacing the
+    #: wait's own `wait: timeout` (`ForgeTask.wait_bounds`). Operational:
+    #: bounded by `maxima.wait_timeout_minutes`, never by the inherited value.
+    wait_timeout_minutes: PositiveInt | None = None
 
 
 class TemplatePolicyOverride(TaskPolicyOverride):
@@ -649,9 +658,76 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             sandbox=sandboxes[0] if sandboxes else None,
             **{
                 n: min(values) if (values := present(n)) else None
-                for n in ("token_budget", "timeout_minutes", "max_attempts")
+                for n in ("token_budget", "timeout_minutes", "max_attempts", "wait_timeout_minutes")
             },
         )
+
+
+#: The safety fields an item layer meets rather than ratchets (Ruling 188):
+#: `deny_tools` already only accumulates and `sandbox` already locks, so those
+#: two go through `apply_template_override` unchanged.
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "token_budget")
+
+
+class WorkItemPolicy(TemplatePolicyOverride):
+    """One work item's own override (Kraft-ab1bh): item-wide fields, plus
+    `paths` -- an override for one node, step or task, keyed by its canonical
+    path. Set at intake or by a `PATCH`, and held on the item's row, never in
+    its snapshot or its template: `MaterializedChain.with_item_policy`
+    validates it, and `MaterializedChain.policy_for` applies it after every
+    scope the chain authored (`apply_to`, Ruling 188)."""
+
+    paths: dict[StrictStr, TemplatePolicyOverride] = Field(default_factory=dict)
+
+    def apply_to(self, policy: InstancePolicy, path: str) -> InstancePolicy:
+        """`policy` -- a scope's, every authored layer already applied -- with
+        this item's layers at `path` on top (Ruling 188). Operational fields
+        apply in order, last, so the item's value wins over the template's
+        within the maxima. Safety fields combine in no order: an allowlist
+        intersects, a deny list unions, a budget takes the minimum, and a
+        sandbox locks -- so an item's safety value only ever tightens, and is
+        never refused because a narrower scope already narrowed it."""
+        for _, layer in self.layers_at(path):
+            policy = policy.apply_template_override(
+                layer.model_copy(update=dict.fromkeys(_ORDERLESS_SAFETY_FIELDS))
+            )
+            if layer.allowed_tools is not None:
+                allowed = policy.allowed_tools
+                policy = dataclasses.replace(
+                    policy,
+                    allowed_tools=tuple(
+                        t
+                        for t in (allowed if allowed is not None else layer.allowed_tools)
+                        if t in layer.allowed_tools
+                    ),
+                )
+            if layer.token_budget is not None:
+                budget = policy.token_budget
+                policy = dataclasses.replace(
+                    policy,
+                    token_budget=min(budget, layer.token_budget)
+                    if budget is not None
+                    else layer.token_budget,
+                )
+        return policy
+
+    def layers_at(self, path: str) -> tuple[tuple[str, TaskPolicyOverride], ...]:
+        """The layers that bind the scope at `path`, broadest first, each with
+        the field prefix its refusal names: this item-wide override, then the
+        override of every path enclosing `path` or equal to it. Its own
+        `paths` are ignored when this is applied as a layer: the override
+        engine reads only the fields it knows."""
+        segments = path.split(".")
+        enclosing = (".".join(segments[:i]) for i in range(1, len(segments) + 1))
+        return (
+            ("policy", self),
+            *((f"policy.paths.{p}", self.paths[p]) for p in enclosing if p in self.paths),
+        )
+
+    def value_at(self, path: str, name: str) -> object:
+        """The narrowest value of `name` this override sets for `path`, or None."""
+        values = (getattr(layer, name, None) for _, layer in reversed(self.layers_at(path)))
+        return next((v for v in values if v is not None), None)
 
 
 @dataclass(frozen=True)
@@ -675,6 +751,9 @@ class InstancePolicy:
     #: so both start empty and only a repository or narrower layer adds them.
     deny_tools: tuple[str, ...] = ()
     sandbox: SandboxPolicy | None = None
+    #: Set only by an override (`TaskPolicyOverride.wait_timeout_minutes`);
+    #: None leaves each wait its own timeout.
+    wait_timeout_minutes: int | None = None
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:

@@ -42,6 +42,7 @@ def test_the_tools_are_registered():
         "set_chain_template",
         "set_agent_overrides",
         "set_node_overrides",
+        "set_work_item_policy",
         "permission_request",
     }
 
@@ -135,3 +136,30 @@ def test_create_work_item_forwards_auto_gate(monkeypatch):
     )
     assert seen["kwargs"].get("auto_gate") is False
     assert seen["args"] == ("t",), "every other argument should be passed by keyword"
+
+
+def test_the_items_own_policy_reaches_the_api_from_both_tools(monkeypatch):
+    """Kraft-ab1bh: `create_work_item(policy=)` and `set_work_item_policy`
+    hand the override to the client as given."""
+    seen = []
+
+    async def fake(*args, **kwargs):
+        seen.append(kwargs.get("policy", args[0] if args else None))
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", fake)
+    monkeypatch.setattr(mcp.client, "set_work_item_policy", fake)
+    override = {"paths": {"verification": {"max_attempts": 2}}}
+    server = mcp.build()
+    asyncio.run(server.call_tool("create_work_item", {"title": "t", "policy": override}))
+    asyncio.run(server.call_tool("set_work_item_policy", {"policy": override}))
+    assert seen == [override, override]
+
+
+def test_a_worker_cannot_set_its_own_policy_through_mcp(monkeypatch):
+    """Kraft-j89jc: the MCP door reaches the same guard as the client's."""
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", "mine")
+    with pytest.raises(Exception, match="set_work_item_policy") as refused:
+        asyncio.run(mcp.build().call_tool("set_work_item_policy", {"policy": {"max_attempts": 9}}))
+    cause = refused.value.__cause__
+    assert isinstance(cause, PermissionError) and "its own work item" in str(cause)

@@ -11,6 +11,10 @@ which keeps the wait's record as events:
 * `external_wait_observed` -- one per observation: what was seen, and for a
   pending one the next observation time.
 * `external_wait_ended` -- the outcome: `settled`, `timed_out` or `error`.
+* `external_wait_rebounded` -- the wait's bounds changed while it was open:
+  its item's policy override was changed (Kraft-ab1bh). The new timeout
+  counts from the wait's own start, and binds from the observation that
+  wrote this.
 
 So no wait ends without a trace (Kraft-vzq2q). A pending observation leaves
 the task `waiting`; the walk parks the item (`status = 'waiting'`, `retry_at`
@@ -49,6 +53,7 @@ _INTERVAL_S = 10
 STARTED = "external_wait_started"
 OBSERVED = "external_wait_observed"
 ENDED = "external_wait_ended"
+REBOUNDED = "external_wait_rebounded"
 #: Events that end every open wait on the item: a restart is a fresh budget.
 #: The same set `store.sessions` reads as "this item started over". A `/retry`
 #: writes both `work_item_retried` and `run_forked` (`executor.retry`); the
@@ -72,7 +77,7 @@ class OpenWait:
 
     @property
     def bounds(self) -> WaitBounds:
-        """The bounds it started under -- a wait keeps them to its end."""
+        """The bounds it started under, or was last rebounded to."""
         return WaitBounds.from_seconds(
             timeout=self.started["timeout_s"],
             initial=self.started["initial_interval_s"],
@@ -84,16 +89,19 @@ def open_wait(conn, work_item_id: str, task: str) -> OpenWait | None:
     """`task`'s open wait instance, or None when its last one ended."""
     rows = conn.execute(
         "SELECT type, payload FROM events WHERE work_item_id = ? AND ("
-        f"(type IN ('{STARTED}', '{OBSERVED}', '{ENDED}') AND json_extract(payload, '$.task') = ?)"
+        f"(type IN ('{STARTED}', '{OBSERVED}', '{REBOUNDED}', '{ENDED}') "
+        "AND json_extract(payload, '$.task') = ?)"
         f" OR type IN ({', '.join('?' * len(_RESTARTS))})) ORDER BY seq DESC",
         (work_item_id, task, *_RESTARTS),
     ).fetchall()
-    last = None
+    last = rebound = None
     for row in rows:
         if row["type"] == OBSERVED:
             last = last or json.loads(row["payload"])
+        elif row["type"] == REBOUNDED:
+            rebound = rebound or json.loads(row["payload"])
         elif row["type"] == STARTED:
-            return OpenWait(json.loads(row["payload"]), last)
+            return OpenWait({**json.loads(row["payload"]), **(rebound or {})}, last)
         else:
             return None
     return None
@@ -117,9 +125,12 @@ def observe(
     `settled` (on whatever `result` -- green or red is the task's business,
     not the wait's), or `error` when the observation itself could not be
     made. A pending observation at or past the deadline is `timed_out`
-    (`external-wait-timeout-needs-human`). `bounds` apply to a new instance
-    only; an open one keeps the bounds it started with. `session_id` is the
-    session the observation ran in, recorded on the outcome."""
+    (`external-wait-timeout-needs-human`). `bounds` are what the task's
+    policy resolves to now: they start a new instance, and an open one whose
+    bounds differ -- its item's policy override changed (Kraft-ab1bh) -- is
+    rebounded to them from this observation on, its deadline counted from
+    its own start. `session_id` is the session the observation ran in,
+    recorded on the outcome."""
     now = datetime.fromisoformat(_now())
     ids = {"task": task, "node_id": node_id}
     wait = open_wait(conn, work_item_id, task)
@@ -135,6 +146,17 @@ def observe(
         }
         events.append(conn, work_item_id, STARTED, started)
         wait = OpenWait(started, None)
+    elif bounds != wait.bounds:
+        start = datetime.fromisoformat(wait.started["started_at"])
+        changed = {
+            **ids,
+            "timeout_s": bounds.timeout.total_seconds(),
+            "initial_interval_s": bounds.initial_interval.total_seconds(),
+            "max_interval_s": bounds.max_interval.total_seconds(),
+            "deadline": (start + bounds.timeout).isoformat(),
+        }
+        events.append(conn, work_item_id, REBOUNDED, changed)
+        wait = OpenWait({**wait.started, **changed}, wait.last)
     n = wait.observations + 1
 
     def end(outcome: str) -> None:

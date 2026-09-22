@@ -102,6 +102,9 @@ async def intake(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: The item's own policy override (Kraft-ab1bh), already checked against
+    #: this chain by the caller (`MaterializedChain.with_item_policy`).
+    policy_override: dict | None = None,
     source: str | None = None,
     bead_priority: int | None = None,
 ) -> str:
@@ -194,6 +197,7 @@ async def intake(
             budget_set=budget_set,
             budget_usd=budget_usd,
             node_overrides=node_overrides,
+            policy_override=policy_override,
             source=source,
             bead_priority=bead_priority,
         )

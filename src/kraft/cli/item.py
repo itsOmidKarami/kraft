@@ -7,8 +7,31 @@ import argparse
 import asyncio
 from pathlib import Path
 
+import yaml
+
 from kraft import client
 from kraft.cli import common
+
+_POLICY_HELP = (
+    "the item's own policy override, FIELD=VALUE item-wide or PATH.FIELD=VALUE for one "
+    "node, step or task by canonical path (repeatable), e.g. "
+    "merge_request_feedback.ci.await_ci.wait_timeout_minutes=180 or max_attempts=4"
+)
+
+
+def _policy(pairs: list[str]) -> dict | None:
+    """`--policy` pairs as the API's override: the last dotted segment of the
+    key is the field, anything before it the path. A value is read as YAML,
+    so `4` is a number and `[Read,Bash]` a list."""
+    policy: dict = {}
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--policy takes FIELD=VALUE or PATH.FIELD=VALUE, not {pair!r}")
+        path, _, name = key.rpartition(".")
+        scope = policy.setdefault("paths", {}).setdefault(path, {}) if path else policy
+        scope[name] = yaml.safe_load(raw)
+    return policy or None
 
 
 def _cmd_create(ns: argparse.Namespace) -> None:
@@ -31,6 +54,7 @@ def _cmd_create(ns: argparse.Namespace) -> None:
                 attachments or None,
                 auto_gate=ns.auto_gate,
                 implements_beads=ns.implements or None,
+                policy=_policy(ns.policy),
             )
         ),
         common._render_action,
@@ -151,6 +175,16 @@ def _cmd_set_node_override(ns: argparse.Namespace) -> None:
     )
 
 
+def _cmd_set_policy(ns: argparse.Namespace) -> None:
+    common.emit(
+        asyncio.run(
+            client.set_work_item_policy(_policy(ns.policy), clear=ns.clear, work_item_id=ns.id)
+        ),
+        common._render_action,
+        ns.json,
+    )
+
+
 def _add_item(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that change a work item."""
     create = subs.add_parser("create", parents=[common], help="file a work item (starts paused)")
@@ -179,6 +213,9 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         metavar="BEAD",
         help="a bead this item implements, closed on completion (repeatable); "
         "ids in --description are not parsed",
+    )
+    create.add_argument(
+        "--policy", action="append", default=[], metavar="KEY=VALUE", help=_POLICY_HELP
     )
     create.set_defaults(func=_cmd_create, all=False)
 
@@ -325,6 +362,18 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "--clear", action="store_true", help="reset this node to the template's own binding"
     )
     set_node_override.set_defaults(func=_cmd_set_node_override)
+
+    set_policy = subs.add_parser(
+        "set-policy",
+        parents=[common],
+        help="replace the item's own policy override; binds from its next node or wait check",
+    )
+    set_policy.add_argument("id", nargs="?")
+    set_policy.add_argument(
+        "--policy", action="append", default=[], metavar="KEY=VALUE", help=_POLICY_HELP
+    )
+    set_policy.add_argument("--clear", action="store_true", help="drop the item's own override")
+    set_policy.set_defaults(func=_cmd_set_policy)
 
     mr_label = subs.add_parser(
         "mr-label",
