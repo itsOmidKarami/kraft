@@ -4,6 +4,7 @@ sessions read back as findings."""
 
 import ast
 import sys
+from pathlib import Path
 
 import pytest
 from support.harness import _git, v1_chain, v1_walk
@@ -64,6 +65,19 @@ async def _dispatch(item_on, *, test_scopes, task=_BUILTIN, node_id="verify", wi
         ),
     )
     return status, it
+
+
+async def test_a_repo_that_declares_no_test_command_stops_naming_what_to_configure(item_on):
+    """Kraft-r19n0: quick-task and `default` both verify with this builtin. A
+    repo declaring neither `test_scopes` nor `test_command` stops for a human
+    at verify, naming both keys, rather than having a command guessed for it."""
+    status, it = await _dispatch(item_on, test_scopes=[])
+
+    [session] = it.sessions()
+    assert (status, session["status"]) == ("config_error", "config_error")
+    log = Path(session["log_path"]).read_text()
+    assert "neither test_scopes nor test_command in repos.yaml" in log
+    assert "will not guess a command" in log
 
 
 # -- selection (Kraft-9wzy, C7 Kraft-s7c04.14) --------------------------------

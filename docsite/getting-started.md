@@ -65,7 +65,11 @@ kraft view watch     # a live board, redrawn on every event
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](assets/board.png)
 
 `quick-task` runs `implementation → verify` with no gate, so if the agent's fix
-is good, the item reaches **Done** on its own. If `verify` fails, the item stops
+is good, the item reaches **Done** on its own. `verify` runs the repo's own
+`test_scopes` (or `test_command`) from `repos.yaml`, and nothing else: a repo
+that declares neither stops at `verify` with a config error naming both keys,
+because Kraft will not guess a test command. Declare one, then
+`kraft item retry`. If `verify` fails, the item stops
 for you with the failing scope named; the `default` chain's `verification` node
 is the one that repairs itself within its fix loop's cap
 ([policy.yaml](configuration.md#policyyaml-caps-budget-archiving)).

@@ -44,6 +44,11 @@ nodes:
       - { id: test_changed_scopes, extends: verify_changed_scopes }
 ```
 
+`verify_changed_scopes` runs the repo's own `test_scopes` or `test_command`
+from `repos.yaml`. On a repo that declares neither, `quick-task` (and
+`default`'s `verification`) stops for a human there with a config error, not
+a guessed command.
+
 The shipped `default` chain is the real one: a spec and a plan, each with its
 own approval gate; implementation; verification (the changed test scopes, then
 a code review) inside a fix loop; a work brief and a `local_review` gate before
