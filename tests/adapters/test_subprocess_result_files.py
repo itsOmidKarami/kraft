@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from kraft.adapters import subprocess as sp
+from kraft.usage import RateLimitInfo
 
 # --- the result and exit files -------------------------------------------------------
 
@@ -144,11 +145,11 @@ _REJECTED = (
             + _REJECTED
             + '{"type":"result","is_error":true}\n',
             "claude-stream-json",
-            {
-                "rate_limit_type": "five_hour",
-                "resets_at": 1788968400,
-                "resets_at_iso": "2026-09-09T15:40:00+00:00",
-            },
+            RateLimitInfo(
+                rate_limit_type="five_hour",
+                resets_at=1788968400,
+                resets_at_iso="2026-09-09T15:40:00+00:00",
+            ),
         ),
         # `overageStatus` can read "rejected" while the turn itself was
         # allowed: only a top-level `status: "rejected"` refused the launch.
