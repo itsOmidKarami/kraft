@@ -47,6 +47,10 @@ codebase. "Add appropriate error handling", "similar to task 3", "write tests
 for the above" are plan failures — the reader may be reading your tasks out of
 order and cannot resolve any of them.
 
+If your instructions name an intent tree, the plan contains a task that applies
+the spec's requirement changes to the tree and writes the tests they are pinned
+to, each test seen to fail for the stated reason before the code makes it pass.
+
 ## Check your own plan before you finish
 
 Walk the spec section by section and point at the task that implements each

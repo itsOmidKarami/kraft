@@ -71,7 +71,9 @@ def _in_process(task: ResolvedTask) -> bool:
     return isinstance(task.task, _IN_PROCESS_KINDS)
 
 
-async def _diagnosis_bundle(db, work_item_id: str, node: ResolvedNode, worktree) -> dict:
+async def _diagnosis_bundle(
+    db, work_item_id: str, node: ResolvedNode, worktree, launch: LaunchContext | None = None
+) -> dict:
     """What a human reconstructs by hand today, gathered once at the moment
     the stuck detector gives up (Kraft-39ep): the worktree's own state, and
     the last measuring session's concerns, if it left any.
@@ -83,8 +85,24 @@ async def _diagnosis_bundle(db, work_item_id: str, node: ResolvedNode, worktree)
     from pathlib import Path
 
     from kraft.config import git_read
+    from kraft.worker.sandbox import SUBMODULES_UNENTERED
 
-    status = git_read(Path(worktree), "status", "--porcelain", expected_failure=True) or ""
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    try:
+        # No host git while a sandboxed co-task still writes the worktree
+        # (Kraft-69rwp); the bundle says why instead.
+        if row is not None:
+            stops.refuse_live_sandboxed_session(db, row, launch, what="the worktree status")
+        status = (
+            git_read(
+                Path(worktree), "status", SUBMODULES_UNENTERED, "--porcelain", expected_failure=True
+            )
+            or ""
+        )
+    except RuntimeError as exc:
+        status = f"(not read: {exc})"
     recent = git_read(Path(worktree), "log", "--oneline", "-5", expected_failure=True) or ""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     # worker_session_exited carries no hook_point of its own, so a judge verdict
@@ -1314,7 +1332,7 @@ async def _walk_node_once(
                 # Deliberately NOT mark_sessions_capped_out: these sessions did
                 # not cap out, and only a real cap breach may claim they did.
                 return _Stuck(
-                    reason, bundle=await _diagnosis_bundle(db, work_item_id, node, worktree)
+                    reason, bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch)
                 )
 
         payload = {
@@ -1693,7 +1711,7 @@ async def run_once(
     try:
         # Before the worktree is touched at all: host git in a sandboxed
         # item's submodule runs what its worker planted there (Kraft-dshto).
-        stops.refuse_sandboxed_submodules(row, launch)
+        stops.refuse_sandboxed_submodules(row, launch, run_dirs.worktrees / work_item_id)
         # A sandboxed item's setup_command runs in its sandbox, never on the
         # host (Kraft-p8nem).
         sandbox = dispatch.item_sandbox(row, launch)

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Collection
 from pathlib import Path
 
 from kraft.adapters.forge.models import ForgeError
@@ -86,7 +87,16 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     """
     with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
-            repo, ["git", *ignore_args, "status", "--porcelain", "--", *_KRAFT_ROOTS]
+            repo,
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                sandbox.SUBMODULES_UNENTERED,
+                "--",
+                *_KRAFT_ROOTS,
+            ],
         )
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
@@ -125,13 +135,21 @@ async def assert_clean(repo: Path, base: str) -> None:
     `work_product_pathspec` drops Kraft's own session notes and artifacts in
     a repo that has not ignored them.
 
-    `--ignore-submodules=none` deliberately overrides the repo's own
-    `submodule.<path>.ignore` config. A human setting `ignore = all` on a
-    workspace with several submodules to stop pointer churn in every `git
-    status` is reasonable; it is not permission for Kraft to open a merge
-    request over a submodule holding commits that request will not carry
-    (Kraft-qlsf — this is what let work item 9d0ab38ff3c9439b90506df0f6966660
-    push a submodule commit nowhere while every guard reported clean).
+    `SUBMODULES_UNENTERED` (`--ignore-submodules=dirty`) deliberately
+    overrides the repo's own `submodule.<path>.ignore` config. A human
+    setting `ignore = all` on a workspace with several submodules to stop
+    pointer churn in every `git status` is reasonable; it is not permission
+    for Kraft to open a merge request over a submodule holding commits that
+    request will not carry (Kraft-qlsf — this is what let work item
+    9d0ab38ff3c9439b90506df0f6966660 push a submodule commit nowhere while
+    every guard reported clean).
+
+    `dirty`, not `none`: `none` also runs `git status` *inside* each
+    submodule to look for uncommitted edits, and that child git reads the
+    submodule's own config -- which, for a repository a sandboxed worker
+    nested in its worktree and committed a gitlink to, is the worker's,
+    filters and all (Kraft-nx4id). A declared member's uncommitted edits are
+    still caught: publication runs this same check in each member.
     """
     pathspec = await work_product_pathspec(repo, base)
     with base_ignore_args(repo, base) as ignore_args:
@@ -142,7 +160,7 @@ async def assert_clean(repo: Path, base: str) -> None:
                 *ignore_args,
                 "status",
                 "--porcelain",
-                "--ignore-submodules=none",
+                sandbox.SUBMODULES_UNENTERED,
                 "--",
                 *pathspec,
             ],
@@ -157,7 +175,9 @@ async def assert_clean(repo: Path, base: str) -> None:
         )
 
 
-async def commit_stragglers(repo: Path, *, base: str, message: str) -> bool:
+async def commit_stragglers(
+    repo: Path, *, base: str, message: str, mounts: Collection[str] = ()
+) -> bool:
     """Commit whatever an agent left behind in the worktree. True if it did.
 
     A worker is told to commit everything it changes before it exits, and one
@@ -171,11 +191,31 @@ async def commit_stragglers(repo: Path, *, base: str, message: str) -> bool:
     `.pytest_cache/` left behind is not mistaken for work — and
     `work_product_pathspec` keeps Kraft's own session notes and artifacts out
     of the merge request even in a repo that has never heard of them.
+
+    So does every nested repository but the item's declared `mounts`
+    (Kraft-nx4id): `git add` runs `git status` inside each gitlink it
+    matches, whatever `--ignore-submodules` says, and that child git runs
+    whatever filter the nested repository's config names. A pointer the
+    agent moved in a submodule nobody declared is left uncommitted for
+    `assert_clean` to name, rather than swept into the merge request.
     """
-    pathspec = await work_product_pathspec(repo, base)
+    nested = await asyncio.to_thread(sandbox.nested_repos, repo) or {}
+    pathspec = [
+        *await work_product_pathspec(repo, base),
+        *(f":(exclude,literal){p}" for p in nested if p not in mounts),
+    ]
     with base_ignore_args(repo, base) as ignore_args:
         status = await run_git(
-            repo, ["git", *ignore_args, "status", "--porcelain", "--", *pathspec]
+            repo,
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                sandbox.SUBMODULES_UNENTERED,
+                "--",
+                *pathspec,
+            ],
         )
         if not status.strip():
             return False

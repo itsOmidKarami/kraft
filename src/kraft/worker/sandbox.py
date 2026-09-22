@@ -345,10 +345,56 @@ def _gitdir_mounts(cwd: Path) -> list[str]:
 #: so that one stays covered by the mounts -- the config files git could read
 #: it from are the common gitdir's `config` (read-only mount), `config.worktree`
 #: and whatever `commondir` redirects to (both shadowed read-only).
-_HARDENED_GIT_CONFIG = (
+_HOOK_PINS = (
     ("core.hooksPath", os.devnull),
     ("core.fsmonitor", ""),
 )
+
+#: Host git never walks into a repository nested in a worktree (Kraft-nx4id).
+#:
+#: A worker can build a git repository of its own anywhere in the worktree it
+#: writes and commit a gitlink to it -- no `.gitmodules`, no declared member.
+#: That repository's config is the worker's: `filter.<x>.clean`, a textconv,
+#: an `ext::` remote, anything with a name git will not let `-c` enumerate.
+#: The main worktree's config is safe to read (the common gitdir is mounted
+#: read-only, `config.worktree` and `commondir` are shadowed, and git reads no
+#: `config` from `<gitdir>/worktrees/<id>` itself); a nested repository's is
+#: not, so what has to hold is that host git never *enters* one. Each of these
+#: is a way it would, from config the operator (not the worker) may have set:
+#: `submodule.recurse` makes checkout, reset and rebase recurse, the
+#: `recurseSubmodules` pair makes fetch and push run inside a submodule with
+#: its own remotes, `diff.submodule=diff`/`log` and `status.submoduleSummary`
+#: run diff and log inside it, and `diff.ignoreSubmodules` is the default for
+#: every `status`/`diff` below -- `dirty` compares only the commit a gitlink
+#: records, which git reads without spawning anything in the nested repo.
+#: That last one is only a default: a `.gitmodules` the worker writes can
+#: override it per path, which is why the calls that compare a worktree also
+#: pass `SUBMODULES_UNENTERED` on the command line.
+_NO_RECURSION_PINS = (
+    ("submodule.recurse", "false"),
+    ("fetch.recurseSubmodules", "false"),
+    ("push.recurseSubmodules", "no"),
+    ("diff.submodule", "short"),
+    ("status.submoduleSummary", "false"),
+    ("diff.ignoreSubmodules", "dirty"),
+)
+
+_HARDENED_GIT_CONFIG = _HOOK_PINS + _NO_RECURSION_PINS
+
+#: For every host `status` and worktree `diff` Kraft runs in a worktree: a
+#: gitlink counts as changed when the commit it points at moves (Kraft-qlsf
+#: needs that much), but git never runs `status` inside it to look for
+#: uncommitted edits -- that child process is what loads a planted repo's
+#: config and runs its filters (review-g1 finding 1). On the command line,
+#: because a worker's `.gitmodules` can override `diff.ignoreSubmodules`.
+SUBMODULES_UNENTERED = "--ignore-submodules=dirty"
+
+
+def _pin(env: MutableMapping[str, str], pins: tuple[tuple[str, str], ...]) -> None:
+    env["GIT_CONFIG_COUNT"] = str(len(pins))
+    for i, (key, value) in enumerate(pins):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
 
 
 def harden_host_git_env(env: MutableMapping[str, str] | None = None) -> None:
@@ -374,28 +420,109 @@ def harden_host_git_env(env: MutableMapping[str, str] | None = None) -> None:
     `adapters.forge.git.push` is the one exception, running with
     `unhardened_git_env()` instead: see that function for why.
     """
-    env = os.environ if env is None else env
-    env["GIT_CONFIG_COUNT"] = str(len(_HARDENED_GIT_CONFIG))
-    for i, (key, value) in enumerate(_HARDENED_GIT_CONFIG):
-        env[f"GIT_CONFIG_KEY_{i}"] = key
-        env[f"GIT_CONFIG_VALUE_{i}"] = value
+    _pin(os.environ if env is None else env, _HARDENED_GIT_CONFIG)
 
 
 def unhardened_git_env() -> dict[str, str]:
-    """A copy of the process env with `harden_host_git_env`'s override lifted.
+    """A copy of the process env with `harden_host_git_env`'s hook pin lifted.
 
     For `git push` alone: by the time Kraft pushes, the commit is already
     made and the worktree gitdir's hooks are either read-only-mounted
     (sandboxed) or none of a worker's business to have tampered with in the
     first place (unsandboxed) -- so the pinned `core.hooksPath=/dev/null`
     is no longer buying anything there, only breaking real hooks a human
-    installed, like git-lfs's pre-push. Popping `GIT_CONFIG_COUNT` alone is
-    enough: git reads none of the paired `GIT_CONFIG_KEY_n`/`_VALUE_n`
-    without it (Kraft-rki).
+    installed, like git-lfs's pre-push (Kraft-rki).
+
+    Only that pin: `_NO_RECURSION_PINS` stay, so an operator's
+    `push.recurseSubmodules=on-demand` still cannot make this push run
+    `git push` inside a repository the worker nested in its worktree, with
+    that repository's remotes and `core.sshCommand` (Kraft-nx4id).
     """
     env = dict(os.environ)
-    env.pop("GIT_CONFIG_COUNT", None)
+    _pin(env, tuple(p for p in _HARDENED_GIT_CONFIG if p[0] != "core.hooksPath"))
     return env
+
+
+def _ls_files(worktree: Path, *args: str) -> list[str] | None:
+    done = subprocess.run(
+        ["git", "ls-files", "-z", *args], cwd=worktree, capture_output=True, text=True
+    )
+    return done.stdout.split("\0")[:-1] if done.returncode == 0 else None
+
+
+def nested_repos(worktree: Path) -> dict[str, str | None] | None:
+    """Every path in `worktree` host git could treat as a repository of its
+    own, mapped to the commit its gitlink records -- None for an untracked
+    one, which `git add -A` would stage as a gitlink. None when git cannot
+    read the worktree at all.
+
+    Read without entering any of them (Kraft-nx4id): `ls-files -s` is the
+    index alone, and `ls-files --others` lists an untracked directory holding
+    a `.git` as `path/` without opening it -- neither parses the nested
+    repository's config, let alone runs anything from it."""
+    staged = _ls_files(worktree, "-s")
+    untracked = _ls_files(worktree, "--others", "--exclude-standard")
+    if staged is None or untracked is None:
+        return None
+    found: dict[str, str | None] = {}
+    for entry in staged:
+        meta, _, path = entry.partition("\t")
+        mode, sha, _ = meta.split(" ", 2)
+        if mode == "160000":
+            found[path] = sha
+    for path in untracked:
+        if path.endswith("/"):
+            found[path.rstrip("/")] = None
+    return found
+
+
+def _gitlinks_at(worktree: Path, rev: str) -> dict[str, str] | None:
+    done = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", rev], cwd=worktree, capture_output=True, text=True
+    )
+    if done.returncode != 0:
+        return None
+    links = {}
+    for entry in done.stdout.split("\0")[:-1]:
+        meta, _, path = entry.partition("\t")
+        mode, _, sha = meta.split(" ", 2)
+        if mode == "160000":
+            links[path] = sha
+    return links
+
+
+def planted_repos(worktree: Path, base: str | None) -> list[str] | None:
+    """The nested repositories in a sandboxed item's `worktree` its worker
+    made, which no host git may be let near -- or None when git cannot say.
+
+    A sandboxed item declares no submodules (Ruling 180 refuses the pairing),
+    so none of these is Kraft's: an untracked nested repository, a gitlink
+    whose directory holds a `.git` (git enters those), and a gitlink the
+    branch added or moved since `base`. A gitlink `base` already had, left
+    unpopulated, is the repository's own and inert -- git has nothing to
+    enter -- so it does not stop a sandboxed item on a repo with submodules."""
+    found = nested_repos(worktree)
+    at_base = _gitlinks_at(worktree, base) if base else {}
+    if found is None or at_base is None:
+        return None
+    return sorted(
+        path
+        for path, sha in found.items()
+        if sha is None
+        or os.path.lexists(worktree / path / ".git")
+        or (base and at_base.get(path) != sha)
+    )
+
+
+def planted_refusal(who: str, paths: list[str]) -> str:
+    """Why a sandboxed item with a nested repository stops (Kraft-nx4id)."""
+    return (
+        f"{who} runs sandboxed, and its worktree holds git repositories Kraft did "
+        f"not create: {', '.join(paths)}. Host git would read their config -- "
+        "which a sandboxed worker writes -- so Kraft runs no git there until a "
+        "person looks. Remove them (or `git rm --cached` the gitlinks) and retry, "
+        "or abandon the item"
+    )
 
 
 async def teardown(session_id: str) -> None:
