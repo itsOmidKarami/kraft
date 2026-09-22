@@ -752,7 +752,7 @@ origin: src/kraft/policy.py §_tool_names -- Kraft-9i6xy: the gate (`sessions.pe
 
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
-enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy, tests/api/test_repository_policy.py::test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all, tests/api/test_repository_policy.py::test_a_member_policy_the_instance_refuses_refuses_the_workspace_item, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy, tests/test_policy.py::test_the_meet_of_repository_layers_is_the_tightest_of_each_field, tests/templates/test_workspace_publication.py::test_each_repository_binds_its_own_task_and_the_checkout_binds_all, tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[manual], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[auto], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_its_nodes_policy_refuses_never_launches[token-budget-spent]
+enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy, tests/api/test_repository_policy.py::test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all, tests/api/test_repository_policy.py::test_a_member_policy_the_instance_refuses_refuses_the_workspace_item, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy, tests/test_policy.py::test_the_meet_of_repository_layers_is_the_tightest_of_each_field, tests/templates/test_workspace_fanout.py::test_each_repository_binds_its_own_task_and_the_checkout_binds_all, tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[manual], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[auto], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_its_nodes_policy_refuses_never_launches[token-budget-spent]
 origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `config.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
@@ -816,33 +816,33 @@ enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge
 
 A workspace-targeted work item SHALL provide tasks an assembled checkout that
 contains its selected member repositories at their declared paths.
-enforced-by: tests/test_builtins.py::test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch, tests/test_builtins.py::test_ensure_worktree_never_runs_a_blanket_submodule_init, tests/templates/test_workspace_publication.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once
+enforced-by: tests/test_builtins.py::test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch, tests/test_builtins.py::test_ensure_worktree_never_runs_a_blanket_submodule_init, tests/templates/test_workspace_fanout.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once
 
 ## REQ task-may-explicitly-fan-out-by-repository
 
 A task MAY explicitly run once for each repository selected by a work item.
 Tasks that do not opt in SHALL run in the work item's ordinary execution
 context.
-enforced-by: tests/templates/test_workspace_publication.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once, tests/templates/test_workspace_publication.py::test_a_fanned_out_task_fails_when_any_repository_fails, tests/templates/test_workspace_publication.py::test_a_fanned_out_run_reads_its_own_repositorys_entry
+enforced-by: tests/templates/test_workspace_fanout.py::test_a_task_opting_in_runs_once_per_selected_repository_and_others_once, tests/templates/test_workspace_fanout.py::test_a_fanned_out_task_fails_when_any_repository_fails, tests/templates/test_workspace_fanout.py::test_a_fanned_out_run_reads_its_own_repositorys_entry
 
 ## REQ repository-area-can-declare-setup-and-test-scopes
 
 A repository area MAY declare its setup requirements and test scopes. Area
 test scopes SHALL use the same selection and result semantics as repository
 test scopes.
-enforced-by: tests/test_config_repos.py::test_load_repos_reads_an_entry[keeps-an-area-as-written], tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-covering-no-path], tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
+enforced-by: tests/test_config_repos.py::test_load_repos_reads_an_entry[keeps-an-area-as-written], tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-covering-no-path], tests/templates/test_workspace_fanout.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ selected-test-scope-activates-its-area-setup
 
 Before running a selected test scope belonging to an area, the system SHALL
 apply that area's setup requirements.
-enforced-by: tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
+enforced-by: tests/templates/test_workspace_fanout.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ unexpected-area-changes-are-tested
 
 When changed paths select a test scope from an area not chosen at intake, the
 system SHALL still apply that area's setup requirements and run the scope.
-enforced-by: tests/templates/test_workspace_publication.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
+enforced-by: tests/templates/test_workspace_fanout.py::test_a_changed_path_in_an_area_runs_its_setup_then_its_scope
 
 ## REQ work-item-target-is-typed-and-immutable
 
