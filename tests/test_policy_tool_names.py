@@ -167,14 +167,18 @@ def test_a_snapshot_frozen_with_a_rule_still_renders_on_the_board(client, repo):
         json={"repo": str(repo), "title": "t", "chain_template": "quick-task", "autostart": False},
     ).json()["id"]
     db = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
-    with sqlite3.connect(db) as conn:
-        (raw,) = conn.execute(
-            "SELECT materialized_chain FROM work_items WHERE id = ?", (wid,)
-        ).fetchone()
-        conn.execute(
-            "UPDATE work_items SET materialized_chain = ? WHERE id = ?",
-            (with_a_frozen_rule(raw), wid),
-        )
+    conn = sqlite3.connect(db)
+    try:
+        with conn:
+            (raw,) = conn.execute(
+                "SELECT materialized_chain FROM work_items WHERE id = ?", (wid,)
+            ).fetchone()
+            conn.execute(
+                "UPDATE work_items SET materialized_chain = ? WHERE id = ?",
+                (with_a_frozen_rule(raw), wid),
+            )
+    finally:
+        conn.close()
 
     r = client.get(f"/api/work-items/{wid}")
 
