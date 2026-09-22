@@ -33,6 +33,9 @@ class _NodeOverride(_ModelEffortOverride):
     auto_escalate_delay_s: Annotated[StrictInt, Field(ge=0)] = Field(default=None)
     attempts: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
     wall_clock_s: Annotated[StrictInt, Field(ge=1)] = Field(default=None)
+    #: Appended to every agent task this node dispatches (Kraft-a7ers), never
+    #: in place of the task's own prompt: `extra_prompt_note`.
+    extra_prompt: StrictStr | None = None
 
 
 def _errors(
@@ -52,7 +55,7 @@ def _errors(
             return [f"{object_name} must be an object" if object_name else "must be an object"]
         error = errors[0]
         field = str(error["loc"][0])
-        if field in {"model", "escalate_model"}:
+        if field in {"model", "escalate_model", "extra_prompt"}:
             return [f"{field!r} must be a string or null"]
         if field == "effort":
             return [f"'effort' must be one of {sorted(_EFFORT_LEVELS)}; got {values[field]!r}"]
@@ -91,3 +94,41 @@ def validate_agent_overrides(overrides: dict) -> list[str]:
         f"agent_overrides {error}" if not error.startswith("agent_overrides") else error
         for error in errors
     ]
+
+
+def extra_prompt_note(text: str | None) -> str:
+    """A node override's `extra_prompt` as it follows a task's instruction:
+    after the task's own prompt and brief, so it adds to the task rather than
+    replacing it. Empty when there is none."""
+    if not text:
+        return ""
+    return f"\n\nThe operator added this note for this node, on top of the task above:\n\n{text}"
+
+
+def harness_refusal(node, fields: dict) -> str | None:
+    """Why the harness one of `node`'s agent tasks launches on would refuse
+    this override's model/effort, or None (Kraft-a7ers): said at the override,
+    not after the item has paid for a worktree. Every task `dispatch_node` runs
+    for the node, so not its gate's `auto_review`, which takes item-wide
+    overrides only (`gate_review`). A profile that cannot be resolved is left
+    to the launch, which already stops on it in its own words."""
+    from kraft import harness as _harness
+    from kraft.adapters import agent as _agent
+    from kraft.templates.models import AgentTask
+
+    asked = {k: fields[k] for k in ("model", "escalate_model", "effort") if fields.get(k)}
+    if not asked:
+        return None
+    harnesses = _harness.load(None)
+    for resolved in node.tasks():
+        if resolved is node.auto_review or not isinstance(resolved.task, AgentTask):
+            continue
+        try:
+            h = harnesses.valid[_agent.harness_profile(resolved.task.harness, harnesses).provider]
+        except _agent.HarnessUnavailable, KeyError:
+            continue
+        for key, value in asked.items():
+            capability = "model" if key == "escalate_model" else key
+            if not (h.supports(capability) and h.value_ok(capability, value)):
+                return f"{key!r} {value!r} is refused by harness {h.id!r} ({resolved.path})"
+    return None

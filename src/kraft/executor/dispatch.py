@@ -19,6 +19,7 @@ from kraft import config as _config
 from kraft import events, store
 from kraft import findings as _findings
 from kraft import harness as _harness
+from kraft import overrides as _overrides
 from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft import usage as _usage
@@ -804,10 +805,9 @@ async def _dispatch_task(
         json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )
     node_override = store.node_overrides_of(work_item_row).get(node.id, {})
-    model_effort = {
-        k: v for k, v in node_override.items() if k in ("model", "escalate_model", "effort")
-    }
-    merged_override = {**item_override, **model_effort}
+    instruction += _overrides.extra_prompt_note(node_override.get("extra_prompt"))
+    keys = ("model", "escalate_model", "effort")
+    merged_override = {**item_override, **{k: v for k, v in node_override.items() if k in keys}}
     try:
         inv = _agent.resolve_agent_task(
             t,

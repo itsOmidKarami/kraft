@@ -210,6 +210,20 @@ def test_create_work_item_forwards_skip_nodes_budget_and_node_overrides(monkeypa
     assert "budget_usd" not in seen[1]
 
 
+def test_set_node_overrides_forwards_model_effort_and_extra_prompt(monkeypatch):
+    """Kraft-a7ers: the MCP door names the same per-node fields the CLI does."""
+    seen = []
+
+    async def fake(*args, **kwargs):
+        seen.append(kwargs)
+        return {"id": "w1"}
+
+    monkeypatch.setattr(mcp.client, "set_node_overrides", fake)
+    fields = {"model": "opus", "effort": "high", "extra_prompt": "Mind the order."}
+    asyncio.run(mcp.build().call_tool("set_node_overrides", {"node_id": "plan", **fields}))
+    assert fields.items() <= seen[0].items()
+
+
 def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path):
     """Kraft-xs3ri: the MCP door, not only the client, hands back what
     `GET /repos` stores for an already-connected repo -- never the probe,
