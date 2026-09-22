@@ -70,6 +70,12 @@ An `agent` task's keys:
 | `policy` | This task's own policy layer. |
 | `skippable` | `false` to refuse an operator's skip. |
 
+A recovery that concludes no repair can help reports `failed` with
+`"suggested_action": {"action": "skip" | "retry" | "abandon", "reason": "..."}`
+in its result file. The stop that follows carries it: `GET /api/work-items/{id}`
+returns it as `suggested_action`, and `kraft view show` prints the one command
+that takes it. An infra stop suggests `retry`.
+
 A `subprocess` task has a `command`; a `builtin` task a `ref`
 (`kraft.verify_changed_test_scopes`, which runs the repo's own test scopes); a
 `forge` task a `target` (`mr.open_draft`, `mr.ci`, `mr.automated_review`,

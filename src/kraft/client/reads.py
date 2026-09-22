@@ -117,6 +117,9 @@ async def get_work_item(work_item_id: str | None = None, *, full: bool = False) 
         "attachments",
         # where the implementer is in its plan, "3 of 6 · title" (None off that node)
         "progress",
+        # why it is stopped, and what the chain suggests doing about it (Kraft-s7c04.27)
+        "stop_reason",
+        "suggested_action",
     )
     return {
         **{k: item[k] for k in keep if k in item},

@@ -9,6 +9,7 @@ from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import events, store, waits
 from kraft import policy as _policy
+from kraft.adapters import subprocess as _subprocess
 from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext
 from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
@@ -204,6 +205,35 @@ async def stop_for_waiting(
     return WAITING
 
 
+#: The suggestion a stop makes when what stopped it is outside the work:
+#: nothing about the code is wrong, so the answer is the same node again once
+#: the outside recovers (Kraft-s7c04.27).
+RETRY_LATER = {
+    "action": "retry",
+    "reason": "the cause is outside the code; retry once it has recovered",
+}
+
+
+def suggestion(db, work_item_id: str, node_id: str) -> dict | None:
+    """What the node's latest session suggested a person do next, from its
+    result file's `suggested_action`, or None (Kraft-s7c04.27).
+
+    The latest session, the one `store.mark_needs_human` names on the stop: a
+    repair that concluded no repair can help reports `failed`, so it is the
+    last thing the node ran before stopping. Read before any escalation turn,
+    whose own session would otherwise stand in front of it."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT result_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node_id),
+        ).fetchone()
+    )
+    if row is None or not row["result_path"]:
+        return None
+    return _subprocess.read_suggested_action(Path(row["result_path"]))
+
+
 async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
     """Something outside the code broke and a repair cannot fix it: the
     persisted `ci_infra:<node_id>` retry cap is spent on a pipeline red for
@@ -221,7 +251,9 @@ async def stop_for_infra(db, work_item_id: str, node: ResolvedNode) -> str:
         ),
         "CI infrastructure failed and retrying it did not recover",
     )
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, suggested=RETRY_LATER)
+    )
     return "needs_human"
 
 

@@ -139,6 +139,29 @@ def read_question(path: Path) -> str | None:
     return _read_str_field(path, "question")
 
 
+#: What a stop may suggest a person do next (Kraft-s7c04.27): each is one
+#: existing verb -- `kraft item skip`, `kraft item retry`, `kraft item abandon`.
+SUGGESTED_ACTIONS = ("skip", "retry", "abandon")
+
+
+def read_suggested_action(path: Path) -> dict | None:
+    """`suggested_action` from a result file, as `{"action", "reason"}`, or
+    None when it is missing or malformed. An agent that concluded no repair
+    can help -- the node should be skipped, retried later, or the item
+    abandoned -- says so here rather than only in prose, so the stop can offer
+    it as one command. A shape Kraft cannot act on is dropped, not guessed at.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except OSError, ValueError:
+        return None
+    value = data.get("suggested_action") if isinstance(data, dict) else None
+    if not isinstance(value, dict) or value.get("action") not in SUGGESTED_ACTIONS:
+        return None
+    reason = value.get("reason")
+    return {"action": value["action"], "reason": reason if isinstance(reason, str) else ""}
+
+
 def read_verdict(path: Path) -> str | None:
     """`verdict` from a gate-review result file, or None (Kraft-zr3s).
 
