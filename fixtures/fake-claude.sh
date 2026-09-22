@@ -44,6 +44,13 @@ for arg in "$@"; do
   esac
 done
 
+# The adapter runs the real CLI with `--output-format stream-json --verbose`,
+# which opens with an init line, before any work -- so a session paused
+# mid-run has already named itself. KRAFT_FAKE_CLAUDE_SESSION_ID is the
+# provider session id that line carries, the one `--resume` takes.
+printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]%s}\n' \
+  "${KRAFT_FAKE_CLAUDE_SESSION_ID:+,\"session_id\":\"$KRAFT_FAKE_CLAUDE_SESSION_ID\"}"
+
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
   mode="fix"
@@ -90,40 +97,45 @@ fake-claude session
 EOF
 fi
 
-# A hook with `artifact:` in the registry is contractually required to write and
-# commit a document. Honour it for the two planning hooks, so the gate, the
-# artifact endpoint and the indexer all see the real inputs.
+# A task that `produces:` a document is contractually required to write and
+# commit it. Honour that, so the gate, the artifact endpoint and the indexer all
+# see the real inputs.
 hook="$(field 'Hook point')"
 item="$(field 'Work item')"
 
-# chain_review's own decision (ready_for_approval/error) lives inside its
-# artifact envelope below, not in this outer per-task result -- a test's
-# KRAFT_FAKE_CLAUDE_STATUS knob is for the node under test (e.g.
-# `implementation` asking a needs_context question), not every node the fake
-# happens to run before it. Forcing this node's own report to "done" keeps
-# that knob from starving chain_finalized of the gate it needs to reach.
-if [ "$hook" = "on.chain.review_ready" ]; then
-  status="done"
-fi
-
-case "$hook" in
-  on.spec.requested) kind="spec" ;;
-  on.plan.requested) kind="plan" ;;
-  *) kind="" ;;
-esac
+# A task's hook point is its canonical path (`spec.main.author`), and what it
+# must write is declared by `produces:` and spelled out in the instruction the
+# adapter built. So read the artifact contract line itself -- "Write your <kind> to
+# <path>" -- which is the same thing a real agent does, and the only signal
+# that survives a chain author renaming the node. Not a path substring: an
+# attached spec puts `.engineering/specs/` into the *plan* author's context
+# too, and that read wrote the plan author a spec.
+kind="$(printf '%s\n' "$ctx" | sed -n 's/.*Write your \([a-z_]*\) to .*/\1/p' | head -1)"
 # Only on a status that advances the chain (executor._ADVANCING), mirroring
 # tests/support/fake_agent.py. A real worker that reports needs_context or a
 # failure has written nothing, and `agent._resolve_status` holds only a claim of
 # success to the artifact -- a fake that writes it regardless is the reason the
 # needs_context downgrade bug in MR !58 passed every needs_context test.
-# `$status` is already resolved here, including the on.chain.review_ready
-# override above, so this is a guard and not a reordering.
+# `$status` is already resolved here, so this is a guard and not a reordering.
 write_artifact=""
 case "$status" in
   done|done_with_concerns) write_artifact=1 ;;
 esac
 if [ -n "${KRAFT_FAKE_CLAUDE_SKIP_ARTIFACT:-}" ]; then write_artifact=""; fi
 
+# The labels an `mr_meta` names, so a test can see them reach the opened MR.
+labels=""
+if [ "$kind" = mr_meta ] && [ -n "${KRAFT_FAKE_CLAUDE_LABELS:-}" ]; then
+  labels="labels: [${KRAFT_FAKE_CLAUDE_LABELS}]
+"
+fi
+
+# A chain revision is a change set Kraft parses, not prose: a fake one proposes
+# no change, the common real answer, so its gate passes without a human.
+body="fake ${kind} body"
+if [ "$kind" = chain_revision ]; then
+  body="$(printf '%s\n%s\n%s' '```json' '{"rationale": "fake: the chain fits the plan"}' '```')"
+fi
 if [ -n "$kind" ] && [ -n "$item" ] && [ -n "$write_artifact" ]; then
   mkdir -p ".engineering/${kind}s"
   cat > ".engineering/${kind}s/${item}.md" <<EOF
@@ -132,52 +144,14 @@ work_item_ids: [${item}]
 node_id: $(field 'Node')
 hook_point: ${hook}
 kind: ${kind}s
-title: fake ${kind}
+${labels}title: fake ${kind}
 ---
 
-fake ${kind} body
+${body}
 EOF
   git add ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
   git -c user.name=fake -c user.email=fake@kraft \
       commit -q -m "fake ${kind}" -- ".engineering/${kind}s/${item}.md" >/dev/null 2>&1 || true
-fi
-
-# chain_review's artifact is a `{status, revised_chain_nodes, rationale}`
-# envelope (skills/chain-review/SKILL.md), not free prose -- the orchestrator
-# splices `revised_chain_nodes` into `chain_definition` at chain_finalized
-# approval (Kraft-hm0). The fake default is the honest "no change" answer:
-# read the item's own chain back out of the run's db and echo its unexecuted
-# tail unchanged, so a caller that never touches chain review still walks the
-# rest of the chain exactly as before this hook grew teeth.
-if [ "$hook" = "on.chain.review_ready" ] && [ -n "$item" ] && [ -n "${KRAFT_RUN_DIR:-}" ]; then
-  mkdir -p .engineering/chain_reviews
-  python3 - "$item" "${KRAFT_RUN_DIR}/orchestrator.db" \
-      > ".engineering/chain_reviews/${item}.md" <<'PY'
-import json
-import sqlite3
-import sys
-
-item, db_path = sys.argv[1], sys.argv[2]
-conn = sqlite3.connect(db_path)
-row = conn.execute(
-    "SELECT chain_definition, current_node_id FROM work_items WHERE id = ?", (item,)
-).fetchone()
-chain = json.loads(row[0])
-nodes = chain["nodes"]
-idx = next((i for i, n in enumerate(nodes) if n["id"] == row[1]), len(nodes) - 1)
-tail = nodes[idx + 1 :]
-envelope = {"status": "ready_for_approval", "revised_chain_nodes": tail, "rationale": "no change"}
-print("---")
-print(f"work_item_ids: [{item}]")
-print("kind: chain_reviews")
-print("title: fake chain review")
-print("---")
-print()
-print(json.dumps(envelope))
-PY
-  git add ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
-  git -c user.name=fake -c user.email=fake@kraft \
-      commit -q -m "fake chain_review" -- ".engineering/chain_reviews/${item}.md" >/dev/null 2>&1 || true
 fi
 
 if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
@@ -201,13 +175,11 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
-# The adapter runs the real CLI with `--output-format stream-json --verbose`, so
-# the fake streams the same shapes: an init line carrying the model, one
-# assistant line carrying a request_id and per-request usage, then the result
-# envelope last (usage capture and `_envelope_is_error` both read the last
-# line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the first
-# line and the rest, so a test can read the log while the child still runs.
-printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]}\n'
+# The rest of the stream, in the real CLI's shapes: after the init line above,
+# one assistant line carrying a request_id and per-request usage, then the
+# result envelope last (usage capture and `_envelope_is_error` both read the
+# last line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the
+# first line and the rest, so a test can read the log while the child still runs.
 sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
 printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
-printf '{"type":"result","is_error":false,"total_cost_usd":0.035,"modelUsage":{"fake-agent":{"inputTokens":1500,"outputTokens":200}},"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}\n'
+printf '{"type":"result","is_error":false,"total_cost_usd":0.035,"modelUsage":{"fake-agent":{"inputTokens":1000,"outputTokens":200,"cacheReadInputTokens":500}},"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}\n'

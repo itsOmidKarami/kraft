@@ -2,9 +2,18 @@ import type { RepoRow } from "./settings";
 
 export interface ChainNode {
   id: string;
+  /** `exec` or `gate` on a Template Schema V1 chain, absent on a legacy one.
+   *  A V1 gate *is* a node of its own rather than a `gate_after` string on the
+   *  node in front of it, so this is how the two are told apart -- never by
+   *  faking `gate_after` onto the gate node. */
+  kind?: "exec" | "gate";
+  /** On a V1 node, the attachment kind that drops it at intake -- the gate
+   *  deciding that document and the node that would write it
+   *  (`ResolvedNode.covered_by`, Kraft-ene04). Absent on a legacy node. */
+  covered_by?: string | null;
   tasks: string[];
   /** Ordered groups of concurrent tasks. Always present on a materialized
-   *  chain (`templates.with_steps`); `tasks` is the same list flattened, in
+   *  chain (`store.node_view`); `tasks` is the same list flattened, in
    *  group order, and every other consumer reads that instead. */
   steps?: string[][];
   gate_after: string | null;
@@ -25,7 +34,7 @@ export interface ChainNode {
    *  human already on the way isn't preempted. `0` fires immediately. */
   auto_escalate_delay_s?: number | null;
   /** Hook points run to repair a red measurement before the fix loop retries
-   *  (templates.py `NODE_CARRYOVER_FIELDS`). */
+   *  (`store.node_view`: the node's own recovery pass). */
   on_failure?: string[] | null;
 }
 
@@ -42,9 +51,9 @@ export type NodeOverrides = Record<
   }
 >;
 
-/** Where the implementer is in its plan (Kraft-qqz8): "Task 3 of 6", derived
+/** Where the implementer is in its plan (Kraft-qqz8): "3 of 6 · title", derived
  *  server-side from the plan's `## Task N` headings, the latest
- *  `task_progress` report and the highest task a commit subject names
+ *  `plan_progress` report and the highest task a commit subject names
  *  (`progress.combine`). `null`/absent off the implementation node or for a
  *  plan with no headings. The list endpoint (`_board_progress`) sends it too,
  *  without `tasks`, for the board row's "Task 3/6" line. */
@@ -66,6 +75,9 @@ export interface BudgetCap {
 
 export interface ChainDefinition {
   template_id: string;
+  /** Always sent by the server (`store.chain_view` fills it for either chain
+   *  shape), but read through a `?? []` at every use: the field was `{}` on a
+   *  V1 row for one release, and a blank board is the failure mode. */
   nodes: ChainNode[];
 }
 
@@ -79,7 +91,7 @@ export type WorkItemStatus =
   // Waiting on an API rate limit to reset; the poller relaunches it, no
   // human paged.
   | "rate_limited"
-  // Parked on a pipeline that has not settled; the ci_wait poller re-enters
+  // Parked on a pipeline that has not settled; the wait scheduler re-enters
   // the node when retry_at comes due, no human paged (Kraft-ru98).
   | "waiting";
 
@@ -124,6 +136,9 @@ export interface WorkItem {
   /** The gate waiting on a person, straight from the server — a rejected gate
    *  is not pending, which no client-side inference from sessions can see. */
   pending_gate?: string | null;
+  /** The `launch_fallback` payload when the item's current or last launch ran
+   *  on a fallback candidate (Kraft-0a3h8); null otherwise. */
+  fallback?: Record<string, unknown> | null;
   /** Repo-relative path to the document the pending gate is a decision about,
    *  or null when the agent wrote nothing for a human to review. */
   gate_artifact?: string | null;
@@ -220,7 +235,7 @@ export type SessionStatus =
   | "rate_limited"
   | "config_error"
   // A forge task (ci_poll) parked on a pipeline that has not settled; the
-  // ci_wait poller re-enters it when retry_at comes due (Kraft-ru98).
+  // wait scheduler re-enters it when retry_at comes due (Kraft-ru98).
   | "waiting";
 
 export interface WorkerSession {
@@ -240,6 +255,9 @@ export interface WorkerSession {
   exited_at: string | null;
   tokens_in: number | null;
   tokens_out: number | null;
+  /** Cache kinds apart from tokens_in (Ruling 211); null on a row from before. */
+  tokens_cache_write?: number | null;
+  tokens_cache_read?: number | null;
   cost_usd: number | null;
   wall_ms: number | null;
   model: string | null;
@@ -263,6 +281,10 @@ export interface KraftEvent {
 export interface UsageRollup {
   tokens_in: number;
   tokens_out: number;
+  tokens_cache_write?: number;
+  tokens_cache_read?: number;
+  /** False when some session predates the split: its cache use is in tokens_in. */
+  split_complete?: boolean;
   cost_usd: number;
   /** False when a session spent tokens but reported no cost — the sum is a floor. */
   cost_complete: boolean;

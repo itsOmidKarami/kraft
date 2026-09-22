@@ -60,6 +60,27 @@ describe("Settings · repos (5a)", () => {
     expect(screen.getAllByRole("switch").length).toBeGreaterThan(0);
   });
 
+  it("shows a dev repo's fake forge as selected", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo({ forge: "fake" })] });
+    renderAt("/settings/repos");
+    await userEvent.click(await screen.findByText("repo-a"));
+    const forge = await screen.findByRole("radiogroup", { name: "forge" });
+    expect(within(forge).getByRole("radio", { name: /fake \(dev only\)/ })).toBeChecked();
+
+    // Switching away in the draft must not take the way back with it: the
+    // option is keyed on the saved repo, not the draft (review finding 9).
+    await userEvent.click(within(forge).getByRole("radio", { name: "github" }));
+    expect(within(forge).getByRole("radio", { name: /fake \(dev only\)/ })).not.toBeChecked();
+  });
+
+  it("does not offer the dev-only fake forge to a real repo", async () => {
+    renderAt("/settings/repos");
+    await userEvent.click(await screen.findByText("repo-a"));
+    const forge = await screen.findByRole("radiogroup", { name: "forge" });
+    expect(within(forge).queryByRole("radio", { name: /fake/ })).toBeNull();
+    expect(within(forge).getByRole("radio", { name: "github" })).toBeChecked();
+  });
+
   it("clicking a row selects it into the URL and opens the detail pane", async () => {
     renderAt("/settings/repos");
     await userEvent.click(await screen.findByText("repo-a"));
@@ -103,19 +124,13 @@ describe("Settings · repos (5a)", () => {
     return dialog;
   };
 
-  it("shows the detected forge and project", async () => {
-    const dialog = await renderProbe({ forge: "github", project: "owner/repo" });
-    expect(await within(dialog).findByText("github · owner/repo")).toBeInTheDocument();
-  });
-
-  it("says so when no forge was detected", async () => {
-    const dialog = await renderProbe({ forge: null, project: null });
-    expect(await within(dialog).findByText("no forge remote detected")).toBeInTheDocument();
-  });
-
-  it("shows the forge alone when no project was recorded", async () => {
-    const dialog = await renderProbe({ forge: "gitea", project: null });
-    expect(await within(dialog).findByText("gitea")).toBeInTheDocument();
+  it.each([
+    ["the detected forge and project", { forge: "github", project: "owner/repo" }, "github · owner/repo"],
+    ["that no forge was detected", { forge: null, project: null }, "no forge remote detected"],
+    ["the forge alone when no project was recorded", { forge: "gitea", project: null }, "gitea"],
+  ])("shows %s", async (_, probe, text) => {
+    const dialog = await renderProbe(probe);
+    expect(await within(dialog).findByText(text)).toBeInTheDocument();
   });
 
   it("/settings with no page is the Settings index, not a redirect to Repos (W7.9)", async () => {
@@ -180,6 +195,23 @@ describe("Settings · repos (5a)", () => {
     expect(screen.getByText("a")).toBeInTheDocument();
   });
 
+  it("reads a repo with no `enabled` key at all as enabled (Ruling 212)", async () => {
+    // An absent `enabled` -- the shape `model_dump_repo` writes for an entry
+    // that never set one -- must read as on, not as the falsy default a plain
+    // `r.enabled` check would give it.
+    const noKey: Partial<import("../../types").Repo> = repo({ path: "/ws", name: "ws" });
+    delete noKey.enabled;
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [noKey as import("../../types").Repo],
+    });
+    renderAt("/settings/repos");
+    expect(await screen.findByText("ws")).toBeInTheDocument();
+    expect(screen.queryByText(/Detected/)).toBeNull();
+    const row = screen.getByText("ws").closest("[data-repo]")!;
+    expect(within(row as HTMLElement).getByRole("switch")).toBeChecked();
+    expect(within(row as HTMLElement).getByText("enabled")).toBeInTheDocument();
+  });
+
   it("keeps a disabled but managed repo in the main list", async () => {
     // "a human turned this off" is a decision, and must not read as noise
     vi.spyOn(api, "getRepos").mockResolvedValue({
@@ -192,12 +224,33 @@ describe("Settings · repos (5a)", () => {
 });
 
 describe("Settings · repo detail (5b)", () => {
-  it("opens the repo detail with GENERAL/TESTING/FORGE/CROSS-REPO/AGENT sections", async () => {
+  it("opens the repo detail with GENERAL/TESTING/FORGE/AGENT sections", async () => {
     renderAt("/settings/repos?repo=/repo-a");
     expect(await screen.findByRole("heading", { name: "repo-a" })).toBeInTheDocument();
-    for (const label of ["General", "Testing", "Forge", "Cross-repo", "Agent"]) {
+    for (const label of ["General", "Testing", "Forge", "Agent"]) {
       expect(screen.getByText(label, { exact: false })).toBeInTheDocument();
     }
+    // Ruling 165: the root pointer default is a workspace's, not a repo's.
+    expect(screen.queryByText("Cross-repo")).toBeNull();
+    expect(screen.queryByText("root merge policy")).toBeNull();
+  });
+
+  it("models are set per harness profile and round-trip through patchRepo", async () => {
+    const repoC = repo({ path: "/repo-c", name: "repo-c", models: { claude: "sonnet" } });
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo(), repoC] });
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
+    renderAt("/settings/repos?repo=/repo-c");
+
+    const models = await screen.findByLabelText("models");
+    expect(models).toHaveValue("claude=sonnet");
+    await userEvent.clear(models);
+    await userEvent.type(models, "claude=opus{enter}codex = gpt-5{enter}half");
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(patch).toHaveBeenCalledWith(
+      "/repo-c",
+      expect.objectContaining({ models: { claude: "opus", codex: "gpt-5" } }),
+    );
   });
 
   it("no longer offers a per-submodule config table", async () => {
@@ -279,6 +332,17 @@ describe("Settings · repo detail (5b)", () => {
       "/repo-c",
       expect.objectContaining({ local_files: [".env"] }),
     );
+  });
+
+  it("the steering picker offers the library's steering profiles rather than a free-text file name", async () => {
+    const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repo());
+    renderAt("/settings/repos?repo=/repo-a");
+    const picker = await screen.findByRole("combobox", { name: "add steering profile" });
+    await waitFor(() => expect(within(picker).getByRole("option", { name: "house-style" })).toBeInTheDocument());
+    await userEvent.selectOptions(picker, "house-style");
+    expect(await screen.findByText("house-style ✕")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    expect(patch).toHaveBeenCalledWith("/repo-a", expect.objectContaining({ steering: ["house-style"] }));
   });
 
   it("re-probing offers the found scopes, and applying them stages a draft edit", async () => {

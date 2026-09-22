@@ -3,43 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-from dataclasses import dataclass
-from pathlib import Path
-from types import SimpleNamespace
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd
 
-from kraft import db, events, policy, rate_limit_retry, store
-from kraft.paths import RunDirs
-
-_FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+from kraft import events, policy, rate_limit_retry, store
 
 
-@dataclass
-class _Stub:
-    state: SimpleNamespace
-
-
-async def _stub(tmp_path, *, rate_limit_retries: int = 5) -> _Stub:
-    rd = RunDirs(tmp_path / "run").ensure()
-    database = await db.Database.open(rd.db)
-    registry = fake_registry(sys.executable, _FAKE_AGENT)
-    return _Stub(
-        state=SimpleNamespace(
-            db=database,
-            run_dirs=rd,
-            registry=registry,
-            templates_dir=tmp_path / "templates",  # no repos.yaml: _launch degrades cleanly
-            skills_dir=tmp_path / "skills",
-            policy=policy.Policy(
-                loops={},
-                default=policy.Cap(attempts=3, wall_clock_s=3600),
-                rate_limit_retries=rate_limit_retries,
-            ),
-            tasks={},
-        )
-    )
+def _state(tmp_path, *, rate_limit_retries: int = 5) -> dict:
+    """What `rate_limit_retry.tick` reads off `app.state` besides the database (`stub_app`)."""
+    return {
+        "templates_dir": tmp_path / "templates",  # no repos.yaml: _launch degrades cleanly
+        "skills_dir": tmp_path / "skills",
+        "policy": policy.Policy(
+            loops={},
+            default=policy.Cap(attempts=3, wall_clock_s=3600),
+            rate_limit_retries=rate_limit_retries,
+        ),
+    }
 
 
 _CHAIN = (
@@ -66,113 +46,217 @@ async def _seed_rate_limited(app, *, retry_at: str, repo: str, wid: str = "w1") 
     await app.state.db.write(lambda c: store.mark_rate_limited(c, wid, "implementation", retry_at))
 
 
-def _run(build, body):
-    async def main():
-        app = await build()
-        try:
-            return await body(app)
-        finally:
-            await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
-            await app.state.db.close()
-
-    return asyncio.run(main())
-
-
-def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch):
+async def test_tick_ignores_a_not_yet_due_item(tmp_path, monkeypatch, repo, stub_app):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
-    async def body(app):
-        await _seed_rate_limited(app, retry_at="2999-01-01T00:00:00+00:00", repo=str(repo))
-        assert await rate_limit_retry.tick(app) == []
-        row = app.state.db.read(
-            lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
-        )
-        assert row["status"] == "rate_limited"
-
-    _run(lambda: _stub(tmp_path), body)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2999-01-01T00:00:00+00:00", repo=str(repo))
+    assert await rate_limit_retry.tick(app) == []
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+    )
+    assert row["status"] == "rate_limited"
 
 
-def test_tick_relaunches_a_due_item(tmp_path, monkeypatch):
+async def test_tick_relaunches_a_due_item(tmp_path, monkeypatch, repo, stub_app):
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # leaves the calc bug in place, on purpose
     isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def body(app):
-        await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
-        got = await rate_limit_retry.tick(app)
-        assert got == ["w1"]
-        await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    got = await rate_limit_retry.tick(app)
+    assert got == ["w1"]
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
 
-        row = app.state.db.read(
-            lambda c: c.execute("SELECT status, retry_at FROM work_items WHERE id='w1'").fetchone()
-        )
-        # relaunched past `implementation`; verify's fake `on.test.run` subprocess
-        # then fails (KRAFT_FAKE_AGENT=noop leaves the calc bug), landing needs_human
-        assert row["status"] == "needs_human"
-        assert row["retry_at"] is None
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT status, retry_at FROM work_items WHERE id='w1'").fetchone()
+    )
+    # relaunched past `implementation`; verify's fake `on.test.run` subprocess
+    # then fails (KRAFT_FAKE_AGENT=noop leaves the calc bug), landing needs_human
+    assert row["status"] == "needs_human"
+    assert row["retry_at"] is None
 
-        types = {e["type"] for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))}
-        assert "work_item_retried" in types
-        ev = [
-            e["payload"]
-            for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))
-            if e["type"] == "work_item_retried"
-        ][0]
-        assert ev["steer"] == rate_limit_retry.RESUME_PROMPT
-
-    _run(lambda: _stub(tmp_path), body)
+    types = {e["type"] for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))}
+    assert "work_item_retried" in types
+    ev = [
+        e["payload"]
+        for e in app.state.db.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "work_item_retried"
+    ][0]
+    assert ev["steer"] == rate_limit_retry.RESUME_PROMPT
 
 
-def test_tick_falls_back_to_needs_human_once_the_cap_breaches(tmp_path, monkeypatch):
+async def test_a_relaunch_resets_no_cap_counter(tmp_path, monkeypatch, repo, stub_app):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the poller's
+    relaunch is Kraft's own retry, so the stopped node's counters stand."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
-
-    async def body(app):
-        await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
-        cap = policy.Cap(attempts=1, wall_clock_s=10**9)
+    isolated_bd(tmp_path)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    keys = ("ci_infra:implementation", "implementation.escalation")
+    for key in keys:
         await app.state.db.write(
-            lambda c: store.bump_counter(c, "w1", "rate_limit:implementation", cap)
-        )  # count now 1, == attempts: one more bump breaches
-
-        got = await rate_limit_retry.tick(app)
-        assert got == []
-        row = app.state.db.read(
-            lambda c: c.execute("SELECT status, retry_at FROM work_items WHERE id='w1'").fetchone()
+            lambda c, k=key: store.bump_counter(c, "w1", k, policy.Cap(9, 3600))
         )
-        assert row["status"] == "needs_human"
-        assert row["retry_at"] is None
-        assert app.state.tasks == {}  # nothing was relaunched
 
-    _run(lambda: _stub(tmp_path, rate_limit_retries=1), body)
+    assert await rate_limit_retry.tick(app) == ["w1"]
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+
+    counted = app.state.db.read(lambda c: store.cap_counts(c, "w1"))
+    assert [counted.get(key) for key in keys] == [1, 1]
 
 
-def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(tmp_path, monkeypatch):
+async def test_tick_falls_back_to_needs_human_once_the_cap_breaches(
+    tmp_path, monkeypatch, repo, stub_app
+):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
+
+    app = stub_app(**_state(tmp_path, rate_limit_retries=1))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    cap = policy.Cap(attempts=1, wall_clock_s=10**9)
+    await app.state.db.write(
+        lambda c: store.bump_counter(c, "w1", "rate_limit:implementation", cap)
+    )  # count now 1, == attempts: one more bump breaches
+
+    got = await rate_limit_retry.tick(app)
+    assert got == []
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT status, retry_at FROM work_items WHERE id='w1'").fetchone()
+    )
+    assert row["status"] == "needs_human"
+    assert row["retry_at"] is None
+    assert app.state.tasks == {}  # nothing was relaunched
+
+
+async def test_tick_does_not_reclaim_an_item_abandoned_before_relaunch(
+    tmp_path, monkeypatch, repo, stub_app
+):
     """The status flip is now `claim_for_run`'s, not `retry_after_cap`'s --
     without the poller's own claim, this would blindly write the item back to
     'active' and spawn into a worktree that may already be gone."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    repo = make_repo(tmp_path)
 
-    async def body(app):
-        await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
-        original_bump_counter = store.bump_counter
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    original_bump_counter = store.bump_counter
 
-        def bump_then_abandon(c, *a, **kw):
-            result = original_bump_counter(c, *a, **kw)
-            # the row is still 'rate_limited' here -- simulate a human's
-            # abandon landing in the window between bump_counter and the
-            # poller's own claim
-            store.abandon_work_item(c, "w1")
-            return result
+    def bump_then_abandon(c, *a, **kw):
+        result = original_bump_counter(c, *a, **kw)
+        # the row is still 'rate_limited' here -- simulate a human's
+        # abandon landing in the window between bump_counter and the
+        # poller's own claim
+        store.abandon_work_item(c, "w1")
+        return result
 
-        monkeypatch.setattr(store, "bump_counter", bump_then_abandon)
-        got = await rate_limit_retry.tick(app)
-        assert got == []
-        row = app.state.db.read(
-            lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+    monkeypatch.setattr(store, "bump_counter", bump_then_abandon)
+    got = await rate_limit_retry.tick(app)
+    assert got == []
+    row = app.state.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id='w1'").fetchone()
+    )
+    assert row["status"] == "abandoned"
+    assert app.state.tasks == {}
+
+
+async def test_a_v1_item_is_relaunched_rather_than_stranded_rate_limited(
+    tmp_path, monkeypatch, repo, stub_app
+):
+    """The same H1 shape as `ci_wait`'s, in the other poller: a V1 row's
+    `chain_definition` is `"{}"`, and the start index used to come from it after
+    the counter had already been bumped -- so the item stayed `rate_limited`
+    forever and nothing but a log line said why. Over `store.node_index` now,
+    which also needed `materialized_chain` adding to this poller's own SELECT."""
+    from support.harness import v1_chain, v1_item
+
+    chain = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo=repo,
+    )
+    spawned: list[int] = []
+
+    app = stub_app(**_state(tmp_path))
+    await v1_item(app.state.db, chain, repo=str(repo), wid="w1")
+    await app.state.db.write(lambda c: store.enter_node(c, "w1", "implementation"))
+    await app.state.db.write(
+        lambda c: store.mark_rate_limited(c, "w1", "implementation", "2000-01-01T00:00:00+00:00")
+    )
+    from kraft.api import deps as api_deps
+
+    def spawn(app, wid, coro):
+        spawned.append(1)
+        api_deps.discard(coro)  # never run: close it, or it leaks unawaited
+
+    monkeypatch.setattr(api_deps, "spawn", spawn)
+    await rate_limit_retry.tick(app)
+    assert spawned, "the poller found no node index and left the item rate_limited"
+
+
+def _status_of(app, wid="w1"):
+    return app.state.db.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
+    )["status"]
+
+
+async def test_a_node_the_chain_does_not_have_stops_the_item_rather_than_wedging_it(
+    tmp_path, repo, stub_app
+):
+    """N1's other half, and worse ordered: `claim_for_run` *then*
+    `retry_after_cap` *then* the index read, with `tick` filtering
+    `status = 'rate_limited'`. A return leaving it `active` is a permanent wedge
+    that looks live. The stop is `stops.claimed_or_stopped`'s."""
+    from support.harness import v1_chain, v1_item
+
+    chain = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            }
+        ],
+        repo=repo,
+    )
+
+    app = stub_app(**_state(tmp_path))
+    await v1_item(app.state.db, chain, repo=str(repo), wid="w1")
+    await app.state.db.write(lambda c: store.enter_node(c, "w1", "gone_from_the_chain"))
+    await app.state.db.write(
+        lambda c: store.mark_rate_limited(
+            c, "w1", "gone_from_the_chain", "2000-01-01T00:00:00+00:00"
         )
-        assert row["status"] == "abandoned"
-        assert app.state.tasks == {}
+    )
+    assert await rate_limit_retry.tick(app) == []
+    result = _status_of(app)
+    assert result == "needs_human"
 
-    _run(lambda: _stub(tmp_path), body)
+
+async def test_a_rate_limit_relaunch_leaves_the_position_to_the_walk(
+    tmp_path, monkeypatch, repo, stub_app
+):
+    """Kraft-c3dab: the poller relaunched at the node's first step, rerunning
+    the steps that had completed before the rate limit. It hands the walk no
+    position now; `walk.run_once` resumes at the item's cursor
+    (tests/executor/test_entry_paths.py)."""
+    from kraft import executor
+
+    seen = {}
+
+    async def fake_run(*args, **kw):
+        seen.update(kw)
+        return "completed"
+
+    monkeypatch.setattr(executor, "run", fake_run)
+    app = stub_app(**_state(tmp_path))
+    await _seed_rate_limited(app, retry_at="2000-01-01T00:00:00+00:00", repo=str(repo))
+    await app.state.db.write(lambda c: store.set_current_step(c, "w1", 2))
+
+    assert await rate_limit_retry.tick(app) == ["w1"]
+    await asyncio.gather(*app.state.tasks.values(), return_exceptions=True)
+    assert "start_index" not in seen and "start_step" not in seen
+    assert seen["work_item_id"] == "w1"

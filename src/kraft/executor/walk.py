@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from kraft import builtins as _builtins
@@ -12,23 +11,73 @@ from kraft import policy as _policy
 from kraft.adapters import beads
 from kraft.adapters import subprocess as _subprocess
 from kraft.executor import dispatch, entry, gates, prompts, stops
+from kraft.executor import read_only as _read_only
 from kraft.executor.context import (
+    _ADVANCING,
     BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
+    CONFLICT,
+    CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
+    READ_ONLY_VIOLATED,
+    REPAIR_DOUBTED,
+    TIME_CAPPED,
+    WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
     OnApprove,
     Steer,
 )
-from kraft.executor.dispatch import _current_base_ref
 from kraft.store import _now as _now
-from kraft.templates import Registry
+from kraft.templates.models import (
+    ExecNode,
+    ForgeTask,
+    GateNode,
+    MaterializedChain,
+    ResolvedNode,
+    ResolvedTask,
+)
 
 
-async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict:
+def chain_of(row) -> MaterializedChain:
+    """The work item's frozen V1 chain, or a clear failure.
+
+    `materialized_chain` is the executor's only input
+    (`materialized-chain-is-immutable-work-item-input`). A row without one was
+    written by the legacy intake path, which Task 5 retires: there is nothing
+    to walk and nothing to fall back to, so this says so rather than walking
+    something else.
+    """
+    chain = store.materialized_chain_of(row)
+    if chain is None:
+        raise LookupError(
+            f"work item {row['id']!r} has no materialized chain: it was filed by the legacy "
+            "intake path and cannot be executed"
+        )
+    return chain
+
+
+#: Task kinds whose work runs inside the orchestrator process, so no commit a
+#: fix agent makes in its worktree can change what executes (Kraft-s7c04.24).
+#: A subprocess task is deliberately absent: it runs the worktree's own
+#: command, which is exactly what a fix commit changes. An agent task is the
+#: worker itself. So is a builtin: V1's one builtin action,
+#: `kraft.verify_changed_test_scopes`, runs the repository's own test commands
+#: in the worktree (legacy's `on.test.run` was a subprocess), and counting it
+#: here stopped every red test in a fix-loop node with "reinstall and restart"
+#: instead of repairing it.
+_IN_PROCESS_KINDS = (ForgeTask,)
+
+
+def _in_process(task: ResolvedTask) -> bool:
+    return isinstance(task.task, _IN_PROCESS_KINDS)
+
+
+async def _diagnosis_bundle(
+    db, work_item_id: str, node: ResolvedNode, worktree, launch: LaunchContext | None = None
+) -> dict:
     """What a human reconstructs by hand today, gathered once at the moment
     the stuck detector gives up (Kraft-39ep): the worktree's own state, and
     the last measuring session's concerns, if it left any.
@@ -40,25 +89,45 @@ async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict
     from pathlib import Path
 
     from kraft.config import git_read
+    from kraft.worker.sandbox import SUBMODULES_UNENTERED
 
-    status = git_read(Path(worktree), "status", "--porcelain", expected_failure=True) or ""
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    try:
+        # No host git while a sandboxed co-task still writes the worktree
+        # (Kraft-69rwp); the bundle says why instead.
+        if row is not None:
+            stops.refuse_live_sandboxed_session(db, row, launch, what="the worktree status")
+        status = (
+            git_read(
+                Path(worktree), "status", SUBMODULES_UNENTERED, "--porcelain", expected_failure=True
+            )
+            or ""
+        )
+    except RuntimeError as exc:
+        status = f"(not read: {exc})"
     recent = git_read(Path(worktree), "log", "--oneline", "-5", expected_failure=True) or ""
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     # worker_session_exited carries no hook_point of its own, so a judge verdict
-    # (JUDGE_HOOK, told by JUDGE_PROMPT/SKILL.md that concerns is required on
+    # (the node's own `fix_loop.judge`, told by JUDGE_PROMPT/SKILL.md that concerns is required on
     # every verdict) and the measuring session it judged both write concerns
     # events, and the judge's always lands last in the same walk_node
     # iteration. Joined against worker_sessions here to skip the judge's own
     # sessions, so this stays the measuring session's concerns, not the
     # judge's reasoning about them.
-    judge_session_ids = db.read(
-        lambda c: {
-            r["id"]
-            for r in c.execute(
-                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
-                (work_item_id, dispatch.JUDGE_HOOK),
-            ).fetchall()
-        }
+    judge_session_ids = (
+        db.read(
+            lambda c: {
+                r["id"]
+                for r in c.execute(
+                    "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
+                    (work_item_id, node.judge.path),
+                ).fetchall()
+            }
+        )
+        if node.judge is not None
+        else set()
     )
     concerns = next(
         (
@@ -84,12 +153,6 @@ async def _diagnosis_bundle(db, work_item_id: str, node: dict, worktree) -> dict
 #: `round=1` `recover_node` used to hardcode, which is also the round the
 #: measurement after the *first* paid cycle uses.
 _REPAIR_ROUND = -1
-
-#: Hook kinds whose handler runs inside the orchestrator process, so no
-#: commit a fix agent makes in its worktree can change what executes
-#: (Kraft-s7c04.24). `subprocess` is deliberately absent: it runs the
-#: worktree's own command, which is exactly what a fix commit changes.
-_IN_PROCESS_KINDS = ("forge", "builtin")
 
 #: Kraft-0i6z4: rounds a single fingerprint must survive fix attempts
 #: unchanged before it alone (not the whole set) counts as stuck. Must be
@@ -145,108 +208,63 @@ def _carry_severity(
     ]
 
 
-def _failure_note(node: dict, failed: list[str]) -> str:
-    """What the orchestrator already knows and the repair would otherwise have
-    to go and rediscover (Kraft-s7c04.26: on work item 6c712ea8 a repair agent
-    spent 4 of its 16 tool calls hunting for a log it was told to read but
-    given no path to).
-
-    The re-measure sentence is not decoration. `recover_node` believes a repair
-    only when the node's own tasks pass afterwards -- that has been the design
-    since Kraft-rv6i -- but it was never said to the agent, and an agent that
-    does not know it will be checked has every incentive to declare success.
-    """
-    which = ", ".join(failed) if failed else "the node"
-    return (
-        f"The failing task(s) in node {node['id']}: {which}.\n"
-        f"After you finish, {which} will be re-measured and that result, not "
-        "your own report, decides whether this repair worked."
-    )
-
-
 async def recover_node(
     db,
     run_dirs,
     work_item_id: str,
-    node: dict,
+    node: ResolvedNode,
     row,
-    registry: Registry,
     worktree,
     *,
-    failed: list[str],
+    failed: list,
     steer: Steer | None,
     launch: LaunchContext | None,
     budget: _policy.Budget,
     measured_round: int,
     round: int = 1,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
-) -> tuple[str, list[str], list[BaseException]]:
-    """One repair pass over a node whose tasks failed (Kraft-rv6i).
+    spent: set[str] | None = None,
+) -> tuple[str, list, list[BaseException]]:
+    """One node-level repair pass over a node whose tasks failed (Kraft-rv6i).
 
-    Runs the node's `on_failure` tasks, then lets the node measure itself
-    again, and reports that second measurement. The re-measure is the point:
-    a node's contract is its own tasks passing, so a repair is believed only
-    when they do -- `on.ci.poll` going green, not a remediator claiming it
-    labelled something.
+    Runs the node's `on_failure` steps, then measures the node again from its
+    first step (`node-recovery-retries-the-entire-node`), and reports that
+    second measurement. The re-measure is the point: a node's contract is its
+    own tasks passing, so a repair is believed only when they do -- a CI wait
+    going green, not a remediator claiming it labelled something.
 
     Once per entry into the node, not a loop. A repair that did not take is a
     blocker Kraft does not understand, and the honest move is to stop for a
     human rather than to keep pulling the same lever.
 
-    `round` keys the repair hook's dispatch and its re-measure in
+    `round` keys the repair's dispatch and its re-measure in
     `sessions_for_round` (`dispatch.collect_findings`,
     `dispatch.needs_context_question`) -- it must not collide with any other
     round the *same node* writes sessions under. The no-fix-loop branch's call
     below needs nothing special: a node with `on_failure` and no `fix_loop`
     never runs `walk_node`'s paid-cycle loop at all, so `round=1` (the
-    default) can never alias anything else for that node. The fix-loop
-    branch, added in a later task, passes its own reserved round instead,
-    because for a node with *both* `fix_loop` and `on_failure` (Task 6 allows
-    this now; it used to be forbidden precisely to dodge this collision)
-    `round=1` already means "the measurement after the first paid fix cycle"
-    to that same node's `collect_findings`/`needs_context_question` calls.
+    default) can never alias anything else for that node. The fix-loop branch
+    passes its own reserved round instead, because for a node with *both*
+    `fix_loop` and `on_failure` `round=1` already means "the measurement after
+    the first paid fix cycle" to that same node's
+    `collect_findings`/`needs_context_question` calls.
     """
-    hooks = list(node["on_failure"])
-    await db.write(
-        lambda c: events.append(
-            c,
-            work_item_id,
-            "node_recovery_started",
-            {"node_id": node["id"], "failed_tasks": failed, "tasks": hooks},
-        )
-    )
-    found, _reported = dispatch.collect_findings(db, work_item_id, node, measured_round, registry)
-    note = _failure_note(node, failed)
-    seeded = prompts.seeded_findings_note(found) if found else None
-    context = f"{note}\n\n{seeded}" if seeded else note
-    if steer is not None and steer:
-        # A person's own instruction leads and keeps its own template;
-        # `_SEEDED_FINDINGS_STEER`'s lead-in sentence ("Findings the last
-        # review of this node left unresolved:") is what stops the bullets
-        # below it reading as something that person wrote. `.take()` because
-        # the incoming note is folded into the one replacing it -- leaving it
-        # undelivered here would deliver it twice (Kraft-s7c04.58 covers the
-        # two-hook case this single Steer cannot serve). The orchestrator's
-        # own context (`note`, and `seeded` when there are findings) is
-        # appended, never substituted for a human's steer.
-        repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
-    else:
-        repair_steer = Steer(context, source="seeded")
-    # `steps`, not just `tasks`, must name the repair hooks -- `measure_node`
-    # reads `steps` first, and a stale `steps` here would re-run the node's
-    # own (still-failing) tasks instead of the repair.
-    verdict, r_failed, r_excs = await dispatch.measure_node(
+    verdict, r_failed, r_excs = await dispatch.run_recovery(
         db,
         run_dirs,
         work_item_id,
-        {**node, "tasks": hooks, "steps": [hooks]},
+        node,
         row,
-        registry,
         worktree,
-        round=round,
-        steer=repair_steer,
+        handler=node.on_failure,
+        scope="node",
+        failed=failed,
+        note=prompts.failure_note(node, [t.task.id for t in failed]),
+        steer=steer,
         launch=launch,
         budget=budget,
+        measured_round=measured_round,
+        round=round,
         loop_severities=loop_severities,
     )
     if verdict != "ok":
@@ -257,50 +275,478 @@ async def recover_node(
         work_item_id,
         node,
         row,
-        registry,
         worktree,
         round=round,
         steer=steer,
         launch=launch,
         budget=budget,
         loop_severities=loop_severities,
+        spent=spent,
     )
 
 
-async def _stop_at_moved_base(db, work_item_id: str, node: dict) -> str:
-    """A step moved `base_ref` in a node that declares `rebase_bounce_to`: the
-    node stops there and completes like a clean pass -- the steps it did not run
-    are the ones the bounce skips, and `run_once` reads the moved base_ref right
-    after this returns and bounces, re-running from the target against the new
-    base. The one place that decision is made, for the step boundary and the
-    conflict resolver alike."""
-    await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+def _node_handler_applies(node: ResolvedNode, failed: list[ResolvedTask]) -> bool:
+    """Whether the node's own `on_failure` is the nearest handler for any of
+    `failed` (`nearest-recovery-handler-wins`: task, then step, then node, at
+    most one). A task whose own handler or whose step's handler already
+    answered for it -- successfully or not -- never reaches the node's."""
+    if not node.on_failure:
+        return False
+    step_handled = {t.path for step in node.steps if step.on_failure for t in step.tasks}
+    return not failed or any(not t.on_failure and t.path not in step_handled for t in failed)
+
+
+#: How much of a config_error's own log line the card carries. A human reads
+#: the cause on the board; the full log is one click away for anything longer.
+_STOP_CAUSE_MAX = 300
+
+
+def _task_cause(
+    db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
+) -> str:
+    """The first line of the newest `status` session log for `task` -- the
+    task's own account of why it stopped -- or "" when there is none or it
+    cannot be read. Never raises: a stop must not become less legible than the
+    generic pointer to the log, and must never escape the walk."""
+    row = db.read(
+        lambda c: c.execute(
+            "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = ? AND status = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node.id, task.path, status),
+        ).fetchone()
+    )
+    try:
+        text = Path(row["log_path"]).read_text() if row else ""
+    except OSError, ValueError:  # ValueError: UnicodeDecodeError
+        return ""
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
+
+
+def _in_process_causes(db, work_item_id: str, node: ResolvedNode, failed: list) -> str:
+    """ " — cause; cause" for the failed tasks Kraft runs itself, or "".
+
+    A forge task's log is Kraft's own one-line account of why it failed, so it
+    belongs on the card. An agent's, a subprocess's or the test-scope builtin's
+    log is that tool's output -- the card names the task and the log button
+    opens it."""
+    causes = [
+        c
+        for t in failed
+        if _in_process(t) and (c := _task_cause(db, work_item_id, node, t, "failed"))
+    ]
+    return f" — {'; '.join(causes)}" if causes else ""
+
+
+async def _stop_for_config_error(
+    db, work_item_id: str, node: ResolvedNode, failed: list[ResolvedTask]
+) -> str:
+    """A task that could not start stops for a human, and the stop names its
+    cause (Task 4b: an unmapped forge target stops "for a human naming the
+    target") rather than only pointing at the session log."""
+    named = ", ".join(t.task.id for t in failed)
+    causes = [c for t in failed if (c := _task_cause(db, work_item_id, node, t))]
+    detail = "; ".join(causes) if causes else "see the session log"
+    reason = f"could not start {named} in node {node.id}: {detail}"
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
+async def _stop_for_wait_timeout(
+    db, work_item_id: str, node: ResolvedNode, timed_out: list[ResolvedTask]
+) -> str:
+    """An external wait ran out (`external-wait-timeout-needs-human`): a stop
+    for a person naming the wait, never a failure for a fix loop."""
+    named = ", ".join(t.path for t in timed_out)
+    causes = [c for t in timed_out if (c := _task_cause(db, work_item_id, node, t, WAIT_TIMED_OUT))]
+    reason = f"{named} timed out waiting" + (f": {'; '.join(causes)}" if causes else "")
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
+async def _sentinel_stop(
+    db,
+    work_item_id: str,
+    node: ResolvedNode,
+    verdict: str,
+    failed: list[ResolvedTask],
+    budget: _policy.Budget,
+) -> str | None:
+    """The stop a non-failure verdict names, or None for `ok`/`failed`.
+
+    One ladder for every outcome in this module -- a measurement, a recovery
+    handler, a fix-loop repair, a conflict handler -- so no caller can forget a
+    rung and let a rate limit or a wait read as a task failure (Kraft-jdkoq,
+    the sibling of the CONFIG_ERROR fix that only one caller had).
+    """
+    if verdict == "paused":
+        return "paused"
+    if verdict == CONFIG_ERROR:
+        return await _stop_for_config_error(db, work_item_id, node, failed)
+    if verdict == RATE_LIMITED:
+        return await stops.stop_for_rate_limit(db, work_item_id, node)
+    if verdict == WAITING:
+        return await stops.stop_for_waiting(db, work_item_id, node, failed)
+    if verdict == WAIT_TIMED_OUT:
+        return await _stop_for_wait_timeout(db, work_item_id, node, failed)
+    if verdict == INFRA_STOP:
+        return await stops.stop_for_infra(db, work_item_id, node)
+    if verdict == TIME_CAPPED:
+        return await stops.stop_for_time_cap(db, work_item_id, node)
+    if verdict == READ_ONLY_VIOLATED:
+        return await _read_only.stop(db, work_item_id, node.id)
+    if verdict == BUDGET:
+        return await stops.stop_for_budget(db, work_item_id, node, budget)
+    if verdict == REPAIR_DOUBTED:
+        doubts = "; ".join(dispatch.repair_doubts(db, work_item_id, node, failed))
+        reason = (
+            f"a repair in node {node.id} finished with concerns, so the node "
+            f"was not measured again: {doubts}"
+        )
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        return "needs_human"
+    return None
+
+
+@dataclass(frozen=True)
+class _Stuck:
+    """A stop the node's recovery and fix loop could not advance past -- the
+    one kind of stop its declared `escalation` task may still answer
+    (`stuck-escalation-is-an-exec-node-control`). Carried back to `walk_node`
+    unrecorded, so a successful escalation retries the node without the item
+    ever reading `needs_human`.
+
+    **The one definition of the stuck set** (Ruling 176): a task failed after
+    recovery, an exhausted fix-loop cap, a stall, and the judge's
+    `stop_needs_human` -- the four places this is constructed. Automatic
+    escalation answers these and nothing else: the node's declared escalation
+    reads this value, and the generic `gates.auto_escalate_stuck` reads the
+    `stuck` mark `_stop_stuck` records from it. Every other stop (config,
+    budget, infra, a reviewer error, a wait timeout, a rate limit, a question)
+    goes straight to a human under its own cause."""
+
+    reason: str
+    capped: dict | None = None
+    bundle: dict | None = None
+    #: `stops.suggestion`: what the node's last session said to do next.
+    suggested: dict | None = None
+
+
+#: The round a stuck escalation's session is written under. Distinct from every
+#: round a measurement, a repair (`_REPAIR_ROUND`) or a paid cycle uses, so its
+#: session never reads as one of theirs.
+_STUCK_ESCALATION_ROUND = -2
+
+
+def _escalation_key(node: ResolvedNode) -> str:
+    """The `retry_counters` key that bounds a node's stuck escalations. Built
+    from the node id like `ci_infra:<node>`, so `store.clear_loop_counters`
+    clears it on a `/retry` without being handed it."""
+    return f"{node.id}.escalation"
+
+
+async def _stop_stuck(db, work_item_id: str, node: ResolvedNode, stuck: _Stuck, extra="") -> str:
+    reason = stuck.reason + extra
+    await db.write(
+        lambda c: store.mark_needs_human(
+            c,
+            work_item_id,
+            node.id,
+            reason,
+            stuck.capped,
+            bundle=stuck.bundle,
+            stuck=True,
+            suggested=stuck.suggested,
+        )
+    )
+    return "needs_human"
+
+
+async def _escalate_stuck(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    stuck: _Stuck,
+    *,
+    policy: _policy.Policy | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+) -> str:
+    """Hand a stuck node to its declared `escalation` task, or to a human.
+
+    `"retry"` when the escalation succeeded: the caller reruns the node from
+    its first step with a fresh fix-loop budget
+    (`successful-stuck-escalation-retries-the-node`). A failed or questioning
+    escalation leaves the item for a human, carrying the original reason
+    (`failed-or-questioning-stuck-escalation-needs-human`). Bounded by
+    `policy.auto_escalate_stuck_cap` per node, counted until a `/retry` or a
+    base-change restart clears it.
+    """
+    task = node.escalation
+    if task is None:
+        return await _stop_stuck(db, work_item_id, node, stuck)
+    cap = policy.auto_escalate_stuck_cap if policy else _policy.DEFAULT_AUTO_ESCALATE_STUCK_CAP
+    key = _escalation_key(node)
+    counter = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    used = counter["count"] if counter is not None else 0
+    if used >= cap:
+        return await _stop_stuck(
+            db, work_item_id, node, stuck, f" (stuck escalation spent: {used} of {cap})"
+        )
+    await db.write(lambda c: store.bump_counter(c, work_item_id, key, _policy.Cap(cap, 10**9)))
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "stuck_escalation_started",
+            {"node_id": node.id, "task": task.path, "reason": stuck.reason, "attempt": used + 1},
+        )
+    )
+    status = await dispatch.dispatch_node(
+        db,
+        run_dirs,
+        task,
+        node,
+        row,
+        worktree,
+        instruction_override=prompts.stuck_escalation_instruction(task, node, stuck.reason),
+        round=_STUCK_ESCALATION_ROUND,
+        launch=launch,
+        budget=budget,
+    )
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "stuck_escalation_finished",
+            {"node_id": node.id, "task": task.path, "status": status},
+        )
+    )
+    if status == "paused":
+        return "paused"
+    if status in _ADVANCING:
+        # A retried node is a fresh pass: the loop that got stuck must not
+        # re-breach on the attempt count that stuck it. Only that counter --
+        # the escalation's own bound is what keeps this from repeating.
+        if node.fix_loop:
+            await db.write(lambda c: store.delete_counter(c, work_item_id, _loop_key(node)))
+        return "retry"
+    if status == "needs_context":
+        session = dispatch._latest_session(db, work_item_id, node, task)
+        question = (
+            _subprocess.read_question(Path(session["result_path"])) if session else None
+        ) or "(no question given)"
+        reason = f"needs_context: {question}"
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        return "needs_human"
+    cause = _task_cause(db, work_item_id, node, task, status)
+    return await _stop_stuck(
+        db,
+        work_item_id,
+        node,
+        stuck,
+        f" (stuck escalation {prompts.named_with_kind(task)} ended {status}"
+        + (f": {cause}" if cause else "")
+        + ")",
+    )
+
+
+def _conflict_detail(db, work_item_id: str, node: ResolvedNode, conflicted, excs) -> str:
+    """What git said about a conflict: a raised `RebaseConflict`'s message, or
+    the first line of the conflicted task's own log."""
+    return (
+        "; ".join(
+            [str(e) for e in excs if isinstance(e, _builtins.RebaseConflict)]
+            + [c for t in conflicted if (c := _task_cause(db, work_item_id, node, t, CONFLICT))]
+        )
+        or "a rebase conflict"
+    )
+
+
+async def _resolve_conflict(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    conflicted: list[ResolvedTask],
+    detail: str,
+    *,
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+    round: int,
+    loop_severities: frozenset[str],
+) -> str:
+    """Run the node's `on_base_changed.on_conflict` handler over a conflict.
+
+    Believed only when the worktree now sits on origin's current tip, the
+    same check the legacy resolver made: an agent reporting success without
+    finishing the rebase has not resolved anything. A resolution that moved
+    the base is a base change, so this answers `CONFLICT_RESOLVED` and
+    `run_once` restarts the declared span
+    (`resolved-conflict-restarts-from-base-change-target`), reopening the
+    span's approved gates.
+    """
+    old_base = dispatch._current_base_ref(db, work_item_id)
+    try:
+        new_base = await _builtins.upstream_head(
+            Path(row["repo"]), await _builtins.base_branch(db, work_item_id, Path(row["repo"]))
+        )
+    except _builtins.BaseBranchMissing as exc:
+        # No base to resolve onto: a person has to say where this item goes.
+        reason = f"the conflict in node {node.id} cannot be resolved: {exc}"
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+        return "needs_human"
+    note = prompts.rebase_resolve_note(
+        worktree,
+        store.branch_for(row),
+        old_base or "(unknown)",
+        new_base or "(unknown)",
+        detail,
+        entry.attachments_of(row),
+    )
+    verdict, failed, _excs = await dispatch.run_recovery(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        handler=node.on_conflict,
+        scope="conflict",
+        failed=conflicted,
+        note=note,
+        steer=steer,
+        launch=launch,
+        budget=budget,
+        measured_round=round,
+        round=round,
+        loop_severities=loop_severities,
+    )
+    stop = await _sentinel_stop(db, work_item_id, node, verdict, failed, budget)
+    if stop is not None:
+        return stop
+    if verdict == "ok":
+        moved = new_base is not None and (
+            _config.git_read(
+                Path(worktree),
+                "merge-base",
+                "--is-ancestor",
+                new_base,
+                "HEAD",
+                expected_failure=True,
+            )
+            is not None
+        )
+        if moved and new_base != old_base:
+            await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
+            return CONFLICT_RESOLVED
+        reason = (
+            f"the conflict handler in node {node.id} finished without rebasing onto "
+            f"{new_base or 'the upstream tip'}: {detail}"
+        )
+    elif (question := dispatch.needs_context_question(db, work_item_id, node, round)) is not None:
+        # The handler judged that what landed upstream changes what this item
+        # is for, and asked: the question is the stop.
+        reason = f"needs_context: {question}"
+    else:
+        reason = f"the conflict handler in node {node.id} could not resolve it: {detail}"
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason))
+    return "needs_human"
+
+
+async def _moved_base(db, work_item_id: str, node: ResolvedNode) -> str:
+    """A step moved `base_ref` and stopped the node on purpose. A node that
+    declares `on_base_changed` hands the restart to `run_once`
+    (`base-change-restarts-a-declared-chain-span`) without completing: its
+    later steps never ran. `BASE_MOVED` only arrives for such a node (dispatch
+    asks the forge for it only there), so the completion below is a defence
+    for a stored chain that lost the declaration, not a path anything takes."""
+    if isinstance(node.node, ExecNode) and node.node.on_base_changed is not None:
+        return BASE_MOVED
+    await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
     return "ok"
+
+
+def _loop_key(node: ResolvedNode) -> str:
+    """The `retry_counters` key a node's fix loop counts under.
+
+    The fix loop's own canonical container path, so two nodes reusing one
+    library component still count separately -- which a shared, authored loop
+    name never did. `policy.yaml`'s `loops:` may name the same key to override
+    the cap, and a `max_attempts` on the loop itself overrides `attempts` from
+    there (`template-policy-may-replace-operational-defaults`).
+    """
+    return f"{node.id}.fix_loop"
+
+
+def fix_loop_cap(
+    policy: _policy.Policy,
+    key: str,
+    node_policy: _policy.InstancePolicy,
+    loop_attempts: int | None,
+    override: dict | None,
+) -> _policy.Cap:
+    """The bound one node's fix loop counts under, narrowest source last:
+
+    1. `policy.yaml`'s `loops:` entry for `key`, else its `default:`;
+    2. the V1 policy resolved at the node's scope -- `max_attempts` for the
+       attempts and `timeout_minutes` for the wall clock, when any layer set
+       them (`template-policy-may-replace-operational-defaults`);
+    3. the loop's own `max_attempts`, which materialization already held to
+       `maxima.max_attempts`;
+    4. an operator's per-item override, which wins over all of them: the
+       work item's own policy override (`_item_cap`), then the older
+       `node_overrides` door's `attempts`/`wall_clock_s`, merged into
+       `override` by the caller.
+    """
+    cap = policy.cap_for(key)
+    # Replaced only where set: `replace` re-validates the whole `Cap`.
+    if node_policy.max_attempts is not None:
+        cap = replace(cap, attempts=node_policy.max_attempts)
+    if node_policy.timeout_minutes is not None:
+        cap = replace(cap, wall_clock_s=node_policy.timeout_minutes * 60)
+    if loop_attempts is not None:
+        cap = replace(cap, attempts=loop_attempts)
+    return _policy.with_cap_override(cap, override)
+
+
+def _item_cap(item: _policy.WorkItemPolicy | None, node_id: str) -> dict:
+    """A work item's own `max_attempts` for `node_id` as a cap override
+    (Kraft-ab1bh): an operator's per-item value, so it wins over the loop's
+    own `max_attempts` the way `node_overrides` does. Its `timeout_minutes`
+    needs no help: the node's policy carries it, and nothing authored sits
+    above that. Already held to the administrator maxima."""
+    attempts = item.value_at(node_id, "max_attempts") if item is not None else None
+    return {"attempts": attempts} if attempts is not None else {}
 
 
 async def walk_node(
     db,
     run_dirs,
     work_item_id: str,
-    node: dict,
+    node: ResolvedNode,
     row,
-    registry: Registry,
     worktree,
     *,
     policy: _policy.Policy | None = None,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     start_step: int = 0,
+    preserve: frozenset[str] = frozenset(),
 ) -> str:
-    key = node.get("fix_loop")
-    # Which severities open a fix cycle -- and therefore, by subtraction, which
-    # findings are "deferred" and owed to the human at the review gate
-    # (Kraft-s7c04.4). Threaded down to `dispatch_node` rather than defaulted
-    # there: a repo that sets `findings.loop_severities` in its own policy.yaml
-    # would otherwise get a board card and a review brief computed from
-    # different sets, which is exactly the disagreement one shared function was
-    # meant to prevent. `policy` is None on a chain built without one.
-    loop_severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
+    """One entry into an execution node: measure it, recover, fix, and, when
+    none of those can advance it, escalate -- a successful escalation reruns
+    the node from its first step, as a fresh entry.
+
+    `preserve` is a task retry's completed siblings (`RunFork.preserved`),
+    kept on the entry measurement only."""
     # Derived here rather than passed in: every caller already hands us the
     # policy, so no call site can forget the cap and silently lose it. Folded
     # through the item's own cap (UI v2 · 04 point 4) -- re-read fresh from
@@ -314,55 +760,132 @@ async def walk_node(
     budget = store.effective_budget(
         fresh_row if fresh_row is not None else row, policy.budget if policy else _policy.NO_BUDGET
     )
+    # The whole node runs off the fresh row, not only its budget: a work
+    # item's own policy override set by a PATCH while it ran binds from the
+    # next node it enters -- every task that node dispatches, and every wait
+    # it observes (Kraft-ab1bh).
+    row = fresh_row if fresh_row is not None else row
+    while True:
+        result = await _walk_node_once(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            worktree,
+            fresh_row=fresh_row,
+            budget=budget,
+            policy=policy,
+            steer=steer,
+            launch=launch,
+            start_step=start_step,
+            preserve=preserve,
+            # A handler runs at most once per entry into the node; a retry the
+            # escalation earned is a new entry.
+            spent=set(),
+        )
+        if not isinstance(result, _Stuck):
+            return result
+        result = replace(result, suggested=stops.suggestion(db, work_item_id, node.id))
+        outcome = await _escalate_stuck(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            worktree,
+            result,
+            policy=policy,
+            launch=launch,
+            budget=budget,
+        )
+        if outcome != "retry":
+            return outcome
+        start_step = 0
+        preserve = frozenset()
 
-    if not key:
+
+async def _walk_node_once(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    *,
+    fresh_row,
+    budget: _policy.Budget,
+    policy: _policy.Policy | None,
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    start_step: int,
+    spent: set[str],
+    preserve: frozenset[str] = frozenset(),
+) -> str | _Stuck:
+    loop = node.node.fix_loop if isinstance(node.node, ExecNode) else None
+    key = _loop_key(node) if loop is not None else None
+    # Which severities open a fix cycle -- and therefore, by subtraction, which
+    # findings are "deferred" and owed to the human at the review gate
+    # (Kraft-s7c04.4). Threaded down to `dispatch_node` rather than defaulted
+    # there: a repo that sets `findings.loop_severities` in its own policy.yaml
+    # would otherwise get a board card and a review brief computed from
+    # different sets, which is exactly the disagreement one shared function was
+    # meant to prevent. `policy` is None on a chain built without one.
+    loop_severities = policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES
+
+    if loop is None:
         verdict, failed, excs = await dispatch.measure_node(
             db,
             run_dirs,
             work_item_id,
             node,
             row,
-            registry,
             worktree,
             steer=steer,
             launch=launch,
             budget=budget,
             loop_severities=loop_severities,
             start_step=start_step,
+            spent=spent,
+            preserve=preserve,
         )
-        if verdict == "paused":
-            return "paused"
-        if verdict == CONFIG_ERROR:
-            named = ", ".join(failed)
-            reason = f"could not start {named} in node {node['id']} — see the session log"
-            await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
-            )
-            return "needs_human"
-        if verdict == RATE_LIMITED:
-            return await stops.stop_for_rate_limit(db, work_item_id, node)
-        if verdict == WAITING:
-            return await stops.stop_for_waiting(db, work_item_id, node)
-        if verdict == INFRA_STOP:
-            return await stops.stop_for_infra(db, work_item_id, node)
         if verdict == BASE_MOVED:
-            return await _stop_at_moved_base(db, work_item_id, node)
-        if verdict == BUDGET:
-            return await stops.stop_for_budget(db, work_item_id, node, budget)
+            return await _moved_base(db, work_item_id, node)
+        stop = await _sentinel_stop(db, work_item_id, node, verdict, failed, budget)
+        if stop is not None:
+            return stop
+        if verdict == CONFLICT:
+            resolved = await _resolve_conflict(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
+                worktree,
+                failed,
+                _conflict_detail(db, work_item_id, node, failed, excs),
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=0,
+                loop_severities=loop_severities,
+            )
+            return resolved
         if verdict == "failed":
             question = dispatch.needs_context_question(db, work_item_id, node, round=0)
             recovered = False
-            if question is None and node.get("on_failure"):
+            repaired = bool(spent)
+            if question is None and _node_handler_applies(node, failed):
                 # Deliberately not reached on needs_context: a question an agent
                 # asked is addressed to a human, and no repair task can answer
                 # it (Kraft-rv6i).
+                repaired = True
                 verdict, failed, excs = await recover_node(
                     db,
                     run_dirs,
                     work_item_id,
                     node,
                     row,
-                    registry,
                     worktree,
                     failed=failed,
                     steer=steer,
@@ -370,95 +893,58 @@ async def walk_node(
                     budget=budget,
                     measured_round=0,
                     loop_severities=loop_severities,
+                    spent=spent,
                 )
-                if verdict == "paused":
-                    return "paused"
-                if verdict == BUDGET:
-                    return await stops.stop_for_budget(db, work_item_id, node, budget)
+                # The same ladder as the measurement: a repair that could not
+                # start, or a re-measure that hit a sentinel, is not "task
+                # failed" (review finding 1).
+                stop = await _sentinel_stop(db, work_item_id, node, verdict, failed, budget)
+                if stop is not None:
+                    return stop
+                if verdict == BASE_MOVED:
+                    return await _moved_base(db, work_item_id, node)
                 recovered = verdict == "ok"
                 if not recovered:
                     question = dispatch.needs_context_question(db, work_item_id, node, round=1)
             if not recovered:
-                # A rebase conflict raised by `on.mr.rebase` (any node that rebases)
-                # is not "for a human to resolve, not to dispatch an agent
-                # into" any more (Kraft-s7c04.23, by the human's own call at
-                # the design gate) -- the resolver re-creates the conflict and
-                # judges whether the upstream commits it rebased onto change
-                # what this work item is supposed to do. Gated on the same
-                # `auto_escalate_stuck` switch route-door dispatch uses: a
-                # resolver is a different mechanism but the same unprompted
-                # spend.
-                conflict = next((e for e in excs if isinstance(e, _builtins.RebaseConflict)), None)
-                if conflict is not None and (policy is None or policy.auto_escalate_stuck):
-                    r_status, _steer_text, _new_base = await resolve_rebase_conflict(
-                        db,
-                        run_dirs,
-                        work_item_id=work_item_id,
-                        node=node,
-                        row=row,
-                        registry=registry,
-                        worktree=worktree,
-                        policy=policy,
-                        launch=launch,
-                        conflict=str(conflict),
-                    )
-                    if r_status == "paused":
-                        return "paused"
-                    if r_status == BUDGET:
-                        return await stops.stop_for_budget(db, work_item_id, node, budget)
-                    if r_status == "ok":
-                        # Completing here is right only when the rebase was the
-                        # node's whole job: `run_once`'s `rebase_bounce_to`
-                        # check sees the moved base_ref and bounces, and the
-                        # steps this node did not run are the ones the bounce
-                        # skips. A node with no bounce target wants the
-                        # opposite -- its rebase is hygiene, and completing
-                        # would mark it done with the later steps never
-                        # dispatched.
-                        if node.get("rebase_bounce_to"):
-                            return await _stop_at_moved_base(db, work_item_id, node)
-                        return await walk_node(
-                            db,
-                            run_dirs,
-                            work_item_id,
-                            node,
-                            row,
-                            registry,
-                            worktree,
-                            policy=policy,
-                            steer=steer,
-                            launch=launch,
-                        )
-                    # "needs_human": the resolver already recorded the stop.
-                    return "needs_human"
                 if question is not None:
                     reason = f"needs_context: {question}"
-                else:
-                    # Kraft-5m7t: a `retry --steer` against this node only
-                    # reaches an agent that reads it; a forge/builtin/subprocess
-                    # task -- ci_poll among them -- has no session for a steer
-                    # to land in, so it silently no-ops and a human can burn
-                    # several retries assuming otherwise. Naming each failed
-                    # task's kind here is the cheapest way to tell them apart
-                    # without guessing whether *this* retry's steer would land.
-                    named = ", ".join(prompts.named_with_kind(t, registry) for t in failed)
-                    reason = f"task failed in node {node['id']}: {named}"
-                    if excs:
-                        reason += f" ({', '.join(repr(e) for e in excs)})"
-                    if node.get("on_failure"):
-                        reason += " (after on_failure)"
-                await db.write(
-                    lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason)
-                )
-                return "needs_human"
-        await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                    await db.write(
+                        lambda c: store.mark_needs_human(c, work_item_id, node.id, reason)
+                    )
+                    return "needs_human"
+                # Kraft-5m7t: a `retry --steer` against this node only
+                # reaches an agent that reads it; a forge/builtin/subprocess
+                # task has no session for a steer to land in, so it silently
+                # no-ops and a human can burn several retries assuming
+                # otherwise. Naming each failed task's kind here is the
+                # cheapest way to tell them apart without guessing whether
+                # *this* retry's steer would land.
+                named = ", ".join(prompts.named_with_kind(t) for t in failed)
+                reason = f"task failed in node {node.id}: {named}"
+                reason += _in_process_causes(db, work_item_id, node, failed)
+                if excs:
+                    reason += f" ({', '.join(repr(e) for e in excs)})"
+                if repaired:
+                    reason += " (after on_failure)"
+                return _Stuck(reason)
+        await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
         return "ok"
 
     if policy is None:
-        raise RuntimeError(f"node {node['id']!r} has fix_loop but no policy was provided")
+        raise RuntimeError(f"node {node.id!r} has fix_loop but no policy was provided")
 
     override_row = fresh_row if fresh_row is not None else row
-    cap = _policy.resolve_cap(policy, key, store.node_overrides_of(override_row).get(node["id"]))
+    cap = fix_loop_cap(
+        policy,
+        key,
+        dispatch.scope_policy(override_row, node),
+        loop.max_attempts,
+        {
+            **_item_cap(store.policy_override_of(override_row), node.id),
+            **(store.node_overrides_of(override_row).get(node.id) or {}),
+        },
+    )
     # `round` is the fix-cycle index every session in this pass is stamped with,
     # so per-round usage can be read back without joining against the events.
     #
@@ -473,24 +959,28 @@ async def walk_node(
     round = counter_row["count"] if counter_row is not None else 0
     # One repair per call to `walk_node` -- exactly one per entry into the
     # node (a fresh call on every re-entry via `run_once`'s loop, a crash
-    # resume, or the `ci_wait` poller).
+    # resume, or the wait scheduler).
     _repair_tried = False
     # "First iteration of this entry" used to be spelled `round == 0`. Since
     # `round` now seeds from the counter the two are different questions, and
     # every site that meant the former needs saying so out loud.
     _first_iteration = True
-    # Where the next measurement resumes: the caller's step on the first pass,
-    # then the group that stopped the last one, so a retry does not re-run
-    # groups that already passed (the rebase step still does).
+    # Where the next measurement starts: the caller's step on the entry pass
+    # (a resume skips steps that already passed), then the node's FIRST step
+    # after every repair attempt (`fix-loop-remeasures-the-whole-node`,
+    # Kraft-mq752): a repair can break what an earlier step already passed --
+    # a repaired merge request has to be awaited on CI again, not only on the
+    # review that failed.
     resume_step = start_step
+    # The last fix pass's exceptions, for the cap's reason on the next cycle.
+    fix_excs: list[BaseException] = []
     while True:
-        verdict, failed, _excs = await dispatch.measure_node(
+        verdict, failed, excs = await dispatch.measure_node(
             db,
             run_dirs,
             work_item_id,
             node,
             row,
-            registry,
             worktree,
             round=round,
             steer=steer,
@@ -498,57 +988,63 @@ async def walk_node(
             budget=budget,
             loop_severities=loop_severities,
             start_step=resume_step,
+            spent=spent,
+            preserve=preserve,
         )
-        # Read before any repair runs: a repair measures a rewritten node and
-        # moves the cursor itself.
-        resume_step = db.read(
-            lambda c: c.execute(
-                "SELECT current_step FROM work_items WHERE id = ?", (work_item_id,)
-            ).fetchone()[0]
-        )
-        if verdict == "paused":
-            return "paused"
-        if verdict == CONFIG_ERROR:
-            # Checked before bump_counter: a repair pass cannot install a
-            # binary either, and the counter must stay untouched (Kraft-579).
-            named = ", ".join(failed)
-            reason = f"could not start {named} in node {node['id']} — see the session log"
-            await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
-            )
-            return "needs_human"
-        if verdict == RATE_LIMITED:
-            return await stops.stop_for_rate_limit(db, work_item_id, node)
-        if verdict == WAITING:
-            return await stops.stop_for_waiting(db, work_item_id, node)
-        if verdict == INFRA_STOP:
-            return await stops.stop_for_infra(db, work_item_id, node)
+        resume_step = 0
+        preserve = frozenset()
         if verdict == BASE_MOVED:
-            # Same decision as the node without a fix loop: not a failure, so
-            # no fix cycle is spent on code the bounce is about to re-measure.
-            return await _stop_at_moved_base(db, work_item_id, node)
-        if verdict == BUDGET:
-            return await stops.stop_for_budget(db, work_item_id, node, budget)
+            # Not a failure: no fix cycle is spent on code a restart is about
+            # to re-measure (`base-change-is-not-an-execution-failure`).
+            return await _moved_base(db, work_item_id, node)
+        # CONFIG_ERROR is checked before bump_counter: a repair pass cannot
+        # install a binary either, and the counter must stay untouched
+        # (Kraft-579).
+        stop = await _sentinel_stop(db, work_item_id, node, verdict, failed, budget)
+        if stop is not None:
+            return stop
 
-        if (
-            verdict == "failed"
-            and node.get("on_failure")
-            and _first_iteration
-            and not _repair_tried
-        ):
-            # Once per entry into this node, and only ahead of the very first
-            # cycle: `recover_node` re-measures for real (on.ci.poll going
-            # green), so a repair that resolved things costs nothing further
-            # here, and one that didn't falls straight through to the normal
-            # fix cycle below with the failure it actually is.
-            _repair_tried = True
-            r_verdict, r_failed, _r_excs = await recover_node(
+        if verdict == CONFLICT:
+            resolved = await _resolve_conflict(
                 db,
                 run_dirs,
                 work_item_id,
                 node,
                 row,
-                registry,
+                worktree,
+                failed,
+                _conflict_detail(db, work_item_id, node, failed, excs),
+                steer=steer,
+                launch=launch,
+                budget=budget,
+                round=round,
+                loop_severities=loop_severities,
+            )
+            return resolved
+
+        if (
+            verdict == "failed"
+            and _node_handler_applies(node, failed)
+            and _first_iteration
+            and not _repair_tried
+            # A measuring task's question is for a human, not a repair task --
+            # the loopless branch's rule (Kraft-rv6i), here too (Kraft-tr0o9):
+            # it stops below, before any recovery is spent on it.
+            and dispatch.needs_context_question(db, work_item_id, node, round, first_iteration=True)
+            is None
+        ):
+            # Once per entry into this node, and only ahead of the very first
+            # cycle: `recover_node` re-measures for real, so a repair that
+            # resolved things costs nothing further here, and one that didn't
+            # falls straight through to the normal fix cycle below with the
+            # failure it actually is.
+            _repair_tried = True
+            r_verdict, r_failed, r_excs = await recover_node(
+                db,
+                run_dirs,
+                work_item_id,
+                node,
+                row,
                 worktree,
                 failed=failed,
                 steer=steer,
@@ -557,66 +1053,44 @@ async def walk_node(
                 round=_REPAIR_ROUND,
                 measured_round=round,
                 loop_severities=loop_severities,
+                spent=spent,
             )
-            if r_verdict == "paused":
-                return "paused"
             # `recover_node`'s re-measure is a real `dispatch.measure_node` call
             # against the node's own tasks again -- every sentinel that call can
-            # produce for the ordinary top-of-loop measure two lines above this
-            # block can just as well come back from here: a fix loop that fell
-            # through the WAITING case, in particular, would spend a paid fix
-            # cycle on a pipeline that has not even finished settling for the
-            # repaired head, every time the repair itself doesn't resolve
-            # things on the first try (the common case for a code failure,
-            # since a metadata-only repair almost never touches the code CI
-            # actually ran). Checked and handled here, in the same order and
-            # against the same `stops` functions `walk_node`'s own top-of-loop
-            # checks above already use for these sentinels, so a repair's
-            # re-measure stops exactly the way an ordinary measure would have.
-            if r_verdict == CONFIG_ERROR:
-                named = ", ".join(r_failed)
-                reason = f"could not start {named} in node {node['id']} — see the session log"
-                await db.write(
-                    lambda c, reason=reason: store.mark_needs_human(
-                        c, work_item_id, node["id"], reason
-                    )
-                )
-                return "needs_human"
-            if r_verdict == RATE_LIMITED:
-                return await stops.stop_for_rate_limit(db, work_item_id, node)
-            if r_verdict == WAITING:
-                return await stops.stop_for_waiting(db, work_item_id, node)
-            if r_verdict == INFRA_STOP:
-                return await stops.stop_for_infra(db, work_item_id, node)
-            if r_verdict == BUDGET:
-                return await stops.stop_for_budget(db, work_item_id, node, budget)
+            # produce for the ordinary top-of-loop measure can just as well come
+            # back from here: a fix loop that fell through the WAITING case, in
+            # particular, would spend a paid fix cycle on a pipeline that has
+            # not even finished settling for the repaired head.
+            stop = await _sentinel_stop(db, work_item_id, node, r_verdict, r_failed, budget)
+            if stop is not None:
+                return stop
+            if r_verdict == BASE_MOVED:
+                return await _moved_base(db, work_item_id, node)
             if r_verdict == "ok":
-                await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
                 return "ok"
-            # Only "failed" reaches here (`dispatch.measure_node`'s remaining
-            # sentinel), and that fall-through is deliberate: the repair ran,
-            # didn't resolve things, and the ordinary paid fix cycle below
-            # should now see the failure for what it actually is.
+            # Only "failed" reaches here, and that fall-through is deliberate:
+            # the repair ran, didn't resolve things, and the ordinary paid fix
+            # cycle below should now see the failure for what it actually is.
             #
             # The repair's own re-measure just wrote its findings/session rows
             # under `_REPAIR_ROUND`, not the `round` this loop was on when it
-            # entered this block (0, on the only entry this ever fires for) --
-            # the fall-through below reads `collect_findings`/
-            # `needs_context_question` at `round`, so `round` has to move to
-            # match, or those calls read the stale pre-repair rows instead of
-            # the fresher re-measure this repair just produced.
-            verdict, failed, round = r_verdict, r_failed, _REPAIR_ROUND
+            # entered this block -- the fall-through below reads
+            # `collect_findings`/`needs_context_question` at `round`, so `round`
+            # has to move to match, or those calls read the stale pre-repair
+            # rows instead of the fresher re-measure this repair just produced.
+            verdict, failed, excs, round = r_verdict, r_failed, r_excs, _REPAIR_ROUND
 
         previous_found, fix_ran, previous_head = dispatch.last_measurement(
-            db, work_item_id, node["id"]
+            db, work_item_id, node.id
         )
         head_sha = _config.git_read(Path(worktree), "rev-parse", "HEAD")
         # The tags this loop's own checks already meant: the *eligible* subset of
         # the last measurement. `last_measurement` returns whole findings now
-        # (the reviewer is handed their messages, and a repeat's severity is
-        # floored against theirs), so the narrowing that used to live in the
-        # event payload's `fingerprints` key happens here instead -- identically,
-        # so `prints == previous_prints` and `repeats` below are unchanged.
+        # (a repeat's severity is floored against theirs), so the narrowing that
+        # used to live in the event payload's `fingerprints` key happens here
+        # instead -- identically, so `prints == previous_prints` and `repeats`
+        # below are unchanged.
         previous_prints = (
             sorted({f.fingerprint for f in previous_found if f.severity in policy.loop_severities})
             if previous_found is not None
@@ -627,16 +1101,17 @@ async def walk_node(
         # the loop counter (`retry_counters` row deleted) but leaves the old
         # `worker_sessions` rows in place, so it alone can't tell "round 1 of
         # this entry" from "round 5 of the item's whole history". Round 1 of
-        # *this* entry always fixes freely, no judge call (spec decision 2):
-        # gated on the loop counter itself having no row yet (the same signal
-        # `bump_counter` below uses to tell a fresh fire from a repeat one),
-        # not on whether a fix session ever ran for this node before. A
-        # carried-in steer gets the same free pass regardless of the counter:
-        # it is the human's answer to exactly the trend the judge might stop
-        # on, and a `stop_needs_human` here would discard it before the
-        # steered cycle it was meant for ever dispatches, re-stranding the
-        # item on the trend `/retry` was supposed to escape.
-        previous_fix = dispatch.previous_fix_session(db, work_item_id, node["id"])
+        # *this* entry always fixes freely, no judge call (spec decision 2,
+        # `fix-loop-judge-runs-after-the-first-attempt`): gated on the loop
+        # counter itself having no row yet (the same signal `bump_counter`
+        # below uses to tell a fresh fire from a repeat one), not on whether a
+        # fix session ever ran for this node before. A carried-in steer gets
+        # the same free pass regardless of the counter: it is the human's
+        # answer to exactly the trend the judge might stop on, and a
+        # `stop_needs_human` here would discard it before the steered cycle it
+        # was meant for ever dispatches, re-stranding the item on the trend
+        # `/retry` was supposed to escape.
+        previous_fix = dispatch.previous_fix_session(db, work_item_id, node)
         counter_row = db.read(lambda c: store.read_counter(c, work_item_id, key))
         # Which steers get the free pass the comment above describes is
         # `Steer.exempts_judge`'s call, not a `human` test. A *seeded* steer
@@ -649,17 +1124,19 @@ async def walk_node(
         # about rather than the misattribution (Kraft-s7c04.6).
         exempt = steer is not None and bool(steer) and steer.exempts_judge
         judge_due = previous_fix is not None and counter_row is not None and not exempt
-        # `reported_hooks`, not `reported`: it is the set of hook points that
+        # `reported_hooks`, not `reported`: it is the set of task paths that
         # wrote a parseable result file, and `blind_failures` below is computed
         # from it. Named for what it holds so nothing else in this function can
         # quietly shadow it -- a draft of Kraft-s7c04.3 did, which turned every
-        # failing hook into a blind failure and put the loop beyond the reach of
+        # failing task into a blind failure and put the loop beyond the reach of
         # the stuck detector.
-        found, reported_hooks = dispatch.collect_findings(db, work_item_id, node, round, registry)
+        found, reported_hooks = dispatch.collect_findings(db, work_item_id, node, round)
         # A `same_as` is only believable for a tag this round's reviewer was
-        # actually shown, and `carried_findings_note` is what showed it. An
-        # invented or stale tag would collapse two distinct defects onto one
-        # identity and fire the stuck detector on a fiction (Kraft-s7c04.2).
+        # actually shown. An invented or stale tag would collapse two distinct
+        # defects onto one identity and fire the stuck detector on a fiction
+        # (Kraft-s7c04.2). A reviewer is shown the tags of this node's last
+        # measurement when its task declares `inputs: [carried_findings]`
+        # (`dispatch.dispatch_node`), which is exactly `previous_found`.
         found = _findings.resolve_identity(
             found, known={f.fingerprint for f in previous_found or []}
         )
@@ -676,17 +1153,6 @@ async def walk_node(
         )
         eligible = [f for f in found if f.severity in policy.loop_severities]
         prints = sorted({f.fingerprint for f in eligible})
-        # A task on `builtin: noop` exits 'done' in milliseconds having done
-        # nothing, contributes no findings, and is therefore indistinguishable
-        # in this event from a review that ran and found nothing (Kraft-yenu).
-        # Naming them costs a dict lookup and is the only signal a reader gets
-        # that a tier of review is not actually running.
-        noop_hooks = [
-            t
-            for t in node["tasks"]
-            if registry.hooks.get(t, {}).get("kind") == "builtin"
-            and registry.hooks.get(t, {}).get("handler") == "noop"
-        ]
         # Built here rather than inside the lambda, the same way `judge_payload`
         # below is: every name a deferred lambda reads out of this loop has to be
         # bound at definition time or it sees the next iteration's value.
@@ -697,7 +1163,7 @@ async def walk_node(
         # `findings.from_payload` reads key-by-key and ignores the extra key --
         # exactly the case its docstring exists for.
         measured_payload = {
-            "node_id": node["id"],
+            "node_id": node.id,
             "cycle": round,
             # The commit this measurement is about, so the next round can tell a
             # re-rating of an untouched tree from a real change.
@@ -707,7 +1173,6 @@ async def walk_node(
                 for f, s in zip(found, as_reported, strict=True)
             ],
             "fingerprints": prints,
-            "noop_hooks": noop_hooks,
         }
         await db.write(
             lambda c, payload=measured_payload: events.append(
@@ -717,11 +1182,11 @@ async def walk_node(
 
         # A failed task that produced no findings at all is still non-clean: the
         # findings list refines *why* a task failed, it does not define failure.
-        blind_failures = [t for t in failed if t not in reported_hooks]
+        blind_failures = [t for t in failed if t.path not in reported_hooks]
         enters_loop = bool(eligible) or bool(blind_failures)
 
         if not enters_loop:
-            await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+            await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
             return "ok"
 
         # Checked before bump_counter, not after: the counter is bumped to
@@ -735,12 +1200,12 @@ async def walk_node(
         if question is not None:
             reason = f"needs_context: {question}"
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
             )
             return "needs_human"
 
         # A cycle no worker commit could ever win: every blind failure traces
-        # to a hook that runs inside this process, and no co-task either
+        # to a task that runs inside this process, and no co-task either
         # failed in a worker-fixable way or reported a finding of its own
         # (Kraft-s7c04.24). Refusing it here, ahead of the budget check, the
         # judge and `bump_counter`, is the same posture as the `CONFIG_ERROR`
@@ -750,27 +1215,24 @@ async def walk_node(
         # After `needs_context_question`, not before (ordering correction,
         # found reviewing the plan): a question a fix agent has already asked
         # is addressed to a human and outranks a stop that only says
-        # "reinstall the daemon" -- reachable on the shipped default chain
-        # when a fix agent's own `needs_context` is followed, one round
-        # later, by a re-measure where the in-process hook blind-fails alone.
-        in_process_blind = {
-            t for t in blind_failures if registry.hooks.get(t, {}).get("kind") in _IN_PROCESS_KINDS
-        }
+        # "reinstall the daemon".
+        in_process_blind = {t.path for t in blind_failures if _in_process(t)}
         if (
             in_process_blind
-            and set(blind_failures) == in_process_blind
+            and {t.path for t in blind_failures} == in_process_blind
             and all(f.source_plugin in in_process_blind for f in eligible)
         ):
             named = ", ".join(
-                prompts.named_with_kind(t, registry) for t in sorted(in_process_blind)
+                sorted(prompts.named_with_kind(t) for t in blind_failures if _in_process(t))
             )
             reason = (
-                f"{named} failed in node {node['id']}, and those tasks are executed by "
-                "the running Kraft daemon — a worker commit cannot change them. "
-                "Reinstall and restart, or skip the node."
+                f"{named} failed in node {node.id}"
+                f"{_in_process_causes(db, work_item_id, node, blind_failures)}, and those "
+                "tasks are executed by the running Kraft daemon — a worker commit cannot "
+                "change them. Reinstall and restart, or skip the node."
             )
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
             )
             return "needs_human"
 
@@ -790,8 +1252,11 @@ async def walk_node(
         # Fix-loop judge (2026-09-12-verify-fix-loop-judge-design): a brake on
         # top of the existing cap, never a second way to get stuck. Anything
         # the judge itself cannot be trusted on already fell open to
-        # "continue" inside `dispatch.judge_verdict`; the cap/stuck checks
-        # below run exactly as they do today regardless of what runs here.
+        # "continue" inside `dispatch.judge_verdict`
+        # (`invalid-judge-result-does-not-block-the-loop`); the cap/stuck
+        # checks below run exactly as they do today regardless of what runs
+        # here, so no verdict can buy a cycle past the cap
+        # (`fix-loop-judge-cannot-override-limits`).
         # Re-initialised every iteration, inside the loop: bound above it, a
         # later round where `judge_due` is False would re-serve the previous
         # round's reasoning and tell the fixer the judge had just said it.
@@ -805,11 +1270,10 @@ async def walk_node(
                 work_item_id,
                 node,
                 row,
-                registry,
                 worktree,
                 round=round,
                 key=key,
-                eligible=eligible,
+                cap=cap,
                 policy=policy,
                 launch=launch,
                 budget=budget,
@@ -817,7 +1281,7 @@ async def walk_node(
             if verdict == "paused":
                 return "paused"
             judge_payload = {
-                "node_id": node["id"],
+                "node_id": node.id,
                 "cycle": round,
                 "verdict": verdict,
                 "reasoning": reasoning,
@@ -829,21 +1293,15 @@ async def walk_node(
                 )
             )
             if verdict == "stop_needs_human":
-                reason = f"judge: {reasoning}"
-                await db.write(
-                    lambda c, reason=reason: store.mark_needs_human(
-                        c, work_item_id, node["id"], reason
-                    )
-                )
-                return "needs_human"
+                return _Stuck(f"judge: {reasoning}")
             # "as if there were no eligible findings" (spec) -- a task that
-            # failed outright (blind or not: on.ci.poll on a red pipeline
-            # reports findings *and* fails) would still be in the loop once
-            # its eligible findings are downgraded, so gate on `failed`
-            # itself rather than on the blind subset. Only a task with no
-            # failure at all can be treated as clean here.
+            # failed outright (blind or not: a red pipeline reports findings
+            # *and* fails) would still be in the loop once its eligible
+            # findings are downgraded, so gate on `failed` itself rather than
+            # on the blind subset. Only a task with no failure at all can be
+            # treated as clean here.
             if verdict == "stop_downgrade" and not failed:
-                await db.write(lambda c: store.complete_node(c, work_item_id, node["id"]))
+                await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
                 return "ok"
 
         # bump_counter returns the cap snapshotted on the row (spec §2.C: written
@@ -855,18 +1313,19 @@ async def walk_node(
         )
         if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
             reason = f"{key} exhausted after {count - 1} fix cycle(s)"
+            # What raised, measuring or fixing, is the only account of why when
+            # a task never reported (Kraft-hr0xr) -- the loopless path already
+            # says it, and the loop threw it away.
+            raised = [*excs, *fix_excs]
+            if raised:
+                reason += f" ({', '.join(repr(e) for e in raised)})"
+            measured = [t.path for step in node.steps for t in step.tasks]
             await db.write(
-                lambda c: store.mark_sessions_capped_out(
-                    c, work_item_id, node["id"], list(node["tasks"])
+                lambda c, measured=measured: store.mark_sessions_capped_out(
+                    c, work_item_id, node.id, measured
                 )
             )
-            capped = {"cycles": count - 1, "attempts": cap.attempts}
-            await db.write(
-                lambda c, reason=reason, capped=capped: store.mark_needs_human(
-                    c, work_item_id, node["id"], reason, capped
-                )
-            )
-            return "needs_human"
+            return _Stuck(reason, capped={"cycles": count - 1, "attempts": cap.attempts})
 
         if prints and fix_ran:
             # Whole-set equality catches "nothing at all changed". Kraft-0i6z4:
@@ -879,7 +1338,13 @@ async def walk_node(
                 None
                 if prints == previous_prints
                 else dispatch.stuck_fingerprint(
-                    dispatch.judge_history(db, work_item_id, node["id"], policy.loop_severities),
+                    dispatch.judge_history(
+                        db,
+                        work_item_id,
+                        node.id,
+                        policy.loop_severities,
+                        fix_paths=dispatch.fix_task_paths(node),
+                    ),
                     _FINGERPRINT_STREAK_LIMIT,
                 )
             )
@@ -890,24 +1355,24 @@ async def walk_node(
                     else f"stuck: finding {stuck_fp} unchanged across "
                     f"{_FINGERPRINT_STREAK_LIMIT} cycles"
                 )
-                bundle = await _diagnosis_bundle(db, work_item_id, node, worktree)
                 # Deliberately NOT mark_sessions_capped_out: these sessions did
                 # not cap out, and only a real cap breach may claim they did.
-                await db.write(
-                    lambda c, reason=reason, bundle=bundle: store.mark_needs_human(
-                        c, work_item_id, node["id"], reason, bundle=bundle
-                    )
+                return _Stuck(
+                    reason, bundle=await _diagnosis_bundle(db, work_item_id, node, worktree, launch)
                 )
-                return "needs_human"
 
-        payload = {"node_id": node["id"], "cycle": count, "failed_tasks": failed}
+        payload = {
+            "node_id": node.id,
+            "cycle": count,
+            "failed_tasks": [t.path for t in failed],
+        }
         await db.write(
             lambda c, payload=payload: events.append(c, work_item_id, "fix_cycle_started", payload)
         )
         instruction = (
-            prompts.FIX_PROMPT.format(node_id=node["id"], failed=", ".join(failed))
+            prompts.FIX_PROMPT.format(node_id=node.id, failed=", ".join(t.task.id for t in failed))
             if failed
-            else prompts.FIX_PROMPT_FINDINGS_ONLY.format(node_id=node["id"])
+            else prompts.FIX_PROMPT_FINDINGS_ONLY.format(node_id=node.id)
         )
         if eligible:
             repeats = set(previous_prints or [])
@@ -934,187 +1399,73 @@ async def walk_node(
         # than hoisted: this is the uncommon path (a fix is about to be
         # dispatched), and the stuck check above is deliberately lazy about the
         # same history so the common path pays nothing.
-        history = dispatch.judge_history(db, work_item_id, node["id"], policy.loop_severities)
+        history = dispatch.judge_history(
+            db,
+            work_item_id,
+            node.id,
+            policy.loop_severities,
+            fix_paths=dispatch.fix_task_paths(node),
+        )
         instruction += prompts.round_history_note(history, dispatch.regressed_fingerprints(history))
         instruction += prompts.previous_attempt_note(previous_fix)
-        fix = await dispatch.dispatch_node(
+        # The fix loop is an ordered shape of its own (`fix-loop-supports-one-
+        # ordered-repair-shape`), so the repair runs through the same steps
+        # walk every other group does rather than one hardcoded task.
+        fix, fix_failed, fix_excs = await dispatch.measure_node(
             db,
             run_dirs,
-            "on.implementation.start",
+            work_item_id,
             node,
             row,
-            registry,
             worktree,
+            steps=node.fix_loop,
             instruction_override=instruction,
             round=count,
             steer=steer,
             launch=launch,
             budget=budget,
-            # Ordered deliberately, and only reachable here: the no-progress stop
-            # above returns first, so a loop that is stuck never buys a more
-            # expensive model for the same blind approach (spec 6).
-            escalate=cap.escalate_after is not None and count > cap.escalate_after,
+            loop_severities=loop_severities,
         )
-        if fix == "paused":
-            return "paused"
-        if fix == BUDGET:
-            return await stops.stop_for_budget(db, work_item_id, node, budget)
-        round = count
-        _first_iteration = False
-        # fix task status is not branched on; loop re-measures
-
-
-#: The round the rebase-conflict resolver writes its session under
-#: (Kraft-s7c04.23). Distinct from `_REPAIR_ROUND` because one node can
-#: reach both -- `mr_checks` declares `on_failure` (which writes at
-#: `_REPAIR_ROUND`) *and* is a legitimate resolver target from the
-#: `/resume`/`/retry` route doors, so both would otherwise write sessions at
-#: the same round on the same node, and `needs_context_question` does not
-#: filter by task (`dispatch.py:713-716`) -- it would read the resolver's row
-#: as the repair's.
-_RESOLVE_ROUND = -2
-
-
-async def resolve_rebase_conflict(
-    db,
-    run_dirs,
-    *,
-    work_item_id: str,
-    node: dict,
-    row,
-    registry: Registry,
-    worktree,
-    policy: _policy.Policy | None,
-    launch: LaunchContext | None,
-    conflict: str,
-) -> tuple[str, str | None, str | None]:
-    """Dispatch `on.implementation.start` to resolve a rebase conflict and
-    judge whether the commits it rebased onto change what this work item is
-    supposed to do (design §4.1 -- the second job is the point, not a
-    formality).
-
-    Returns `(status, steer_text, new_base)`:
-    * `"ok"` -- resolved (`done`/`done_with_concerns`); `new_base` is the sha
-      to persist, `steer_text` is the resolver's own concerns, carried
-      forward as a `seeded` `Steer`, when it reported `done_with_concerns`.
-    * `"needs_human"` -- `needs_context`, `failed`, or a cap breach; the stop
-      has already been recorded via `store.mark_needs_human`.
-    * `"paused"` / `BUDGET` -- propagate exactly as any other dispatch.
-    """
-    key = "rebase_conflict"
-    cap = (
-        _policy.resolve_cap(policy, key)
-        if policy is not None
-        else _policy.Cap(attempts=3, wall_clock_s=3600)
-    )
-    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
-    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
-        reason = f"{key} exhausted after {count - 1} attempt(s): {conflict}"
-        await db.write(
-            lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
-        )
-        return "needs_human", None, None
-
-    branch = store.branch_for(row)
-    old_base = _current_base_ref(db, work_item_id)
-    new_base = await _builtins.upstream_head(Path(row["repo"]))
-    instruction = prompts.rebase_resolve_note(
-        worktree,
-        branch,
-        old_base or "(unknown)",
-        new_base or "(unknown)",
-        conflict,
-        entry.attachments_of(row),
-    )
-    status = await dispatch.dispatch_node(
-        db,
-        run_dirs,
-        "on.implementation.start",
-        node,
-        row,
-        registry,
-        worktree,
-        instruction_override=instruction,
-        round=_RESOLVE_ROUND,
-        launch=launch,
-    )
-    if status in ("paused", BUDGET):
-        return status, None, None
-    session = db.read(
-        lambda c: c.execute(
-            "SELECT result_path FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND hook_point = 'on.implementation.start' AND round = ? ORDER BY created_at DESC "
-            "LIMIT 1",
-            (work_item_id, node["id"], _RESOLVE_ROUND),
-        ).fetchone()
-    )
-    if status in ("done", "done_with_concerns"):
-        # An agent that reported success without actually completing the
-        # rebase is downgraded to the failure path -- `refresh_worktree_base`
-        # cannot be reused here, since it returns None both for "already up
-        # to date" and for "nothing to do", which every caller reads as "no
-        # movement" and skips `set_base_ref` (design §4.4).
-        moved = new_base is not None and (
-            _config.git_read(
-                Path(worktree),
-                "merge-base",
-                "--is-ancestor",
-                new_base,
-                "HEAD",
-                expected_failure=True,
+        if not _repair_outcome(fix, fix_failed):
+            # Only a genuine repair outcome spends an attempt (Kraft-jdkoq). A
+            # repair that was paused, rate limited, left waiting, refused to
+            # start, or whose own plumbing failed (a sync step that never
+            # pushed) has not tried anything the next measurement could judge:
+            # re-measuring would spend the cycle and stop as "stuck", blaming a
+            # fix that never ran.
+            await db.write(lambda c: store.refund_counter(c, work_item_id, key))
+            await db.write(
+                lambda c, refund={"node_id": node.id, "cycle": count, "outcome": fix}: (
+                    events.append(c, work_item_id, "fix_cycle_refunded", refund)
+                )
             )
-            is not None
-        )
-        if not moved:
+            if fix == BASE_MOVED:
+                return await _moved_base(db, work_item_id, node)
+            stop = await _sentinel_stop(db, work_item_id, node, fix, fix_failed, budget)
+            if stop is not None:
+                return stop
+            named = ", ".join(prompts.named_with_kind(t) for t in fix_failed)
             reason = (
-                f"rebase-conflict resolver reported {status!r} without completing "
-                f"the rebase: {conflict}"
+                f"fix attempt {count} in node {node.id} could not finish: {named} failed"
+                f"{_in_process_causes(db, work_item_id, node, fix_failed)}"
             )
             await db.write(
-                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
+                lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node.id, reason)
             )
-            return "needs_human", None, None
-        await db.write(lambda c, new_base=new_base: store.set_base_ref(c, work_item_id, new_base))
-        steer_text = None
-        if status == "done_with_concerns" and session is not None:
-            steer_text = _subprocess.read_concerns(Path(session["result_path"]))
-        return "ok", steer_text, new_base
-    if status == "needs_context":
-        question = (
-            _subprocess.read_question(Path(session["result_path"])) if session is not None else None
-        )
-        reason = f"needs_context: {question or '(no question given)'}"
-        await db.write(
-            lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
-        )
-        return "needs_human", None, None
-    # "failed", or any other status dispatch_node can report for an agent task.
-    reason = f"rebase-conflict resolver could not resolve the conflict: {conflict}"
-    await db.write(
-        lambda c, reason=reason: store.mark_needs_human(c, work_item_id, node["id"], reason)
-    )
-    return "needs_human", None, None
+            return "needs_human"
+        round = count
+        _first_iteration = False
 
 
-async def bounce(db, work_item_id: str, node: dict, target: str, policy) -> str:
-    """Bump the `rebase_bounce` cap and decide whether another bounce to
-    `target` is still allowed (Kraft-4bgg). Same `Cap`/`retry_counters`
-    machinery a fix_loop's own cap check uses in `walk_node`, just keyed on
-    the whole item's rebase bounces rather than one node's fix cycles.
-    """
-    if policy is None:
-        raise RuntimeError(f"node {node['id']!r} has rebase_bounce_to but no policy was provided")
-    key = "rebase_bounce"
-    cap = _policy.resolve_cap(policy, key)
-    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
-    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
-        reason = f"{key} exhausted after {count - 1} bounce(s) back to {target!r}"
-        capped = {"cycles": count - 1, "attempts": cap.attempts}
-        await db.write(
-            lambda c: store.mark_needs_human(c, work_item_id, node["id"], reason, capped)
-        )
-        return "needs_human"
-    return "ok"
+def _repair_outcome(fix: str, fix_failed: list[ResolvedTask]) -> bool:
+    """Whether a fix-loop pass is a genuine repair attempt the next
+    measurement may judge: the steps ran clean, or a repair task that does the
+    repairing (an agent's, a subprocess's) reported that it failed. Kraft's own
+    in-process steps -- a forge sync, a builtin -- failing is plumbing, not a
+    repair outcome, and every stop verdict is its own cause."""
+    if fix == "ok":
+        return True
+    return fix == "failed" and not any(_in_process(t) for t in fix_failed)
 
 
 async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
@@ -1133,29 +1484,197 @@ async def _report_if_undelivered(db, work_item_id: str, carried: Steer) -> None:
         )
 
 
+async def _restart_for_base_change(
+    db,
+    work_item_id: str,
+    nodes,
+    index: int,
+    restart_from: str,
+    policy: _policy.Policy | None,
+    *,
+    reopen_gates: bool,
+) -> int | None:
+    """Restart the chain at `restart_from` because node `index` moved the
+    worktree base (`base-change-restarts-a-declared-chain-span`), or stop for a
+    human once the node's restarts are spent.
+
+    A base change is not an execution failure
+    (`base-change-is-not-an-execution-failure`): no recovery ran for it and no
+    fix attempt is bumped. Every node in the span gets a fresh fix-loop budget
+    instead -- re-running a node is a fresh pass over it, and a clock from
+    before the restart would price the new pass at the old one's cost
+    (Kraft-s7c04.25). The restarts themselves are bounded by their own
+    `<node>.on_base_changed` counter, which the span never clears: a base that
+    moves on every pass would otherwise restart forever.
+
+    `reopen_gates` is whether a conflict was resolved to get here (Ruling 162).
+    A clean rebase -- the forge's forced rebase included, which succeeds only
+    with no textual conflict -- changes nothing a gate saw, so an approved gate
+    in the span keeps its approval and the restarted walk passes over it. A
+    resolved conflict changed code no gate saw: every approved gate in the span
+    reopens, and a human approves it again.
+    """
+    node = nodes[index]
+    key = f"{node.id}.on_base_changed"
+    cap = (
+        _policy.resolve_cap(policy, key)
+        if policy is not None
+        else _policy.Cap(attempts=3, wall_clock_s=3600)
+    )
+    count, started_at, cap = await db.write(lambda c: store.bump_counter(c, work_item_id, key, cap))
+    if _policy.check(count=count, started_at=started_at, cap=cap, now=_now()) == "breached":
+        reason = f"{key} exhausted after {count - 1} restart(s) from {restart_from!r}"
+        capped = {"cycles": count - 1, "attempts": cap.attempts}
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, capped))
+        return None
+    target = next(j for j, n in enumerate(nodes) if n.id == restart_from)
+    span = [n for n in nodes[target : index + 1] if isinstance(n.node, ExecNode)]
+    if reopen_gates:
+        for gate in nodes[target:index]:
+            if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
+                await db.write(
+                    lambda c, g=gate.id: events.append(
+                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "conflict_resolved"}
+                    )
+                )
+    for n in span:
+        await db.write(
+            lambda c, n=n: store.clear_loop_counters(
+                c, work_item_id, n.id, _loop_key(n) if n.node.fix_loop else None
+            )
+        )
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "base_change_restart",
+            {
+                "node_id": node.id,
+                "restart_from": restart_from,
+                "nodes": [n.id for n in span],
+                "restart": count,
+            },
+        )
+    )
+    return target
+
+
+def _cursor(row, nodes) -> tuple[int, int]:
+    """Where the item stands: its current node's index and the step group that
+    node last began. An item that never reached a node stands at the start."""
+    current = row["current_node_id"]
+    if current is None:
+        return 0, 0
+    index = next((i for i, n in enumerate(nodes) if n.id == current), None)
+    if index is None:
+        raise LookupError(
+            f"work item {row['id']!r} stands on node {current!r}, which its chain does not have"
+        )
+    return index, row["current_step"]
+
+
+async def _door_conflict(
+    db,
+    run_dirs,
+    work_item_id: str,
+    nodes,
+    index: int,
+    row,
+    worktree,
+    conflict: str,
+    carried: Steer,
+    policy: _policy.Policy | None,
+    launch: LaunchContext | None,
+) -> int | str:
+    """A rebase conflict hit before the walk, handed to `nodes[index]`'s
+    `on_conflict` handler as the walk would hand a task's (Kraft-e7anb): the
+    node to restart at once it is resolved -- the declared span, its approved
+    gates reopened -- or the stop it ended in. With no handler it stops for a
+    human (`rebase-conflict-requires-explicit-handler`), and the steer goes
+    back on the row for the attempt that follows -- one addressed to paused
+    agent tasks too, which is every steer a paused item takes (Ruling 183)."""
+    node = nodes[index]
+    declared = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
+    if declared is None or declared.on_conflict is None:
+        if carried:
+            text = carried.take()
+            await db.write(lambda c: store.set_steer(c, work_item_id, text))
+        await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, conflict))
+        return "needs_human"
+    budget = store.effective_budget(row, policy.budget if policy else _policy.NO_BUDGET)
+    result = await _resolve_conflict(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        [],
+        conflict,
+        steer=carried,
+        launch=launch,
+        budget=budget,
+        round=0,
+        loop_severities=policy.loop_severities if policy else _policy.DEFAULT_LOOP_SEVERITIES,
+    )
+    if result != CONFLICT_RESOLVED:
+        return result
+    target = await _restart_for_base_change(
+        db, work_item_id, nodes, index, declared.restart_from, policy, reopen_gates=True
+    )
+    return "needs_human" if target is None else target
+
+
 async def run_once(
     db,
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
+    conflict: str | None = None,
 ) -> str:
+    """The one way into the walk.
+
+    Every door that *resumes* an item -- `/resume`, crash resume
+    (`resuming.resume`), the rate-limit and CI-wait pollers -- passes no
+    position: the walk starts at the item's own cursor, `current_node_id` and
+    the step group `current_step` last began, so work that completed before the
+    stop is not rerun (`resume-preserves-completed-work`, Kraft-c3dab). A door
+    that *moves* the item -- a retry, a skip, a gate decision -- passes
+    `start_index` (and `start_step`) to say where it moved it to.
+
+    The item's status is read before every node: a walk only runs an `active`
+    item, and every result is returned as it is, never remapped (Kraft-z0hah).
+
+    `conflict` is a rebase conflict the door itself hit refreshing the worktree
+    before the walk (`/retry`, `/resume`). It goes to the starting node's
+    `on_base_changed.on_conflict` handler exactly as a task's conflict would
+    inside the walk, and stops for a human only when there is none (Kraft-e7anb).
+    """
     # the note is good for one agent launch, whichever task gets there first
-    carried = Steer(steer, source=steer_source)
+    carried = Steer(steer, source=steer_source, to=steer_to)
     row = db.read(
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     if row is None:
         raise LookupError(f"unknown work_item {work_item_id!r}")
-    chain = json.loads(row["chain_definition"])
-    nodes = chain["nodes"]
+    if row["status"] in store.ENDED:
+        # Whatever door got here, an ended item's chain does not run again
+        # (Kraft-dncfg) -- not even the bookkeeping and worktree set-up below.
+        return row["status"]
+    nodes = chain_of(row).chain.nodes
+    if start_index is None:
+        start_index, cursor_step = _cursor(row, nodes)
+        start_step = cursor_step if start_step is None else start_step
+    elif start_step is None:
+        start_step = 0
     # Record the chain as loaded before touching the filesystem: this is
     # bookkeeping about the item, not about the worktree, and a work item
     # whose worktree can never be created (bad repo, git failure) must still
@@ -1166,7 +1685,7 @@ async def run_once(
     # events than a client waiting on this chain to progress at all is
     # entitled to expect.
     if start_index == 0:
-        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0]["id"]))
+        await db.write(lambda c: store.load_chain(c, work_item_id, nodes[0].id))
 
     # Kraft-tsfpk: a bd dependency the tracker already knows about (`bd dep
     # add ... --type blocks`) must stop this walk before it spends a paid
@@ -1199,7 +1718,7 @@ async def run_once(
         if blocked_by:
             await db.write(
                 lambda c: store.mark_blocked_by_dependency(
-                    c, work_item_id, nodes[start_index]["id"], blocked_by
+                    c, work_item_id, nodes[start_index].id, blocked_by
                 )
             )
             return "paused"
@@ -1216,6 +1735,12 @@ async def run_once(
     # failed to start" -- node_started, then needs_human naming it -- should
     # not disappear just because the failure now happens a moment earlier.
     try:
+        # Before the worktree is touched at all: host git in a sandboxed
+        # item's submodule runs what its worker planted there (Kraft-dshto).
+        stops.refuse_sandboxed_submodules(row, launch, run_dirs.worktrees / work_item_id)
+        # A sandboxed item's setup_command runs in its sandbox, never on the
+        # host (Kraft-p8nem).
+        sandbox = dispatch.item_sandbox(row, launch)
         worktree = await _builtins.ensure_worktree(
             db,
             run_dirs,
@@ -1223,16 +1748,55 @@ async def run_once(
             work_item_id=work_item_id,
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
+            sandbox=sandbox,
+        )
+        # What the deleted `env_setup` node used to do, as implicit runtime
+        # preparation: V1 has no builtin action for it, and every node from the
+        # first one on can commit, so the environment the repo declares has to
+        # be there before anything dispatches. Recorded as an event rather than
+        # a session -- there is no task here to own one; `kraft view events` is
+        # where a human reads the report back.
+        #
+        # Only when the walk is actually starting, unlike `ensure_worktree`
+        # above it. `env_setup` was an ordinary node, so a re-entry at
+        # `start_index > 0` skipped it -- and `run_once` is re-entered that way
+        # by the wait scheduler (once per observation of an external wait),
+        # `rate_limit_retry`, gate approval and every `/retry`. Running the
+        # repo's `setup_command` per dispatch attempt rather than per item would
+        # re-`uv sync` a worktree dozens of times over one CI wait and append
+        # its whole stdout to the events table each time.
+        report = (
+            await _builtins.prepare_runtime(
+                worktree, Path(row["repo"]), launch.repo_entry if launch else None, sandbox=sandbox
+            )
+            if start_index == 0
+            else None
         )
     except (RuntimeError, _config.ConfigError) as exc:
-        failing_node = nodes[start_index]["id"]
+        failing_node = nodes[start_index].id
         reason = str(exc)
         await db.write(lambda c: store.enter_node(c, work_item_id, failing_node))
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
         return "needs_human"
+    if report is not None:
+        await db.write(
+            lambda c: events.append(c, work_item_id, "worktree_prepared", {"report": report})
+        )
 
     i = start_index
     step = start_step
+    # A task retry keeps its completed siblings (`task-retry-reruns-that-task-
+    # and-later-work`) -- read off the fork rather than passed in, so a crash
+    # resume that lands back on the retried step keeps them too.
+    fork = db.read(lambda c: store.current_fork(c, work_item_id))
+    preserve = fork.preserved if fork is not None and fork.start == (i, step) else frozenset()
+    if conflict is not None:
+        target = await _door_conflict(
+            db, run_dirs, work_item_id, nodes, i, row, worktree, conflict, carried, policy, launch
+        )
+        if isinstance(target, str):
+            return target
+        i, step, preserve = target, 0, frozenset()
     while i < len(nodes):
         # Kraft-e7pm: a session verdict of "paused" is not the only way a walk
         # has to stop. Pausing between two nodes' dispatches leaves no live
@@ -1246,15 +1810,28 @@ async def run_once(
         if gates.status_of(db, work_item_id) != "active":
             return "paused"
         node = nodes[i]
-        bounce_to = node.get("rebase_bounce_to")
-        pre_base = _current_base_ref(db, work_item_id) if bounce_to else None
+        # A gate is an ordered node of its own (`gate-is-an-ordered-node`): it
+        # runs nothing, so it is recognised here rather than after an execution
+        # node's own tasks. `maybe_gate` answers False for a gate this item has
+        # already cleared, which is what lets a resumed walk pass one.
+        if await gates.maybe_gate(db, work_item_id, node, run_dirs):
+            await _report_if_undelivered(db, work_item_id, carried)
+            return "awaiting_gate"
+        if isinstance(node.node, GateNode):
+            # Cleared: its approval already completed it (`store.approve_gate`),
+            # and entering it again would stamp a second `node_started` on a
+            # decision the item already has.
+            i += 1
+            step = 0
+            continue
+        base_change = node.node.on_base_changed if isinstance(node.node, ExecNode) else None
+        pre_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
         result = await walk_node(
             db,
             run_dirs,
             work_item_id,
             node,
             row,
-            registry,
             worktree,
             policy=policy,
             # `carried` empties itself on the first agent launch, so the note reaches
@@ -1262,8 +1839,10 @@ async def run_once(
             steer=carried,
             launch=launch,
             start_step=step,
+            preserve=preserve,
         )
         step = 0  # only the entry node resumes mid-way
+        preserve = frozenset()
         if result in ("paused", "needs_human", RATE_LIMITED, WAITING):
             # This call is ending without giving `node` -- or any later node
             # in this same run_once, since none of these statuses continue
@@ -1279,51 +1858,36 @@ async def run_once(
             return RATE_LIMITED
         if result == WAITING:
             return WAITING
-        if bounce_to:
-            new_base = _current_base_ref(db, work_item_id)
-            if new_base != pre_base:
-                bounced = await bounce(db, work_item_id, node, bounce_to, policy)
-                if bounced == "needs_human":
-                    return "needs_human"
-                target = next(j for j, n in enumerate(nodes) if n["id"] == bounce_to)
-                # A bounce is a fresh pass over every node in the span it
-                # re-enters, not just the target -- an intervening node's own
-                # fix-loop counter (e.g. `mr_checks`' `ci_fix_loop` on a bounce
-                # from `merge`) is exactly as stale as the target's
-                # (Kraft-s7c04.25 spec §2). Inclusive of the bouncing node
-                # itself: bouncing from `merge` re-runs `merge` too.
-                cleared = [n["id"] for n in nodes[target : i + 1]]
-                for n in nodes[target : i + 1]:
-                    await db.write(
-                        lambda c, n=n: store.clear_loop_counters(
-                            c, work_item_id, n["id"], n.get("fix_loop")
-                        )
-                    )
-                await db.write(
-                    lambda c, cleared=cleared, bounce_to=bounce_to: events.append(
-                        c,
-                        work_item_id,
-                        "loop_counters_reset",
-                        {"nodes": cleared, "reason": "rebase_bounce", "bounce_to": bounce_to},
-                    )
-                )
-                # `carried` is about to be replaced by Kraft's own rebase note
-                # -- if the original steer (human or seeded) survived this
-                # far untaken, report it before it's overwritten, or it is
-                # lost with no trace (Kraft-s7c04.50, found in spec review).
+        new_base = dispatch._current_base_ref(db, work_item_id) if base_change else None
+        if base_change is not None and (
+            result in (BASE_MOVED, CONFLICT_RESOLVED) or new_base != pre_base
+        ):
+            target = await _restart_for_base_change(
+                db,
+                work_item_id,
+                nodes,
+                i,
+                base_change.restart_from,
+                policy,
+                reopen_gates=result == CONFLICT_RESOLVED,
+            )
+            if target is None:
                 await _report_if_undelivered(db, work_item_id, carried)
-                carried = Steer(
-                    prompts.rebase_drift_note(worktree, store.branch_for(row), pre_base, new_base),
-                    # Kraft wrote this one, not a person (the `_REBASE_PROMPT`
-                    # template already says so); it must not claim the judge
-                    # exemption a human's own answer gets.
-                    source="seeded",
-                )
-                i = target
-                continue
-        if await gates.maybe_gate(db, work_item_id, node):
+                return "needs_human"
+            # `carried` is about to be replaced by Kraft's own drift note -- if
+            # the original steer survived this far untaken, report it before
+            # it is overwritten (Kraft-s7c04.50).
             await _report_if_undelivered(db, work_item_id, carried)
-            return "awaiting_gate"
+            carried = Steer(
+                prompts.rebase_drift_note(
+                    worktree, store.branch_for(row), pre_base or "HEAD", new_base or "HEAD"
+                ),
+                # Kraft wrote this one, not a person; it must not claim the
+                # judge exemption a human's own answer gets.
+                source="seeded",
+            )
+            i = target
+            continue
         i += 1
 
     # The whole chain ran to completion without any node's dispatch ever
@@ -1340,35 +1904,36 @@ async def run(
     run_dirs,
     *,
     work_item_id: str,
-    registry: Registry,
     bd_cwd: str | None = None,
-    start_index: int = 0,
-    start_step: int = 0,
+    start_index: int | None = None,
+    start_step: int | None = None,
     policy: _policy.Policy | None = None,
     steer: str | None = None,
     steer_source: str = "human",
+    steer_to: dict[str, str] | None = None,
     launch: LaunchContext | None = None,
     on_approve: OnApprove | None = None,
+    conflict: str | None = None,
 ) -> str:
     status = await run_once(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         bd_cwd=bd_cwd,
         start_index=start_index,
         start_step=start_step,
         policy=policy,
         steer=steer,
         steer_source=steer_source,
+        steer_to=steer_to,
         launch=launch,
+        conflict=conflict,
     )
     status = await gates.review_gates(
         status,
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,
@@ -1379,7 +1944,6 @@ async def run(
         db,
         run_dirs,
         work_item_id=work_item_id,
-        registry=registry,
         policy=policy,
         launch=launch,
         bd_cwd=bd_cwd,

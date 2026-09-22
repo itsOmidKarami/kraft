@@ -20,6 +20,12 @@ test` (add `-k pattern` or a path to target specific tests; use
 `--no-testmon` for a full run). Calling pytest raw skips testmon's
 change-tracking and burns the full ~14min suite.
 
+**Testing guideline:** see `docs/testing.md`. Two tiers (unmarked unit,
+mocked at the adapter seam; `@pytest.mark.e2e("<cli>")` for a real CLI's
+contract) and one rule for every pin: mutate the code it covers and confirm
+that same test fails, or it isn't proof of anything. `just check-tests`
+enforces what can be checked mechanically.
+
 ## Running Kraft
 
 Two ways, and neither is `python -m kraft` by hand.
@@ -44,7 +50,8 @@ surface. `--json` on any verb prints the raw API payload.
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate]  # files it paused
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate] [--autostart]  # files it paused unless --autostart
+kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
@@ -64,9 +71,11 @@ kraft admin stop                             # SIGTERM to run/kraft.pid
 kraft admin restart                          # stop, then start again the same way it was running
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
-kraft admin update [--restart]               # install the newest release; --restart also restarts
+kraft admin update [--restart] [-y]          # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
-kraft admin reload                           # reread templates/registry from disk, no restart
+kraft admin reload                           # reread the template library and policy.yaml from disk, no restart
+kraft admin templates lint                   # check every chain in the library; exit 1 on any error
+kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
 ```
 
@@ -97,22 +106,53 @@ item attachments instead:
 kraft item create "title" --spec PATH --plan PATH
 ```
 
-**An attachment is snapshotted at intake, and frozen.** Intake copies the file
-into `~/.kraft/run/attachments/<work-item-id>/`, and that copy — not the path
-you passed — is what `builtins.ensure_worktree` reads into the worker's
-worktree when the item runs. A source that has gone missing raises rather than
-skipping silently, so an item can no longer run with its gates trimmed and no
-document.
+**An attachment is snapshotted at intake.** Intake copies the file into
+`~/.kraft/run/attachments/<work-item-id>/`, and that copy, not the path you
+passed, is what `builtins.ensure_worktree` copies into the worker's worktree
+when the item runs. A stored copy that has gone missing fails the item before
+its worktree is made, so it never runs with its gates trimmed and no document.
 
-Two consequences worth remembering:
+Editing the original after filing changes nothing on its own. To revise a spec
+or plan before the item starts, re-attach it in place instead of abandoning and
+re-filing:
 
-- Editing the original after filing changes nothing. The worker reads the
-  snapshot, and no endpoint refreshes it.
-- Revising an attached spec or plan therefore means abandoning the item and
-  re-filing it. There is a bead open for patching an attachment in place; until
-  it lands, re-filing is the whole mechanism. Get the document right before you
-  attach it — not because the file might vanish, but because changing it
-  afterwards is a no-op that looks like it worked.
+```bash
+kraft item set-attachments [ID] --spec PATH   # copied again; --plan likewise
+kraft item set-attachments [ID] --drop spec   # removes it and puts its gate back
+```
+
+Once the item has started, its documents are fixed (the call answers 409): its
+worktree already holds them, committed on its branch. `kraft item create` warns
+when an open item in the same repo has the same title or implements a bead you
+named; read that warning before filing twice.
+
+### The test tree mirrors the source tree
+
+A test for `src/kraft/<pkg>/<mod>.py` lives at `tests/<pkg>/test_<mod>.py` — not
+`tests/test_<pkg>_<mod>.py`. Flat names under a hierarchical source is how the
+layout drifted the first time. A module with no package mirrors nothing and
+stays at `tests/test_<mod>.py`.
+
+**Every `tests/` subdirectory needs an empty `__init__.py`.** This is
+load-bearing, not tidiness. The mirrored tree has eleven duplicate basenames
+(`test_gates.py` exists under `api/`, `executor/` and the root, and so on for
+`test_db`, `test_auth`, `test_budget`, `test_escalate`, `test_progress`,
+`test_reattach`, `test_repos`, `test_service`, `test_triggers`,
+`test_work_items`), which pytest's default prepend import mode rejects as a
+hard collection error. Packages fix it with no config change, and they keep
+`tests/` on `sys.path` — which the 87 files doing `from support.harness import
+...` depend on. Do not "simplify" this by switching to
+`--import-mode=importlib`; that drops `tests/` off `sys.path` and breaks every
+one of them.
+
+Two things bite when you move or add a nested test:
+
+- `Path(__file__)` paths are written relative to `tests/`, so a file one level
+  down needs `parents[1]` where the root wanted `parents[0]`. Resolve them
+  against the filesystem rather than trusting the arithmetic.
+- Moving a test file breaks its `enforced-by:` pins in `docs/intent/`. CI runs
+  `python -m kraft.intent`, which exits 1 on a broken pin, so repoint them in
+  the same change and confirm with `just intent`.
 
 ### Marking a task already done in a reused plan
 

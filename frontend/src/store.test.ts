@@ -1,26 +1,21 @@
+// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useStore } from "./store";
+import { item } from "./testFixtures";
 import type { KraftEvent, WorkItem } from "./types";
 
-const baseItem = (over: Partial<WorkItem> = {}): WorkItem => ({
-  id: "w1",
-  title: "t",
-  repo: "/r",
-  status: "active",
-  chain_template: "quick-task",
-  chain_definition: {
-    template_id: "quick-task",
-    nodes: [
-      { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },
-      { id: "verify", tasks: ["on.test.run"], gate_after: null },
-    ],
-  },
-  current_node_id: "env_setup",
-  bead_id: "B-1",
-  created_at: "t",
-  updated_at: "t",
-  ...over,
-});
+const baseItem = (over: Partial<WorkItem> = {}): WorkItem =>
+  item({
+    title: "t", chain_template: "quick-task", current_node_id: "env_setup", bead_id: "B-1",
+    chain_definition: {
+      template_id: "quick-task",
+      nodes: [
+        { id: "env_setup", tasks: ["on.env.prepare"], gate_after: null },
+        { id: "verify", tasks: ["on.test.run"], gate_after: null },
+      ],
+    },
+    ...over,
+  });
 
 const ev = (over: Partial<KraftEvent>): KraftEvent => ({
   seq: 1,
@@ -71,6 +66,14 @@ describe("applyEvent", () => {
     const rows = useStore.getState().sessionsByItem.w1;
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("done");
+  });
+
+  it("worker_session_exited patches every kind of token in (Ruling 211)", () => {
+    const st = useStore.getState();
+    const kinds = { tokens_in: 7, tokens_cache_write: 40, tokens_cache_read: 900, tokens_out: 3 };
+    st.applyEvent(ev({ seq: 2, type: "worker_session_started", payload: { session_id: "s1", node_id: "verify", hook_point: "on.test.run" } }));
+    st.applyEvent(ev({ seq: 3, type: "worker_session_exited", payload: { session_id: "s1", status: "done", ...kinds } }));
+    expect(useStore.getState().sessionsByItem.w1[0]).toMatchObject(kinds);
   });
 
   it("worker_session_created makes the row appear before anything runs", () => {
@@ -159,10 +162,10 @@ describe("applyEvent", () => {
     expect(useStore.getState().workItems.w1.fixCycle).toBe(2);
   });
 
-  it("task_progress sets the hero task bar's progress", () => {
+  it("plan_progress sets the hero task bar's progress", () => {
     useStore
       .getState()
-      .applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 3, total: 6, title: "wire the thing" } }));
+      .applyEvent(ev({ type: "plan_progress", payload: { node_id: "env_setup", task: 3, total: 6, title: "wire the thing" } }));
     expect(useStore.getState().workItems.w1.progress).toEqual({
       current: 3,
       total: 6,
@@ -171,7 +174,7 @@ describe("applyEvent", () => {
     });
   });
 
-  it("task_progress recomputes an existing plan list's states", () => {
+  it("plan_progress recomputes an existing plan list's states", () => {
     useStore.setState((s) => ({
       workItems: {
         ...s.workItems,
@@ -190,7 +193,7 @@ describe("applyEvent", () => {
         },
       },
     }));
-    useStore.getState().applyEvent(ev({ type: "task_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
+    useStore.getState().applyEvent(ev({ type: "plan_progress", payload: { node_id: "env_setup", task: 2, total: 3, title: "b" } }));
     expect(useStore.getState().workItems.w1.progress?.tasks?.map((t) => t.state)).toEqual([
       "done",
       "current",
@@ -198,20 +201,17 @@ describe("applyEvent", () => {
     ]);
   });
 
-  it("work_item_completed sets status", () => {
-    useStore.getState().applyEvent(ev({ type: "work_item_completed", payload: {} }));
-    expect(useStore.getState().workItems.w1.status).toBe("completed");
-  });
-
-  it("work_item_needs_human sets status", () => {
-    useStore.getState().applyEvent(ev({ type: "work_item_needs_human", payload: { node_id: "verify", reason: "x" } }));
-    expect(useStore.getState().workItems.w1.status).toBe("needs_human");
-  });
-  it("work_item_abandoned sets status", () => {
-    // A live board holding a row for an item someone abandoned elsewhere would
-    // keep offering actions on a worktree that no longer exists.
-    useStore.getState().applyEvent(ev({ type: "work_item_abandoned", payload: {} }));
-    expect(useStore.getState().workItems.w1.status).toBe("abandoned");
+  // abandoned: a live board holding a row for an item abandoned elsewhere
+  // would keep offering actions on a worktree that no longer exists.
+  it.each<[string, Record<string, unknown>, Partial<WorkItem>]>([
+    ["work_item_completed", {}, { status: "completed" }],
+    ["work_item_needs_human", { node_id: "verify", reason: "x" }, { status: "needs_human" }],
+    ["work_item_abandoned", {}, { status: "abandoned" }],
+    ["work_item_rate_limited", { retry_at: "2026-01-01T00:00:00Z", node_id: "n" }, { status: "rate_limited", retry_at: "2026-01-01T00:00:00Z" }],
+    ["work_item_waiting", { retry_at: "2026-01-01T00:00:00Z", node_id: "n" }, { status: "waiting", retry_at: "2026-01-01T00:00:00Z" }],
+  ])("%s patches the item", (type, payload, patch) => {
+    useStore.getState().applyEvent(ev({ type, payload }));
+    expect(useStore.getState().workItems.w1).toMatchObject(patch);
   });
 
   it("work_item_needs_human carries the needs_context question off the live stream", () => {
@@ -250,22 +250,6 @@ describe("applyEvent", () => {
     },
   );
 
-  it("work_item_rate_limited patches status and retry_at", () => {
-    useStore.getState().applyEvent(
-      ev({ type: "work_item_rate_limited", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
-    );
-    expect(useStore.getState().workItems.w1.status).toBe("rate_limited");
-    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
-  });
-
-  it("work_item_waiting patches status and retry_at", () => {
-    useStore.getState().applyEvent(
-      ev({ type: "work_item_waiting", payload: { retry_at: "2026-01-01T00:00:00Z", node_id: "n" } }),
-    );
-    expect(useStore.getState().workItems.w1.status).toBe("waiting");
-    expect(useStore.getState().workItems.w1.retry_at).toBe("2026-01-01T00:00:00Z");
-  });
-
   it("work_item_archived sets archived_at/archived_by", () => {
     useStore.setState({ workItems: { w1: baseItem({ status: "completed" }) } });
     useStore.getState().applyEvent(ev({ type: "work_item_archived", payload: { by: "you" } }));
@@ -289,27 +273,16 @@ describe("applyEvent", () => {
     expect(useStore.getState().eventsByItem.w1).toHaveLength(1);
   });
 
-  it("work_item_created for an unknown id triggers hydrateItem", async () => {
-    const spy = vi
-      .spyOn(useStore.getState(), "hydrateItem")
-      .mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ work_item_id: "w2", type: "work_item_created", payload: {} }));
-    await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w2");
-  });
-
-  it("chain_loaded for an unknown id triggers hydrateItem", async () => {
+  // gate_requested: so a stale deferred_findings roll-up isn't left showing.
+  it.each([
+    ["work_item_created for an unknown id", "w2", "work_item_created", {}],
+    ["chain_loaded for an unknown id", "w2", "chain_loaded", {}],
+    ["gate_requested", "w1", "gate_requested", { gate: "human_review_approval" }],
+  ])("%s triggers hydrateItem", async (_, id, type, payload) => {
     const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ work_item_id: "w2", type: "chain_loaded", payload: {} }));
+    useStore.getState().applyEvent(ev({ work_item_id: id, type, payload }));
     await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w2");
-  });
-
-  it("gate_requested re-hydrates so a stale deferred_findings roll-up isn't left showing", async () => {
-    const spy = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue(undefined);
-    useStore.getState().applyEvent(ev({ type: "gate_requested", payload: { gate: "human_review_approval" } }));
-    await new Promise((r) => setTimeout(r));
-    expect(spy).toHaveBeenCalledWith("w1");
+    expect(spy).toHaveBeenCalledWith(id);
   });
 
   it("lastSeq never goes backward", () => {

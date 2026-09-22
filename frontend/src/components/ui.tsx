@@ -175,8 +175,8 @@ export function MiniChain({
             data-state={state}
           >
             <span className="chain-fill" title={size === "sm" ? n.id : undefined}>
-              {n.gate_after && (
-                <span className="chain-gate" title={n.gate_after}>
+              {(n.gate_after || n.kind === "gate") && (
+                <span className="chain-gate" title={n.gate_after ?? n.id}>
                   <Flag weight="fill" size={9} />
                 </span>
               )}
@@ -194,22 +194,13 @@ export function MiniChain({
 /* — task progress (spec §7) —————————————————————————————————————————— */
 
 /** One vocabulary for "where the implementer is in its plan" (UI v3 · §2):
- *  the count in accent, the title in neutral and ellipsized. `short` is the
- *  board row's meta line, where "Task 3/6" is all that fits. */
-export function TaskLine({
-  progress,
-  form = "long",
-}: {
-  progress: TaskProgress;
-  form?: "long" | "short";
-}) {
+ *  the count in accent, the title in neutral and ellipsized. `3 of 6`, never
+ *  "Task 3 of 6": a bare "task" could mean a chain task, and the title is what
+ *  says which plan task this is (docs/templates-v1-design.md). */
+export function TaskLine({ progress }: { progress: TaskProgress }) {
   return (
     <span className="task-line">
-      <span className="task-count">
-        {form === "short"
-          ? `Task ${progress.current}/${progress.total}`
-          : `Task ${progress.current} of ${progress.total}`}
-      </span>
+      <span className="task-count">{`${progress.current} of ${progress.total}`}</span>
       <span className="task-title">{progress.title}</span>
     </span>
   );

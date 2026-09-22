@@ -15,7 +15,7 @@ interface YamlLine {
   tone: "override" | "selected" | null;
 }
 
-function yamlOf(item: WorkItem, nodeId: string | null): YamlLine[] {
+export function yamlOf(item: WorkItem, nodeId: string | null): YamlLine[] {
   const chain = item.effective_chain ?? item.chain_definition;
   const overrides = item.node_overrides ?? {};
   const lines: YamlLine[] = [
@@ -25,8 +25,20 @@ function yamlOf(item: WorkItem, nodeId: string | null): YamlLine[] {
   for (const n of chain.nodes) {
     const isOverridden = Object.keys(overrides[n.id] ?? {}).length > 0;
     const selected = n.id === nodeId;
-    lines.push({ text: `  - id: ${n.id}${selected ? " # ← selected" : ""}`, tone: selected ? "selected" : null });
-    lines.push({ text: `    gate_after: ${n.gate_after ?? "null"}`, tone: selected ? "selected" : null });
+    lines.push({
+      text: `  - id: ${n.id}${selected ? " # ← selected" : ""}`,
+      tone: selected ? "selected" : null,
+    });
+    // A V1 gate node reports itself under `gate_after`, which under its own
+    // entry reads `gate_after: <its own id>` -- a shape no authored template can
+    // have. Print the field a V1 chain actually declares instead.
+    lines.push({
+      text:
+        n.kind === "gate"
+          ? `    kind: gate${n.reject_to ? `, reject_to: ${n.reject_to}` : ""}`
+          : `    gate_after: ${n.gate_after ?? "null"}`,
+      tone: selected ? "selected" : null,
+    });
     if (n.auto_escalate != null) {
       lines.push({
         text: `    auto_escalate: ${n.auto_escalate}${isOverridden ? " # override" : ""}`,
@@ -37,13 +49,23 @@ function yamlOf(item: WorkItem, nodeId: string | null): YamlLine[] {
   return lines;
 }
 
-export function ConfigPane({ item, nodeId }: { item: WorkItem; nodeId: string | null }) {
+export function ConfigPane({
+  item,
+  nodeId,
+}: {
+  item: WorkItem;
+  nodeId: string | null;
+}) {
   const hydrateItem = useStore((s) => s.hydrateItem);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [editingBudget, setEditingBudget] = useState(false);
-  const [budgetDraft, setBudgetDraft] = useState(() => String(item.budget_cap?.cap_usd ?? ""));
-  const [noCap, setNoCap] = useState(item.budget_cap?.cap_usd == null && item.budget_cap?.source === "item");
+  const [budgetDraft, setBudgetDraft] = useState(() =>
+    String(item.budget_cap?.cap_usd ?? ""),
+  );
+  const [noCap, setNoCap] = useState(
+    item.budget_cap?.cap_usd == null && item.budget_cap?.source === "item",
+  );
 
   const resetToTemplate = async () => {
     setBusy(true);
@@ -70,7 +92,9 @@ export function ConfigPane({ item, nodeId }: { item: WorkItem; nodeId: string | 
       } else {
         const n = Number(budgetDraft);
         if (!Number.isFinite(n) || n < 0) {
-          setErr(`"${budgetDraft}" is not a valid budget — enter a non-negative number`);
+          setErr(
+            `"${budgetDraft}" is not a valid budget — enter a non-negative number`,
+          );
           return;
         }
         value = n;
@@ -104,7 +128,10 @@ export function ConfigPane({ item, nodeId }: { item: WorkItem; nodeId: string | 
               ? `${usd(item.budget_cap.cap_usd)} · ${usd(item.budget_cap.spent_usd)} used`
               : `no cap · ${usd(item.budget_cap?.spent_usd ?? 0)} used`}
             {!editingBudget && (
-              <button className="btn btn-ghost" onClick={() => setEditingBudget(true)}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setEditingBudget(true)}
+              >
                 Edit
               </button>
             )}
@@ -133,7 +160,11 @@ export function ConfigPane({ item, nodeId }: { item: WorkItem; nodeId: string | 
                 disabled={busy}
               />
             )}
-            <button className="btn btn-secondary" disabled={busy} onClick={saveBudget}>
+            <button
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={saveBudget}
+            >
               Save budget
             </button>
           </div>
@@ -144,26 +175,41 @@ export function ConfigPane({ item, nodeId }: { item: WorkItem; nodeId: string | 
         <div className="control-row">
           <p className="section-label">
             Effective chain · this work item ·{" "}
-            {overridesCount > 0 ? `${overridesCount} override${overridesCount === 1 ? "" : "s"}` : "default · no overrides"}
+            {overridesCount > 0
+              ? `${overridesCount} override${overridesCount === 1 ? "" : "s"}`
+              : "default · no overrides"}
           </p>
-          <button className="btn btn-ghost" disabled={busy || started_item} onClick={resetToTemplate}>
+          <button
+            className="btn btn-ghost"
+            disabled={busy || started_item}
+            onClick={resetToTemplate}
+          >
             Reset to template
           </button>
-          <button className="btn btn-secondary" disabled title="no template-write API yet — Kraft-9ba7">
+          <button
+            className="btn btn-secondary"
+            disabled
+            title="no template-write API yet — Kraft-9ba7"
+          >
             Save as template…
           </button>
         </div>
         <pre className="config-yaml mono">
           {yamlOf(item, nodeId).map((line, i) => (
-            <div key={i} className={line.tone ? `yaml-line yaml-${line.tone}` : "yaml-line"}>
+            <div
+              key={i}
+              className={
+                line.tone ? `yaml-line yaml-${line.tone}` : "yaml-line"
+              }
+            >
               {line.text}
             </div>
           ))}
         </pre>
         <p className="inspector-foot config-legend">
           <span className="yaml-legend-swatch yaml-override" /> override ·{" "}
-          <span className="yaml-legend-swatch yaml-selected" /> selected node · Chains → default opens the
-          full editor
+          <span className="yaml-legend-swatch yaml-selected" /> selected node ·
+          Chains → default opens the full editor
         </p>
       </section>
       {err && <p className="form-error">{err}</p>}

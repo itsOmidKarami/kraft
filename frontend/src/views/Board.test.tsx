@@ -8,27 +8,9 @@ import { useStore } from "../store";
 import type { KraftEvent, WorkerSession, WorkItem } from "../types";
 import type { ToastPayload } from "../components/Toast";
 import { Board } from "./Board";
+import { item, QUICK, setPhoneWidth } from "../testFixtures";
 
-const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({
-    id: over.id ?? "w1",
-    title: over.title ?? "Item",
-    repo: over.repo ?? "/repo-a",
-    status: over.status ?? "active",
-    chain_template: over.chain_template ?? "quick-task",
-    chain_definition: {
-      template_id: "quick-task",
-      nodes: [
-        { id: "plan", tasks: ["a"], gate_after: "plan_approval" },
-        { id: "verify", tasks: ["b"], gate_after: null },
-      ],
-    },
-    current_node_id: "verify",
-    bead_id: "B",
-    created_at: "t",
-    updated_at: "t",
-    ...over,
-  }) as WorkItem;
+const wi = (over: Partial<WorkItem>): WorkItem => item({ title: "Item", repo: "/repo-a", ...QUICK, ...over });
 
 const setItems = (...items: WorkItem[]) =>
   useStore.setState({ workItems: Object.fromEntries(items.map((i) => [i.id, i])), sessionsByItem: {}, eventsByItem: {} } as never);
@@ -210,6 +192,27 @@ describe("Board", () => {
     expect(screen.getAllByTestId("board-card")).toHaveLength(1);
   });
 
+  // The New work item dialog omits `chain_template` when `default` is chosen
+  // (Kraft-cd47), so a board holding one explicit template and one default
+  // item mixes a real id with a null. Sorting those keys with
+  // `localeCompare` threw on the null and blanked the whole board. It throws
+  // when the null is the *receiver*, so it fired only when `sort` passed the
+  // null key as a comparison's first argument -- which is why a full board
+  // survived it and a small one did not. This test does not reproduce that
+  // pairing directly; it pins the guard, and reverting `tplOf` reddens it.
+  it("counts an item with no explicit template as `default` instead of blanking the board", async () => {
+    setItems(
+      wi({ id: "w0", repo: "/repo-a", status: "active", chain_template: null as never }),
+      wi({ id: "w1", repo: "/repo-a", status: "active", chain_template: "quick-task" }),
+    );
+    renderBoard();
+    expect(screen.getAllByTestId("board-card")).toHaveLength(2);
+    expect(within(filters()).getByRole("button", { name: /^default/ })).toHaveTextContent("1");
+    // And the chip filters to that item rather than to nothing.
+    await userEvent.click(within(filters()).getByRole("button", { name: /^default/ }));
+    expect(screen.getAllByTestId("board-card")).toHaveLength(1);
+  });
+
   it("caps the Done group at five until 'show all' is clicked", async () => {
     setItems(
       ...Array.from({ length: 7 }, (_, n) =>
@@ -272,13 +275,17 @@ describe("Board", () => {
     ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
     ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
     ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
-    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /Task 3\/6 · wire the store$/, null],
+    // N of M · title, with no bare task noun in front
+    ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!task )3 of 6 · wire the store$/i, null],
     ["rate limited", { status: "rate_limited", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
-  ])("%s: the meta line ends in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
+    ["waiting", { status: "waiting", retry_at: new Date(Date.now() + 4 * 60_000 + 30_000).toISOString() }, /retry in 4m$/, null],
+  ])("%s: the meta line and its tooltip end in its reason, and the button matches (W11 · B.2, B.3)", (_, over, reason, button) => {
     setItems(wi({ id: "w9", ...over }));
     renderBoard();
     const row = screen.getByTestId("board-card");
-    expect(row.querySelector(".board-row-meta")?.textContent).toMatch(reason);
+    const meta = row.querySelector(".board-row-meta")!;
+    expect(meta.textContent).toMatch(reason);
+    expect(meta.getAttribute("title")).toMatch(reason);
     expect([...row.querySelectorAll(".board-row-action button")].map((b) => b.textContent)).toEqual(button ? [button] : []);
   });
 
@@ -407,43 +414,14 @@ describe("Board", () => {
     expect(meta.getAttribute("title")).toMatch(/^repo-a · B · quick-task/);
   });
 
-  it("groups a rate_limited item under Running, not Needs you", () => {
-    setItems(wi({ id: "w3", status: "rate_limited", current_node_id: "implementation" }));
+  // Kraft-knym: ru98 landed 'waiting' on the backend with no frontend
+  // treatment at all, so a parked item matched no board group and vanished
+  // from the board entirely.
+  it.each(["rate_limited", "waiting"] as const)("groups a %s item under Running, not Needs you", (status) => {
+    setItems(wi({ id: "w3", status }));
     renderBoard();
     expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
     expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
-  });
-
-  it("shows the retry time on a rate_limited card", () => {
-    setItems(wi({ id: "w3", status: "rate_limited", retry_at: "2026-09-10T05:00:00Z" }));
-    renderBoard();
-    expect(screen.getByText(/retry/i)).toBeInTheDocument();
-  });
-
-  it("groups a waiting item under Running, not Needs you", () => {
-    // Kraft-knym: ru98 landed 'waiting' on the backend with no frontend
-    // treatment at all, so a parked item matched no board group and vanished
-    // from the board entirely -- worse than the "looks hung" bug it was filed
-    // to fix.
-    setItems(wi({ id: "w3", status: "waiting", current_node_id: "mr_checks" }));
-    renderBoard();
-    expect(within(group("Running")).getByText("Item")).toBeInTheDocument();
-    expect(within(group("Needs you")).queryByText("Item")).not.toBeInTheDocument();
-  });
-
-  it("shows the retry time on a waiting card", () => {
-    setItems(wi({ id: "w3", status: "waiting", retry_at: "2026-09-10T05:00:00Z" }));
-    renderBoard();
-    expect(screen.getByText(/retry/i)).toBeInTheDocument();
-  });
-
-  it("Task N/M · title renders in the meta line when progress is set", () => {
-    setItems(
-      wi({ id: "w1", status: "active", progress: { current: 3, total: 6, title: "wire the store" } }),
-    );
-    renderBoard();
-    expect(screen.getByText("Task 3/6")).toBeInTheDocument();
-    expect(screen.getByText("wire the store")).toBeInTheDocument();
   });
 
   it("plain click toggles the peek param; ⌘-click navigates instead", async () => {
@@ -504,7 +482,7 @@ describe("Board", () => {
   });
 
   it("long-press opens the peek pane instead of navigating (phone)", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     renderBoard();
     const row = screen.getByTestId("board-card");
@@ -516,7 +494,7 @@ describe("Board", () => {
   });
 
   it("a plain tap navigates to the item on phone instead of toggling peek", async () => {
-    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }) as never);
+    setPhoneWidth();
     setItems(wi({ id: "w1" }));
     const { container } = render(
       <MemoryRouter
@@ -712,5 +690,24 @@ describe("the .board-row grid contract", () => {
       hidden(/\.board-row\s*>\s*\.chain-bar\.sm\s*\{([^}]*)\}/g) -
       hidden(/\.board-row\s*>\s*\.board-row-action\s*\{([^}]*)\}/g);
     expect(trackCount).toBe(inFlow);
+  });
+});
+
+describe("Board: a launch that ran on a fallback (Kraft-0a3h8)", () => {
+  it("marks the card with the timeline's sentence as its tooltip", () => {
+    const fallback = {
+      reason: "known_limited",
+      from: { harness: "claude", model: "opus", effort: null },
+      to: { harness: "codex", model: "gpt-5.6-sol", effort: null },
+      resets_at_iso: null,
+      session_id: "s2",
+    };
+    setItems(wi({ id: "w1", status: "active", fallback }), wi({ id: "w2", status: "active", title: "Plain" }));
+    renderBoard();
+    const [marked, plain] = within(group("Running")).getAllByTestId("board-card");
+    const marker = marked.querySelector(".board-row-fallback")!;
+    expect(marker.textContent).toBe("fallback");
+    expect(marker.getAttribute("title")).toBe("Skipped claude / opus (rate-limited); started on codex / gpt-5.6-sol.");
+    expect(plain.querySelector(".board-row-fallback")).toBeNull();
   });
 });

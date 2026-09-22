@@ -1,24 +1,28 @@
 # Playwright end-to-end
 
-Four specs, all against one running orchestrator:
+Eight specs, all against one running orchestrator. Playwright proves the
+UI↔server contract and real-browser layout; component behaviour (Escape
+handling, active nav tabs, which controls a phone hides) is vitest's. Shared
+helpers — `REPO`, `REPO_NAME`, `connectRepo`, `createItem` — live in
+`fixtures.ts`.
 
 | spec | what it drives |
 | --- | --- |
 | `chain.spec.ts` | create a `quick-task` item against a sample repo with a failing test, watch it reach `work_item_completed`, open the linked session summary |
-| `lifecycle.spec.ts` | the human-in-the-loop controls: gate approve, gate reject → re-plan, pause / steer / resume |
-| `regression.spec.ts` | every Settings page (repos, templates, plugins, policy, access), Analytics, the search overlay |
-| `search.spec.ts` | the search overlay in detail: filters, document viewer, Escape handling |
-| `phone.visual.spec.ts` | sub-project B's phone contract at a 390x844 viewport: the board, the gate, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), and the diff viewer wrapping a **real** diff. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so the unit tests can only assert class boundaries and stylesheet source order — this is the only place the media queries are real |
-| `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the struck-through chain preview, the `from spec+plan` badge, the "attached at intake" tag. Writes screenshots to `frontend/e2e-shots/` (gitignored) — it asserts little and is meant to be looked at |
-| `planning.spec.ts` | a `default`-chain item reaching `spec_approval`, the "Review spec" button and its document modal, rejecting the gate (re-runs the spec node, returns to the same gate), approving into `plan_approval`, and the "Review plan" button/modal |
+| `planning.spec.ts` | a `default`-chain item reaching `spec_approval`, "Review spec" → Documents tab, rejecting the gate (re-runs the spec node, returns to the same gate), approving into `plan_approval`, and "Review plan" |
+| `lifecycle.spec.ts` | pause / steer / resume a running agent, and a deep link answered by the SPA fallback |
+| `regression.spec.ts` | every Settings page's write path (repos, chains, policy, steering, access, notify, appearance) |
+| `search.spec.ts` | Ctrl-K → a real index hit → the document viewer; the advanced kind filter |
+| `board-responsive.spec.ts` | the peek overlays the board without moving a row |
+| `phone.visual.spec.ts` | the phone contract at 390x844: no sideways scroll, 44px touch targets, the reject textarea's 16px floor (under it, mobile Safari zooms on focus and never zooms back), a **real** diff wrapping. Writes screenshots to `frontend/e2e-shots/`. jsdom has no viewport, so this is the only place the media queries are real |
+| `attachments.visual.spec.ts` | intake from an existing spec/plan: the type-to-search picker, the `from spec+plan` badge, the "attached at intake" tag. Also writes screenshots |
 
-`lifecycle.spec.ts` slows the implementation hook through `PUT /registry` so
-there is something to pause, and puts it back afterwards — so these run one at
-a time (`workers: 1`, already set in `playwright.config.ts`).
+`lifecycle.spec.ts` slows its agent with `KRAFT_SLOW` in the title so there is
+something to pause. One server, run one spec at a time (`workers: 1`, set in
+`playwright.config.ts`).
 
-This is **manual / non-blocking**, mirroring the gated Python e2e
-(`pytest -m e2e`, `KRAFT_E2E=1`). It is not part of `npm test` or the blocking
-`frontend` CI job.
+`playwright` is a required CI check (`.github/workflows/test.yml`), not a
+manual run.
 
 ## Prerequisites
 
@@ -53,10 +57,11 @@ Env it sets for the child `python -m kraft`:
 | --- | --- |
 | `KRAFT_PORT` | ephemeral by default; pin one explicitly via `KRAFT_PORT` |
 | `KRAFT_RUN_DIR` | `<tmp>/run` |
-| `KRAFT_TEMPLATES_DIR` | fake templates dir (quick-task + default + registry + policy) |
+| `KRAFT_TEMPLATES_DIR` | fake templates dir (the V1 library, its chains, harness profiles and policy) |
 | `KRAFT_BD_CWD` | isolated `bd` tracker repo |
 | `KRAFT_FRONTEND_DIST` | `frontend/dist` |
 | `KRAFT_FAKE_CLAUDE` | `fix` |
+| `KRAFT_HOME` | `<tmp>` — pinned, never inherited: the V1 `fake` harness overlay is written to `$KRAFT_HOME/templates/harnesses`, which is the only place the daemon reads it from |
 
 It polls the port it picked (or the one you pinned) until `/api/health` answers 200, then prints:
 

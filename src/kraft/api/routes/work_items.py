@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Literal
@@ -12,14 +13,16 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
-from kraft.api.routes import board
+from kraft.api.routes import board, gates
 from kraft.executor import entry
-from kraft.templates import (
-    ATTACHMENT_GATES,
-    materialize,
+from kraft.overrides import (
+    harness_refusal,
     validate_agent_overrides,
     validate_node_override_fields,
 )
+from kraft.policy import PolicyError, PolicyMaximaInput
+from kraft.templates.environment import RootPointerPolicy
+from kraft.templates.models import MaterializedChain, ResolvedChain
 
 
 class Attachment(BaseModel):
@@ -39,10 +42,18 @@ class NewWorkItem(BaseModel):
     #: stays distinguishable from an item that named `chain_template:
     #: "default"` outright.
     chain_template: str | None = None
-    #: cross-repo (design 1g "Advanced · cross-repo"): submodule paths from the
-    #: repo's .gitmodules, and what happens to the root pointer when they land
-    submodules: list[str] = []
-    root_merge_policy: str = "bump"
+    #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
+    #: `repo` is the root of, the members it selects, and the root-pointer
+    #: policy -- the workspace's `root_pointer_default` when unset. Frozen into
+    #: the item's target at intake (`deps.workspace_target`).
+    workspace: str | None = None
+    members: list[str] = []
+    root_pointer_policy: RootPointerPolicy | None = None
+    #: The branch the item's work starts from and its merge request targets
+    #: (Kraft-v9gbi), frozen into its target; a workspace item's root's only.
+    #: None is the repository's default branch. Refused (422) unless origin
+    #: has it.
+    base_branch: str | None = None
     #: spec/plan documents that already exist — they trim the gates they satisfy
     attachments: list[Attachment] = []
     #: the caller's working directory, sent only when there are attachment paths
@@ -62,7 +73,7 @@ class NewWorkItem(BaseModel):
     #: Node ids to drop from the materialized chain at intake (UI v2 · 04
     #: point 6; design 10/m09's click-to-skip). Rejected (422) if any name
     #: is not a node of the resolved template. A gated node may be named --
-    #: see `templates.materialize`'s docstring for why that is not a bypass.
+    #: see `ResolvedChain.materialize`'s docstring for why that is not a bypass.
     skip_nodes: list[str] = []
     #: Per-item spend cap at intake (point 6), same presence-vs-null rule as
     #: the PATCH route: omitted means "use the policy default", `null` means
@@ -72,6 +83,10 @@ class NewWorkItem(BaseModel):
     #: Per-node overrides at intake, same shape and field set as the PATCH
     #: route's `node_overrides` (point 6): `{node_id: {auto_escalate: bool}}`.
     node_overrides: dict[str, dict] = {}
+    #: The item's own policy override (Kraft-ab1bh, `policy.WorkItemPolicy`):
+    #: item-wide policy fields, plus `paths: {canonical path: {field: value}}`
+    #: for one node, step or task. 422 naming the field it refuses.
+    policy: dict | None = None
 
 
 def _git_common_dir(path: Path) -> Path | None:
@@ -172,13 +187,16 @@ async def create_work_item(body: NewWorkItem, request: Request):
         # posture as an invalid registry — do not accept a run we cannot bound.
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    template = st.templates.valid.get(
-        body.chain_template if body.chain_template is not None else "default"
-    )
-    if template is None:
-        raise HTTPException(422, "unknown or invalid template")
-    if body.root_merge_policy not in store.ROOT_MERGE_POLICIES:
-        raise HTTPException(422, f"unknown root_merge_policy {body.root_merge_policy!r}")
+    if body.autostart and gates._decided_by(request) != "human":
+        # Design §6 rule 1, at the one door every client reaches (Kraft-s7c04.31):
+        # an agent files work, a human starts it. Refused, not quietly filed
+        # paused, so the caller learns that nothing is running.
+        raise HTTPException(
+            403,
+            "an agent cannot start the work it files: file it paused (no autostart) "
+            "and a human starts it from the board",
+        )
+    chain = deps.resolve_chain_or_422(st, body.chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -189,42 +207,64 @@ async def create_work_item(body: NewWorkItem, request: Request):
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
-    node_ids = {n["id"] for n in template.nodes}
+    attachment_kinds = frozenset(a["kind"] for a in attachments)
+    node_ids = {n.id for n in chain.nodes}
     unknown_skip = set(body.skip_nodes) - node_ids
     if unknown_skip:
         raise HTTPException(422, f"unknown node id(s) to skip: {sorted(unknown_skip)}")
-    # A kept node's rebase_bounce_to naming a skipped node is a dangling bounce
-    # target: walk.py's `next(j for j, n in ... if n["id"] == bounce_to)` has no
-    # fallback like `reject_target`'s and raises StopIteration mid-run, crashing
-    # the executor into needs_human. Reject the skip at intake instead.
-    dangling_bounce = {
-        n["id"]: n["rebase_bounce_to"]
-        for n in template.nodes
-        if n["id"] not in body.skip_nodes and n.get("rebase_bounce_to") in body.skip_nodes
-    }
-    if dangling_bounce:
-        raise HTTPException(
-            422,
-            f"cannot skip node(s) {sorted(set(dangling_bounce.values()))}: named as "
-            f"rebase_bounce_to by kept node(s) {sorted(dangling_bounce)}",
+    # A skip and an attachment trim must not empty the chain between them:
+    # `create_work_item`/`executor.run_once` both index `nodes[0]` unguarded,
+    # and by the time either would crash the bead is filed and the run spawned.
+    # One dry-run drop, because that is what `materialize` will do -- two
+    # separate emptiness checks can each pass while their union empties it.
+    # (The legacy `rebase_bounce_to` dangling-target check is gone with the
+    # field: Task 4a deleted `walk.bounce`, and a V1 gate's `reject_to` is
+    # nulled rather than left dangling by the same drop.)
+    # The repository layer, once: the dry run and the intake below must
+    # materialize from the same policy (`repository-policy-cannot-relax-
+    # instance-safety`).
+    base_branch = await deps.base_branch_or_422(body.repo, body.base_branch)
+    target = deps.workspace_target(
+        st,
+        body.repo,
+        workspace=body.workspace,
+        members=body.members,
+        root_pointer_policy=body.root_pointer_policy,
+        base_branch=base_branch,
+    ) or entry.single_repo_target(body.repo, base_branch=base_branch)
+    policy = deps.item_policy_or_422(st, body.repo, target)
+    per_repository = deps.repository_policies_or_422(st, target)
+    repo_steering = deps.repository_steering_or_422(st, body.repo, target)
+    try:
+        item_policy = (
+            chain.materialize(
+                target=target,
+                effective_policy=policy,
+                repository_policies=per_repository,
+                attachment_kinds=attachment_kinds,
+                skip_nodes=frozenset(body.skip_nodes),
+            )
+            .with_item_policy(body.policy)
+            .item_policy
         )
-    # skip_nodes alone, or together with an attachment's gate trim, must not
-    # empty the chain: materialize would hand `intake` nothing to run, and
-    # `create_work_item`/`executor.run_once` both index `nodes[0]` unguarded
-    # (code-review). The bead is already filed and the run spawned by the
-    # time either of those would crash, so this has to be checked first.
-    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments)
-    if not materialize(template, satisfied_gates=satisfied, skip_nodes=body.skip_nodes)["nodes"]:
-        raise HTTPException(422, "skip_nodes would leave no nodes in the chain")
-    for node_id, fields in body.node_overrides.items():
-        if node_id not in node_ids:
-            raise HTTPException(422, f"unknown node id {node_id!r}")
-        field_errs = validate_node_override_fields(fields)
-        if field_errs:
-            raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    _check_node_overrides(
+        body.node_overrides,
+        node_ids,
+        {n.id: n for n in chain.nodes},
+        deps.instance_policy(st).maxima,
+    )
+    # Read before this item exists, so it cannot find itself. Warned, not
+    # refused (Kraft-s7c04.30): a deliberate second item is legitimate, and
+    # the usual reason to re-file, a revised spec, now has its own door.
+    duplicates = st.db.read(
+        lambda c: store.open_duplicates(c, body.repo, body.title, body.implements_beads)
+    )
     try:
         wid = await executor.intake(
             st.db,
@@ -232,7 +272,8 @@ async def create_work_item(body: NewWorkItem, request: Request):
             title=body.title,
             description=body.description,
             repo=body.repo,
-            template=template,
+            chain=chain,
+            effective_policy=policy,
             # The raw request value, not the resolved template's id (Kraft-cd47):
             # None here means no explicit template was chosen, and must stay
             # None in the row -- `intake`'s own default would otherwise store
@@ -240,8 +281,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
             # `chain_template: "default"` outright.
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
-            submodules=body.submodules,
-            root_merge_policy=body.root_merge_policy,
+            target=target,
+            repository_policies=per_repository,
+            repository_steering=repo_steering,
             attachments=attachments,
             status="active" if body.autostart else "paused",
             # Folded into intake's own INSERT transaction, not a separate
@@ -256,6 +298,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
             budget_set="budget_usd" in body.model_fields_set,
             budget_usd=body.budget_usd,
             node_overrides=body.node_overrides or None,
+            policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
+            if item_policy is not None
+            else None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
@@ -266,6 +311,13 @@ async def create_work_item(body: NewWorkItem, request: Request):
     # noise in `kraft item create`'s kv block and in the API.
     warning = deps._bead_warning(st, wid)
     extra = {"bead_warning": warning} if warning else {}
+    if duplicates:
+        extra["duplicate_warning"] = (
+            "looks like open work item "
+            + "; ".join(f"{r['id']} ({r['status']}, {why})" for r, why in duplicates)
+            + ". To revise its spec or plan, use `kraft item set-attachments` on it "
+            "rather than filing again; abandon whichever of the two is not wanted"
+        )
 
     if not body.autostart:
         # Created, not started. `/resume` begins it at node zero, because a NULL
@@ -291,7 +343,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
                 st.db,
                 st.run_dirs,
                 work_item_id=wid,
-                registry=st.registry,
                 bd_cwd=deps.bd_cwd(),
                 policy=st.policy,
                 launch=deps.launch(st, body.repo),
@@ -299,17 +350,25 @@ async def create_work_item(body: NewWorkItem, request: Request):
             ),
         ),
     )
-    chain = json.loads(row["chain_definition"])
+    # The chain as filed: the trim the attachments earned is already applied,
+    # so this is what will actually run and not what the template declares.
+    filed = store.materialized_chain_of(row)
     return JSONResponse(
         status_code=201,
         content={
             "id": wid,
             "bead_id": row["bead_id"],
             "status": row["status"],
-            "chain_definition": chain,
+            # `store.chain_view`, like both GET doors: this returned `{}` for a
+            # V1 item, so `kraft item create --json` printed a chain with no
+            # nodes and this door contradicted the "one shape at every door"
+            # rationale of the fix that changed the other two.
+            "chain_definition": store.chain_view(row),
+            "materialized_chain": row["materialized_chain"],
             # the run task advances this asynchronously; before its first write the
             # chain still starts at node 0 by definition.
-            "current_node_id": row["current_node_id"] or chain["nodes"][0]["id"],
+            "current_node_id": row["current_node_id"]
+            or (filed.chain.nodes[0].id if filed is not None else None),
             **extra,
         },
     )
@@ -331,18 +390,17 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    template = st.templates.valid.get(
-        body.chain_template if body.chain_template is not None else "default"
-    )
-    if template is None:
-        raise HTTPException(422, "unknown or invalid template")
+    chain = deps.resolve_chain_or_422(st, body.chain_template)
     if len(body.title) > beads_mod.MAX_TITLE:
         raise HTTPException(
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
+    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
+    policy = deps.item_policy_or_422(st, body.repo)
+    repo_steering = deps.repository_steering_or_422(st, body.repo)
     try:
         wid = await executor.intake(
             st.db,
@@ -350,7 +408,9 @@ async def fire_trigger(body: TriggerBody, request: Request):
             title=body.title,
             description=body.description,
             repo=body.repo,
-            template=template,
+            chain=chain,
+            effective_policy=policy,
+            repository_steering=repo_steering,
             chain_template=body.chain_template,
             bd_cwd=deps.bd_cwd(),
             status="paused",
@@ -400,6 +460,84 @@ class WorkItemPatch(BaseModel):
     #: `model_fields_set` below, because `None` is both "untouched" and a
     #: legal explicit value here.
     budget_usd: float | None = None
+    #: The item's own policy override, as at intake (`NewWorkItem.policy`).
+    #: `None` (default) leaves it alone, `{}` clears it, and a non-empty
+    #: object *replaces* the whole stored override. Accepted on any item that
+    #: has not ended, running or waiting included. A change takes effect at
+    #: the next node the item enters and at the next observation of a wait it
+    #: is parked on: every node entry re-reads the row (`walk.walk_node`), and
+    #: every observation is a fresh entry.
+    policy: dict | None = None
+    #: Per kind, like `node_overrides` (Kraft-s7c04.28): `{"spec": PATH}`
+    #: re-snapshots that kind from PATH, `{"spec": null}` drops it and so
+    #: restores the gate it trimmed (.29), and a kind not named keeps the copy
+    #: it has. The chain is re-trimmed from the item's own snapshot, never
+    #: the live template, so the trim follows the documents both ways and
+    #: nodes skipped at intake stay skipped. 409 once `current_node_id` is
+    #: set (a started item's worktree already holds its documents, committed
+    #: on its branch, and its chain is fixed), or when another write changed
+    #: the attachments or chain since this one read them.
+    attachments: dict[Literal["spec", "plan"], str | None] | None = None
+    #: The caller's working directory, as at intake (`NewWorkItem.cwd`).
+    cwd: str | None = None
+
+
+def _check_node_overrides(
+    overrides: dict[str, dict],
+    node_ids: set[str],
+    nodes: dict | None,
+    maxima: PolicyMaximaInput | None = None,
+) -> None:
+    """422 on an override naming no node of the chain, an unknown field, a
+    model/effort a node's harness refuses (`overrides.harness_refusal`), or an
+    `auto_escalate: true` on a gate declaring no `auto_review`. One check for
+    intake and `PATCH`, so the two doors cannot answer differently (review E
+    #3). `nodes` maps node id to its `ResolvedNode`; `None` (a legacy row, with
+    no typed chain) skips the last two checks.
+
+    Said in the error, because that is what the caller reads. The override
+    *permits or suppresses* a reviewing task the chain declares; it does not
+    name one (`store.effective_nodes`). Accepting `auto_escalate: true` on a
+    gate with no `auto_review` would persist a switch, answer 2xx, and change
+    nothing -- the shape a human reads as "I turned it on".
+    """
+    for node_id, fields in overrides.items():
+        if node_id not in node_ids:
+            raise HTTPException(422, f"unknown node id {node_id!r}")
+        field_errs = validate_node_override_fields(fields)
+        if field_errs:
+            raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        if nodes is not None and (why := harness_refusal(nodes[node_id], fields)):
+            raise HTTPException(422, f"node {node_id!r}: {why}")
+        # A per-item fix-loop bound is an operational value, held to the
+        # administrator maximum like the item's own policy override is
+        # (Kraft-3br6j): the two doors must not bound it differently.
+        for key, name, seconds in (
+            ("attempts", "max_attempts", 1),
+            ("wall_clock_s", "timeout_minutes", 60),
+        ):
+            ceiling = getattr(maxima, name, None)
+            if (
+                fields.get(key) is not None
+                and ceiling is not None
+                and fields[key] > ceiling * seconds
+            ):
+                raise HTTPException(
+                    422,
+                    f"node {node_id!r}: {key} {fields[key]} cannot exceed the administrator "
+                    f"maximum {name} {ceiling}",
+                )
+        if (
+            nodes is not None
+            and fields.get("auto_escalate") is True
+            and nodes[node_id].auto_review is None
+        ):
+            raise HTTPException(
+                422,
+                f"node {node_id!r} declares no 'auto_review' task, so agent gate review "
+                f"cannot be switched on for it: an override permits or suppresses the "
+                f"reviewer its chain declares, it cannot supply one",
+            )
 
 
 def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
@@ -407,30 +545,86 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
     (UI v2 · 04 point 1). `patch == {}` (reset to template) 409s if the item
     has started at all -- point 2, "only allowed on unstarted nodes".
     """
-    chain = json.loads(row["chain_definition"])
-    node_ids = {n["id"] for n in chain["nodes"]}
+    # Node ids come from the shared reader, which answers for either chain shape
+    # and never raises; only `nodes` needs the typed snapshot, because
+    # `auto_review` and a task's harness have no legacy equivalent.
+    node_ids = set(store.chain_node_ids(row))
+    v1 = store.materialized_chain_of(row)
+    nodes = {n.id: n for n in v1.chain.nodes} if v1 is not None else None
     if not patch:
         if row["current_node_id"] is not None:
             raise HTTPException(409, "work item has already started; overrides cannot be reset")
         return
 
+    _check_node_overrides(patch, node_ids, nodes, deps.instance_policy(st).maxima)
+
     def check(c):
-        for node_id, fields in patch.items():
-            if node_id not in node_ids:
-                raise HTTPException(422, f"unknown node id {node_id!r}")
-            field_errs = validate_node_override_fields(fields)
-            if field_errs:
-                raise HTTPException(422, f"node {node_id!r}: {field_errs[0]}")
+        for node_id in patch:
             if store.node_started(c, row["id"], node_id):
                 raise HTTPException(409, f"node {node_id!r} has started; its config is locked")
 
     st.db.read(lambda c: check(c))
 
 
+def _item_policy(row, patch: dict | None, new_materialized: str | None):
+    """The item's own policy override after this PATCH, checked against the
+    chain it will run: the new template's on a switch, else its own. A switch
+    re-checks the override already stored, since a path it names may not
+    exist on the new chain. 422 naming the field refused."""
+    if patch is None and new_materialized is None:
+        return None
+    chain = (
+        MaterializedChain.from_json(new_materialized)
+        if new_materialized is not None
+        else store.materialized_chain_of(row)
+    )
+    if chain is None:
+        raise HTTPException(409, "this work item has no V1 chain to hold a policy override")
+    try:
+        # `{}` clears: nothing to check.
+        wanted = store.policy_override_of(row) if patch is None else (patch or None)
+        return chain.with_item_policy(wanted).item_policy
+    except PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
+    """The item's own snapshot, re-trimmed for `kinds` (Kraft-2fyjt): never the
+    live template, whose nodes, policy and steering may have changed since
+    intake. Trimming needs only the snapshot; putting a trimmed node back needs
+    the chain as it was before the trim, which a snapshot keeps as `untrimmed`
+    from the moment anything is attached. 409 naming it when that is missing."""
+    previous = store.materialized_chain_of(row)
+    if previous is None:
+        raise HTTPException(409, "this work item has no V1 chain to re-trim")
+    untrimmed = previous.untrimmed if filed_kinds else previous.chain.chain
+    if untrimmed is None and filed_kinds - kinds:
+        raise HTTPException(
+            409,
+            f"this item's snapshot does not carry the nodes its "
+            f"{', '.join(sorted(filed_kinds))} attachment trimmed at intake (it was filed "
+            "before snapshots kept them), so dropping one cannot put them back; replace "
+            "the document instead",
+        )
+    base = (
+        ResolvedChain.from_chain(untrimmed, steering=previous.chain.steering)
+        if untrimmed is not None
+        else previous.chain
+    )
+    try:
+        chain = base.trim_for_attachments(kinds)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return dataclasses.replace(
+        previous, chain=chain, untrimmed=untrimmed if kinds else None
+    ).to_json()
+
+
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
-    row = deps._work_item_row(st, wid)  # 404s on an unknown work item, before any 422
+    # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
+    row = deps._live_work_item_row(st, wid)
     fields_set = body.model_fields_set
     if (
         body.title is None
@@ -438,12 +632,14 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
         and body.chain_template is None
         and body.agent_overrides is None
         and body.node_overrides is None
+        and body.policy is None
+        and body.attachments is None
         and "budget_usd" not in fields_set
     ):
         raise HTTPException(
             422,
             "nothing to patch: send a title, description, chain_template, agent_overrides, "
-            "node_overrides, or budget_usd",
+            "node_overrides, policy, attachments, or budget_usd",
         )
     if body.title is not None and not body.title.strip():
         raise HTTPException(422, "title cannot be empty")
@@ -451,20 +647,64 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     if body.node_overrides is not None:
         _validate_node_overrides(st, row, body.node_overrides)
 
-    new_chain_definition = None
+    filed_kinds = frozenset(a["kind"] for a in entry.attachments_of(row))
+    kinds, added = filed_kinds, []
     if body.chain_template is not None:
-        template = st.templates.valid.get(body.chain_template)
-        if template is None:
+        # `st.library is None` first, through the shared door: a 404 "unknown
+        # chain template 'default'" for a library that did not parse tells the
+        # operator their chain id is wrong, which is the one misleading answer
+        # the 503 was written to replace. The membership check answers 404 only
+        # once there *is* a library to be absent from.
+        deps.library_or_503(st)
+        if body.chain_template not in st.library.chain_ids:
             raise HTTPException(404, f"unknown chain template {body.chain_template!r}")
         if row["current_node_id"] is not None:
             raise HTTPException(
                 409, "work item has already started; template is fixed for its life"
             )
-        # The exact expression `executor.intake` uses today, against the
-        # item's existing attachments -- switching template must not force a
-        # re-attach to get back a trim the item already earned.
-        satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in entry.attachments_of(row))
-        new_chain_definition = json.dumps(materialize(template, satisfied_gates=satisfied))
+    if body.attachments is not None:
+        if row["current_node_id"] is not None:
+            raise HTTPException(
+                409,
+                "work item has already started; its worktree already holds the documents "
+                "it was filed with, so its attachments are fixed for its life",
+            )
+        wanted = [Attachment(kind=k, path=p) for k, p in body.attachments.items() if p]
+        added = _validated_attachments(row["repo"], wanted, body.cwd)
+        kinds = (kinds - body.attachments.keys()) | {a["kind"] for a in added}
+
+    new_materialized = None
+    if body.chain_template is not None:
+        # Re-materialized the way intake would have, attachments included: a
+        # switch that re-authored a document the item already carries would
+        # undo the trim it was filed with. The one door that reads the live
+        # library: the caller asked for a different template.
+        previous = store.materialized_chain_of(row)
+        target = previous.target if previous is not None else None
+        try:
+            new_materialized = (
+                deps.resolve_chain_or_422(st, body.chain_template)
+                .materialize(
+                    target=target or entry.single_repo_target(row["repo"]),
+                    # The instance and repository layers, never
+                    # `previous.policy`: that one already carries the old
+                    # chain's own override, and layering the new chain's on
+                    # top of it stacks the two (Kraft-yaq99).
+                    effective_policy=deps.item_policy(st, row["repo"], target),
+                    repository_policies=deps.repository_policies(st, target),
+                    # Not the chain's: the repositories' steering the item was
+                    # filed with stays frozen across a template switch.
+                    repository_steering=previous.repository_steering if previous else None,
+                    attachment_kinds=kinds,
+                )
+                .to_json()
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    elif body.attachments is not None:
+        new_materialized = _retrimmed(row, filed_kinds, kinds)
+
+    item_policy = _item_policy(row, body.policy, new_materialized)
 
     if body.agent_overrides is not None:
         errs = validate_agent_overrides(body.agent_overrides)
@@ -477,8 +717,17 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             store.set_title(c, wid, body.title)
         if body.description is not None:
             store.set_description(c, wid, body.description)
+        # Attachments first: its compare-and-set is against the row as read.
+        if body.attachments is not None:
+            store.set_attachments(
+                c,
+                wid,
+                stored,
+                new_materialized,
+                seen=(row["attachments"], row["materialized_chain"]),
+            )
         if body.chain_template is not None:
-            store.set_chain_template(c, wid, body.chain_template, new_chain_definition)
+            store.set_chain_template(c, wid, body.chain_template, new_materialized)
         if body.agent_overrides is not None:
             store.set_agent_overrides(
                 c, wid, json.dumps(body.agent_overrides) if body.agent_overrides else None
@@ -487,8 +736,34 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
             store.set_node_overrides(c, wid, body.node_overrides)
         if "budget_usd" in fields_set:
             store.set_budget(c, wid, body.budget_usd)
+        if body.policy is not None:
+            store.set_policy_override(c, wid, item_policy)
 
-    await st.db.write(apply)
+    filed = stored = entry.attachments_of(row)
+    won = False
+    try:
+        if body.attachments is not None:
+            try:
+                stored = entry.replace_attachments(
+                    st.run_dirs, wid, filed, body.attachments, added, repo=row["repo"]
+                )
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        await st.db.write(apply)
+        won = True
+    except ValueError as exc:
+        if body.attachments is None:
+            raise
+        # `store.set_attachments`' compare-and-set lost: the item started, or
+        # another PATCH changed its attachments or chain since `row` was read.
+        raise HTTPException(409, f"{exc}; nothing was changed") from exc
+    finally:
+        # Only this request's own files: the superseded copies if its write
+        # won, its fresh ones if not. Never "whatever the row does not name",
+        # which would delete a concurrent PATCH's copies before it writes.
+        if body.attachments is not None:
+            keep, drop = (stored, filed) if won else (filed, stored)
+            entry.discard_attachments(st.run_dirs, wid, drop, keep)
     # `model_dump(exclude_none=True)` would drop an explicit `budget_usd:
     # null` along with every untouched field, so build the echo from
     # `fields_set` (what the caller actually sent) instead.

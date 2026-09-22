@@ -29,18 +29,40 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Usage:
+    #: Uncached input only. Cache writes and reads were billed as input too,
+    #: and are kept apart so a run's cache share is visible (Ruling 211);
+    #: `total` is what every budget counts (Decision 18).
     tokens_in: int = 0
     tokens_out: int = 0
     #: None means "this agent did not report a cost", never "it was free".
     cost_usd: float | None = None
     model: str | None = None
+    tokens_cache_write: int = 0
+    tokens_cache_read: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.tokens_in + self.tokens_cache_write + self.tokens_cache_read + self.tokens_out
+
+
+#: The token columns a `worker_sessions` row carries, in `Usage`'s names.
+KINDS = ("tokens_in", "tokens_cache_write", "tokens_cache_read", "tokens_out")
+
+
+def spent(row) -> int:
+    """Every token a session row (or rollup) records: uncached input, cache
+    writes, cache reads and output. What a `token_budget` counts, and what
+    "tokens" means wherever one number is shown (Decision 18). A row written
+    before the split has NULL cache kinds and its whole input in `tokens_in`,
+    so this is the same total either way."""
+    return sum(row[k] or 0 for k in KINDS)
 
 
 def _int(v: object) -> int:
@@ -51,15 +73,20 @@ def _from_usage_block(block: object, model: object) -> Usage | None:
     """One ``usage`` mapping, in either the agent's or Kraft's own field names."""
     if not isinstance(block, dict):
         return None
-    tokens_in = _int(block.get("input_tokens", block.get("tokens_in")))
-    tokens_out = _int(block.get("output_tokens", block.get("tokens_out")))
-    # Cache reads and writes are input tokens that were billed; leaving them out
-    # would under-report a long agent run by most of its input.
-    tokens_in += _int(block.get("cache_creation_input_tokens"))
-    tokens_in += _int(block.get("cache_read_input_tokens"))
-    if not tokens_in and not tokens_out:
-        return None
-    return Usage(tokens_in, tokens_out, None, model if isinstance(model, str) else None)
+    u = Usage(
+        tokens_in=_int(block.get("input_tokens", block.get("tokens_in"))),
+        tokens_out=_int(block.get("output_tokens", block.get("tokens_out"))),
+        model=model if isinstance(model, str) else None,
+        # Cache writes and reads are input tokens that were billed; leaving
+        # them out would under-report a long agent run by most of its input.
+        tokens_cache_write=_int(
+            block.get("cache_creation_input_tokens", block.get("tokens_cache_write"))
+        ),
+        tokens_cache_read=_int(
+            block.get("cache_read_input_tokens", block.get("tokens_cache_read"))
+        ),
+    )
+    return u if u.total else None
 
 
 #: The per-model token counts `modelUsage` carries, in the agent CLI's own
@@ -92,36 +119,25 @@ def _dominant(by_model: dict) -> str | None:
 
 
 def _from_model_usage(by_model: object, model: str | None) -> Usage | None:
-    """Tokens from `modelUsage`, for an envelope whose `usage` block is empty.
-
-    An agent interrupted mid-turn flushes a result envelope whose `usage` block
-    is all zeroes -- there is no completed request for it to describe -- with
-    the session's real counts only under `modelUsage` (measured against claude
-    2.1.273). `_from_usage_block` returns None for that, and `from_envelope`
-    returns before it ever reaches `total_cost_usd`, so the one cost figure
-    Kraft will ever have for a paused session was thrown away with it
-    (Kraft-s7c04.18).
+    """Tokens from `modelUsage`: the whole CLI session's, every model summed.
 
     Sums across models rather than picking one: this is "what did this session
     spend", not "which model did the work" -- that second question is
     `_model_of`/`_dominant`'s and is deliberately left alone (Kraft-s7c04.15).
-
-    Cache reads and writes count as input for the same reason they do in
-    `_from_usage_block`: they were billed that way.
+    None when it reports nothing, so a task that spent nothing is not a
+    zero-token run.
     """
     if not isinstance(by_model, dict):
         return None
-    tokens_in = tokens_out = 0
-    for stats in by_model.values():
-        if not isinstance(stats, dict):
-            continue
-        tokens_in += _int(stats.get("inputTokens"))
-        tokens_in += _int(stats.get("cacheReadInputTokens"))
-        tokens_in += _int(stats.get("cacheCreationInputTokens"))
-        tokens_out += _int(stats.get("outputTokens"))
-    if not tokens_in and not tokens_out:
-        return None
-    return Usage(tokens_in, tokens_out, None, model)
+    stats = [s for s in by_model.values() if isinstance(s, dict)]
+    u = Usage(
+        tokens_in=sum(_int(s.get("inputTokens")) for s in stats),
+        tokens_out=sum(_int(s.get("outputTokens")) for s in stats),
+        model=model,
+        tokens_cache_write=sum(_int(s.get("cacheCreationInputTokens")) for s in stats),
+        tokens_cache_read=sum(_int(s.get("cacheReadInputTokens")) for s in stats),
+    )
+    return u if u.total else None
 
 
 def _model_of(envelope: dict) -> str | None:
@@ -150,18 +166,21 @@ def from_envelope(envelope: object) -> Usage | None:
     """Usage from a decoded agent result envelope, or None if it carries none."""
     if not isinstance(envelope, dict):
         return None
-    u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
+    # `modelUsage` first (Kraft-s7c04.65): it is cumulative over the session,
+    # Task-tool sub-agents and any turn killed before its result included, and
+    # it is what `total_cost_usd` paid for. The `usage` block is the main
+    # agent's last turn only (193475c9 read 1.80M input tokens of the 2.11M
+    # billed). An interrupted envelope zeroes `usage` and reports only here
+    # (Kraft-s7c04.18). `usage` stays the read for a result file, or any
+    # envelope with no `modelUsage` to read.
+    u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
     if u is None:
-        # An interrupted envelope zeroes `usage` and reports only in
-        # `modelUsage` (Kraft-s7c04.18). Tried second, never first: a normal
-        # envelope's `usage` block is the authority and this must not change
-        # what it produces.
-        u = _from_model_usage(envelope.get("modelUsage"), _model_of(envelope))
+        u = _from_usage_block(envelope.get("usage"), _model_of(envelope))
     if u is None:
         return None
     cost = envelope.get("total_cost_usd", envelope.get("cost_usd"))
     if isinstance(cost, int | float) and not isinstance(cost, bool):
-        u = Usage(u.tokens_in, u.tokens_out, float(cost), u.model)
+        u = replace(u, cost_usd=float(cost))
     return u
 
 
@@ -219,28 +238,81 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
         seen[key] = u
     if not seen:
         return None
-    return Usage(
-        sum(u.tokens_in for u in seen.values()),
-        sum(u.tokens_out for u in seen.values()),
-        None,
+    return replace(
+        _sum(seen.values()),
         # The FIRST model seen, deliberately -- not `_model_of`'s dominant-by-
         # tokens read (Kraft-s7c04.15). `_INIT_KEY` is seeded from the
         # `system`/`init` line above and inserted before any `assistant` line,
         # and that line names the session's real model. This is already right
         # and must not be "fixed" to match the envelope path.
-        next((u.model for u in seen.values() if u.model), None),
+        model=next((u.model for u in seen.values() if u.model), None),
     )
 
 
+def _sum(usages: Iterable[Usage]) -> Usage:
+    """Each kind of token summed; no cost and no model, which do not add."""
+    usages = list(usages)
+    return Usage(**{k: sum(getattr(u, k) for u in usages) for k in KINDS})
+
+
+def _combine(envelopes: list[dict]) -> dict:
+    """One envelope standing for every agent invocation a log holds.
+
+    A log can carry several result envelopes -- one per invocation, when the
+    agent is re-launched into the same log (Kraft-s7c04.60). Measured against
+    every such log on the owner's machine: within one CLI `session_id`,
+    `total_cost_usd` and `modelUsage` are *cumulative* across invocations
+    (5.54 -> 6.03 -> 6.08 -> 6.12 over four) while `usage` is that invocation
+    alone. So taking the last envelope kept the cost but dropped every earlier
+    invocation's tokens, and summing costs would double-count them.
+
+    Per CLI session, then, the last envelope speaks for the whole: its cost and
+    its `modelUsage` tokens. Not "the first envelope plus `modelUsage`
+    growth": 6c235b8c's first turn ran 2,380 lines and was killed before it
+    wrote a result, so its first result's `usage` held 1.2M input tokens of
+    the 123M its $34.72 paid for. Only a group with no `modelUsage` to read
+    falls back to summing each invocation's own `usage`. Distinct CLI sessions
+    in one log are summed. A group whose last envelope reports no cost makes
+    the whole cost unknown, never zero.
+    """
+    groups: dict[object, list[dict]] = {}
+    for envelope in envelopes:
+        groups.setdefault(envelope.get("session_id"), []).append(envelope)
+    parts: list[Usage] = []
+    cost: float | None = 0.0
+    for group in groups.values():
+        last = group[-1]
+        total = _from_model_usage(last.get("modelUsage"), None)
+        parts += [total] if total is not None else [from_envelope(e) for e in group]
+        last_cost = (from_envelope(last) or Usage()).cost_usd
+        cost = None if cost is None or last_cost is None else cost + last_cost
+    u = _sum(parts)
+    combined: dict = {
+        # In Kraft's own names, which `_from_usage_block` reads as well.
+        "usage": {k: getattr(u, k) for k in KINDS},
+        "model": _model_of(envelopes[-1]),
+    }
+    if cost is not None:
+        combined["total_cost_usd"] = cost
+    return combined
+
+
 def read_envelope(log_path: Path) -> dict | None:
-    """The agent's final result envelope: the last JSON object that carries a
-    `usage` block, searching from the end of the log.
+    """The agent's result envelope: every invocation's, combined (`_combine`)
+    when there is more than one.
+
+    An invocation is a `type: result` line (or an untyped one, the shape a
+    result file has) that `from_envelope` can read. A `usage` block alone is
+    not enough: a Task-tool sub-agent's `system/task_progress` line carries
+    one of its own, `{total_tokens, tool_uses, duration_ms}`, and read as an
+    invocation it over-counted 6c235b8c by 156,662 input tokens
+    (Kraft-lp01z).
 
     Claude Code's `stream-json` output appends a trailing `system/task_summary`
     line *after* the `result` line that carries `usage` and `total_cost_usd`.
     Taking the literal last line picked up that summary instead and silently
-    dropped a reported cost (Kraft-xob8). Scanning backward for `usage` finds
-    the `result` line regardless of what follows it; a log that never has one
+    dropped a reported cost (Kraft-xob8). Looking for `usage` finds the
+    `result` line regardless of what follows it; a log that never has one
     still gets its last parseable JSON object, unchanged from before.
     """
     try:
@@ -248,18 +320,20 @@ def read_envelope(log_path: Path) -> dict | None:
     except OSError:
         return None
     fallback = None
-    for line in reversed(lines):
+    envelopes = []
+    for line in lines:
         try:
             envelope = json.loads(line)
         except json.JSONDecodeError:
             continue
         if not isinstance(envelope, dict):
             continue
-        if fallback is None:
-            fallback = envelope
-        if isinstance(envelope.get("usage"), dict):
-            return envelope
-    return fallback
+        fallback = envelope
+        if envelope.get("type", "result") == "result" and from_envelope(envelope):
+            envelopes.append(envelope)
+    if len(envelopes) > 1:
+        return _combine(envelopes)
+    return envelopes[0] if envelopes else fallback
 
 
 def _rate_limit_claude(log_path: Path) -> dict | None:
@@ -299,6 +373,136 @@ def _rate_limit_claude(log_path: Path) -> dict | None:
     return None
 
 
+def _cumulative(log_path: Path, cli: str) -> Usage | None:
+    """What CLI session `cli` had spent by the end of this log: its last
+    result envelope's `modelUsage` tokens and `total_cost_usd`, both running
+    totals over every invocation of that session (`_combine`'s measurement).
+    None when the log has no result envelope for it."""
+    last = None
+    try:
+        with log_path.open() as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict) and obj.get("type") == "result":
+                    last = obj if obj.get("session_id") in (cli, None) else last
+    except OSError:
+        return None
+    return from_envelope(last)
+
+
+def net_of_earlier(own: Usage, log_path: Path, earlier_log: Path, cli: str) -> Usage:
+    """`own`, less what CLI session `cli` had already spent by the end of
+    `earlier_log`, a session this one resumed (Kraft-s7c04.62). Both logs'
+    envelopes report the session's running totals, so the difference is this
+    session's own spend. Unknown earlier spend makes this session's cost
+    unknown too, never the whole running total and never zero."""
+    mine, before = _cumulative(log_path, cli), _cumulative(earlier_log, cli)
+    if mine is None:
+        return own
+    if before is None:
+        return replace(own, cost_usd=None)
+    cost = (
+        None
+        if mine.cost_usd is None or before.cost_usd is None
+        else max(mine.cost_usd - before.cost_usd, 0.0)
+    )
+    return Usage(
+        **{k: max(getattr(mine, k) - getattr(before, k), 0) for k in KINDS},
+        cost_usd=cost,
+        model=own.model,
+    )
+
+
+def _session_id_claude(log_path: Path) -> str | None:
+    """The `claude` CLI's own session id, off the `system`/`init` line every
+    `--output-format stream-json` run starts with -- the identity `--resume`
+    takes, distinct from Kraft's own `worker_sessions.id`.
+
+    Scanned across every line rather than assumed to be the first, the same
+    defensive shape `_rate_limit_claude` uses reading this same log: a line
+    Kraft cannot parse yet must not crash a session that otherwise ran fine.
+    Read line by line and stopped at the first init: `store.sessions` asks
+    this of a work item's earlier logs at every session end (Kraft-s7c04.62).
+    """
+    try:
+        with log_path.open() as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(obj, dict)
+                    and obj.get("type") == "system"
+                    and obj.get("subtype") == "init"
+                ):
+                    sid = obj.get("session_id")
+                    if isinstance(sid, str) and sid:
+                        return sid
+    except OSError:
+        return None
+    return None
+
+
+#: A job's own terminal states, as `task_updated` reports them.
+_JOB_ENDED = ("completed", "failed", "killed", "stopped")
+
+
+def _unfinished_jobs_claude(log_path: Path) -> list[str]:
+    """What each background job still running when the agent's last turn
+    ended was running, oldest first; `[]` when none was, or no turn ended.
+
+    A job is backgrounded two ways, and the log shows both: the agent asks
+    (`run_in_background` on a Bash call), or Claude Code moves a foreground
+    command that outlived its timeout (`task_updated` with `is_backgrounded`)
+    -- the second is how a full-suite run left the turn in Kraft-nxqft. A
+    job ends with its `task_notification`. Read as of the last `result` line,
+    the turn's end: the CLI kills what is left on its way out, which the log
+    reports after that line, and that kill is not the agent waiting on it.
+    """
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return []
+    running: dict[object, str] = {}  # tool_use_id -> the command it runs
+    started: dict[object, tuple[object, str]] = {}  # task_id -> (tool_use_id, command)
+    at_turn_end: list[str] = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        kind, sub = obj.get("type"), obj.get("subtype")
+        if kind == "result":
+            at_turn_end = list(running.values())
+        elif kind == "assistant" and isinstance(obj.get("message"), dict):
+            for block in obj["message"].get("content") or ():
+                args = block.get("input") if isinstance(block, dict) else None
+                if isinstance(args, dict) and args.get("run_in_background") is True:
+                    running[block.get("id")] = str(args.get("command") or block.get("name"))
+        elif kind != "system":
+            continue
+        elif sub == "task_started":
+            job = (obj.get("tool_use_id"), str(obj.get("description")))
+            started[obj.get("task_id")] = job
+            if obj.get("is_backgrounded") is True:
+                running.setdefault(*job)
+        elif sub == "task_updated" and isinstance(obj.get("patch"), dict):
+            job = started.get(obj.get("task_id"))
+            if job is not None and obj["patch"].get("is_backgrounded") is True:
+                running.setdefault(*job)
+            elif job is not None and obj["patch"].get("status") in _JOB_ENDED:
+                running.pop(job[0], None)
+        elif sub == "task_notification":
+            running.pop(obj.get("tool_use_id"), None)
+    return at_turn_end
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -312,6 +516,13 @@ class Reader:
     stream: Callable[[Iterable[str], dict], Usage | None]
     envelope: Callable[[Path], dict | None]
     rate_limit: Callable[[Path], dict | None]
+    #: The CLI's own resumable-session id, off this schema's log -- distinct
+    #: from Kraft's own `worker_sessions.id` (Kraft-cvnx1). None for a schema
+    #: with no such id to extract.
+    session_id: Callable[[Path], str | None] = lambda _log_path: None
+    #: What each background job still running when the last turn ended was
+    #: running (Kraft-xvugd). `[]` for a schema that cannot tell.
+    unfinished_jobs: Callable[[Path], list[str]] = lambda _log_path: []
 
 
 READERS: dict[str, Reader] = {
@@ -320,6 +531,8 @@ READERS: dict[str, Reader] = {
         stream=from_stream,
         envelope=read_envelope,
         rate_limit=_rate_limit_claude,
+        session_id=_session_id_claude,
+        unfinished_jobs=_unfinished_jobs_claude,
     ),
 }
 

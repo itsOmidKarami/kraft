@@ -25,4 +25,5 @@ def test_install_script_is_valid_shell():
     stranger's machine, where nobody will debug it."""
     import subprocess
 
-    subprocess.run(["sh", "-n", str(ROOT / "install.sh")], check=True)
+    result = subprocess.run(["sh", "-n", str(ROOT / "install.sh")], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

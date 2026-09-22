@@ -10,6 +10,7 @@ import { elapsed, usd } from "../format";
 import { useStore } from "../store";
 import type { Analytics, WorkItem } from "../types";
 import { AnalyticsView } from "./Analytics";
+import { item } from "../testFixtures";
 
 const report: Analytics = {
   totals: {
@@ -84,8 +85,7 @@ const report: Analytics = {
   ],
 };
 
-const wi = (over: Partial<WorkItem>): WorkItem =>
-  ({ id: "w1", repo: "/repo-a", chain_template: "default", ...over }) as WorkItem;
+const wi = (over: Partial<WorkItem>): WorkItem => item({ repo: "/repo-a", ...over });
 
 beforeEach(() => {
   useStore.setState({ workItems: { w1: wi({}), w2: wi({ id: "w2", repo: "/repo-b" }) } } as never);

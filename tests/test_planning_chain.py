@@ -4,31 +4,22 @@ the human's note, and approving moves on to the plan node."""
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
 import pytest
-import yaml
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import connected_repo, fake_templates_dir
+
+#: No default repo entry for an unconnected repo, as before this used the shared client.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
 
 
 def _templates(tmp_path: Path) -> Path:
-    d = fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
-    registry = yaml.safe_load((d / "registry.yaml").read_text())
-    for hook, kind in (("on.spec.requested", "spec"), ("on.plan.requested", "plan")):
-        registry["hooks"][hook] = {
-            "kind": "agent",
-            "command": str(_FAKE_CLAUDE),
-            "skill": kind,
-            "artifact": kind,
-        }
-    (d / "registry.yaml").write_text(yaml.safe_dump(registry))
-    return d
+    return fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))
 
 
 @pytest.fixture
@@ -37,19 +28,15 @@ def prompt_log(tmp_path) -> Path:
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch, prompt_log):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(_templates(tmp_path)))
+def templates_dir(tmp_path):
+    return _templates(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _agent_env(tmp_path, monkeypatch, prompt_log):
+    """Read at startup, so set before `client` starts the app (autouse runs first)."""
     monkeypatch.setenv("KRAFT_SKILLS_DIR", str(tmp_path / "no-skills"))
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompt_log))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
-
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
 
 
 def _await_gate(client, wid, gate, timeout=60):
@@ -63,7 +50,7 @@ def _await_gate(client, wid, gate, timeout=60):
 
 @pytest.mark.slow
 def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path, prompt_log):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
@@ -93,7 +80,7 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
 def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_log):
     """Kraft-bol end to end: the plan node's re-run is told to edit the file it
     already wrote, not to start again from the brief."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
         json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},

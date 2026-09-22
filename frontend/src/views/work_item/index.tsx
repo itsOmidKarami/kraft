@@ -217,7 +217,8 @@ export function WorkItemDetail() {
           <span className="item-max-title">{item.title}</span>
           <span className="item-max-node">
             {item.current_node_id}
-            {item.progress && ` · Task ${item.progress.current} of ${item.progress.total}`}
+            {item.progress &&
+              ` · ${item.progress.current} of ${item.progress.total} · ${item.progress.title}`}
           </span>
           <span className="item-max-actions">
             <button className="btn btn-ghost" onClick={() => setMaximized(false)}>

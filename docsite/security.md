@@ -18,7 +18,9 @@ things worth being deliberate about:
   (Tailscale / a named tunnel), not a bare `--host 0.0.0.0`.
 - **An agent cannot start work or approve its own gate.** Everything a coding
   agent files through the MCP tools or `kraft item create` lands paused; a
-  human clicks Start. A worker session cannot approve, reject, pause, or
+  human clicks Start. `kraft item create --autostart` is a person's shortcut
+  past that click, and the server refuses it (403, nothing filed) from a
+  Kraft worker session or an MCP client. A worker session cannot approve, reject, pause, or
   resume the work item it is itself running — enforced in code, not by
   convention. See [Agent integration](agent-integration.md).
 - **Worker environment is allowlisted, not inherited.** A worker's process
@@ -26,6 +28,13 @@ things worth being deliberate about:
   vars, `KRAFT_*`, the agent's credential var) plus whatever a repo's
   `repos.yaml` entry explicitly declares — not whatever the Kraft daemon's own
   shell happened to have set. See [Configuration](configuration.md#reposyaml-connected-repos).
+- **Settings can change what the daemon runs.** A harness profile's
+  `executable` (Settings → Harnesses) is the program every agent launch on
+  that profile starts, and a repository's `setup_command` (Settings → Repos)
+  runs in every new worktree. Both are editable by anyone who can open
+  Settings, so the Settings password guards command execution on this
+  machine, not only configuration. Keep the bind on loopback or behind the
+  access password, and review these fields after anyone else has had access.
 - **`install.sh` is a shell script fetched and piped from the internet.** It
   is short by design — read it before you run it:
   [`install.sh`](https://github.com/itsOmidKarami/kraft/blob/main/install.sh).

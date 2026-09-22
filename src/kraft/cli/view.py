@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 
-from kraft import client, render
+from kraft import client, render, usage
 from kraft.cli import common
 
 _LIST_COLUMNS = [
@@ -39,18 +39,51 @@ _PROGRESS_MARKS = {"done": "✓", "current": "▸", "pending": "·"}
 
 
 def _progress_text(p: dict) -> str:
-    lines = [f"Task {p['current']}/{p['total']} — {p['title']}"]
+    lines = [f"{p['current']} of {p['total']} · {p['title']}"]
     lines += [f"{_PROGRESS_MARKS[t['state']]} {t['n']}. {t['title']}" for t in p.get("tasks", [])]
     return "\n".join(lines)
 
 
+#: The one command each `suggested_action` names (Kraft-s7c04.27).
+_SUGGESTED_VERBS = {"skip": "skip", "retry": "retry", "abandon": "abandon --yes"}
+
+
+def _suggestion_text(item: dict) -> str:
+    s = item["suggested_action"]
+    head = f"{s['action']}: {s['reason']}" if s["reason"] else s["action"]
+    return f"{head}\nrun: kraft item {_SUGGESTED_VERBS[s['action']]} {item['id']}"
+
+
+def _usage_text(u: dict) -> str:
+    """Every kind of token apart (Ruling 211). A session from before the split
+    counts its cache use under `in`, and the line says so."""
+    total = sum(u.get(k, 0) for k in usage.KINDS)
+    parts = [
+        f"{total:,} tokens",
+        f"{u['tokens_in']:,} in"
+        + ("" if u.get("split_complete", True) else " (cache not split on older sessions)"),
+        f"{u.get('tokens_cache_write', 0):,} cache write",
+        f"{u.get('tokens_cache_read', 0):,} cache read",
+        f"{u['tokens_out']:,} out",
+    ]
+    if u.get("cost_usd"):
+        cost = f"${u['cost_usd']:.2f}"
+        parts.append(cost if u.get("cost_complete", True) else f"at least {cost}")
+    return " · ".join(parts)
+
+
+def _show_value(item: dict, key: str, value) -> str:
+    if key == "progress" and value:
+        return _progress_text(value)
+    if key == "usage" and value:
+        return _usage_text(value)
+    if key == "suggested_action" and value:
+        return _suggestion_text(item)
+    return str(value)
+
+
 def _render_show(item: dict) -> str:
-    return render.kv(
-        [
-            (key, _progress_text(value) if key == "progress" and value else str(value))
-            for key, value in item.items()
-        ]
-    )
+    return render.kv([(key, _show_value(item, key, value)) for key, value in item.items()])
 
 
 def _render_search(payload: dict) -> str:
@@ -70,7 +103,8 @@ def _cmd_list(ns: argparse.Namespace) -> None:
 
 
 def _cmd_show(ns: argparse.Namespace) -> None:
-    common.emit(asyncio.run(client.get_work_item(ns.id)), _render_show, ns.json)
+    item = asyncio.run(client.get_work_item(ns.id, full=ns.json))
+    common.emit(item, _render_show, ns.json)
 
 
 def _cmd_search(ns: argparse.Namespace) -> None:
@@ -100,7 +134,7 @@ def _cmd_logs(ns: argparse.Namespace) -> None:
         for entry in lines:
             _print_log(entry, ns.json)
         if ns.follow:
-            seen = lines[-1]["n"] + 1 if lines else 0
+            seen = lines[-1]["n"] + 1 if lines else await client.log_next_line(session_id)
             async for entry in client.stream_log(session_id, after_line=seen):
                 _print_log(entry, ns.json)
 

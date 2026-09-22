@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { dismissTurn } from "./EscalationCard";
 import { ItemCard } from "./ItemCard";
-import { NEEDS_HUMAN_EVENT, escMessage, escSession, item, session } from "./testFixtures";
+import { NEEDS_HUMAN_EVENT, escMessage, escSession, item, session } from "../../../testFixtures";
 
 type Href = (node: string, tab: string, id: string) => string;
 
@@ -62,6 +62,7 @@ describe("ItemCard (W11 · A)", () => {
     ["gate without a named document", gateItem({ pending_gate: "code_review" }), [], [], ["Approve", "Reject", "Read document"]],
     ["running", item({ status: "active" }), [], [], ["Pause"]],
     ["paused", item({ status: "paused" }), [], [], ["Resume", "Steer"]],
+    ["paused, steerable false", item({ status: "paused", steerable: false }), [], [], ["Resume"]],
     ["capped", item(capped), [], [], ["Steer & retry", "Escalate"]],
     ["budget", item({ status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }), [], [], ["Raise budget", "Escalate"]],
     ["question", item({ status: "needs_human", needs_context_question: "which?" }), [], [], ["Answer"]],
@@ -149,6 +150,15 @@ describe("ItemCard (W11 · A)", () => {
     expect(document.querySelector(".item-card-stats")?.textContent).toBe("1 task · 95.4k tokens · $5.01");
   });
 
+  it("counts the item's cache tokens in its total and names each kind on hover", () => {
+    const kinds = { tokens_in: 1_200, tokens_cache_write: 3_000, tokens_cache_read: 80_000, tokens_out: 11_000 };
+    const u = { cost_usd: 5.01, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 };
+    renderCard(item({ usage: { total: { ...kinds, ...u }, by_node: [] } }), [session()]);
+    const stats = document.querySelector(".item-card-stats");
+    expect(stats?.textContent).toBe("1 task · 95.2k tokens · $5.01");
+    expect(stats?.getAttribute("title")).toContain("1.2k in · 3k cache write · 80k cache read · 11k out");
+  });
+
   it("gate: Approve calls the API, and a failure says so", async () => {
     const spy = vi.spyOn(api, "approveGate").mockRejectedValue(new Error("409 gate already resolved"));
     renderCard(gateItem({ pending_gate: "plan_approval", current_node_id: "plan" }));
@@ -181,14 +191,19 @@ describe("ItemCard (W11 · A)", () => {
     expect(screen.getByRole("button", { name: /reject and send back/i })).toBeInTheDocument();
   });
 
-  it("gate: Skip in More opens its composer and skips with the note", async () => {
-    const spy = vi.spyOn(api, "skipWorkItem").mockResolvedValue({} as never);
-    renderCard(gateItem());
-    await openMore();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Skip" }));
-    await userEvent.type(screen.getByLabelText(/composer message/i), "not needed");
-    await userEvent.click(screen.getByRole("button", { name: "Skip step" }));
-    expect(spy).toHaveBeenCalledWith("w1", "not needed");
+  // Kraft-k5ol: a paused item's Escalate lives in More actions.
+  it.each([
+    ["gate: Skip in More skips", gateItem(), "menuitem", "Skip", "Skip step", "skipWorkItem"],
+    ["paused: Steer resumes", item({ status: "paused" }), "button", "Steer", "Resume with this steer", "resumeWorkItem"],
+    ["paused: Escalate in More escalates", item({ status: "paused" }), "menuitem", "Escalate", "Escalate", "escalateWorkItem"],
+  ] as const)("%s with the composer's note", async (_, it_, role, trigger, submit, call) => {
+    const spy = vi.spyOn(api, call).mockResolvedValue({} as never);
+    renderCard(it_);
+    if (role === "menuitem") await openMore();
+    await userEvent.click(screen.getByRole(role, { name: trigger }));
+    await userEvent.type(screen.getByLabelText(/composer message/i), "a note");
+    await userEvent.click(screen.getByRole("button", { name: submit }));
+    expect(spy).toHaveBeenCalledWith("w1", "a note");
   });
 
   it("gate: counts deferred findings on the header's second line and links them to the Timeline", () => {
@@ -249,15 +264,6 @@ describe("ItemCard (W11 · A)", () => {
     expect(screen.queryByRole("menuitem", { name: /escalate/i })).toBeNull();
   });
 
-  it("paused: Steer opens a composer that resumes with the note", async () => {
-    const spy = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({ id: "w1", node_id: "verify", steer: "go" });
-    renderCard(item({ status: "paused" }));
-    await userEvent.click(screen.getByRole("button", { name: /^steer$/i }));
-    await userEvent.type(screen.getByLabelText(/composer message/i), "go");
-    await userEvent.click(screen.getByRole("button", { name: /resume with this steer/i }));
-    expect(spy).toHaveBeenCalledWith("w1", "go");
-  });
-
   it("composer: Cmd-Enter submits on the item it was opened on and closes the composer (W6.3, W6.4)", async () => {
     const resume = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({ id: "w1", node_id: null, steer: "go" });
     renderCard(item({ status: "paused" }));
@@ -275,22 +281,6 @@ describe("ItemCard (W11 · A)", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByLabelText(/composer message/i)).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: /^steer$/i })).toHaveFocus());
-  });
-
-  it("paused, steerable false: no Steer", () => {
-    renderCard(item({ status: "paused", steerable: false }));
-    expect(rowNames()).toEqual(["Resume"]);
-  });
-
-  it("paused: Escalate is offered from More actions and posts through (Kraft-k5ol)", async () => {
-    const spy = vi.spyOn(api, "escalateWorkItem").mockResolvedValue({ id: "w1", status: "escalating" });
-    renderCard(item({ status: "paused" }));
-    await openMore();
-    expect(menuLabels()).toContain("Escalate");
-    await userEvent.click(screen.getByRole("menuitem", { name: "Escalate" }));
-    await userEvent.type(screen.getByLabelText(/composer message/i), "please look at this");
-    await userEvent.click(screen.getByRole("button", { name: /^escalate$/i }));
-    expect(spy).toHaveBeenCalledWith("w1", "please look at this");
   });
 
   it("shows a failed Cancel work item", async () => {

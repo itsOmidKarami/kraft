@@ -11,14 +11,18 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
-import json
+import shutil
 import uuid
-from pathlib import Path
 
-from kraft import events, store
+from kraft import caps, events, executor, store
+from kraft import policy as _policy
+from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
-from kraft.executor import LaunchContext
+from kraft.executor import LaunchContext, stops
+from kraft.templates.models import AgentTask, TaskKind
+
+_SESSIONS = ".engineering/sessions"
 
 #: Prepended to every turn's prompt, regenerated fresh each call rather than
 #: diffed against a prior turn -- the live state is always correct to hand
@@ -63,26 +67,20 @@ _PAUSED_ACTION = (
     "clearly whether you think it's ready to resume, and let a human run "
     "`kraft item resume` themselves.\n"
 )
-#: `{resume_note}` on a turn > 1 in a thread (`resume_session_id` set) --
-#: b5afe84c: a `--resume`d conversation carries forward its own memory of the
-#: literal path an earlier turn wrote its result/summary to, and a model
-#: that recalls "I know where to write" from that memory instead of
-#: re-reading this turn's fresh instruction writes to the wrong turn's file,
-#: which `require_result_file` then downgrades to `failed` despite the turn
-#: having finished cleanly. Empty on turn 1, where no earlier-turn memory
-#: exists to be confused with.
-_RESUME_NOTE = (
-    "This turn's own files are NEW, not the ones from earlier in this "
-    "conversation -- if you recall writing to a path from an earlier turn, "
-    "that path belongs to that turn, not this one:\n"
-    "  - Result file: {result_path}\n"
-    "  - Session summary: {summary_path}\n"
-    "Write to these exact paths for this turn, even if they differ from "
-    "what you wrote before.\n"
+#: After `{action_line}` on every turn, manual or automatic, needs_human or
+#: paused (Ruling 209, Kraft-s7c04.67): nothing pre-approves these verbs for
+#: an escalation agent, so a person's own classifier would refuse the call,
+#: and the turn hands the person the one command instead of trying.
+_HANDS_OFF = (
+    "You are not allowed to skip or abandon this work item yourself, for "
+    "safety. If a person asks you to skip it, or you conclude skipping is "
+    "right, say plainly that you may not take that action yourself, and give "
+    "them the one command that does: `kraft item skip {work_item_id}` (or the "
+    "Skip action on the board). Abandoning is theirs as well: `kraft item "
+    "abandon --yes {work_item_id}`.\n"
 )
 _STATE = (
     "{opening}"
-    "{resume_note}"
     "Status: {status}\n"
     "Current node: {node_id}\n"
     "{reason_line}"
@@ -90,6 +88,7 @@ _STATE = (
     "{description_line}"
     "\n"
     "{action_line}"
+    "{hands_off}"
     "\n"
     "The human's message:\n{message}"
 )
@@ -99,9 +98,9 @@ def _description_line(row) -> str:
     return f"Description: {row['description']}\n" if row["description"] else ""
 
 
-def _reason(db, work_item_id: str, evts: list | None = None) -> str:
-    """The most recent `work_item_needs_human` event's reason -- the live
-    answer to "why is this stopped", same reverse-scan idiom
+def _last_stop(db, work_item_id: str, evts: list | None = None) -> dict:
+    """The most recent `work_item_needs_human` event's payload, or `{}` -- the
+    live answer to "why is this stopped", same reverse-scan idiom
     `kraft.executor.dispatch.last_measurement`/`needs_context_question`
     already use. `evts`, when given, is a timeline the caller already
     fetched (`gates.auto_escalate_stuck`'s single read, threaded through
@@ -110,19 +109,27 @@ def _reason(db, work_item_id: str, evts: list | None = None) -> str:
     evts = evts if evts is not None else db.read(lambda c: events.read_after(c, 0, work_item_id))
     for e in reversed(evts):
         if e["type"] == "work_item_needs_human":
-            return e["payload"].get("reason") or "(no reason recorded)"
-    return "(no reason recorded)"
+            return e["payload"]
+    return {}
 
 
-def _reason_line(db, work_item_id: str, status: str, evts: list | None = None) -> str:
-    """The `{reason_line}` `_STATE` slot. `needs_human` only -- a `paused`
-    item's most recent `work_item_needs_human` reason (if it has one at all)
-    belongs to whatever it stopped for *before* being paused, not to why it
-    is paused now, so reporting it here would be stale or actively
+def _reason_line(stop: dict, status: str) -> str:
+    """The `{reason_line}` `_STATE` slot, with the stop's `suggested_action`
+    when it has one (Kraft-s7c04.27), so a turn starts from what the chain
+    already concluded instead of rediscovering it. `needs_human` only -- a
+    `paused` item's most recent `work_item_needs_human` reason (if it has one
+    at all) belongs to whatever it stopped for *before* being paused, not to
+    why it is paused now, so reporting it here would be stale or actively
     misleading (Kraft-k5ol code-review finding)."""
     if status != "needs_human":
         return ""
-    return f"Why it is stopped: {_reason(db, work_item_id, evts=evts)}\n"
+    line = f"Why it is stopped: {stop.get('reason') or '(no reason recorded)'}\n"
+    if suggested := stop.get("suggested_action"):
+        line += (
+            f"What Kraft suggests a person do: {suggested['action']} -- {suggested['reason']} "
+            f"(`kraft item {suggested['action']}`)\n"
+        )
+    return line
 
 
 #: Events that close an episode, so a judge verdict before one of them describes
@@ -159,32 +166,6 @@ def _judge_line(db, work_item_id: str, node_id: str | None, evts: list | None = 
                 return ""
             return f"What the fix-loop judge made of it: {reasoning}\n"
     return ""
-
-
-def _extract_cli_session_id(log_path: Path) -> str | None:
-    """The `claude` CLI's own session id, off the `system`/`init` line every
-    `--output-format stream-json` run starts with -- the identity `--resume`
-    takes, distinct from Kraft's own `worker_sessions.id`.
-
-    Scanned across every line rather than assumed to be the first, the same
-    defensive shape `adapters.subprocess._rate_limit_rejection` uses reading
-    this same log: a line Kraft cannot parse yet must not crash a session
-    that otherwise ran fine.
-    """
-    try:
-        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
-    except OSError:
-        return None
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
-            sid = obj.get("session_id")
-            if isinstance(sid, str) and sid:
-                return sid
-    return None
 
 
 def escalation_running(db, work_item_id: str) -> str | None:
@@ -249,6 +230,75 @@ def session_status(db, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
+#: The escalation role, as an ordinary agent task
+#: (`agent-roles-use-ordinary-agent-task-runtime-configuration`): its launch
+#: resolves `harness:` through `adapters.agent.harness_profile` like every other
+#: V1 agent launch, so the runtime is `harnesses.yaml`'s `claude` profile
+#: -- its executable and defaults -- and no field special to escalation exists.
+#: A `claude` profile because the turn is a resumable conversation: the thread
+#: id is read off the provider's own `system`/`init` line
+#: (`usage.READERS["claude-stream-json"].session_id`). A disabled or missing
+#: profile stops the turn as a config error rather than substituting another
+#: (`unavailable-selected-harness-needs-human`).
+ESCALATION_TASK = AgentTask(
+    id="escalation",
+    kind=TaskKind.AGENT,
+    harness="claude",
+    prompt="Help resolve a stopped work item.",
+)
+
+
+async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
+    """An escalation turn that could not launch, recorded as its own session so
+    the stop names why (the same shape `dispatch.config_error_session` gives a chain
+    task)."""
+    from kraft import builtins as _builtins
+    from kraft.executor.context import CONFIG_ERROR
+
+    _, log_path, result_path = await _builtins.start_session(
+        db,
+        run_dirs,
+        session_id=session_id,
+        work_item_id=row["id"],
+        node_id=row["current_node_id"],
+        hook_point="escalation",
+        round=0,
+    )
+    return await _builtins.finish_session(
+        db, log_path, result_path, session_id=session_id, status=CONFIG_ERROR, log=log
+    )
+
+
+#: What an escalation thread's runtime is: fixed for the life of a thread.
+_RUNTIME = ("command", "harness", "model", "effort", "permission_mode")
+
+
+async def _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime):
+    """The turn's `escalation_message`, before it launches -- a refused launch
+    included, so every turn counts toward the auto-escalation bound."""
+    payload = {
+        "session_id": session_id,
+        "message": message,
+        "auto": auto,
+        "thread": thread,
+        "turn": turn,
+    }
+    if runtime is not None:
+        payload["runtime"] = runtime
+    await db.write(lambda c: events.append(c, work_item_id, "escalation_message", payload))
+
+
+def _thread_runtime(db, work_item_id: str, thread: int) -> dict | None:
+    """The runtime escalation `thread` started on, off its first turn's
+    `escalation_message`; None for a thread that predates the record."""
+    evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
+    for e in evts:
+        if e["type"] == "escalation_message" and e["payload"].get("thread") == thread:
+            runtime = e["payload"].get("runtime")
+            return {k: runtime[k] for k in _RUNTIME if k in runtime} if runtime else None
+    return None
+
+
 async def dispatch(
     db,
     run_dirs,
@@ -293,76 +343,208 @@ async def dispatch(
     turn = db.read(lambda c: store.escalation_thread_turn_count(c, work_item_id, thread)) + 1
 
     session_id = uuid.uuid4().hex
-    await db.write(
-        lambda c: events.append(
-            c,
-            work_item_id,
-            "escalation_message",
-            {
-                "session_id": session_id,
-                "message": message,
-                "auto": auto,
-                "thread": thread,
-                "turn": turn,
-            },
-        )
-    )
     worktree = run_dirs.worktrees / work_item_id
 
-    resume_note = (
-        _RESUME_NOTE.format(
-            result_path=result_path_for(run_dirs, session_id),
-            summary_path=f".engineering/sessions/{session_id}.md",
-        )
-        if resume_session_id
-        else ""
-    )
     task_instruction = _STATE.format(
         opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
-        resume_note=resume_note,
         status=row["status"],
         node_id=row["current_node_id"],
-        reason_line=_reason_line(db, work_item_id, row["status"], evts=evts),
+        reason_line=_reason_line(_last_stop(db, work_item_id, evts), row["status"]),
         judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
         description_line=_description_line(row),
         action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
+        hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
         message=message,
     )
 
-    # A minimal binding, no hook: `resolve_invocation` still folds in repo-level
-    # deny_tools/steering/default_model, which is all "full tools" means here --
-    # repo policy still applies, only a hook's own narrowing is absent because
-    # there is no hook. Its own `escalate:` kwarg (left at the `False` default)
-    # is the fix loop's unrelated "buy a stronger model" bump -- same word,
-    # different feature; not to be confused with this module.
-    inv = _agent.resolve_invocation(
-        {"command": "claude"}, launch.repo_entry, launch.steering_dir, skills_dir=launch.skills_dir
+    # Node-scoped (Kraft-l8ype, `stuck-escalation-is-an-exec-node-control`):
+    # the turn runs under the policy of the node the item stopped at, resolved
+    # from its snapshot like every other agent launch -- instance, repository,
+    # work item, chain and node. Its tool lists, frozen sandbox, harness
+    # allowlist and token budget all bound it; no snapshot, or no such node in
+    # it, is no policy anyone could know, and refused rather than run unbounded.
+    policy = _node_policy(row)
+    breach = (
+        stops.budget_breach(
+            db, work_item_id, _policy.NO_BUDGET, row=row, path=row["current_node_id"]
+        )
+        if policy is not None
+        else None
     )
-    status = await _agent.run_agent_task(
-        db,
-        run_dirs,
-        session_id=session_id,
-        work_item_id=work_item_id,
-        node_id=row["current_node_id"],
-        hook_point="escalation",
-        command=inv.command,
-        harness=inv.harness,
-        model=inv.model,
-        deny_tools=inv.deny_tools,
-        steering_texts=inv.steering_texts,
-        sandbox=inv.sandbox,
-        task_instruction=task_instruction,
-        title=row["title"],
-        repo_path=row["repo"],
-        cwd=worktree,
-        resume_session_id=resume_session_id,
-        autocompact="auto",
-        identify_as_worker=False,
-        repo_entry=launch.repo_entry,
-        thread=thread,
-    )
+    if policy is None or breach is not None:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(
+            db,
+            run_dirs,
+            session_id=session_id,
+            row=row,
+            log=(
+                stops.budget_reason(breach)
+                if breach is not None
+                else f"escalation has no policy to run under: work item {work_item_id} has "
+                f"no node {row['current_node_id']!r} in a materialized chain"
+            )
+            + "\n",
+        )
 
-    cli_session_id = _extract_cli_session_id(run_dirs.logs / f"{session_id}.log")
+    # Its own `escalate:` kwarg (left at the `False` default) is the fix loop's
+    # unrelated "buy a stronger model" bump -- same word, different feature;
+    # not to be confused with this module.
+    #
+    # `harness:`, **not** `command: "claude"`. Same shape Task 4b removed from
+    # `gate_review.py`, and removed here for the same reason: a hardcoded
+    # `command` bypasses the harness declaration entirely, so an operator who
+    # overlays `~/.kraft/templates/harnesses/claude.yaml` is ignored and a test
+    # fixture cannot substitute a fake. `run_agent_task` falls through to the
+    # harness's own declared command when `command` is empty
+    # (`adapters/agent.py`'s `command=command or None`), which is what every
+    # other V1 agent launch already does.
+    try:
+        # The item's sandbox, as for every launch of it (Ruling 189).
+        sandbox = executor.item_sandbox(row, launch)
+    except executor.SandboxUnresolved as exc:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
+    try:
+        inv = _agent.resolve_agent_task(
+            ESCALATION_TASK,
+            launch.repo_entry,
+            launch.library_steering,
+            skills_dir=launch.skills_dir,
+            # The repository's steering, frozen with the item at intake.
+            **executor.frozen_steering(row),
+            policy=policy,
+        )
+    except _agent.HarnessUnavailable as exc:
+        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        return await _refused(
+            db,
+            run_dirs,
+            session_id=session_id,
+            row=row,
+            log=f"escalation selects harness {ESCALATION_TASK.harness!r}, which is not "
+            f"available: {exc}\n",
+        )
+    # A turn that resumes a thread runs on the runtime the thread started on
+    # (`resumed-escalation-preserves-original-runtime`): the profile may have
+    # changed since, and a resumed conversation on another model or harness is
+    # not the session it claims to be. Only a new thread takes the current
+    # profile.
+    original = _thread_runtime(db, work_item_id, thread) if resume_session_id else None
+    if original is not None:
+        inv = inv._replace(**original)
+    runtime = {k: getattr(inv, k) for k in _RUNTIME}
+    # An automatic turn is its node running, so the node's time cap bounds it
+    # (Kraft-8en38). A person's turn is a person talking: no cap.
+    time_cap = None
+    if auto:
+        hit = db.read(lambda c: caps.for_turn(c, row, row["current_node_id"]))
+        if hit is not None and hit.remaining_s <= 0:
+            await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+            return await _refused(
+                db, run_dirs, session_id=session_id, row=row, log=f"not started: {hit.reason}\n"
+            )
+        time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
+    await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
+    files = thread_files(work_item_id, thread)
+    await _archive_last_turn(db, run_dirs, worktree, files)
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=row["current_node_id"],
+            hook_point="escalation",
+            command=inv.command,
+            harness=inv.harness,
+            model=inv.model,
+            effort=inv.effort,
+            permission_mode=inv.permission_mode,
+            deny_tools=inv.deny_tools,
+            allowed_tools=inv.allowed_tools,
+            steering_texts=inv.steering_texts,
+            sandbox=sandbox,
+            task_instruction=task_instruction,
+            title=row["title"],
+            repo_path=row["repo"],
+            cwd=worktree,
+            resume_session_id=resume_session_id,
+            autocompact="auto",
+            identify_as_worker=False,
+            harness_id=ESCALATION_TASK.harness,
+            repo_entry=launch.repo_entry,
+            thread=thread,
+            files=files,
+            time_cap=time_cap,
+        )
+    except _agent.LaunchRefused as exc:
+        return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
+
+    cli_session_id = _usage.READERS["claude-stream-json"].session_id(
+        run_dirs.logs / f"{session_id}.log"
+    )
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))
     return status
+
+
+def thread_files(work_item_id: str, thread: int) -> str:
+    """The name every turn of one escalation thread writes its result file
+    and session summary under (Kraft-s7c04.54,
+    `a-resumed-escalation-turn-writes-where-it-remembers`).
+
+    Per thread, not per turn: a `--resume`d conversation remembers the
+    literal paths an earlier turn wrote to, and a model that trusts that
+    memory over the fresh instruction wrote to the earlier turn's file
+    (b5afe84c), which `require_result_file` then recorded as `failed`. With
+    one name per thread, the path it remembers is this turn's path.
+    """
+    return f"escalation-{work_item_id}-{thread}"
+
+
+async def _archive_last_turn(db, run_dirs, worktree, files: str) -> None:
+    """Give the thread's last turn its own names back before the next turn
+    writes, so this turn starts with no result file to be mistaken for its
+    own and the last turn's stays readable from its row.
+
+    The result family (`.json` and its `.exit`/`.cid` sidecars) moves to the
+    last turn's session id and its row follows. The summary is copied, not
+    moved: it sits in the worktree, where a repo that does not ignore
+    `.engineering/` may track it.
+    """
+    shared = result_path_for(run_dirs, files)
+    summary = f"{_SESSIONS}/{files}.md"
+    last = db.read(
+        lambda c: c.execute(
+            "SELECT id, session_summary_ref FROM worker_sessions WHERE result_path = ?",
+            (str(shared),),
+        ).fetchone()
+    )
+    if last is not None:
+        own = result_path_for(run_dirs, last["id"])
+        for suffix in (".json", ".exit", ".cid"):
+            if shared.with_suffix(suffix).exists():
+                shared.with_suffix(suffix).replace(own.with_suffix(suffix))
+        ref = last["session_summary_ref"]
+        if ref == summary and (worktree / summary).exists():
+            ref = f"{_SESSIONS}/{last['id']}.md"
+            shutil.copyfile(worktree / summary, worktree / ref)
+        await db.write(
+            lambda c: c.execute(
+                "UPDATE worker_sessions SET result_path = ?, session_summary_ref = ? WHERE id = ?",
+                (str(own), ref, last["id"]),
+            )
+        )
+    # A turn that never got a row (refused before launch) owns nothing here.
+    for suffix in (".json", ".exit", ".cid"):
+        shared.with_suffix(suffix).unlink(missing_ok=True)
+
+
+def _node_policy(row) -> _policy.InstancePolicy | None:
+    """The policy of the node `row` stopped at, from its snapshot; None when
+    there is no snapshot or no such node in it."""
+    snapshot = store.materialized_chain_of(row)
+    nodes = snapshot.chain.nodes if snapshot is not None else ()
+    node = next((n for n in nodes if n.id == row["current_node_id"]), None)
+    return executor.scope_policy(row, node) if node is not None else None

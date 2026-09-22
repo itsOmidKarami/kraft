@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Collection
 from pathlib import Path
 
-from kraft import sandbox
 from kraft.adapters.forge.models import ForgeError
-from kraft.config import git_read, main_ignore_args
+from kraft.config import base_ignore_args, git_read
+from kraft.worker import sandbox
 
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
-#: in `poll_ci` reaches into that thread.
+#: outside that thread reaches into it.
 CLI_TIMEOUT_S = 120.0
 
 
@@ -67,7 +68,7 @@ async def run_git(
 _KRAFT_ROOTS = (".engineering", "docs/superpowers")
 
 
-async def _kraft_written_paths(repo: Path) -> list[str]:
+async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
     """Untracked paths under `_KRAFT_ROOTS` -- Kraft's own artifacts and
     session notes, which hooks write straight to disk and never `git add`.
 
@@ -80,18 +81,27 @@ async def _kraft_written_paths(repo: Path) -> list[str]:
     merge request (caught in review: a worker's edit to a pre-existing,
     already-committed `.engineering/specs/x.md` would otherwise vanish).
 
-    `main_ignore_args` rides along so a root `main` ignores but this
+    `base_ignore_args` rides along so a root the base branch ignores but this
     worktree's own stale `.gitignore` does not yet is treated the same as one
     it always knew about, instead of showing up here as merely untracked.
     """
-    with main_ignore_args(repo) as ignore_args:
+    with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
-            repo, ["git", *ignore_args, "status", "--porcelain", "--", *_KRAFT_ROOTS]
+            repo,
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                sandbox.SUBMODULES_UNENTERED,
+                "--",
+                *_KRAFT_ROOTS,
+            ],
         )
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
 
 
-async def work_product_pathspec(repo: Path) -> list[str]:
+async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     """`.`, plus an exclusion for every path Kraft itself wrote into
     `_KRAFT_ROOTS` -- session summaries, spec/plan/chain_review/review_brief,
     and a spec/plan attachment copied in under `docs/superpowers/`. None of
@@ -113,10 +123,10 @@ async def work_product_pathspec(repo: Path) -> list[str]:
     spec/plan/chain_review/review_brief once none of them are committed
     either) — without also assuming every path under a Kraft root is ours.
     """
-    return [".", *(f":(exclude){p}" for p in await _kraft_written_paths(repo))]
+    return [".", *(f":(exclude){p}" for p in await _kraft_written_paths(repo, base))]
 
 
-async def assert_clean(repo: Path) -> None:
+async def assert_clean(repo: Path, base: str) -> None:
     """Refuse to open a merge request over a worktree with uncommitted work.
 
     Untracked files are included on purpose: a source or test file the agent
@@ -125,16 +135,24 @@ async def assert_clean(repo: Path) -> None:
     `work_product_pathspec` drops Kraft's own session notes and artifacts in
     a repo that has not ignored them.
 
-    `--ignore-submodules=none` deliberately overrides the repo's own
-    `submodule.<path>.ignore` config. A human setting `ignore = all` on a
-    workspace with several submodules to stop pointer churn in every `git
-    status` is reasonable; it is not permission for Kraft to open a merge
-    request over a submodule holding commits that request will not carry
-    (Kraft-qlsf — this is what let work item 9d0ab38ff3c9439b90506df0f6966660
-    push a submodule commit nowhere while every guard reported clean).
+    `SUBMODULES_UNENTERED` (`--ignore-submodules=dirty`) deliberately
+    overrides the repo's own `submodule.<path>.ignore` config. A human
+    setting `ignore = all` on a workspace with several submodules to stop
+    pointer churn in every `git status` is reasonable; it is not permission
+    for Kraft to open a merge request over a submodule holding commits that
+    request will not carry (Kraft-qlsf — this is what let work item
+    9d0ab38ff3c9439b90506df0f6966660 push a submodule commit nowhere while
+    every guard reported clean).
+
+    `dirty`, not `none`: `none` also runs `git status` *inside* each
+    submodule to look for uncommitted edits, and that child git reads the
+    submodule's own config -- which, for a repository a sandboxed worker
+    nested in its worktree and committed a gitlink to, is the worker's,
+    filters and all (Kraft-nx4id). A declared member's uncommitted edits are
+    still caught: publication runs this same check in each member.
     """
-    pathspec = await work_product_pathspec(repo)
-    with main_ignore_args(repo) as ignore_args:
+    pathspec = await work_product_pathspec(repo, base)
+    with base_ignore_args(repo, base) as ignore_args:
         raw = await run_git(
             repo,
             [
@@ -142,7 +160,7 @@ async def assert_clean(repo: Path) -> None:
                 *ignore_args,
                 "status",
                 "--porcelain",
-                "--ignore-submodules=none",
+                sandbox.SUBMODULES_UNENTERED,
                 "--",
                 *pathspec,
             ],
@@ -157,7 +175,9 @@ async def assert_clean(repo: Path) -> None:
         )
 
 
-async def commit_stragglers(repo: Path, *, message: str) -> bool:
+async def commit_stragglers(
+    repo: Path, *, base: str, message: str, mounts: Collection[str] = ()
+) -> bool:
     """Commit whatever an agent left behind in the worktree. True if it did.
 
     A worker is told to commit everything it changes before it exits, and one
@@ -171,11 +191,31 @@ async def commit_stragglers(repo: Path, *, message: str) -> bool:
     `.pytest_cache/` left behind is not mistaken for work — and
     `work_product_pathspec` keeps Kraft's own session notes and artifacts out
     of the merge request even in a repo that has never heard of them.
+
+    So does every nested repository but the item's declared `mounts`
+    (Kraft-nx4id): `git add` runs `git status` inside each gitlink it
+    matches, whatever `--ignore-submodules` says, and that child git runs
+    whatever filter the nested repository's config names. A pointer the
+    agent moved in a submodule nobody declared is left uncommitted for
+    `assert_clean` to name, rather than swept into the merge request.
     """
-    pathspec = await work_product_pathspec(repo)
-    with main_ignore_args(repo) as ignore_args:
+    nested = await asyncio.to_thread(sandbox.nested_repos, repo) or {}
+    pathspec = [
+        *await work_product_pathspec(repo, base),
+        *(f":(exclude,literal){p}" for p in nested if p not in mounts),
+    ]
+    with base_ignore_args(repo, base) as ignore_args:
         status = await run_git(
-            repo, ["git", *ignore_args, "status", "--porcelain", "--", *pathspec]
+            repo,
+            [
+                "git",
+                *ignore_args,
+                "status",
+                "--porcelain",
+                sandbox.SUBMODULES_UNENTERED,
+                "--",
+                *pathspec,
+            ],
         )
         if not status.strip():
             return False
@@ -269,33 +309,56 @@ async def _head_sha(repo: Path) -> str:
         return ""
 
 
-async def commits_on(repo: Path, branch: str) -> tuple[str, ...]:
-    """Subjects of the commits this branch adds, newest last.
+async def commits_on(repo: Path, branch: str, base: str) -> tuple[str, ...]:
+    """Subjects of the commits this branch adds to `base`, the branch its
+    merge request targets, newest last.
 
-    `origin/main` and not the local `main`: a Kraft worktree is cut from
+    `origin/<base>` and not the local one: a Kraft worktree is cut from
     whatever the local checkout happened to be at, which may be behind.
     Returns empty rather than raising — a description is not worth failing a
     node over.
     """
     try:
         raw = await run_git(
-            repo, ["git", "log", "--reverse", "--format=%s", f"origin/main..{branch}"]
+            repo, ["git", "log", "--reverse", "--format=%s", f"origin/{base}..{branch}"]
         )
     except ForgeError:
         return ()
     return tuple(line for line in raw.splitlines() if line.strip())
 
 
+async def commits_ahead(repo: Path, branch: str, base: str) -> int | None:
+    """How many commits `branch` adds to `origin/<base>`, as `commits_on`
+    reads them; None when git cannot say (no origin), which is no evidence
+    the branch is empty."""
+    try:
+        raw = await run_git(repo, ["git", "rev-list", "--count", f"origin/{base}..{branch}"])
+    except ForgeError:
+        return None
+    return int(raw.strip() or 0)
+
+
+async def source_changed(repo: Path, branch: str, *, base: str, exclude: set[str]) -> bool:
+    """Whether `branch` changes any path of `repo` outside `exclude` -- a
+    workspace root's member mount paths, so a commit that only moves a
+    member's pointer is not a source change. Against `origin/<base>`, as
+    `commits_on` reads; False when git cannot say (no origin), like it."""
+    try:
+        raw = await run_git(repo, ["git", "diff", "--name-only", f"origin/{base}...{branch}"])
+    except ForgeError:
+        return False
+    return any(p and p not in exclude for p in raw.splitlines())
+
+
 async def _assert_submodules_covered(repo: Path, covered: set[Path]) -> None:
-    """Refuse to open the root's merge request while an initialized submodule
+    """Refuse to publish a workspace item while an initialized submodule
     holds commits no `work_item_repos` row will carry anywhere.
 
-    The §3a scan (`builtins.scan_submodules`) runs in an earlier node
-    and is what normally covers a submodule the agent touched but nobody
-    declared -- this only fires when that scan itself missed one (submodule
-    init failed, `git submodule status` errored), which must stop the chain
-    rather than silently drop the change, exactly as it did on work item
-    9d0ab38ff3c9439b90506df0f6966660.
+    Membership is typed: the item's frozen target selects the members it may
+    change, and only those get a branch and a merge request. A submodule the
+    agent changed without it being selected must stop the chain rather than
+    silently drop the change, exactly as it did on work item
+    9d0ab38ff3c9439b90506df0f6966660 -- select it when filing the item.
     """
     raw = await run_git(repo, ["git", "submodule", "status"])
     for line in raw.splitlines():
@@ -313,7 +376,11 @@ async def _assert_submodules_covered(repo: Path, covered: set[Path]) -> None:
 
 
 async def default_branch(repo: Path) -> str:
-    """origin's default branch, or `main` when the forge doesn't say."""
+    """origin's default branch, or `main` when the forge doesn't say.
+
+    Not the answer to "which branch does this item's work target": that is
+    `builtins.base_branch`, which reads this only for an item that named no
+    branch, and for a workspace member."""
     try:
         raw = await run_git(repo, ["git", "symbolic-ref", "refs/remotes/origin/HEAD"])
         return raw.strip().rsplit("/", 1)[-1] or "main"

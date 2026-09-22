@@ -1,90 +1,14 @@
-"""Waiting for a pipeline to settle, and reading a merge request back until it
-lands.
+"""Reading a pipeline once: `render_ci`'s verdict on one read, what counts as
+infrastructure-red, and the one self-retry of an infra-red pipeline. Waiting
+for it is `kraft.waits`' -- nothing here sleeps.
 """
 
 from __future__ import annotations
 
-import asyncio
-import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from kraft.adapters.forge import git
-from kraft.adapters.forge.models import MR, CIStatus, Forge, ForgeError, MRRef
-
-logger = logging.getLogger(__name__)
-
-#: How long a `ci_poll` node waits for a pipeline to settle, and how long it
-#: sleeps between checks. Both are overridable per node in the registry; a
-#: pipeline slower than this needs a human whatever the number is.
-DEFAULT_POLL_TIMEOUT = 1800.0
-DEFAULT_POLL_INTERVAL = 5.0
-_MAX_POLL_INTERVAL = 60.0
-
-#: How long the merge node waits for the forge to report the merge request
-#: actually merged, and how long it sleeps between reads. Five minutes rather
-#: than DEFAULT_POLL_TIMEOUT's thirty: by the time this wait starts, `merge`
-#: has just re-validated CI itself (`wait_for_ci`, same wait `ci_poll` uses),
-#: so a merge that has not landed by now is waiting on something a person has
-#: to see, not on a pipeline `mr_sync`'s push may have re-armed (Kraft-266b,
-#: Kraft-x10m). Deliberately not registry-tunable — nothing has asked, and
-#: these are one edit away if something does.
-MERGE_VERIFY_TIMEOUT = 300.0
-MERGE_VERIFY_INTERVAL = 5.0
-
-
-#: Kraft-x92: one flaky/rate-limited `ci_status` call used to fail the whole
-#: wait -- an error at minute 12 of a 30-minute poll read the same as a red
-#: pipeline. Tolerate a short run of consecutive errors before giving up;
-#: reset the count the moment a call succeeds, so this bounds a burst, not
-#: the wait's total error budget.
-_MAX_CONSECUTIVE_POLL_ERRORS = 3
-
-
-async def poll_ci(
-    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
-) -> tuple[CIStatus, bool]:
-    """Wait for a pipeline to settle.
-
-    Returns the last status seen and whether the wait ran out with it still
-    pending. Backoff rather than a fixed interval: a thirty-minute pipeline
-    should not cost three hundred CLI invocations, and the early checks are the
-    ones worth making promptly.
-    """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    # The cap bounds how far the backoff *grows*, not what the caller asked
-    # for: a registry that sets a 300s interval for a rate-limited forge must
-    # not silently get 60s and five times the CLI calls.
-    cap = max(_MAX_POLL_INTERVAL, interval)
-    consecutive_errors = 0
-    while True:
-        try:
-            ci = await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
-        except ForgeError:
-            consecutive_errors += 1
-            if consecutive_errors > _MAX_CONSECUTIVE_POLL_ERRORS:
-                raise
-            logger.warning(
-                "ci_status failed mid-poll (%d/%d consecutive), retrying",
-                consecutive_errors,
-                _MAX_CONSECUTIVE_POLL_ERRORS,
-            )
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise
-            await asyncio.sleep(min(interval, remaining))
-            interval = min(interval * 2, cap)
-            continue
-        consecutive_errors = 0
-        # A branch that cannot merge is an answer, not a wait: a conflict will
-        # not resolve itself in thirty minutes (Kraft-ejj9).
-        if ci.state != "pending" or ci.mergeable is False:
-            return ci, False
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return ci, True
-        await asyncio.sleep(min(interval, remaining))
-        interval = min(interval * 2, cap)
+from kraft.adapters.forge.models import MR, CIStatus, Forge
 
 
 async def render_ci(
@@ -107,11 +31,24 @@ async def render_ci(
     later). A settled red pipeline is `"infra"` when every failed job is the
     forge's own fault, `"failed"` (code-red) otherwise, and green+confirmed-
     unmergeable is `"conflict"`.
+
+    A pending read standing only on a run cancelled `_CANCEL_GRACE` ago or
+    more is `"abandoned"` (Kraft-kbqmk): a successor to a relabel or a
+    push-superseded run registers within seconds, so one that has not in
+    that long is not coming, and a person decides now rather than at the
+    wait's full timeout. A fresher cancel stays a wait (Kraft-zn8me).
     """
     log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
     if ci.sha and head_sha and ci.sha != head_sha:
         return log, "waiting"
     if ci.state == "pending":
+        if _abandoned(ci.cancelled_at):
+            log += (
+                f"the run for {(head_sha or ci.sha)[:7] or 'this head'} was cancelled at "
+                f"{ci.cancelled_at} and no new run has started since; nothing about the code "
+                "failed. re-run CI, then retry this item\n"
+            )
+            return log, "abandoned"
         return log, "waiting"
     if ci.state == "success" and ci.mergeable is False:
         if _retried:
@@ -128,19 +65,33 @@ async def render_ci(
     return log, "failed"
 
 
+#: How long a cancelled run may stand as the latest for its head before it
+#: counts as one nobody followed up. Minutes, not seconds: a successor
+#: registers within seconds, and the forge's clock is not this machine's.
+_CANCEL_GRACE = timedelta(minutes=5)
+
+
+def _abandoned(cancelled_at: str) -> bool:
+    """Whether a cancel is `_CANCEL_GRACE` old. A time that will not parse is
+    not old: it waits, and the wait's own timeout still stops it."""
+    try:
+        at = datetime.fromisoformat(cancelled_at)
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        return False
+    return datetime.now(UTC) - at >= _CANCEL_GRACE
+
+
 #: Kraft-h81i, Kraft-s8ul, Kraft-ddxn: a failed job whose own `failure_reason`
 #: names one of these is the forge's own infrastructure, not the branch's
 #: code. `script_failure`, an unrecognised reason, or a red pipeline that
 #: named no reason at all, are code-red — the failure a fix loop is for.
 #:
-#: Deliberately NOT `"cancelled"`. By the time a job's `failure_reason` is read
-#: here, `render_ci`'s sha guard has already confirmed this pipeline belongs to
-#: the current head, so nothing newer could have superseded it through
-#: GitLab's redundant-pipeline auto-cancel — the only thing left that could
-#: have cancelled *this* pipeline is a human clicking Cancel. Auto-retrying
-#: that through the forge would silently override a person's own decision,
-#: which is worse than spending one code-red fix cycle that finds nothing to
-#: change and reports back quickly with the cancellation named in the finding.
+#: No `"cancelled"`: a cancelled run never reaches here. Both backends read it
+#: as pending (Kraft-zn8me), because a cancelled run is never a verdict, and a
+#: run a person cancelled with no successor is `render_ci`'s "abandoned".
+#: It is never auto-retried here, which would override that person's decision.
 _INFRA_REASONS = frozenset(
     {
         "runner_system_failure",
@@ -188,17 +139,6 @@ _INFRA_RETRY_CAP = 2
 #: side always will be, first.
 _INFRA_WALL_CLOCK_S = 3600
 
-#: Kraft-43kw: merge_watch's own budget for a target-branch pipeline that
-#: never settles at all -- plain module constants, not a policy.yaml key,
-#: same as the pair above (`_run_one` has no `policy` object to resolve one
-#: from). Deliberately smaller than `ci_wait.py`'s shared `ci_wait` cap
-#: (1800s/60 attempts) so this always resolves first: the merged work is
-#: already on the target branch by the time this node runs, so giving up on
-#: watching and finishing is a smaller consequence than paging a human over
-#: a pipeline this item cannot fix either way.
-_POST_MERGE_WAIT_CAP = 40
-_POST_MERGE_WAIT_WALL_CLOCK_S = 900
-
 
 async def retry_infra_once(
     forge: Forge,
@@ -218,7 +158,7 @@ async def retry_infra_once(
     sees `"pending"` (verdict `"waiting"`). A loop with an immediate re-read
     (this function's previous shape) therefore only ever spent one kick
     before returning `"waiting"`, whatever its cap said, and reset that
-    "budget" to zero on every fresh call -- once per `ci_wait` re-entry,
+    "budget" to zero on every fresh call -- once per scheduler re-entry,
     forever. Real settlement takes real CI minutes, which only elapse
     *between* separate calls to this node, so the retry budget is counted by
     `run.py`'s persisted `ci_infra:<node_id>` counter instead, bumped once per
@@ -232,7 +172,7 @@ async def retry_infra_once(
     failing the terminal node -- the same MR-vs-branch split the caller's
     first read already makes with `branch_ci_status`. Both real backends
     raise there; `FakeForge` does not, so the double that holds this down
-    (`tests/test_forge_run.py`) raises on the MR path on purpose.
+    (`tests/adapters/forge/test_run.py`) raises on the MR path on purpose.
     """
     await forge.retry_jobs(repo=repo, ci=first)
     ci_status = (
@@ -240,61 +180,9 @@ async def retry_infra_once(
         if branch_only
         else await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
     )
-    return await render_ci(ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
-
-
-async def wait_for_ci(
-    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
-) -> tuple[str, str]:
-    """Wait for CI to settle, and render the log line and the mergeable/red
-    verdict `merge`'s own CI gate reports (Kraft-266b, Kraft-x10m):
-    `mr_sync`'s push after `human_review` can re-arm a project's
-    required-pipeline rule for a head `mr_checks` never watched, so `merge`
-    re-runs this exact wait, with the same timeout/interval, right before it
-    calls `forge.merge()` — not a second, differently-tuned approximation of
-    it. `ci_poll` no longer calls this (Kraft-ru98): it hands an unsettled
-    pipeline back to the scheduler instead of blocking here.
-
-    Returns the log text and "done"/"failed", the same vocabulary a node's
-    status already uses. A timeout here still maps to "failed" -- `merge`'s
-    caller has no scheduler to hand a wait back to.
-    """
-    ci, timed_out = await poll_ci(
-        forge, repo=repo, branch=branch, timeout=timeout, interval=interval
+    log, verdict = await render_ci(
+        ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
     )
-    if timed_out:
-        # A timeout and a red pipeline are both a failed node, but a reviewer
-        # -- and any fix loop built on this node (Kraft-cbr) -- has to tell
-        # "finished red" from "never finished".
-        log = f"pipeline timed out after {timeout:g}s, still pending: {ci.url}\n" + "".join(
-            f"  {j}\n" for j in ci.jobs
-        )
-        return log, "failed"
-    head_sha = await git._head_sha(repo)
-    return await render_ci(ci, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
-
-
-async def poll_merged(
-    forge: Forge, *, repo: Path, branch: str, timeout: float, interval: float
-) -> MRRef | None:
-    """Read the merge request back until it stops being open.
-
-    `glab mr merge --yes` exits 0 both for "merged" and for "merge when all
-    merge checks pass", and the second one merges nothing (Kraft-79x3, MR !76);
-    `gh pr merge` has the same shape. The exit code is not the answer — the
-    merge request's own state is. Returns the last `MRRef` read, or None if the
-    branch has no merge request at all any more; the caller decides from the
-    state. Same backoff as `poll_ci`, for the same reason.
-    """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    cap = max(_MAX_POLL_INTERVAL, interval)
-    while True:
-        ref = await forge.find_mr(repo=repo, branch=branch)
-        if ref is None or ref.state != "open":
-            return ref
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return ref
-        await asyncio.sleep(min(interval, remaining))
-        interval = min(interval * 2, cap)
+    # This kick just re-started the run, so an old cancel is not one nobody
+    # followed up, and "abandoned" is no verdict any caller of this handles.
+    return log, "waiting" if verdict == "abandoned" else verdict

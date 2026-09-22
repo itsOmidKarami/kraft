@@ -64,16 +64,20 @@ kraft view watch     # a live board, redrawn on every event
 
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](assets/board.png)
 
-`quick-task` runs `env_setup → implementation → verify` with no gate, so if
-the agent's fix is good, the item reaches **Done** on its own. If `verify`
-fails, it retries within `verify_fix_loop`'s cap
-([policy.yaml](configuration.md#policyyaml-caps-budget-archiving)) before
-stopping for you.
+`quick-task` runs `implementation → verify` with no gate, so if the agent's fix
+is good, the item reaches **Done** on its own. `verify` runs the repo's own
+`test_scopes` (or `test_command`) from `repos.yaml`, and nothing else: a repo
+that declares neither stops at `verify` with a config error naming both keys,
+because Kraft will not guess a test command. Declare one, then
+`kraft item retry`. If `verify` fails, the item stops
+for you with the failing scope named; the `default` chain's `verification` node
+is the one that repairs itself within its fix loop's cap
+([policy.yaml](configuration.md#policyyaml-caps-budget-archiving)).
 
 ## 5. Try the real chain, and its gate
 
 `default` is the chain most work actually runs on — spec, then plan, then
-implementation, then a human-review gate before merge. It's also the default
+implementation and verification, then two review gates before merge. It's also the default
 for `--chain`, so leaving the flag off is enough:
 
 ```bash
@@ -89,7 +93,9 @@ kraft view docs        # read the spec and plan Kraft wrote
 kraft item approve     # or Approve on the board
 ```
 
-Approving walks it to `plan_approval`, then on into implementation. Reject
+Approving walks it to `plan_approval`, then to a chain revision (which
+usually proposes nothing and passes on its own; see
+[Concepts](concepts.md#chain)), then on into implementation. Reject
 instead, with `kraft item reject --note "..."`, and the producing node re-runs
 with your note as its steer — see
 [Concepts → Gate](concepts.md#gate).
@@ -101,18 +107,21 @@ kraft view diff --stat   # how big is it, before you read the whole thing
 kraft view diff          # the coloured body, through $PAGER
 ```
 
-The chain's last gate, `human_review_approval`, is where you actually read the
-diff. Approve it and Kraft rebases, opens the merge request, watches CI, and
-merges — no further input needed unless CI goes red or a rebase lands new
-commits underneath it, either of which bounces the chain back to `verify`
-rather than merging over untested code.
+Two gates stand between the work and a merge. `local_review` comes first, with
+the work brief the chain wrote: approving it opens a draft merge request, and
+Kraft then watches CI and the automated review, repairing what they report.
+`final_review` is the last gate, with the review brief: approving it marks the
+merge request ready, waits for its external approval, merges, and watches the
+post-merge pipeline — no further input needed unless something goes red. A
+rebase that moves the base re-runs `verification` rather than merging over
+untested code.
 
 ## Where to go from here
 
-- **[Concepts](concepts.md)** — the five-word vocabulary this walkthrough used:
-  chain, node, hook point, adapter, gate, cap.
-- **[Configuration](configuration.md)** — every field in `repos.yaml`,
-  `registry.yaml`, `policy.yaml`, `access.yaml`.
+- **[Concepts](concepts.md)** — the vocabulary this walkthrough used: chain,
+  node, task, gate, cap.
+- **[Configuration](configuration.md)** — every field in `library.yaml`,
+  `repos.yaml`, `policy.yaml`, `access.yaml`.
 - **[Agent integration](agent-integration.md)** — doing all of the above from
   inside a coding-agent session instead of this shell.
 - **[Remote access](remote-access.md)** — approving that gate from your phone.

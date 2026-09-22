@@ -28,7 +28,7 @@ def test_kraft_home_defaults_under_the_user(monkeypatch):
 def _bundle(monkeypatch, tmp_path) -> Path:
     bundled = tmp_path / "_bundled" / "templates"
     bundled.mkdir(parents=True)
-    (bundled / "registry.yaml").write_text("hooks: {}\n")
+    (bundled / "policy.yaml").write_text("loops: {}\n")
     (bundled / "access.yaml").write_text("bind: 0.0.0.0\n")
     # A local checkout should never have a live notify.yaml here, but nothing
     # stops `just install`'s `cp -R templates ...` from copying one if one
@@ -36,6 +36,13 @@ def _bundle(monkeypatch, tmp_path) -> Path:
     # in the bundle so seed_home is proven to strip it, not just to never have
     # been given one.
     (bundled / "notify.yaml").write_text("url: https://hook.invalid/t0ken\n")
+    # The V1 library and its chains/ subdirectory. Here because the installed
+    # layout is V1 and `seed_home` is the only thing that puts it in a home --
+    # a bundle with no subdirectory could not catch a seed that stopped
+    # recursing.
+    (bundled / "library.yaml").write_text("tasks: {}\n")
+    (bundled / "chains").mkdir()
+    (bundled / "chains" / "default.yaml").write_text("id: default\n")
     monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "_bundled")
     return bundled
 
@@ -45,26 +52,40 @@ def test_seed_home_copies_the_bundle_once(monkeypatch, tmp_path):
     home = tmp_path / "home" / "templates"
 
     assert cli.seed_home(home) is True
-    assert (home / "registry.yaml").read_text() == "hooks: {}\n"
+    assert (home / "policy.yaml").read_text() == "loops: {}\n"
     # per-machine, holds a password hash: never shipped in the bundle
     assert not (home / "access.yaml").exists()
     # per-machine, usually holds a bearer token in the URL: never shipped either
     assert not (home / "notify.yaml").exists()
 
 
+def test_seed_home_installs_the_v1_library_and_its_chains(monkeypatch, tmp_path):
+    """Phase 2's exit criterion is that the *installed* layout is V1, and this is
+    the only seam where that happens: `seed_home` is what puts a home's templates
+    there. `tests/templates/test_materialization.py` asserts the packaged
+    `templates/` tree is V1, which cannot fail if seeding itself breaks -- in
+    particular if it stopped recursing into `chains/`."""
+    _bundle(monkeypatch, tmp_path)
+    home = tmp_path / "home" / "templates"
+
+    assert cli.seed_home(home) is True
+    assert (home / "library.yaml").read_text() == "tasks: {}\n"
+    assert (home / "chains" / "default.yaml").read_text() == "id: default\n"
+
+
 def test_seed_home_never_overwrites_an_edited_config(monkeypatch, tmp_path):
     _bundle(monkeypatch, tmp_path)
     home = tmp_path / "home" / "templates"
     home.mkdir(parents=True)
-    (home / "registry.yaml").write_text("hooks: {mine: 1}\n")
+    (home / "policy.yaml").write_text("loops: {mine: 1}\n")
 
     assert cli.seed_home(home) is False
-    assert (home / "registry.yaml").read_text() == "hooks: {mine: 1}\n"
+    assert (home / "policy.yaml").read_text() == "loops: {mine: 1}\n"
 
 
 def test_seed_home_says_so_when_there_is_nothing_to_seed_with(monkeypatch, tmp_path):
     """A build that skipped `just install` ships no _bundled/. The server would
-    die on a bare FileNotFoundError for registry.yaml; say what is wrong instead."""
+    die on a bare FileNotFoundError for library.yaml; say what is wrong instead."""
     import pytest
 
     monkeypatch.setattr(cli.admin, "BUNDLED", tmp_path / "missing")
@@ -91,7 +112,7 @@ def test_seed_home_leaves_no_half_seeded_home_behind(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "rename", real_rename)
     assert cli.seed_home(home) is True
-    assert (home / "registry.yaml").exists()
+    assert (home / "policy.yaml").exists()
 
 
 def test_seeding_records_the_version_it_seeded_from(monkeypatch, tmp_path):

@@ -10,7 +10,7 @@ module existed. This poller is the backstop for a delay greater than 0: the
 item that inline call left alone because the delay hadn't elapsed yet has
 nothing else watching it once that call returns, so something has to
 re-check it once the delay passes. Same fixed-interval shape as
-`rate_limit_retry.poller`/`ci_wait.poller`.
+`rate_limit_retry.poller`/`waits.poller`.
 
 Always on, like those two: a delay is a per-node config an operator opts
 into, but once they have, nothing except this poller ever revisits an item
@@ -28,7 +28,7 @@ from kraft.executor import gates
 
 logger = logging.getLogger(__name__)
 
-#: Same fixed cadence `rate_limit_retry`/`ci_wait` use -- no per-operator
+#: Same fixed cadence `rate_limit_retry`/`waits` use -- no per-operator
 #: tuning knob for this either.
 _INTERVAL_S = 30
 
@@ -134,7 +134,17 @@ async def tick(app) -> list[str]:
         # row can only return its status unchanged, and spawning it anyway
         # spends a `max_concurrent` slot the rows that *are* due needed, and
         # briefly installs a task under this wid that 409s a human's retry.
-        if not gates.auto_check_due(row, gate, evts, st.policy):
+        try:
+            if not gates.auto_check_due(row, gate, evts, st.policy):
+                continue
+        except LookupError:
+            # A legacy row with a pending gate and a delay > 0: `auto_check_due`
+            # walks the V1 chain and `walk.chain_of` raises for a row the legacy
+            # intake path wrote. Per row, not per tick -- uncaught it aborted the
+            # whole scan every `_INTERVAL_S` and starved every other due row
+            # behind it. Not a compatibility path: nothing is retried against the
+            # legacy shape, the row is simply skipped, which is what it already
+            # gets from every other V1-converted door.
             continue
         status, fn = (
             ("awaiting_gate", gates.review_gates)
@@ -152,7 +162,6 @@ async def tick(app) -> list[str]:
                     st.db,
                     st.run_dirs,
                     work_item_id=wid,
-                    registry=st.registry,
                     policy=st.policy,
                     launch=deps.launch(st, row["repo"]),
                     bd_cwd=deps.bd_cwd(),

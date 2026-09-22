@@ -1,0 +1,117 @@
+# chains/default.yaml
+id: default
+
+nodes:
+  - id: spec
+    kind: exec
+    tasks:
+      - id: author
+        extends: spec_author
+
+  - id: spec_approval
+    kind: gate
+    message: Review and approve the specification.
+    artifact: spec
+    reject_to: spec
+
+  - id: plan
+    kind: exec
+    tasks:
+      - id: author
+        extends: plan_author
+
+  - id: plan_approval
+    kind: gate
+    message: Review and approve the implementation plan.
+    artifact: plan
+    reject_to: plan
+
+  # Kraft-oydes: the chain was chosen at intake, before the spec and plan
+  # existed. Now both are approved, one agent reads them against the nodes
+  # still to run and proposes a change set -- or, usually, none, which passes
+  # the gate below without asking anyone.
+  - id: chain_revision
+    kind: exec
+    tasks:
+      - id: revise
+        extends: revise_chain
+
+  - id: chain_revision_approval
+    kind: gate
+    message: Review the proposed change to the rest of this chain.
+    artifact: chain_revision
+    reject_to: chain_revision
+
+  - id: implementation
+    extends: implementation
+
+  - id: verification
+    extends: verification
+
+  - id: work_brief
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_work_brief
+
+  - id: local_review
+    kind: gate
+    message: Approve creating a draft merge request.
+    artifact: work_brief
+    reject_to: implementation
+
+  # Its own node, not a task before `open`: a node wholly produces one kind or
+  # declares none, and `open` produces nothing.
+  - id: describe_merge_request
+    kind: exec
+    tasks:
+      - id: author
+        extends: describe_mr
+
+  - id: draft_merge_request
+    kind: exec
+    tasks:
+      - id: open
+        extends: open_draft_mr
+
+  - id: merge_request_feedback
+    extends: post_draft_feedback
+    on_base_changed:
+      restart_from: verification
+
+  - id: work_item_summary
+    kind: exec
+    tasks:
+      - id: author
+        extends: write_summary
+
+  - id: final_review
+    kind: gate
+    chain_finalized: true
+    message: Review the complete work item and merge-request summary.
+    artifact: review_brief
+    reject_to: implementation
+
+  - id: mark_ready
+    kind: exec
+    tasks:
+      - id: ready
+        extends: mark_mr_ready
+
+  - id: external_approval
+    kind: exec
+    tasks:
+      - id: await
+        extends: await_external_approval
+
+  - id: merge
+    kind: exec
+    tasks:
+      - id: merge
+        extends: merge_mr
+
+  - id: post_merge_ci
+    kind: exec
+    tasks:
+      - id: await
+        extends: await_post_merge_ci

@@ -1,12 +1,9 @@
-import { expect, test } from "./fixtures";
+import { expect, REPO, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 // Manual regression round: drives every operational surface of the SPA against
 // a real orchestrator (see e2e/serve.py). Assumes the same fixture server as
 // chain.spec.ts.
-const REPO = process.env.KRAFT_E2E_REPO!;
-
-
 
 test("settings: connect a repo", async ({ page }) => {
   // Earlier specs connect REPO through fixtures.connectRepo, so take it off
@@ -34,19 +31,35 @@ test("settings: connect a repo", async ({ page }) => {
   await expect(page.getByRole("heading", { name })).toBeVisible();
 });
 
-test("settings: chain templates page loads and validates", async ({ page }) => {
+test("settings: chain templates page loads the chain file and resolves it", async ({ page }) => {
   await page.goto("/settings/chains");
-  await expect(page.getByText("default").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  // the graph node, not the live YAML pane, which also says "verify"
-  await page.getByRole("button", { name: /^verify\b/ }).click();
-  await expect(page.getByLabel("fix_loop")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "default" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await expect(page.getByText("verification", { exact: true })).toBeVisible();
+  const yaml = page.getByLabel("chain yaml");
+  await expect(yaml).toHaveValue(/id: default/);
+  await expect(page.getByText("valid", { exact: true })).toBeVisible();
 });
 
-test("settings: plugins page lists hooks", async ({ page }) => {
-  await page.goto("/settings/plugins");
-  await expect(page.getByRole("switch").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  await page.getByText("on.test.run").click();
-  await expect(page.getByText(/used by/)).toBeVisible();
+test("settings: library shows a component's chains, and a chain links back to it", async ({ page }) => {
+  await page.goto("/settings/library?c=tasks.implementer");
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await expect(page.getByLabel("library yaml")).toHaveValue(/implementer:/);
+  await page.getByRole("link", { name: "quick-task", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "quick-task" })).toBeVisible();
+  await page.getByRole("link", { name: "tasks.implementer" }).first().click();
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
+});
+
+test("settings: a library task links to its harness profile, and the profile back to it", async ({ page }) => {
+  await page.goto("/settings/library?c=tasks.implementer");
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await page.getByRole("link", { name: "claude", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "claude", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^provider / })).toBeVisible();
+  // The harness profile's own link: the agent profiles panel beside it
+  // (`strong`) links the same task too.
+  await page.locator(".template-draft").getByRole("link", { name: "tasks.implementer" }).click();
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
 });
 
 test("settings: policy edit saves", async ({ page }) => {
@@ -62,41 +75,20 @@ test("settings: policy edit saves", async ({ page }) => {
   await expect(page.getByLabel(/max concurrent/i)).toHaveValue("4");
 });
 
-test("settings: steering is editable and diffable", async ({ page }) => {
+test("settings: steering profiles are edited on the Library, and the old Steering address opens it", async ({
+  page,
+}) => {
   await page.goto("/settings/steering");
-  // the fixture instance ships no steering files, so make one
-  page.once("dialog", (d) => d.accept("e2e-steering"));
-  await page.getByRole("button", { name: "New", exact: true }).click({ timeout: scaledTimeout(15_000) });
-  const body = page.getByLabel("steering body");
-  await expect(body).toBeVisible();
-  // A new file's body effect fires a doomed GET for the not-yet-saved name
-  // (404, caught, resets draft/loaded to ""). Under load that GET can still
-  // be in flight when Save lands; its stale catch then wipes the just-saved
-  // draft back to empty. Let it settle before typing.
-  await page.waitForLoadState("networkidle");
-  await body.fill("edited by e2e\n");
-  await page.getByRole("tab", { name: /diff vs saved/i }).click();
-  await expect(page.getByTestId("draft-diff")).toBeVisible();
-  await page.getByRole("tab", { name: "edit" }).click();
-  await page.getByRole("button", { name: "Save" }).click();
-  // Save is async (PUT, then a list reload) -- wait for it to actually land
-  // before the hard reload below, or a slow save's request gets cancelled
-  // mid-flight and the file never persists.
-  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled({
-    timeout: scaledTimeout(15_000),
-  });
-  await page.reload();
-  await page.locator(".facet-opt", { hasText: "e2e-steering" }).click();
-  await expect(page.getByLabel("steering body")).toHaveValue("edited by e2e\n");
+  await expect(page).toHaveURL(/\/settings\/library/, { timeout: scaledTimeout(15_000) });
+  await expect(page.getByLabel("library yaml")).toBeEditable({ timeout: scaledTimeout(15_000) });
+  // The seeded library's one steering profile, the same store repos.yaml names.
+  await page.locator(".facet-opt", { hasText: "project-standards" }).click();
+  await expect(page.getByText(/frozen into an item at intake/)).toBeVisible();
 });
 
-test("settings: access page shows bind", async ({ page }) => {
+test("settings: access shows the bind, and allowed-hosts tags round-trip", async ({ page }) => {
   await page.goto("/settings/access");
   await expect(page.getByText("127.0.0.1").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-});
-
-test("settings: access allowed-hosts tag add/remove round-trips", async ({ page }) => {
-  await page.goto("/settings/access");
   const input = page.getByPlaceholder(/add a host or ip/i);
   await expect(input).toBeVisible({ timeout: scaledTimeout(15_000) });
   await input.fill("e2e.kraft.local");
@@ -145,57 +137,4 @@ test("settings: appearance density and board prefs persist after reload", async 
   await page.reload();
   await expect(page.getByRole("radio", { name: "Comfortable" })).toBeChecked();
   await expect(page.getByRole("radio", { name: "repo" })).toBeChecked();
-});
-
-test("analytics renders and repo/template selects change the numbers", async ({ page }) => {
-  await page.goto("/analytics");
-  await expect(page.locator("body")).not.toContainText("Failed to fetch");
-  await expect(page.getByText("Completed").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
-  const before = await page.locator(".kpi-value").first().textContent();
-  await page.getByLabel(/repo:/i).selectOption({ index: 1 }).catch(() => {});
-  await page.waitForTimeout(500);
-  const after = await page.locator(".kpi-value").first().textContent();
-  // A filter change must re-render, even if the fixture data happens to
-  // leave a particular number unchanged -- the request itself is the claim.
-  expect(before).toBeDefined();
-  expect(after).toBeDefined();
-});
-
-test("login: shows a plain error on a wrong password", async ({ page }) => {
-  // Auth is off for a loopback client (perimeter.py), so no password brings
-  // the login screen up here. Answer the API with 401 instead: the app routes
-  // to Login on any 401, and /api/login's detail is the error it shows.
-  await page.route("**/api/**", (route) =>
-    route.fulfill({
-      status: 401,
-      contentType: "application/json",
-      body: JSON.stringify({
-        detail: route.request().url().endsWith("/api/login") ? "Wrong password." : "authentication required",
-      }),
-    }),
-  );
-  await page.goto("/");
-  await expect(page.getByRole("switch", { name: /stay signed in/i })).toBeVisible({
-    timeout: scaledTimeout(15_000),
-  });
-  await page.getByLabel("Password").fill("wrong-password");
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByText("Wrong password.")).toBeVisible({ timeout: scaledTimeout(15_000) });
-});
-
-test("search overlay finds an indexed document", async ({ page }) => {
-  await page.goto("/");
-  // The Ctrl-K handler attaches in a useEffect, so it doesn't exist until
-  // React has hydrated (search.spec.ts's openWithShortcut documents the same
-  // race) -- pressing the chord straight off `goto` is a race this test lost
-  // intermittently. Wait for a rendered control first.
-  await expect(page.getByRole("button", { name: "Search" })).toBeVisible();
-  await page.keyboard.press("Meta+k").catch(() => {});
-  const dlg = page.getByRole("dialog", { name: "Search" });
-  if (!(await dlg.isVisible().catch(() => false))) {
-    await page.keyboard.press("Control+k");
-  }
-  await expect(dlg).toBeVisible({ timeout: scaledTimeout(10_000) });
-  await dlg.getByLabel("search").fill("backoff");
-  await expect(dlg.locator(".search-result").first()).toBeVisible({ timeout: scaledTimeout(15_000) });
 });

@@ -8,51 +8,44 @@ import type {
   Repo,
   SearchResult,
   TemplateSummary,
+  Workspace,
 } from "../types";
 import { SectionLabel, Switch } from "./ui";
 import { showToast } from "./Toast";
 import { backdropProps, useModal } from "../useModal";
-import { parentOf } from "../views/settings/ReposPage";
 
 /**
  * New work item (design 10, mobile m09). Two columns: the form on the left,
  * "OVERRIDES FOR THIS ITEM" + "Will happen on start" pinned to a 280px right
  * rail. The "Advanced · cross-repo" disclosure is collapsed by default and
- * only has anything in it when the repo actually has connected, enabled
- * child repos — those are Kraft's own registry entries (§1), not a raw
- * `.gitmodules` probe, so a child that's connected but left disabled in
- * Settings correctly stays off this list rather than being pickable with no
- * config behind it (Kraft-z6qb4).
+ * only has anything in it when the repo roots a `repos.yaml` workspace with
+ * enabled members — declared membership, not a raw `.gitmodules` probe, so a
+ * member whose repository is left disabled in Settings stays off this list
+ * rather than being pickable with no config behind it (Kraft-z6qb4).
  */
 
-const MERGE_POLICIES = [
-  { id: "bump", label: "Bump" },
-  { id: "skip", label: "Skip" },
-  { id: "bump_no_mr", label: "Bump, no MR" },
-];
+/** An absent `enabled` means enabled (Ruling 212): only an explicit `false`
+ *  turns a repo off. */
+const repoEnabled = (r: Pick<Repo, "enabled">): boolean => r.enabled !== false;
 
-// The gate each kind satisfies documents why picking one skips a chain phase;
-// the server is the one that actually trims the chain.
+const POINTER_POLICIES = [
+  { id: "ignore", label: "Ignore · leave the root unchanged" },
+  { id: "bump", label: "Bump · update the root's pointers" },
+] as const;
+
+// The document kinds an item can start from. Which nodes one covers is the
+// chain's own declaration (`covered_by`); the server is the one that trims.
 const KINDS = [
-  {
-    kind: "spec" as const,
-    docKind: "specs",
-    gate: "spec_approval",
-    label: "spec",
-  },
-  {
-    kind: "plan" as const,
-    docKind: "plans",
-    gate: "plan_approval",
-    label: "plan",
-  },
+  { kind: "spec" as const, docKind: "specs", label: "spec" },
+  { kind: "plan" as const, docKind: "plans", label: "plan" },
 ];
 
 export function IntakeModal({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   const [allRepos, setAllRepos] = useState<Repo[]>([]);
+  const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
   const [templates, setTemplates] = useState<string[]>(["default"]);
-  // GET /templates already returns each template's nodes (§8 chain preview
+  // GET /templates/chains already returns each template's nodes (§8 chain preview
   // needs them); kept alongside the id list rather than re-fetched per pick.
   const [templateSummaries, setTemplateSummaries] = useState<TemplateSummary[]>(
     [],
@@ -68,7 +61,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   // Phone (W3.8): the overrides panel sits behind its own disclosure.
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  const [mergePolicy, setMergePolicy] = useState("bump");
+  // null: the workspace's own `root_pointer_default` (Ruling 165).
+  const [pointerPolicy, setPointerPolicy] = useState<"ignore" | "bump" | null>(null);
   // Intake from existing artifacts (design §4): kind -> the path once
   // attached (the field becomes a chip), kind -> the search box's typed
   // text while it isn't, kind -> its hits.
@@ -104,7 +98,10 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       .catch(() => {});
     api
       .getRepos()
-      .then(({ repos }) => setAllRepos(repos))
+      .then(({ repos, workspaces }) => {
+        setAllRepos(repos);
+        setWorkspaces(workspaces ?? {});
+      })
       .catch(() => {});
     api
       .getPolicy()
@@ -118,19 +115,26 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     setSkipped(new Set());
   }, [tpl]);
 
-  // Connected, enabled children of the picked repo — Kraft's own registry,
-  // not a `.gitmodules` probe, so `enabled` here actually controls what's
-  // pickable (Kraft-z6qb4). Root-relative paths: `work_items.submodules`
-  // expects the same shape `probe.submodules` used to produce.
-  const available = repo
-    ? allRepos
-        .filter((r) => r.enabled && parentOf(r, allRepos)?.path === repo)
-        .map((r) => r.path.slice(repo.length + 1))
+  // The workspace the picked repo roots, and its members whose repository is
+  // enabled: picked by member id, shown by mount path.
+  const byId = (id: string) => allRepos.find((r) => r.id === id);
+  const ws = repo
+    ? Object.values(workspaces).find((w) => byId(w.root)?.path === repo)
+    : undefined;
+  const available = ws
+    ? Object.entries(ws.members)
+        .filter(([, m]) => {
+          const member = byId(m.repository);
+          return member != null && repoEnabled(member);
+        })
+        .map(([id, m]) => ({ id, path: m.path }))
     : [];
+  const pointer = pointerPolicy ?? ws?.root_pointer_default ?? "ignore";
 
   // Switching repos invalidates any picks made against the previous one.
   useEffect(() => {
     setPicked([]);
+    setPointerPolicy(null);
   }, [repo]);
 
   // Type-to-search per kind: GET /search requires a non-empty q, so this only
@@ -158,20 +162,21 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
       path: attachPath[kind].trim(),
     }),
   );
-  // §8: attaching a kind is the statement that its gate is satisfied, so the
-  // node carrying that gate_after drops out of the chain — same rule as
-  // `templates.materialize` on the server, applied here only to preview it.
-  const satisfiedGates = new Set(
-    KINDS.filter(({ kind }) => attachPath[kind]?.trim()).map(
-      ({ gate }) => gate,
-    ),
-  );
+  // A node says which attachment drops it: `covered_by`, the server's own
+  // `ResolvedNode.covered_by` -- the gate that decides the document and the
+  // node that would write it (Kraft-ene04).
+  const attachedKinds = new Set<unknown>(attachments.map((a) => a.kind));
+  const coveredByAttachment = (n: TemplateSummary["nodes"][number]) =>
+    attachedKinds.has(n.covered_by);
   const selectedNodes =
     templateSummaries.find((t) => t.id === tpl)?.nodes ?? [];
+  // Only the gates that declare a reviewer (`auto_escalate` on the node view):
+  // the server refuses the switch on a gate with none, since an override can
+  // arm a reviewer but never supply one.
   const autoEscalateOverrides: NodeOverrides = autoEscalate
     ? Object.fromEntries(
         selectedNodes
-          .filter((n) => n.gate_after)
+          .filter((n) => n.gate_after && n.auto_escalate)
           .map((n) => [n.id, { auto_escalate: true }]),
       )
     : {};
@@ -232,8 +237,8 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         title,
         ...(description.trim() ? { description } : {}),
         ...(tpl === "default" ? {} : { chain_template: tpl }),
-        ...(picked.length
-          ? { submodules: picked, root_merge_policy: mergePolicy }
+        ...(ws && picked.length
+          ? { workspace: ws.id, members: picked, root_pointer_policy: pointer }
           : {}),
         ...(attachments.length ? { attachments } : {}),
         skip_nodes: [...skipped],
@@ -254,7 +259,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const runCount = selectedNodes.length - skipped.size - satisfiedGates.size;
+  const runCount = selectedNodes.filter(
+    (n) => !skipped.has(n.id) && !coveredByAttachment(n),
+  ).length;
 
   // Once attached (found via search or typed by hand and blurred), the
   // field becomes a chip -- one control does both jobs, not a search box
@@ -359,9 +366,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                   select a repo…
                 </option>
                 {allRepos.map((r) => (
-                  <option key={r.path} value={r.path} disabled={!r.enabled}>
+                  <option key={r.path} value={r.path} disabled={!repoEnabled(r)}>
                     {r.name}
-                    {!r.enabled && " · disabled"}
+                    {!repoEnabled(r) && " · disabled"}
                   </option>
                 ))}
               </select>
@@ -378,7 +385,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 Start from existing{" "}
                 <span className="field-hint">· skips the phase it covers</span>
               </label>
-              {KINDS.map(({ kind, label, gate }) => (
+              {KINDS.map(({ kind, label }) => (
                 <div key={kind} className="attachment-row">
                   {attachPath[kind] ? (
                     <>
@@ -399,7 +406,12 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                         </button>
                       </span>
                       <p className="field-hint">
-                        {label} attached → {gate} satisfied
+                        {label} attached →{" "}
+                        {selectedNodes
+                          .filter((n) => n.covered_by === kind)
+                          .map((n) => n.id)
+                          .join(", ") || "nothing in this chain"}{" "}
+                        skipped
                       </p>
                     </>
                   ) : (
@@ -487,8 +499,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                 </p>
                 <p className="field-hint">
                   {selectedNodes.map((n, i) => {
-                    const autoSkipped =
-                      n.gate_after != null && satisfiedGates.has(n.gate_after);
+                    const autoSkipped = coveredByAttachment(n);
                     const struck = autoSkipped || skipped.has(n.id);
                     return (
                       <span key={n.id}>
@@ -531,25 +542,25 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                   <>
                     <div className="field">
                       <label>
-                        Submodules{" "}
+                        Members{" "}
                         <span className="field-hint">
-                          · connected, enabled child repos
+                          · of this repo's workspace, each its own branch and merge request
                         </span>
                       </label>
                       <div className="submodules">
-                        {available.map((path) => {
-                          const on = picked.includes(path);
+                        {available.map(({ id, path }) => {
+                          const on = picked.includes(id);
                           return (
                             <button
-                              key={path}
+                              key={id}
                               type="button"
                               className={`tag ${on ? "tag-accent" : "tag-outline tag-off"}`}
                               aria-pressed={on}
                               onClick={() =>
                                 setPicked(
                                   on
-                                    ? picked.filter((p) => p !== path)
-                                    : [...picked, path],
+                                    ? picked.filter((p) => p !== id)
+                                    : [...picked, id],
                                 )
                               }
                             >
@@ -561,15 +572,15 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
                       </div>
                     </div>
                     <div className="field">
-                      <label>Root merge policy</label>
+                      <label>Root pointer</label>
                       <div className="policy-radios">
-                        {MERGE_POLICIES.map((p) => (
+                        {POINTER_POLICIES.map((p) => (
                           <label key={p.id} className="radio">
                             <input
                               type="radio"
-                              name="root-merge-policy"
-                              checked={mergePolicy === p.id}
-                              onChange={() => setMergePolicy(p.id)}
+                              name="root-pointer-policy"
+                              checked={pointer === p.id}
+                              onChange={() => setPointerPolicy(p.id)}
                             />
                             <span className="dot" />
                             {p.label}
@@ -655,7 +666,7 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
             <SectionLabel>Will happen on start</SectionLabel>
             <p className="field-hint">
               {runCount} node{runCount === 1 ? "" : "s"} run
-              {autoEscalate ? ", every gate escalates before you see it" : ""}
+              {autoEscalate ? ", every gate with a reviewer escalates before you see it" : ""}
               {autoGate ? " and an agent reviews first" : ""}.
             </p>
           </div>

@@ -62,7 +62,16 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # `git describe --abbrev=0` finds the nearest tag by commit graph
+          # distance, prerelease or not -- and a repo can carry more than one
+          # malformed rc tag on the very commit rc1 shipped from (a ruleset can
+          # block deleting the wrong one), so excluding a couple of glob shapes
+          # from `describe` is not enough to keep every prerelease form out.
+          # List every exact `vX.Y.Z` release tag reachable from this commit
+          # instead and take the highest by version order -- `v1.0.0rc1`,
+          # `v1.0.0.rc1` and `v1.0.0-rc.1` all fail the anchored regex and never
+          # enter the running.
+          PREVIOUS=$(git tag --list --merged "$SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
           # No `|| true`: next_tag exits 0 with no output for release::none, and
           # non-zero only when it cannot read the previous tag or the labels
           # contradict each other. Swallowing that would turn a broken tag
@@ -131,7 +140,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
+          # The notes are CHANGELOG.md's `## X.Y.Z` section when it has one:
+          # a release PR squashes many PRs into one commit, so --generate-notes
+          # would list only that one PR. Without a section, fall back to it.
+          awk -v h="## ${TAG#v}" '$0==h{f=1;next} f&&/^## /{exit} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
+          fi
 
       - name: publish to PyPI
         if: steps.impact.outputs.tag != ''

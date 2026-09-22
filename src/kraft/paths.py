@@ -98,9 +98,10 @@ class RunDirs:
         """Intake attachments, copied here at intake rather than referenced in
         place (Kraft-eqgn).
 
-        The gate an attachment satisfies is trimmed out of `chain_definition`
-        at intake and cannot be put back, so the document that justified the
-        trim has to be one Kraft owns from that moment. Referencing a path in
+        The gate an attachment satisfies is trimmed out of the chain at
+        intake, and once the item starts it cannot be put back (before then,
+        PATCH /work-items re-snapshots or drops it, Kraft-s7c04.28), so the
+        document that justified the trim has to be one Kraft owns. Referencing a path in
         someone else's working tree meant a file deleted in between left the
         item running with its spec and plan gates gone and nothing said.
         """

@@ -16,24 +16,16 @@ export const repo = (overrides: Partial<Repo> = {}): Repo => ({
   forge: "github",
   project: "acme/repo-a",
   enabled: true,
-  default_model: null,
+  models: {},
   deny_tools: [],
   steering: [],
   local_files: [],
-  default_root_merge_policy: "bump",
   managed: true,
   ...overrides,
 });
 
-export const hooks = {
-  "on.env.prepare": { kind: "builtin" as const, handler: "env_setup" },
-  "on.implementation.start": { kind: "agent" as const, command: "claude" },
-  "on.test.run": { kind: "subprocess" as const, command: ["pytest"] },
-  "on.mr.open": { kind: "forge" as const, handler: "open_mr" },
-};
-
 export const policy = {
-  loops: { verify_fix_loop: { attempts: 3, wall_clock_s: 3600 } },
+  loops: { "verify.fix_loop": { attempts: 3, wall_clock_s: 3600 } },
   default: { attempts: 3, wall_clock_s: 3600 },
   max_concurrent: 3,
   rate_limit_retries: 5,
@@ -68,21 +60,33 @@ export function setupSettingsMocks() {
     {
       id: "quick-task",
       gates: 0,
+      error: null,
       nodes: [
-        { id: "verify", tasks: ["on.test.run"], gate_after: null, fix_loop: "verify_fix_loop" },
+        {
+          id: "verify",
+          kind: "exec",
+          tasks: ["verify.main.test_changed_scopes"],
+          gate_after: null,
+          fix_loop: "verify.fix_loop",
+        },
       ],
     },
   ]);
-  vi.spyOn(api, "getRegistry").mockResolvedValue({ hooks });
   vi.spyOn(api, "getPolicy").mockResolvedValue(policy);
   vi.spyOn(api, "getTheme").mockResolvedValue(theme);
-  vi.spyOn(api, "getSteering").mockResolvedValue({
-    files: [{ name: "house-style", bytes: 14 }],
-    max_bytes: 8192,
-  });
-  vi.spyOn(api, "getSteeringFile").mockResolvedValue({
-    name: "house-style",
-    body: "prefer stdlib\n",
+  vi.spyOn(api, "getLibrary").mockResolvedValue({
+    file: "~/.kraft/templates/library.yaml",
+    text: "steering:\n  house-style:\n    instructions: prefer stdlib\n",
+    components: [
+      {
+        id: "steering.house-style",
+        kind: "steering",
+        name: "house-style",
+        definition: { instructions: "prefer stdlib\n" },
+        used_by: [],
+        issues: [],
+      },
+    ],
   });
   vi.spyOn(api, "getIntake").mockResolvedValue({
     enabled: false,

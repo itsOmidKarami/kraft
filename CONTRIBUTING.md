@@ -27,6 +27,11 @@ just fix        # autofix
 change-tracking; a raw invocation skips it and runs the full ~14 minute suite.
 A Claude Code hook blocks it for agent sessions.
 
+See [`docs/testing.md`](docs/testing.md) for the shape a test should take: the
+two tiers, the shared fixtures, and the mutate-then-confirm-it-fails procedure
+that is the only thing that actually proves a test pins something.
+`just check-tests` enforces what of that can be checked mechanically.
+
 Requirements: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 20+, git.
 `claude` is only needed for real agent runs, not for `just dev` or the tests.
 
@@ -55,6 +60,11 @@ is the declaration that this change ships nothing.
 
 Nothing checks that the declared impact matches the diff. The label is a claim by
 its author; review is what tests it.
+
+A pull request that ships something adds its line to `CHANGELOG.md`, under a
+`## X.Y.Z` heading for the version it will become. The release workflow
+publishes that section as the release notes, and falls back to GitHub's
+generated notes when there isn't one.
 
 **Pull requests from forks are not asked for a label** — only people with write
 access can apply one. A maintainer labels the pull request before merging. An
@@ -119,7 +129,7 @@ same pull request, not as a follow-up:
 | Source | Docs page |
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/cli.md` |
-| A `registry.yaml` / `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/config.py`, `policy.py`) | `docsite/configuration.md` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/configuration.md` |
 | A chain template's node fields, or a new default chain | `docsite/concepts.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/harnesses.md` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/agent-integration.md` |

@@ -7,61 +7,63 @@ guards by staying green unedited.
 
 import asyncio
 import json
+import shlex
 import sys
 import tempfile
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.chain_run import loop_policy, run_chain
+from support.harness import isolated_bd, make_repo, seed_v1_library, v1_resolved
 
 from kraft import db, events, executor, policy, store
 from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 _FAKE_REVIEWER = Path(__file__).parent / "support" / "fake_reviewer.py"
 
 
-def _registry():
-    """`on.review.local.run` becomes the scripted reviewer; everything else stands."""
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    hooks = dict(base.hooks)
-    hooks["on.review.local.run"] = {
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
+
+
+def _agent(task_id):
+    return {"id": task_id, "kind": "agent", "harness": "fake", "prompt": "Fix it."}
+
+
+def _reviewer():
+    """The scripted reviewer: a subprocess whose findings come from a plan file."""
+    return {
+        "id": "review",
         "kind": "subprocess",
-        "command": [sys.executable, str(_FAKE_REVIEWER)],
+        "command": shlex.join([sys.executable, str(_FAKE_REVIEWER)]),
     }
-    return Registry(hooks=hooks)
 
 
-def _template() -> Template:
-    """env_setup builds the worktree; `review` is the fix-loop node under test."""
-    return Template(
-        id="findings",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "review",
-                "tasks": ["on.review.local.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
-    )
+def _loop_node(node_id, measure: dict) -> dict:
+    """`node_id` measured by `measure`, with the fix loop and judge the legacy
+    `verify_fix_loop` bound to the fake agent."""
+    return {
+        "id": node_id,
+        "kind": "exec",
+        "tasks": [measure],
+        "fix_loop": {"tasks": [_agent("fix")], "judge": _agent("judge")},
+    }
+
+
+def _chain(templates_parent: Path, node: dict):
+    """One fix-loop node as a chain, with the `fake` harness its agent tasks
+    name overlaid onto this test's `KRAFT_HOME`. No `env_setup` node: V1
+    prepares the worktree before the first node."""
+    seed_v1_library(templates_parent / "templates", agent_command=_FAKE)
+    return v1_resolved([node])
 
 
 def _policy(tmp_path, *, attempts=3, severities=None) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    text = (
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: 3600 }}\n"
-        # Kraft-lpdd: this suite is about the findings loop's own cap, not
-        # the unrelated auto-escalate trigger a `needs_human` cap breach
-        # would otherwise also fire.
-        "auto_escalate_stuck: false\n"
+    extra = (
+        "" if severities is None else f"findings:\n  loop_severities: {json.dumps(severities)}\n"
     )
-    if severities is not None:
-        text += f"findings:\n  loop_severities: {json.dumps(severities)}\n"
-    p.write_text(text)
-    return policy.load_policy(p)
+    return loop_policy(
+        tmp_path, "review.fix_loop", "verify.fix_loop", attempts=attempts, extra=extra
+    )
 
 
 def _finding(message, severity="critical", *, file="a.py", line=3):
@@ -74,8 +76,8 @@ def _finding(message, severity="critical", *, file="a.py", line=3):
     }
 
 
-def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, registry=None):
-    """Drive one work item through the review node. Returns a dict of what happened.
+def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, measure=None):
+    """Drive one work item through the review node. Returns `run_chain`'s dict.
 
     Each call gets its own scratch subdirectory rather than writing straight into
     `tmp_path`: `tmp_path` is per-test, not per-call, and `isolated_bd`/`make_repo`
@@ -91,42 +93,12 @@ def _run(tmp_path, monkeypatch, entries, *, attempts=3, severities=None, registr
     plan = call_dir / "review-plan.json"
     plan.write_text(json.dumps(entries))
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
-    tracker = isolated_bd(call_dir)
-    repo = make_repo(call_dir)
-    out = {}
-
-    async def scenario():
-        rd = RunDirs(call_dir / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="review me",
-                repo=str(repo),
-                template=_template(),
-                bd_cwd=str(tracker),
-            )
-            out["result"] = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry or _registry(),
-                bd_cwd=str(tracker),
-                policy=_policy(call_dir, attempts=attempts, severities=severities),
-            )
-            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
-            out["sessions"] = database.read(
-                lambda c: list(
-                    c.execute("SELECT * FROM worker_sessions WHERE work_item_id = ?", (wid,))
-                )
-            )
-            out["wid"] = wid
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return out
+    return run_chain(
+        call_dir,
+        _chain(call_dir, _loop_node("review", measure or _reviewer())),
+        policy=_policy(call_dir, attempts=attempts, severities=severities),
+        title="review me",
+    )
 
 
 def _cycles(out):
@@ -144,57 +116,27 @@ def _needs_human_reason(out):
     return None
 
 
-def _noop_registry():
-    """`on.review.local.run` back on the shipped noop binding, which is what any
-    repo that has not bound a reviewer is actually running."""
-    hooks = dict(_registry().hooks)
-    hooks["on.review.local.run"] = {"kind": "builtin", "handler": "noop"}
-    return Registry(hooks=hooks)
-
-
-def test_findings_measured_names_the_tasks_that_were_noops(tmp_path, monkeypatch):
-    """A noop task contributes no findings, exits 'done' in milliseconds, and is
-    otherwise indistinguishable in this event from a review that ran and found
-    nothing (Kraft-yenu part b)."""
-    out = _run(tmp_path, monkeypatch, [{"status": "done"}], registry=_noop_registry())
-    measured = _measured(out)
-    assert measured, "no findings_measured event was written"
-    assert measured[-1]["payload"]["noop_hooks"] == ["on.review.local.run"]
-
-
-def test_findings_measured_reports_no_noops_when_every_task_ran(tmp_path, monkeypatch):
-    """The empty case is explicit: readers get [] rather than a missing key, so
-    nobody has to tell 'no noops' from 'old event, field did not exist yet'."""
-    out = _run(tmp_path, monkeypatch, [{"status": "done"}])
-    assert _measured(out)[-1]["payload"]["noop_hooks"] == []
-
-
-def _broken_binary_registry():
-    """`on.review.local.run` bound to a command that does not exist — the
+def _broken_binary():
+    """The measuring task bound to a command that does not exist — the
     Kraft-579 incident in miniature."""
-    hooks = dict(_registry().hooks)
-    hooks["on.review.local.run"] = {
-        "kind": "subprocess",
-        "command": ["kraft-nonexistent-binary-xyz"],
-    }
-    return Registry(hooks=hooks)
+    return {"id": "review", "kind": "subprocess", "command": "kraft-nonexistent-binary-xyz"}
 
 
 def test_a_task_that_never_launched_stops_without_burning_a_cycle(tmp_path, monkeypatch):
     """The whole point of Kraft-579: no fix agent is dispatched and no attempt is
     spent, because no agent can install a missing binary by editing source. The
     incident this comes from spent six cycles and about an hour on exactly this."""
-    out = _run(tmp_path, monkeypatch, [{"status": "done"}], registry=_broken_binary_registry())
+    out = _run(tmp_path, monkeypatch, [{"status": "done"}], measure=_broken_binary())
 
     assert out["result"] == "needs_human"
     assert _cycles(out) == 0, "a config error must not open a fix cycle"
     reason = _needs_human_reason(out)
-    assert "kraft-nonexistent-binary-xyz" in reason or "on.review.local.run" in reason
+    assert "could not start review" in reason
     assert "task failed" not in reason, "a launch failure must not read as a test failure"
 
     # and no fix agent was dispatched at it
     hooks = {s["hook_point"] for s in out["sessions"]}
-    assert "on.implementation.start" not in hooks
+    assert "review.fix_loop.main.fix" not in hooks
 
 
 def test_the_scripted_reviewer_drives_the_loop(tmp_path, monkeypatch):
@@ -354,7 +296,7 @@ def test_diagnosis_bundle_skips_the_judges_own_concerns(tmp_path, monkeypatch):
     same walk_node iteration. worker_session_exited carries no hook_point of
     its own, so the fix has to join back to worker_sessions to tell the two
     apart."""
-    from kraft.executor import dispatch, walk
+    from kraft.executor import walk
 
     async def scenario():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -390,13 +332,14 @@ def test_diagnosis_bundle_skips_the_judges_own_concerns(tmp_path, monkeypatch):
                     lambda c: store.session_exited(c, session_id, "done", concerns=concerns)
                 )
 
+            node = v1_resolved([_loop_node("verify", _reviewer())]).nodes[0]
             # The measuring session exits first, with its own concerns...
-            await exit_session("on.check", "measure-1", "flaky under load")
+            await exit_session(node.steps[0].tasks[0].path, "measure-1", "flaky under load")
             # ...then the judge, told to write concerns on every verdict,
             # exits after it in the same iteration.
-            await exit_session(dispatch.JUDGE_HOOK, "judge-1", "judge's own reasoning")
+            await exit_session(node.judge.path, "judge-1", "judge's own reasoning")
 
-            return await walk._diagnosis_bundle(database, wid, {"id": "verify"}, repo)
+            return await walk._diagnosis_bundle(database, wid, node, repo)
         finally:
             await database.close()
 
@@ -567,8 +510,8 @@ def test_fix_sessions_result_is_excluded_from_the_next_cycles_findings(tmp_path,
     """`_collect_findings` filters to the node's own measuring tasks. Pin it: the
     fake fix agent reports a finding of its own at the same round the next
     measuring pass runs at, and that finding must never appear in any
-    `findings_measured` payload — it belongs to `on.implementation.start`, not
-    to `on.review.local.run`. Without the hook_point filter this test is silent
+    `findings_measured` payload — it belongs to the fix task, not to the
+    measuring reviewer. Without the hook_point filter this test is silent
     (the fake fix agent normally never writes a `findings` key at all), which is
     exactly the gap KRAFT_FAKE_AGENT_FINDING closes."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT_FINDING", "agent noise")
@@ -605,23 +548,23 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
     monkeypatch.setenv("KRAFT_FAKE_REVIEW_PLAN", str(plan))
     tracker = isolated_bd(call_dir)
     repo = make_repo(call_dir)
+    chain = _chain(call_dir, _loop_node("review", _reviewer()))
 
     async def scenario():
         rd = RunDirs(call_dir / "run").ensure()
         database = await db.Database.open(rd.db)
         try:
-            registry = _registry()
             pol = _policy(call_dir, attempts=5)
             wid = await executor.intake(
                 database,
                 rd,
                 title="review me",
                 repo=str(repo),
-                template=_template(),
+                chain=chain,
                 bd_cwd=str(tracker),
             )
             first = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
+                database, rd, work_item_id=wid, bd_cwd=str(tracker), policy=pol
             )
             assert first == "needs_human"
             events_after_first = database.read(lambda c: events.read_after(c, 0, wid))
@@ -631,16 +574,17 @@ def test_retry_after_no_progress_dispatches_a_fix_instead_of_re_escalating(tmp_p
                 lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
             )
             await database.write(
-                lambda c: store.retry_after_cap(c, wid, "review", "verify_fix_loop", None)
+                lambda c: store.retry_after_cap(
+                    c, wid, "review", "review.fix_loop", None, by_person=True
+                )
             )
             await executor.run(
                 database,
                 rd,
                 work_item_id=wid,
-                registry=registry,
                 bd_cwd=str(tracker),
                 policy=pol,
-                start_index=1,
+                start_index=0,
             )
             return database.read(lambda c: events.read_after(c, 0, wid))
         finally:
@@ -662,81 +606,41 @@ _FAILING_SUBPROCESS = (
 )
 
 
-def _blind_failure_registry():
-    """`on.check` is a real subprocess that fails with no result file at all --
-    the genuinely blind case `on.review.local.run`'s scripted reviewer (which
-    always writes a result file, even an empty-findings one) can't exercise."""
-    hooks = dict(_registry().hooks)
-    hooks["on.check"] = {
-        "kind": "subprocess",
-        "command": [sys.executable, "-c", _FAILING_SUBPROCESS],
-    }
-    return Registry(hooks=hooks)
-
-
-def _blind_failure_template() -> Template:
-    return Template(
-        id="blind",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "verify",
-                "tasks": ["on.check"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
+def _blind_failure_node() -> dict:
+    """`check` is a real subprocess that fails with no result file at all --
+    the genuinely blind case the scripted reviewer (which always writes a
+    result file, even an empty-findings one) can't exercise."""
+    return _loop_node(
+        "verify",
+        {
+            "id": "check",
+            "kind": "subprocess",
+            "command": shlex.join([sys.executable, "-c", _FAILING_SUBPROCESS]),
+        },
     )
 
 
-def _run_template(tmp_path, monkeypatch, template, registry, *, attempts=3):
-    """Like `_run`, but for a caller-supplied template/registry instead of the
+def _run_template(tmp_path, monkeypatch, node, *, attempts=3):
+    """Like `_run`, but for a caller-supplied node instead of the
     scripted-reviewer `review` node -- the blind-failure tests need a real
     subprocess, not the fake reviewer's plan file."""
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-    out = {}
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="blind failure",
-                repo=str(repo),
-                template=template,
-                bd_cwd=str(tracker),
-            )
-            out["result"] = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                bd_cwd=str(tracker),
-                policy=_policy(tmp_path, attempts=attempts),
-            )
-            out["events"] = database.read(lambda c: events.read_after(c, 0, wid))
-            out["wid"] = wid
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-    return out
+    return run_chain(
+        tmp_path,
+        _chain(tmp_path, node),
+        policy=_policy(tmp_path, attempts=attempts),
+        title="blind failure",
+    )
 
 
 def test_blind_subprocess_failure_becomes_a_synthetic_finding(tmp_path, monkeypatch):
-    out = _run_template(
-        tmp_path, monkeypatch, _blind_failure_template(), _blind_failure_registry(), attempts=2
-    )
+    out = _run_template(tmp_path, monkeypatch, _blind_failure_node(), attempts=2)
     measured = _measured(out)
     assert measured, "no findings_measured event was written"
     findings = measured[0]["payload"]["findings"]
     assert len(findings) == 1
     f = findings[0]
-    assert f["source_plugin"] == "on.check"
+    assert f["source_plugin"] == "verify.main.check"
     assert f["severity"] == "critical"
     assert "e2e/x.spec.ts:1:1" in f["message"]
     assert "Test timeout" in f["message"]
@@ -749,8 +653,7 @@ def test_blind_subprocess_failure_fingerprint_is_stable_across_rounds(tmp_path, 
     out = _run_template(
         tmp_path,
         monkeypatch,
-        _blind_failure_template(),
-        _blind_failure_registry(),
+        _blind_failure_node(),
         attempts=5,
     )
     assert out["result"] == "needs_human"
@@ -760,9 +663,7 @@ def test_blind_subprocess_failure_fingerprint_is_stable_across_rounds(tmp_path, 
 def test_blind_failure_findings_are_labeled_by_source_in_judge_history(tmp_path, monkeypatch):
     from kraft.executor import dispatch as _dispatch
 
-    out = _run_template(
-        tmp_path, monkeypatch, _blind_failure_template(), _blind_failure_registry(), attempts=2
-    )
+    out = _run_template(tmp_path, monkeypatch, _blind_failure_node(), attempts=2)
 
     async def read_history():
         rd = RunDirs(tmp_path / "run").ensure()
@@ -779,4 +680,4 @@ def test_blind_failure_findings_are_labeled_by_source_in_judge_history(tmp_path,
     # second handle through `_run_template`.
     history = asyncio.run(read_history())
     assert history, "no rounds recorded"
-    assert any(f.source_plugin == "on.check" for h in history for f in h["findings"])
+    assert any(f.source_plugin == "verify.main.check" for h in history for f in h["findings"])

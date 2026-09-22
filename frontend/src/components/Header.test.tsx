@@ -6,6 +6,7 @@ import * as api from "../api";
 import { useStore } from "../store";
 import { Header } from "./Header";
 import type { WorkItem } from "../types";
+import { setPhoneWidth } from "../testFixtures";
 
 const renderAt = (path: string) =>
   render(
@@ -84,39 +85,21 @@ describe("Header", () => {
   });
 
   it("hides on phone width on a settings sub-page (its own PhoneHeader is the one top bar), but not on the settings index", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn().mockImplementation((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
+    setPhoneWidth();
     const { unmount } = renderAt("/settings/chains");
     expect(screen.queryByText("Chains")).toBeNull();
     unmount();
     renderAt("/settings");
     expect(screen.getByText("Settings")).toBeInTheDocument();
-    vi.unstubAllGlobals();
   });
 
   it("hides on phone width on an item page, where PhoneTopBar is the one header (W3.1)", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn().mockImplementation((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
+    setPhoneWidth();
     useStore.setState({
       workItems: { wi_1: { id: "wi_1", repo: "/repo-a", title: "Fix the flaky import" } as WorkItem },
     } as never);
     const { container } = renderAt("/work-items/wi_1");
     expect(container.querySelector(".app-header")).toBeNull();
-    vi.unstubAllGlobals();
   });
 
   it("shows Board › Archived · N item(s) on the archived route, singular for one (Kraft-h7igq)", async () => {

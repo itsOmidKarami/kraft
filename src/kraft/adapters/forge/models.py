@@ -4,6 +4,7 @@ every node speaks in.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -14,12 +15,34 @@ if TYPE_CHECKING:
     # already makes every annotation below lazy, so this is type-checking
     # only.
     from kraft.adapters.forge.mr import MRMeta
+    from kraft.automated_review import AutomatedReview
 
 CIState = Literal["pending", "success", "failed"]
 
 
 class ForgeError(RuntimeError):
     """The forge could not be reached, or answered something unusable."""
+
+
+ApprovalState = Literal["pending", "approved"]
+
+
+@dataclass(frozen=True)
+class ReviewResult:
+    """One read of the automated review, in the only vocabulary a template
+    sees (`automated-review-task-uses-ordinary-task-results`). Which bot,
+    which check, which webhook produced it is the backend's business
+    (`automated-review-implementation-is-not-template-configuration`)."""
+
+    state: Literal["pending", "clean", "actionable", "error"]
+    #: One entry per piece of actionable feedback; what the node's recovery
+    #: and fix loop are handed as findings.
+    findings: tuple[str, ...] = ()
+    #: What the reviewer said, for the log a human reads.
+    detail: str = ""
+    #: False when the repository names no reviewer: settled clean because no
+    #: review is expected, which is recorded as such rather than as a pass.
+    configured: bool = True
 
 
 @dataclass(frozen=True)
@@ -40,6 +63,14 @@ class MRRef:
     number: int
     url: str
     state: Literal["open", "merged", "closed"]
+    #: The forge already holds a merge request for it -- auto-merge enabled,
+    #: merge when the pipeline succeeds -- and will land it on its own. The
+    #: forge's record, so it outlives any restart of Kraft's own wait
+    #: (Kraft-l98h6): nothing asks it to merge a second time.
+    merge_queued: bool = False
+    #: The revision a merged one landed on its target, "" when the forge did
+    #: not say -- what a workspace root's pointer names (Kraft-n60oh).
+    merged_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,12 +122,30 @@ class CIStatus:
     #: GitLab's numeric pipeline id, opaque outside `GlabCli.retry_jobs`. ""
     #: on gh, whose `retry_jobs` works from `failed_jobs[*].detail_url` instead.
     pipeline_ref: str = ""
+    #: When the run this pending read stands on was cancelled (the forge's own
+    #: timestamp), set only when a cancel is the *only* thing it is waiting
+    #: on: every other check settled and none red. "" otherwise, or when the
+    #: forge gave no time. `render_ci` reads it to tell a cancel whose
+    #: successor is still registering from one nobody followed up
+    #: (Kraft-kbqmk).
+    cancelled_at: str = ""
 
 
 class Forge(Protocol):
     async def open_mr(
-        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
-    ) -> MR: ...
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        meta: MRMeta | None = None,
+    ) -> MR:
+        """A draft merge request from `branch` into `base`, the item's base
+        branch in `repo` (`builtins.base_branch`)."""
+        ...
+
     async def mark_ready(self, *, repo: Path, branch: str, mr: MR) -> None: ...
     async def push(self, *, repo: Path, branch: str) -> None: ...
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None: ...
@@ -110,6 +159,22 @@ class Forge(Protocol):
     async def set_labels(self, *, repo: Path, mr: MR, labels: tuple[str, ...]) -> None: ...
     async def find_mr(self, *, repo: Path, branch: str) -> MRRef | None: ...
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None: ...
+    async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState: ...
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None
+    ) -> ReviewResult: ...
+
+
+def _head(repo: Path) -> str | None:
+    """`repo`'s checked-out head, for `FakeForge`; None when `repo` is not a
+    git checkout (most fake-forge tests hand it a bare directory)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+        )
+    except OSError, subprocess.CalledProcessError:
+        return None
+    return out.stdout.strip()
 
 
 @dataclass
@@ -118,7 +183,11 @@ class FakeForge:
 
     `ci_states` is consumed one call at a time so a test can script
     pending-then-green without sleeping or polling; the last state repeats
-    forever, so a test that only cares about the end state passes one.
+    forever, so a test that only cares about the end state passes one. Every
+    other wait's script -- `review_results`, `approval_states`,
+    `branch_ci_states` -- works the same way, and `merge_delay` holds a
+    requested merge open for that many reads: so every external wait can be
+    walked pending-then-settled.
     """
 
     ci_states: list[CIState] = field(default_factory=lambda: ["success"])
@@ -145,6 +214,8 @@ class FakeForge:
     #: needs this to make on.ci.poll's persisted `ci_pipeline_ref` non-empty
     #: against a fake forge.
     ci_pipeline_refs: list[str] = field(default_factory=lambda: [""])
+    #: Parallel to `ci_states`: each `ci_status` call's `cancelled_at`.
+    ci_cancelled_at: list[str] = field(default_factory=lambda: [""])
     opened: dict[int, str] = field(default_factory=dict)
     merged: list[int] = field(default_factory=list)
     #: Last description written per branch, so a test can see the sync land.
@@ -182,14 +253,50 @@ class FakeForge:
     #: Body each `open_mr` call was given, alongside `bodies` (which only
     #: `update_mr`/`sync_mr` write to).
     opened_bodies: dict[int, str] = field(default_factory=dict)
+    #: The branch each opened merge request targets, by number.
+    opened_base: dict[int, str] = field(default_factory=dict)
+    #: `automated_review`'s answers, consumed like `ci_states`. A bare state
+    #: string is shorthand for a `ReviewResult` with nothing else to say.
+    review_results: list[ReviewResult | str] = field(default_factory=lambda: ["clean"])
+    #: `approval_state`'s answers, consumed like `ci_states`.
+    approval_states: list[ApprovalState] = field(default_factory=lambda: ["approved"])
+    #: `branch_ci_status`'s own script, for the post-merge pipeline; `None`
+    #: shares `ci_states` with the merge request's pipeline.
+    branch_ci_states: list[CIState] | None = None
+    #: How many `find_mr` reads of a merge request after its `merge` still
+    #: find it open, its merge queued -- a forge that merges when its checks
+    #: pass rather than at once.
+    merge_delay: int = 0
+    #: Merges queued but not landed yet, each merge request's own: number ->
+    #: reads of it left. Reading one never moves another.
+    _landing: dict[int, int] = field(default_factory=dict)
+    #: The head each queued merge was asked for at. A push of a different
+    #: head drops the queued merge, as a forge drops it for commits nobody
+    #: asked it to merge.
+    _queued_head: dict[int, str | None] = field(default_factory=dict)
+    #: The head each merge request merged at, by number.
+    _merged_head: dict[int, str | None] = field(default_factory=dict)
+
+    @staticmethod
+    def _next(script: list):
+        """The script's next answer; its last repeats forever."""
+        return script.pop(0) if len(script) > 1 else script[0]
 
     async def open_mr(
-        self, *, repo: Path, branch: str, title: str, body: str, meta: MRMeta | None = None
+        self,
+        *,
+        repo: Path,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        meta: MRMeta | None = None,
     ) -> MR:
         from kraft.adapters.forge.mr import MRMeta
 
         number = len(self.opened) + 1
         self.opened[number] = branch
+        self.opened_base[number] = base
         self._opened_repo[number] = str(repo)
         self.opened_titles[number] = title
         self.opened_draft[number] = True
@@ -202,6 +309,12 @@ class FakeForge:
 
     async def push(self, *, repo: Path, branch: str) -> None:
         self.pushed.append(branch)
+        head = _head(repo)
+        for number in list(self._landing):
+            asked_at = self._queued_head[number]
+            same_mr = self.opened[number] == branch and self._matches(number, repo)
+            if same_mr and asked_at is not None and head is not None and head != asked_at:
+                del self._landing[number], self._queued_head[number]
 
     async def update_mr(self, *, repo: Path, branch: str, body: str) -> None:
         self.bodies[branch] = body
@@ -230,6 +343,7 @@ class FakeForge:
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
+            cancelled_at=self._next(self.ci_cancelled_at),
         )
 
     async def branch_ci_status(
@@ -240,12 +354,34 @@ class FakeForge:
         (Kraft-tsfpk). `head_sha` is accepted only so the fake's signature
         matches the real backends' -- the fake's own sha guard is exercised
         through `ci_shas` regardless of which method a test calls."""
-        return await self.ci_status(
+        status = await self.ci_status(
             repo=repo,
             mr=MR(number=0, url="http://fake.forge/branch"),
             branch=branch,
             pipeline_id=pipeline_id,
         )
+        if self.branch_ci_states is None:
+            return status
+        state = self._next(self.branch_ci_states)
+        return CIStatus(
+            state=state,
+            url=status.url,
+            jobs=(f"fake-job: {state}",),
+            sha=status.sha,
+            failed_jobs=status.failed_jobs,
+            pipeline_ref=status.pipeline_ref,
+        )
+
+    async def approval_state(self, *, repo: Path, branch: str) -> ApprovalState:
+        return self._next(self.approval_states)
+
+    async def automated_review(
+        self, *, repo: Path, branch: str, reviewer: AutomatedReview | None = None
+    ) -> ReviewResult:
+        # The script answers whether or not a reviewer is configured: a dev
+        # instance and a test both script the review they want to walk.
+        result = self._next(self.review_results)
+        return ReviewResult(result) if isinstance(result, str) else result
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         self.retried.append(ci.url)
@@ -266,7 +402,12 @@ class FakeForge:
             number = max(candidates, default=0)
         if number not in self.opened:
             raise ForgeError(f"no such merge request: {mr.number}")
-        self.merged.append(number)
+        if self.merge_delay:
+            self._landing[number] = self.merge_delay
+            self._queued_head[number] = _head(repo)
+        else:
+            self.merged.append(number)
+            self._merged_head[number] = _head(repo)
 
     def _matches(self, number: int, repo: Path) -> bool:
         """A number opened before `_opened_repo` existed (an older test's
@@ -280,8 +421,17 @@ class FakeForge:
         if not numbers:
             return None
         number = next((n for n in numbers if n not in self.merged), numbers[0])
+        if number in self._landing:
+            if self._landing[number]:
+                self._landing[number] -= 1
+            else:
+                del self._landing[number]
+                self._merged_head[number] = self._queued_head.pop(number)
+                self.merged.append(number)
         return MRRef(
             number=number,
             url=f"http://fake.forge/{number}",
             state="merged" if number in self.merged else "open",
+            merge_queued=number in self._landing,
+            merged_sha=self._merged_head.get(number) or "",
         )

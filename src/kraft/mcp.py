@@ -57,6 +57,11 @@ def build() -> MCPServer:
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
         implements_beads: list[str] | None = None,
+        policy: dict | None = None,
+        base_branch: str | None = None,
+        skip_nodes: list[str] | None = None,
+        budget_usd: float | None = None,
+        node_overrides: dict | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -79,7 +84,20 @@ def build() -> MCPServer:
 
         `implements_beads` are bead ids this item implements; they are closed
         when it completes. Ids mentioned in the description are not parsed —
-        naming a bead in prose promises nothing."""
+        naming a bead in prose promises nothing.
+
+        `policy` is the item's own policy override, as `set_work_item_policy`
+        takes it. Leave it out unless a human asked for one.
+
+        `base_branch` is the branch the work starts from and its merge request
+        targets -- a release branch, say. Unset, it is the repo's default
+        branch. It must already exist on the repo's origin.
+
+        `skip_nodes` drops named nodes from the item's chain; `budget_usd` caps
+        its spend in dollars (unset, the policy's cap applies -- this door can
+        set a cap but not lift one); `node_overrides` is `{node_id: {field:
+        value}}`, the fields `set_node_overrides` takes. Leave all three out
+        unless a human asked for them."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -88,6 +106,11 @@ def build() -> MCPServer:
             attachments=attachments,
             auto_gate=auto_gate,
             implements_beads=implements_beads,
+            policy=policy,
+            base_branch=base_branch,
+            skip_nodes=skip_nodes,
+            node_overrides=node_overrides,
+            **({"budget_usd": budget_usd} if budget_usd is not None else {}),
         )
 
     @server.tool()
@@ -98,12 +121,16 @@ def build() -> MCPServer:
         return await client.ensure_repo(path)
 
     @server.tool()
-    async def approve_gate(gate: str | None = None, work_item_id: str | None = None) -> dict:
+    async def approve_gate(
+        gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
+    ) -> dict:
         """Approve the human gate a Kraft work item is waiting on, letting the
         chain continue. With no gate name, approves whichever gate is pending.
         Gates are spec_approval, plan_approval, chain_finalized, and
-        human_review_approval. Only a human should decide this — ask first."""
-        return await client.approve_gate(gate, work_item_id)
+        human_review_approval. A chain revision gate also needs the `digest`
+        get_gate_artifact returned with the revision the human reviewed. Only a
+        human should decide this — ask first."""
+        return await client.approve_gate(gate, work_item_id, digest=digest)
 
     @server.tool()
     async def reject_gate(
@@ -134,26 +161,57 @@ def build() -> MCPServer:
         return await client.report_progress(task, work_item_id)
 
     @server.tool()
-    async def resume_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
-        """Start or restart a paused Kraft work item. `steer` is carried into the
-        next attempt's prompt. This is also how a work item created by
-        create_work_item is started for the first time."""
-        return await client.resume(steer, work_item_id)
+    async def resume_work_item(
+        steer: str | None = None,
+        work_item_id: str | None = None,
+        steers: dict[str, str] | None = None,
+    ) -> dict:
+        """Start or restart a paused Kraft work item. `steer` reaches every
+        paused agent task; `steers` gives individual paused agent tasks their
+        own, keyed by canonical task path (`node.step.task`). This is also how a
+        work item created by create_work_item is started for the first time."""
+        return await client.resume(steer, work_item_id, steers=steers)
 
     @server.tool()
-    async def retry_work_item(steer: str | None = None, work_item_id: str | None = None) -> dict:
-        """Re-run the node a stopped Kraft work item stopped on, with `steer`
-        carried into the retry's prompt. This is the only way back onto an item
-        that stopped for a human: resume only takes a paused item."""
-        return await client.retry(steer, work_item_id)
+    async def retry_work_item(
+        steer: str | None = None,
+        work_item_id: str | None = None,
+        path: str | None = None,
+        restart: bool = False,
+    ) -> dict:
+        """Rerun work on a stopped Kraft work item, with `steer` carried into the
+        retry's prompt: the node it stopped on, or `path` (canonical: `node`,
+        `node.step` or `node.step.task`) and everything after it; `restart`
+        reruns the whole chain. This is the only way back onto an item that
+        stopped for a human: resume only takes a paused item."""
+        return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
-    async def skip_work_item(note: str | None = None, work_item_id: str | None = None) -> dict:
+    async def skip_work_item(
+        note: str | None = None, work_item_id: str | None = None, path: str | None = None
+    ) -> dict:
         """Advance a Kraft work item past its current node or pending gate,
-        without running or approving it. Works while active (kills the
-        running session first), paused, or stopped for a human. Only a human
-        should decide this — ask first."""
-        return await client.skip(note, work_item_id)
+        without running or approving it -- or, with `path` (`node.step` or
+        `node.step.task` inside the current node), skip only that, stopping
+        nothing beside it. Works while active, paused, or stopped for a human.
+        Only a human should decide this — ask first."""
+        return await client.skip(note, work_item_id, path=path)
+
+    @server.tool()
+    async def complete_work_item(
+        reason: str, work_item_id: str | None = None, close_beads: bool = False
+    ) -> dict:
+        """Mark a Kraft work item complete by hand, stopping anything running.
+        The reason is required and recorded. Its beads stay open unless
+        `close_beads` is true. Only a human should decide this — ask first."""
+        return await client.complete(reason, work_item_id, close_beads=close_beads)
+
+    @server.tool()
+    async def cancel_work_item(reason: str, work_item_id: str | None = None) -> dict:
+        """Cancel a Kraft work item, stopping anything running; its worktree
+        stays. The reason is required and recorded. Only a human should decide
+        this — ask first."""
+        return await client.cancel(reason, work_item_id)
 
     @server.tool()
     async def escalate_work_item(message: str, work_item_id: str | None = None) -> dict:
@@ -181,6 +239,20 @@ def build() -> MCPServer:
         return await client.set_chain_template(template, work_item_id)
 
     @server.tool()
+    async def set_attachments(
+        spec: str | None = None,
+        plan: str | None = None,
+        drop: list[str] | None = None,
+        work_item_id: str | None = None,
+    ) -> dict:
+        """Revise a not-yet-started Kraft work item's attached spec or plan
+        instead of filing it again. `spec`/`plan` is a path, re-copied into
+        Kraft's storage; a kind in `drop` ("spec" or "plan") is removed, which
+        puts back the gate it had trimmed. A kind not named keeps its copy.
+        409s once the item has started."""
+        return await client.set_attachments(spec, plan, drop, work_item_id)
+
+    @server.tool()
     async def set_agent_overrides(
         model: str | None = None,
         escalate_model: str | None = None,
@@ -203,12 +275,18 @@ def build() -> MCPServer:
         auto_escalate: bool | None = None,
         auto_escalate_stuck: bool | None = None,
         auto_escalate_delay_s: int | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        extra_prompt: str | None = None,
         clear: bool = False,
         work_item_id: str | None = None,
     ) -> dict:
-        """Set or clear one node's per-item auto-escalate override on a Kraft
-        work item, without touching the Policy screen's system defaults or the
-        chain template everyone else uses. `clear` resets this node back to
+        """Set or clear one node's per-item override on a Kraft work item --
+        its auto-escalate settings, the `model`/`effort` its agent tasks launch
+        with (above the item-wide `set_agent_overrides`), and an `extra_prompt`
+        appended to each of their instructions -- without touching the Policy
+        screen's system defaults or the chain template everyone else uses. A
+        model/effort the node's harness refuses is refused here. `clear` resets this node back to
         the template's own binding; naming a field replaces the whole stored
         override for that node rather than merging with it. 409s once the
         node has started."""
@@ -217,9 +295,31 @@ def build() -> MCPServer:
             auto_escalate,
             auto_escalate_stuck,
             auto_escalate_delay_s,
+            model=model,
+            effort=effort,
+            extra_prompt=extra_prompt,
             clear=clear,
             work_item_id=work_item_id,
         )
+
+    @server.tool()
+    async def set_work_item_policy(
+        policy: dict | None = None, clear: bool = False, work_item_id: str | None = None
+    ) -> dict:
+        """Set or clear a Kraft work item's own policy override, for that item
+        only -- never its chain template or any other item. `policy` holds
+        item-wide fields (`max_attempts`, `timeout_minutes`,
+        `allowed_harnesses`, and the fields that can only tighten: the time
+        caps `time_cap_minutes` and `total_time_cap_minutes` -- a wait's total
+        cap is its timeout -- and `allowed_tools`, `deny_tools`,
+        `token_budget`, `budget_usd`, `sandbox`) and `paths`, a map from a canonical path
+        (`node`, `node.step` or `node.step.task`) to the same fields for that
+        scope: `{"paths": {"merge_request_feedback.ci.await_ci":
+        {"total_time_cap_minutes": 60}}}`. It replaces the whole stored
+        override; `clear` removes it. Refused, naming the field, past an
+        administrator maximum. On a running or waiting item it binds from the
+        next node entered and the next observation of a wait."""
+        return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)
 
     @server.tool()
     async def permission_request(

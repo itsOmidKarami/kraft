@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 38
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -87,6 +87,11 @@ CREATE TABLE work_items (
   -- chain_definition at read time -- nothing else reads chain_definition's
   -- node fields directly once this exists.
   node_overrides TEXT,
+  -- the item's own policy override (`policy.WorkItemPolicy`, Kraft-ab1bh):
+  -- JSON, item-wide fields plus `paths` keyed by canonical path. NULL means
+  -- none. Layered onto the snapshot when the row is read
+  -- (`store.materialized_chain_of`), never written into it.
+  policy_override TEXT,
   -- who and when a completed/abandoned item was archived (UI v2 · 03).
   -- NULL means "not archived". Never set on any other status -- archiving
   -- does not change `status` -- "Ended as" keeps reading completed/
@@ -94,13 +99,20 @@ CREATE TABLE work_items (
   -- the two writers are archive_work_item's only two callers.
   archived_at      TEXT,
   archived_by      TEXT,
-  -- GitLab pipeline pinned by the last `on.ci.poll` read, stored as
+  -- GitLab pipeline pinned by the last CI read, stored as
   -- "<head_sha>:<pipeline_id>" (Kraft-ivh1). Empty until the first poll,
-  -- cleared on retry_after_cap alongside the ci_wait/ci_infra counters.
+  -- cleared on retry_after_cap alongside the ci_infra counter.
   ci_pipeline_ref  TEXT,
   -- the step group `current_node_id` last began. 0 unless a wait or a retry
   -- resumed the node past its first group. Reset whenever the node changes.
   current_step     INTEGER NOT NULL DEFAULT 0,
+  -- template schema V1's immutable work-item input (`MaterializedChain.to_json`).
+  -- Beside `chain_definition`, not replacing it -- see _MIGRATIONS[32].
+  materialized_chain TEXT,
+  -- the materialization of the run fork this item is executing
+  -- (`RunFork.materialized_chain`, copied here so every reader of the row
+  -- gets it). NULL until the first retry: the intake snapshot is the run.
+  run_chain        TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -114,6 +126,7 @@ CREATE TABLE events (
 );
 
 CREATE INDEX idx_events_work_item ON events(work_item_id, seq);
+CREATE INDEX idx_events_type ON events(type);
 
 CREATE TABLE worker_sessions (
   id             TEXT PRIMARY KEY,
@@ -138,6 +151,9 @@ CREATE TABLE worker_sessions (
   model          TEXT,
   tokens_in      INTEGER,
   tokens_out     INTEGER,
+  -- cache writes and reads, apart from tokens_in (Ruling 211), NULL: unknown split
+  tokens_cache_write INTEGER,
+  tokens_cache_read  INTEGER,
   cost_usd       REAL,
   wall_ms        INTEGER,
   exited_at      TEXT,
@@ -194,7 +210,38 @@ CREATE TABLE work_item_repos (
 );
 
 CREATE INDEX idx_work_item_repos_item ON work_item_repos(work_item_id, merge_rank);
+
+-- One row per retry (`retry-creates-an-immutable-run-fork`): the run a retry
+-- forked from (`parent`, NULL for the intake run), what it retried, and its own
+-- copy of the materialization with any retry override applied. Never updated
+-- or deleted -- `_RUN_FORK_TRIGGERS` refuses both.
+CREATE TABLE run_forks (
+  id                 TEXT PRIMARY KEY,
+  work_item_id       TEXT NOT NULL REFERENCES work_items(id),
+  parent             TEXT REFERENCES run_forks(id),
+  scope              TEXT NOT NULL CHECK (scope IN ('work_item', 'node', 'step', 'task')),
+  -- the canonical path retried, NULL for a work-item restart
+  path               TEXT,
+  -- the events seq the fork starts after: everything at or before it is the
+  -- prior runs' data, kept
+  after_seq          INTEGER NOT NULL,
+  materialized_chain TEXT NOT NULL,
+  -- what the retry changed (path, task_config, policy), NULL when nothing
+  override           TEXT,
+  created_at         TEXT NOT NULL
+);
+
+CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)
 """
+
+#: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
+#: the two statements that make a fork immutable live here and run after it.
+_RUN_FORK_TRIGGERS = [
+    "CREATE TRIGGER run_forks_immutable BEFORE UPDATE ON run_forks "
+    "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
+    "CREATE TRIGGER run_forks_undeletable BEFORE DELETE ON run_forks "
+    "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
+]
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -682,6 +729,49 @@ FROM worker_sessions""",
     # The step group a node last began, so a CI wait and a fix-loop retry resume
     # at the group that stopped instead of at group zero.
     31: ["ALTER TABLE work_items ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0"],
+    # Template schema V1: the immutable materialized work-item input, and the
+    # run-fork lineage Phase 5 fills.
+    #
+    # Additive, beside `chain_definition`, rather than a conversion of it. A V1
+    # MaterializedChain has no `gate_after` and its gates are ordered nodes, so
+    # there is no faithful mechanical translation of a legacy row: a half-run
+    # item would resume against a chain whose node order differs from the one it
+    # started on. V1 is declared incompatible
+    # (`REQ template-v1-is-not-backward-compatible`) and the update path warns,
+    # requires acceptance and backs up. So existing rows keep their legacy column
+    # and stay readable by the legacy path until they finish or are cancelled.
+    32: [
+        "ALTER TABLE work_items ADD COLUMN materialized_chain TEXT",
+        "ALTER TABLE work_items ADD COLUMN run_fork_parent TEXT",
+    ],
+    # The agent's progress event was renamed `task_progress` -> `plan_progress`
+    # (it reports a plan task, and V1 made "task" a chain-task word). Every
+    # reader -- the Timeline's grouping, the board's "Task N of M" -- matches
+    # the new name only, so stored rows are renamed once here rather than each
+    # reader learning both (Kraft-7hy7x).
+    33: ["UPDATE events SET type = 'plan_progress' WHERE type = 'task_progress'"],
+    # Run forks (`retry-creates-an-immutable-run-fork`). The fork's lineage lives
+    # on its own row, so the column reserved for it on the work item goes, and
+    # the item gains the current fork's materialization in its place.
+    34: [
+        "ALTER TABLE work_items DROP COLUMN run_fork_parent",
+        "ALTER TABLE work_items ADD COLUMN run_chain TEXT",
+        *(s.strip() for s in SCHEMA_SQL.split(";") if "CREATE TABLE run_forks" in s),
+        "CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)",
+        *_RUN_FORK_TRIGGERS,
+    ],
+    # A work item's own policy override (Kraft-ab1bh).
+    35: ["ALTER TABLE work_items ADD COLUMN policy_override TEXT"],
+    # Cache tokens apart from tokens_in (Ruling 211). An older row keeps its
+    # summed tokens_in and NULLs here: its split is unknown, not zero.
+    36: [
+        "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_write INTEGER",
+        "ALTER TABLE worker_sessions ADD COLUMN tokens_cache_read INTEGER",
+    ],
+    # Every agent launch with a fallback list asks for the newest
+    # `rate_limit_hit` of a harness+model across all items
+    # (`executor.fallback.known_limited`), which must not scan the whole table.
+    37: ["CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
@@ -742,6 +832,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         for stmt in (s.strip() for s in SCHEMA_SQL.split(";")):
             if stmt:
                 conn.execute(stmt)
+        for stmt in _RUN_FORK_TRIGGERS:
+            conn.execute(stmt)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     except BaseException:

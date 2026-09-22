@@ -14,13 +14,17 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import psutil
 
-from kraft import events, logs, store
-from kraft import sandbox as _sandbox
+from kraft import caps, events, logs, store
 from kraft import usage as _usage
-from kraft.worker_env import worker_env
+from kraft.worker import sandbox as _sandbox
+from kraft.worker.env import worker_env
+
+if TYPE_CHECKING:
+    from kraft.config import RepoEntry
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +36,56 @@ _AGENT_STATUSES = ("done", "failed", "done_with_concerns", "needs_context")
 _flush_sleep = asyncio.sleep
 
 
-def result_path_for(run_dirs, session_id: str) -> Path:
+#: The event naming the background jobs a worker's turn left running.
+JOBS_ABANDONED = "background_jobs_abandoned"
+
+#: How much of one job's command a reason quotes.
+_JOB_NAME_MAX = 200
+
+
+async def fail_abandoned_jobs(db, session_id: str, log_path: Path, status: str, reader) -> str:
+    """`status`, or `failed` when the agent's turn ended with a background job
+    still running (Kraft-xvugd): the session ends with its turn, so nothing
+    would ever read that job's result. The prose in `agent._CTX` alone did not
+    hold (Kraft-nxqft); this is the check behind it. The jobs are named in the
+    log's last line and a `JOBS_ABANDONED` event rather than left to a generic
+    missing-result failure.
+
+    A `needs_context` stop keeps its status -- it is a person's stop already,
+    and failing it would lose the question -- but the jobs are still named.
+    The one door both `run_task` and `reattach` exit an agent session through.
+    """
+    if reader is None or status not in _AGENT_STATUSES:
+        return status
+    jobs = _usage.READERS[reader].unfinished_jobs(log_path)
+    if not jobs:
+        return status
+    named = "; ".join(j if len(j) <= _JOB_NAME_MAX else j[: _JOB_NAME_MAX - 1] + "…" for j in jobs)
+    reason = (
+        f"the turn ended with {len(jobs)} background job(s) still running: {named}. "
+        "The session ends with its turn, so nothing reads a job's result: run it in "
+        "the foreground."
+    )
+    with open(log_path, "a") as fh:
+        fh.write(f"\nkraft: failed: {reason}\n")
+
+    def _record(c):
+        row = c.execute(
+            "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        payload = {"session_id": session_id, "node_id": row["node_id"], "jobs": jobs}
+        events.append(c, row["work_item_id"], JOBS_ABANDONED, {**payload, "reason": reason})
+
+    await db.write(_record)
+    return status if status == "needs_context" else "failed"
+
+
+def result_path_for(run_dirs, name: str) -> Path:
     """Where a session's $KRAFT_RESULT_PATH lives -- the one formula every
-    caller that needs to predict it ahead of dispatch (`escalate.dispatch`'s
-    resumed-turn note) must use, rather than reimplementing it."""
-    return run_dirs.results / f"{session_id}.json"
+    caller that needs to predict it ahead of dispatch must use, rather than
+    reimplementing it. `name` is the session id, or an escalation thread's
+    `escalate.thread_files` name."""
+    return run_dirs.results / f"{name}.json"
 
 
 def _resolve_result_file(path: Path) -> str | None:
@@ -93,6 +142,29 @@ def read_concerns(path: Path) -> str | None:
 def read_question(path: Path) -> str | None:
     """`question` from a `needs_context` result file, or None."""
     return _read_str_field(path, "question")
+
+
+#: What a stop may suggest a person do next (Kraft-s7c04.27): each is one
+#: existing verb -- `kraft item skip`, `kraft item retry`, `kraft item abandon`.
+SUGGESTED_ACTIONS = ("skip", "retry", "abandon")
+
+
+def read_suggested_action(path: Path) -> dict | None:
+    """`suggested_action` from a result file, as `{"action", "reason"}`, or
+    None when it is missing or malformed. An agent that concluded no repair
+    can help -- the node should be skipped, retried later, or the item
+    abandoned -- says so here rather than only in prose, so the stop can offer
+    it as one command. A shape Kraft cannot act on is dropped, not guessed at.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except OSError, ValueError:
+        return None
+    value = data.get("suggested_action") if isinstance(data, dict) else None
+    if not isinstance(value, dict) or value.get("action") not in SUGGESTED_ACTIONS:
+        return None
+    reason = value.get("reason")
+    return {"action": value["action"], "reason": reason if isinstance(reason, str) else ""}
 
 
 def read_verdict(path: Path) -> str | None:
@@ -211,6 +283,27 @@ def _resolve(result_path: Path, returncode: int) -> str:
     if file_status is not None:
         return file_status
     return "done" if returncode == 0 else "failed"
+
+
+def _docker_launch_failed(cidfile: Path) -> bool:
+    """True if `docker run` itself never created the container -- the daemon
+    is down, or an image could not be pulled -- so the sandboxed command
+    never ran: an infra problem no agent edit can fix (Kraft-nc9gm).
+
+    Read off `--cidfile`, not the log (Kraft-6ltwh): the log holds the
+    sandboxed command's own output too, so a task that prints docker's
+    wording is not docker failing. Nor the exit code: daemon-down is plain 1
+    (docker-cli 29.7.2, probed 2026-09-22), the same code a failing command
+    returns. docker writes the id once the container exists and removes an
+    unwritten cidfile when create fails (probed the same day: daemon
+    unreachable exits 1, a refused create exits 125, and neither leaves the
+    file; a create that succeeds writes it before start). A container docker
+    created but could not start is not caught here; it fails as the task's
+    own, as it did before this check existed."""
+    try:
+        return not cidfile.read_text().strip()
+    except OSError:
+        return True
 
 
 def _resolve_exit_file(path: Path) -> str | None:
@@ -370,13 +463,27 @@ async def run_task(
     #: sets this; a subprocess-kind hook a template binds directly has no such
     #: contract.
     require_result_file: bool = False,
-    repo_entry: dict | None = None,
+    repo_entry: RepoEntry | None = None,
+    #: The tightest time cap over this launch (`caps.at_launch`): past its
+    #: deadline the process group, and a sandbox's container, is killed and
+    #: the session exits `capped_out` with `caps.REACHED` naming the scope.
+    time_cap: caps.Deadline | None = None,
+    #: The name the result file (and its sidecars) goes under, when not the
+    #: session's own: an escalation thread's, shared by its turns
+    #: (`escalate.thread_files`, Kraft-s7c04.54). The log stays per session.
+    files: str | None = None,
+    #: `{"harness": <harness id>, "model": <resolved model or None>}`, which a
+    #: `rate_limit_hit` carries so a later launch can skip that pair until its
+    #: reset (`executor.fallback.known_limited`). Only `run_agent_task` sets it.
+    rate_limit_key: dict | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
-    result_path = result_path_for(run_dirs, session_id)
+    result_path = result_path_for(run_dirs, files or session_id)
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
     exit_path = result_path.with_suffix(".exit")
+    # docker's own sidecar, written only once it created the container.
+    cidfile = result_path.with_suffix(".cid")
     # Captured before any sandbox wrap reassigns `cmd` below (Kraft-s7c04.35) --
     # this must read as what actually ran, never a docker-wrapped invocation.
     command_ran = shlex.join(cmd)
@@ -404,14 +511,17 @@ async def run_task(
         # that already exists, so create it now (empty) rather than letting
         # docker invent a directory at that path.
         result_path.touch(exist_ok=True)
+        # docker refuses a cidfile that already exists.
+        cidfile.unlink(missing_ok=True)
         cmd = _sandbox.docker_argv(
             cmd,
             cwd,
             sandbox,
             run_dirs.results,
-            env={**((repo_entry or {}).get("env") or {}), **(env or {})},
+            env={**(repo_entry.env if repo_entry is not None else {}), **(env or {})},
             name=_sandbox.container_name(session_id),
             result_path=result_path,
+            cidfile=cidfile,
         )
     # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
     # pid yet. `pause_work_item`, `chain.skip_node`, and
@@ -500,8 +610,14 @@ async def run_task(
         seen_usage: dict[str, _usage.Usage] = {}
         log_offset = 0
         next_progress = time.monotonic() + progress_s
+        capped = False
         while proc.poll() is None:
             await asyncio.sleep(poll_s)
+            if time_cap is not None and caps.monotonic() >= time_cap.at:
+                # Left through the `finally` below, which kills the group and
+                # tears down a sandbox's container.
+                capped = True
+                break
             if time.monotonic() < next_progress:
                 continue
             next_progress = time.monotonic() + progress_s
@@ -565,8 +681,34 @@ async def run_task(
                     c, session_id, _usage.read(log_path, result_path, reader)
                 )
             )
+    if capped:
+        hit = time_cap.hit
+
+        def _capped(c):
+            store.session_exited(
+                c, session_id, "capped_out", None, _usage.read(log_path, result_path, reader)
+            )
+            events.append(
+                c,
+                work_item_id,
+                caps.REACHED,
+                hit.payload(node_id=node_id, task=hook_point, session_id=session_id),
+            )
+
+        with open(log_path, "a") as fh:
+            fh.write(f"\nkraft: stopped: {hit.reason}\n")
+        await db.write(_capped)
+        return caps.TIME_CAPPED
     returncode = proc.returncode
     status = _resolve(result_path, returncode)
+    # `docker run` itself failing to launch (daemon down, image pull failed)
+    # is Kraft's own launcher not reaching the sandboxed command at all --
+    # the same "config problem, not a task failure" class as the
+    # FileNotFoundError branch above, one step later and inside the sandboxed
+    # path only (Kraft-nc9gm). Checked before every other status adjustment
+    # below so it can't be shadowed by require_result_file or post_resolve.
+    if sandbox and status == "failed" and _docker_launch_failed(cidfile):
+        status = "config_error"
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell
     # "no contract" (a plain subprocess hook) from "broke the contract" (an
@@ -576,6 +718,8 @@ async def run_task(
     # unconditional overwrite is what protects it, not an exclusion here.
     if require_result_file and status == "done" and _resolve_result_file(result_path) is None:
         status = "failed"
+    if require_result_file:
+        status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
     rate_limit = _rate_limit_rejection(log_path, reader=reader)
     if rate_limit is not None:
         # A rejected launch produced no artifact by construction, so this
@@ -584,7 +728,10 @@ async def run_task(
         status = "rate_limited"
         await db.write(
             lambda c, rl=rate_limit: events.append(
-                c, work_item_id, "rate_limit_hit", {**rl, "node_id": node_id}
+                c,
+                work_item_id,
+                "rate_limit_hit",
+                {**rl, **(rate_limit_key or {}), "node_id": node_id},
             )
         )
     elif post_resolve is not None:

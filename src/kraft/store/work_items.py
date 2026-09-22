@@ -6,6 +6,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
+from kraft.store._common import ENDED, write_status
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -67,6 +68,10 @@ def create_work_item(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: The item's own policy override, already validated against its chain
+    #: (`MaterializedChain.with_item_policy`); stored as `set_policy_override`
+    #: stores it.
+    policy_override: dict | None = None,
     #: Set when this item was filed by the auto-intake poller, not a person
     #: (`intake.py::_start`). Recorded on `work_item_created` only -- never a
     #: column -- so "recent pickups" and "last picked up per repo" (design 31)
@@ -75,6 +80,10 @@ def create_work_item(
     #: The bead's own priority at pickup time (P0-P4), carried the same way --
     #: Kraft's own row has no priority column, the bead does.
     bead_priority: int | None = None,
+    #: `MaterializedChain.to_json()` — the immutable V1 input for this item.
+    #: Defaulted so the legacy intake path is unchanged; NULL means this item
+    #: runs off `chain_definition` (template schema V1, phase 2).
+    materialized_chain: str | None = None,
 ) -> None:
     """`submodules` are the cross-repo paths chosen at intake (06, design 1g).
 
@@ -93,8 +102,9 @@ def create_work_item(
         "INSERT INTO work_items (id, bead_id, title, description, repo, chain_template, "
         "chain_definition, current_node_id, status, created_at, updated_at, "
         "submodules, root_merge_policy, attachments, bead_cwd, branch, implements_beads, "
-        "auto_gate, budget_set, budget_usd, node_overrides) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "auto_gate, budget_set, budget_usd, node_overrides, "
+        "materialized_chain, policy_override) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             bead_id,
@@ -116,6 +126,8 @@ def create_work_item(
             1 if budget_set else 0,
             budget_usd,
             json.dumps(node_overrides) if node_overrides else None,
+            materialized_chain,
+            json.dumps(policy_override) if policy_override else None,
         ),
     )
     payload = {"title": title, "repo": repo, "chain_template": chain_template}
@@ -139,8 +151,15 @@ def mark_needs_human(
     capped: dict | None = None,
     budget: dict | None = None,
     bundle: dict | None = None,
+    *,
+    stuck: bool = False,
+    suggested: dict | None = None,
 ) -> None:
     """`capped` carries {cycles, attempts} when a loop cap is what stopped the item.
+
+    `stuck` marks a stop in the stuck set (`walk._Stuck`, Ruling 176): the only
+    stops automatic escalation answers. Written only by `walk._stop_stuck`;
+    `executor.gates.stuck_stop` is its reader.
 
     The UI shows capped-out as a glyph *plus* the words "capped n/n", and the
     board never fetches sessions per row — so the numbers have to ride the
@@ -154,12 +173,18 @@ def mark_needs_human(
     human would otherwise reconstruct by hand from the worktree and the
     event log, gathered once at the moment Kraft gives up rather than asked
     for later.
+
+    `suggested` is the next action the chain or a repair concluded
+    (`{action, reason}`, Kraft-s7c04.27): recorded as `suggested_action`, so
+    the stop offers it as one command instead of only prose in the reason.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'needs_human', retry_at = NULL, updated_at = ? "
         "WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     payload = {"node_id": node_id, "reason": reason}
     # The reason names the hook that failed, never why -- that is in the failed
     # session's log. Naming the session here is what lets the timeline offer
@@ -186,6 +211,10 @@ def mark_needs_human(
         payload["budget"] = budget
     if bundle is not None:
         payload["bundle"] = bundle
+    if stuck:
+        payload["stuck"] = True
+    if suggested is not None:
+        payload["suggested_action"] = suggested
     events.append(conn, work_item_id, "work_item_needs_human", payload)
 
 
@@ -194,10 +223,12 @@ def mark_rate_limited(
 ) -> None:
     """The item hit an API rate limit; `rate_limit_retry.poller` relaunches it
     once `retry_at` passes, with nobody paged (unlike `mark_needs_human`)."""
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'rate_limited', retry_at = ?, updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn, work_item_id, "work_item_rate_limited", {"node_id": node_id, "retry_at": retry_at}
     )
@@ -212,10 +243,12 @@ def mark_waiting(conn: sqlite3.Connection, work_item_id: str, node_id: str, retr
     and the intake slot frees (Kraft-g15w); and with no coroutine in flight
     there is nothing for pause to fail to cancel (Kraft-tnak).
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'waiting', retry_at = ?, updated_at = ? WHERE id = ?",
         (retry_at, _now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn, work_item_id, "work_item_waiting", {"node_id": node_id, "retry_at": retry_at}
     )
@@ -231,10 +264,12 @@ def mark_blocked_by_dependency(
     resume costs one more `bd blocked` call and re-pauses here, not a full
     agent session that reads the blocker from prose.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn,
         work_item_id,
@@ -243,15 +278,19 @@ def mark_blocked_by_dependency(
     )
 
 
-def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> None:
+def mark_reentered(conn: sqlite3.Connection, work_item_id: str) -> bool:
     """Flip a `waiting` (or `rate_limited`) item back to `active` the instant
     its own poller decides to re-enter it, before the spawned run has done
     anything -- so the *next* tick's `WHERE status = 'waiting'` no longer
     matches this row (Kraft-ppk9). No event: `node_started` already narrates
     the re-entry once the walk actually begins; this is bookkeeping to make
     the row stop looking due, not something a human reads.
+
+    False, and nothing written, for an item an operator ended after the
+    poller selected it (Kraft-dncfg).
     """
-    conn.execute(
+    return write_status(
+        conn,
         "UPDATE work_items SET status = 'active', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
     )
@@ -263,6 +302,57 @@ def mark_completed(conn: sqlite3.Connection, work_item_id) -> None:
         (_now(), work_item_id),
     )
     events.append(conn, work_item_id, "work_item_completed", {})
+
+
+#: An operator's terminal action -> (the write that ends the item, its audit
+#: event, the ordinary event every reader of that status already knows). The
+#: status is a literal in each write, not a parameter, so no reader of this
+#: module (`dev/check_claim_handoff.py`) can take it for a claim to `active`.
+MANUAL_ENDS = {
+    "complete": (
+        "UPDATE work_items SET status = 'completed', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_manually_completed",
+        "work_item_completed",
+    ),
+    "cancel": (
+        "UPDATE work_items SET status = 'abandoned', retry_at = NULL, updated_at = ? WHERE id = ?",
+        "work_item_cancelled",
+        "work_item_abandoned",
+    ),
+}
+
+
+def end_work_item(
+    conn: sqlite3.Connection,
+    work_item_id: str,
+    action: str,
+    reason: str,
+    *,
+    session_ids: list[str] | None = None,
+) -> None:
+    """End an item by an operator's explicit `complete` or `cancel`
+    (`manual-completion-is-an-explicit-work-item-terminal-action`,
+    `manual-cancellation-is-an-explicit-work-item-terminal-action`).
+
+    One write: the running sessions are marked `paused` before the caller
+    signals them (`pause_work_item`'s ordering), the status leaves the running
+    set for good -- which is what stops the walk at its next node -- and the
+    audit event carries the reason and the node the item stood on.
+    """
+    ending, audit, ordinary = MANUAL_ENDS[action]
+    now = _now()
+    for sid in session_ids or []:
+        conn.execute(
+            "UPDATE worker_sessions SET status = 'paused', exited_at = ? WHERE id = ?",
+            (now, sid),
+        )
+        events.append(conn, work_item_id, "worker_session_paused", {"session_id": sid})
+    node_id = conn.execute(
+        "SELECT current_node_id FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()[0]
+    conn.execute(ending, (now, work_item_id))
+    events.append(conn, work_item_id, audit, {"reason": reason, "node_id": node_id})
+    events.append(conn, work_item_id, ordinary, {})
 
 
 def set_bead_id(conn: sqlite3.Connection, work_item_id, bead_id: str) -> None:
@@ -337,10 +427,12 @@ def pause_work_item(conn: sqlite3.Connection, work_item_id: str, session_ids: li
     look like it worked and then silently undo itself.
     """
     now = _now()
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (now, work_item_id),
-    )
+    ):
+        return
     events.append(conn, work_item_id, "pause_requested", {"sessions": session_ids})
     for sid in session_ids:
         conn.execute(
@@ -366,10 +458,12 @@ def pause_for_broken_base(
     walk at the next node rather than mid-session -- cheap and eventual, the
     same posture Part 1's blocked-by pause takes.
     """
-    conn.execute(
+    if not write_status(
+        conn,
         "UPDATE work_items SET status = 'paused', retry_at = NULL, updated_at = ? WHERE id = ?",
         (_now(), work_item_id),
-    )
+    ):
+        return
     events.append(
         conn,
         work_item_id,
@@ -548,12 +642,12 @@ def claim_for_run(
     if limit is not None:
         capacity_clause = " AND (SELECT COUNT(*) FROM work_items WHERE status = 'active') < ?"
         params = (*params, limit)
-    cur = conn.execute(
+    return write_status(
+        conn,
         f"UPDATE work_items SET status = ?, retry_at = NULL, updated_at = ? "
         f"WHERE id = ? AND status IN ({placeholders}){capacity_clause}",
         params,
     )
-    return cur.rowcount == 1
 
 
 def resume_work_item(conn: sqlite3.Connection, work_item_id: str, steer: str | None) -> None:
@@ -603,3 +697,25 @@ def last_auto_pickup_at(conn: sqlite3.Connection) -> dict[str, str]:
         "GROUP BY repo"
     ).fetchall()
     return {r["repo"]: r["at"] for r in rows if r["repo"]}
+
+
+def open_duplicates(
+    conn: sqlite3.Connection, repo: str, title: str, implements_beads: list[str]
+) -> list[tuple[sqlite3.Row, str]]:
+    """Open items in `repo` a new filing looks like (Kraft-s7c04.30), each with
+    why: the same title (case and surrounding space aside), or a bead both say
+    they implement. Exact on purpose: no fuzzy match, so no false alarm to
+    learn to ignore."""
+    wanted = title.strip().casefold()
+    out = []
+    for row in conn.execute(
+        "SELECT id, title, status, implements_beads FROM work_items "
+        "WHERE repo = ? AND status NOT IN (?, ?) ORDER BY created_at",
+        (repo, *ENDED),
+    ):
+        shared = sorted(set(implements_beads) & set(json.loads(row["implements_beads"] or "[]")))
+        if shared:
+            out.append((row, f"also implements {', '.join(shared)}"))
+        elif row["title"].strip().casefold() == wanted:
+            out.append((row, "same title"))
+    return out

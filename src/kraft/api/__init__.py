@@ -7,7 +7,7 @@ see the sibling modules for the actual routes:
 - `routes/*` -- one module per resource, each decorating `api_router` below
 
 Nothing outside this package imports anything from here except `app` --
-`kraft.intake`, `kraft.ci_wait`, and `kraft.rate_limit_retry` import
+`kraft.intake`, `kraft.waits`, and `kraft.rate_limit_retry` import
 `kraft.api.deps` directly instead (see that module's docstring).
 """
 
@@ -43,6 +43,7 @@ from kraft.api.routes import (  # noqa: E402,F401
     auth,
     board,
     gates,
+    harnesses,
     lifecycle,
     repos,
     search,
@@ -71,7 +72,7 @@ async def spa(path: str, request: Request):
 
 @app.exception_handler(config_mod.ConfigError)
 async def _bad_config_file(request: Request, exc: config_mod.ConfigError) -> JSONResponse:
-    """A legible 422 for any `load_repos`/`load_registry`/etc. caller that does
+    """A legible 422 for any `load_repos`/`Intake.load`/etc. caller that does
     not catch `ConfigError` itself. `templates/` is a plain directory an
     operator can hand-edit, and the message already names the file and what is
     wrong with it — a global backstop is the fix, not a guard at each call

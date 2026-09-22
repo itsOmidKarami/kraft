@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from kraft import harness
+from kraft.templates import environment as template_environment
 
 
 def test_bundled_harnesses_all_load():
@@ -60,6 +61,19 @@ def test_claude_constrains_effort_but_not_model():
     assert claude.value_ok("model", "us.anthropic.claude-sonnet-4-5-v1:0")
     assert claude.value_ok("effort", "max")
     assert not claude.value_ok("effort", "minimal")  # codex's value, not claude's
+
+
+def test_codex_effort_values_include_xhigh():
+    """Kraft-c1qfa: codex-cli 0.155.0 passes `-c model_reasoning_effort=` straight
+    to the model API uninterpreted -- probed 2026-09-22, an invalid value's own
+    error names the real vocabulary as 'none', 'minimal', 'low', 'medium',
+    'high', 'xhigh', 'max'. codex.yaml's `values:` list (a closed vocabulary
+    Kraft ships, not codex's own) had fallen behind that and rejected a legit
+    xhigh binding at load with a RegistryError."""
+    codex = harness.load(None).valid["codex"]
+    assert codex.value_ok("effort", "xhigh")
+    assert codex.value_ok("effort", "minimal")  # unaffected by the widening
+    assert not codex.value_ok("effort", "bogus")
 
 
 def _write(tmp_path: Path, name: str, body: str) -> Path:
@@ -152,6 +166,85 @@ def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect
     hs = harness.load(tmp_path / "harnesses")
     assert "x" not in hs.valid
     assert expect in hs.invalid["x"]
+
+
+_CAPS = "  context: { channel: prompt }\n  usage: { source: result_file }\n"
+
+
+@pytest.mark.parametrize(
+    "body,expect",
+    [
+        ("- just\n- a list\n", "x.yaml: expected a top-level mapping"),
+        ("id: 7\nkind: cli\ncommand: [x]\n", "missing a string 'id'"),
+        ("id: x\nkind: [cli]\ncommand: [x]\n", "unknown kind ['cli']"),
+        ("id: x\nkind: cli\ncommand: {a: b}\n", "'command' must be a string or a list"),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncommand_resume: [1]\n",
+            "'command_resume' must be a string or a list",
+        ),
+        ("id: x\nkind: cli\ncommand: [x]\ncapabilities: [prompt]\n", "non-empty mapping"),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n" + _CAPS + "  prompt: [-p]\n",
+            "capability 'prompt' must be a mapping",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n" + _CAPS + "  prompt: { cli: -p }\n",
+            "capability 'prompt' 'cli' must be a list of strings",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _CAPS
+            + "  prompt: { cli: ['-p', '{value}'] }\n"
+            + "  effort: { cli: ['-e', '{value}'], values: [1] }\n",
+            "capability 'effort' 'values' must be a list of strings",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _CAPS
+            + "  effort: { cli: ['-e', '{value}'], always: 3 }\n"
+            + "  prompt: { cli: ['-p', '{value}'] }\n",
+            "capability 'effort' 'always' must be a string or a list of strings",
+        ),
+    ],
+)
+def test_a_misshapen_harness_is_refused_in_prose_naming_the_key(tmp_path, body, expect):
+    """Kraft-5d510.2: the shape is `HarnessInput`'s, but the reason an operator
+    reads is still the one the hand-rolled parser gave, never pydantic's
+    "Input should be a valid list"."""
+    _write(tmp_path, "x.yaml", body)
+    assert expect in harness.load(tmp_path / "harnesses").invalid["x"]
+
+
+def test_a_harness_is_built_from_its_input_model():
+    """The pattern `HarnessProfileInput`/`HarnessProfile` use: the model holds
+    the shape, `from_input` the relationships between capabilities."""
+    parsed = harness.HarnessInput.model_validate(
+        {
+            "id": "mini",
+            "kind": "cli",
+            "command": "mini",
+            "capabilities": {
+                "context": {"channel": "prompt"},
+                "usage": {"source": "result_file"},
+                "prompt": {"cli": ["-p", "{value}"]},
+            },
+        }
+    )
+    h = harness.Harness.from_input(parsed, where="test")
+    assert (h.id, h.command, list(h.capabilities)) == (
+        "mini",
+        ("mini",),
+        ["context", "usage", "prompt"],
+    )
+    with pytest.raises(harness.HarnessError, match="test: missing required capability 'prompt'"):
+        harness.Harness.from_input(
+            parsed.model_copy(
+                update={
+                    "capabilities": {k: v for k, v in parsed.capabilities.items() if k != "prompt"}
+                }
+            ),
+            where="test",
+        )
 
 
 def test_one_bad_file_does_not_take_the_others_down(tmp_path):
@@ -275,3 +368,65 @@ def test_an_option_a_harness_does_not_support_is_never_emitted():
     argv = _argv("codex", options={"deny_tools": ("Write",)})
     assert "Write" not in argv
     assert "--disallowed-tools" not in argv
+
+
+# ── HarnessProfile: a configured instance, validated against its provider's
+# own declared capability surface (provider-declares-harness-capabilities,
+# harness-profile-has-safe-instance-configuration,
+# agent-task-selects-capability-compatible-runtime-options) ──
+
+
+def test_harness_profile_selects_only_provider_declared_options():
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(
+        provider="claude", executable="claude", defaults={"effort": "low"}
+    )
+    profile = template_environment.HarnessProfile.from_input("claude", parsed, harness=claude)
+    assert profile.defaults == {"effort": "low"}
+    assert profile.provider == "claude"
+
+
+def test_harness_profile_rejects_an_option_the_provider_does_not_declare():
+    """A profile selects only from what `provider-declares-harness-
+    capabilities` -- it does not invent its own runtime option."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="claude", defaults={"network": "on"})
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="network"):
+        template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
+
+
+def test_harness_profile_rejects_a_value_the_provider_rejects():
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(
+        provider="claude", defaults={"effort": "minimal"}
+    )
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="effort"):
+        template_environment.HarnessProfile.from_input("bad", parsed, harness=claude)
+
+
+def test_harness_profile_reports_unavailable_when_disabled():
+    """`unavailable-selected-harness-needs-human` needs to know this fact;
+    it does not itself decide what happens next -- that is Phase 6's."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="claude", enabled=False)
+    profile = template_environment.HarnessProfile.from_input("claude", parsed, harness=claude)
+    assert profile.is_available() is False
+
+
+def test_harness_profile_provider_must_be_the_harness_it_configures():
+    """A profile is one configured instance of a provider, and the provider id
+    IS the `Harness.id` -- there is no second registry a mapping could point
+    at (`provider-profile-and-agent-task-are-distinct`)."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="codex")
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="codex"):
+        template_environment.HarnessProfile.from_input("mismatched", parsed, harness=claude)
+
+
+def test_harness_profile_id_must_be_nameable_by_a_task():
+    """`AgentTask.harness` is an `Identifier`; a profile id that pattern rejects
+    could be defined and never referenced."""
+    claude = harness.load(None).valid["claude"]
+    parsed = template_environment.HarnessProfileInput(provider="claude")
+    with pytest.raises(template_environment.TemplateEnvironmentError, match="Claude-Review"):
+        template_environment.HarnessProfile.from_input("Claude-Review", parsed, harness=claude)

@@ -1,6 +1,6 @@
 import { Robot } from "@phosphor-icons/react";
 import { Row, RowState, RowText, StatusGlyph } from "../../../components/ui";
-import { clock, elapsed, shortId, tokens, usd } from "../../../format";
+import { clock, elapsed, shortId, tokenTotal, tokens, usd } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 
 /**
@@ -39,7 +39,7 @@ export function ScopeChips({
 function metricsOf(s: WorkerSession): string {
   const parts: string[] = [];
   if (s.tokens_in != null || s.tokens_out != null) {
-    parts.push(`${tokens((s.tokens_in ?? 0) + (s.tokens_out ?? 0))} tokens`);
+    parts.push(`${tokens(tokenTotal(s))} tokens`);
   }
   if (s.cost_usd != null) parts.push(usd(s.cost_usd));
   if (s.wall_ms != null) parts.push(elapsed(s.wall_ms));

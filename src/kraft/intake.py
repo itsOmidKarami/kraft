@@ -19,6 +19,7 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft import policy as policy_mod
 from kraft.adapters import beads
+from kraft.templates.models import GateNode
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +68,12 @@ async def tick(app) -> list[str]:
         return []
 
     try:
-        repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+        repos = config_mod.load_repos(deps.repos_path(st))
     except config_mod.ConfigError as exc:
         logger.warning("auto-intake: repo config invalid, skipping this tick: %s", exc)
         return []
     wanted = set(cfg.get("repos") or [])
-    # `enabled` defaults to True here because `load_repos` does not default it and
-    # the API's own `RepoBody` does — an entry hand-written without it is on.
-    repos = [r for r in repos if r.get("enabled", True) and (not wanted or r["path"] in wanted)]
+    repos = [r for r in repos if r.enabled and (not wanted or r.path in wanted)]
     # `repos.yaml` paths are stored as written, so a `~` or a trailing slash in
     # the filter matches nothing and the poller ticks forever picking nothing up.
     if wanted and not repos:
@@ -86,7 +85,7 @@ async def tick(app) -> list[str]:
     for repo in repos:
         if slots <= 0:
             break
-        for row in await beads.ready(cwd=repo["path"]):
+        for row in await beads.ready(cwd=repo.path):
             if slots <= 0:
                 break
             if row["id"] in known or not isinstance(row.get("priority"), int):
@@ -108,25 +107,36 @@ async def tick(app) -> list[str]:
     return started
 
 
-async def _start(app, repo: dict, row: dict) -> str | None:
+async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
     from kraft.api import deps
 
     st = app.state
-    template = st.templates.valid.get(repo.get("default_chain_template") or "default")
-    if template is None:
-        logger.warning("auto-intake: %s has no valid chain template, skipping", repo["path"])
+    if st.library is None:
+        # Distinguished from "no such chain": a library that did not parse makes
+        # every chain unresolvable, and logging the chain id here is the same
+        # misleading answer the API's 503 replaced.
+        logger.warning(
+            "auto-intake: the template library is invalid (%s), skipping",
+            "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+        )
+        return None
+    chain = deps.resolve_chain(st, repo.default_chain_template or "default")
+    if chain is None:
+        logger.warning("auto-intake: %s has no valid chain template, skipping", repo.path)
         return None
     # Spec §5 is "an auto-started item passes no gate automatically". A template
     # with no gate at all satisfies that by having nothing to pass, which is the
     # letter of the rule and the opposite of its point: it would run to merge
     # unattended. A human can still start such a chain by hand — they are the
     # judgement the gates exist to invoke.
-    if not any(n.get("gate_after") for n in template.nodes):
+    # A gate is a node whose kind says so (`gate-is-an-ordered-node`), not a
+    # `gate_after` name hung off the node in front of it.
+    if not any(isinstance(n, GateNode) for n in chain.chain.nodes):
         logger.warning(
             "auto-intake: %s uses %r, which has no gate — refusing to start it "
             "unattended; a person can start it from the board",
-            repo["path"],
-            template.id,
+            repo.path,
+            chain.id,
         )
         return None
     try:
@@ -135,13 +145,15 @@ async def _start(app, repo: dict, row: dict) -> str | None:
             st.run_dirs,
             title=row["title"],
             description=row.get("description"),
-            repo=repo["path"],
-            template=template,
+            repo=repo.path,
+            chain=chain,
+            effective_policy=deps.item_policy(st, repo.path),
+            repository_steering=deps.repository_steering(st, repo.path),
             bd_cwd=deps.bd_cwd(),
             bead_id=row["id"],
             # the bead was never filed in KRAFT_BD_CWD — it is adopted from the
             # repo's own .beads and can only be closed there.
-            bead_cwd=repo["path"],
+            bead_cwd=repo.path,
             source="auto_intake",
             bead_priority=row.get("priority"),
         )
@@ -160,16 +172,15 @@ async def _start(app, repo: dict, row: dict) -> str | None:
                     st.db,
                     st.run_dirs,
                     work_item_id=wid,
-                    registry=st.registry,
                     bd_cwd=deps.bd_cwd(),
                     policy=st.policy,
-                    launch=deps.launch(st, repo["path"]),
+                    launch=deps.launch(st, repo.path),
                 ),
             ),
         )
     except deps.AlreadyRunning:
         # Structurally unreachable today (every `_start` call is a freshly
-        # intaken id), kept for the same reason ci_wait/rate_limit_retry are:
+        # intaken id), kept for the same reason waits/rate_limit_retry are:
         # a poller finding its own target already running must log and move
         # on, never crash the tick.
         logger.warning("auto-intake: %s already has a live walk, not double-starting", wid)

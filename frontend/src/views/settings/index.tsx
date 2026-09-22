@@ -2,18 +2,18 @@ import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { SETTINGS_GROUP_LABEL, SETTINGS_NAV } from "../../settingsNav";
 import { AccessPage } from "./AccessPage";
 import { AppearancePage } from "./AppearancePage";
+import { HarnessesPage } from "./HarnessesPage";
 import { IntakePage } from "./IntakePage";
+import { LibraryPage } from "./LibraryPage";
 import { NotifyPage } from "./NotifyPage";
-import { PluginsPage } from "./PluginsPage";
 import { PolicyPage } from "./PolicyPage";
 import { ReposPage } from "./ReposPage";
 import "./settings.css";
-import { SteeringPage } from "./SteeringPage";
 import { TemplatesPage } from "./TemplatesPage";
 
 /* ── shell ────────────────────────────────────────────────────────────────── */
 
-/** The Settings index (m10; W7.9 on desktop too): the nine sections with a
+/** The Settings index (m10; W7.9 on desktop too): the ten sections with a
  *  line each, so the "Settings" crumb names a page, not a redirect to Repos. */
 function SettingsIndex() {
   return (
@@ -42,6 +42,10 @@ export function Settings() {
       <Routes>
         <Route index element={<SettingsIndex />} />
         <Route path="templates" element={<Navigate to="/settings/chains" replace />} />
+        {/* The hook-binding editor went with the registry it edited (Template Schema V1). */}
+        <Route path="plugins" element={<Navigate to="/settings/chains" replace />} />
+        {/* Steering is library profiles now (Kraft-91i6p): edited on the Library screen. */}
+        <Route path="steering" element={<Navigate to="/settings/library" replace />} />
         {SETTINGS_NAV.map((n) => (
           <Route
             key={n.to}
@@ -50,9 +54,9 @@ export function Settings() {
               {
                 repos: <ReposPage />,
                 chains: <TemplatesPage />,
-                plugins: <PluginsPage />,
+                library: <LibraryPage />,
+                harnesses: <HarnessesPage />,
                 policy: <PolicyPage />,
-                steering: <SteeringPage />,
                 intake: <IntakePage />,
                 notify: <NotifyPage />,
                 access: <AccessPage />,

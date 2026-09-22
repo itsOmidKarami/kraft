@@ -181,6 +181,8 @@ export const useStore = create<State>((set, get) => ({
                   model: p.model ?? null,
                   tokens_in: p.tokens_in ?? null,
                   tokens_out: p.tokens_out ?? null,
+                  tokens_cache_write: p.tokens_cache_write ?? null,
+                  tokens_cache_read: p.tokens_cache_read ?? null,
                   cost_usd: p.cost_usd ?? null,
                 }
               : { status };
@@ -200,7 +202,7 @@ export const useStore = create<State>((set, get) => ({
         // server-side — patched here from what the event already carries
         // when there is a prior list to carry forward, and backfilled by the
         // queued hydrate otherwise (first report of a fresh run).
-        case "task_progress":
+        case "plan_progress":
           return {
             ...base,
             ...patchItem(s, id, (w) => ({

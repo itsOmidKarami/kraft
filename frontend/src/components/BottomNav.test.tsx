@@ -27,6 +27,21 @@ describe("BottomNav", () => {
     expect(within(nav).getByRole("link", { name: "Board" })).not.toHaveClass("active");
   });
 
+  // Was the active-class half of e2e phone.visual's bottom-nav test.
+  it.each([
+    ["/", "Board"],
+    ["/analytics", "Analytics"],
+    ["/settings/repos", "Settings"],
+  ])("on %s only the %s tab is active", (route, tab) => {
+    render(
+      <MemoryRouter initialEntries={[route]}>
+        <BottomNav />
+      </MemoryRouter>,
+    );
+    const active = [...screen.getByRole("navigation", { name: "primary" }).querySelectorAll("a.active")];
+    expect(active.map((a) => a.textContent)).toEqual([tab]);
+  });
+
   it("shows a needs-you count badge on the Board tab only", () => {
     useStore.setState({
       workItems: {

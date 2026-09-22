@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from kraft import auth as auth_mod
 from kraft import update as update_mod
-from kraft.api import api_router
+from kraft.api import api_router, deps
 
 
 class Login(BaseModel):
@@ -77,8 +77,13 @@ async def revoke_session(session_id: str, request: Request):
 @api_router.get("/health")
 async def health(request: Request):
     st = request.app.state
-    invalid = st.templates.invalid
     invalid_policy = st.invalid_policy
+    # A library that did not parse makes every chain unselectable, and a chain
+    # that does not resolve makes that one unselectable -- a degraded instance
+    # for the same reason a bad `policy.yaml` is, reported under
+    # `invalid_templates` so the SPA's health badge, `kraft admin health` and
+    # `admin doctor` all show it (Kraft-n1zp9). The other chains still run.
+    invalid = deps.invalid_templates(st)
     return {
         "status": "degraded" if (invalid or invalid_policy) else "ok",
         "invalid_templates": invalid,

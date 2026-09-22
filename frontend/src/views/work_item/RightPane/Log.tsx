@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLineDown, ArrowsOutSimple, Copy } from "@phosphor-icons/react";
 import * as api from "../../../api";
-import { clock, elapsed, logLineText, tokens, usd } from "../../../format";
+import { clock, elapsed, logLineText, tokenTotal, tokens, usd } from "../../../format";
 import { findSession, useStore } from "../../../store";
 import type { LogLine } from "../../../types";
 import { StatusGlyph } from "../../../components/ui";
@@ -26,10 +26,6 @@ const CHIPS: { id: string; label: string }[] = [
   { id: "sys", label: "sys" },
 ];
 
-/** A `task_progress` sys line is a task boundary among hundreds of tool
- *  calls — worth tinting so it reads as one, not just another log line. */
-const TASK_PROGRESS = /^task_progress\s+task=(\d+)\s+"(.*)"$/;
-
 function merge(prev: LogLine[], incoming: LogLine[]): LogLine[] {
   const byLine = new Map(prev.map((l) => [l.n, l]));
   let changed = false;
@@ -49,15 +45,11 @@ export function Log({
   /** Mobile m04: the current-node log caps at 8 lines with a "Show all"
    *  below it, instead of the full scrolling pane desktop gets. */
   capLines,
-  /** `item.progress.total`, for "task N of {taskTotal}" on a task_progress
-   *  line. Omitted (just "task N") when the item carries no progress. */
-  taskTotal,
 }: {
   sessionId: string;
   maximized?: boolean;
   onToggleMaximize?: () => void;
   capLines?: number;
-  taskTotal?: number;
 }) {
   const [expanded, setExpanded] = useState(!capLines);
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -157,7 +149,7 @@ export function Log({
     meta.push(span ? `${session.status} · ${span}` : session.status);
     meta.push(session.round > 0 ? `${session.node_id} · cycle ${session.round}` : session.node_id);
     if (session.tokens_in != null) {
-      const total = (session.tokens_in ?? 0) + (session.tokens_out ?? 0);
+      const total = tokenTotal(session);
       meta.push(
         session.cost_usd != null
           ? `${tokens(total)} tokens · ${usd(session.cost_usd)}`
@@ -231,20 +223,13 @@ export function Log({
         {lines.length > 0 && shown.length === 0 && !error && (
           <p className="empty">no {filter} lines — this session logged {lines.length}</p>
         )}
-        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) => {
-          const m = TASK_PROGRESS.exec(l.text);
-          return (
-            <div key={l.n} className="log-line" data-src={l.src} data-task-progress={m ? "true" : undefined}>
-              <span className="log-t">{l.t ? clock(l.t) : ""}</span>
-              <span className="log-src">{l.src}</span>
-              <span className="log-text">
-                {m
-                  ? `task_progress · task ${m[1]}${taskTotal ? ` of ${taskTotal}` : ""} · "${m[2]}"`
-                  : logLineText(l)}
-              </span>
-            </div>
-          );
-        })}
+        {(capLines && !expanded ? shown.slice(-capLines) : shown).map((l) => (
+          <div key={l.n} className="log-line" data-src={l.src}>
+            <span className="log-t">{l.t ? clock(l.t) : ""}</span>
+            <span className="log-src">{l.src}</span>
+            <span className="log-text">{logLineText(l)}</span>
+          </div>
+        ))}
         {capLines && !expanded && shown.length > capLines && (
           <button className="btn btn-ghost log-show-all" onClick={() => setExpanded(true)}>
             Show all {shown.length} lines

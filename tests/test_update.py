@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 
 import httpx
 import pytest
+import yaml
 
 from kraft import update
 
@@ -101,57 +103,37 @@ def test_every_transport_failure_is_none_not_an_exception(cache, monkeypatch, bo
     assert update.latest() is None
 
 
-def test_a_garbage_body_is_none(cache, monkeypatch):
-    monkeypatch.setattr(update, "_fetch", _fetch({"not": "a list"}))
-    assert update.latest() is None
-
-
-def test_an_empty_release_list_is_none(cache, monkeypatch):
-    monkeypatch.setattr(update, "_fetch", _fetch([]))
-    assert update.latest() is None
-
-
-def test_a_release_with_no_wheel_is_none(cache, monkeypatch):
-    payload = [{"tag_name": "v9.0.0", "draft": False, "prerelease": False, "assets": []}]
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"not": "a list"},
+        [],
+        [{"tag_name": "v9.0.0", "draft": False, "prerelease": False, "assets": []}],
+    ],
+    ids=["garbage-body", "empty-release-list", "no-wheel"],
+)
+def test_a_feed_with_no_usable_release_is_none(cache, monkeypatch, payload):
     monkeypatch.setattr(update, "_fetch", _fetch(payload))
     assert update.latest() is None
 
 
-def test_a_draft_release_is_not_an_update(cache, monkeypatch):
-    """GitHub lists drafts in the same feed; GitLab had no equivalent."""
-    payload = [
-        {
-            "tag_name": "v0.9.9",
-            "draft": True,
-            "prerelease": False,
-            "assets": [{"name": "k.whl", "browser_download_url": "https://x/d.whl"}],
-        },
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
-    assert update.latest().tag == "v0.4.0"
+def _release(tag, *, draft=False, prerelease=False, wheel=True):
+    assets = [{"name": "k.whl", "browser_download_url": "https://x/k.whl"}] if wheel else []
+    return {"tag_name": tag, "draft": draft, "prerelease": prerelease, "assets": assets}
 
 
-def test_a_prerelease_is_not_an_update(cache, monkeypatch):
-    payload = [
-        {
-            "tag_name": "v1.0.0rc1",
-            "draft": False,
-            "prerelease": True,
-            "assets": [{"name": "k.whl", "browser_download_url": "https://x/p.whl"}],
-        },
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
-    assert update.latest().tag == "v0.4.0"
-
-
-def test_a_release_with_no_wheel_is_skipped(cache, monkeypatch):
-    payload = [
-        {"tag_name": "v0.9.9", "draft": False, "prerelease": False, "assets": []},
-        *RELEASE_JSON,
-    ]
-    monkeypatch.setattr(update, "_fetch", _fetch(payload))
+@pytest.mark.parametrize(
+    "newer",
+    [
+        # GitHub lists drafts in the same feed; GitLab had no equivalent.
+        _release("v0.9.9", draft=True),
+        _release("v1.0.0rc1", prerelease=True),
+        _release("v0.9.9", wheel=False),
+    ],
+    ids=["draft", "prerelease", "no-wheel"],
+)
+def test_a_release_that_is_not_an_update_is_skipped(cache, monkeypatch, newer):
+    monkeypatch.setattr(update, "_fetch", _fetch([newer, *RELEASE_JSON]))
     assert update.latest().tag == "v0.4.0"
 
 
@@ -181,6 +163,8 @@ def test_perform_downloads_the_wheel_and_installs_the_local_copy(monkeypatch):
     seen = {}
 
     def run(command, **kwargs):
+        if command[:3] == ["uv", "tool", "list"]:
+            return type("R", (), {"returncode": 0, "stdout": ""})()
         seen["command"] = command
         wheel_path = pathlib.Path(command[5])
         seen["wheel_bytes"] = wheel_path.read_bytes()
@@ -284,6 +268,335 @@ def test_perform_under_homebrew_without_brew_is_a_readable_failure(monkeypatch):
         update.perform(update.Release(tag="v0.4.0", wheel_url="u/w.whl"), run=run)
 
 
+#: `uv tool list` on a machine installed before the kraft -> kraft-sdlc PyPI
+#: rename and updated since: two receipts, both claiming the `kraft` command.
+PRE_RENAME_LISTING = "black v24.1.0\n- black\nkraft v0.40.0\n- kraft\nkraft-sdlc v0.76.2\n- kraft\n"
+
+
+@pytest.mark.parametrize(
+    "listing, stale",
+    [
+        (PRE_RENAME_LISTING, True),
+        ("kraft-sdlc v0.76.2\n- kraft\n", False),
+        ("", False),
+    ],
+    ids=["pre-rename-receipt", "kraft-sdlc-only", "no-tools"],
+)
+def test_perform_refuses_a_stale_pre_rename_kraft_tool(monkeypatch, listing, stale):
+    """Kraft-rswxq: a `kraft` uv tool left over from before the PyPI rename
+    shares the `kraft` command with `kraft-sdlc`, and `uv tool uninstall
+    kraft` -- the obvious cleanup -- deletes that command for both. Update
+    stops before it downloads anything and names both commands, in order;
+    `uv` itself is never reached past `tool list`."""
+    downloads = []
+    monkeypatch.setattr(update, "_request", lambda url, _timeout: downloads.append(url) or b"")
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        out = listing if command[:3] == ["uv", "tool", "list"] else ""
+        return type("R", (), {"returncode": 0, "stdout": out})()
+
+    release = update.Release(tag="v0.4.0", wheel_url="u/w.whl")
+    if not stale:
+        assert update.perform(release, run=run) == 0
+        assert calls[-1][:3] == ["uv", "tool", "install"]
+        return
+    with pytest.raises(SystemExit) as err:
+        update.perform(release, run=run)
+    assert calls == [["uv", "tool", "list"]], "nothing may be installed over the stale receipt"
+    assert not downloads, "the wheel was downloaded for an update that cannot run"
+    message = str(err.value)
+    assert "uv tool uninstall kraft\n  uv tool install --force --reinstall kraft-sdlc" in message
+
+
 def test_is_homebrew_install_is_false_for_a_uv_tool_prefix(monkeypatch):
     monkeypatch.setattr(update.sys, "prefix", "/Users/x/.local/share/uv/tools/kraft-sdlc")
     assert update._is_homebrew_install() is False
+
+
+# ── a major update replaces an incompatible template configuration
+# (major-update-*, migration-helper-is-not-guaranteed) ──
+
+#: What a pre-V1 home holds that V1 has no reader for, and what it holds that
+#: belongs to this machine rather than to the template schema.
+LEGACY_ONLY = {"registry.yaml": "hooks: {}\n", "my-chain.yaml": "id: my-chain\nnodes: []\n"}
+MACHINE = {
+    "access.yaml": "bind: 127.0.0.1\n",
+    "notify.yaml": "enabled: false\n",
+    "repos.yaml": "repos: [{path: /work/mine}]\n",
+    "intake.yaml": "enabled: true\n",
+    "steering/mine.md": "Ask before deleting anything.\n",
+    "theme.yaml": "accent: teal\n",
+    "harnesses/mine.yaml": "id: mine\n",
+}
+
+
+def _tree(root: pathlib.Path) -> dict[str, bytes]:
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.fixture
+def legacy_home(tmp_path, monkeypatch):
+    """A pre-V1 `$KRAFT_HOME/templates`, a V1 bundle to replace it with (the
+    repository's own `templates/`), and a release feed that is already current,
+    so `kraft admin update` has only the configuration to do."""
+    from kraft import cli
+
+    repo_templates = pathlib.Path(__file__).resolve().parents[1] / "templates"
+    bundle = tmp_path / "_bundled"
+    shutil.copytree(repo_templates, bundle / "templates")
+    monkeypatch.setattr(cli.admin, "BUNDLED", bundle)
+    home = tmp_path / "home" / "templates"
+    for name, text in {**LEGACY_ONLY, **MACHINE}.items():
+        (home / name).parent.mkdir(parents=True, exist_ok=True)
+        (home / name).write_text(text)
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(home))
+    monkeypatch.setattr(update, "latest", lambda **_: update.Release("v1.0.0", "u"))
+    monkeypatch.setattr(update, "installed", lambda: "1.0.0")
+    return home
+
+
+def _backups(home: pathlib.Path) -> list[pathlib.Path]:
+    return sorted(home.parent.glob(f"{home.name}.pre-v1-*"))
+
+
+@pytest.mark.parametrize("accept", ["flag", "prompt"])
+def test_major_update_requires_acceptance_and_makes_backup(
+    legacy_home, monkeypatch, capsys, accept
+):
+    from kraft import cli
+    from kraft.templates.library import TemplateLibrary
+
+    before = _tree(legacy_home)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt: "y" if accept == "prompt" else pytest.fail("asked despite -y"),
+    )
+
+    cli.main(["admin", "update", *(["-y"] if accept == "flag" else [])])
+
+    # The whole configuration it replaced, kept byte for byte beside it.
+    [backup] = _backups(legacy_home)
+    assert _tree(backup) == before
+    # The V1 configuration is installed, and resolves.
+    assert TemplateLibrary.from_yaml_dir(legacy_home).resolve_chain("default").id == "default"
+    # What belongs to this machine, not to the template schema, is carried over.
+    for name, text in MACHINE.items():
+        assert (legacy_home / name).read_text() == text
+    # Nothing is migrated: a legacy chain is not converted into the new home
+    # (migration-helper-is-not-guaranteed); it is only in the backup.
+    assert not (legacy_home / "my-chain.yaml").exists()
+    out = capsys.readouterr().out
+    assert str(backup) in out
+
+
+@pytest.mark.parametrize(
+    ("answer", "tty"), [("n", True), ("", True), (None, False)], ids=["no", "enter", "no-terminal"]
+)
+def test_major_update_without_acceptance_changes_nothing(
+    legacy_home, monkeypatch, capsys, answer, tty
+):
+    from kraft import cli
+
+    before = _tree(legacy_home)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: tty)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt: answer if tty else pytest.fail("prompted with no terminal"),
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "update"])
+
+    assert caught.value.code == 1
+    assert _tree(legacy_home) == before
+    assert _backups(legacy_home) == []
+    err = capsys.readouterr().err
+    assert "-y" in err
+
+
+def test_the_major_update_warns_before_it_asks(legacy_home, monkeypatch, capsys):
+    """`major-update-requires-explicit-acceptance`: the breaking change is
+    stated before the question, not after the answer."""
+    from kraft import cli
+
+    asked = []
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(capsys.readouterr()) or "n")
+
+    with pytest.raises(SystemExit):
+        cli.main(["admin", "update"])
+
+    [seen] = asked
+    assert "not compatible" in seen.err
+    assert "backup" in seen.err
+
+
+def test_an_update_leaves_a_v1_home_alone(legacy_home, monkeypatch):
+    """A home that already has the V1 `library.yaml` is not legacy, whatever
+    else sits beside it -- no prompt, no backup, no change."""
+    from kraft import cli
+
+    (legacy_home / "library.yaml").write_text("tasks: {}\n")
+    before = _tree(legacy_home)
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("asked about a V1 home"))
+
+    cli.main(["admin", "update"])
+
+    assert _tree(legacy_home) == before
+    assert _backups(legacy_home) == []
+
+
+#: A pre-V1 `policy.yaml` an operator tuned: values V1 still has a key for, a
+#: legacy fix-loop cap V1 never reads, a knob V1's schema has no key for, and
+#: a value V1 refuses.
+LEGACY_POLICY = {
+    "loops": {
+        "verify_fix_loop": {"attempts": 5, "wall_clock_s": 3600},
+        "ci_wait": {"attempts": 90, "wall_clock_s": 2700},
+    },
+    "default": {"attempts": 4, "wall_clock_s": 1800},
+    "findings": {"loop_severities": ["critical"]},
+    "budget": {"work_item_usd": 25, "daily_usd": 500},
+    "rate_limit_retries": 20,
+    "forge_cli_timeout_s": 600,
+    "max_concurrent": 7,
+    "escalate_after": 3,
+    "archive": {"after_days": -1},
+}
+
+
+def _update_with_policy(home, capsys) -> tuple[dict, str]:
+    from kraft import cli
+
+    (home / "policy.yaml").write_text(yaml.safe_dump(LEGACY_POLICY))
+    cli.main(["admin", "update", "-y"])
+    captured = capsys.readouterr()
+    return yaml.safe_load((home / "policy.yaml").read_text()), captured.out + captured.err
+
+
+def test_a_major_update_keeps_the_policy_values_v1_still_has(legacy_home, capsys):
+    """Ruling 172: a spend cap or a forge timeout an operator set survives the
+    update. Every key the V1 policy schema still has keeps its value, and the
+    result is a valid V1 policy."""
+    from kraft.policy import PolicyInput
+
+    policy, _ = _update_with_policy(legacy_home, capsys)
+
+    assert policy["budget"] == {"work_item_usd": 25, "daily_usd": 500}
+    assert policy["rate_limit_retries"] == 20
+    assert policy["forge_cli_timeout_s"] == 600
+    assert policy["max_concurrent"] == 7
+    assert policy["findings"] == {"loop_severities": ["critical"]}
+    assert policy["default"] == {"attempts": 4, "wall_clock_s": 1800}
+    PolicyInput.from_yaml(legacy_home / "policy.yaml")
+
+
+def test_a_major_update_reports_each_policy_key_it_drops(legacy_home, capsys):
+    """What V1 has no key for is dropped -- and said, with the value it had, so
+    the operator can see what the backup holds that the new file does not."""
+    policy, output = _update_with_policy(legacy_home, capsys)
+
+    assert "verify_fix_loop" not in policy["loops"]
+    assert "escalate_after" not in policy
+    assert "loops.verify_fix_loop" in output and "'attempts': 5" in output
+    assert "escalate_after = 3" in output
+    # A key V1 has, with a value it refuses: dropped too, the seed's kept.
+    assert "archive = {'after_days': -1}" in output
+    assert policy["archive"] == {"after_days": 30}
+    # Task 9 retired `loops.ci_wait`: a wait's timeout is its task's own now.
+    assert "ci_wait" not in policy["loops"]
+    assert "loops.ci_wait" in output and "'attempts': 90" in output
+
+
+@pytest.mark.parametrize("next_step", ["start", "update"])
+def test_a_crash_between_the_swap_renames_is_finished_not_reseeded(
+    legacy_home, monkeypatch, capsys, next_step
+):
+    """Kraft-cttgx. Killed after the old home moved to its backup and before the
+    new one moved into place, the home is missing. The next start -- or the next
+    update -- finishes the swap from the staged copy and says so; it never seeds
+    vanilla defaults over the operator's configuration."""
+    from kraft import cli
+
+    before = _tree(legacy_home)
+    real_rename = pathlib.Path.rename
+    renames = []
+
+    def rename(self, target):
+        renames.append(self)
+        if len(renames) == 2:
+            raise OSError("power cut")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", rename)
+    with pytest.raises(OSError, match="power cut"):
+        cli.main(["admin", "update", "-y"])
+    monkeypatch.setattr(pathlib.Path, "rename", real_rename)
+    assert not legacy_home.exists()  # the crash point
+    capsys.readouterr()
+
+    if next_step == "start":
+        assert cli.seed_home(legacy_home) is False
+    else:
+        cli.main(["admin", "update"])
+
+    assert (legacy_home / "library.yaml").is_file()
+    for name, text in MACHINE.items():
+        assert (legacy_home / name).read_text() == text
+    [backup] = _backups(legacy_home)
+    assert _tree(backup) == before
+    assert "interrupted" in capsys.readouterr().err
+
+
+def test_a_staging_dir_no_update_finished_writing_is_never_installed(legacy_home, capsys):
+    """A `templates.seeding` beside a backup is not proof of a staged update: an
+    interrupted first seed leaves one too. Only a staging the update marked
+    complete is installed; anything else is seeded over as before."""
+    from kraft import cli
+
+    cli.main(["admin", "update", "-y"])
+    shutil.rmtree(legacy_home)
+    partial = legacy_home.with_name(legacy_home.name + ".seeding")
+    partial.mkdir()
+    (partial / "junk.yaml").write_text("half: written\n")
+
+    assert cli.seed_home(legacy_home) is True
+
+    assert (legacy_home / "library.yaml").is_file()
+    assert not (legacy_home / "junk.yaml").exists()
+
+
+def _script(path: pathlib.Path) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize(
+    "path_entries, shadowed",
+    [
+        (["this/bin"], False),
+        (["linked"], False),
+        (["other/bin", "this/bin"], True),
+        ([], False),
+    ],
+    ids=["this-install", "symlink-to-this-install", "older-install-first", "not-on-path"],
+)
+def test_shadowing_kraft_names_another_install_ahead_on_path(
+    tmp_path, monkeypatch, path_entries, shadowed
+):
+    """Kraft-xs3ri: a Homebrew `kraft` ahead of the uv one kept every MCP
+    session on old code after `kraft admin update`. `~/.local/bin/kraft` is a
+    symlink into the uv venv, so a symlink to this install is still this one."""
+    _script(tmp_path / "this" / "bin" / "kraft")
+    _script(tmp_path / "other" / "bin" / "kraft")
+    (tmp_path / "linked").mkdir()
+    (tmp_path / "linked" / "kraft").symlink_to(tmp_path / "this" / "bin" / "kraft")
+    monkeypatch.setattr(update.sys, "executable", str(tmp_path / "this" / "bin" / "python"))
+    monkeypatch.setenv("PATH", ":".join(str(tmp_path / e) for e in path_entries) or "/nonexistent")
+    expected = str(tmp_path / "other" / "bin" / "kraft") if shadowed else None
+    assert update.shadowing_kraft() == expected

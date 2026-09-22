@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from kraft import events
+from kraft import usage as _usage
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import _span_ms
 from kraft.usage import Usage
@@ -236,7 +238,7 @@ def reusable_session(
     since it ran. The `node_started` shape above needs a departure to some
     other node in between, which a gate with no `reject_to` never produces:
     `gates.reject_target` falls back to the gate node itself, so `spec`,
-    `plan` and `chain_review` (`templates/default.yaml`) re-enter their own
+    `plan` and `final_review` (`templates/chains/default.yaml`) re-enter their own
     node with nothing in between, and their artifacts live in gitignored
     `.engineering/`, so `head_sha` does not move either. On a second
     rejection of such a gate every other key here still matches the first
@@ -266,12 +268,31 @@ def reusable_session(
     already-closed-out attempt (Kraft-s15p0's same shape, a stale `failed`
     row a later `done` one supersedes) does not share this (round, head_sha)
     at all and is unaffected.
+
+    Also excluded: a session from before a `/retry` (`work_item_retried`) or
+    a base-change restart (`base_change_restart`). Both start a new pass that
+    restarts the round numbers -- a retry deletes the loop counter a round is
+    seeded from, a restart clears every counter in its span -- so a new pass
+    measures, repairs and recovers at the very rounds the old one used, and a
+    steered retry of a task that makes no commit leaves `head_sha` where it
+    was too. Without this, the steered repair a human asked for is "reused"
+    from before the retry and never dispatched (Kraft-znsvg: the fix loop's
+    repair and `walk.recover_node`'s on_failure repair alike). Decided here,
+    once, rather than by any one caller: the fix loop's repair used to be
+    exempted from reuse at its own call site, which left every other caller
+    open.
     """
     if head_sha is None:
         return None
     return conn.execute(
         "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
         "AND hook_point = ? AND round = ? AND status = 'done' AND head_sha = ? "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM events restarted "
+        "  WHERE restarted.work_item_id = worker_sessions.work_item_id "
+        "  AND restarted.type IN ('work_item_retried', 'base_change_restart') "
+        "  AND restarted.created_at > worker_sessions.created_at"
+        ") "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM events WHERE events.work_item_id = worker_sessions.work_item_id "
         "  AND events.type = 'node_completed' "
@@ -394,6 +415,14 @@ def session_running(conn: sqlite3.Connection, session_id, pid, pid_start_time) -
     )
 
 
+#: Every token kind a row stores, apart (Ruling 211), in `_tokens`' order.
+_SET_TOKENS = ", ".join(f"{k} = ?" for k in _usage.KINDS)
+
+
+def _tokens(usage: Usage) -> tuple[int, ...]:
+    return tuple(getattr(usage, k) for k in _usage.KINDS)
+
+
 def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
     """Live token counts and model for a session that is still running (Kraft-54dk).
 
@@ -409,10 +438,39 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     settled, and a late progress write must not reopen them.
     """
     conn.execute(
-        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ? "
-        "WHERE id = ? AND status = 'running'",
-        (usage.model, usage.tokens_in, usage.tokens_out, session_id),
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS} WHERE id = ? AND status = 'running'",
+        (usage.model, *_tokens(usage), session_id),
     )
+
+
+def _own_share(conn: sqlite3.Connection, session_id, usage: Usage | None) -> Usage | None:
+    """`usage` less what an earlier session of this item and task already
+    recorded, when this one resumed that one's CLI session (Kraft-s7c04.62,
+    `a-resumed-cli-session-is-counted-once`): a paused task's resume and every
+    escalation turn after a thread's first run `--resume`, and the CLI reports
+    cost and `modelUsage` as running totals over the whole session. The
+    earlier session is the latest one on the same task whose log names the
+    same CLI session -- not just the latest, since a turn refused before launch
+    can sit between two turns of one thread."""
+    me = conn.execute(
+        "SELECT rowid, work_item_id, hook_point, log_path FROM worker_sessions WHERE id = ?",
+        (session_id,),
+    ).fetchone()
+    if usage is None or me is None or not me["log_path"]:
+        return usage
+    session_of = _usage.READERS["claude-stream-json"].session_id
+    cli = session_of(Path(me["log_path"]))
+    if cli is None:
+        return usage
+    earlier = conn.execute(
+        "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND hook_point = ? "
+        "AND rowid < ? AND log_path IS NOT NULL ORDER BY rowid DESC",
+        (me["work_item_id"], me["hook_point"], me["rowid"]),
+    ).fetchall()
+    for row in earlier:
+        if session_of(Path(row["log_path"])) == cli:
+            return _usage.net_of_earlier(usage, Path(me["log_path"]), Path(row["log_path"]), cli)
+    return usage
 
 
 def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None) -> None:
@@ -440,12 +498,13 @@ def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None
     Guarded on `status = 'paused'` for the reason `session_progress` guards on
     `'running'`: a row that has moved on has settled numbers.
     """
+    usage = _own_share(conn, session_id, usage)
     if usage is None:
         return
     conn.execute(
-        "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, cost_usd = ? "
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ? "
         "WHERE id = ? AND status = 'paused'",
-        (usage.model, usage.tokens_in, usage.tokens_out, usage.cost_usd, session_id),
+        (usage.model, *_tokens(usage), usage.cost_usd, session_id),
     )
 
 
@@ -497,16 +556,16 @@ def session_exited(
         payload["concerns"] = concerns
     if question:
         payload["question"] = question
+    usage = _own_share(conn, session_id, usage)
     if usage is not None:
         conn.execute(
-            "UPDATE worker_sessions SET model = ?, tokens_in = ?, tokens_out = ?, "
-            "cost_usd = ?, wall_ms = ? WHERE id = ?",
-            (usage.model, usage.tokens_in, usage.tokens_out, usage.cost_usd, wall_ms, session_id),
+            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, wall_ms = ? "
+            "WHERE id = ?",
+            (usage.model, *_tokens(usage), usage.cost_usd, wall_ms, session_id),
         )
         payload |= {
             "model": usage.model,
-            "tokens_in": usage.tokens_in,
-            "tokens_out": usage.tokens_out,
+            **dict(zip(_usage.KINDS, _tokens(usage), strict=True)),
             "cost_usd": usage.cost_usd,
         }
     else:
@@ -563,20 +622,6 @@ def session_status(conn: sqlite3.Connection, session_id: str) -> str | None:
     return row["status"] if row else None
 
 
-def recent_sessions_for_hook(
-    conn: sqlite3.Connection, hook_point: str, limit: int = 5
-) -> list[dict]:
-    """The Plugins binding detail's "LAST RUNS" (design 28): the most recent
-    sessions dispatched for one hook, across every work item — not filtered
-    to one item, the same way the binding itself isn't."""
-    rows = conn.execute(
-        "SELECT work_item_id, node_id, round, status, wall_ms, created_at "
-        "FROM worker_sessions WHERE hook_point = ? ORDER BY created_at DESC LIMIT ?",
-        (hook_point, limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> list[sqlite3.Row]:
     """Every running session on the item's current node — all of them on a
     concurrent node like `verify` — plus any running escalation session
@@ -598,3 +643,50 @@ def running_sessions_for_node(conn: sqlite3.Connection, work_item_id: str) -> li
         "AND (s.node_id = w.current_node_id OR s.hook_point = 'escalation')",
         (work_item_id,),
     ).fetchall()
+
+
+def live_session_ids(conn: sqlite3.Connection, work_item_id: str) -> list[str]:
+    """Every session of this item still running or just started, whatever
+    its node or task: what `stops.refuse_live_sandboxed_session` waits on."""
+    return [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM worker_sessions WHERE work_item_id = ? "
+            "AND status IN ('running', 'pending')",
+            (work_item_id,),
+        ).fetchall()
+    ]
+
+
+def running_sessions_under(conn: sqlite3.Connection, work_item_id: str, path: str) -> list:
+    """The running (or just-started) sessions of the task at `path`, or of
+    every task under a step path -- what a skip of that scope stops, and
+    nothing beside it."""
+    return conn.execute(
+        "SELECT id, pid, hook_point FROM worker_sessions WHERE work_item_id = ? "
+        "AND status IN ('running', 'pending') "
+        "AND (hook_point = ? OR substr(hook_point, 1, length(?)) = ?)",
+        (work_item_id, path, path + ".", path + "."),
+    ).fetchall()
+
+
+def resumable_agent_session(
+    conn: sqlite3.Connection, work_item_id: str, node_id: str, hook_point: str
+):
+    """The session a paused agent task resumes: the task's latest session in
+    this node, if an operator paused it and no retry or restart has begun a new
+    pass since (`reusable_session`'s rule, Kraft-znsvg). None otherwise."""
+    latest = conn.execute(
+        "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+        "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (work_item_id, node_id, hook_point),
+    ).fetchone()
+    if latest is None or latest["status"] != "paused":
+        return None
+    newer_pass = conn.execute(
+        "SELECT 1 FROM events WHERE work_item_id = ? "
+        "AND type IN ('work_item_retried', 'run_forked', 'base_change_restart') "
+        "AND created_at > ? LIMIT 1",
+        (work_item_id, latest["created_at"]),
+    ).fetchone()
+    return None if newer_pass else latest

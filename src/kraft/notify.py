@@ -104,19 +104,16 @@ class Notifier:
         this must not raise -- that would leave the broadcaster, indexer,
         `index_conn` and database un-stopped on the way out of `lifespan` --
         and `reload()` calling this must not keep serving a stale config
-        either. Falling back to `NOTIFY_DEFAULT` (`enabled: False`) means a
+        either. Falling back to the defaults (`enabled: False`) means a
         config Kraft cannot parse sends nothing, which is the same failure
         mode as any other invalid setting: safe, not silent -- the warning
-        below is the record. `config_mod.load_notify` already sanitizes the
+        below is the record. `config_mod.Notify.load` already sanitizes the
         message before it ever reaches here, so logging it is not a leak."""
         try:
-            return config_mod.load_notify(self._config_path).model_dump()
+            return config_mod.Notify.load(self._config_path).model_dump()
         except config_mod.ConfigError as exc:
             logger.warning("%s -- notifications disabled until it is fixed", exc)
-            return {
-                **config_mod.NOTIFY_DEFAULT,
-                "events": list(config_mod.NOTIFY_DEFAULT["events"]),
-            }
+            return config_mod.Notify().model_dump()
 
     def notify(self) -> None:
         self._wakeup.set()

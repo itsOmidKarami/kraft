@@ -34,6 +34,11 @@ export const parentOf = (r: Repo, all: Repo[]): Repo | undefined =>
     .filter((p) => p.path !== r.path && r.path.startsWith(`${p.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
+/** An absent `enabled` means enabled (Ruling 212): only an explicit `false`
+ *  turns a repo off. Exported for IntakeModal, which filters by the same
+ *  rule. */
+export const repoEnabled = (r: Pick<Repo, "enabled">): boolean => r.enabled !== false;
+
 function AddRepo({
   templates,
   onClose,
@@ -192,11 +197,22 @@ function AddRepo({
 
 /* ── 5b repo detail (desktop 25, phone m12 detail) ──────────────────────── */
 
-const ROOT_MERGE_LABEL: Record<Repo["default_root_merge_policy"], string> = {
-  bump: "Bump",
-  skip: "Skip",
-  bump_no_mr: "Bump, no MR",
-};
+/** `profile=model` per line <-> `Repo.models`. A line without `=` is still
+ *  being typed, so it is left out of the map rather than refused. */
+function parseModels(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const at = line.indexOf("=");
+    const [k, v] = [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+    if (at > 0 && k && v) out[k] = v;
+  }
+  return out;
+}
+
+const modelsText = (models: Record<string, string>) =>
+  Object.entries(models)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
 
 function RepoDetail({
   path,
@@ -216,11 +232,15 @@ function RepoDetail({
   reload: () => Promise<void>;
 }) {
   const phone = usePhone();
+  const { value: library } = useResource(() => api.getLibrary());
   const repo = repos.find((r) => r.path === path);
   const [draft, setDraft] = useState<Repo | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Raw text while editing, so a half-typed line survives the re-render (the
+  // map is parsed from it on every change); null shows the saved map.
+  const [models, setModels] = useState<string | null>(null);
   const current = draft ?? repo;
   const dirty = draft !== null;
 
@@ -239,6 +259,7 @@ function RepoDetail({
       };
       await api.patchRepo(path, payload);
       setDraft(null);
+      setModels(null);
       await reload();
       setMessage("saved");
     } catch (e) {
@@ -269,12 +290,12 @@ function RepoDetail({
       <SectionLabel>General</SectionLabel>
       <div className="field">
         <Switch
-          checked={current.enabled}
+          checked={repoEnabled(current)}
           onChange={(next) => set({ enabled: next })}
-          label={`${current.enabled ? "disable" : "enable"} ${current.name}`}
+          label={`${repoEnabled(current) ? "disable" : "enable"} ${current.name}`}
         />
         <span className="field-hint">
-          {current.enabled
+          {repoEnabled(current)
             ? "enabled — new items can target it"
             : "disabled — new items can't target it; running items keep going"}
         </span>
@@ -311,13 +332,17 @@ function RepoDetail({
         </div>
       </div>
       <div className="field">
-        <label htmlFor="repo-default-model">default model</label>
-        <input
-          id="repo-default-model"
-          className="input"
-          placeholder="inherit from registry"
-          value={current.default_model ?? ""}
-          onChange={(e) => set({ default_model: e.target.value || null })}
+        <label htmlFor="repo-models">models</label>
+        <textarea
+          id="repo-models"
+          className="input mono"
+          rows={2}
+          placeholder="claude=opus — one harness profile per line; unset inherits the profile's"
+          value={models ?? modelsText(current.models ?? {})}
+          onChange={(e) => {
+            setModels(e.target.value);
+            set({ models: parseModels(e.target.value) });
+          }}
         />
       </div>
 
@@ -447,7 +472,10 @@ function RepoDetail({
       <p className="settings-note">on.mr.open · on.ci.poll · on.mr.sync · on.merge</p>
       <div className="field">
         <div className="seg" role="radiogroup" aria-label="forge">
-          {(["gitlab", "github", "none"] as const).map((f) => (
+          {/* `fake` is dev-only (Ruling 147): shown only to a repo saved on it,
+              so nobody picks a forge that opens nothing by accident -- keyed on
+              the saved repo, so a draft switch away keeps the way back. */}
+          {[...(repo.forge === "fake" ? ["fake"] : []), "gitlab", "github", "none"].map((f) => (
             <label key={f} className="seg-opt">
               <input
                 type="radio"
@@ -455,7 +483,7 @@ function RepoDetail({
                 checked={(current.forge ?? "none") === f}
                 onChange={() => set({ forge: f === "none" ? null : f })}
               />
-              {f}
+              {f === "fake" ? "fake (dev only)" : f}
             </label>
           ))}
         </div>
@@ -469,24 +497,6 @@ function RepoDetail({
           value={current.project ?? ""}
           onChange={(e) => set({ project: e.target.value || null })}
         />
-      </div>
-
-      <SectionLabel>Cross-repo</SectionLabel>
-      <div className="field">
-        <label>root merge policy</label>
-        <div className="seg" role="radiogroup" aria-label="default root merge policy">
-          {(["bump", "skip", "bump_no_mr"] as const).map((p) => (
-            <label key={p} className="seg-opt">
-              <input
-                type="radio"
-                name="repo-root-merge"
-                checked={current.default_root_merge_policy === p}
-                onChange={() => set({ default_root_merge_policy: p })}
-              />
-              {ROOT_MERGE_LABEL[p]}
-            </label>
-          ))}
-        </div>
       </div>
 
       <SectionLabel>Agent</SectionLabel>
@@ -503,16 +513,14 @@ function RepoDetail({
               {name} ✕
             </button>
           ))}
-          <button
-            type="button"
-            className="tag tag-off"
-            onClick={() => {
-              const name = window.prompt("Steering file name");
-              if (name) set({ steering: [...current.steering, name] });
-            }}
+          <select aria-label="add steering profile" className="input" value=""
+            onChange={(e) => e.target.value && set({ steering: [...current.steering, e.target.value] })}
           >
-            + add
-          </button>
+            <option value="">+ add a library profile</option>
+            {(library?.components ?? [])
+              .filter((c) => c.kind === "steering" && !current.steering.includes(c.name))
+              .map((c) => <option key={c.name}>{c.name}</option>)}
+          </select>
         </div>
       </div>
       <div className="field">
@@ -546,7 +554,12 @@ function RepoDetail({
           <Check size={14} />
           Save
         </button>
-        <button className="btn btn-ghost" disabled={busy || !dirty} onClick={() => setDraft(null)}>
+        <button className="btn btn-ghost" disabled={busy || !dirty}
+          onClick={() => {
+            setDraft(null);
+            setModels(null);
+          }}
+        >
           Revert
         </button>
         <span className="save-hint">{message ?? "writes repos.yaml"}</span>
@@ -688,7 +701,7 @@ export function ReposPage() {
                   sub={[
                     r.default_chain_template,
                     r.forge && `${r.forge} ${r.project ?? ""}`.trim(),
-                    !r.enabled && "disabled",
+                    !repoEnabled(r) && "disabled",
                     parentOf(r, repos) && `in ${parentOf(r, repos)!.name}`,
                   ]
                     .filter(Boolean)
@@ -731,16 +744,16 @@ export function ReposPage() {
               <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
               <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
                 <Switch
-                  checked={r.enabled}
+                  checked={repoEnabled(r)}
                   onChange={(next) =>
                     api
                       .patchRepo(r.path, { enabled: next })
                       .then(reload)
                       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
                   }
-                  label={`${r.enabled ? "disable" : "enable"} ${r.name}`}
+                  label={`${repoEnabled(r) ? "disable" : "enable"} ${r.name}`}
                 />
-                <span className="row-sub">{r.enabled ? "enabled" : "disabled"}</span>
+                <span className="row-sub">{repoEnabled(r) ? "enabled" : "disabled"}</span>
               </span>
               <span onClick={(e) => e.stopPropagation()}>
                 <OverflowMenu
@@ -786,7 +799,7 @@ export function ReposPage() {
                   <span className="row-sub mono">{r.test_command ?? "not detected"}</span>
                   <span className="repo-row-state" onClick={(e) => e.stopPropagation()}>
                     <Switch
-                      checked={r.enabled}
+                      checked={repoEnabled(r)}
                       onChange={(next) =>
                         api
                           .patchRepo(r.path, { enabled: next })

@@ -74,9 +74,9 @@ Each skill is one moment you'd reach for Kraft, not one skill per tool:
 - **`/kraft:gates`** — Approve or reject the gate a work item is waiting on,
   or pause/resume one heading the wrong way.
 - **`/kraft:check`** — Check whether a repo's Kraft config has drifted from
-  what this version ships: a hook stuck on a placeholder, a chain missing a
-  node, a hook naming a skill that isn't installed. Report-only unless asked
-  to fix.
+  what this version ships: a chain missing a node, a chain that no longer
+  resolves, a task naming a skill that isn't installed. Report-only unless
+  asked to fix.
 
 Most call the same MCP tools listed below; `onboard` and `check` instead run
 `kraft admin doctor`/`admin init` directly as shell commands. Either way,
@@ -89,8 +89,8 @@ browser uses:
 | | |
 |---|---|
 | read | `list_work_items`, `get_work_item`, `search` |
-| write | `create_work_item`, `ensure_repo` |
-| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item` |
+| write | `create_work_item`, `ensure_repo`, `set_work_item_policy` |
+| act | `approve_gate`, `reject_gate`, `pause_work_item`, `resume_work_item`, `retry_work_item`, `skip_work_item`, `complete_work_item`, `cancel_work_item` |
 
 That's the everyday subset, not the full tool list — every `kraft` subcommand
 (see the [CLI reference](cli.md)) has an MCP twin.

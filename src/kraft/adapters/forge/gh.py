@@ -7,7 +7,15 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
+from kraft.adapters.forge.models import (
+    MR,
+    CIState,
+    CIStatus,
+    FailedJob,
+    ForgeError,
+    MRRef,
+    ReviewResult,
+)
 
 _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "closed"}
 
@@ -18,10 +26,27 @@ _GH_MR_STATES: dict[str, str] = {"OPEN": "open", "MERGED": "merged", "CLOSED": "
 _GH_FAILURE_REASON = {
     "TIMED_OUT": "job_execution_timeout",
     "STARTUP_FAILURE": "runner_system_failure",
-    "CANCELLED": "cancelled",
     "FAILURE": "script_failure",
     "ACTION_REQUIRED": "script_failure",
 }
+#: The conclusions that are a red verdict. Not CANCELLED: a cancelled run is
+#: never a verdict (Kraft-zn8me, Kraft-7g5h4, Kraft-50bhi). GitHub cancels a
+#: superseded run's jobs seconds before it registers the successor's checks, so
+#: a read in that window sees only the cancelled rows. It is a wait; a run a
+#: person cancelled with no successor is `ci.render_ci`'s "abandoned".
+_GH_RED = frozenset(_GH_FAILURE_REASON)
+_GH_SETTLED_OK = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+
+
+def _cancelled_at(rows: list[dict], *, at: str) -> str:
+    """The latest cancel among `rows` when a cancel is all they wait on --
+    every other row settled and none red -- else "" (Kraft-kbqmk)."""
+    ends = [str(r.get("conclusion") or "").upper() for r in rows]
+    if "CANCELLED" not in ends or not all(c in _GH_SETTLED_OK or c == "CANCELLED" for c in ends):
+        return ""
+    return max(str(r.get(at) or "") for r, c in zip(rows, ends, strict=True) if c == "CANCELLED")
+
+
 _RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
 
 
@@ -47,7 +72,7 @@ def _latest_by_name(rows: list[dict], *, name: str, started: str) -> list[dict]:
     return list(latest.values())
 
 
-class GhCli:
+class GhCli(mr_ops.CliWaits):
     """GitHub through `gh`. For the public repo after the v0.1.0 split."""
 
     async def open_mr(
@@ -55,11 +80,12 @@ class GhCli:
         *,
         repo: Path,
         branch: str,
+        base: str,
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
     ) -> MR:
-        await git.assert_clean(repo)
+        await git.assert_clean(repo, base)
         await self.push(repo=repo, branch=branch)
         # `--fill` titles the PR from the commits; see GlabCli.open_mr.
         await git.run_git(
@@ -70,6 +96,8 @@ class GhCli:
                 "create",
                 # See GlabCli.open_mr.
                 "--draft",
+                "--base",
+                base,
                 "--title",
                 mr_ops.mr_title(title),
                 "--body",
@@ -152,12 +180,9 @@ class GhCli:
             )
         jobs = tuple(f"{c.get('name')}: {c.get('conclusion') or 'PENDING'}" for c in checks)
         conclusions = [str(c.get("conclusion") or "") for c in checks]
-        if any(
-            c in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
-            for c in conclusions
-        ):
+        if any(c in _GH_RED for c in conclusions):
             state: CIState = "failed"
-        elif all(c in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in conclusions):
+        elif all(c in _GH_SETTLED_OK for c in conclusions):
             state = "success"
         else:
             state = "pending"
@@ -169,8 +194,7 @@ class GhCli:
                 c.get("detailsUrl"),
             )
             for c in checks
-            if str(c.get("conclusion") or "")
-            in ("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+            if str(c.get("conclusion") or "") in _GH_RED
         )
         return CIStatus(
             state=state,
@@ -181,6 +205,93 @@ class GhCli:
             block_reason=block_reason,
             sha=sha,
             failed_jobs=failed_jobs,
+            cancelled_at=_cancelled_at(checks, at="completedAt"),
+        )
+
+    async def _json(self, repo: Path, args: list[str], what: str):
+        return mr_ops.parse_json(await git.run_git(repo, ["gh", *args]), what)
+
+    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+        """`bot`'s latest review of the PR's current head, dismissed ones
+        skipped: pending until there is one. Changes requested, or any inline comment, is actionable
+        -- one finding per comment; anything else is clean."""
+        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        number, head = pr["number"], pr["headRefOid"]
+        # ponytail: one page of 100 reviews -- paginate if a PR ever has more.
+        reviews = await self._json(
+            repo,
+            ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews?per_page=100"],
+            "gh api reviews",
+        )
+        mine = [
+            r
+            for r in reviews
+            if mr_ops.same_login(str((r.get("user") or {}).get("login", "")), bot)
+            and r.get("commit_id") == head
+            # A draft review is not submitted, and a dismissed one is a
+            # maintainer's "this no longer blocks" (Kraft-mlicj): neither
+            # counts, so the bot's latest other review of this head stands.
+            and r.get("state") not in ("PENDING", "DISMISSED")
+        ]
+        if not mine:
+            return ReviewResult("pending", detail=f"waiting for {bot} to review {head[:7]}")
+        last = mine[-1]
+        comments = await self._json(
+            repo,
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews/{last['id']}/comments?per_page=100",
+            ],
+            "gh api review comments",
+        )
+        findings = tuple(
+            f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {c.get('body', '')}"
+            for c in comments
+        )
+        if last.get("state") == "CHANGES_REQUESTED" and not findings:
+            findings = (str(last.get("body") or f"{bot} requested changes"),)
+        if findings:
+            return ReviewResult("actionable", findings=findings, detail=f"{bot}: {last['state']}")
+        return ReviewResult("clean", detail=f"{bot}: {last.get('state')}")
+
+    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+        """The check run `check` on the PR's head, or else the commit status
+        of that name: pending until it completes, clean on success, and
+        actionable on anything else, its output the finding."""
+        pr = await self._json(repo, ["pr", "view", "--json", "number,headRefOid"], "gh pr view")
+        head = pr["headRefOid"]
+        runs = (
+            await self._json(
+                repo,
+                ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?check_name={check}"],
+                "gh api check-runs",
+            )
+        ).get("check_runs") or []
+        if runs:
+            run = runs[0]
+            if run.get("status") != "completed":
+                return ReviewResult("pending", detail=f"{check}: {run.get('status')}")
+            conclusion = str(run.get("conclusion") or "")
+            if conclusion in ("success", "neutral", "skipped"):
+                return ReviewResult("clean", detail=f"{check}: {conclusion}")
+            if conclusion == "cancelled":  # never a verdict, as in `ci_status`
+                return ReviewResult("pending", detail=f"{check}: cancelled")
+            output = run.get("output") or {}
+            text = "\n".join(str(output[k]) for k in ("title", "summary", "text") if output.get(k))
+            return ReviewResult("actionable", findings=(f"{check} {conclusion}: {text}",))
+        statuses = (
+            await self._json(
+                repo, ["api", f"repos/{{owner}}/{{repo}}/commits/{head}/status"], "gh api status"
+            )
+        ).get("statuses") or []
+        status = next((s for s in statuses if s.get("context") == check), None)
+        if status is None or status.get("state") == "pending":
+            return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
+        if status.get("state") == "success":
+            return ReviewResult("clean", detail=f"{check}: success")
+        return ReviewResult(
+            "actionable",
+            findings=(f"{check} {status.get('state')}: {status.get('description') or ''}",),
         )
 
     async def _checks_sha(self, repo: Path, rollup: list[dict]) -> str:
@@ -237,12 +348,18 @@ class GhCli:
                 "-L",
                 "20",
                 "--json",
-                "status,conclusion,headSha,url,name",
+                "status,conclusion,headSha,url,name,createdAt,updatedAt",
             ],
         )
         rows = mr_ops.parse_json(raw, "gh run list")
         runs = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
-        current = [r for r in runs if str(r.get("headSha") or "") == head_sha]
+        # The latest run of each workflow for this head, so a cancelled
+        # superseded run is outvoted by its successor, as in `ci_status`.
+        current = _latest_by_name(
+            [r for r in runs if str(r.get("headSha") or "") == head_sha],
+            name="name",
+            started="createdAt",
+        )
         if not current:
             return CIStatus(state="pending", url="", jobs=(f"no run for {head_sha[:7]} yet",))
         jobs = tuple(
@@ -252,13 +369,10 @@ class GhCli:
         if any(str(r.get("status") or "") != "completed" for r in current):
             state: CIState = "pending"
         else:
-            conclusions = [str(r.get("conclusion") or "") for r in current]
-            if any(
-                c in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
-                for c in conclusions
-            ):
+            conclusions = [str(r.get("conclusion") or "").upper() for r in current]
+            if any(c in _GH_RED for c in conclusions):
                 state = "failed"
-            elif all(c in ("success", "neutral", "skipped") for c in conclusions):
+            elif all(c in _GH_SETTLED_OK for c in conclusions):
                 state = "success"
             else:
                 state = "pending"
@@ -270,8 +384,7 @@ class GhCli:
                 str(r.get("url") or "") or None,
             )
             for r in current
-            if str(r.get("conclusion") or "")
-            in ("failure", "timed_out", "cancelled", "action_required", "startup_failure")
+            if str(r.get("conclusion") or "").upper() in _GH_RED
         )
         return CIStatus(
             state=state,
@@ -279,6 +392,7 @@ class GhCli:
             jobs=jobs,
             sha=head_sha,
             failed_jobs=failed_jobs,
+            cancelled_at=_cancelled_at(current, at="updatedAt"),
         )
 
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
@@ -299,11 +413,19 @@ class GhCli:
         No pipeline to re-create, unlike GitLab: a workflow that cares about
         labels keys on `pull_request: types: [labeled]` and GitHub re-evaluates
         it on the edit.
+
+        A label that shares a new label's `scope::` prefix is removed in the
+        same edit, as `GlabCli.set_labels` does (Kraft-o9xh1).
         """
         if not labels:
             return
         target = [str(mr.number)] if mr.number > 0 else []
-        await git.run_git(repo, ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)])
+        data = await self._json(repo, ["pr", "view", *target, "--json", "labels"], "gh pr view")
+        current = [str(label.get("name", "")) for label in data.get("labels") or []]
+        args = ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)]
+        for label in mr_ops.same_scope_labels(current, labels):
+            args += ["--remove-label", label]
+        await git.run_git(repo, args)
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)
@@ -322,7 +444,7 @@ class GhCli:
                 "--state",
                 "all",
                 "--json",
-                "number,url,state",
+                "number,url,state,autoMergeRequest,mergeCommit",
                 "-L",
                 "5",
             ],
@@ -334,6 +456,8 @@ class GhCli:
                     number=int(r["number"]),
                     url=str(r.get("url", "")),
                     state=_GH_MR_STATES.get(str(r.get("state", "")), "closed"),
+                    merge_queued=bool(r.get("autoMergeRequest")),
+                    merged_sha=str((r.get("mergeCommit") or {}).get("oid") or ""),
                 )
                 for r in rows
             ]

@@ -4,9 +4,11 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from kraft import caps as _caps
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import session_wall_ms
+from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.usage import KINDS, spent
 
 
 def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
@@ -23,13 +25,21 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     `wall_ms` is derived when the column is NULL (`_common.session_wall_ms`) --
     unlike cost, time is knowable for a session that never reported, because
     the row carries the same two stamps `session_exited` would have used.
+
+    Each kind of token is summed apart (Ruling 211). `split_complete` is false
+    when some session spent tokens but predates the split -- its cache kinds
+    are NULL and its `tokens_in` is its whole input -- so `tokens_in` is then
+    uncached input plus that older unsplit input, and says so.
     """
     rows = conn.execute(
-        "SELECT node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, status, "
+        f"SELECT id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, status, "
         "started_at, created_at, exited_at "
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
     ).fetchall()
+    timed_out = wait_timed_out_sessions(conn, [work_item_id])
+    # A time cap's stop is its own outcome too (Ruling 194), never a loop's cap.
+    time_capped = _caps.time_capped_sessions(conn, [work_item_id])
     by_node: dict[str, dict] = {}
     rounds: dict[str, set[int]] = {}
     for r in rows:
@@ -37,29 +47,38 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
             r["node_id"],
             {
                 "node": r["node_id"],
-                "tokens_in": 0,
-                "tokens_out": 0,
+                **dict.fromkeys(KINDS, 0),
                 "cost_usd": 0.0,
                 "wall_ms": 0,
                 "sessions": 0,
                 "rounds": 0,
                 "capped_out": 0,
+                "wait_timed_out": 0,
+                "time_capped": 0,
                 "cost_complete": True,
+                "split_complete": True,
             },
         )
-        node["tokens_in"] += r["tokens_in"] or 0
-        node["tokens_out"] += r["tokens_out"] or 0
+        for k in KINDS:
+            node[k] += r[k] or 0
         node["cost_usd"] += r["cost_usd"] or 0.0
         # a session that spent tokens but reported no cost makes the sum a floor
-        if r["cost_usd"] is None and (r["tokens_in"] or r["tokens_out"]):
+        if r["cost_usd"] is None and spent(r):
             node["cost_complete"] = False
+        if r["tokens_cache_read"] is None and spent(r):
+            node["split_complete"] = False
         # Not `r["wall_ms"] or 0`: only `session_exited` writes that column, so
         # a paused, skipped, capped or still-running session contributed
         # nothing and a node that had been running 75 minutes summed to 0
         # (Kraft-s7c04.18, .47). The stamps are on the row either way.
         node["wall_ms"] += session_wall_ms(r) or 0
         node["sessions"] += 1
-        node["capped_out"] += 1 if r["status"] == "capped_out" else 0
+        # A wait that ran out is not a loop that ran out (Kraft-uwbc8).
+        waited_out = r["id"] in timed_out
+        cut = r["id"] in time_capped
+        node["wait_timed_out"] += 1 if waited_out else 0
+        node["time_capped"] += 1 if cut else 0
+        node["capped_out"] += 1 if r["status"] == "capped_out" and not (waited_out or cut) else 0
         rounds.setdefault(r["node_id"], set()).add(r["round"] or 0)
     for node_id, seen in rounds.items():
         by_node[node_id]["rounds"] = len(seen)
@@ -67,12 +86,21 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     nodes = list(by_node.values())
     total = {
         k: sum(n[k] for n in nodes)
-        for k in ("tokens_in", "tokens_out", "cost_usd", "wall_ms", "sessions", "capped_out")
+        for k in (
+            *KINDS,
+            "cost_usd",
+            "wall_ms",
+            "sessions",
+            "capped_out",
+            "wait_timed_out",
+            "time_capped",
+        )
     }
     # An item's rounds is the deepest a single node had to loop, not the sum:
     # summing would read as "this item retried nine times" for nine clean nodes.
     total["rounds"] = max((n["rounds"] for n in nodes), default=0)
     total["cost_complete"] = all(n["cost_complete"] for n in nodes)
+    total["split_complete"] = all(n["split_complete"] for n in nodes)
     return {"total": total, "by_node": sorted(nodes, key=lambda n: n["node"])}
 
 

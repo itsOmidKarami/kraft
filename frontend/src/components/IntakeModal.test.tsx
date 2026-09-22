@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { IntakeModal } from "./IntakeModal";
 
@@ -14,13 +14,26 @@ const REPO_A = {
   test_scopes: null,
   forge: null,
   project: null,
-  default_model: null,
+  models: {},
   deny_tools: [],
   steering: [],
   local_files: [],
-  default_root_merge_policy: "bump" as const,
   managed: true,
 };
+
+function workspace(
+  mounts: Record<string, string>,
+  root_pointer_default: "ignore" | "bump" = "ignore",
+) {
+  return {
+    id: "ws",
+    root: "a",
+    root_pointer_default,
+    members: Object.fromEntries(
+      Object.entries(mounts).map(([id, path]) => [id, { repository: id, path }]),
+    ),
+  };
+}
 
 function renderModal(onClose: () => void = () => {}) {
   return render(
@@ -48,11 +61,16 @@ async function fillBasics(repoName = "repo-a", title = "t") {
   await userEvent.type(screen.getByLabelText("title"), title);
 }
 
+// Every test starts from one repo and the default chain; a test that needs
+// something else overrides the spy.
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.spyOn(api, "getTemplates").mockResolvedValue([{ id: "default", nodes: [], gates: 0 }]);
+  vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
+});
+
 describe("IntakeModal", () => {
   it("says where to get one when there are no repos connected", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
     renderModal();
     expect(
@@ -61,10 +79,6 @@ describe("IntakeModal", () => {
   });
 
   it("lays the dialog out in two columns with an overrides column", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     renderModal();
     const dlg = await screen.findByRole("dialog");
     expect(dlg.querySelector(".intake-grid")).toBeTruthy();
@@ -73,9 +87,6 @@ describe("IntakeModal", () => {
   });
 
   it("shows a disabled repo as a disabled option, not omitted", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
     vi.spyOn(api, "getRepos").mockResolvedValue({
       repos: [
         REPO_A,
@@ -112,10 +123,6 @@ describe("IntakeModal", () => {
   });
 
   it("submits and shows an inline error on failure", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     vi.spyOn(api, "createWorkItem").mockRejectedValue(
       new Error("repo path does not exist"),
     );
@@ -134,7 +141,6 @@ describe("IntakeModal", () => {
       { id: "default", nodes: [], gates: 0 },
       { id: "quick-task", nodes: [], gates: 0 },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -160,31 +166,21 @@ describe("IntakeModal", () => {
     expect(await screen.findByText("detail for w9")).toBeInTheDocument();
   });
 
-  it("rejects a non-numeric budget instead of silently sending no cap", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
-    const create = vi
-      .spyOn(api, "createWorkItem")
-      .mockResolvedValue({ id: "w9" });
+  it.each([
+    ["budget", /^budget$/, "$20", /budget must be a plain number/],
+    ["fix attempts", /^fix attempts$/i, "lots", /fix attempts must be a plain number/i],
+    ["wall clock", /wall clock, minutes/i, "soon", /wall clock must be a plain number/i],
+  ])("rejects a non-numeric %s instead of sending no cap or NaN", async (_, label, typed, error) => {
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
     renderModal();
     await fillBasics();
-    await userEvent.type(screen.getByLabelText("budget"), "$20");
-    await userEvent.click(
-      screen.getByRole("button", { name: /create and start/i }),
-    );
-    expect(
-      await screen.findByText(/budget must be a plain number/),
-    ).toBeInTheDocument();
+    await userEvent.type(await screen.findByLabelText(label), typed);
+    await userEvent.click(screen.getByRole("button", { name: /create and start/i }));
+    expect(await screen.findByText(error)).toBeInTheDocument();
     expect(create).not.toHaveBeenCalled();
   });
 
   it("submits the description with the new work item", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -211,7 +207,6 @@ describe("IntakeModal", () => {
       { id: "default", nodes: [], gates: 0 },
       { id: "quick-task", nodes: [], gates: 0 },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -246,7 +241,6 @@ describe("IntakeModal", () => {
         ],
       },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -316,18 +310,6 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("rejects a non-numeric fix attempts value loudly instead of sending NaN", async () => {
-    const create = vi.spyOn(api, "createWorkItem");
-    renderModal();
-    await fillBasics();
-    await userEvent.type(await screen.findByLabelText(/^fix attempts$/i), "lots");
-    await userEvent.click(
-      screen.getByRole("button", { name: /create and start/i }),
-    );
-    expect(await screen.findByText(/fix attempts must be a plain number/i)).toBeInTheDocument();
-    expect(create).not.toHaveBeenCalled();
-  });
-
   it("puts the $ in the budget placeholder, not the label (never-wrap rule)", async () => {
     renderModal();
     await fillBasics();
@@ -343,10 +325,14 @@ describe("IntakeModal", () => {
       {
         id: "default",
         gates: 1,
-        nodes: [{ id: "plan", tasks: [], gate_after: "plan_approval" }],
+        // Only a gate declaring a reviewer (`auto_escalate: true`) can be
+        // armed; the server refuses the switch on one that declares none.
+        nodes: [
+          { id: "plan", tasks: [], gate_after: "plan_approval", auto_escalate: true },
+          { id: "hold", tasks: [], gate_after: "hold", auto_escalate: false },
+        ],
       },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -368,10 +354,6 @@ describe("IntakeModal", () => {
   });
 
   it("Create paused sends autostart: false; Create and start sends true", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w9" });
@@ -387,41 +369,60 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("offers the cross-repo disclosure only when the repo has connected, enabled children", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
-    renderModal();
-    await selectRepo();
-    expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
-  });
-
-  it("does not offer a connected but disabled child", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
+  it("offers the cross-repo disclosure only when the repo roots a workspace", async () => {
+    // A nested, enabled repo is not a member: membership is declared, never
+    // inferred from where a path happens to sit.
     vi.spyOn(api, "getRepos").mockResolvedValue({
-      repos: [
-        REPO_A,
-        { ...REPO_A, path: "/a/libs/a", name: "libs-a", enabled: false },
-      ],
+      repos: [REPO_A, { ...REPO_A, path: "/a/libs/a", name: "libs-a" }],
+      workspaces: {},
     });
     renderModal();
     await selectRepo();
     expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
   });
 
-  it("sends the picked submodules and the root merge policy", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
+  it("does not offer a member whose repository is disabled", async () => {
     vi.spyOn(api, "getRepos").mockResolvedValue({
       repos: [
-        REPO_A,
-        { ...REPO_A, path: "/a/libs/a", name: "libs-a" },
-        { ...REPO_A, path: "/a/libs/b", name: "libs-b" },
+        { ...REPO_A, id: "a" },
+        { ...REPO_A, id: "lib-a", path: "/a/libs/a", name: "libs-a", enabled: false },
       ],
+      workspaces: { ws: workspace({ "lib-a": "libs/a" }) },
+    });
+    renderModal();
+    await selectRepo();
+    expect(screen.queryByRole("button", { name: /cross-repo/ })).toBeNull();
+  });
+
+  it("offers a member whose repository never set an `enabled` key at all (Ruling 212)", async () => {
+    const member: Record<string, unknown> = {
+      ...REPO_A,
+      id: "lib-a",
+      path: "/a/libs/a",
+      name: "libs-a",
+    };
+    delete member.enabled;
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [{ ...REPO_A, id: "a" }, member] as unknown as (typeof REPO_A)[],
+      workspaces: { ws: workspace({ "lib-a": "libs/a" }) },
+    });
+    renderModal();
+    await selectRepo();
+    expect(await screen.findByRole("button", { name: /cross-repo/ })).toBeInTheDocument();
+  });
+
+  // Both defaults: a fixture of only one lets a hardcoded default of the
+  // same value pass (Kraft-3f4kb).
+  it.each(["bump", "ignore"] as const)("sends the workspace with its picked members and the workspace's root pointer policy by default: %s", async (pointer) => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [
+        { ...REPO_A, id: "a" },
+        { ...REPO_A, id: "lib-a", path: "/a/libs/a", name: "libs-a" },
+        { ...REPO_A, id: "lib-b", path: "/a/libs/b", name: "libs-b" },
+      ],
+      workspaces: {
+        ws: workspace({ "lib-a": "libs/a", "lib-b": "libs/b" }, pointer),
+      },
     });
     const create = vi
       .spyOn(api, "createWorkItem")
@@ -437,7 +438,11 @@ describe("IntakeModal", () => {
     await userEvent.click(disclosure);
 
     await userEvent.click(screen.getByRole("button", { name: "libs/a" }));
-    await userEvent.click(screen.getByRole("radio", { name: "Skip" }));
+    // Ruling 165: the default is the workspace's `root_pointer_default`, not
+    // a hardcoded "bump".
+    const other = pointer === "bump" ? "ignore" : "bump";
+    expect(screen.getByRole("radio", { name: new RegExp(pointer, "i") })).toBeChecked();
+    expect(screen.getByRole("radio", { name: new RegExp(other, "i") })).not.toBeChecked();
     await userEvent.click(
       screen.getByRole("button", { name: /create and start/i }),
     );
@@ -446,18 +451,15 @@ describe("IntakeModal", () => {
         expect.objectContaining({
           repo: "/a",
           title: "bump pointers",
-          submodules: ["libs/a"],
-          root_merge_policy: "skip",
+          workspace: "ws",
+          members: ["lib-a"],
+          root_pointer_policy: pointer,
         }),
       ),
     );
   });
 
   it("attaches a spec through one search field that becomes a chip", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     vi.spyOn(api, "search").mockResolvedValue({
       query: "submodule",
       mode: "hybrid",
@@ -481,16 +483,10 @@ describe("IntakeModal", () => {
     await userEvent.click(
       await screen.findByRole("option", { name: /submodule-pointers/ }),
     );
-    expect(
-      screen.getByText(/spec attached → spec_approval satisfied/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/spec attached →/)).toBeInTheDocument();
   });
 
   it("searches the chosen repo's artifacts and submits the picked plan", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     vi.spyOn(api, "search").mockResolvedValue({
       query: "auth",
       mode: "hybrid",
@@ -538,50 +534,35 @@ describe("IntakeModal", () => {
     );
   });
 
-  it("shows a chain preview with the nodes an attachment removes struck through", async () => {
+  // Kraft-ene04. A V1 chain has no `gate_after`: its gate is a node of its
+  // own, and each node names the attachment kind that drops it
+  // (`covered_by`, from `ResolvedNode.covered_by`) -- the gate that decides the
+  // document and the node that would have written it, both.
+  it("V1 chain: an attached spec strikes through its gate and the node that writes it", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       {
         id: "default",
         gates: 2,
         nodes: [
-          {
-            id: "spec",
-            tasks: ["on.spec.requested"],
-            gate_after: "spec_approval",
-          },
-          {
-            id: "plan",
-            tasks: ["on.plan.requested"],
-            gate_after: "plan_approval",
-          },
-          {
-            id: "implementation",
-            tasks: ["on.implementation.start"],
-            gate_after: null,
-          },
+          { id: "spec", kind: "exec", tasks: ["spec.main.author"], gate_after: null, covered_by: "spec" },
+          { id: "spec_approval", kind: "gate", tasks: [], gate_after: "spec_approval", covered_by: "spec" },
+          { id: "plan", kind: "exec", tasks: ["plan.main.author"], gate_after: null, covered_by: "plan" },
+          { id: "plan_approval", kind: "gate", tasks: [], gate_after: "plan_approval", covered_by: "plan" },
+          { id: "implementation", kind: "exec", tasks: ["implementation.main.implement"], gate_after: null, covered_by: null },
         ],
       },
     ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     renderModal();
-
     await fillBasics();
-    await userEvent.type(
-      screen.getByLabelText("spec"),
-      ".engineering/specs/x.md{Enter}",
-    );
-
-    const struckSpec = await screen.findByText("spec", { selector: "s" });
-    expect(struckSpec).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("spec"), ".engineering/specs/x.md{Enter}");
+    expect(await screen.findByText("spec_approval", { selector: "s" })).toBeInTheDocument();
+    expect(screen.getByText("spec", { selector: "s" })).toBeInTheDocument();
+    expect(screen.getByText("plan_approval").tagName).not.toBe("S");
     expect(screen.getByText("plan").tagName).not.toBe("S");
     expect(screen.getByText("implementation").tagName).not.toBe("S");
   });
 
   it("accepts a path typed by hand for a document that is not indexed", async () => {
-    vi.spyOn(api, "getTemplates").mockResolvedValue([
-      { id: "default", nodes: [], gates: 0 },
-    ]);
-    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [REPO_A] });
     const create = vi
       .spyOn(api, "createWorkItem")
       .mockResolvedValue({ id: "w1" });

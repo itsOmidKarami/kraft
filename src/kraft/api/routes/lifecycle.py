@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import shutil
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import psutil
 from fastapi import HTTPException, Request
@@ -21,18 +21,35 @@ from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
 from kraft.config import git_read
-from kraft.executor import gates, walk
-from kraft.templates import Registry
+from kraft.executor import gates, stops, walk
+from kraft.templates.forks import ChainPath, PathError, override_record
+from kraft.templates.models import AgentTask, GateNode
+from kraft.templates.retry import RetryOverrideError, validate_retry_override
 
 logger = logging.getLogger(__name__)
 
 
 class Retry(BaseModel):
     steer: str | None = None
+    #: What to rerun, by canonical path: `node`, `node.step` or
+    #: `node.step.task`. Absent, the node the item stopped on.
+    path: str | None = None
+    #: Rerun the whole chain from its first node instead
+    #: (`work-item-restart-reruns-the-complete-chain`).
+    restart: bool = False
+    #: Task fields to change for the retried task, and the retried scope's
+    #: policy (`retry-overrides-are-policy-bounded`), validated against the
+    #: chain and its policy bounds before anything forks.
+    task_config: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
 
 
 class Skip(BaseModel):
     note: str | None = None
+    #: What to skip, by canonical path: the node the item stands on, or a
+    #: `node.step` or `node.step.task` inside it. Absent, the current node or
+    #: pending gate.
+    path: str | None = None
 
 
 class Progress(BaseModel):
@@ -49,7 +66,22 @@ class Steer(BaseModel):
 
 
 class Resume(BaseModel):
+    #: Reaches every paused agent task (`steer-defaults-to-all-paused-agent-tasks`).
     steer: str | None = None
+    #: Individual steers for paused agent tasks, by canonical task path; each
+    #: wins over `steer` for the task it names.
+    steers: dict[str, str] = {}
+
+
+class EndWorkItem(BaseModel):
+    #: Required (`manual-*-is-an-explicit-work-item-terminal-action`): recorded
+    #: on the audit event.
+    reason: str
+
+
+class CompleteWorkItem(EndWorkItem):
+    #: Close the item's beads as a walked completion would. Off by default.
+    close_beads: bool = False
 
 
 class Escalate(BaseModel):
@@ -289,11 +321,17 @@ async def pause_work_item(wid: str, request: Request):
 @api_router.post("/work-items/{wid}/progress")
 async def report_progress(wid: str, body: Progress, request: Request):
     """The implementer saying which plan task it is starting. Recorded as a
-    `task_progress` event carrying everything a client needs to show it."""
+    `plan_progress` event carrying everything a client needs to show it."""
     st = request.app.state
     row = deps._work_item_row(st, wid)
     node_id = progress_mod.active_implementation_node(row)
     if node_id is None:
+        if progress_mod.chain_implementation_node(row) is None:
+            raise HTTPException(
+                409,
+                "no implementing node was found in this chain (a node whose own steps "
+                "hold an agent task with no `skill:`), so it has no plan progress",
+            )
         raise HTTPException(409, "work item is not running its implementation node")
     worktree = st.run_dirs.worktrees / wid
     tasks = progress_mod.tasks_for(row, worktree)
@@ -307,211 +345,93 @@ async def report_progress(wid: str, body: Progress, request: Request):
         "total": len(tasks),
         "title": tasks[body.task - 1][0],
     }
-    await st.db.write(lambda c: events.append(c, wid, "task_progress", payload))
+    await st.db.write(lambda c: events.append(c, wid, "plan_progress", payload))
     return {"id": wid, "progress": progress_mod.for_item(st.db, row, worktree)}
 
 
-def _node_has_agent_task(node: dict, registry: Registry) -> bool:
-    """Whether this node's own dispatch could ever consume a Steer note.
+def steer_reachable(row, node_id: str | None = None) -> bool:
+    """Whether a Steer note given at `node_id` -- this item's current node by
+    default -- could reach any agent task from there to the end of its chain.
 
-    `Steer.take()` (executor.py) is read only from the agent-kind branch of
-    `_dispatch`. A node whose own tasks are all subprocess/forge/builtin, and
-    which has no `fix_loop` (a fix cycle always falls back to the agent-kind
-    `on.implementation.start`), has nothing on it that will ever read one.
+    One entry point, so the `GET /work-items/{id}` field the UI hides a
+    control on and the 409 the steer route raises cannot disagree. Answers off
+    the item's frozen snapshot. Fails open (`True`) when the current node is
+    not in its own chain, or when there is no current node at all -- an
+    unmapped edge is not a reason to hide a control that may still work. A row
+    with no snapshot was filed by the legacy loader and no V1 walk can run it,
+    so nothing on it can ever read a note.
     """
-    if node.get("fix_loop"):
+    start_id = node_id if node_id is not None else row["current_node_id"]
+    if start_id is None:
         return True
-    hooks = [*node.get("tasks", []), *(node.get("on_failure") or [])]
-    return any(registry.hooks.get(h, {}).get("kind") == "agent" for h in hooks)
-
-
-def _steer_reachable(nodes: list[dict], start_id: str, registry: Registry) -> bool:
-    """Whether a Steer note given at `start_id` could reach *any* agent task
-    from there to the end of the chain.
-
-    `run()` threads one `Steer` object through every node from `start_index`
-    on (`carried`, executor.py `run`) -- it is consumed by whichever agent-kind
-    dispatch runs first, not necessarily the one it was given on. `open_mr`
-    (forge-kind, no fix_loop) has nothing of its own, but `human_review` right
-    after it does; a note given while stopped at `open_mr` still reaches that
-    agent if `open_mr` and `mr_checks` succeed on retry. Checking only the
-    current node (Kraft-bz9b's first pass) refused that as dead on arrival.
-
-    Not a guarantee of delivery -- if `start_id` fails again, the walk never
-    reaches the later node and the note is dropped same as before -- only
-    that it is not *structurally* impossible, which is what the API can 409
-    on and the UI can hide a control for.
-    """
+    v1 = store.materialized_chain_of(row)
+    if v1 is None:
+        return False
     reached = False
-    for n in nodes:
-        if n["id"] == start_id:
-            reached = True
-        if reached and _node_has_agent_task(n, registry):
+    for node in v1.chain.nodes:
+        reached = reached or node.id == start_id
+        if reached and any(isinstance(t.task, AgentTask) for t in node.tasks()):
             return True
-    return False
+    # Only "not reachable" when the node was actually found: an id that is
+    # in no node of this chain takes the fail-open path.
+    return not reached
+
+
+def not_paused(row) -> str:
+    """The 409 a steer or resume on an item that is not paused gets. A running
+    one is told what to do (Ruling 183: a steer never reaches a running item)."""
+    if row["status"] in ("active", "waiting"):
+        return f"work item is {row['status']}: it is running, so pause it first"
+    return f"work item is {row['status']}, not paused"
+
+
+def paused_steer_refusal(db, row) -> str | None:
+    """Why a steer given to this paused item would reach no agentic work, or
+    None when an agent task of its node is paused to take it (Ruling 183,
+    Kraft-5d3sy). A pause that stopped a subprocess or a CI wait has no agent
+    task to resume with the text, and handing it to whichever agent runs next
+    is not steering the work the operator stopped. An item filed paused and
+    never started stopped nothing: its steer is a note to its first agent, as
+    `steer_reachable` already fails open on no current node."""
+    if row["current_node_id"] is None or executor.resume_steer(db, row, None, {}):
+        return None
+    return (
+        f"no agent task is paused at node {row['current_node_id']!r}, and a steer reaches "
+        "only an agent task a pause stopped; resume without one"
+    )
+
+
+def steerable(st, row) -> bool:
+    """`GET /work-items/{id}`'s `steerable`: what the door this item's status
+    offers would accept -- a paused item's own agent task, else (a retry or a
+    needs_context answer) an agent task downstream (`steer_reachable`)."""
+    if row["status"] == "paused":
+        return paused_steer_refusal(st.db, row) is None
+    return steer_reachable(row)
 
 
 @api_router.post("/work-items/{wid}/steer")
 async def steer_work_item(wid: str, body: Steer, request: Request):
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] != "paused" and not (
         row["status"] == "needs_human" and board._needs_context_stop(st, wid)
     ):
-        raise HTTPException(409, "work item is not paused")
+        raise HTTPException(409, not_paused(row))
     text = body.text.strip()
     if not text:
         raise HTTPException(400, "steer text is required")
+    if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+        raise HTTPException(409, why)
     await st.db.write(lambda c: store.set_steer(c, wid, text))
     return {"id": wid, "steer": text}
-
-
-def _bounce_target_index(nodes: list[dict]) -> int | None:
-    """Earliest-indexed node any `rebase_bounce_to` in the chain names, or
-    None when the chain declares none (Kraft-s7c04.23 design §4.6). `min`
-    against the current node happens at the call site -- an item stopped at
-    `spec` is before `verify` and must not skip implementation."""
-    targets = {n["rebase_bounce_to"] for n in nodes if n.get("rebase_bounce_to")}
-    if not targets:
-        return None
-    indices = [i for i, n in enumerate(nodes) if n["id"] in targets]
-    return min(indices) if indices else None
-
-
-async def _resolve_conflict_task(
-    st,
-    wid: str,
-    row,
-    node_id: str,
-    chain: dict,
-    steer_text: str | None,
-    reason: str,
-) -> None:
-    """The whole restore-steer -> resolve -> continue-or-escalate sequence
-    for a rebase conflict at `/resume` or `/retry` (Kraft-s7c04.23), run as
-    the item's own spawned task rather than awaited inline in the route.
-
-    Awaiting the resolver agent inside the HTTP handler blocked the response
-    for the length of that session *and* left it invisible to
-    `deps.task_is_live` -- nothing under `wid` in `app.state.tasks` -- so a
-    concurrent `/retry` sailed past `task_is_live` and `claim_for_run`
-    (`from_statuses=["needs_human"]`, which a status the route had already
-    set matched) and started a second walk in the same worktree. That is
-    exactly the collision Kraft-s7c04.20 closed (!241); this route was
-    reopening it. Registering this whole sequence as the item's task via
-    `deps.spawn` closes it the same way every other route does: `spawn`
-    itself refuses a second task for the same `wid` for as long as this one
-    is still running.
-
-    The item is left `active` (however `claim_for_run` set it before the
-    rebase attempt) for the duration -- no `mark_needs_human` up front. On a
-    resolving verdict the walk continues with no status flip needed; on
-    every other verdict this function marks the stop itself, the same
-    `needs_human` the caller would have seen synchronously before this
-    fix, just recorded a little later.
-    """
-    if steer_text:
-        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
-    if node is not None and (st.policy is None or st.policy.auto_escalate_stuck):
-        worktree = st.run_dirs.worktrees / wid
-        r_status, r_steer, _new_base = await walk.resolve_rebase_conflict(
-            st.db,
-            st.run_dirs,
-            work_item_id=wid,
-            node=node,
-            row=row,
-            registry=st.registry,
-            worktree=worktree,
-            policy=st.policy,
-            launch=deps.launch(st, row["repo"]),
-            conflict=reason,
-        )
-        if r_status == "ok":
-            nodes = chain["nodes"]
-            current = next(i for i, n in enumerate(nodes) if n["id"] == node_id)
-            bounce_idx = _bounce_target_index(nodes)
-            start = min(current, bounce_idx) if bounce_idx is not None else current
-            for n in nodes[start : current + 1]:
-                await st.db.write(
-                    lambda c, n=n: store.clear_loop_counters(c, wid, n["id"], n.get("fix_loop"))
-                )
-            # The human's own steer, restored above, is delivered now rather
-            # than left for a second /resume or /retry to take -- this call
-            # is already relaunching the walk. Leads ahead of the resolver's
-            # own concerns, same merge `recover_node` uses (Kraft-s7c04.26):
-            # a person's instruction keeps its own template and source.
-            took = await st.db.write(lambda c: store.take_steer(c, wid))
-            resume_steer, resume_source = None, "human"
-            if took and r_steer:
-                resume_steer, resume_source = f"{took}\n\n{r_steer}", "human"
-            elif took:
-                resume_steer, resume_source = took, "human"
-            elif r_steer:
-                resume_steer, resume_source = r_steer, "seeded"
-            # Awaited directly, not spawned again: this coroutine already
-            # *is* `wid`'s registered task, and a second `deps.spawn` for the
-            # same key would raise `AlreadyRunning` against itself.
-            await executor.run(
-                st.db,
-                st.run_dirs,
-                work_item_id=wid,
-                registry=st.registry,
-                bd_cwd=deps.bd_cwd(),
-                start_index=start,
-                policy=st.policy,
-                steer=resume_steer,
-                steer_source=resume_source,
-                launch=deps.launch(st, row["repo"]),
-                on_approve=deps._on_approve(st),
-            )
-            return
-        # A non-resolving verdict ("needs_human") already recorded its own
-        # stop reason inside `resolve_rebase_conflict`; fall through to the
-        # same escalate path "not armed" takes below.
-    else:
-        # Disarmed, or the node vanished from the chain: nothing else has
-        # recorded a stop reason yet, so this is it.
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
-    await gates.auto_escalate_stuck(
-        "needs_human",
-        st.db,
-        st.run_dirs,
-        work_item_id=wid,
-        registry=st.registry,
-        policy=st.policy,
-        launch=deps.launch(st, row["repo"]),
-        bd_cwd=deps.bd_cwd(),
-        on_approve=deps._on_approve(st),
-    )
-
-
-def _spawn_conflict_resolution(
-    st, request: Request, wid: str, row, node_id: str, chain: dict, steer_text: str | None, exc
-) -> dict:
-    """Registers `_resolve_conflict_task` as `wid`'s task and returns the
-    item's current row immediately -- the route itself does not wait on it
-    (design §4.8: "the route returns immediately either way")."""
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                _resolve_conflict_task(st, wid, row, node_id, chain, steer_text, str(exc)),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
 @api_router.post("/work-items/{wid}/resume")
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     from_statuses = ["paused"]
     if row["status"] == "needs_human" and board._needs_context_stop(st, wid):
         from_statuses.append("needs_human")
@@ -519,7 +439,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # Same reason as retry: claim_for_run below still decides, but an item
         # that was never paused should hear that, not a complaint about its
         # steer text or a busy slot.
-        raise HTTPException(409, "work item is not paused")
+        raise HTTPException(409, not_paused(row))
     running = escalate.escalation_running(st.db, wid)
     if running is not None:
         raise HTTPException(409, f"an escalation turn ({running}) is already running")
@@ -530,17 +450,24 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # non-empty) — fall back to the same "1" resume already used rather than
     # crash a path that used to degrade gracefully.
     limit = st.policy.max_concurrent if st.policy else 1
-    chain = json.loads(row["chain_definition"])
     steer_text = None
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
-        found = any(n["id"] == row["current_node_id"] for n in chain["nodes"])
-        if found and not _steer_reachable(chain["nodes"], row["current_node_id"], st.registry):
+        if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+            raise HTTPException(409, why)
+        found = row["current_node_id"] in store.chain_node_ids(row)
+        if found and not steer_reachable(row):
             raise HTTPException(
                 409,
                 f"node {row['current_node_id']!r} has no agent task downstream to steer; "
                 "this text would be dropped",
             )
+
+    individual = {p: t.strip() for p, t in body.steers.items() if t.strip()}
+    try:
+        steer_to = executor.resume_steer(st.db, row, steer_text, individual)
+    except executor.SteerError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     if deps.task_is_live(request.app, wid):
         # Checked before the claim and the rebase below: a paused/needs_human
@@ -549,39 +476,84 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         # and catching spawn's own refusal only after those writes would
         # strand the item claimed 'active' with no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
-    )
-    if not claimed:
-        if st.db.read(store.active_count) >= limit:
-            raise HTTPException(
-                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+    # Bracketed from *before* the claim to the hand-off (the claim-then-return
+    # class). A claim makes this item read `active`, which means "a walk is
+    # behind this"; any exit from here that neither spawns one nor leaves a
+    # status a selector re-picks would leave it claimed and unowned.
+    # `stops.claimed_or_stopped` performs that stop once, for every exit --
+    # including the ones no static sweep can enumerate, and including the
+    # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+    # either because no slot was free -- and then the status is still one
+    # `from_statuses` names, which the bracket ignores -- or because the status is
+    # not one it claims from, and that one *can* be `active`, for an item a restart
+    # left claimed with no walk behind it. In that case the bracket writes
+    # `needs_human` on the way out of the 409, which is the right answer for an
+    # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+    # is a refusal path that now moves the status. The comment this replaces said it
+    # could not.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        row["current_node_id"],
+        reason="resume claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=from_statuses, limit=limit)
+        )
+        if not claimed:
+            if st.db.read(store.active_count) >= limit:
+                raise HTTPException(
+                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+                )
+            raise HTTPException(409, "work item is not paused")
+        # The claim moves before this awaited rebase deliberately (Kraft-11e0):
+        # the up-to-60s network call now happens on an item already marked
+        # `active`, and no second caller can pass the claim while it runs.
+        if steer_text is not None:
+            await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
+        steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        worktree = st.run_dirs.worktrees / wid
+        conflict = None
+        try:
+            # The refresh runs host git in the worktree (Kraft-dshto).
+            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            new_base = await builtins_mod.refresh_worktree_base(
+                worktree,
+                Path(row["repo"]),
+                store.branch_for(row),
+                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
             )
-        raise HTTPException(409, "work item is not paused")
+        except builtins_mod.RebaseConflict as exc:
+            # Handed to the walk, which gives it to the node's `on_conflict`
+            # handler as it would a task's, or stops for a human (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
+        except RuntimeError as exc:
+            # The claim already flipped this item to 'active'; a failed rebase
+            # must not leave it stranded there with no walk behind it.
+            reason = str(exc)
+            await st.db.write(
+                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
+            )
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        if new_base:
+            worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+            await st.db.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "worktree_rebase_verified",
+                    {"reported_head": new_base, "worktree_head": worktree_head},
+                )
+            )
+            await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+        await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
+        # Every paused agent task gets the steer, or its own; a steer left
+        # through `/steer` stands in for the one this request did not type.
+        targets = {p: t or steer for p, t in (steer_to or {}).items()}
+        targets = {p: t for p, t in targets.items() if t} or None
 
-    # The claim moves before this awaited rebase deliberately (Kraft-11e0):
-    # the up-to-60s network call now happens on an item already marked
-    # `active`, and no second caller can pass the claim while it runs.
-    if steer_text is not None:
-        await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
-    steer = await st.db.write(lambda c: store.take_steer(c, wid))
-    worktree = st.run_dirs.worktrees / wid
-    try:
-        new_base = await builtins_mod.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
-        )
-    except builtins_mod.RebaseConflict as exc:
-        # `steer` here is already the taken local (line 414, above the
-        # rebase) -- the helper must not re-read `pending_steer_context`,
-        # which this call already emptied.
-        return _spawn_conflict_resolution(
-            st, request, wid, row, row["current_node_id"], chain, steer, exc
-        )
-    except RuntimeError as exc:
-        # The claim already flipped this item to 'active'; a failed rebase
-        # must not leave it stranded there with no walk behind it.
-        reason = str(exc)
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason))
         try:
             deps.spawn(
                 request.app,
@@ -589,60 +561,34 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.run(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
                         bd_cwd=deps.bd_cwd(),
+                        # No position: the walk resumes at the item's own
+                        # cursor, so work that completed before the pause is
+                        # not rerun (Kraft-c3dab). An item that never started
+                        # stands at the start of its chain.
+                        policy=st.policy,
+                        # Addressed to the paused agent tasks when there are
+                        # any; otherwise the note the next agent launch takes.
+                        steer=None if targets else steer,
+                        steer_to=targets,
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-    if new_base:
-        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
-        await st.db.write(
-            lambda c: events.append(
-                c,
-                wid,
-                "worktree_rebase_verified",
-                {"reported_head": new_base, "worktree_head": worktree_head},
-            )
-        )
-        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
-    await st.db.write(lambda c: store.resume_work_item(c, wid, steer))
-
-    start = next((i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]), 0)
-    try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=steer,
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
-        )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {"id": wid, "node_id": row["current_node_id"], "steer": steer}
+        return {
+            "id": wid,
+            "node_id": row["current_node_id"],
+            "steer": steer,
+            "steered": sorted(targets or {}),
+        }
 
 
 @api_router.post("/work-items/{wid}/open-worktree")
@@ -677,12 +623,11 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     rather than run inline -- see the `work_item_self_retry_requested`
     branch below.
     """
+    from kraft.api.routes.gates import _decided_by  # local: it imports this module
+
     st = request.app.state
-    row = deps._work_item_row(st, wid)
-    chain = json.loads(row["chain_definition"])
-    node_id = row["current_node_id"]
-    node = next((n for n in chain["nodes"] if n["id"] == node_id), None)
-    if node is None:
+    row = deps._live_work_item_row(st, wid)
+    if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
     if row["status"] != "needs_human":
         # Cheap precondition, ahead of the steer and slot checks: claim_for_run
@@ -690,11 +635,17 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
         raise HTTPException(409, "work item is not stopped")
-    key = node.get("fix_loop") or None
-    gate = node.get("gate_after")
-    gate_key = f"{gate}_reject_loop" if gate else None
-    if row["status"] != "needs_human":
-        raise HTTPException(409, "work item is not stopped")
+    chain = walk.chain_of(row)
+    target = _retry_target(chain, row, body)
+    override = _retry_override(chain, target, body)
+    # The node the rerun starts at: what a steer has to reach from, whose
+    # findings seed one, and which counters the retry clears (Kraft-bzwi: a
+    # node with no fix loop just has none to clear).
+    node = target.node if target is not None else chain.chain.nodes[0]
+    node_id = node.id
+    is_gate = isinstance(node.node, GateNode)
+    key = None if is_gate or node.node.fix_loop is None else walk._loop_key(node)
+    gate_key = gates.reject_loop_key(node.id) if is_gate else None
     caller_session_id = request.headers.get("x-kraft-session-id")
     running = escalate.escalation_running(st.db, wid)
     if running is not None and running != caller_session_id:
@@ -721,9 +672,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 409, f"all {limit} slots are busy; pause something or raise max_concurrent"
             )
         precheck_steer = (body.steer or "").strip() or None
-        if precheck_steer is not None and not _steer_reachable(
-            chain["nodes"], node_id, st.registry
-        ):
+        if precheck_steer is not None and not steer_reachable(row, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -754,7 +703,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # `gates.auto_escalate_stuck` perform it once its `await` on this
         # session's run actually returns (Kraft code-review finding).
         steer = (body.steer or "").strip() or None
-        if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+        if steer is not None and not steer_reachable(row, node_id):
             raise HTTPException(
                 409,
                 f"node {node_id!r} has no agent task downstream to steer; "
@@ -776,6 +725,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 {
                     "session_id": caller_session_id,
                     "node_id": node_id,
+                    "path": target.path if target is not None else None,
+                    "restart": body.restart,
+                    # Validated above, carried as validated (Kraft-vvj32).
+                    "override": override_record(override) if override is not None else None,
                     "key": key,
                     "gate_key": gate_key,
                     "steer": steer,
@@ -788,7 +741,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     limit = st.policy.max_concurrent if st.policy else 1
 
     steer = (body.steer or "").strip() or None
-    if steer is not None and not _steer_reachable(chain["nodes"], node_id, st.registry):
+    if steer is not None and not steer_reachable(row, node_id):
         # Explicit only: the seeded-findings and last-rejection fallbacks
         # below are Kraft's own carry-forward, not something the caller just
         # typed and needs told.
@@ -820,28 +773,70 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # writes would strand the item claimed 'active' with the cap already
         # cleared and no walk behind it.
         raise HTTPException(409, "a walk is already running for this work item")
-    claimed = await st.db.write(
-        lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
-    )
-    if not claimed:
-        if st.db.read(store.active_count) >= limit:
-            raise HTTPException(
-                409, f"all {limit} slots are busy; pause something or raise max_concurrent"
-            )
-        raise HTTPException(409, "work item is not stopped")
-
-    worktree = st.run_dirs.worktrees / wid
-    try:
-        new_base = await builtins_mod.refresh_worktree_base(
-            worktree, Path(row["repo"]), store.branch_for(row)
+    # Bracketed from *before* the claim to the hand-off (the claim-then-return
+    # class). A claim makes this item read `active`, which means "a walk is
+    # behind this"; any exit from here that neither spawns one nor leaves a
+    # status a selector re-picks would leave it claimed and unowned.
+    # `stops.claimed_or_stopped` performs that stop once, for every exit --
+    # including the ones no static sweep can enumerate, and including the
+    # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+    # either because no slot was free -- and then the status is still one
+    # `from_statuses` names, which the bracket ignores -- or because the status is
+    # not one it claims from, and that one *can* be `active`, for an item a restart
+    # left claimed with no walk behind it. In that case the bracket writes
+    # `needs_human` on the way out of the 409, which is the right answer for an
+    # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+    # is a refusal path that now moves the status. The comment this replaces said it
+    # could not.
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        node_id,
+        reason="retry claimed this item but could not start a walk",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
+        claimed = await st.db.write(
+            lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"], limit=limit)
         )
-    except builtins_mod.RebaseConflict as exc:
-        # `/retry` never persists `steer` ahead of the rebase the way
-        # `/resume` does -- the helper is the first thing to write it.
-        return _spawn_conflict_resolution(st, request, wid, row, node_id, chain, steer, exc)
-    except RuntimeError as exc:
-        reason = str(exc)
-        await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+        if not claimed:
+            if st.db.read(store.active_count) >= limit:
+                raise HTTPException(
+                    409, f"all {limit} slots are busy; pause something or raise max_concurrent"
+                )
+            raise HTTPException(409, "work item is not stopped")
+        worktree = st.run_dirs.worktrees / wid
+        conflict = None
+        try:
+            # The refresh runs host git in the worktree (Kraft-dshto).
+            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            new_base = await builtins_mod.refresh_worktree_base(
+                worktree,
+                Path(row["repo"]),
+                store.branch_for(row),
+                base=await builtins_mod.base_branch(st.db, wid, Path(row["repo"])),
+            )
+        except builtins_mod.RebaseConflict as exc:
+            # The retry still forks; the walk hands the conflict to the
+            # starting node's `on_conflict` handler, or stops for a human
+            # (Kraft-e7anb).
+            new_base, conflict = None, str(exc)
+        except RuntimeError as exc:
+            reason = str(exc)
+            await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+            # Not escalated: a git failure is not in the stuck set (Ruling 176).
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+        if new_base:
+            worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
+            await st.db.write(
+                lambda c: events.append(
+                    c,
+                    wid,
+                    "worktree_rebase_verified",
+                    {"reported_head": new_base, "worktree_head": worktree_head},
+                )
+            )
+            await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+
         try:
             deps.spawn(
                 request.app,
@@ -849,65 +844,75 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
                 deps.guard(
                     st.db,
                     wid,
-                    gates.auto_escalate_stuck(
-                        "needs_human",
+                    executor.retry(
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
-                        policy=st.policy,
-                        launch=deps.launch(st, row["repo"]),
+                        target=target,
+                        # Only a person's retry resets a cap counter
+                        # (Kraft-s7c04.22): not a worker's, not an MCP
+                        # assistant's.
+                        by_person=_decided_by(request) == "human",
+                        override=override,
                         bd_cwd=deps.bd_cwd(),
+                        policy=st.policy,
+                        steer=steer,
+                        seeded=seeded,
+                        launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
+                        conflict=conflict,
                     ),
                 ),
             )
         except deps.AlreadyRunning:
             raise HTTPException(409, "a walk is already running for this work item") from None
-        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-    if new_base:
-        worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
-        await st.db.write(
-            lambda c: events.append(
-                c,
-                wid,
-                "worktree_rebase_verified",
-                {"reported_head": new_base, "worktree_head": worktree_head},
-            )
-        )
-        await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
+        return {
+            "id": wid,
+            "node_id": node_id,
+            "path": target.path if target is not None else None,
+            "loop": key,
+            "steer": steer,
+        }
 
-    await st.db.write(
-        lambda c: store.retry_after_cap(
-            c, wid, node_id, key, steer, gate_key=gate_key, seeded=seeded
-        )
-    )
-    start = next(i for i, n in enumerate(chain["nodes"]) if n["id"] == node_id)
+
+def _retry_target(chain, row, body: Retry) -> ChainPath | None:
+    """What a retry reruns: `body.path`, the whole chain on `restart`, or the
+    node the item stopped on. A retry reruns its target and everything after
+    it, so a target past where the item stands would skip the work between --
+    that is `skip`'s job, and refused here."""
+    if body.restart:
+        if body.path is not None:
+            raise HTTPException(422, "path: a restart reruns the whole chain; give one, not both")
+        return None
     try:
-        deps.spawn(
-            request.app,
-            wid,
-            deps.guard(
-                st.db,
-                wid,
-                executor.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    registry=st.registry,
-                    bd_cwd=deps.bd_cwd(),
-                    start_index=start,
-                    policy=st.policy,
-                    steer=steer,
-                    steer_source="seeded" if seeded else "human",
-                    launch=deps.launch(st, row["repo"]),
-                    on_approve=deps._on_approve(st),
-                ),
-            ),
+        target = ChainPath.parse(chain, body.path or row["current_node_id"])
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    here = store.node_index(row, row["current_node_id"])
+    if target.node_index > here:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is after the node the item stands on "
+            f"({row['current_node_id']!r}); a retry reruns work, it does not skip ahead",
         )
-    except deps.AlreadyRunning:
-        raise HTTPException(409, "a walk is already running for this work item") from None
-    return {"id": wid, "node_id": node_id, "loop": key, "steer": steer}
+    return target
+
+
+def _retry_override(chain, target: ChainPath | None, body: Retry):
+    """The validated override, or a 422 naming the field it was refused for
+    (`retry-overrides-are-policy-bounded`). Refused before the claim, so a
+    refusal forks nothing."""
+    if not body.task_config and not body.policy:
+        return None
+    if target is None:
+        field = "task_config" if body.task_config else "policy"
+        raise HTTPException(422, f"{field}: a work-item restart carries no override")
+    try:
+        return validate_retry_override(
+            chain, target.path, task_config=body.task_config, policy=body.policy
+        )
+    except RetryOverrideError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 class RaiseBudget(BaseModel):
@@ -927,7 +932,7 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     the same way `POST .../retry` does.
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
     await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
@@ -976,6 +981,17 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             # already recorded skipped and no walk behind it.
             raise HTTPException(409, "a walk is already running for this work item")
 
+        target = _skip_target(row, body.path)
+        if target is not None and target.task is None and target.step is None:
+            target = None if target.node.id == _skip_node_id(st, wid, row) else target
+            if target is not None:
+                raise HTTPException(
+                    409,
+                    f"path: {body.path!r} is not the node the item stands on "
+                    f"({row['current_node_id']!r}) or its pending gate",
+                )
+        if target is not None:
+            return await _skip_within_node(st, request, wid, row, target, body.note)
         if row["status"] in ("active", "waiting"):
             # Cancel the old walk *first*, before the claim and before
             # skip_node. Cancelling afterwards left a window -- every await
@@ -992,39 +1008,148 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
             # the pre-cancel read said.
             row = deps._work_item_row(st, wid)
 
-        chain = json.loads(row["chain_definition"])
+        node_ids = store.chain_node_ids(row)
         gate = board._pending_gate(st, wid)
-        if gate is not None:
-            node_index = board._gate_node_index(chain, gate)
-        else:
-            node_index = next(
-                (i for i, n in enumerate(chain["nodes"]) if n["id"] == row["current_node_id"]),
-                None,
-            )
-            if node_index is None:
-                raise HTTPException(409, "work item has no current node to skip")
-        node_id = chain["nodes"][node_index]["id"]
+        # Both branches over the shared reader, which answers for either chain
+        # shape and never raises. This runs after `cancel` above, so a raise
+        # here would strand an item whose walk is already gone.
+        node_index = (
+            store.gate_node_index(row, gate)
+            if gate is not None
+            else store.node_index(row, row["current_node_id"])
+        )
+        if node_index is None or node_index >= len(node_ids):
+            raise HTTPException(409, "work item has no current node to skip")
+        node_id = node_ids[node_index]
+        if not ChainPath.parse(walk.chain_of(row), node_id).skippable:
+            raise HTTPException(409, f"path: {node_id!r} does not allow skipping")
 
         sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
 
+        # Bracketed from *before* the claim to the hand-off (the claim-then-return
+        # class). A claim makes this item read `active`, which means "a walk is
+        # behind this"; any exit from here that neither spawns one nor leaves a
+        # status a selector re-picks would leave it claimed and unowned.
+        # `stops.claimed_or_stopped` performs that stop once, for every exit --
+        # including the ones no static sweep can enumerate, and including the
+        # failed-claim 409s below. Those are *nearly* inert, not inert: a claim fails
+        # either because no slot was free -- and then the status is still one
+        # `from_statuses` names, which the bracket ignores -- or because the status is
+        # not one it claims from, and that one *can* be `active`, for an item a restart
+        # left claimed with no walk behind it. In that case the bracket writes
+        # `needs_human` on the way out of the 409, which is the right answer for an
+        # orphan (the `task_is_live` refusal above already ran, so no walk owns it) but
+        # is a refusal path that now moves the status. The comment this replaces said it
+        # could not.
+        async with stops.claimed_or_stopped(
+            st.db,
+            wid,
+            node_id,
+            reason="skip could not start a walk for the node after the skipped one",
+            handed_off=lambda: deps.task_is_live(request.app, wid),
+        ):
+            claimed = await st.db.write(
+                lambda c: store.claim_for_run(
+                    c, wid, from_statuses=["active", "waiting", "paused", "needs_human"]
+                )
+            )
+            if not claimed:
+                raise HTTPException(409, "work item status changed; try again")
+            note = (body.note or "").strip() or None
+            session_ids = [s["id"] for s in sessions]
+            # mark first, then signal: same race pause_work_item guards against —
+            # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
+            await st.db.write(
+                lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
+            )
+            for s in sessions:
+                _terminate(s["pid"])
+
+            try:
+                deps.spawn(
+                    request.app,
+                    wid,
+                    deps.guard(
+                        st.db,
+                        wid,
+                        executor.run(
+                            st.db,
+                            st.run_dirs,
+                            work_item_id=wid,
+                            bd_cwd=deps.bd_cwd(),
+                            start_index=node_index + 1,
+                            policy=st.policy,
+                            launch=deps.launch(st, row["repo"]),
+                            on_approve=deps._on_approve(st),
+                        ),
+                    ),
+                )
+            except deps.AlreadyRunning:
+                raise HTTPException(409, "a walk is already running for this work item") from None
+            return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+
+
+def _skip_node_id(st, wid: str, row) -> str | None:
+    """The node a node skip would skip: the pending gate, or the current node."""
+    return board._pending_gate(st, wid) or row["current_node_id"]
+
+
+def _skip_target(row, path: str | None) -> ChainPath | None:
+    """`path` resolved against the item's chain, refused when it names nothing
+    there or a component that does not allow skipping
+    (`task-step-and-node-are-skippable-by-default`)."""
+    if path is None:
+        return None
+    try:
+        target = ChainPath.parse(walk.chain_of(row), path)
+    except PathError as exc:
+        raise HTTPException(422, f"path: {exc}") from None
+    if not target.skippable:
+        raise HTTPException(409, f"path: {path!r} does not allow skipping")
+    return target
+
+
+async def _skip_within_node(st, request: Request, wid: str, row, target: ChainPath, note):
+    """Skip a task or a step of the node the item stands on
+    (`skip-stops-only-the-selected-scope`).
+
+    Only the sessions inside the scope stop; a sibling keeps running. On an
+    active item the walk that owns them goes on and counts the scope as done
+    (`dispatch.measure_node`). A stopped or paused item is walked again from its
+    cursor, where the skipped scope now counts as done.
+    """
+    if target.node.id != row["current_node_id"]:
+        raise HTTPException(
+            409,
+            f"path: {target.path!r} is not inside the node the item stands on "
+            f"({row['current_node_id']!r})",
+        )
+    note = (note or "").strip() or None
+    sessions = st.db.read(lambda c: store.running_sessions_under(c, wid, target.path))
+    session_ids = [s["id"] for s in sessions]
+    if row["status"] == "active":
+        # mark first, then signal: the same race `pause_work_item` guards against.
+        await st.db.write(
+            lambda c: store.skip_scope(c, wid, target.path, note, session_ids=session_ids)
+        )
+        for s in sessions:
+            _terminate(s["pid"])
+        return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
+    async with stops.claimed_or_stopped(
+        st.db,
+        wid,
+        target.node.id,
+        reason="skip could not start a walk past the skipped scope",
+        handed_off=lambda: deps.task_is_live(request.app, wid),
+    ):
         claimed = await st.db.write(
             lambda c: store.claim_for_run(
-                c, wid, from_statuses=["active", "waiting", "paused", "needs_human"]
+                c, wid, from_statuses=["waiting", "paused", "needs_human"]
             )
         )
         if not claimed:
             raise HTTPException(409, "work item status changed; try again")
-
-        note = (body.note or "").strip() or None
-        session_ids = [s["id"] for s in sessions]
-        # mark first, then signal: same race pause_work_item guards against —
-        # a SIGTERM landing before the row says 'paused' resolves as 'failed'.
-        await st.db.write(
-            lambda c: store.skip_node(c, wid, node_id, gate, note, session_ids=session_ids)
-        )
-        for s in sessions:
-            _terminate(s["pid"])
-
+        await st.db.write(lambda c: store.skip_scope(c, wid, target.path, note))
         try:
             deps.spawn(
                 request.app,
@@ -1036,9 +1161,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
                         st.db,
                         st.run_dirs,
                         work_item_id=wid,
-                        registry=st.registry,
                         bd_cwd=deps.bd_cwd(),
-                        start_index=node_index + 1,
                         policy=st.policy,
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
@@ -1050,6 +1173,49 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
         return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
 
 
+@api_router.post("/work-items/{wid}/complete")
+async def complete_work_item(wid: str, body: CompleteWorkItem, request: Request):
+    """Mark the item complete by hand, with a reason. Its beads stay open
+    unless `close_beads` says otherwise (Ruling 167): work completed by hand
+    may have landed somewhere else, or not at all."""
+    row = await _end_work_item(request, wid, "complete", body.reason)
+    if body.close_beads:
+        await executor.close_beads(
+            request.app.state.db, row, deps.bd_cwd(), request.app.state.run_dirs, by_hand=True
+        )
+    return deps._work_item_row(request.app.state, wid)
+
+
+@api_router.post("/work-items/{wid}/cancel")
+async def cancel_work_item(wid: str, body: EndWorkItem, request: Request):
+    """Cancel the item, with a reason. Unlike `abandon` the worktree stays:
+    archiving reclaims it later, the same as for any ended item."""
+    await _end_work_item(request, wid, "cancel", body.reason)
+    return deps._work_item_row(request.app.state, wid)
+
+
+async def _end_work_item(request: Request, wid: str, action: str, reason: str):
+    """The terminal actions' one door: a work-item action only, it needs a
+    reason, stops whatever runs -- sessions, an escalation turn, the walk --
+    and leaves the item where no door leads back onto its chain."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    reason = reason.strip()
+    if not reason:
+        raise HTTPException(422, "reason: a terminal action needs a reason")
+    if row["status"] in store.ENDED:
+        raise HTTPException(409, f"work item is already {row['status']}")
+    sessions = st.db.read(lambda c: store.running_sessions_for_node(c, wid))
+    ids = [s["id"] for s in sessions]
+    await st.db.write(lambda c: store.end_work_item(c, wid, action, reason, session_ids=ids))
+    for s in sessions:
+        _terminate(s["pid"])
+    # Bounded, as pause's is: the status is already terminal, so a walk that
+    # outlives the wait stops at its next node on its own.
+    await deps.cancel(request.app, wid, timeout=deps.CANCEL_TIMEOUT)
+    return row
+
+
 @api_router.post("/work-items/{wid}/escalate")
 async def escalate_work_item(wid: str, body: Escalate, request: Request):
     """Send a message into this item's escalation thread, starting one if
@@ -1058,7 +1224,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
     """
     st = request.app.state
-    row = deps._work_item_row(st, wid)
+    row = deps._live_work_item_row(st, wid)
     if row["status"] not in ("needs_human", "paused"):
         raise HTTPException(409, "work item is not needs_human or paused")
     # A `paused` item that has never started (current_node_id is NULL, per
@@ -1105,7 +1271,6 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
             st.run_dirs,
             work_item_id=wid,
             cursor=cursor,
-            registry=st.registry,
             policy=st.policy,
             launch=deps.launch(st, row["repo"]),
             bd_cwd=deps.bd_cwd(),
@@ -1170,7 +1335,7 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
         raise HTTPException(422, "no labels given")
     repo_entry = deps.launch(st, row["repo"]).repo_entry
     try:
-        backend = forge_mod.backend_for("auto", (repo_entry or {}).get("forge"))
+        backend = forge_mod.backend_for("auto", repo_entry.forge if repo_entry else None)
         forge = forge_mod.resolve(backend)
         await forge.set_labels(repo=worktree, mr=forge_mod.MR(number=0, url=""), labels=labels)
     except forge_mod.ForgeError as exc:

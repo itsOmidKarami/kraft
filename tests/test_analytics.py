@@ -48,7 +48,8 @@ def _session(conn, sid, wid, node, *, round=0, status="done", u: Usage | None = 
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, log_path, "
         "result_path, status, attempt, created_at, round, tokens_in, tokens_out, cost_usd, "
-        "wall_ms) VALUES (?, ?, ?, ?, 'l', 'r', ?, 1, ?, ?, ?, ?, ?, ?)",
+        "wall_ms, tokens_cache_write, tokens_cache_read) "
+        "VALUES (?, ?, ?, ?, 'l', 'r', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             sid,
             wid,
@@ -61,6 +62,8 @@ def _session(conn, sid, wid, node, *, round=0, status="done", u: Usage | None = 
             u.tokens_out if u else None,
             u.cost_usd if u else None,
             wall_ms,
+            u.tokens_cache_write if u else None,
+            u.tokens_cache_read if u else None,
         ),
     )
 
@@ -154,6 +157,29 @@ def test_totals_group_by_status_and_sum_usage(conn):
     assert t["wall_ms"] == 60_000 + 30_000 + 1_000 + 10_000
     # w1's verify looped once; w2 never looped
     assert t["rounds"] == 1
+
+
+def test_cache_tokens_are_summed_apart_and_still_counted(tmp_path):
+    """Ruling 211: the totals sum each kind of input apart, and every
+    "tokens" figure (per node, per repo) still counts cache reads and writes
+    -- including a row written before the split, whose NULL cache kinds leave
+    its `tokens_in` the whole input and the split marked incomplete."""
+    c = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(c)
+    _item(c, "w1", created=_at(1))
+    _session(c, "new", "w1", "verify", u=Usage(10, 5, 0.1, None, 20, 300))
+    _session(c, "old", "w1", "verify", u=Usage(1000, 1, 0.1))
+    c.execute(
+        "UPDATE worker_sessions SET tokens_cache_write = NULL, tokens_cache_read = NULL "
+        "WHERE id = 'old'"
+    )
+    a = analytics.compute(c, range_="7d", now=NOW)
+    c.close()
+    t = a["totals"]
+    assert (t["tokens_in"], t["tokens_cache_write"], t["tokens_cache_read"]) == (1010, 20, 300)
+    assert t["split_complete"] is False
+    assert a["by_node"][0]["tokens"] == 10 + 20 + 300 + 5 + 1000 + 1
+    assert a["by_repo"][0]["tokens"] == 10 + 20 + 300 + 5 + 1000 + 1
 
 
 def test_a_merge_is_a_completed_node_that_ran_on_merge(conn):
@@ -526,12 +552,18 @@ def test_a_paused_session_s_time_reaches_the_node_and_the_totals(tmp_path):
     assert report["totals"]["wall_ms"] == 180_000
 
 
-def test_an_assistant_clearing_a_gate_still_counts_as_a_human_touch(tmp_path):
+@pytest.mark.parametrize(
+    ("by", "touches"),
+    [("assistant", 1), ("agent", 0)],
+    ids=["an-assistant-is-a-human-touch", "a-worker-agent-is-not"],
+)
+def test_who_cleared_a_gate_decides_whether_it_was_a_human_touch(tmp_path, by, touches):
     """Kraft-s7c04.43 added a third `by` value, and the tempting change is to
     treat `assistant` like `agent` here. It is the wrong change. `agent` is
-    skipped because it is the machinery unblocking itself; an assistant cleared
-    this gate because a person told it to, and this metric counts stops that
-    needed a person. Same reasoning pins `executor.gates._auto_dispatch_count`.
+    Kraft's own gate auto-review -- the machinery unblocking itself, the run
+    closed without anyone being paged; an assistant cleared this gate because a
+    person told it to, and this metric counts stops that needed a person. Same
+    reasoning pins `executor.gates._auto_dispatch_count`.
     """
     conn = _episode_conn(
         tmp_path,
@@ -544,35 +576,81 @@ def test_an_assistant_clearing_a_gate_still_counts_as_a_human_touch(tmp_path):
                     "capped": {"cycles": 2, "attempts": 3},
                 },
             ),
-            ("gate_approved", {"gate": "human_review_approval", "by": "assistant"}),
+            ("gate_approved", {"gate": "human_review_approval", "by": by}),
         ],
     )
     try:
         t = analytics.compute(conn, range_="all")["totals"]
     finally:
         conn.close()
-    assert t["unplanned_touches_per_item"] == 1
+    assert t["unplanned_touches_per_item"] == touches
 
 
-def test_a_worker_agent_clearing_its_own_gate_is_still_not_a_human_touch(tmp_path):
-    """The other half, unchanged: `agent` is Kraft's own gate auto-review, and
-    the run closed without anyone being paged."""
-    conn = _episode_conn(
-        tmp_path,
+def _v1_item(conn, wid, resolved, *, created):
+    """A V1 row: `chain_definition` is `"{}"` (as `executor.entry.intake` writes
+    it) and the chain lives only in `materialized_chain`."""
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
+
+    materialized = resolved.materialize(
+        target=WorkItemTarget.for_repository("a"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+    _item(conn, wid, status="completed", created=created)
+    conn.execute(
+        "UPDATE work_items SET chain_definition = '{}', materialized_chain = ? WHERE id = ?",
+        (materialized.to_json(), wid),
+    )
+
+
+def test_merges_and_fix_cycles_are_read_off_a_v1_items_materialized_chain(tmp_path):
+    """Kraft-hicln: V1 rows have no `on.merge` in `chain_definition` and no node
+    named `verify`, so Insights read 0 merges and 0 fix cycles for every one.
+    Both now come from what a node DOES in the materialized chain: a forge task
+    targeting `mr.merge`, a declared `fix_loop`. `w2` names its merge node `land`
+    and has a `verify` node with no loop, so a by-name reading gets it wrong."""
+    from pathlib import Path
+
+    from support.harness import v1_resolved
+
+    from kraft.templates.library import TemplateLibrary
+
+    seed = TemplateLibrary.from_yaml_dir(Path(__file__).resolve().parents[1] / "templates")
+    custom = v1_resolved(
         [
-            (
-                "work_item_needs_human",
-                {
-                    "node_id": "verify",
-                    "reason": "verify_fix_loop exhausted after 2 fix cycle(s)",
-                    "capped": {"cycles": 2, "attempts": 3},
-                },
-            ),
-            ("gate_approved", {"gate": "human_review_approval", "by": "agent"}),
-        ],
+            {
+                "id": "verify",
+                "kind": "exec",
+                "tasks": [{"id": "t", "kind": "agent", "harness": "fake", "prompt": "p"}],
+            },
+            {
+                "id": "land",
+                "kind": "exec",
+                "tasks": [{"id": "m", "kind": "forge", "target": "mr.merge"}],
+            },
+        ]
     )
+    conn = db._connect(tmp_path / "orchestrator.db")
+    db.migrate(conn)
+    _v1_item(conn, "w1", seed.resolve_chain("default"), created=_at(2))
+    _v1_item(conn, "w2", custom, created=_at(2))
+    # w1: the seed's fix-loop nodes are `verification` and
+    # `merge_request_feedback`; `spec` has none and must not count.
+    _session(conn, "s1", "w1", "spec")
+    _session(conn, "s2", "w1", "verification", round=0)
+    _session(conn, "s3", "w1", "verification", round=1)
+    _session(conn, "s4", "w1", "merge_request_feedback", round=0, status="capped_out")
+    _event(conn, "w1", "node_completed", {"node_id": "merge"}, _at(1))
+    # w2: a loopless `verify` is not a fix cycle, and `land` is a merge.
+    _session(conn, "s5", "w2", "verify", round=0, status="capped_out")
+    _event(conn, "w2", "node_completed", {"node_id": "verify"}, _at(1))
+    _event(conn, "w2", "node_completed", {"node_id": "land"}, _at(1))
+    conn.commit()
     try:
-        t = analytics.compute(conn, range_="all")["totals"]
+        t = analytics.compute(conn, range_="7d", now=NOW)["totals"]
     finally:
         conn.close()
-    assert t["unplanned_touches_per_item"] == 0
+
+    assert t["mrs_merged"] == 2
+    assert t["fix_cycles"] == pytest.approx(3.0)  # 3 loop rounds / 1 item with a loop
+    assert t["fix_cycles_capped"] == 1

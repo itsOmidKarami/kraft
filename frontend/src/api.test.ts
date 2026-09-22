@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 
@@ -56,6 +57,25 @@ describe("api", () => {
         body: JSON.stringify({ note: "redo" }),
       }),
     );
+  });
+
+  it("encodes custom gate names in gate action URLs", async () => {
+    const f = mockFetch(200, {});
+    vi.stubGlobal("fetch", f);
+    await api.approveGate("id1", "release/ready#1");
+    expect(f).toHaveBeenCalledWith(
+      "/api/work-items/id1/gates/release%2Fready%231/approve",
+      expect.anything(),
+    );
+  });
+
+  it("approveGate sends a chain revision's digest back, and no body otherwise", async () => {
+    const f = mockFetch(200, {});
+    vi.stubGlobal("fetch", f);
+    await api.approveGate("id1", "chain_revision_approval", "d1");
+    await api.approveGate("id1", "spec_approval");
+    expect(f.mock.calls[0][1]).toEqual(expect.objectContaining({ method: "POST", body: JSON.stringify({ digest: "d1" }) }));
+    expect(f.mock.calls[1][1].body).toBeUndefined();
   });
 
   it("logUrl builds the log path", () => {

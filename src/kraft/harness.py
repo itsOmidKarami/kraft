@@ -18,8 +18,10 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Annotated
 
 import yaml
+from pydantic import BaseModel, BeforeValidator, ConfigDict, StrictStr, ValidationError
 
 from kraft.paths import default_harnesses_dir
 
@@ -45,6 +47,7 @@ KNOWN = (
     "approval_channel",
     "deny_tools",
     "allowed_tools",
+    "restrict_tools",
     "resume",
     "autocompact",
     "rate_limit_signal",
@@ -90,6 +93,11 @@ class Capability:
     #: Names a command prefix key that carries this capability's value
     #: instead of a flag -- `resume: {via: command_resume}`.
     via: str | None = None
+    #: `permission_mode` only: the mode a launch under a tool allowlist runs
+    #: in -- one that sends every ask it does not settle itself to the
+    #: approval channel, rather than approving it (Kraft-nt6tt). A harness
+    #: whose `permission_mode` declares none cannot launch under an allowlist.
+    under_allowlist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +111,117 @@ class Harness:
     #: Insertion-ordered: this is argv order (PyYAML preserves it).
     capabilities: dict[str, Capability] = field(default_factory=dict)
     path: Path | None = None
+
+    @classmethod
+    def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
+        """One harness file's parsed content, validated, or raise `HarnessError`
+        prefixed with `where`."""
+        try:
+            parsed = HarnessInput.model_validate(data)
+        except ValidationError as exc:
+            raise HarnessError(f"{where}: {_shape_problem(exc)}") from exc
+        return cls.from_input(parsed, where=where, path=path)
+
+    @classmethod
+    def from_input(cls, parsed: HarnessInput, *, where: str, path: Path | None = None) -> Harness:
+        """A well-shaped harness, checked as a whole: the required capabilities
+        are there, every binding is one `kind` can invoke, and the capabilities
+        that depend on each other agree."""
+        if not parsed.id:
+            raise HarnessError(f"{where}: missing a string 'id'")
+        kind = parsed.kind
+        if kind not in KINDS:
+            raise HarnessError(f"{where}: unknown kind {kind!r}; known: {sorted(KINDS)}")
+        if not parsed.command:
+            raise HarnessError(f"{where}: 'command' must be a non-empty string or list")
+        command_resume = tuple(parsed.command_resume)
+        if not parsed.capabilities:
+            raise HarnessError(f"{where}: 'capabilities' must be a non-empty mapping")
+
+        caps = {name: _capability(name, raw, where) for name, raw in parsed.capabilities.items()}
+
+        for name in REQUIRED:
+            if name not in caps:
+                raise HarnessError(f"{where}: missing required capability {name!r}")
+
+        for name, cap in caps.items():
+            # Every capability is either invocable or one of the known facts
+            # about reading results back. Neither -> `capabilities` is a
+            # wishlist. `context` is exempt here because its own validation
+            # below covers both channels: `channel: prompt` is deliberately
+            # argv-less.
+            if not cap.argv and not cap.via and name not in (*NON_INVOCABLE, "context"):
+                raise HarnessError(
+                    f"{where}: capability {name!r} has no 'cli' binding for kind {kind!r} "
+                    f"and is not one of {sorted(NON_INVOCABLE)}"
+                )
+            if cap.via and cap.via != "command_resume":
+                raise HarnessError(f"{where}: capability {name!r} 'via' must be 'command_resume'")
+            if cap.via == "command_resume" and not command_resume:
+                raise HarnessError(
+                    f"{where}: capability {name!r} is bound via 'command_resume', "
+                    "which this harness does not define"
+                )
+            # A default the harness's own CLI would reject is worse than no
+            # default: it fails every launch, with no binding to blame.
+            for one in (cap.always,) if isinstance(cap.always, str) else (cap.always or ()):
+                if cap.values and not any(re.fullmatch(p, one) for p in cap.values):
+                    raise HarnessError(
+                        f"{where}: capability {name!r} 'always' value {one!r} "
+                        "is not accepted by its own 'values'"
+                    )
+
+        ctx = caps["context"]
+        if ctx.channel not in ("system_prompt", "prompt"):
+            raise HarnessError(
+                f"{where}: capability 'context' needs channel 'system_prompt' or 'prompt', "
+                f"not {ctx.channel!r}"
+            )
+        if ctx.channel == "system_prompt" and not ctx.argv:
+            raise HarnessError(f"{where}: context channel 'system_prompt' needs a 'cli' binding")
+        if ctx.channel == "prompt" and ctx.argv:
+            raise HarnessError(
+                f"{where}: context channel 'prompt' is folded into the prompt and "
+                "must not also carry a 'cli' binding"
+            )
+
+        usage = caps["usage"]
+        if usage.source not in ("envelope", "result_file"):
+            raise HarnessError(
+                f"{where}: capability 'usage' needs source 'envelope' or 'result_file', "
+                f"not {usage.source!r}"
+            )
+        # Nothing for a reader to read without a machine-readable stream.
+        for name in ("usage", "rate_limit_signal"):
+            cap = caps.get(name)
+            if cap is None:
+                continue
+            if name == "usage" and cap.source != "envelope":
+                continue
+            if not cap.reader:
+                raise HarnessError(f"{where}: capability {name!r} needs a 'reader'")
+            if "structured_log" not in caps:
+                raise HarnessError(
+                    f"{where}: capability {name!r} reads the log, so 'structured_log' "
+                    "must be declared"
+                )
+
+        # A bare positional would be swallowed by a preceding flag.
+        for name, cap in caps.items():
+            if cap.argv == ("{value}",) and name != next(reversed(caps)):
+                raise HarnessError(
+                    f"{where}: capability {name!r} is a bare positional, so it must be "
+                    "the last declared capability (argv order is declaration order)"
+                )
+
+        return cls(
+            id=parsed.id,
+            kind=kind,
+            command=tuple(parsed.command),
+            command_resume=command_resume,
+            capabilities=caps,
+            path=path,
+        )
 
     def supports(self, name: str) -> bool:
         return name in self.capabilities
@@ -125,165 +244,104 @@ class HarnessSet:
     invalid: dict[str, str]
 
 
-def _capability(name: str, raw: object, where: str) -> Capability:
+#: A command prefix, written as a string or a list of strings.
+Prefix = Annotated[list[StrictStr], BeforeValidator(lambda v: [v] if isinstance(v, str) else v)]
+
+
+class CapabilityInput(BaseModel):
+    """One `capabilities:` entry as written. Shape only: whether its binding
+    makes sense for its name is `Harness.from_input`'s to say."""
+
+    # Unknown keys are ignored, as the hand-rolled parser did: refusing them
+    # would quarantine an operator overlay that loaded yesterday.
+    model_config = ConfigDict(strict=True)
+
+    cli: list[StrictStr] = []
+    values: list[StrictStr] = []
+    always: StrictStr | list[StrictStr] | None = None
+    channel: StrictStr | None = None
+    source: StrictStr | None = None
+    reader: StrictStr | None = None
+    via: StrictStr | None = None
+    under_allowlist: StrictStr | None = None
+
+
+class HarnessInput(BaseModel):
+    """One harness file as written. Everything is defaulted so that a missing
+    key reaches `Harness.from_input`, which refuses it in the same words as a
+    wrong one."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: StrictStr = ""
+    kind: StrictStr | None = None
+    command: Prefix = []
+    command_resume: Prefix = []
+    capabilities: dict[StrictStr, CapabilityInput] = {}
+
+
+#: What each capability key's shape is, in the words an operator reads.
+_SHAPE = {
+    "cli": "must be a list of strings",
+    "values": "must be a list of strings",
+    "always": "must be a string or a list of strings",
+}
+
+
+def _shape_problem(exc: ValidationError) -> str:
+    """The first thing `HarnessInput` refused, in the prose the hand-rolled
+    parser used rather than pydantic's "Input should be a valid list"."""
+    error = exc.errors()[0]
+    match error["loc"]:
+        case ("id",):
+            return "missing a string 'id'"
+        case ("kind",):
+            return f"unknown kind {error['input']!r}; known: {sorted(KINDS)}"
+        case ("command" | "command_resume" as key, *_):
+            return f"{key!r} must be a string or a list of strings"
+        case ("capabilities",):
+            return "'capabilities' must be a non-empty mapping"
+        case ("capabilities", name):
+            return f"capability {name!r} must be a mapping"
+        case ("capabilities", name, key, *_):
+            return f"capability {name!r} {key!r} {_SHAPE.get(key, 'must be a string')}"
+    return "expected a top-level mapping"
+
+
+def _capability(name: str, raw: CapabilityInput, where: str) -> Capability:
     if name not in KNOWN:
         raise HarnessError(f"{where}: unknown capability {name!r}; known: {sorted(KNOWN)}")
-    if not isinstance(raw, dict):
-        raise HarnessError(f"{where}: capability {name!r} must be a mapping")
-    cli = raw.get("cli", ())
-    if cli and not (isinstance(cli, list) and all(isinstance(x, str) for x in cli)):
-        raise HarnessError(f"{where}: capability {name!r} 'cli' must be a list of strings")
-    for frag in cli:
+    for frag in raw.cli:
         for ph in re.findall(r"\{[a-z_]+\}", frag):
             if ph not in PLACEHOLDERS:
                 raise HarnessError(
                     f"{where}: capability {name!r} uses placeholder {ph}; "
                     f"only {', '.join(PLACEHOLDERS)} exist"
                 )
-    values = raw.get("values", ())
-    if values and not (isinstance(values, list) and all(isinstance(x, str) for x in values)):
-        raise HarnessError(f"{where}: capability {name!r} 'values' must be a list of strings")
-    for pattern in values:
+    for pattern in raw.values:
         try:
             re.compile(pattern)
         except re.error as exc:
             raise HarnessError(
                 f"{where}: capability {name!r} value pattern {pattern!r} is not a regex: {exc}"
             ) from None
-    always = raw.get("always")
-    if isinstance(always, list):
-        always = tuple(always)
     return Capability(
         name=name,
-        argv=tuple(cli),
-        values=tuple(values),
-        always=always,
-        channel=raw.get("channel"),
-        source=raw.get("source"),
-        reader=raw.get("reader"),
-        via=raw.get("via"),
-    )
-
-
-def _prefix(raw: object, key: str, where: str) -> tuple[str, ...]:
-    """A command prefix, accepted as a string or a list of strings."""
-    if raw is None:
-        return ()
-    if isinstance(raw, str):
-        return (raw,)
-    if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
-        return tuple(raw)
-    raise HarnessError(f"{where}: {key!r} must be a string or a list of strings")
-
-
-def parse(data: object, *, where: str, path: Path | None = None) -> Harness:
-    """One harness definition, validated, or raise `HarnessError`."""
-    if not isinstance(data, dict):
-        raise HarnessError(f"{where}: expected a top-level mapping")
-    hid = data.get("id")
-    if not isinstance(hid, str) or not hid:
-        raise HarnessError(f"{where}: missing a string 'id'")
-    kind = data.get("kind")
-    if kind not in KINDS:
-        raise HarnessError(f"{where}: unknown kind {kind!r}; known: {sorted(KINDS)}")
-    command = _prefix(data.get("command"), "command", where)
-    if not command:
-        raise HarnessError(f"{where}: 'command' must be a non-empty string or list")
-    command_resume = _prefix(data.get("command_resume"), "command_resume", where)
-    raw_caps = data.get("capabilities")
-    if not isinstance(raw_caps, dict) or not raw_caps:
-        raise HarnessError(f"{where}: 'capabilities' must be a non-empty mapping")
-
-    caps: dict[str, Capability] = {}
-    for name, raw in raw_caps.items():
-        caps[name] = _capability(name, raw, where)
-
-    for name in REQUIRED:
-        if name not in caps:
-            raise HarnessError(f"{where}: missing required capability {name!r}")
-
-    for name, cap in caps.items():
-        # Every capability is either invocable or one of the known facts about
-        # reading results back. Neither -> `capabilities` is a wishlist.
-        # `context` is exempt here because its own validation below covers
-        # both channels: `channel: prompt` is deliberately argv-less.
-        if not cap.argv and not cap.via and name not in (*NON_INVOCABLE, "context"):
-            raise HarnessError(
-                f"{where}: capability {name!r} has no 'cli' binding for kind {kind!r} "
-                f"and is not one of {sorted(NON_INVOCABLE)}"
-            )
-        if cap.via and cap.via != "command_resume":
-            raise HarnessError(f"{where}: capability {name!r} 'via' must be 'command_resume'")
-        if cap.via == "command_resume" and not command_resume:
-            raise HarnessError(
-                f"{where}: capability {name!r} is bound via 'command_resume', "
-                "which this harness does not define"
-            )
-        # A default the harness's own CLI would reject is worse than no
-        # default: it fails every launch, with no binding to blame.
-        for one in (cap.always,) if isinstance(cap.always, str) else (cap.always or ()):
-            if cap.values and not any(re.fullmatch(p, one) for p in cap.values):
-                raise HarnessError(
-                    f"{where}: capability {name!r} 'always' value {one!r} "
-                    "is not accepted by its own 'values'"
-                )
-
-    ctx = caps["context"]
-    if ctx.channel not in ("system_prompt", "prompt"):
-        raise HarnessError(
-            f"{where}: capability 'context' needs channel 'system_prompt' or 'prompt', "
-            f"not {ctx.channel!r}"
-        )
-    if ctx.channel == "system_prompt" and not ctx.argv:
-        raise HarnessError(f"{where}: context channel 'system_prompt' needs a 'cli' binding")
-    if ctx.channel == "prompt" and ctx.argv:
-        raise HarnessError(
-            f"{where}: context channel 'prompt' is folded into the prompt and "
-            "must not also carry a 'cli' binding"
-        )
-
-    usage = caps["usage"]
-    if usage.source not in ("envelope", "result_file"):
-        raise HarnessError(
-            f"{where}: capability 'usage' needs source 'envelope' or 'result_file', "
-            f"not {usage.source!r}"
-        )
-    # Nothing for a reader to read without a machine-readable stream.
-    for name in ("usage", "rate_limit_signal"):
-        cap = caps.get(name)
-        if cap is None:
-            continue
-        if name == "usage" and cap.source != "envelope":
-            continue
-        if not cap.reader:
-            raise HarnessError(f"{where}: capability {name!r} needs a 'reader'")
-        if "structured_log" not in caps:
-            raise HarnessError(
-                f"{where}: capability {name!r} reads the log, so 'structured_log' must be declared"
-            )
-
-    # A bare positional would be swallowed by a preceding flag.
-    for name, cap in caps.items():
-        if cap.argv == ("{value}",) and name != next(reversed(caps)):
-            raise HarnessError(
-                f"{where}: capability {name!r} is a bare positional, so it must be "
-                "the last declared capability (argv order is declaration order)"
-            )
-
-    return Harness(
-        id=hid,
-        kind=kind,
-        command=command,
-        command_resume=command_resume,
-        capabilities=caps,
-        path=path,
+        argv=tuple(raw.cli),
+        values=tuple(raw.values),
+        always=tuple(raw.always) if isinstance(raw.always, list) else raw.always,
+        channel=raw.channel,
+        source=raw.source,
+        reader=raw.reader,
+        via=raw.via,
+        under_allowlist=raw.under_allowlist,
     )
 
 
 def load(harnesses_dir: Path | None) -> HarnessSet:
     """Every harness, overlay-first then bundled, by bare name.
 
-    Per-file validity, like `templates.load_templates`: one malformed harness
+    Per-file validity: one malformed harness
     is quarantined by name with its reason and the rest still load. An
     unusable harness nobody references is not an outage.
     """
@@ -305,7 +363,7 @@ def load(harnesses_dir: Path | None) -> HarnessSet:
                 invalid[stem] = f"{path}: cannot read/parse: {exc}"
                 continue
             try:
-                h = parse(data, where=str(path), path=path)
+                h = Harness.from_mapping(data, where=str(path), path=path)
             except HarnessError as exc:
                 invalid[stem] = str(exc)
                 continue
@@ -340,8 +398,8 @@ def build_argv(
 
     Order is `capabilities:` declaration order, after the command prefix --
     the file reads as the command line it builds. A capability the harness
-    does not declare is *skipped*, never emitted flagless: `load_registry`
-    already rejected the binding, and a second line of defence here is what
+    does not declare is *skipped*, never emitted flagless: loading the task or
+    profile already refused it, and a second line of defence here is what
     makes the old `agent.py:473` bare-positional bug unrepresentable.
     """
     opts = dict(options or {})

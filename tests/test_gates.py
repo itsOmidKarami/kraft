@@ -1,22 +1,19 @@
-import asyncio
-import json
-import subprocess
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.harness import isolated_bd, v1_named_chain
 
-from kraft import db, events, executor, policy, store
-from kraft.paths import RunDirs
-from kraft.templates import load_registry, load_templates
+from kraft import events, executor, store
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
 
 
-def _default_template():
-    reg = load_registry(_REPO_ROOT / "templates" / "registry.yaml")
-    return load_templates(_REPO_ROOT / "templates", reg).valid["default"]
+def _default_template(tmp_path):
+    """The shipped V1 `default` chain, its agent tasks on the fake agent."""
+    return v1_named_chain(
+        tmp_path / "templates", "default", agent_command=f"{sys.executable} {_FAKE_AGENT}"
+    )
 
 
 def _events(database, wid):
@@ -31,206 +28,100 @@ def _payloads(database, wid, etype):
     ]
 
 
-def _bd_status(repo, bead_id):
-    out = subprocess.run(
-        ["bd", "show", bead_id, "--json"], cwd=repo, capture_output=True, text=True, check=True
-    ).stdout
-    return json.loads(out)[0]["status"]
+def _launch(tmp_path, **repo_entry):
+    return executor.LaunchContext(repo_entry=repo_entry or None)
 
 
-def _gate_index(chain_json, gate):
-    nodes = json.loads(chain_json)["nodes"]
-    return next(i for i, n in enumerate(nodes) if n.get("gate_after") == gate)
+async def test_walk_stops_at_first_gate(tmp_path, database, run_dirs, repo):
+    tracker = isolated_bd(tmp_path)
 
-
-def _launch():
-    # `fake_registry` spreads the shipped `on.spec.requested`/etc bindings, so
-    # they carry the real `steering:` key -- a dispatch that reaches them needs
-    # a real steering_dir to resolve against, same as production.
-    return executor.LaunchContext(
-        repo_entry=None, steering_dir=_REPO_ROOT / "templates" / "steering"
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="make the failing test pass",
+        repo=str(repo),
+        chain=_default_template(tmp_path),
+        bd_cwd=str(tracker),
     )
+    result = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        bd_cwd=str(tracker),
+        launch=_launch(tmp_path),
+    )
+    assert result == "awaiting_gate"
+    row = database.read(
+        lambda c: c.execute(
+            "SELECT status, current_node_id FROM work_items WHERE id=?", (wid,)
+        ).fetchone()
+    )
+    assert row["status"] == "needs_human"
+    # A V1 gate is its own node, so the walk stands on it.
+    assert row["current_node_id"] == "spec_approval"
+    types = _events(database, wid)
+    assert types.count("gate_requested") == 1
+    assert _payloads(database, wid, "gate_requested")[0]["gate"] == "spec_approval"
+    assert "work_item_completed" not in types
 
 
-def test_walk_stops_at_first_gate(tmp_path):
+async def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path, database, run_dirs, repo):
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="make the failing test pass",
-                repo=str(repo),
-                template=_default_template(),
-                bd_cwd=str(tracker),
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                bd_cwd=str(tracker),
-                launch=_launch(),
-            )
-            assert result == "awaiting_gate"
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, current_node_id FROM work_items WHERE id=?", (wid,)
-                ).fetchone()
-            )
-            assert row["status"] == "needs_human"
-            assert row["current_node_id"] == "spec"
-            types = _events(database, wid)
-            assert types.count("gate_requested") == 1
-            assert _payloads(database, wid, "gate_requested")[0]["gate"] == "spec_approval"
-            assert "work_item_completed" not in types
-        finally:
-            await database.close()
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="t",
+        repo=str(repo),
+        chain=_default_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        bd_cwd=str(tracker),
+        launch=_launch(tmp_path),
+    )
+    status = lambda: database.read(  # noqa: E731
+        lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
+    )["status"]
 
-    asyncio.run(scenario())
+    # a terminal reject leaves the item stopped where it is
+    await database.write(
+        lambda c: store.reject_gate(c, wid, "spec_approval", "not specific enough", reopen=False)
+    )
+    assert status() == "needs_human"
 
-
-def test_approving_all_four_gates_completes_chain(tmp_path):
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
-            pol = policy.load_policy(_REPO_ROOT / "templates" / "policy.yaml")
-            wid = await executor.intake(
-                database,
-                rd,
-                title="make the failing test pass",
-                repo=str(repo),
-                template=_default_template(),
-                bd_cwd=str(tracker),
-            )
-            chain_json = database.read(
-                lambda c: c.execute(
-                    "SELECT chain_definition FROM work_items WHERE id=?", (wid,)
-                ).fetchone()
-            )["chain_definition"]
-
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                bd_cwd=str(tracker),
-                policy=pol,
-                launch=_launch(),
-            )
-            for gate in (
-                "spec_approval",
-                "plan_approval",
-                "chain_finalized",
-                "human_review_approval",
-            ):
-                assert result == "awaiting_gate"
-                assert _payloads(database, wid, "gate_requested")[-1]["gate"] == gate
-                await database.write(lambda c, g=gate: store.approve_gate(c, wid, g))
-                start = _gate_index(chain_json, gate) + 1
-                result = await executor.run(
-                    database,
-                    rd,
-                    work_item_id=wid,
-                    registry=registry,
-                    bd_cwd=str(tracker),
-                    start_index=start,
-                    policy=pol,
-                    launch=_launch(),
-                )
-            assert result == "completed"
-            row = database.read(
-                lambda c: c.execute(
-                    "SELECT status, bead_id FROM work_items WHERE id=?", (wid,)
-                ).fetchone()
-            )
-            assert row["status"] == "completed"
-            assert _bd_status(tracker, row["bead_id"]) == "closed"
-            types = _events(database, wid)
-            assert types.count("gate_requested") == 4
-            assert types.count("gate_approved") == 4
-            assert types.count("node_completed") == 10
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    # a re-planning reject hands the node back to the executor
+    await database.write(
+        lambda c: store.reject_gate(c, wid, "spec_approval", "not specific enough", reopen=True)
+    )
+    assert status() == "active"
+    rej = _payloads(database, wid, "gate_rejected")
+    assert (
+        rej
+        == [
+            {
+                "gate": "spec_approval",
+                "note": "not specific enough",
+                "node": None,
+                "by": "human",
+                # Kraft-s7c04.16. None, not "reject": this test drives
+                # `store.reject_gate` directly and names no verdict. The
+                # key is always present so a reader never has to tell
+                # "no verdict given" from "event predates the field".
+                "verdict": None,
+            }
+        ]
+        * 2
+    )
+    assert "gate_approved" not in _events(database, wid)
 
 
-def test_reject_records_the_note_and_reopen_flips_the_row(tmp_path):
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="t",
-                repo=str(repo),
-                template=_default_template(),
-                bd_cwd=str(tracker),
-            )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-            status = lambda: database.read(  # noqa: E731
-                lambda c: c.execute("SELECT status FROM work_items WHERE id=?", (wid,)).fetchone()
-            )["status"]
-
-            # a terminal reject leaves the item stopped where it is
-            await database.write(
-                lambda c: store.reject_gate(
-                    c, wid, "spec_approval", "not specific enough", reopen=False
-                )
-            )
-            assert status() == "needs_human"
-
-            # a re-planning reject hands the node back to the executor
-            await database.write(
-                lambda c: store.reject_gate(
-                    c, wid, "spec_approval", "not specific enough", reopen=True
-                )
-            )
-            assert status() == "active"
-            rej = _payloads(database, wid, "gate_rejected")
-            assert (
-                rej
-                == [
-                    {
-                        "gate": "spec_approval",
-                        "note": "not specific enough",
-                        "node": None,
-                        "by": "human",
-                        # Kraft-s7c04.16. None, not "reject": this test drives
-                        # `store.reject_gate` directly and names no verdict. The
-                        # key is always present so a reader never has to tell
-                        # "no verdict given" from "event predates the field".
-                        "verdict": None,
-                    }
-                ]
-                * 2
-            )
-            assert "gate_approved" not in _events(database, wid)
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-
-def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(tmp_path, monkeypatch):
+async def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """The empty gate from work item 6363c65e, end to end (Kraft-7lu).
 
     The worker there was refused every Write, produced nothing, and still
@@ -240,29 +131,27 @@ def test_a_spec_worker_that_wrote_no_artifact_opens_no_gate(tmp_path, monkeypatc
     """
     monkeypatch.setenv("KRAFT_FAKE_AGENT_SKIP_ARTIFACT", "1")
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = fake_registry(sys.executable, _FAKE_AGENT)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="make the failing test pass",
-                repo=str(repo),
-                template=_default_template(),
-                bd_cwd=str(tracker),
-            )
-            await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker)
-            )
-            types = _events(database, wid)
-            assert "gate_requested" not in types
-            assert "node_completed" not in types
-            assert not (rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md").exists()
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="make the failing test pass",
+        repo=str(repo),
+        chain=_default_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        bd_cwd=str(tracker),
+        launch=_launch(tmp_path),
+    )
+    types = _events(database, wid)
+    assert "gate_requested" not in types
+    assert "node_completed" not in types
+    # ...and for the missing document, not for something incidental:
+    # the spec task ran and failed for want of its document.
+    stopped = _payloads(database, wid, "worker_session_exited")
+    assert [p["status"] for p in stopped] == ["failed"]
+    assert not (run_dirs.worktrees / wid / ".engineering" / "specs" / f"{wid}.md").exists()

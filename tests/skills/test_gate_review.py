@@ -1,0 +1,677 @@
+"""Gate review dispatch, driven against a real DB, with
+`_agent.run_agent_task` monkeypatched -- the same seam
+`tests/test_escalate.py` uses.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from pathlib import Path
+
+import pytest
+from support.harness import entry_of, v1_chain, v1_item, write_harness_profiles
+
+from kraft import events, executor, gate_review, store
+from kraft import policy as _policy
+from kraft.db import Database
+from kraft.executor import walk
+from kraft.paths import RunDirs
+
+
+@pytest.fixture(autouse=True)
+def _claude_profile():
+    """`_reviewer` selects profile `claude`, on the provider of that name."""
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates", {"claude": {"provider": "claude"}}
+    )
+
+
+def _reviewer(**extra):
+    """The gate's own declared reviewing task (`GateNode.auto_review`). Its
+    launch is monkeypatched out in every test here; `claude` is only what
+    `resolve_agent_task` resolves a command from."""
+    return {"id": "reviewer", "kind": "agent", "harness": "claude", "prompt": "Review it.", **extra}
+
+
+def _chain(rd):
+    """spec (exec) -> spec_approval (gate, artifact: spec, reviewed)."""
+    return v1_chain(
+        [
+            {
+                "id": "spec",
+                "kind": "exec",
+                "tasks": [{"id": "author", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "spec_approval",
+                "kind": "gate",
+                "artifact": "spec",
+                "reject_to": "spec",
+                "auto_review": _reviewer(),
+            },
+        ],
+        repo=rd.base,
+    )
+
+
+def _gate(rd):
+    return _chain(rd).chain.nodes[1]
+
+
+async def _seed(database, rd, wid):
+    await v1_item(
+        database,
+        _chain(rd),
+        repo=rd.base,
+        wid=wid,
+        title="the widget",
+        description="make it stop throwing",
+        auto_gate=True,
+    )
+    await database.write(lambda c: store.enter_node(c, wid, "spec_approval"))
+    await database.write(lambda c: store.request_gate(c, wid, "spec_approval", "spec_approval"))
+    doc = rd.worktrees / wid / ".engineering" / "specs" / f"{wid}.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("# the design\n")
+
+
+def _fake_agent(result: dict | None, seen: dict):
+    async def fake_run_agent_task(db, run_dirs, *, session_id, **kw):
+        seen["kwargs"] = kw
+        seen["session_id"] = session_id
+        if result is not None:
+            (run_dirs.results / f"{session_id}.json").write_text(json.dumps(result))
+        return result.get("status", "done") if result else "failed"
+
+    return fake_run_agent_task
+
+
+@pytest.mark.parametrize(
+    "result,expected",
+    [
+        ({"status": "done", "verdict": "approve"}, "approve"),
+        (
+            {"status": "done", "verdict": "reject", "concerns": "the spec skips migrations"},
+            "reject",
+        ),
+        (
+            {"status": "done", "verdict": "fixed", "concerns": "typo in the spec, corrected"},
+            "fixed",
+        ),
+        ({"status": "done", "verdict": "undecided"}, "undecided"),
+        # Everything ambiguous collapses to undecided: the gate stays pending
+        # and a human decides. This is the whole safety story of the feature.
+        ({"status": "done"}, "undecided"),
+        ({"status": "done", "verdict": "APPROVE!"}, "undecided"),
+        ({"status": "failed", "verdict": "approve"}, "undecided"),
+        ({"status": "needs_context", "verdict": "approve"}, "undecided"),
+        # A rejection with no reason is worthless as a steer note.
+        ({"status": "done", "verdict": "reject", "concerns": ""}, "undecided"),
+        (None, "undecided"),
+    ],
+)
+async def test_verdict_resolution(monkeypatch, result, expected, database, run_dirs):
+    seen = {}
+    monkeypatch.setattr("kraft.gate_review._agent.run_agent_task", _fake_agent(result, seen))
+
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    verdict, _note = await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert verdict == expected
+
+
+async def test_item_override_reaches_the_gate_review_dispatch(monkeypatch, database, run_dirs):
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    await _seed(database, run_dirs, "w1")
+    await database.write(
+        lambda c: store.set_agent_overrides(
+            c, "w1", json.dumps({"model": "sonnet", "effort": "low"})
+        )
+    )
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert seen["kwargs"]["model"] == "sonnet"
+    assert seen["kwargs"]["effort"] == "low"
+
+
+async def test_review_forwards_the_repo_s_resolved_sandbox(monkeypatch, database, run_dirs):
+    """Kraft-rki: a repo's `sandbox:` reaches the reviewer's `run_agent_task`,
+    through `dispatch.item_sandbox` (Ruling 189), or it silently does nothing
+    for its gate reviews.
+    """
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(
+        repo_entry=entry_of({"sandbox": {"kind": "docker", "image": "kraft-worker:py"}}),
+        skills_dir=None,
+    )
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    assert seen["kwargs"]["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
+
+
+async def test_dispatch_is_a_worker_with_no_resume(monkeypatch, database, run_dirs):
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    await gate_review.review(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        gate="spec_approval",
+        node=_gate(run_dirs),
+        launch=launch,
+    )
+    kw = seen["kwargs"]
+    # The safety property: a worker cannot clear its own gate, and
+    # `client.context._forbid_self_action` is what enforces that. Flipping this
+    # flag would silently hand the agent the human's standing.
+    assert kw.get("identify_as_worker", True) is True
+    # The gate's own declared task, by its canonical path.
+    assert kw["hook_point"] == _gate(run_dirs).auto_review.path
+    assert kw.get("resume_session_id") is None
+    assert "spec_approval" in kw["task_instruction"]
+    assert ".engineering/specs/w1.md" in kw["task_instruction"]
+
+
+async def test_a_reviewer_on_an_unavailable_profile_launches_nothing_and_claims_nothing(
+    monkeypatch, database, run_dirs
+):
+    """`unavailable-selected-harness-needs-human`, at the gate: a reviewer whose
+    profile is disabled raises `HarnessUnavailable` before any launch and before
+    `store.approve_gate`'s claim, so the gate stays pending for a person. The
+    raise reaches `deps.guard`, which stops the item for a human; the dangling
+    `gate_auto_review_started` counts as the attempt, so the gate is not
+    re-armed. `claude` is a real provider, so a fallback onto it would launch."""
+    from kraft.adapters import agent
+
+    write_harness_profiles(
+        Path(os.environ["KRAFT_HOME"]) / "templates",
+        {"claude": {"provider": "claude", "enabled": False}},
+    )
+    seen = {}
+    monkeypatch.setattr(
+        "kraft.gate_review._agent.run_agent_task",
+        _fake_agent({"status": "done", "verdict": "approve"}, seen),
+    )
+
+    await _seed(database, run_dirs, "w1")
+    launch = executor.LaunchContext(repo_entry=None, skills_dir=None)
+    with pytest.raises(agent.HarnessUnavailable, match="'claude' is disabled"):
+        await gate_review.review(
+            database,
+            run_dirs,
+            work_item_id="w1",
+            gate="spec_approval",
+            node=_gate(run_dirs),
+            launch=launch,
+        )
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+
+    assert seen == {}
+    # Still parked at the gate, as `_seed` left it: nothing claimed it.
+    assert (row["status"], row["current_node_id"]) == ("needs_human", "spec_approval"), row
+    assert types[-1] == "gate_auto_review_started", types
+    assert "gate_approved" not in types and "gate_rejected" not in types, types
+
+
+def _chain2(rd, *, auto_review=True):
+    """implementation (exec) -> human_review_approval (gate, reject_to
+    implementation, reviewed unless `auto_review=False`)."""
+    gate = {"id": "human_review_approval", "kind": "gate", "reject_to": "implementation"}
+    if auto_review:
+        gate["auto_review"] = _reviewer()
+    return v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "subprocess", "command": "true"}],
+            },
+            gate,
+        ],
+        repo=rd.base,
+    )
+
+
+POLICY = _policy.Policy(loops={}, default=_policy.Cap(attempts=2, wall_clock_s=3600))
+
+
+async def _seed_at_gate(database, rd, wid, chain, *, auto_gate):
+    await v1_item(
+        database,
+        chain,
+        repo=rd.base,
+        wid=wid,
+        title="the widget",
+        description="make it stop throwing",
+        auto_gate=auto_gate,
+    )
+    await database.write(lambda c: store.enter_node(c, wid, "human_review_approval"))
+    await database.write(
+        lambda c: store.request_gate(c, wid, "human_review_approval", "human_review_approval")
+    )
+
+
+async def _passthrough_approve(row, gate):
+    """What `kraft.api.routes.gates.apply_approval` returns for a gate with nothing to splice."""
+    return walk.chain_of(row).chain.nodes, None
+
+
+async def _review_from_gate(
+    database, rd, chain=None, *, auto_gate, wid="w1", on_approve=_passthrough_approve
+):
+    """Enter `kraft.executor.gates.review_gates` exactly as `run` does when
+    its walk stopped at a gate."""
+    await _seed_at_gate(database, rd, wid, chain or _chain2(rd), auto_gate=auto_gate)
+    return await executor.review_gates(
+        "awaiting_gate",
+        database,
+        rd,
+        work_item_id=wid,
+        policy=POLICY,
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
+        bd_cwd=None,
+        on_approve=on_approve,
+    )
+
+
+def _stub_review(monkeypatch, verdict, note="because the migration is missing"):
+    async def fake_review(db, run_dirs, **kw):
+        return verdict, note
+
+    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+
+
+def _stub_walk(monkeypatch, calls, status="completed"):
+    async def fake_run_once(db, run_dirs, **kw):
+        calls.append((kw.get("start_index"), kw.get("steer")))
+        return status
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+
+@pytest.mark.parametrize(
+    "verdict,expected_start",
+    [
+        # approve -> the node after the gate
+        ("approve", 2),
+        # reject -> the chain's own reject_to
+        ("reject", 0),
+        # fixed -> the execution node *before* the gate, so the repair is
+        # measured and not trusted. NOT the gate node itself any more (Task 4b,
+        # Ruling 54): a V1 gate has no execution shape, so re-entering there
+        # dispatched nothing and re-requested the same gate. In this chain the
+        # preceding execution node is also what `reject_to` names, so the two
+        # verdicts coincide at 0 -- the discriminating case, where they differ,
+        # is pinned in tests/executor/test_gates.py by
+        # test_a_fixed_verdict_re_enters_the_execution_node_before_the_gate.
+        ("fixed", 0),
+    ],
+)
+async def test_verdict_reenters_the_walk_at_the_right_node(
+    monkeypatch, verdict, expected_start, database, run_dirs
+):
+    calls = []
+    _stub_review(monkeypatch, verdict)
+    _stub_walk(monkeypatch, calls)
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "completed"
+    assert [c[0] for c in calls] == [expected_start]
+    # A rejection's reasoning is the steer for whoever redoes the work.
+    if verdict == "approve":
+        assert calls[0][1] is None
+    else:
+        assert calls[0][1] == "because the migration is missing"
+
+
+async def test_undecided_leaves_the_gate_pending(monkeypatch, database, run_dirs):
+    calls = []
+    _stub_review(monkeypatch, "undecided")
+    _stub_walk(monkeypatch, calls)
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "awaiting_gate"
+    assert calls == []
+    row = database.read(
+        lambda c: c.execute("SELECT status FROM work_items WHERE id = 'w1'").fetchone()
+    )
+    assert row["status"] == "needs_human"
+
+
+@pytest.mark.parametrize("auto_gate,auto_escalate", [(False, True), (True, False), (False, False)])
+async def test_no_review_unless_both_knobs_are_on(
+    monkeypatch, auto_gate, auto_escalate, database, run_dirs
+):
+    """The AND is this feature's safety property, so it is pinned explicitly
+    rather than implied by the happy path. V1: the chain's half of the AND is
+    the gate declaring an `auto_review` task."""
+    reviewed = []
+
+    async def fake_review(db, run_dirs, **kw):
+        reviewed.append(kw["gate"])
+        return "approve", ""
+
+    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+
+    chain = _chain2(run_dirs, auto_review=auto_escalate)
+    status = await _review_from_gate(database, run_dirs, chain, auto_gate=auto_gate)
+    assert status == "awaiting_gate"
+    assert reviewed == []
+
+
+async def test_a_human_decision_taken_during_the_review_wins(monkeypatch, database, run_dirs):
+    """The agent worked for minutes and a person approved the gate meanwhile.
+    The verdict was computed against state that no longer exists, so it is
+    dropped rather than written on top of the human's decision."""
+    calls = []
+
+    async def fake_review(db, run_dirs, *, work_item_id, **kw):
+        await db.write(lambda c: store.approve_gate(c, work_item_id, "human_review_approval"))
+        return "reject", "send it back"
+
+    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    _stub_walk(monkeypatch, calls)
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "active"  # what the human's approval left behind
+    assert calls == []  # the walk was not re-entered
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert "gate_rejected" not in types
+    assert types[-1] == "gate_auto_review_discarded"
+
+
+async def test_an_agent_fixed_verdict_is_recorded_as_fixed(monkeypatch, database, run_dirs):
+    """Kraft-s7c04.16. `by: agent` alone cannot tell a reviewer that rejected
+    from one that repaired the worktree and committed -- and those differ: a
+    `fixed` re-enters at the gate's own node and regenerates the artifact the
+    gate is about. The 7ced80e6 investigation could only find that cycle by
+    putting session logs in order by hand."""
+    _stub_review(monkeypatch, "fixed", note="tidied the spec")
+
+    async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
+        return "needs_human"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+    await _review_from_gate(database, run_dirs, auto_gate=True)
+    [rej] = [
+        e
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "gate_rejected"
+    ]
+    assert rej["payload"]["verdict"] == "fixed"
+    assert rej["payload"]["by"] == "agent"
+
+
+async def test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, database, run_dirs):
+    """A reviewer that keeps repairing and re-measuring is bounded by the same
+    counter a human's rejections are bounded by, and ends at a person."""
+    _stub_review(monkeypatch, "fixed", note="tidied the spec again")
+
+    async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
+        # Each re-entry walks straight back into the same pending gate.
+        await db.write(
+            lambda c: store.request_gate(
+                c, work_item_id, "human_review_approval", "human_review_approval"
+            )
+        )
+        return "awaiting_gate"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "needs_human"
+    count = database.read(
+        lambda c: c.execute(
+            "SELECT count FROM retry_counters WHERE work_item_id = 'w1' AND key = ?",
+            ("human_review_approval_reject_loop",),
+        ).fetchone()
+    )["count"]
+    assert count == 3  # attempts=2, so the third is the breach
+
+
+@pytest.mark.parametrize(("by_person", "count"), [(False, 4), (True, 3)], ids=["agent", "person"])
+async def test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop(
+    monkeypatch, database, run_dirs, by_person, count
+):
+    """Kraft-s7c04.22 (`only-a-person-resets-a-cap-counter`): a retry between
+    two runs of fixed verdicts does not buy the reviewer a fresh cycle unless a
+    person asked for it. The agent's retry breaches on its first fixed verdict
+    (the count goes on from 3); a person's starts a fresh one (1, 2, 3)."""
+    from kraft.templates.forks import ChainPath
+
+    await test_repeated_fixed_verdicts_breach_the_reject_loop(monkeypatch, database, run_dirs)
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["needs_human"]))
+
+    status = await executor.retry(
+        database,
+        run_dirs,
+        work_item_id="w1",
+        target=ChainPath.parse(walk.chain_of(row), "human_review_approval"),
+        by_person=by_person,
+        policy=POLICY,
+        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
+        on_approve=_passthrough_approve,
+    )
+
+    assert status == "needs_human"
+    counted = database.read(lambda c: store.cap_counts(c, "w1"))
+    assert counted["human_review_approval_reject_loop"] == count
+
+
+async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dirs):
+    """A review Kraft cannot pay for is not started, and the gate goes to a
+    human rather than being cleared by nobody."""
+    reviewed = []
+
+    async def fake_review(db, run_dirs, **kw):
+        reviewed.append(kw["gate"])
+        return "approve", ""
+
+    monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
+    monkeypatch.setattr(
+        "kraft.executor.stops.budget_breach",
+        lambda db, wid, budget, **_tokens: {
+            "scope": "work_item",
+            "spent_usd": 11.0,
+            "cap_usd": 10.0,
+        },
+    )
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert status == "awaiting_gate"
+    assert reviewed == []
+    types = [e["type"] for e in database.read(lambda c: events.read_after(c, 0, "w1"))]
+    assert types[-1] == "gate_auto_review_skipped"
+
+
+async def test_approve_without_an_approval_door_leaves_the_gate_for_a_human(
+    monkeypatch, database, run_dirs
+):
+    """`store.approve_gate` is not the whole of an approval: `chain_finalized`
+    splices the reviewed nodes in and every artifact-carrying gate indexes its
+    document. Without `on_approve` those cannot run, and clearing the gate with
+    half an approval is worse than not clearing it."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True, on_approve=None)
+    assert status == "awaiting_gate"
+    assert calls == []
+    assert executor.pending_gate(database, "w1") == "human_review_approval"
+
+
+async def test_approve_parks_the_item_when_the_approval_refuses(monkeypatch, database, run_dirs):
+    """A `chain_review` artifact that is missing, corrupt, or reports `error`
+    makes `apply_approval` return no chain. A person gets it, and the gate is
+    not cleared on the way."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    async def refuse(row, gate):
+        return None, "chain_review: no artifact found; the worker did not write one"
+
+    status = await _review_from_gate(database, run_dirs, auto_gate=True, on_approve=refuse)
+    assert status == "needs_human"
+    assert calls == []
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id = 'w1'").fetchone())
+    assert row["status"] == "needs_human"
+    log = database.read(lambda c: events.read_after(c, 0, "w1"))
+    stops = [e for e in log if e["type"] == "work_item_needs_human"]
+    assert "no artifact found" in stops[-1]["payload"]["reason"]
+
+
+def test_approve_walks_the_chain_the_approval_returned(tmp_path, monkeypatch):
+    """The point of routing an agent approval through the same door: a
+    `chain_finalized` approval splices a new tail in, and the walk has to
+    re-enter against that tail rather than the chain the gate opened on."""
+    calls = []
+    _stub_review(monkeypatch, "approve")
+    _stub_walk(monkeypatch, calls)
+
+    async def scenario():
+        rd = RunDirs(tmp_path / "run").ensure()
+        database = await Database.open(rd.db)
+        try:
+            # The returned chain puts one more node *ahead* of the gate, so the
+            # walk re-entering at the gate's index in the chain it opened on
+            # (2 -> index 2 is past the end) is told apart from re-entering at
+            # its index in the returned chain (3).
+            spliced = v1_chain(
+                [
+                    {
+                        "id": "extra",
+                        "kind": "exec",
+                        "tasks": [{"id": "x", "kind": "subprocess", "command": "true"}],
+                    },
+                    *[
+                        n.node.model_dump(mode="json", exclude_none=True)
+                        for n in _chain2(rd).chain.nodes
+                    ],
+                ],
+                repo=rd.base,
+            ).chain.nodes
+
+            async def splice(row, gate):
+                return spliced, None
+
+            status = await _review_from_gate(database, rd, auto_gate=True, on_approve=splice)
+            assert status == "completed"
+            assert [c[0] for c in calls] == [3]
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+async def test_run_calls_auto_escalate_stuck_after_review_gates(monkeypatch, database, run_dirs):
+    calls = []
+
+    async def fake_run_once(db, run_dirs, **kw):
+        return "needs_human"
+
+    async def fake_auto_escalate_stuck(status, db, run_dirs, **kw):
+        calls.append((status, kw["work_item_id"]))
+        return "sentinel_status"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+    monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
+
+    status = await executor.run(database, run_dirs, work_item_id="w1")
+    assert status == "sentinel_status"
+    assert calls == [("needs_human", "w1")]
+
+
+async def test_resume_calls_auto_escalate_stuck_after_review_gates(monkeypatch, database, run_dirs):
+    calls = []
+
+    async def fake_resume_once(db, run_dirs, **kw):
+        return "needs_human"
+
+    async def fake_auto_escalate_stuck(status, db, run_dirs, **kw):
+        calls.append((status, kw["work_item_id"]))
+        return "sentinel_status"
+
+    monkeypatch.setattr("kraft.executor.resuming.resume_once", fake_resume_once)
+    monkeypatch.setattr("kraft.executor.gates.auto_escalate_stuck", fake_auto_escalate_stuck)
+
+    status = await executor.resume(database, run_dirs, work_item_id="w1", adopted={})
+    assert status == "sentinel_status"
+    assert calls == [("needs_human", "w1")]
+
+
+async def test_an_agent_gate_verdict_re_enters_without_claiming_a_human_wrote_it(
+    monkeypatch, database, run_dirs
+):
+    """Kraft-s7c04.6. `review_gates` re-entered `run_once(steer=note)` with no
+    source, so the re-run's prompt led with "A human has steered this run" over
+    a note an agent wrote -- the exact misattribution `Steer.source` exists to
+    prevent, on the one path nobody wired it into."""
+    _stub_review(monkeypatch, "fixed", note="tidied the spec")
+    seen = {}
+
+    async def fake_run_once(db, run_dirs, *, work_item_id, **kw):
+        seen.update(kw)
+        return "needs_human"
+
+    monkeypatch.setattr("kraft.executor.walk.run_once", fake_run_once)
+
+    await _review_from_gate(database, run_dirs, auto_gate=True)
+    assert seen["steer"] == "tidied the spec"
+    assert seen["steer_source"] == "gate_review"
+
+
+def test_a_gate_reviewers_note_still_reaches_a_dispatch(monkeypatch):
+    """The other half, and why this is not simply `steer_source="seeded"`. The
+    note lives only in the `Steer` -- `take()` empties it and nothing
+    re-delivers it -- so a judge stop before delivery would discard the entire
+    content of a `fixed`/`reject` verdict and park the item having paid for a
+    gate-review agent and a judge call and used neither."""
+    from kraft.executor.context import Steer
+
+    assert Steer("x", source="gate_review").exempts_judge is True
+    assert Steer("x", source="human").exempts_judge is True
+    assert Steer("x", source="seeded").exempts_judge is False

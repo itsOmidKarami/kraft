@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from support.harness import fake_templates_dir, isolated_bd, make_repo
+from support.harness import connected_repo
+
+#: No default repo entry: an autostarted item stops where an unconfigured repo stops.
+pytestmark = pytest.mark.api_client(default_setup=False)
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FAKE_CLAUDE = _REPO_ROOT / "fixtures" / "fake-claude.sh"
@@ -28,22 +30,8 @@ def _poll_for(client, wid, event_type, timeout=30):
     raise AssertionError(f"{event_type} never arrived for {wid}")
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("KRAFT_BD_CWD", str(isolated_bd(tmp_path)))
-    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, str(_FAKE_CLAUDE))))
-    monkeypatch.setenv(
-        "KRAFT_FRONTEND_DIST", os.environ.get("KRAFT_FRONTEND_DIST") or str(tmp_path / "no-dist")
-    )
-    import kraft.api as api
-
-    with TestClient(api.app, client=("127.0.0.1", 54321)) as c:
-        yield c
-
-
 def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "wait for me", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -56,7 +44,7 @@ def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
 
 
 def test_autostart_defaults_true_so_the_ui_is_unaffected(client, tmp_path):
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post("/api/work-items", json={"title": "go now", "repo": str(repo)}).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
 
@@ -66,7 +54,7 @@ def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
     what makes a NULL current_node_id resolve to the first node. Nothing else
     was written for this case, so if that expression is ever refactored, this
     test is the thing that notices."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "start me", "repo": str(repo), "autostart": False}
     ).json()["id"]
@@ -82,8 +70,28 @@ def test_resuming_a_never_started_item_begins_at_node_zero(client, tmp_path):
 
 def test_pausing_a_never_started_item_is_refused(client, tmp_path):
     """It is already paused; /pause requires an active item."""
-    repo = make_repo(tmp_path)
+    repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items", json={"title": "already waiting", "repo": str(repo), "autostart": False}
     ).json()["id"]
     assert client.post(f"/api/work-items/{wid}/pause").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "caller",
+    [{"X-Kraft-Session-Id": "s1"}, {"X-Kraft-Client": "mcp"}],
+    ids=["worker", "mcp-assistant"],
+)
+def test_an_agent_files_work_paused_and_cannot_autostart_it(client, tmp_path, caller):
+    """Kraft-s7c04.31: `autostart` is a human's choice. A Kraft session (its
+    `X-Kraft-Session-Id`) or an MCP client asking for it is refused before
+    anything is filed; the same caller filing paused is still let through."""
+    repo = connected_repo(tmp_path)
+    body = {"title": "t", "repo": str(repo)}
+    refused = client.post("/api/work-items", json={**body, "autostart": True}, headers=caller)
+    assert refused.status_code == 403, refused.text
+    assert "paused" in refused.json()["detail"]
+    assert client.get("/api/work-items").json()["items"] == []
+
+    filed = client.post("/api/work-items", json={**body, "autostart": False}, headers=caller)
+    assert filed.status_code == 201 and filed.json()["status"] == "paused"

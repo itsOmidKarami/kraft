@@ -13,13 +13,25 @@ import json
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, harness, templates
+from kraft import auth, capabilities, client, config, harness
 from kraft.adapters import forge
-from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.executor import fallback
+from kraft.paths import (
+    BUNDLED,
+    RunDirs,
+    default_run_dir,
+    default_skills_dir,
+    default_templates_dir,
+)
+from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
+from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
+from kraft.templates.models import AgentTask, ForgeTask
+from kraft.worker import sandbox
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -59,8 +71,9 @@ async def run_checks() -> list[dict]:
     )
     checks.extend(_config_checks())
     checks.append(_pidfile_check())
-    checks.extend(_agent_checks(*_loaded_registry()))
+    checks.extend(_agent_checks())
     checks.append(await _mcp_check(health is not None))
+    checks.append(_path_check())
     checks.append(_completion_check())
     checks.append(_bundle_check())
     checks.append(_version_check())
@@ -89,20 +102,32 @@ def _health_checks(payload: dict) -> list[dict]:
     if payload.get("invalid_policy"):
         reasons.append(f"invalid policy: {payload['invalid_policy']}")
     reasons.extend(f"index: {error}" for error in index.get("errors") or [])
-    if not embeddings.get("available"):
-        reasons.append(f"embeddings unavailable: {embeddings.get('reason') or 'no reason given'}")
     orphaned = (payload.get("reattach_summary") or {}).get("unknown") or []
     if orphaned:
         reasons.append(f"orphaned agent sessions: {', '.join(orphaned)}")
+    # Semantic search is an opt-in extra (`available` is whether it imports),
+    # so /health stays `ok` without it and so does doctor: an ok line carrying
+    # the advice, never a FAIL on something the operator never asked for
+    # (Kraft-rj8cn). Installed but failing to load or encode is a FAIL: the
+    # operator did ask for it (Kraft-pm2rj).
+    if not embeddings.get("available"):
+        extra = _check(
+            "embeddings", True, f"not installed: {embeddings.get('reason') or 'no reason given'}"
+        )
+    elif embeddings.get("reason"):
+        extra = _check("embeddings", False, f"installed but broken: {embeddings['reason']}")
+    else:
+        extra = _check("embeddings", True, f"available ({embeddings.get('model')})")
     if not reasons:
-        return [_check("health", payload.get("status") == "ok", str(payload.get("status", "?")))]
-    return [_check("health", False, reason) for reason in reasons]
+        status = str(payload.get("status", "?"))
+        return [_check("health", payload.get("status") == "ok", status), extra]
+    return [*(_check("health", False, reason) for reason in reasons), extra]
 
 
 def _config_checks() -> list[dict]:
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     if not templates.is_dir():
-        # `hooks` still reports, as a skip: every check this function can emit
+        # Every row still reports, as a skip: every check this function can emit
         # emits on every path, so a caller reading the run by name never has to
         # ask whether a row is missing because it passed, because it was skipped,
         # or because an earlier branch returned before reaching it.
@@ -110,21 +135,19 @@ def _config_checks() -> list[dict]:
             _check(
                 "templates", False, f"{templates} does not exist — start `kraft` once to seed it"
             ),
-            _hooks_check(),
-            _dead_hooks_check(),
             _chain_templates_check(),
+            _check("chains", True, "skipped: no templates dir", skipped=True),
             _capabilities_check(),
             _token_check(),
         ]
     checks = [_check("templates", True, str(templates))]
     try:
-        config.load_access(templates / "access.yaml")
+        config.Access.load(templates / "access.yaml")
         checks.append(_check("access.yaml", True, "parses"))
     except config.ConfigError as exc:
         checks.append(_check("access.yaml", False, str(exc)))
-    checks.append(_hooks_check())
-    checks.append(_dead_hooks_check())
     checks.append(_chain_templates_check())
+    checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
     return checks
@@ -155,147 +178,17 @@ def _pidfile_check() -> dict:
     return _check("pidfile", True, f"{pid_path} (pid {pid})")
 
 
-def _is_noop(binding) -> bool:
-    return isinstance(binding, dict) and binding.get("handler") == "noop"
-
-
-def _hooks_check() -> dict:
-    """Hooks this version ships a real binding for, still on `builtin: noop`
-    locally.
-
-    `templates/` is seeded once and never overwritten (`cli.seed_home`), so an
-    operator who installed before a hook was implemented keeps the placeholder
-    forever — and a placeholder gate shows an empty card with nothing to read
-    and no reason why. Always `ok`: which hooks to run is the operator's
-    decision, and `kraft admin doctor` exits 1 on any failed check.
-    """
-    shipped_path = BUNDLED / "templates" / "registry.yaml"
-    # `KRAFT_TEMPLATES_DIR` first, exactly as `_config_checks` reads it above:
-    # doctor must inspect the directory the running server actually loaded,
-    # not the one $KRAFT_HOME implies.
-    live_path = (
-        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
-    )
-    if not shipped_path.is_file():
-        # A source checkout has no `_bundled/`: there is nothing to compare to.
-        return _check("hooks", True, "skipped: not an installed Kraft", skipped=True)
-    try:
-        shipped = yaml.safe_load(shipped_path.read_text())["hooks"]
-        live = yaml.safe_load(live_path.read_text())["hooks"]
-    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
-        return _check("hooks", True, f"skipped: cannot compare ({exc})", skipped=True)
-    # Two different problems with two different fixes, so they are counted
-    # separately rather than as one "stale" bucket: a hook still on the
-    # placeholder is a binding to change, while a hook missing entirely is a
-    # line to add. The second is what a registry seeded before the hook point
-    # existed looks like, and `.get(h)` returning None reads as "not a noop" —
-    # which silently exempted exactly the case this check exists for (Kraft-zmb).
-    real = {h: b for h, b in shipped.items() if not _is_noop(b)}
-    placeholder = sorted(h for h in real if _is_noop(live.get(h)))
-    absent = sorted(h for h in real if h not in live)
-    if not placeholder and not absent:
-        return _check("hooks", True, f"{len(live)} bound, none left on the placeholder")
-    parts = []
-    if placeholder:
-        parts.append(f"{', '.join(placeholder)} still builtin:noop")
-    if absent:
-        parts.append(f"{', '.join(absent)} missing entirely")
-    return _check(
-        "hooks",
-        True,
-        f"{'; '.join(parts)} in {live_path}, but bound in this version's "
-        "defaults — Settings → Hooks, or edit that file",
-    )
-
-
-def _chain_template_hooks(directory: Path) -> set[str]:
-    """Every hook named in any chain template's node `tasks`, across every YAML
-    file in `directory` with a `nodes` list -- the same file shape
-    `_chain_template_files` walks, read for hook names instead of node ids.
-    """
-    hooks: set[str] = set()
-    if not directory.is_dir():
-        return hooks
-    for path in sorted(directory.glob("*.yaml")):
-        try:
-            data = yaml.safe_load(path.read_text())
-        except OSError, ValueError, yaml.YAMLError:
-            continue
-        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-            continue
-        for node in data["nodes"]:
-            if isinstance(node, dict) and isinstance(node.get("tasks"), list):
-                hooks.update(t for t in node["tasks"] if isinstance(t, str))
-    return hooks
-
-
-def _dead_hooks_check() -> dict:
-    """Hooks a chain template actually dispatches, bound to `builtin: noop` in
-    the live registry, and either `builtin: noop` or absent entirely in this
-    version's shipped registry — dead by design, not by staleness.
-
-    A different question from `_hooks_check`, which reports a hook real (not
-    noop) in the shipped registry but noop-or-absent in the live one: a
-    registry that has fallen behind what this version ships. `on.review.mr.run`
-    is `builtin: noop` in the *shipped* registry too, so it never enters
-    `_hooks_check`'s `real` set and can never be reported there (spec "Why the
-    existing doctor check cannot catch C6").
-
-    Reported as information, not a defect. A core noop is a plugin extension
-    point by design: `on.review.mr.run` ships noop so a plugin can fill it
-    (kraft-lite does). A plugin fills it by rebinding it in the live registry,
-    so a hook still noop in live is one that no plugin binds on this install.
-    The operator should know that tier does nothing here. It is not broken.
-
-    Scoped to noop-or-absent in shipped so the two checks are disjoint by
-    construction: `_hooks_check` only ever selects a hook that is real (not
-    noop) in shipped, this one only ever selects one that is noop or absent
-    in shipped, so no hook can satisfy both and be reported twice for two
-    different reasons.
-
-    Always `ok`, like `_hooks_check`: which hooks a chain names is the
-    operator's own template, not a fault doctor should fail the exit code over.
-    """
-    shipped_path = BUNDLED / "templates" / "registry.yaml"
-    if not shipped_path.is_file():
-        return _check("dead_hooks", True, "skipped: not an installed Kraft", skipped=True)
-    live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    live_path = live_dir / "registry.yaml"
-    try:
-        shipped = yaml.safe_load(shipped_path.read_text())["hooks"]
-        live = yaml.safe_load(live_path.read_text())["hooks"]
-    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
-        return _check("dead_hooks", True, f"skipped: cannot compare ({exc})", skipped=True)
-    dispatched = _chain_template_hooks(live_dir)
-    dead = sorted(
-        h
-        for h in dispatched
-        if (h not in shipped or _is_noop(shipped.get(h))) and _is_noop(live.get(h))
-    )
-    if not dead:
-        return _check("dead_hooks", True, f"{len(dispatched)} hook(s) dispatched, none dead")
-    return _check(
-        "dead_hooks",
-        True,
-        f"{', '.join(dead)} named in a chain's tasks but builtin:noop in shipped and "
-        "live registries — this tier does nothing on this install unless a plugin binds it",
-    )
-
-
 def _chain_template_files(directory: Path) -> dict[str, set[str]]:
-    """Every YAML file in `directory` that is a chain template — has a
-    top-level `nodes` list — mapped to the ids of its nodes.
-
-    Distinguishes chain templates (`default.yaml`, `quick-task.yaml`) from
-    the registry and from config with no chain shape at all (`intake.yaml`,
-    `policy.yaml`, `repos.yaml`) by structure, not by filename, so a
-    template added in a later version is picked up without a code change
-    here.
-    """
+    """Every chain file under `directory/chains/` -- one with a top-level
+    `nodes` list -- mapped to the ids of its nodes. By structure, not by
+    filename, so a chain added in a later version is picked up without a code
+    change here. Authored node ids: a chain's nodes are listed in the chain
+    file itself even when a node `extends` a library node."""
     found: dict[str, set[str]] = {}
-    if not directory.is_dir():
+    chains = directory / CHAINS_DIR
+    if not chains.is_dir():
         return found
-    for path in sorted(directory.glob("*.yaml")):
+    for path in sorted(chains.glob("*.yaml")):
         try:
             data = yaml.safe_load(path.read_text())
         except OSError, ValueError, yaml.YAMLError:
@@ -310,17 +203,16 @@ def _chain_template_files(directory: Path) -> dict[str, set[str]]:
 
 def _chain_templates_check() -> dict:
     """Nodes this version's chain templates ship, missing from the live
-    installed copy — the same drift `_hooks_check` catches for hooks,
-    generalized to node lists. `templates/` is seeded once and never
+    installed copy. `templates/` is seeded once and never
     overwritten (`cli.seed_home`), so a template shipped or changed after an
     operator's copy was seeded keeps missing the new node forever with
     nothing to say so.
 
-    Always `ok`, like `_hooks_check`: which nodes a repo's chain actually
-    runs is an operator's own edit, not a fault.
+    Always `ok`: which nodes a repo's chain actually runs is an operator's own
+    edit, not a fault.
     """
     shipped_dir = BUNDLED / "templates"
-    if not shipped_dir.is_dir():
+    if not (shipped_dir / CHAINS_DIR).is_dir():
         return _check("chain_templates", True, "skipped: not an installed Kraft", skipped=True)
     shipped = _chain_template_files(shipped_dir)
     if not shipped:
@@ -348,17 +240,29 @@ def _chain_templates_check() -> dict:
     )
 
 
+def _chains_check(templates: Path) -> dict:
+    """Every chain of the live library that does not resolve, by id and with
+    the resolver's own message (Kraft-n1zp9) -- `admin templates lint`'s pass,
+    read from disk so it answers with no server running. A chain that does
+    not resolve otherwise only shows up as the next intake on it failing."""
+    skills = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
+    report = TemplateLibrary.lint_dir(templates, skills_dir=skills)
+    if report.valid:
+        return _check("chains", True, f"{len(report.chains)} chain(s) resolve")
+    return _check("chains", False, "; ".join(str(issue) for issue in report.issues))
+
+
 def _capabilities_check() -> dict:
     """What this version can do that the live seeded config cannot (Kraft-hxt6x).
 
-    Always `ok`, like `_hooks_check` and `_chain_templates_check`: whether to
+    Always `ok`, like `_chain_templates_check`: whether to
     adopt a capability is an operator's decision, not a fault. The row exists
     because the alternative is silence -- `templates/` is seeded once and never
     overwritten, and on a real install two capabilities shipped within a week
     were both inactive with nothing anywhere saying so.
 
     Reports adoption instructions, never a diff and never an applied change:
-    the live registry carries per-hook `model`/`effort` choices the shipped
+    the live library carries per-task `model`/`effort` choices the shipped
     defaults do not, so overwriting destroys operator intent.
     """
     live_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
@@ -400,51 +304,45 @@ def _token_check() -> dict:
     return _check("mcp token", True, f"{path} ({mode:04o})")
 
 
-def _loaded_registry() -> tuple[templates.Registry, harness.HarnessSet]:
-    """The live registry and harness set, for `_agent_checks` -- the same
-    `KRAFT_TEMPLATES_DIR` precedence `_hooks_check` reads by. A registry that
-    fails to load is reported as no agent bindings at all rather than
-    crashing doctor: some other check names the real problem."""
-    hs = harness.load(None)
-    live_path = (
-        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
-    )
-    try:
-        reg = templates.load_registry(live_path, harnesses=hs)
-    except templates.RegistryError:
-        reg = templates.Registry(hooks={})
-    return reg, hs
+def _agent_checks() -> list[dict]:
+    """One PATH check per harness profile the live library's chains select,
+    plus one failure row per harness file or profile table that failed to load.
 
-
-def _agent_checks(registry: templates.Registry, harnesses: harness.HarnessSet) -> list[dict]:
-    """One PATH check per harness the live registry actually names, plus one
-    failure row per harness file that failed to load.
-
-    Every existing install ships one harness (claude), so this used to be a
-    single hardcoded check (`AGENT_COMMAND`) — a chain with a codex node must
-    be told about codex, not reassured about claude. A shipped harness
-    nothing references is not a missing dependency and gets no row.
+    Read from disk, the same `KRAFT_TEMPLATES_DIR` precedence dispatch reads
+    `harnesses.yaml` by (`agent.harness_profile`). A chain that does not resolve
+    selects nothing here: `/health` already names the library error, and a
+    second copy of it helps nobody. A shipped profile nothing selects is not a
+    missing dependency and gets no row.
     """
+    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    harnesses = harness.load(None)
     checks: list[dict] = []
-    referenced = sorted(
-        {
-            b["harness"]
-            for b in registry.hooks.values()
-            if b.get("kind") == "agent" and b.get("harness")
-        }
-    )
-    for hid in referenced:
-        h = harnesses.valid.get(hid)
-        if h is None:
-            checks.append(_check(f"agent: {hid}", False, harnesses.invalid.get(hid, "not found")))
+    try:
+        table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
+    except TemplateEnvironmentError as exc:
+        checks.append(_check("harnesses.yaml", False, str(exc)))
+        table = HarnessProfileTable(profiles={})
+    profiles = table.profiles
+    for pid in sorted(_selected_profiles(live)):
+        profile = profiles.get(pid)
+        if profile is None:
+            checks.append(_check(f"agent: {pid}", False, "no such profile in harnesses.yaml"))
             continue
-        # argv[0] of the harness's own prefix; a binding may override it per
-        # hook, and that override is checked with the binding, not here.
-        exe = h.command[0]
+        provider = harnesses.valid.get(profile.provider)
+        if provider is None:
+            checks.append(
+                _check(
+                    f"agent: {pid}",
+                    False,
+                    harnesses.invalid.get(profile.provider, f"{profile.provider}: not found"),
+                )
+            )
+            continue
+        exe = profile.executable or provider.command[0]
         found = shutil.which(exe)
         if not found:
             checks.append(
-                _check(f"agent: {hid}", False, f"`{exe}` is not on PATH — no chain can run")
+                _check(f"agent: {pid}", False, f"`{exe}` is not on PATH — no chain can run")
             )
             continue
         real = os.path.realpath(found)
@@ -456,10 +354,69 @@ def _agent_checks(registry: templates.Registry, harnesses: harness.HarnessSet) -
             if "fixtures" in Path(real).parts
             else found
         )
-        checks.append(_check(f"agent: {hid}", True, detail))
+        checks.append(_check(f"agent: {pid}", True, detail))
     for hid, reason in sorted(harnesses.invalid.items()):
         checks.append(_check(f"harness: {hid}", False, reason))
-    return checks
+    return checks + _pairing_checks(live, table, harnesses)
+
+
+def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[dict]:
+    """One failure per agent profile a task selects and the launch would
+    refuse on that task's harness (Kraft-ps1ao), naming every such task in the
+    launch's words. A harness that does not
+    resolve already has its own row above."""
+    refused: dict[str, list[str]] = {}
+    for chain in _resolved_chains(live):
+        for node in chain.nodes:
+            for t in node.tasks():
+                if not isinstance(t.task, AgentTask):
+                    continue
+                # The task's own launch, then each fallback entry (Kraft-0a3h8).
+                entries, source = fallback.fallback_list(t.task, table)
+                launches = [(t.task, "")] + [
+                    (fallback.apply(t.task, e), f" fallback entry {n} ({source})")
+                    for n, e in enumerate(entries)
+                ]
+                for task, at in launches:
+                    harness_profile = table.profiles.get(task.harness)
+                    if (
+                        task.profile is None
+                        or harness_profile is None
+                        or harness_profile.provider not in harnesses.valid
+                    ):
+                        continue
+                    why = table.pairing_problem(task.profile, harness_profile, harnesses.valid)
+                    if why:
+                        refused.setdefault(task.profile, []).append(
+                            f"chain {chain.id!r} task {t.path!r}{at}: {why}"
+                        )
+    return [_check(f"profile: {p}", False, "; ".join(why)) for p, why in sorted(refused.items())]
+
+
+def _resolved_chains(live: Path) -> list:
+    """Every chain of the live library that resolves; `[]` when the library
+    itself does not load."""
+    try:
+        library = TemplateLibrary.from_yaml_dir(live)
+    except TemplateLibraryError:
+        return []
+    chains = []
+    for id in library.chain_ids:
+        try:
+            chains.append(library.resolve_chain(id))
+        except TemplateLibraryError:
+            continue
+    return chains
+
+
+def _selected_profiles(live: Path) -> set[str]:
+    return {
+        t.task.harness
+        for chain in _resolved_chains(live)
+        for node in chain.nodes
+        for t in node.tasks()
+        if isinstance(t.task, AgentTask)
+    }
 
 
 #: Where `claude mcp add --scope user` records its servers -- what
@@ -515,6 +472,24 @@ async def _mcp_check(server_up: bool) -> dict:
     )
 
 
+def _path_check() -> dict:
+    """Is the `kraft` on PATH this one? Every MCP registration runs it by name,
+    so an older install ahead of this one on PATH answers every agent's tool
+    call with that install's code, whatever `kraft admin update` installed.
+    `ok=False` for the same reason as `_mcp_check`: it breaks silently."""
+    from kraft import update
+
+    other = update.shadowing_kraft()
+    if other is None:
+        return _check("kraft on PATH", True, shutil.which("kraft") or "not on PATH")
+    return _check(
+        "kraft on PATH",
+        False,
+        f"{other} is another install, ahead of this one ({update.installed()}, "
+        f"{sys.prefix}) -- MCP servers and hooks run it; uninstall it or reorder PATH",
+    )
+
+
 def _beads_check() -> dict:
     """Always `ok`: `_check(ok=False)` sets `kraft admin doctor`'s exit code,
     and an install with no work-graph tracker is a choice, not a fault (Kraft-7gy)."""
@@ -527,8 +502,8 @@ def _beads_check() -> dict:
 
 
 def _completion_check() -> dict:
-    """Tab completion is convenience, not health: always `ok`, like `_hooks_check`
-    — a missing `eval` line is a line to add, not a reason to exit 1."""
+    """Tab completion is convenience, not health: always `ok` -- a missing
+    `eval` line is a line to add, not a reason to exit 1."""
     shell = os.environ.get("SHELL", "")
     if "zsh" not in shell:
         return _check("shell completion", True, "skipped: not zsh", skipped=True)
@@ -546,54 +521,71 @@ def _completion_check() -> dict:
     )
 
 
-def _binds_auto_forge() -> bool:
-    """Does the registry the server actually loaded bind a forge hook to `auto`?
-
-    `KRAFT_TEMPLATES_DIR` first, exactly as `_hooks_check` reads it. A registry
-    that cannot be read means no forge checks: `templates` and `hooks` already
-    report that failure, and a second copy of it per repo helps nobody.
+def _runs_forge_tasks() -> bool:
+    """Does any chain of the live library run a forge task? Every V1 forge task
+    picks its backend from the repo's recorded `forge` (`backend: auto`), so
+    one forge task anywhere means every connected repo needs a reachable forge.
+    A library that cannot be read means no forge checks: `/health` already
+    reports that failure, and a second copy of it per repo helps nobody.
     """
-    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()) / "registry.yaml"
-    try:
-        hooks = yaml.safe_load(live.read_text())["hooks"]
-    except OSError, ValueError, KeyError, TypeError, yaml.YAMLError:
-        return False
+    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     return any(
-        isinstance(b, dict) and b.get("kind") == "forge" and b.get("backend") == "auto"
-        for b in hooks.values()
+        isinstance(t.task, ForgeTask)
+        for chain in _resolved_chains(live)
+        for node in chain.nodes
+        for t in node.tasks()
     )
 
 
-def _forge_check(repo: dict) -> dict:
+def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
-    Fails rather than reporting with detail, unlike `_hooks_check`: an operator
-    who does not want these hooks has bound them to something else, so `auto`
-    in the live registry means they intend to run them — and the alternative is
-    finding out three nodes into a work item.
+    Fails rather than reporting with detail: a chain that runs a forge task
+    means the operator intends to run it, and the alternative is finding out
+    three nodes into a work item.
     """
-    name = f"forge {repo.get('name') or repo['path']}"
+    name = f"forge {_label(repo)}"
     try:
         # The same call `run_task` makes, so doctor and the runtime cannot
         # disagree about either the answer or the wording of the failure.
-        cli = forge.backend_for("auto", repo.get("forge"))
+        cli = forge.backend_for("auto", repo.forge)
     except forge.ForgeError as exc:
         return _check(name, False, str(exc))
+    if cli == "fake":
+        return _check(name, True, "fake · dev only: opens, merges and pushes nothing", warn=True)
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
-    return _check(name, True, f"{repo['forge']} · {cli}")
+    return _check(name, True, f"{repo.forge} · {cli}")
+
+
+def _label(repo: config.RepoEntry) -> str:
+    return repo.name or repo.path
 
 
 async def _repo_checks() -> list[dict]:
     """Through `GET /repos`, not `repos.yaml`: spec D §4 keeps one reader of the
     repo list on this side of the wire, and doctor is not an exception to it."""
     checks = []
-    # Read once, not per repo: which backend the hooks are bound to is a fact
+    # Read once, not per repo: whether any chain runs a forge task is a fact
     # about the install, and every repo is measured against the same answer.
-    auto = _binds_auto_forge()
-    for repo in await client.repos():
-        path = Path(repo["path"])
-        name = f"repo {repo.get('name') or repo['path']}"
+    auto = _runs_forge_tasks()
+    # Retyped from the wire: the checks below read the entry the loader
+    # models, not a dict whose keys each one must spell right. The loader's
+    # own unrecognised-key warning stays quiet: doctor fails a row on them.
+    repos = [
+        config.RepoEntry.model_validate(r, context={"unrecognised_keys_reported": True})
+        for r in await client.repos()
+    ]
+    # Kraft-dshto: `GET /repos` lists a sandboxed workspace rather than
+    # refusing it, so the repository that sets the sandbox fails its own row.
+    sandboxed = {
+        rid: ws_id
+        for ws_id, ws in (await client.workspaces()).items()
+        for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
+    }
+    for repo in repos:
+        path = Path(repo.path)
+        name = f"repo {_label(repo)}"
         if not path.is_dir():
             checks.append(_check(name, False, f"{path} no longer exists"))
         elif not (path / ".git").exists():
@@ -604,7 +596,7 @@ async def _repo_checks() -> list[dict]:
             checks.append(_check(name, True, f"{path} — no .beads: work items here file no bead"))
         else:
             checks.append(_check(name, True, str(path)))
-        if repo.get("setup_command") is None:
+        if repo.setup_command is None:
             # No default stands behind this key: an undeclared repo stops its
             # next work item when the worktree is built (Kraft-kji8w). That is
             # deliberate; being told here rather than by a parked item is what
@@ -612,10 +604,31 @@ async def _repo_checks() -> list[dict]:
             suggestion = config._first_setup_command(path) if path.is_dir() else None
             checks.append(
                 _check(
-                    f"setup {repo.get('name') or repo['path']}",
+                    f"setup {_label(repo)}",
                     False,
                     f"no setup_command in repos.yaml — suggest: {suggestion or 'none found'}"
                     ' (use "" if this repo deliberately needs no preparation)',
+                )
+            )
+        unrecognised = config.unrecognised_repo_keys(repo.model_extra or {})
+        if unrecognised:
+            # Loaded, with a warning nobody may be reading: a key that binds
+            # nothing is exactly what a typo looks like (Kraft-4hn34).
+            checks.append(
+                _check(
+                    f"keys {_label(repo)}",
+                    False,
+                    f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
+                )
+            )
+        if repo.id in sandboxed:
+            checks.append(
+                _check(
+                    f"sandbox {_label(repo)}",
+                    False,
+                    sandbox.submodule_refusal(
+                        f"workspaces.{sandboxed[repo.id]}: repository {repo.id!r}"
+                    ),
                 )
             )
         if auto:

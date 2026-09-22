@@ -96,16 +96,16 @@ class Indexer:
 
         Degrades like `kraft.api.deps.launch` rather than raising: a malformed file must
         not take down a scan of the repos that are still fine. Steering is not
-        validated here — indexing has nothing to do with steering files.
+        validated here — indexing has nothing to do with steering.
         """
         if self._repos_path is None:
             return []
         try:
-            repos = config_mod.load_repos(self._repos_path, validate_steering=False)
+            repos = config_mod.load_repos(self._repos_path)
         except (config_mod.ConfigError, OSError) as exc:
             logger.warning("repo config unreadable, indexing without it: %s", exc)
             return []
-        return [r["path"] for r in repos]
+        return [r.path for r in repos]
 
     # ---- ingestion ----
 
@@ -318,12 +318,13 @@ class Indexer:
                 for ev in new:
                     self._cursor = ev["seq"]
                     payload = ev["payload"]
-                    rescan = ev["type"] == "work_item_completed" or (
-                        # 04 §2 piggyback: a work item starting on a repo is a
-                        # good moment to refresh that repo's artifacts.
-                        ev["type"] == "worker_session_started"
-                        and payload.get("hook_point") == "on.env.prepare"
-                    )
+                    # 04 §2 piggyback: a work item starting on a repo is a good
+                    # moment to refresh that repo's artifacts. `chain_loaded`,
+                    # not the old `on.env.prepare` session: V1 has no env_setup
+                    # node to piggyback on (its work is implicit runtime
+                    # preparation now), and `store.load_chain` emits this at the
+                    # top of the walk with the same meaning.
+                    rescan = ev["type"] in ("work_item_completed", "chain_loaded")
                     if rescan:
                         row = self._state.read(
                             lambda c, wid=ev["work_item_id"]: c.execute(
@@ -764,7 +765,9 @@ class Indexer:
                 "available": available,
                 "model": self._embedder.model_name,
                 "chunks": chunks,
-                "reason": None if available else self._embedder.reason,
+                # Unavailable: why not. Available: the last load/encode
+                # failure, None once one succeeds (Kraft-pm2rj).
+                "reason": self._embedder.reason,
             },
             "errors": list(self._errors),
         }

@@ -2,8 +2,8 @@
 
 A local orchestrator for semi-autonomous software work. One FastAPI process plus a
 React SPA: work items enter as **chains** — ordered nodes materialized from a YAML
-template — and each node runs hook-point tasks through plugin adapters (a headless
-agent, a subprocess, a builtin). Every retry loop is capped; hitting a cap escalates
+template — and each node runs typed tasks (a headless agent, a subprocess, a
+builtin, a forge action). Every retry loop is capped; hitting a cap escalates
 to a person with the full trace. Gates stop the chain where a human decision belongs.
 
 Runs on your machine, binds loopback by default, and edits your repos through git
@@ -15,12 +15,12 @@ worktrees.
 
 - **[Getting started](getting-started.md)** — install, connect a repo, run a
   work item end to end, approve its gate.
-- **[Concepts](concepts.md)** — chain, node, hook point, adapter, gate, cap:
-  the whole vocabulary.
+- **[Concepts](concepts.md)** — chain, node, task, gate, cap: the whole
+  vocabulary.
 - **[Install](install.md)** — `uv tool install`, Homebrew, or from source.
 - **[CLI reference](cli.md)** — every `kraft` verb, grouped by what it does.
-- **[Configuration](configuration.md)** — every field in `repos.yaml`,
-  `registry.yaml`, `policy.yaml`, `access.yaml`.
+- **[Configuration](configuration.md)** — every field in `library.yaml`,
+  `repos.yaml`, `policy.yaml`, `access.yaml`.
 - **[Agent integration](agent-integration.md)** — driving Kraft with `/kraft:*`
   slash commands from a coding agent instead of the browser: onboarding a repo,
   checking its config, filing work, acting on gates. Install via the Claude

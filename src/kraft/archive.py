@@ -1,7 +1,7 @@
 """Auto-archive a completed/abandoned item once it has aged past
 `policy.archive_after_days` (UI v2 · 03).
 
-Same shape as `rate_limit_retry.poller`/`ci_wait.poller`: a fixed-interval
+Same shape as `rate_limit_retry.poller`/`waits.poller`: a fixed-interval
 tick, not a per-item timer. The interval is coarser than either of those
 (they wake on a wall-clock deadline seconds away; `after_days` is day-grained,
 so nothing here needs finer than an hour).

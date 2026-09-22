@@ -197,8 +197,7 @@ export function NotifyPage() {
             {/* Toggles, not checkboxes: this codebase has no `type="checkbox"`
                 anywhere, and `.radio` hides its input to draw a round dot —
                 a radio's affordance, which is wrong for a multi-select. The
-                `.switch` pattern is already here and already means on/off
-                (PluginsPage.tsx). */}
+                `.switch` pattern is already here and already means on/off. */}
             {NOTIFY_EVENTS.map((e) => (
               <div key={e.id} className="save-row field-row">
                 <Switch

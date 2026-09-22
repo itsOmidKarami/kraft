@@ -9,35 +9,48 @@ beforeEach(() => {
 });
 
 describe("Settings · policy (5d)", () => {
-  it("edits a cap and saves every counter together", async () => {
+  it.each<[string, string | RegExp, string, object]>([
+    ["a loop cap, saving every counter together", "verify.fix_loop attempts", "5", {
+      loops: { "verify.fix_loop": { attempts: 5, wall_clock_s: 3600 } },
+      default: { attempts: 3, wall_clock_s: 3600 },
+    }],
+    ["max_concurrent", /max concurrent/i, "5", { max_concurrent: 5 }],
+    ["the auto-escalate cap", "auto-escalate stuck cap", "5", { auto_escalate_stuck_cap: 5 }],
+    ["the auto-escalate delay", "auto-escalate delay", "30", { auto_escalate_delay_s: 30 }],
+  ])("editing %s dirties the page and saves it", async (_, label, typed, saved) => {
     const put = vi.spyOn(api, "putPolicy").mockResolvedValue(policy);
     renderAt("/settings/policy");
-    const attempts = await screen.findByLabelText("verify_fix_loop attempts");
-    await userEvent.clear(attempts);
-    await userEvent.type(attempts, "5");
+    const input = await screen.findByLabelText(label);
+    await userEvent.clear(input);
+    await userEvent.type(input, typed);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith(
-      expect.objectContaining({
-        loops: { verify_fix_loop: { attempts: 5, wall_clock_s: 3600 } },
-        default: { attempts: 3, wall_clock_s: 3600 },
-      }),
-    );
+    expect(put).toHaveBeenCalledWith(expect.objectContaining(saved));
   });
 
-  it("clearing a budget field saves null, not zero", async () => {
-    vi.spyOn(api, "getPolicy").mockResolvedValue({
-      ...policy,
-      budget: { work_item_usd: 20, daily_usd: null },
-    });
+  it.each([
+    ["a budget", { budget: { work_item_usd: 20, daily_usd: null } }, "work item budget", 20, { budget: { work_item_usd: null, daily_usd: null } }],
+    ["the archive", { archive: { after_days: 30 } }, /archive after days/i, 30, { archive: { after_days: null } }],
+  ])("clearing %s field saves null, not zero", async (_, loaded, label, shown, saved) => {
+    vi.spyOn(api, "getPolicy").mockResolvedValue({ ...policy, ...loaded });
     const put = vi.spyOn(api, "putPolicy").mockResolvedValue(policy);
     renderAt("/settings/policy");
-    const field = await screen.findByLabelText("work item budget");
-    expect(field).toHaveValue(20);
+    const field = await screen.findByLabelText(label);
+    expect(field).toHaveValue(shown);
     await userEvent.clear(field);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith(
-      expect.objectContaining({ budget: { work_item_usd: null, daily_usd: null } }),
-    );
+    expect(put).toHaveBeenCalledWith(expect.objectContaining(saved));
+  });
+
+  // policy fixture: max_concurrent 3, rate_limit_retries 5, wall_clock_s 3600.
+  it.each([
+    ["max concurrent", /max concurrent/i, 3],
+    ["wall clock in minutes, not raw seconds", "verify.fix_loop wall clock", 60],
+    ["rate-limit retries", /rate limit retries/i, 5],
+    ["the auto-escalate stuck cap", "auto-escalate stuck cap", 3],
+    ["the auto-escalate delay", "auto-escalate delay", 0],
+  ])("shows %s from the loaded policy", async (_, label, value) => {
+    renderAt("/settings/policy");
+    expect(await screen.findByLabelText(label)).toHaveValue(value);
   });
 
   it("states the one-task overshoot", async () => {
@@ -45,39 +58,21 @@ describe("Settings · policy (5d)", () => {
     expect(await screen.findByText(/overshoot/i)).toBeInTheDocument();
   });
 
-  it("shows the concurrency section wired to policy.max_concurrent", async () => {
-    renderAt("/settings/policy");
-    expect(await screen.findByLabelText(/max concurrent/i)).toHaveValue(3);
-  });
-
-  it("editing max_concurrent dirties the page and saves", async () => {
-    const put = vi.spyOn(api, "putPolicy").mockResolvedValue({ ...policy, max_concurrent: 5 });
-    renderAt("/settings/policy");
-    const input = await screen.findByLabelText(/max concurrent/i);
-    await userEvent.clear(input);
-    await userEvent.type(input, "5");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith(expect.objectContaining({ max_concurrent: 5 }));
-  });
-
-  it("shows findings severity toggles and rate-limit retries", async () => {
+  it("shows findings severity toggles", async () => {
     renderAt("/settings/policy");
     expect(await screen.findByRole("button", { name: /critical/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     expect(screen.getByRole("button", { name: /minor/i })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByLabelText(/rate limit retries/i)).toHaveValue(5);
   });
 
-  it("shows the auto-escalate-on-stuck defaults", async () => {
+  it("shows the auto-escalate-on-stuck switch on", async () => {
     renderAt("/settings/policy");
     expect(await screen.findByRole("switch", { name: /auto-escalate on stuck/i })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    expect(screen.getByLabelText("auto-escalate stuck cap")).toHaveValue(3);
-    expect(screen.getByLabelText("auto-escalate delay")).toHaveValue(0);
   });
 
   it("toggling auto-escalate-on-stuck dirties the page and saves", async () => {
@@ -91,30 +86,9 @@ describe("Settings · policy (5d)", () => {
     expect(put).toHaveBeenCalledWith(expect.objectContaining({ auto_escalate_stuck: false }));
   });
 
-  it("editing the auto-escalate cap and delay saves both", async () => {
-    const put = vi.spyOn(api, "putPolicy").mockResolvedValue(policy);
-    renderAt("/settings/policy");
-    const cap = await screen.findByLabelText("auto-escalate stuck cap");
-    await userEvent.clear(cap);
-    await userEvent.type(cap, "5");
-    const delay = screen.getByLabelText("auto-escalate delay");
-    await userEvent.clear(delay);
-    await userEvent.type(delay, "30");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith(
-      expect.objectContaining({ auto_escalate_stuck_cap: 5, auto_escalate_delay_s: 30 }),
-    );
-  });
-
-  it("shows wall-clock in minutes, not raw seconds", async () => {
-    renderAt("/settings/policy");
-    // policy fixture: wall_clock_s: 3600 -- 60 minutes.
-    expect(await screen.findByLabelText("verify_fix_loop wall clock")).toHaveValue(60);
-  });
-
   it("names the template whose node's fix_loop matches this loop key", async () => {
     renderAt("/settings/policy");
-    const row = (await screen.findByLabelText("verify_fix_loop attempts")).closest(
+    const row = (await screen.findByLabelText("verify.fix_loop attempts")).closest(
       "[data-loop]",
     );
     expect(row).toHaveTextContent("quick-task");
@@ -129,21 +103,25 @@ describe("Settings · policy (5d)", () => {
   it("+ Add loop prompts a key and adds it with the default cap", async () => {
     vi.spyOn(window, "prompt").mockReturnValue("new_loop");
     renderAt("/settings/policy");
-    await screen.findByLabelText("verify_fix_loop attempts");
+    await screen.findByLabelText("verify.fix_loop attempts");
     await userEvent.click(screen.getByRole("button", { name: /add loop/i }));
     expect(await screen.findByLabelText("new_loop attempts")).toHaveValue(3);
   });
 
-  it("clearing the archive field saves null, not zero", async () => {
-    vi.spyOn(api, "getPolicy").mockResolvedValue({ ...policy, archive: { after_days: 30 } });
+  it("saves the per-level caps it does not edit in their nested shape", async () => {
+    // Ruling 211: `defaults:`/`maxima:` caps are nested per level. The page
+    // edits neither section, and a save must hand both back as it read them.
+    const levels = {
+      defaults: { max_attempts: 2, tasks: { time_cap_minutes: 90 } },
+      maxima: { work_item: { time_cap_minutes: 1440 }, tasks: { time_cap_minutes: 240 } },
+    };
+    vi.spyOn(api, "getPolicy").mockResolvedValue({ ...policy, ...levels });
     const put = vi.spyOn(api, "putPolicy").mockResolvedValue(policy);
     renderAt("/settings/policy");
-    const field = await screen.findByLabelText(/archive after days/i);
-    expect(field).toHaveValue(30);
-    await userEvent.clear(field);
+    const input = await screen.findByLabelText(/max concurrent/i);
+    await userEvent.clear(input);
+    await userEvent.type(input, "5");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith(
-      expect.objectContaining({ archive: { after_days: null } }),
-    );
+    expect(put).toHaveBeenCalledWith(expect.objectContaining({ max_concurrent: 5, ...levels }));
   });
 });

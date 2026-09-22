@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from kraft.caps import TIME_CAPPED
+
+if TYPE_CHECKING:
+    from kraft.config import RepoEntry
 
 #: `_dispatch` returned without launching because a spend cap was already over.
 #: It is not "failed" — the agent never ran, so nothing about it failed — and it
@@ -21,12 +26,18 @@ RATE_LIMITED = "rate_limited"
 #: a missing binary.
 CONFIG_ERROR = "config_error"
 
-#: The node is waiting on something outside Kraft — today, a pipeline that has
-#: not settled. Returned by `adapters/forge`'s `ci_poll` instead of sleeping the
-#: whole `poll_timeout` in-process (Kraft-ru98). Ranked with `RATE_LIMITED`: a
-#: pipeline that has not finished is not evidence about the code either. Below
+#: The node is waiting on something outside Kraft: a forge task's external
+#: wait observed its condition still pending (`kraft.waits`), instead of
+#: sleeping in-process (Kraft-ru98). Ranked with `RATE_LIMITED`: a condition
+#: that has not settled is not evidence about the code either. Below
 #: `"paused"`, which is always a human's own instruction.
 WAITING = "waiting"
+
+#: An external wait reached its timeout still pending
+#: (`external-wait-timeout-needs-human`). The session status a loop cap
+#: already uses for "this ran out" -- not `failed`, because nothing about the
+#: code failed, so no recovery or fix cycle may spend on it.
+WAIT_TIMED_OUT = "capped_out"
 
 #: Statuses that let the chain advance. `done_with_concerns` is deliberately
 #: here: the agent finished the work — its doubts are information for the human
@@ -35,13 +46,24 @@ WAITING = "waiting"
 #: that counts as "moved the node forward" cannot drift between the two.
 _ADVANCING = ("done", "done_with_concerns")
 
-#: `on.mr.rebase` moved the branch onto a newer origin tip, in a node that
-#: declares `rebase_bounce_to`. Deliberately not in `_ADVANCING`, so
-#: `measure_node` stops the node before its later groups run: the whole point
-#: of the bounce is that they must not run against a base that just moved.
-#: Not a failure -- `walk_node` completes the node and `run_once`'s existing
-#: base-ref comparison does the bounce.
+#: A task moved the branch onto a newer origin tip, in a node that declares
+#: `on_base_changed` (the forge reports it only there). Deliberately not in
+#: `_ADVANCING`, so `measure_node` stops the node before its later steps run:
+#: they must not run against a base that just moved. Not a failure --
+#: `walk_node` hands it to `run_once`, which restarts the declared span.
 BASE_MOVED = "base_moved"
+
+#: A task could not rebase: the forge's `conflict` status, or a raised
+#: `builtins.RebaseConflict`. A task failure like any other -- unless its node
+#: declares `on_base_changed.on_conflict`, in which case `measure_node` answers
+#: this for the node and `walk` hands it to that handler.
+CONFLICT = "conflict"
+
+#: The node's `on_conflict` handler resolved a rebase conflict and the base
+#: moved (`walk._resolve_conflict`). A base change like `BASE_MOVED`, with one
+#: difference `run_once` acts on: code changed that no gate in the restart span
+#: saw, so the span's approved gates reopen (Ruling 162).
+CONFLICT_RESOLVED = "conflict_resolved"
 
 #: A settled pipeline whose every failed job is the forge's own fault
 #: (Kraft-h81i, Kraft-s8ul). `ci_poll` retries it internally, through the
@@ -49,6 +71,18 @@ BASE_MOVED = "base_moved"
 #: exhausted and it is still red -- straight to `needs_human`, spending
 #: no agent turn on infrastructure a fix loop cannot fix.
 INFRA_STOP = "infra_stop"
+
+#: A recovery handler finished `done_with_concerns` (Kraft-s7c04.56). For an
+#: ordinary task doubts are information for the next gate (`_ADVANCING`); for
+#: a repair they are a verdict on whether repair was possible at all, so the
+#: node is not measured again and a human reads them instead. A conflict
+#: handler is not a repair here: its concerns ride `CONFLICT_RESOLVED`.
+REPAIR_DOUBTED = "repair_doubted"
+
+#: A `read_only` step or node changed the worktree (`executor.read_only`). A
+#: stop, not a failure: nothing about the implementation's code failed, and a
+#: fix loop or recovery writing more would not make the check true.
+READ_ONLY_VIOLATED = "read_only_violated"
 
 
 #: The tier that handles each status, in one place so a new status cannot be
@@ -66,14 +100,19 @@ SCOPE: dict[str, str] = {
     "done_with_concerns": "advance",
     "failed": "task",
     "needs_context": "task",
-    "conflict": "task",  # RebaseConflict has its own resolver, but a task still fails on it
+    CONFLICT: "task",  # a failure, unless the node declares an explicit on_conflict handler
     "paused": "stop",  # a human's own SIGTERM
     BUDGET: "stop",  # nothing ran; a fix cycle would only spend more
     RATE_LIMITED: "stop",
     CONFIG_ERROR: "stop",
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
+    WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
+    REPAIR_DOUBTED: "stop",  # a repair doubts itself; a person decides
+    READ_ONLY_VIOLATED: "stop",  # a read_only scope wrote; a person looks
+    TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
+    CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
 }
 
 
@@ -89,18 +128,25 @@ class LaunchContext:
     """The repo config an agent dispatch resolves against.
 
     `None` on any field means "nothing configured", not "look elsewhere" —
-    `agent.resolve_invocation` already treats a missing repo entry and a missing
-    steering dir as empty. Threaded keyword-only, `launch: LaunchContext | None
-    = None`, from `kraft.api` down through every walk/resume path so a work item's
-    repo config reaches its agent launches, including reattach and the fix cycle.
+    `agent.resolve_invocation` already treats a missing repo entry as empty.
+    Threaded keyword-only, `launch: LaunchContext | None = None`, from
+    `kraft.api` down through every walk/resume path so a work item's repo
+    config reaches its agent launches, including reattach and the fix cycle.
 
     `skills_dir` is where an operator may override a bundled method file;
     `None` means the packaged copies only.
     """
 
-    repo_entry: dict | None
-    steering_dir: Path | None
+    repo_entry: RepoEntry | None
     skills_dir: Path | None = None
+    #: Every connected repository entry with an `id`, by that id: what a task
+    #: fanned out to a workspace member reads instead of `repo_entry` (its
+    #: setup, test scopes, sandbox). Empty when nothing has an id.
+    repositories: Mapping[str, RepoEntry] = field(default_factory=dict)
+    #: The live library's steering profiles, name to instructions: read only
+    #: by an item whose snapshot predates frozen repository steering
+    #: (`steering.for_repository`). Everything else runs on its snapshot's.
+    library_steering: Mapping[str, str] = field(default_factory=dict)
 
 
 class Steer:
@@ -130,9 +176,21 @@ class Steer:
     #: a say. See `exempts_judge`.
     _JUDGE_EXEMPT = ("human", "gate_review")
 
-    def __init__(self, text: str | None = None, *, source: str = "human") -> None:
+    def __init__(
+        self, text: str | None = None, *, source: str = "human", to: dict[str, str] | None = None
+    ) -> None:
         self._text = text or None
         self.source = source
+        #: A steer addressed to tasks by path (`resuming.resume_steer`): each
+        #: named task's launch takes its own text, once, and no other launch
+        #: takes any (`steer-defaults-to-all-paused-agent-tasks`,
+        #: `steer-can-address-paused-agent-tasks-individually`). `None` is the
+        #: unaddressed note the first agent launch takes.
+        self._to = dict(to) if to else None
+
+    @property
+    def targeted(self) -> bool:
+        return self._to is not None
 
     @property
     def human(self) -> bool:
@@ -159,9 +217,20 @@ class Steer:
         """
         return self.source in self._JUDGE_EXEMPT
 
-    def take(self) -> str | None:
+    def take(self, path: str | None = None) -> str | None:
+        """The note for the launch of `path`. An addressed steer answers only a
+        task it names; asked with no path, it gives up everything still
+        undelivered (what `walk._report_if_undelivered` reports): one text
+        every task was given as itself, different ones by task."""
+        if self._to is not None:
+            if path is not None:
+                return self._to.pop(path, None)
+            left, self._to = self._to, {}
+            if len(set(left.values())) == 1:
+                return next(iter(left.values()))
+            return "\n".join(f"{p}: {t}" for p, t in left.items()) or None
         text, self._text = self._text, None
         return text
 
     def __bool__(self) -> bool:
-        return self._text is not None
+        return bool(self._to) if self._to is not None else self._text is not None

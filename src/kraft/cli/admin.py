@@ -20,10 +20,12 @@ from pathlib import Path
 
 import httpx
 import uvicorn
+import yaml
 
 from kraft import client, config, render
-from kraft.cli import common
+from kraft.cli import common, templates
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
+from kraft.policy import CarriedPolicy
 
 #: launchd label / systemd unit name. One daemon, one name -- not
 #: per-instance, since the spec is about supervising *the* daemon.
@@ -155,8 +157,19 @@ def _cmd_install_service(ns: argparse.Namespace) -> None:
         manager = "launchctl"
     elif sys.platform.startswith("linux"):
         path = _write_systemd_unit(kraft_bin)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", _SYSTEMD_UNIT], check=True)
+        # `enable` by the bare unit name only resolves against the *running
+        # manager's own* unit search path -- fixed to the environment the
+        # manager was started with, not this process's. On a machine whose
+        # $HOME the manager didn't start with (any sandboxed test, notably
+        # GitHub Actions' persistent per-job user session), that search path
+        # will never contain what we just wrote, so `daemon-reload` followed
+        # by `enable --now <bare name>` fails "Unit file ... does not exist"
+        # every time, not intermittently (Kraft-1zvs3 -- confirmed by
+        # instrumenting the manager's own environment in CI). Passing the
+        # absolute path instead makes `enable` link the file into the
+        # manager's real unit directory itself (the documented way to adopt
+        # an out-of-tree unit), sidestepping that mismatch entirely.
+        subprocess.run(["systemctl", "--user", "enable", "--now", str(path)], check=True)
         manager = "systemctl --user"
     else:
         raise SystemExit(f"kraft admin install-service: unsupported platform {sys.platform}")
@@ -193,7 +206,7 @@ def seed_home(templates_dir: Path) -> bool:
     notify.yaml and runs `just install` -- if either file ever slips into
     `BUNDLED / "templates"`, it must still not reach a seeded home.
     """
-    if templates_dir.exists():
+    if finish_interrupted_update(templates_dir) or templates_dir.exists():
         return False
     if not (BUNDLED / "templates").is_dir():
         raise SystemExit(
@@ -203,6 +216,13 @@ def seed_home(templates_dir: Path) -> bool:
         )
     # Build beside the target and rename: an interrupted copy must not leave a
     # half-seeded home that every later start then treats as already seeded.
+    _stage_bundle(templates_dir).rename(templates_dir)
+    return True
+
+
+def _stage_bundle(templates_dir: Path) -> Path:
+    """The bundled config, copied beside `templates_dir` under a staging name
+    for the caller to rename into place. Returns the staging directory."""
     staging = templates_dir.with_name(templates_dir.name + ".seeding")
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(BUNDLED / "templates", staging)
@@ -212,18 +232,130 @@ def seed_home(templates_dir: Path) -> bool:
     # Written into `staging`, before the rename, so an interrupted seed can never
     # leave a stamp describing config that is not there.
     #
-    # Deliberately not `.yaml`: `templates.load_templates` globs `*.yaml`, and a
-    # YAML stamp would be read as a malformed template and surface as degraded
-    # health. A non-YAML name sidesteps that instead of documenting it.
+    # Deliberately not `.yaml`, so nothing that globs this directory's YAML
+    # ever reads the stamp as configuration.
     (staging / ".seeded-version").write_text(f"{_version()}\n")
+    return staging
+
+
+#: What a home holds that belongs to this machine rather than to the template
+#: schema: the password hash and bind, the webhook, the theme, the connected
+#: repositories, auto-intake, the pre-1.0 steering files (folded into the library
+#: at the next start) and harness
+#: overrides. A major update carries each across unchanged; everything else --
+#: the registry, the chains, `policy.yaml` -- is replaced, and kept in the backup.
+MACHINE_CONFIG = (
+    "access.yaml",
+    "notify.yaml",
+    "theme.yaml",
+    "repos.yaml",
+    "intake.yaml",
+    "steering",
+    "harnesses",
+)
+
+
+#: Written into a major update's staging directory once it is complete, naming
+#: the backup the old home moves to. Its presence is what tells a later start
+#: that a missing home is a swap to finish, not a home to seed.
+UPDATE_STAGED = ".pre-v1-update"
+
+
+def replace_pre_v1_config(templates_dir: Path, backup: Path) -> CarriedPolicy | None:
+    """Install the bundled V1 configuration in place of a pre-V1 home, which
+    moves to `backup` whole (`major-update-preserves-replaced-configuration`).
+
+    Nothing is converted (`migration-helper-is-not-guaranteed`): the old
+    chains and registry are only in the backup. The operator's `policy.yaml`
+    values move onto the V1 seed's where V1 still has the key (Ruling 172);
+    the result says what was dropped, `None` if there was no readable policy.
+
+    Crash-safe (Kraft-cttgx): the new home is built complete beside the old
+    one and marked (`UPDATE_STAGED`) before anything moves. Then two renames:
+    old -> backup, staged -> home. Between them the home is missing, and
+    `finish_interrupted_update` -- run by the next start and the next update --
+    completes the swap from the marked staging instead of seeding over it."""
+    if not (BUNDLED / "templates").is_dir():
+        raise SystemExit(
+            "kraft admin update: this build shipped no bundled configuration to install; "
+            "reinstall with `just install`. Nothing was changed."
+        )
+    staging = _stage_bundle(templates_dir)
+    for name in MACHINE_CONFIG:
+        kept = templates_dir / name
+        if kept.is_dir():
+            # The operator's copy wins over a bundled file of the same name.
+            shutil.copytree(kept, staging / name, dirs_exist_ok=True)
+        elif kept.is_file():
+            shutil.copy2(kept, staging / name)
+    carried = _carry_policy(templates_dir / "policy.yaml", staging / "policy.yaml", backup)
+    (staging / UPDATE_STAGED).write_text(f"{backup.name}\n")
+    templates_dir.rename(backup)
     staging.rename(templates_dir)
+    (templates_dir / UPDATE_STAGED).unlink()
+    return carried
+
+
+def _carry_policy(old: Path, new: Path, backup: Path) -> CarriedPolicy | None:
+    try:
+        legacy = yaml.safe_load(old.read_text())
+        seed = yaml.safe_load(new.read_text()) or {}
+    except OSError, ValueError, yaml.YAMLError:
+        return None
+    if not isinstance(legacy, dict):
+        return None
+    carried = CarriedPolicy.from_legacy(legacy, seed)
+    if carried.data != seed:
+        new.write_text(
+            f"# The V1 policy, with the values `kraft admin update` carried over from\n"
+            f"# the pre-V1 policy.yaml; that file is unchanged in {backup}.\n"
+            + yaml.safe_dump(carried.data, sort_keys=False)
+        )
+    return carried
+
+
+def finish_interrupted_update(templates_dir: Path) -> bool:
+    """Complete a major update that stopped between its two renames: the home
+    is missing and its staging is marked complete. True if it did, and says so.
+
+    That is the only half-state the swap can leave -- the marker is written
+    after the staging is whole, and the home moves only after the marker -- so
+    there is nothing to roll back. An unmarked staging is an interrupted
+    *seed*, and seeding over it is right."""
+    staging = templates_dir.with_name(templates_dir.name + ".seeding")
+    marker = staging / UPDATE_STAGED
+    if templates_dir.exists() or not marker.is_file():
+        return False
+    backup = templates_dir.with_name(marker.read_text().strip())
+    staging.rename(templates_dir)
+    (templates_dir / UPDATE_STAGED).unlink()
+    print(
+        f"kraft: finished an interrupted update: installed the staged V1 configuration "
+        f"in {templates_dir}; the old one is at {backup}",
+        file=sys.stderr,
+    )
     return True
+
+
+def _warn_if_pre_v1(templates_dir: Path) -> None:
+    """A legacy install's first V1 start: nothing is converted or overwritten.
+    The server comes up degraded and refuses new work until the operator runs
+    `kraft admin update`, and this says so where they are looking."""
+    from kraft.templates.library import is_pre_v1
+
+    if is_pre_v1(templates_dir):
+        print(
+            f"kraft: {templates_dir} holds a pre-V1 template configuration. Starting "
+            "degraded, refusing new work; run `kraft admin update` to back it up and "
+            "install the V1 configuration.",
+            file=sys.stderr,
+        )
 
 
 def _bind(templates_dir: Path) -> tuple[str, int]:
     """Bind address from access.yaml — this is the "takes effect on restart" in
     Settings → Access (design 5e). Env still wins, for a one-off run."""
-    access = config.load_access(templates_dir / "access.yaml")
+    access = config.Access.load(templates_dir / "access.yaml")
     host = os.environ.get("KRAFT_HOST") or access.bind
     port = int(os.environ.get("KRAFT_PORT") or access.port)
     if host not in config.LOOPBACK and not access.password_hash:
@@ -421,6 +553,7 @@ def _serve() -> None:
         _redirect_output_to_log(log_path)
     if seed_home(templates_dir):
         print(f"kraft: seeded default config in {templates_dir}")
+    _warn_if_pre_v1(templates_dir)
     host, port = _bind(templates_dir)
     _refuse_if_addr_taken(host, port)
     running = _read_pid(pid_path)
@@ -669,16 +802,20 @@ def _cmd_reindex(ns: argparse.Namespace) -> None:
 
 
 def _render_reload(result: dict) -> str:
-    lines = [f"reloaded {len(result.get('valid', []))} template(s)"]
+    refused = result.get("refused_policy")
+    policy = "" if refused else " and policy.yaml"
+    lines = [f"reloaded {len(result.get('valid', []))} template(s){policy}"]
     for name, reason in (result.get("invalid_templates") or {}).items():
         lines.append(f"  invalid: {name}: {reason}")
+    if refused:
+        lines.append(f"  refused: policy.yaml: {refused} (the running policy is kept)")
     return "\n".join(lines)
 
 
 def _cmd_reload(ns: argparse.Namespace) -> None:
     payload = asyncio.run(client.reload_templates())
     common.emit(payload, _render_reload, ns.json)
-    if payload.get("invalid_templates"):
+    if payload.get("invalid_templates") or payload.get("refused_policy"):
         # exit 1 so `kraft admin reload && ...` works; the reasons are already on stdout
         raise SystemExit(1)
 
@@ -706,8 +843,55 @@ def _version() -> str:
         return "0.0.0+source"
 
 
+def _accept_major_update(templates_dir: Path, assume_yes: bool) -> None:
+    """Replace a pre-V1 `templates_dir` once the operator has said yes, or
+    exit 1 having changed nothing (`major-update-requires-explicit-acceptance`).
+    The breaking change is stated before the question is asked."""
+    backup = templates_dir.with_name(
+        f"{templates_dir.name}.pre-v1-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
+    print(
+        f"kraft: {templates_dir} holds a pre-V1 template configuration (a hook registry\n"
+        "and gate_after chains). It is not compatible with this Kraft, which runs\n"
+        "Template Schema V1 only, and there is no migration: replacing it installs the\n"
+        "V1 configuration and moves the current one, whole, to a backup at\n"
+        f"  {backup}\n"
+        f"Carried across unchanged: {', '.join(MACHINE_CONFIG)}.\n"
+        "policy.yaml keeps your value for every key V1 still has; any other key is\n"
+        "dropped and listed. Your chains and registry.yaml are replaced. All of it\n"
+        "stays in the backup.",
+        file=sys.stderr,
+    )
+    # No terminal to ask on is a refusal, never a default yes.
+    if not assume_yes and not (
+        sys.stdin.isatty() and input("Replace it? [y/N] ").strip().lower() in ("y", "yes")
+    ):
+        print(
+            "kraft admin update: nothing changed. Answer y, or pass -y, to replace it.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    carried = replace_pre_v1_config(templates_dir, backup)
+    print(f"kraft: installed the V1 configuration in {templates_dir}; the old one is at {backup}")
+    if carried is None:
+        print("kraft: policy.yaml: no readable pre-V1 policy; the V1 default is installed")
+    for key, value in (carried.dropped if carried else {}).items():
+        print(
+            f"kraft: policy.yaml: dropped {key} = {value!r} "
+            "(V1 has no such key, or refuses the value)"
+        )
+
+
 def _cmd_update(ns: argparse.Namespace) -> None:
     from kraft import update
+    from kraft.templates.library import is_pre_v1
+
+    # The configuration first: a pre-V1 home is what a legacy install's first V1
+    # binary finds, and that binary is the one running this.
+    templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    finish_interrupted_update(templates_dir)
+    if is_pre_v1(templates_dir):
+        _accept_major_update(templates_dir, ns.yes)
 
     release = update.latest(force=True)
     if release is None:
@@ -726,6 +910,11 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if code != 0:
         raise SystemExit(code)
     print(f"kraft {release.tag} installed.")
+    if other := update.shadowing_kraft():
+        print(
+            f"warning: `kraft` on PATH is {other}, another install -- MCP servers and "
+            "hooks keep running it; uninstall it or reorder PATH (kraft admin doctor)"
+        )
     if ns.restart:
         _cmd_restart(ns)
     else:
@@ -770,6 +959,12 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     update_p = subs.add_parser("update", help="install the newest released kraft")
     update_p.add_argument("--force", action="store_true", help="install even when already current")
     update_p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="accept replacing a pre-V1 template configuration, which is backed up first",
+    )
+    update_p.add_argument(
         "--restart",
         action="store_true",
         help="restart a running server after a successful update, the same way it was running",
@@ -781,9 +976,13 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     reindex.set_defaults(func=_cmd_reindex)
 
     reload_p = subs.add_parser(
-        "reload", parents=[common], help="reread templates and registry from disk, no restart"
+        "reload",
+        parents=[common],
+        help="reread the template library and policy.yaml from disk, no restart",
     )
     reload_p.set_defaults(func=_cmd_reload)
+
+    templates.add(subs, common)
 
     init = subs.add_parser(
         "init", parents=[common], help="register Kraft's MCP server and skills with an agent"

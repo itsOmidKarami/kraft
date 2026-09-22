@@ -10,7 +10,9 @@ here blocks for longer than its timeout. A failure is `None`, which reads as
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -50,6 +52,24 @@ def installed() -> str:
         return _pkg_version("kraft-sdlc")
     except PackageNotFoundError:
         return "0.0.0+source"
+
+
+def shadowing_kraft() -> str | None:
+    """The `kraft` PATH resolves to, when that is not this install; else None.
+
+    Every agent registration runs `kraft admin mcp` by name (`init.py`, the
+    plugin manifest), so a second, older install earlier on PATH is what those
+    sessions get -- `kraft admin update` replacing this one changes nothing
+    they run (Kraft-xs3ri: a Homebrew 0.65.0 ahead of a uv 0.76.2 kept MCP's
+    `ensure_repo` on a fix three releases old). A console script lives next to
+    its venv's interpreter, so "this install" is `sys.executable`'s directory.
+    None too when nothing named `kraft` is on PATH: there is nothing to shadow.
+    """
+    found = shutil.which("kraft")
+    if found is None:
+        return None
+    here = os.path.realpath(os.path.dirname(sys.executable))
+    return None if os.path.dirname(os.path.realpath(found)) == here else found
 
 
 def _cache_path():
@@ -177,6 +197,19 @@ def _is_homebrew_install() -> bool:
     return "/Cellar/kraft/" in sys.prefix
 
 
+def _stale_kraft_tool(run) -> bool:
+    """Whether uv still holds a `kraft` tool: this package's name before the
+    kraft -> kraft-sdlc PyPI rename (Kraft-rswxq). Both receipts claim the
+    `kraft` command, so uninstalling the stale one deletes it for both.
+    False when uv cannot say -- `perform` reports a missing uv itself."""
+    try:
+        listing = run(["uv", "tool", "list"], capture_output=True, text=True)
+    except FileNotFoundError:
+        return False
+    out = getattr(listing, "stdout", "") or ""
+    return listing.returncode == 0 and re.search(r"^kraft v", out, re.MULTILINE) is not None
+
+
 def perform(release: Release, *, run=None) -> int:
     """Replace this install with `release`. Returns the installer's exit code.
 
@@ -206,6 +239,17 @@ def perform(release: Release, *, run=None) -> int:
                 "on PATH. Install it, or run this yourself:\n"
                 f"  {' '.join(command)}"
             ) from None
+
+    if _stale_kraft_tool(run):
+        # ponytail: told, not migrated -- a `kraft` receipt could be another
+        # project's tool of that name, and uninstalling it is not ours to do.
+        raise SystemExit(
+            "kraft admin update: uv still has a `kraft` tool from before the rename to "
+            "kraft-sdlc, and both claim the `kraft` command. Uninstalling it removes that "
+            "command too, so run both, in order:\n"
+            "  uv tool uninstall kraft\n"
+            "  uv tool install --force --reinstall kraft-sdlc"
+        )
 
     import tempfile
     from pathlib import Path

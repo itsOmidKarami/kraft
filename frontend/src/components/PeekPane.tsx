@@ -102,7 +102,7 @@ export function PeekPane({
     navigate(`/work-items/${item.id}${hash}`);
   };
 
-  const nodes = item.chain_definition.nodes;
+  const nodes = item.chain_definition.nodes ?? [];
   const rawIndex = item.current_node_id ? nodes.findIndex((n) => n.id === item.current_node_id) : -1;
   // A null current_node_id means two different things: a finished item ran
   // every node and cleared it (nodes.length - 1, the last one, is right),

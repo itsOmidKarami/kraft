@@ -1,7 +1,7 @@
 # Concepts
 
-Kraft's whole vocabulary is five words: work item, chain, node, hook point,
-adapter — plus two ways a chain stops: gate and cap.
+Kraft's whole vocabulary is five words: work item, chain, node, task, gate —
+plus the bounds that stop a chain rather than let it loop: caps and waits.
 
 ## Work item
 
@@ -9,145 +9,200 @@ A **work item** is one unit of work and produces one merge request. You create
 one from the UI, the CLI (`kraft item create`), or an MCP tool
 (`create_work_item`). It always lands **paused** — see
 [Agent integration](agent-integration.md) for why an agent can never skip that.
+Its repo must already be connected (`kraft repo connect`); intake refuses one
+that isn't, naming that command — the same refusal a trigger's `POST
+/api/triggers` door gets (see [Triggers](triggers.md)).
+
+Its work starts from the repository's default branch, and its merge request
+targets it, unless it names a **base branch** (`--base-branch`, the MCP tool's
+`base_branch`): then that branch is the one its worktree is cut from, every
+rebase replays onto, a base change is detected on, the merge request targets
+and post-merge CI watches. The branch must already exist on the repository's
+origin, or intake refuses the item. It is frozen at intake. On a workspace item
+it names the root's branch; each member keeps its own default branch, because
+one branch name means nothing across repositories that need not share it.
 
 ## Chain
 
-A work item enters as a **chain**: an ordered list of **nodes**, materialized
-from a YAML template in `templates/`. Which template it uses is either named
-explicitly with `--chain` (`kraft item create "..." --chain quick-task`) or
-comes from the repo's `default_chain_template` in `repos.yaml`.
+A work item enters as a **chain**: an ordered list of **nodes**, resolved from
+one file under `templates/chains/` and frozen onto the item at intake — editing
+the chain afterwards changes nothing for an item already filed. Which chain it
+uses is either named explicitly with `--chain`
+(`kraft item create "..." --chain quick-task`) or comes from the repo's
+`default_chain_template` in `repos.yaml`.
 
-The simplest shipped template, `quick-task`, is three nodes with no gates at all:
+The simplest shipped chain, `quick-task`, is two nodes with no gates at all:
 
 ```yaml
+# chains/quick-task.yaml
 id: quick-task
 nodes:
-  - { id: env_setup,      tasks: [on.env.prepare],         gate_after: null }
-  - { id: implementation, tasks: [on.implementation.start], gate_after: null }
-  - { id: verify,         tasks: [on.test.run],            gate_after: null }
+  - id: implementation
+    kind: exec
+    tasks:
+      - { id: implement, extends: implementer }
+  - id: verify
+    kind: exec
+    tasks:
+      - { id: test_changed_scopes, extends: verify_changed_scopes }
 ```
 
-The shipped `default` template is the real one — spec and plan gates, a fix
-loop on test failures, a rebase at the start of every node that writes or measures code, CI
-watched with its own fix loop, a human-review gate, then merge:
+`verify_changed_scopes` runs the repo's own `test_scopes` or `test_command`
+from `repos.yaml`. On a repo that declares neither, `quick-task` (and
+`default`'s `verification`) stops for a human there with a config error, not
+a guessed command.
 
-```yaml
-id: default
-nodes:
-  - { id: spec,             steps: [[on.mr.rebase], [on.spec.requested]], gate_after: spec_approval }
-  - { id: plan,             steps: [[on.mr.rebase], [on.plan.requested]], gate_after: plan_approval }
-  - { id: chain_review,     tasks: [on.chain.review_ready],      gate_after: chain_finalized, auto_escalate: true }
-  - { id: implementation,   steps: [[on.mr.rebase], [on.env.prepare], [on.implementation.start], [on.repos.scan]], gate_after: null }
-  - { id: verify,           steps: [[on.mr.rebase], [on.env.prepare], [on.test.run, on.review.local.run]], fix_loop: verify_fix_loop, gate_after: null }
-  - { id: open_mr,          steps: [[on.mr.rebase], [on.mr.describe], [on.mr.open]], gate_after: null, rebase_bounce_to: verify }
-  - { id: mr_checks,        steps: [[on.ci.poll], [on.review.mr.run]], fix_loop: ci_fix_loop, gate_after: null, rebase_bounce_to: verify }
-  - { id: human_review,      tasks: [on.human_review.requested],   gate_after: human_review_approval, reject_to: implementation }
-  - { id: merge,             steps: [[on.mr.sync], [on.merge]],    gate_after: null, rebase_bounce_to: verify }
-  - { id: post_merge_watch,  tasks: [on.merge.watch],              gate_after: null }
-```
+The shipped `default` chain is the real one: a spec and a plan, each with its
+own approval gate; a chain revision (below); implementation; verification (the changed test scopes, then
+a code review) inside a fix loop; a work brief and a `local_review` gate before
+a draft merge request exists; CI and automated review on the draft, with its own
+fix loop; a summary and the final `final_review` gate; then ready, external
+approval, merge, and the post-merge pipeline. `kraft admin templates show
+default --resolved` prints it with every library component expanded.
 
-A node's work is one or more **groups** of tasks. `tasks: [a, b]` is a single
-group: `a` and `b` are dispatched together and the node is measured once both
-have settled. `steps: [[a], [b]]` is two groups, run in order — `b` is not
-dispatched at all if `a` fails, and it sees whatever `a` left behind. A node
-declares one key or the other, never both.
+**Chain revision.** A chain is picked at intake, before its spec and plan
+exist. Once the plan is approved, `default`'s `chain_revision` node has an agent
+read both against the nodes still to run and propose a change set: skip a node,
+add one built from library components, or set a task's `model`/`effort` or an
+operational policy value (a cap, a budget, a fix loop's bound) within the
+administrator maxima. Only nodes after its gate may change, a gate never
+does, and no node that opens, describes, syncs, readies or merges the merge
+request (or waits on its checks) can be skipped. Usually it proposes nothing, and the `chain_revision_approval` gate passes
+without asking anyone. When it does propose something, that gate shows the
+rationale, each change with the line of the spec or plan behind it, and the diff;
+approving replaces the item's chain with exactly the revision you were shown (a
+`chain_revised` event). The approval sends back the digest of what you read
+(`kraft view artifact` prints the `kraft item approve --digest` to run); if
+the revision changed since, it is refused until you look again, and a proposal that would not validate cannot be approved — reject it
+back to `chain_revision` with the reason the gate gives.
 
-Reach for `steps` when the second task needs the first task's result: the
-default chain's `implementation` node runs the implementing agent and then
-scans submodules, so the scan reads a worktree the agent has actually
-touched rather than one it has not started on.
+## Node
 
-Every node that authors or measures code rebases onto the fetched tip of the
-target branch as its first step. A work item can run for hours while other work
-merges, and a spec written against stale code propagates into the plan and the
-implementation, where a later rebase does not undo it. The rebase is cheap and
-does nothing when the branch is already current. `implementation` and `verify`
-then re-run `on.env.prepare`, because a rebase can land a new lockfile.
+A node is `kind: exec` (it runs work) or `kind: gate` (it waits for a human).
 
-`open_mr` is the one node that stops on it: if its rebase moves the branch, the
-merge request is not opened and the chain returns to `verify`, because the tests
-that passed measured a base that no longer exists.
-
-A node's optional fields change how the chain behaves around it:
+An **exec** node's work is one or more **steps**, each a group of tasks.
+`tasks: [a, b]` is shorthand for one step named `main`: `a` and `b` are
+dispatched together and the node is measured once both have settled.
+`steps: [{id: tests, tasks: [a]}, {id: review, tasks: [b]}]` runs its steps in
+order — `b` is not dispatched at all if `a` fails, and it sees whatever `a` left
+behind. A node declares one key or the other, never both. Its other keys:
 
 | Field | Means |
 |---|---|
-| `gate_after` | Names a gate id. After this node runs, the chain halts and the work item becomes `needs_human` until someone approves, rejects, or steers. |
-| `fix_loop` | Names a loop in `policy.yaml`'s `loops:` map. A failure here re-runs the node instead of escalating, up to that loop's `attempts`/`wall_clock_s` cap. |
-| `on_failure` | A repair pass for *this node* — extra hook points dispatched once, after every task in the node has settled and the node still failed, before the next fix-loop attempt. Not a retry. A repair that is really about one task belongs on that task's binding instead (see [Configuration](configuration.md#registryyaml-hook-point-bindings)) — it travels with the task into every chain and costs one task's re-dispatch rather than the whole node's. |
-| `rebase_bounce_to` | If this node's own git operation actually moves the branch, the chain jumps back to the named node (almost always `verify`) instead of continuing over a diff nothing has re-tested. |
-| `reject_to` | Where a gate's "reject with a note" re-enters the chain — `human_review`'s rejection walks back to `implementation` with the reviewer's note as the steer. |
-| `auto_escalate` | Notifies a person immediately when this node's gate opens, instead of waiting quietly on the board for someone to notice. |
-| `auto_escalate_stuck` | Whether this node stopping for a reason that is *not* a pending gate — a fix loop out of attempts — dispatches an escalation turn before a human is asked. A different mechanism and a different trigger from `auto_escalate`; defaults on. |
-| `auto_escalate_delay_s` | Seconds to hold either escalation back after the event that triggered it, so a human already about to look at the board is not preempted by an agent. `0`, the default, fires immediately. |
+| `on_failure` | A recovery pass — tasks or steps that run once after the node failed, before it is measured again. A task or a step may carry its own `on_failure`; the nearest one to the failure wins. |
+| `fix_loop` | Repair tasks and an optional `judge`, re-run until the node passes, up to `max_attempts` and the wall clock `policy.yaml` gives the loop (`<node>.fix_loop`). |
+| `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a human is asked. |
+| `on_base_changed` | What to re-run when this node's rebase moves the base: `restart_from` names an earlier node, and `on_conflict` the task that resolves a conflicting rebase. |
+| `policy` | This node's layer of the [policy](configuration.md#policyyaml-caps-budget-archiving) — safety only tightens, operational values stay within the administrator's maxima. |
+| `skippable` | `false` to refuse an operator's skip. |
+| `read_only` | `true` to have Kraft verify the node's own steps leave the worktree as they found it. See below. Refused on a node with a `fix_loop`. |
 
-## Hook point and adapter
+**`read_only`** goes on a step or an exec node, never on a task: tasks in a
+step share one worktree, so a task-level check would fail on a sibling's
+writes, and a task that sets it is refused at load. A read_only step records
+each repository of the checkout (the root and every workspace member) before
+its first task launches — HEAD, `git status --porcelain=v1 -z` (ignored files
+stay out) and a hash of `git diff HEAD` — and reads them again after its last
+task exits; a read_only node does the same around all of its own steps. Any
+difference, an untracked file included and a commit included, stops the item
+for a person with a `read_only_violated` event and a stop reason naming the
+changed files. It is not a task failure: no recovery, fix loop or attempt is
+spent on it. Recovery and fix loops write by design, so they run outside the
+check (a recovery's retry of the step's tasks is checked again), and a step
+inside an `on_failure` or a `fix_loop` refuses `read_only`. On a sandboxed item
+Kraft runs no host git in a worktree that gained a repository it did not
+create; that repository is the reported change. It is opt-in: no shipped chain
+sets it. Setting it on both a node and its steps is allowed and redundant.
 
-Each node names one or more **hook points** — `on.test.run`, `on.mr.open`,
-`on.review.local.run` — and each hook point is bound to an **adapter** by
-`templates/registry.yaml`. Four kinds of adapter exist:
+A **gate** node names its `message`, the `artifact` it asks a person to decide
+on, and `reject_to` — the node a rejection re-enters with the reviewer's note.
+`auto_review` names an agent task that may report a verdict first, and
+`chain_finalized: true` marks the final review, which cannot be approved without
+its document.
 
-- **`agent`** (`src/kraft/adapters/`) — runs a headless coding agent in a git
-  worktree, on whichever [harness](harnesses.md) the binding names (`claude`
-  by default; `codex` and `gemini` also ship), optionally with a named skill
-  and an artifact it's expected to produce (a spec, a plan, a review brief).
+Every task, step and node has a **canonical path** — `spec.main.author`,
+`verification.review.code_review`, `merge_request_feedback.fix_loop.judge` —
+which is what events, sessions, `kraft item retry --path` and
+`kraft item skip --path` address.
+
+## Task
+
+A **task** is one unit of execution, of one of four kinds:
+
+- **`agent`** (`src/kraft/adapters/agent.py`) — runs a headless coding agent in
+  the item's worktree on a [harness profile](harnesses.md) (`harness:
+  codex`), with its own `prompt`, and optionally one `skill`, the
+  `steering` profiles it reads (after its repository's), the document it `produces`, and the `inputs`
+  Kraft hands it. Its model comes from an [agent profile](harnesses.md#agent-profiles)
+  (`profile: strong`, a named tier spelled per provider) or from its own
+  `model:`/`effort:`, never both.
 - **`subprocess`** (`src/kraft/adapters/subprocess.py`) — runs a literal
-  command, like `on.test.run`'s `[uv, run, pytest, -q]`.
-- **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself in Python:
-  preparing a worktree, scanning for touched submodules, rebasing before the
-  merge request opens.
-- **`forge`** (`src/kraft/adapters/forge/`) — talks to GitHub or GitLab
-  (`backend: auto` resolves per repo from the `forge` recorded in that repo's
-  `repos.yaml` entry): opening the merge request, polling CI, syncing,
-  merging, watching the post-merge pipeline.
+  `command`.
+- **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself, named by a
+  `ref` such as `kraft.verify_changed_test_scopes`.
+- **`forge`** (`src/kraft/adapters/forge/`) — a merge-request action on GitHub
+  or GitLab, named by its `target` (`mr.open_draft`, `mr.ci`, `mr.merge`, …),
+  resolved per repo from the `forge` recorded in that repo's `repos.yaml`
+  entry. A task that waits on the forge declares its own polling in `wait:`
+  and its timeout as its `policy: total_time_cap_minutes`.
 
-Rebinding a hook point to a different adapter, or a different skill, is a
-`registry.yaml` edit — see [Configuration](configuration.md).
+## The library and `extends`
 
-## Composing a template
-
-A custom template doesn't have to restate the shipped ones. `extends: <id>`
-starts from another template's already-resolved node list, then `remove`,
-`insert_before`, and `insert_after` edit it — never both `extends` and a
-`nodes:` list on the same template:
+A chain does not have to restate everything. `templates/library.yaml` holds
+reusable `tasks`, `steps`, `nodes` and named `steering` profiles, and a chain
+component takes one with `extends: <name>`:
 
 ```yaml
-id: quick-task-with-security-review
-extends: quick-task
-insert_after: { verify: [{ id: security_review, tasks: [on.review.security.run] }] }
+# chains/quick-task-with-review.yaml
+id: quick-task-with-review
+nodes:
+  - id: implementation
+    kind: exec
+    tasks:
+      - { id: implement, extends: implementer }
+  - id: verification
+    extends: verification        # the library node, fix loop and all
 ```
 
-(`on.review.security.run` is a real hook, registered but in no shipped
-chain — see [Configuration](configuration.md#registryyaml-hook-point-bindings).)
-
-`remove` names node ids to drop (unknown ids reject at load); `insert_before`/
-`insert_after` are maps of an existing node id to a list of new node dicts
-spliced in beside it (an unknown anchor id, or a naming collision with an
-existing node, also rejects at load). A chain resolves `extends` recursively,
-so a template can extend a template that itself extends another — but not
-itself, directly or through a cycle.
+A component extends one parent of its own kind (a node extends a node, never a
+task). Maps merge recursively, lists replace, and a reference that resolves to
+nothing is an error naming the file it came from — `kraft admin templates lint`
+reports every one.
 
 ## Gate
 
-A **gate** is where a human decision belongs. A node with `gate_after: <id>`
-stops the chain the moment it finishes; the work item's status becomes
-`needs_human` and the board shows it under *Needs you*. From there:
+A **gate** is where a human decision belongs. When the chain reaches a gate
+node it stops; the work item's status becomes `needs_human` and the board shows
+it under *Needs you*. From there:
 
-- **Approve** — the chain continues to the next node.
-- **Reject**, with a note — the chain re-enters at the node named by
-  `reject_to` (or re-runs the same producing node if none is set), carrying
-  the note as a steer.
+- **Approve** — the chain continues to the node after the gate.
+- **Reject**, with a note — the chain re-enters at the gate's `reject_to` node,
+  carrying the note as a steer.
 - **Steer**, without rejecting — for a paused-mid-flight item, not a gate.
 
-## Cap
+An item filed with an attached spec or plan starts without the nodes that
+document covers: the gate that decides it and the node that would have written
+it.
+Intake copies the document into Kraft's own storage, and that copy is what the
+item's worktree gets, so editing the original afterwards changes nothing. Until
+the item starts, `kraft item set-attachments` replaces a document (copied again)
+or drops one, which puts its gate and node back. Once it starts, its documents
+are fixed.
 
-Every retry loop is bounded. `policy.yaml`'s `loops:` map names each loop's
-`attempts` and `wall_clock_s` ceiling — `verify_fix_loop`, `ci_fix_loop`,
-`ci_wait`, `rebase_bounce`, `rebase_conflict`. A top-level `default:` key,
-sibling to `loops:` rather than inside it, covers any `fix_loop` name not
-listed there. Hitting either bound stops the chain and escalates to a person
-with the full trace, rather than looping forever on a defect the agent can't
-actually fix.
+## Cap and wait
+
+Every retry loop is bounded. A fix loop stops at its own `max_attempts`, and at
+the wall clock `policy.yaml`'s `loops:` map gives its key (or `default:`). An
+external wait — CI, an automated review, an approval, a merge landing — is
+bounded by its task's own `total_time_cap_minutes` instead, and running out
+stops for a person. Hitting either bound stops the chain and escalates with the
+full trace, rather than looping forever on a defect the agent can't actually
+fix.
+
+Time is capped per scope too. `time_cap_minutes` bounds a scope's running time
+and `total_time_cap_minutes` its wall clock, waits and gates included, on the
+work item, a node, a step or a task; each caps its own scope, a child's cannot
+exceed its parent's, and running out stops for a person, naming the scope.
 
 ## Where this is enforced
 

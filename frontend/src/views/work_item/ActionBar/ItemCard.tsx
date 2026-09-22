@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import { itemMenuItems } from "../../../components/itemMenu";
 import { OverflowMenu, StatusGlyph, type OverflowItem } from "../../../components/ui";
 import { deriveState } from "../../../deriveState";
-import { ago, clock, elapsedBetween, judgeReasoning, tokens, until, usd, waitingSince } from "../../../format";
+import { ago, clock, elapsedBetween, judgeReasoning, tokenSplit, tokenTotal as sum, tokens, until, usd, waitingSince } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { PhoneComposer } from "../PhoneComposer";
 import type { InspectorTab } from "../selection";
@@ -66,7 +66,7 @@ function deferredSummary(item: WorkItem): string {
 /** The node whose `gate_after` is this gate -- where the gate's document and
  *  its findings link should land, which is not necessarily the item's
  *  *current* node. */
-function gateNodeId(item: WorkItem, gate: string): string | null {
+export function gateNodeId(item: WorkItem, gate: string): string | null {
   return item.chain_definition?.nodes.find((n) => n.gate_after === gate)?.id ?? null;
 }
 
@@ -97,20 +97,20 @@ const COMPOSER_TITLES: Record<ComposerKind, string> = {
 };
 
 /** `1 task · 95.4k tokens · $5.01`: the node's tasks, the item's tokens and
- *  spend. The node's own tokens are in the title. */
+ *  spend. Each kind of token (Ruling 211) and the node's own are in the title. */
 function stats(item: WorkItem, taskCount: number): { text: string; title: string } {
   const parts = [`${taskCount} task${taskCount === 1 ? "" : "s"}`];
   const u = item.usage;
-  const sum = (r: { tokens_in: number; tokens_out: number }) => r.tokens_in + r.tokens_out;
-  let nodeTokens = "";
+  let detail = "";
   if (u) {
     parts.push(`${tokens(sum(u.total))} tokens`);
+    detail = tokenSplit(u.total);
     if (u.total.cost_usd > 0) parts.push(usd(u.total.cost_usd, u.total.cost_complete));
     const node = u.by_node.find((n) => n.node === item.current_node_id);
-    if (node) nodeTokens = `${tokens(sum(node))} tokens this node`;
+    if (node) detail += ` · ${tokens(sum(node))} tokens this node`;
   }
   const text = parts.join(" · ");
-  return { text, title: nodeTokens ? `${text} · ${nodeTokens}` : text };
+  return { text, title: detail ? `${text} · ${detail}` : text };
 }
 
 /** A stop that waits on a person says how long, apart from the node's frozen

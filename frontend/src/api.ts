@@ -9,19 +9,23 @@ import type {
   KraftEvent,
   LogLine,
   SessionStatus,
-  SteeringList,
-  HookBinding,
-  HookRun,
   Notify,
   Policy,
   Repo,
+  Workspace,
   Theme,
   RepoProbe,
   NodeOverrides,
   SearchResponse,
-  TemplateNode,
+  ChainFile,
+  ChainNode,
+  Harnesses,
+  HarnessProfile,
+  HarnessProfileInput,
+  HarnessProviders,
+  Library,
+  ResolveResult,
   TemplateSummary,
-  TemplateValidation,
   WorkItem,
   WorkItemArtifact,
   WorkItemDiff,
@@ -96,8 +100,11 @@ export const createWorkItem = (body: {
   title: string;
   description?: string;
   chain_template?: string;
-  submodules?: string[];
-  root_merge_policy?: string;
+  /** A workspace item: the workspace `repo` roots, the member ids picked,
+   *  and the root-pointer policy (`ignore`/`bump`). */
+  workspace?: string;
+  members?: string[];
+  root_pointer_policy?: "ignore" | "bump";
   attachments?: { kind: "spec" | "plan"; path: string }[];
   /** Node ids to drop from the materialized chain at intake (UI v2 · 04
    *  point 6; design 10/m09's click-to-skip). */
@@ -147,11 +154,15 @@ export const raiseBudget = (id: string, budgetUsd: number | null) =>
     json("POST", { budget_usd: budgetUsd }),
   );
 
-export const approveGate = (id: string, gate: string) =>
-  req<void>(`/work-items/${id}/gates/${gate}/approve`, { method: "POST" });
+/** `digest`: a chain revision's, as its artifact carried it (Kraft-ec66w). */
+export const approveGate = (id: string, gate: string, digest?: string) =>
+  req<void>(
+    `/work-items/${id}/gates/${encodeURIComponent(gate)}/approve`,
+    digest ? json("POST", { digest }) : { method: "POST" },
+  );
 
 export const rejectGate = (id: string, gate: string, note: string) =>
-  req<void>(`/work-items/${id}/gates/${gate}/reject`, json("POST", { note }));
+  req<void>(`/work-items/${id}/gates/${encodeURIComponent(gate)}/reject`, json("POST", { note }));
 
 export const pauseWorkItem = (id: string) =>
   req<{ id: string; paused_sessions: string[] }>(`/work-items/${id}/pause`, json("POST", {}));
@@ -212,7 +223,7 @@ export const openDocument = (id: string, editor?: string) =>
     json("POST", { editor: editor ?? null }),
   );
 
-export const getTemplates = () => req<TemplateSummary[]>("/templates");
+export const getTemplates = () => req<TemplateSummary[]>("/templates/chains");
 
 export const getHealth = () => req<Health>("/health");
 
@@ -275,7 +286,8 @@ export const getWorkItemArtifact = (id: string) =>
 
 /* ── settings (design 5a–5e) ─────────────────────────────────────────────── */
 
-export const getRepos = () => req<{ repos: Repo[] }>("/repos");
+export const getRepos = () =>
+  req<{ repos: Repo[]; workspaces?: Record<string, Workspace> }>("/repos");
 export const probeRepo = (path: string) => req<RepoProbe>("/repos/probe", json("POST", { path }));
 export const addRepo = (body: Partial<Repo> & { path: string }) =>
   req<Repo>("/repos", json("POST", body));
@@ -284,46 +296,42 @@ export const patchRepo = (path: string, body: Partial<Repo>) =>
 export const deleteRepo = (path: string) =>
   req<void>(`/repos?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 
-export const getTemplate = (id: string) =>
-  req<{ id: string; nodes: TemplateNode[] }>(`/templates/${encodeURIComponent(id)}`);
-export const validateTemplate = (id: string, nodes: TemplateNode[]) =>
-  req<TemplateValidation>(`/templates/${encodeURIComponent(id)}/validate`, json("POST", { nodes }));
-export const putTemplate = (id: string, nodes: TemplateNode[]) =>
-  req<{ id: string; nodes: TemplateNode[] }>(
-    `/templates/${encodeURIComponent(id)}`,
-    json("PUT", { nodes }),
+export const getTemplate = (id: string) => req<ChainFile>(`/templates/chains/${encodeURIComponent(id)}`);
+/** A saved chain resolved, not materialized: its nodes in `ChainNode` shape. */
+export const getResolvedTemplate = (id: string) =>
+  req<{ id: string; nodes: ChainNode[] }>(`/templates/chains/${encodeURIComponent(id)}/resolved`);
+/** Save one chain file's text; the server refuses (422) a chain the library
+ *  does not resolve. */
+export const putTemplate = (id: string, text: string) =>
+  req<{ id: string; file: string; text: string }>(
+    `/templates/chains/${encodeURIComponent(id)}`,
+    json("PUT", { text }),
   );
+export const getLibrary = () => req<Library>("/templates/library");
+/** Save `library.yaml`'s text; the server refuses (422, naming why) a library
+ *  that would stop any chain that resolves now from resolving. */
+export const putLibrary = (text: string) => req<Library>("/templates/library", json("PUT", { text }));
+export const getHarnesses = () => req<Harnesses>("/harnesses/profiles");
+export const getHarnessProviders = () => req<HarnessProviders>("/harnesses/providers");
+/** Save one profile; the server refuses (422, naming why) one the loader
+ *  refuses, or one that would stop a resolving chain's agent task launching. */
+export const putHarness = (id: string, body: HarnessProfileInput) =>
+  req<HarnessProfile>(`/harnesses/profiles/${encodeURIComponent(id)}`, json("PUT", body));
+/** Typed YAML into the mapping `resolveTemplate` checks. */
 export const parseTemplateYaml = (text: string) =>
-  req<{ nodes: TemplateNode[] | null; error: string | null }>(
+  req<{ chain: Record<string, unknown> | null; error: string | null }>(
     "/templates/parse",
     json("POST", { text }),
   );
-
-export const getRegistry = () => req<{ hooks: Record<string, HookBinding> }>("/registry");
-export const putRegistry = (hooks: Record<string, HookBinding>) =>
-  req<{ hooks: Record<string, HookBinding>; invalid_templates: Record<string, string> }>(
-    "/registry",
-    json("PUT", { hooks }),
-  );
-export const getHookRuns = (hook: string) =>
-  req<{ runs: HookRun[] }>(`/registry/${encodeURIComponent(hook)}/runs`);
+/** Check an unsaved chain against the installed library; writes nothing. */
+export const resolveTemplate = (chain: Record<string, unknown>) =>
+  req<ResolveResult>("/templates/resolve", json("POST", { chain }));
 
 export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));
 
 export const getTheme = () => req<Theme>("/theme");
 export const putTheme = (theme: Theme) => req<Theme>("/theme", json("PUT", theme));
-
-export const getSteering = () => req<SteeringList>("/steering");
-export const getSteeringFile = (name: string) =>
-  req<{ name: string; body: string }>(`/steering/${encodeURIComponent(name)}`);
-export const putSteeringFile = (name: string, body: string) =>
-  req<{ name: string; body: string }>(
-    `/steering/${encodeURIComponent(name)}`,
-    json("PUT", { body }),
-  );
-export const deleteSteeringFile = (name: string) =>
-  req<{ deleted: string }>(`/steering/${encodeURIComponent(name)}`, { method: "DELETE" });
 
 export const getIntake = () => req<Intake>("/intake");
 export const putIntake = (intake: Intake) => req<Intake>("/intake", json("PUT", intake));

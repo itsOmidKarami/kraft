@@ -3,6 +3,8 @@
        --output-format stream-json --verbose
 CWD is the worktree. Mode via KRAFT_FAKE_AGENT: fix (default) | noop | error |
 rate_limit (rejects with KRAFT_FAKE_AGENT_RESETS_AT, default 1788968400).
+KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS (comma-separated `--model` values, `-` for a
+launch that names none) puts only those launches in rate_limit mode.
 
 Obeys the session-summary instructions in the injected context (03 §3, 04 §6):
 reads the linkage fields back out of the prompt, writes
@@ -99,8 +101,13 @@ def _write_artifact(argv: list[str]) -> None:
         f"hook_point: {fields.get('Hook point', '')}\n"
         f"kind: {kind}s\n"
         f"title: fake {kind}\n"
-        f"---\n\nfake agent {kind}\n"
+        f"---\n\n{_BODIES.get(kind, f'fake agent {kind}')}\n"
     )
+
+
+#: An artifact Kraft parses rather than shows: a fake chain revision proposes no
+#: change, the common real answer, so its gate passes without a human.
+_BODIES = {"chain_revision": '```json\n{"rationale": "fake: the chain fits the plan"}\n```'}
 
 
 def _prompt(argv: list[str]) -> str:
@@ -138,6 +145,11 @@ def _plan_entry() -> dict:
     return plan[min(n, len(plan) - 1)]
 
 
+def _model(argv: list[str]) -> str:
+    """This launch's `--model`, or `-` when it names none."""
+    return next((argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--model"), "-")
+
+
 def _record_argv(argv: list[str]) -> None:
     """Append the full argv (JSON, one line) to KRAFT_FAKE_AGENT_ARGV_LOG, so a
     test can assert on flags -p doesn't cover, like --model."""
@@ -152,6 +164,9 @@ def main() -> int:
     _record_prompt(sys.argv)
     _record_argv(sys.argv)
     mode = os.environ.get("KRAFT_FAKE_AGENT", "fix")
+    limited = os.environ.get("KRAFT_FAKE_AGENT_RATE_LIMIT_MODELS")
+    if limited is not None and _model(sys.argv) in limited.split(","):
+        mode = "rate_limit"
     if mode == "fix":
         calc = pathlib.Path("calc.py")
         calc.write_text(calc.read_text().replace("a - b", "a + b"))
@@ -181,12 +196,6 @@ def main() -> int:
         # a plan entry (per invocation) overrides them when present. Default
         # stays "done" so every test that sets neither is unaffected.
         status = entry.get("status") or os.environ.get("KRAFT_FAKE_AGENT_STATUS", "done")
-        # chain_review's own decision lives inside its artifact envelope, not
-        # this outer per-task result -- a global KRAFT_FAKE_AGENT_STATUS aimed
-        # at the node under test must not also starve chain_finalized of the
-        # gate it needs (same reasoning as fixtures/fake-claude.sh).
-        if fields.get("Hook point") == "on.chain.review_ready":
-            status = "done"
         result = {"status": status}
         concerns = entry.get("concerns") or os.environ.get("KRAFT_FAKE_AGENT_CONCERNS")
         if concerns:
@@ -253,7 +262,9 @@ def main() -> int:
         "is_error": mode in ("error", "rate_limit"),
         # no top-level `model`: the real envelope carries `modelUsage`, keyed by
         # model name, which is why every worker_sessions row had model NULL
-        "modelUsage": {"fake-agent": {"inputTokens": 1500, "outputTokens": 200}},
+        "modelUsage": {
+            "fake-agent": {"inputTokens": 1000, "outputTokens": 200, "cacheReadInputTokens": 500}
+        },
         # a real agent CLI reports what it was billed; Kraft never computes it
         "total_cost_usd": 0.035,
         "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 500},

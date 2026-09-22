@@ -70,6 +70,10 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         return
     verb = "already connected" if result.get("already_connected") else "connected"
     print(f"{verb}: {result['path']}")
+    if not result.get("already_connected") and result.get("test_command"):
+        markers = result.get("test_markers")
+        source = f" (from {', '.join(markers)})" if markers else ""
+        print(f"test command: {result['test_command']}{source}")
 
 
 def _cmd_disconnect(ns: argparse.Namespace) -> None:

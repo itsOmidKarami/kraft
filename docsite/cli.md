@@ -16,13 +16,57 @@ kraft view list                      # the board, scoped to the repo you are in
 kraft view list --all --status=paused
 kraft view show                      # the work item whose worktree you are in
 kraft item create "fix the flaky test" --description "..."   # files it paused; a human starts it
+kraft item create "fix it now" --autostart   # starts it at once; refused (403) from a Kraft worker
 kraft item create "ship the thing" --spec .engineering/specs/x.md   # skips the spec node
+kraft item create "backport the fix" --base-branch release/1.2   # starts from, and merges into, release/1.2
+kraft item create "fix the parser" --repo ~/code/app --chain quick-task --implements app-123 --auto-gate
+                                     # another repo and chain; closes bead app-123 on completion; --auto-gate has an agent review auto-escalate gates before a human does
+kraft item create "small fix" --skip-nodes spec,plan --budget 5 \
+  --node-override implementation.attempts=2   # intake fields POST /work-items takes; --budget none lifts the cap
 kraft item approve                   # approve whichever gate is pending
-kraft item reject --note "the plan skips migrations"
+kraft item reject --note "the plan skips migrations"   # --node N re-enters at N instead of the gate's reject_to
 kraft item pause / kraft item resume --steer "try the other adapter"
 kraft item retry                     # re-run the node a stopped item stopped on
 kraft view search "retry policy"
 ```
+
+`kraft view show` includes what the item has spent, each kind of token on its
+own: uncached input, cache writes, cache reads and output, then the cost. A
+session recorded before cache tokens were split out has only one input figure;
+it is counted under `in`, and the line says `(cache not split on older
+sessions)`. A `token_budget` counts all four kinds.
+
+`--repo` (and the MCP tool's `repo`) must already be a connected repo — run
+`kraft repo connect` there first. A path Kraft has not connected is refused
+with a 422 naming that command, rather than filing an item Kraft cannot set
+up a worktree for.
+
+### Addressing work by path
+
+Retry, skip and resume address chain work by its canonical path: `node`,
+`node.step` or `node.step.task` (a `tasks:` node's one step is `main`, so
+`implementation.main.implement`). `kraft view show --json` lists every path.
+
+```bash
+kraft item retry --path verification.review               # that step, and everything after it
+kraft item retry --path verification.review.code_review   # that task; its finished siblings stand
+kraft item retry --path spec                              # a node that already completed, and on
+kraft item retry --restart                                # the whole chain from its first node
+kraft item resume --steer "keep the old API" \
+  --steer-task verification.review.code_review="check the auth module first"
+kraft item skip --path verification.review.code_review    # only that task; its siblings keep running
+```
+
+A retry keeps everything the earlier run did and runs on a new run fork. It
+reopens every gate it has to rerun; a gate before the retried work keeps its
+decision. `resume --steer` reaches every paused agent task; `--steer-task`
+gives one its own, and naming a task that is not a paused agent task is
+refused. A paused agent task resumes its own session when its harness can
+(Claude's `--resume`), told the steer and to carry on; otherwise it restarts
+with its brief and the steer. A steer is refused while the item is running
+(pause it first) and when the pause stopped no agent task, such as a test
+run or a CI wait: there is nothing there for it to steer. Pause is always the
+whole work item.
 
 ## Following a running item
 
@@ -35,6 +79,10 @@ kraft view watch              # a live board, redrawn on every event
 
 `kraft view logs --json` emits NDJSON — one object per line — because a stream has
 no end to close an array on.
+
+`-n 0 -f` prints nothing already written and only what is written after it
+starts: with no backlog line to resume after, it follows from wherever the
+log already is, not from its start.
 
 ## Reviewing before you approve
 
@@ -58,11 +106,18 @@ kraft item progress 3        # a worker saying it started plan task 3 -- not one
 kraft item escalate --message "the fix loop keeps missing the same edge case"
 kraft item escalate --message "..." --new-thread  # a fresh agent session, not the latest thread
 kraft item set-chain --template quick-task        # switch a not-yet-started item's chain
+kraft item set-attachments --spec specs/x.md      # revise a not-yet-started item's spec; --drop spec restores its gate
 kraft item set-overrides --model opus --effort high
 kraft item set-overrides --clear                  # back to the template's own binding
 kraft item set-node-override --node verify --auto-escalate-stuck
+kraft item set-node-override --node implementation --model opus --effort high \
+  --extra-prompt "Keep the migration backwards compatible."   # one node's agent tasks
+kraft item set-policy --policy merge_request_feedback.ci.await_ci.total_time_cap_minutes=60
+kraft item set-policy --clear                     # drop the item's own policy override
 kraft item mr-label --id <id> release::patch      # relabel the MR; re-creates its pipeline
 kraft item abandon --yes                          # drops the item, reclaims its worktree
+kraft item complete --reason "shipped by hand"    # end it as completed; add --close-beads to close its beads
+kraft item cancel --reason "superseded by #412"   # end it as cancelled; the worktree stays
 ```
 
 `progress` is what a worker session itself calls to report which plan task it
@@ -70,7 +125,68 @@ started — you'll see it in logs more than type it. `escalate` is the manual
 door onto the same path `kraft admin` and the board's own auto-escalation use
 to ask an agent to help resolve a `needs_human` stop. `abandon` destroys
 uncommitted work in the item's worktree; `--yes` is required, not optional,
-on purpose.
+on purpose. `complete` and `cancel` are the explicit terminal actions: each
+needs a `--reason`, stops whatever is running, and records the reason on the
+item's timeline.
+
+### One node's agent tasks
+
+`kraft item set-node-override --node N` (and `--node-override N.FIELD=VALUE`
+at intake, or MCP `set_node_overrides`) changes one node of one item, until
+that node starts; after that it answers 409. Besides the auto-escalate
+settings and `attempts`/`wall_clock_s`, it takes:
+
+- `--model`, `--effort`: what every agent task in the node launches with. The
+  order, highest first: this node override, the item-wide `set-overrides`,
+  the task's own `model:`/`effort:` in the library, the repo's `models:`
+  (model only), the harness profile's `defaults:`. A value the node's harness refuses (its
+  `values:`, or a capability it does not declare) is refused here, not at
+  launch. A gate's `auto_review` keeps the item-wide values only.
+- `--extra-prompt TEXT`: appended to the instruction of every agent task the
+  node runs (its steps, `on_failure`, `fix_loop`, judge and stuck
+  escalation), after the task's own prompt and brief. It never replaces them.
+  It does not reach a gate's `auto_review`, or the interactive escalation turn
+  (`kraft item escalate`), which belongs to the whole item. At intake,
+  `N.extra_prompt=...` is taken as written, not read as YAML.
+
+The node override is stored on the item. It is not a chain edit, so the frozen
+chain and its policy are unchanged.
+
+### A work item's own policy
+
+`kraft item create --policy KEY=VALUE` (repeatable) and `kraft item
+set-policy` give one work item its own policy override, without touching its
+chain template or any other item. `FIELD=VALUE` applies item-wide;
+`PATH.FIELD=VALUE` applies to one node, step or task by canonical path and
+everything under it. A value is read as YAML, so `deny_tools=[WebFetch]` is a
+list.
+
+```bash
+kraft item create "quick fix" \
+  --policy time_cap_minutes=45 \
+  --policy merge_request_feedback.ci.await_ci.total_time_cap_minutes=60 \
+  --policy verification.max_attempts=4
+kraft item set-policy <id> --policy max_attempts=2   # replaces the whole override
+```
+
+The fields are the ones `policy.yaml` explains (see [Configuration](configuration.md)):
+`timeout_minutes`, `max_attempts` (execution nodes only) and
+`allowed_harnesses` move within the administrator `maxima`, and win over what
+the chain authored. `allowed_tools`, `deny_tools` and `sandbox` only
+tighten: a list intersects with what each task already allows. The caps --
+`time_cap_minutes`, `total_time_cap_minutes`, `token_budget` and
+`budget_usd` -- are the work item's own item-wide: raising one above the
+chain's, up to the administrator `maxima.work_item`, is how a person unsticks
+a capped item before a retry (Rulings 198, 211). On a path one may pass that
+scope's level default, up to its level's maximum, but is refused, naming both
+scopes, above what the chain or the item already gives that scope (a wait
+task's total cap is its timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
+`total_time_cap_minutes`. An operational value past its maximum, a path
+the chain does not have, or a key that is not a policy field is refused,
+naming the field. `set-policy` works on any item that has not ended: on a
+running or waiting one it binds from the next node the item enters and from
+the next observation of a wait it is parked on, whose new timeout counts from
+when the wait started.
 
 ## Repos and worktrees
 
@@ -92,8 +208,10 @@ for it:
 | `env` | Literal variables every worker for this repo gets. |
 | `env_passthrough` | Names of variables to carry over from the daemon's own environment, for what the baseline allowlist does not cover. |
 
-`kraft repo connect` probes a `setup_command` from the repo's markers; check it
-before trusting it, and `kraft admin doctor` reports any repo still undeclared.
+`kraft repo connect` probes a `setup_command` and a test command from the
+repo's markers, and prints the test command with the file it came from (a
+justfile with a `test` recipe proposes `just test` ahead of any manifest). Check
+both before trusting them; `kraft admin doctor` reports any repo still undeclared.
 Editing a repo's settings stays in the UI. Full field list, including
 `test_scopes`, `forge`, and `default_chain_template`:
 [Configuration](configuration.md#reposyaml-connected-repos).
@@ -107,8 +225,15 @@ kraft admin restart            # stop, then start again the same way it was runn
 kraft admin health             # exit 1 when degraded, reasons on stdout
 kraft admin doctor             # every check in one pass; exit 1 if any fails
 kraft admin reindex [--repo P] # rescan documents into the search index
-kraft admin reload             # reread templates/registry from disk, no restart
-kraft admin update [--restart] # install the newest release (brew upgrade, if that's how you installed)
+kraft admin reload             # reread the template library and policy.yaml, no restart
+kraft admin update [--force] [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
+kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
+kraft admin templates show ID  # one chain file as its author wrote it
+kraft admin templates show ID --resolved  # the same chain with its library components expanded
+kraft admin templates library      # every library.yaml component, its kind, and the chains using it
+kraft admin templates library ID   # one component: its definition, users and lint issues (tasks.implementer, or a unique bare name)
+kraft admin harnesses         # every harnesses.yaml profile, its provider, and the library tasks selecting it
+kraft admin harnesses ID      # one profile: provider, executable, defaults, the tasks and chains using it
 kraft admin init [--repo]      # register the MCP server and skills; see Agent integration
 kraft admin mcp                # serve the MCP tools over stdio
 ```
@@ -126,6 +251,32 @@ installed, back into the background if it was `--detach`ed, or — if it was
 running attached to a terminal — stopped with a note that only that terminal
 can bring it back. `kraft admin update --restart` chains the same restart
 onto a successful update.
+
+Agent registrations run `kraft admin mcp` by name, so they get whichever
+`kraft` is first on PATH. A second, older install ahead of this one (a Homebrew
+formula beside a `uv tool` install, say) keeps every MCP session on its code
+after an update. `kraft admin update` warns when that is the case, and
+`kraft admin doctor` fails its `kraft on PATH` row.
+
+Semantic search's embedder is an opt-in extra: `available` on `/health` and in
+`doctor` only means it imports. An installed embedder whose model won't load
+or encode is a different state from a missing extra — `/health` still reports
+it available, with the failure reason alongside it, but `kraft admin doctor`
+FAILs its `embeddings` row until a later encode call succeeds.
+
+A home still holding the pre-V1 template configuration (a `registry.yaml` and
+no `library.yaml`) is not converted and not overwritten. The server starts
+degraded and refuses new work, and `kraft admin update` says what will change,
+asks, and only then moves the whole directory to a `templates.pre-v1-<time>`
+backup beside it and installs the V1 configuration. `-y` accepts without the
+question; with no terminal and no `-y` it changes nothing. `access.yaml`,
+`notify.yaml`, `theme.yaml`, `repos.yaml`, `intake.yaml`, `steering/` and
+`harnesses/` are carried across; the next start folds `steering/*.md` into
+`library.yaml` as steering profiles ([Configuration](configuration.md#repository-steering)). `policy.yaml` starts from the V1 default and
+keeps your value for every key V1 still has; each key it drops is printed with
+its old value. The old chains and registry stay only in the backup. There is no
+migration helper. An update interrupted mid-swap is finished by the next start
+or `kraft admin update`, never reseeded over.
 
 The verbs live in four groups — `item` acts, `view` reads, `repo` is
 repositories and their worktrees, `admin` is this machine's server. Typing an

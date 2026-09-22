@@ -5,12 +5,15 @@ import logging
 import re
 import shutil
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from kraft import events, store
 from kraft.adapters import beads
 from kraft.config import git_read
-from kraft.templates import ATTACHMENT_GATES, Template, materialize
+from kraft.policy import InstancePolicy, InstancePolicyInput
+from kraft.templates.environment import WorkItemTarget
+from kraft.templates.models import ResolvedChain
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +26,45 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
+def single_repo_target(repo: str, *, base_branch: str | None = None) -> WorkItemTarget:
+    """The immutable target of an item filed against one repository.
+
+    The id is the constant `"target"`, not the repository's own configured id:
+    a single-repository item has exactly one target, nothing reads the name,
+    and a `repos.yaml` id is not available at every intake door. A *workspace*
+    target carries real member ids and is Phase 6's.
+
+    Shared with the `/work-items` route, which dry-runs the same
+    materialization before it files a bead -- two copies of this would let the
+    dry run and the real one disagree about what gets trimmed.
+    """
+    return WorkItemTarget.for_repository("target", base_branch=base_branch)
+
+
 async def intake(
     db,
     run_dirs,
     *,
     title: str,
     repo: str,
-    template: Template,
+    #: The resolved V1 chain this item runs. Materialized here, into the
+    #: `materialized_chain` column, which is the executor's only input
+    #: (`materialized-chain-is-immutable-work-item-input`).
+    chain: ResolvedChain,
+    #: The V1 instance policy this item's tasks start from; the chain's own
+    #: `policy:` override is layered onto it by `materialize`. Defaults to the
+    #: empty policy -- an unset maximum is no bound at all -- so an internal
+    #: caller with no policy object still files a valid item.
+    effective_policy: InstancePolicy | None = None,
     description: str | None = None,
     bd_cwd: str | None = None,
-    submodules: list[str] | None = None,
-    root_merge_policy: str = "bump",
+    #: The item's immutable target (`deps.workspace_target` for a workspace
+    #: item); None is a single-repository target on `repo`.
+    target: WorkItemTarget | None = None,
+    #: A workspace item's policy per selected repository id
+    #: (`deps.repository_policies`); `effective_policy` is then the assembled
+    #: checkout's.
+    repository_policies: dict[str, InstancePolicy] | None = None,
     attachments: list[dict] | None = None,
     status: str = "active",
     #: When given, `status="active"` is downgraded to `"paused"` if
@@ -53,7 +84,7 @@ async def intake(
     implements_beads: list[str] | None = None,
     bead_cwd: str | None = None,
     #: The value to store in the row's `chain_template` column. `_UNSET`
-    #: (default) stores `template.id`; `None` stores `None` -- the caller
+    #: (default) stores `chain.id`; `None` stores `None` -- the caller
     #: that wants that distinction (Kraft-cd47) has to say so explicitly.
     chain_template: str | None | object = _UNSET,
     #: Arms agent gate review for this item's `auto_escalate` gates
@@ -63,8 +94,8 @@ async def intake(
     #: passes the value.
     auto_gate: bool = False,
     #: Node ids to remove from the materialized chain at intake (UI v2 · 04
-    #: point 6, `templates.materialize`'s `skip_nodes`). Already validated
-    #: against the template by the caller.
+    #: point 6, `ResolvedChain.materialize`'s `skip_nodes`). Already validated
+    #: against the chain by the caller.
     skip_nodes: frozenset[str] = frozenset(),
     #: Intake-time spend cap and per-node overrides, forwarded verbatim to
     #: `store.create_work_item` (point 6). `budget_set=False` (default)
@@ -72,8 +103,15 @@ async def intake(
     budget_set: bool = False,
     budget_usd: float | None = None,
     node_overrides: dict[str, dict] | None = None,
+    #: The item's own policy override (Kraft-ab1bh), already checked against
+    #: this chain by the caller (`MaterializedChain.with_item_policy`).
+    policy_override: dict | None = None,
     source: str | None = None,
     bead_priority: int | None = None,
+    #: `MaterializedChain.repository_steering`, resolved by the door
+    #: (`api.deps.repository_steering`). `None` freezes none, and the item's
+    #: launches read its repository's names against the live library.
+    repository_steering: Mapping[str, Mapping[str, str]] | None = None,
 ) -> str:
     work_item_id = uuid.uuid4().hex
     # A daemon's cwd is an accident of how it was launched — launchd, a login
@@ -83,6 +121,36 @@ async def intake(
     # the e2e harness set it, and an operator who set it as the workaround for
     # this very bug must not silently start filing per-repo on upgrade.
     cwd = bd_cwd or repo
+    # An attachment's trim is the V1 chain's own decision -- the gate's
+    # `artifact:` and the producing node's `produces:`, never a kind-to-gate-
+    # name table this layer looks up -- and it happens in the same drop as
+    # `skip_nodes`, so a chain the two together would empty is refused once.
+    materialized = chain.materialize(
+        target=target or single_repo_target(repo),
+        effective_policy=(
+            effective_policy
+            if effective_policy is not None
+            else InstancePolicy.from_input(InstancePolicyInput())
+        ),
+        # Derived from the attachments themselves, never passed in beside
+        # them: the kinds that trim the chain and the documents that justify
+        # the trim have to be the same list, and a caller holding both is a
+        # caller that can make them disagree.
+        attachment_kinds=frozenset(a["kind"] for a in attachments or []),
+        skip_nodes=skip_nodes,
+        repository_policies=repository_policies,
+        repository_steering=repository_steering,
+    )
+    # Everything above is pure; everything below has a side effect. A chain
+    # the instance policy refuses (`PolicyError`, a `ValueError`) is refused
+    # here, before a bead is filed or an attachment copied -- a trigger used to
+    # file an orphaned bead on every due minute (Kraft-ib2af).
+    # Raising rather than degrading, and before the bead: `materialize` above
+    # has removed this attachment's gate from the chain permanently, and
+    # a trim whose document is not Kraft's own is a promise something outside
+    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
+    # caller can fix the path, so it is where this fails.
+    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
     # An auto-intaken bead already exists; filing a second one for the same work
     # is the duplicate this parameter prevents.
     bead_warning: str | None = None
@@ -101,16 +169,6 @@ async def intake(
             bead_warning = str(exc)
         if bead_warning:
             logger.warning("bead not filed for %r in %s: %s", title, cwd, bead_warning)
-    # Before the trim below, and raising rather than degrading: `materialize`
-    # is about to remove this attachment's gate from the chain permanently, and
-    # a trim whose document is not Kraft's own is a promise something outside
-    # Kraft can later make false (Kraft-eqgn). Intake is the last moment the
-    # caller can fix the path, so it is where this fails.
-    attachments = _store_attachments(run_dirs, work_item_id, attachments, repo=repo)
-    satisfied = frozenset(ATTACHMENT_GATES[a["kind"]] for a in attachments or [])
-    chain_definition = json.dumps(
-        materialize(template, satisfied_gates=satisfied, skip_nodes=skip_nodes)
-    )
     implements_beads = [b for b in (implements_beads or []) if b != bead_id] or None
 
     def _create(c):
@@ -124,13 +182,20 @@ async def intake(
             title=title,
             description=description,
             repo=repo,
-            chain_template=template.id if chain_template is _UNSET else chain_template,
-            chain_definition=chain_definition,
+            chain_template=chain.id if chain_template is _UNSET else chain_template,
+            # `"{}"`, not the legacy envelope: the column is NOT NULL and Task
+            # 11 removes it. Nothing in a V1 walk reads it -- `walk.chain_of`
+            # reads `materialized_chain` and has no fallback.
+            chain_definition="{}",
+            materialized_chain=materialized.to_json(),
             # Recorded on every new row, so a bead is closed where it was filed
             # whatever KRAFT_BD_CWD says months later.
             bead_cwd=bead_cwd or cwd,
-            submodules=submodules,
-            root_merge_policy=root_merge_policy,
+            # Display copies of the frozen target, for the item's Config
+            # panel: the mount paths and the root-pointer policy. Nothing at
+            # run time reads them -- the snapshot's target is the truth.
+            submodules=[m.path for m in materialized.target.mounts.values()],
+            root_merge_policy=materialized.target.root_pointer_policy.value,
             attachments=attachments,
             status=effective_status,
             implements_beads=implements_beads,
@@ -138,6 +203,7 @@ async def intake(
             budget_set=budget_set,
             budget_usd=budget_usd,
             node_overrides=node_overrides,
+            policy_override=policy_override,
             source=source,
             bead_priority=bead_priority,
         )
@@ -151,7 +217,7 @@ async def intake(
 
 
 def _store_attachments(
-    run_dirs, work_item_id: str, attachments: list[dict] | None, *, repo: str
+    run_dirs, work_item_id: str, attachments: list[dict] | None, *, repo: str, tag: str = ""
 ) -> list[dict]:
     """Copy each attachment into Kraft's own storage; return the rewritten records.
 
@@ -163,6 +229,10 @@ def _store_attachments(
     Raises rather than skipping. Every other reader of an attachment is
     best-effort, and that is right for them; this one backs an irreversible
     decision.
+
+    `tag` names a re-snapshot apart from the copy it supersedes
+    (`replace_attachments`), so the old one stays intact until the row stops
+    naming it.
     """
     if not attachments:
         return attachments or []
@@ -171,7 +241,7 @@ def _store_attachments(
     stored = []
     for a in attachments:
         src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
-        dest = dest_dir / f"{a['kind']}{Path(a['path']).suffix or '.md'}"
+        dest = dest_dir / f"{a['kind']}{tag}{Path(a['path']).suffix or '.md'}"
         # Not shutil.copyfile's own error message: it names two absolute paths
         # under $KRAFT_HOME and says nothing about which attachment this was.
         try:
@@ -180,6 +250,31 @@ def _store_attachments(
             raise ValueError(f"cannot read the {a['kind']} attachment at {src}: {exc}") from exc
         stored.append({**a, "source": str(dest)})
     return stored
+
+
+def replace_attachments(
+    run_dirs, work_item_id: str, current: list[dict], changes: dict, added: list[dict], *, repo: str
+) -> list[dict]:
+    """A not-yet-started item's attachments after a PATCH (Kraft-s7c04.28):
+    each kind named in `changes` is dropped, `added` (validated, one per kind)
+    is snapshotted under a fresh name, and every other kind keeps the copy it
+    has. Raises like intake does; `discard_attachments` clears whichever set
+    the write did not keep."""
+    kept = [a for a in current if a["kind"] not in changes]
+    tag = f"-{uuid.uuid4().hex[:8]}"
+    fresh = _store_attachments(run_dirs, work_item_id, added, repo=repo, tag=tag)
+    return sorted(kept + fresh, key=lambda a: a["kind"] != "spec")
+
+
+def discard_attachments(run_dirs, work_item_id: str, drop: list[dict], keep: list[dict]) -> None:
+    """Delete the stored copies `drop` names and `keep` does not: only this
+    item's own, and only the ones the caller made or superseded."""
+    stored = run_dirs.attachments / work_item_id
+    kept = {a.get("source") for a in keep}
+    for a in drop:
+        source = a.get("source")
+        if source and source not in kept and Path(source).parent == stored:
+            Path(source).unlink(missing_ok=True)
 
 
 def attachments_of(work_item_row) -> list[dict]:
@@ -194,8 +289,12 @@ def attachments_of(work_item_row) -> list[dict]:
 #: bare id anywhere in prose, this is a promise the author made deliberately,
 #: and it is the convention every forge already reads. It is also the signal
 #: that tracks implementation: a bead fixed by a merged commit stayed open for
-#: a day because nothing here read it.
-_TRAILER_RE = re.compile(r"\b(?:Fixes|Closes)\b:?\s+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I)
+#: a day because nothing here read it. A line of its own, not the word
+#: anywhere: a body retelling the brief ("the old path closes Kraft-x early")
+#: promises nothing (Kraft-iaou3).
+_TRAILER_RE = re.compile(
+    r"^[ \t]*(?:Fixes|Closes):?[ \t]+(Kraft-[a-z0-9]+(?:\.[0-9]+)*)", re.I | re.M
+)
 
 
 def _trailer_beads(messages: list[str]) -> list[str]:
@@ -216,16 +315,31 @@ def _implements_beads(work_item_row) -> list[str]:
     return json.loads(raw) if raw else []
 
 
-async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
+async def close_beads(db, row, bd_cwd: str | None, run_dirs, *, by_hand: bool = False) -> None:
     """Close `row['bead_id']`, every id in `row['implements_beads']`, and every id
-    a `Fixes`/`Closes` trailer on the item's own commits names.
+    a `Fixes`/`Closes` trailer on the item's own commits names -- but only when
+    the item's change carries them (Kraft-iaou3).
+
+    A chain running to its end is not evidence on its own: two P1s once read
+    "closed" with no code behind them, and the next work was planned on top.
+    The evidence is the item's own branch changing something besides its own
+    attachments (`base_ref..HEAD`, read from the row as it is *now* -- a
+    rebase mid-walk moves `base_ref`, and the stale one would count the base's
+    commits as the item's), or a member's merge request having merged. Without
+    it the beads stay open and a `beads_left_open` event says why: a bead left
+    open is found, a bead wrongly closed is not. `by_hand` is a person
+    completing the item and asking for the close (Ruling 167) -- they have said
+    where the work landed, so nothing here second-guesses it.
 
     An item filed while bd was down has no `bead_id` (Kraft-7gy); this backfills
-    one via a late `beads.intake` before closing, rather than leaving it open
+    one via a late `beads.intake` first, rather than leaving it untracked
     forever (Kraft-dr3n) -- and persists it to the row, same as if intake had
     filed it originally. Each id's failure is logged, not raised -- one bad bead
     must not stop the others from closing, same as the single-bead path before.
     """
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (row["id"],)).fetchone()
+    )
     cwd = row["bead_cwd"] or bd_cwd
     bead_id = row["bead_id"]
     if bead_id is None:
@@ -235,24 +349,40 @@ async def close_beads(db, row, bd_cwd: str | None, run_dirs) -> None:
             logger.warning("late bead intake failed for %r: %r", row["title"], exc)
         else:
             await db.write(lambda c: store.set_bead_id(c, row["id"], bead_id))
-    if bead_id:
-        try:
-            await beads.complete(bead_id, cwd=cwd)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", bead_id, exc)
     # `git_read` never raises, so a worktree already cleaned up, or a row with no
-    # `base_ref`, degrades to closing exactly the stated beads: a bead left open
-    # is found, a bead wrongly closed is not.
+    # `base_ref`, reads as no change at all.
     worktree = run_dirs.worktrees / row["id"]
-    log = (
-        git_read(worktree, "log", "--format=%B%x00", f"{row['base_ref']}..HEAD")
-        if row["base_ref"]
-        else None
-    )
-    trailers = _trailer_beads(log.split("\0") if log else [])
+    base = row["base_ref"]
+    log = git_read(worktree, "log", "--format=%B%x00", f"{base}..HEAD") if base else None
+    changed = git_read(worktree, "diff", "--name-only", base, "HEAD") if base else None
     stated = _implements_beads(row)
-    for sub_id in [*stated, *(x for x in trailers if x != bead_id and x not in stated)]:
+    trailers = _trailer_beads(log.split("\0") if log else [])
+    ids = [b for b in (bead_id, *stated) if b]
+    ids += [x for x in trailers if x not in ids]
+    if not by_hand and not _carries_a_change(db, row, changed):
+        if ids:
+            reason = (
+                "the item completed without changing anything but its own attachments, "
+                "and no member merge request merged; close them by hand once the work lands"
+            )
+            logger.warning("beads left open for %s: %s", row["id"], reason)
+            await db.write(
+                lambda c: events.append(
+                    c, row["id"], "beads_left_open", {"beads": ids, "reason": reason}
+                )
+            )
+        return
+    for one in ids:
         try:
-            await beads.complete(sub_id, cwd=cwd)
+            await beads.complete(one, cwd=cwd)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("bead close failed for %s: %r", sub_id, exc)
+            logger.warning("bead close failed for %s: %r", one, exc)
+
+
+def _carries_a_change(db, row, changed: str | None) -> bool:
+    """Whether the item's branch changed a path that is not one of its own
+    attachments, or one of its member repos' merge requests merged."""
+    attached = {a["path"] for a in attachments_of(row)}
+    if set((changed or "").splitlines()) - attached:
+        return True
+    return any(r["state"] == "merged" for r in db.read(lambda c: store.repos_for(c, row["id"])))

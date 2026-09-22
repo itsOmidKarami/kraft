@@ -7,10 +7,30 @@ import type { Finding, KraftEvent, WorkerSession } from "../../types";
  * of the old `EventTimeline.tsx` unchanged.
  */
 
+/** Kraft-0a3h8: the sentence a `launch_fallback` event reads as, on the
+ *  timeline and as the board card's "fallback" marker. `to` is the next
+ *  candidate; `session_id` is set when it actually launched. */
+export function fallbackSentence(p: Record<string, unknown>): string {
+  const who = (d: unknown): string => {
+    const x = d as { harness?: string; model?: string | null } | null;
+    return !x ? "" : x.model ? `${x.harness} / ${x.model}` : String(x.harness);
+  };
+  const from = who(p.from);
+  const until = typeof p.resets_at_iso === "string" ? ` until ${clock(p.resets_at_iso).slice(0, 5)}` : "";
+  const why =
+    p.reason === "unavailable" ? (typeof p.detail === "string" ? p.detail : "not available") : `rate-limited${until}`;
+  if (!p.to) return `Skipped ${from} (${why}); no fallback is left.`;
+  const to = who(p.to);
+  if (!p.session_id) return `Skipped ${from} (${why}); trying ${to}.`;
+  if (p.reason === "rate_limit_hit") return `Ran on ${to} instead of ${from}: ${from} is ${why}.`;
+  return `Skipped ${from} (${why}); started on ${to}.`;
+}
+
 export function detailOf(e: KraftEvent): string | null {
   const p = e.payload as Record<string, unknown>;
-  // Kraft-qqz8: "3 of 6" beside the "Started task 3 — <title>" titleOf gives it.
-  if (e.type === "task_progress" && typeof p.task === "number" && typeof p.total === "number") {
+  if (e.type === "launch_fallback") return fallbackSentence(p);
+  // Kraft-qqz8: "3 of 6" beside the plan task's own title, which titleOf gives.
+  if (e.type === "plan_progress" && typeof p.task === "number" && typeof p.total === "number") {
     return `${p.task} of ${p.total}`;
   }
   if (e.type === "gate_rejected" && typeof p.note === "string") return p.note;
@@ -105,9 +125,10 @@ const VERBS: Record<string, string> = {
 };
 
 export function titleOf(e: KraftEvent, hooks: Map<string, string>): string | null {
-  // Kraft-qqz8: "Started task 3 — <title>", not the generic session verbs below.
-  if (e.type === "task_progress" && typeof e.payload.task === "number") {
-    return `Started task ${e.payload.task} — ${e.payload.title as string}`;
+  // Kraft-qqz8: the plan task's own title, not a bare "task N" noun -- "N of M"
+  // is detailOf's, rendered beside this as the row's meta.
+  if (e.type === "plan_progress" && typeof e.payload.title === "string") {
+    return e.payload.title;
   }
   if (e.type === "judge_verdict" && typeof e.payload.verdict === "string") {
     return e.payload.verdict === "continue" ? "judge: continuing" : "judge: stopped early";
@@ -176,7 +197,7 @@ export interface Round {
 }
 
 /** A row the left list shows at its time: a round, an escalation turn, or a
- *  node-level event (gates, node and item lifecycle, a run of task_progress). */
+ *  node-level event (gates, node and item lifecycle, a run of plan_progress). */
 export type TimelineEntry =
   | { kind: "round"; at: string; round: Round }
   | { kind: "escalationThread"; at: string; thread: number; sessions: WorkerSession[] }
@@ -284,16 +305,16 @@ export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerS
       continue;
     }
     if (SESSION_TYPES.has(e.type) || ROUND_TYPES.has(e.type) || sessionOf(e)) {
-      if (e.type !== "task_progress") progress = null;
+      if (e.type !== "plan_progress") progress = null;
       continue;
     }
-    if (e.type === "task_progress") {
-      // A run of task_progress is one row (D.2's rule, applied here too).
+    if (e.type === "plan_progress") {
+      // A run of plan_progress is one row (D.2's rule, applied here too).
       if (progress) {
         progress.last = e;
         continue;
       }
-      progress = { kind: "event", at: e.created_at, event: e, label: "task_progress", last: e };
+      progress = { kind: "event", at: e.created_at, event: e, label: "plan_progress", last: e };
       entries.push(progress);
       continue;
     }
@@ -307,13 +328,13 @@ export function nodeRounds(node: string, events: KraftEvent[], sessions: WorkerS
   return { node, rounds, entries, events: own, startedAt: times[0] ?? null, endedAt: times[times.length - 1] ?? null };
 }
 
-/** `Task 3 → 6 of 6` for a run of task_progress events. */
+/** `3 → 6 of 6` for a run of plan_progress events -- no bare "task" noun. */
 export function taskRunLabel(first: KraftEvent, last: KraftEvent = first): string {
   const a = first.payload.task as number | undefined;
   const b = last.payload.task as number | undefined;
   const total = last.payload.total as number | undefined;
-  if (a == null || b == null) return "task_progress";
-  return `Task ${a === b ? a : `${a} → ${b}`}${total != null ? ` of ${total}` : ""}`;
+  if (a == null || b == null) return "plan_progress";
+  return `${a === b ? a : `${a} → ${b}`}${total != null ? ` of ${total}` : ""}`;
 }
 
 /** The Timeline selection (`tnode` in the URL, C.4): `session:<id>`,

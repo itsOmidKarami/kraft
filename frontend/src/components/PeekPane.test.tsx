@@ -6,27 +6,9 @@ import * as api from "../api";
 import { useStore } from "../store";
 import type { WorkerSession, WorkItem } from "../types";
 import { PeekPane } from "./PeekPane";
+import { item, QUICK } from "../testFixtures";
 
-const baseItem = (over: Partial<WorkItem> = {}): WorkItem =>
-  ({
-    id: "w1",
-    title: "t",
-    repo: "/r",
-    status: "active",
-    chain_template: "quick-task",
-    chain_definition: {
-      template_id: "quick-task",
-      nodes: [
-        { id: "plan", tasks: ["a"], gate_after: "plan_approval" },
-        { id: "verify", tasks: ["b"], gate_after: null },
-      ],
-    },
-    current_node_id: "verify",
-    bead_id: "B",
-    created_at: "t",
-    updated_at: "t",
-    ...over,
-  }) as WorkItem;
+const baseItem = (over: Partial<WorkItem> = {}): WorkItem => item({ title: "t", ...QUICK, ...over });
 
 const setOneItem = (over: Partial<WorkItem> = {}) =>
   useStore.setState({ workItems: { w1: baseItem(over) } } as never);
@@ -122,7 +104,7 @@ describe("PeekPane", () => {
     renderPeek();
     const hero = document.querySelector(".peek-hero") as HTMLElement;
     expect(within(hero).getByText("verify")).toBeTruthy();
-    expect(within(hero).getByText("Task 3 of 6")).toBeTruthy();
+    expect(within(hero).getByText("3 of 6")).toBeTruthy();
     expect(within(hero).getByTestId("task-bar")).toBeTruthy();
   });
 

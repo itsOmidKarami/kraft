@@ -85,8 +85,12 @@ def _next_node_id(item: dict) -> str | None:
     return ids[after] if after < len(ids) else None
 
 
-async def get_work_item(work_item_id: str | None = None) -> dict:
-    """One item. Defaults to the item this session is standing in."""
+async def get_work_item(work_item_id: str | None = None, *, full: bool = False) -> dict:
+    """One item. Defaults to the item this session is standing in.
+
+    Trimmed so an agent's context is not spent on the chain and its sessions;
+    `full` keeps the detail endpoint's whole payload, which is what
+    `kraft view show --json` prints (Kraft-w17d)."""
     if work_item_id is None:
         work_item_id, _origin = context.resolve_context()
     if work_item_id is None:
@@ -95,6 +99,8 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
             f"no work item: pass an id, or run from a Kraft worktree under {worktrees}"
         )
     item = await transport._get(f"/work-items/{work_item_id}")
+    if full:
+        return {**item, "next_node_id": _next_node_id(item)}
     keep = (
         "id",
         "title",
@@ -109,10 +115,20 @@ async def get_work_item(work_item_id: str | None = None) -> dict:
         # what an attached spec/plan trimmed, and the trim itself — an agent
         # confirming a handoff landed needs to see both (Kraft-82gz).
         "attachments",
-        # where the implementer is in its plan, "Task 3 of 6" (None off that node)
+        # where the implementer is in its plan, "3 of 6 · title" (None off that node)
         "progress",
+        # why it is stopped, and what the chain suggests doing about it (Kraft-s7c04.27)
+        "stop_reason",
+        "suggested_action",
     )
-    return {**{k: item[k] for k in keep if k in item}, "next_node_id": _next_node_id(item)}
+    return {
+        **{k: item[k] for k in keep if k in item},
+        # what it has spent, each kind of token apart (Ruling 211)
+        **({"usage": item["usage"]["total"]} if item.get("usage") else {}),
+        # The item's own policy override (Kraft-ab1bh), only when it has one.
+        **({"policy_override": item["policy_override"]} if item.get("policy_override") else {}),
+        "next_node_id": _next_node_id(item),
+    }
 
 
 async def worker_sessions(work_item_id: str | None = None) -> list[dict]:
@@ -154,12 +170,28 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
 
     `limit` is `None` for everything and `0` for none; `0` cannot be spelled as
     a falsy "no limit", which is the bug the slice invites.
+
+    The server bounds what it returns and leads with a `truncated` marker row
+    when it had to. `limit` is the reader's own cut, the marker the server's:
+    it stays whenever the slice reaches back to it, so the cap is never silent.
     """
     payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
     lines = payload.get("lines", [])
     if limit is None:
         return lines
-    return lines[-limit:] if limit > 0 else []
+    rows = [line for line in lines if "truncated" not in line]
+    kept = rows[-limit:] if limit > 0 else []
+    if kept and len(kept) == len(rows):
+        return [line for line in lines if "truncated" in line] + kept
+    return kept
+
+
+async def log_next_line(session_id: str) -> int:
+    """The number the log's next line will get: a follow's cursor for "only
+    what is written from now on", which no backlog line can give when none
+    was printed (`-n 0`)."""
+    payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
+    return payload["next_line"]
 
 
 async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
@@ -170,7 +202,8 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
     its own — a follow that outlives the agent is worse than no follow.
 
     `after_line` is applied here rather than sent: the follow endpoint replays
-    from the top of the file and takes no offset, so skipping is the client's
+    the log's bounded tail (a `truncated` marker row, `n` -1, first when it
+    had to cut) and takes no offset, so skipping is the client's
     job. Cheap, and it keeps the resume semantics in one place.
 
     Not an MCP tool: a tool returns a value and a generator has none. An agent
@@ -317,6 +350,11 @@ async def repos() -> list[dict]:
     return (await transport._get("/repos")).get("repos", [])
 
 
+async def workspaces() -> dict[str, dict]:
+    """Every declared workspace by id, as `GET /repos` shapes it."""
+    return (await transport._get("/repos")).get("workspaces", {})
+
+
 async def health() -> dict:
     """The server's own view of itself: invalid config, index state, reattach.
 
@@ -361,3 +399,42 @@ async def reindex(repo: str | None = None) -> dict:
 async def search(q: str, limit: int = 20) -> dict:
     """Cross-repo search over specs, plans, and session summaries."""
     return await transport._get("/search", q=q, limit=limit)
+
+
+async def lint_templates() -> dict:
+    """The installed template library, linted as it is on disk: the chains that
+    resolve and every issue with the rest. Reads only; nothing is reloaded."""
+    return await transport._get("/templates/lint")
+
+
+async def template(template_id: str) -> dict:
+    """One chain template's file, as its author wrote it."""
+    return await transport._get(f"/templates/chains/{template_id}")
+
+
+async def resolved_template(template_id: str) -> dict:
+    """One saved chain with its library components expanded, before any work
+    item materializes it."""
+    return await transport._get(f"/templates/chains/{template_id}/resolved")
+
+
+async def library() -> dict:
+    """The template library's components: each one's definition as written,
+    the chains that use it, and the lint issues that name it."""
+    return await transport._get("/templates/library")
+
+
+async def library_component(component_id: str) -> dict:
+    """One library component, by `tasks.implementer` or a bare unique name."""
+    return await transport._get(f"/templates/library/{component_id}")
+
+
+async def harnesses() -> dict:
+    """`harnesses.yaml`'s profiles, each with the library tasks and chains
+    that select it (Kraft-archr)."""
+    return await transport._get("/harnesses/profiles")
+
+
+async def harness(profile_id: str) -> dict:
+    """One harness profile."""
+    return await transport._get(f"/harnesses/profiles/{profile_id}")

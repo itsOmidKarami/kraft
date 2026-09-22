@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
+from itertools import count
 from pathlib import Path
 
 import yaml
@@ -28,18 +30,22 @@ class RepoBody(BaseModel):
     # caller that does supply one still gets the enable-without-test-command
     # refusal below.
     enabled: bool | None = None
-    default_model: str | None = None
+    #: Model per harness profile id (Ruling 165); the loader checks the keys.
+    models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
-    default_root_merge_policy: str | None = None
 
 
 class ProbeBody(BaseModel):
     path: str
 
 
-def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: list[str]) -> None:
+def _auto_connect_children(
+    repos: list[dict], parent: dict, submodule_paths: list[str]
+) -> dict[str, dict]:
     """One disabled entry per `.gitmodules` path, appended to `repos` in place.
+    Returns every child now connected -- new or already there -- by its path
+    relative to `parent`: the members of the workspace `add_repo` declares.
 
     `managed: False` -- detected, nobody has looked. Each child is probed on
     its own, so a Rust submodule under a Python workspace gets `cargo test`
@@ -49,7 +55,8 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
     connecting one whose child an operator already added by hand, must not
     reset that child's latch.
     """
-    known = {r["path"] for r in repos}
+    known = {r["path"]: r for r in repos}
+    children: dict[str, dict] = {}
     for rel in submodule_paths:
         child_path = Path(parent["path"]) / rel
         try:
@@ -60,40 +67,96 @@ def _auto_connect_children(repos: list[dict], parent: dict, submodule_paths: lis
             # connected, so skipping is the whole recovery.
             continue
         if probed["path"] in known:
+            children[rel] = known[probed["path"]]
             continue
-        known.add(probed["path"])
-        repos.append(
-            {
-                "path": probed["path"],
-                "name": probed["name"],
-                "default_chain_template": "default",
-                "test_command": probed["test_command"],
-                "test_scopes": None,
-                "setup_command": probed["setup_command"],
-                "forge": probed["forge"],
-                "project": probed["project"],
-                "enabled": False,
-                "managed": False,
-                "default_model": None,
-                "deny_tools": [],
-                "steering": [],
-                "default_root_merge_policy": "bump",
-            }
-        )
+        child = {
+            "path": probed["path"],
+            "name": probed["name"],
+            "default_chain_template": "default",
+            "test_command": probed["test_command"],
+            "test_scopes": None,
+            "setup_command": probed["setup_command"],
+            "forge": probed["forge"],
+            "project": probed["project"],
+            "enabled": False,
+            "managed": False,
+            "models": {},
+            "deny_tools": [],
+            "steering": [],
+        }
+        known[probed["path"]] = children[rel] = child
+        repos.append(child)
+    return children
 
 
-def _validate_repos(st, repos: list[dict]) -> None:
+def _repository_id(entry: dict, repos: list[dict]) -> str:
+    """`entry`'s repository id, minted from its name when it has none: the
+    `[a-z][a-z0-9_-]*` rule a workspace reference must match, and unique
+    among `repos`. Adding an id changes nothing else about an entry."""
+    if entry.get("id"):
+        return entry["id"]
+    base = re.sub(r"[^a-z0-9_-]+", "-", str(entry.get("name") or "repo").lower()).strip("-_")
+    base = base if base[:1].isalpha() else f"repo-{base}".rstrip("-")
+    taken = {r.get("id") for r in repos}
+    entry["id"] = next(c for n in count(1) if (c := base if n == 1 else f"{base}-{n}") not in taken)
+    return entry["id"]
+
+
+def _declare_workspace(
+    workspaces: dict, repos: list[dict], root: dict, children: dict[str, dict]
+) -> None:
+    """Declare `root` a workspace mounting `children` (`workspace-declares-
+    root-and-members`), unless one is already rooted there. Typed membership
+    replaces reading `.gitmodules` at intake: the intake picker offers these
+    members, and the item's checkout assembles exactly the ones chosen."""
+    if not children:
+        return
+    root_id = _repository_id(root, repos)
+    if any(w.get("root") == root_id for w in workspaces.values()):
+        return
+    members = {}
+    for rel, child in children.items():
+        child_id = _repository_id(child, repos)
+        members[child_id] = {"repository": child_id, "path": rel}
+    ws_id = root_id if root_id not in workspaces else f"{root_id}-workspace"
+    workspaces[ws_id] = {"root": root_id, "members": members}
+
+
+def _editable_repos(st, path: str | None = None) -> tuple[list[dict], dict | None]:
+    """The connected entries as the plain mappings `save_repos` writes -- the
+    writer's boundary, where a route edits and re-saves what it read -- and
+    the one connected at `path` (`deps._connected`), if any. Loaded through
+    `RepoEntry` first, so a legacy shape is migrated on the way."""
+    models = config_mod.load_repos(deps.repos_path(st))
+    found = deps._connected(models, path) if path is not None else None
+    repos = [r.model_dump_repo() for r in models]
+    return repos, next((d for m, d in zip(models, repos, strict=True) if m is found), None)
+
+
+def _workspaces(st) -> dict:
+    """The raw `workspaces:` section, as written."""
+    return dict(config_mod.read_yaml(deps.repos_path(st), {}).get("workspaces") or {})
+
+
+def _validate_repos(
+    st, repos: list[dict], workspaces: dict | None = None, *, steering: bool = True
+) -> None:
     """Write `repos` to a scratch file and run the real loader over it.
 
     Mirrors `put_registry`: the write side must reject exactly what the read
     side would later choke on, or a bad `POST`/`PATCH` persists and every
     subsequent `GET /repos` 500s until an operator hand-edits the file.
     """
+    workspaces = _workspaces(st) if workspaces is None else workspaces
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp) / "repos.yaml"
-        candidate.write_text(yaml.safe_dump({"repos": repos}))
+        candidate.write_text(yaml.safe_dump({"repos": repos, "workspaces": workspaces}))
         try:
-            config_mod.load_repos(candidate, steering_dir=st.templates_dir / "steering")
+            if steering:
+                # Against the library's profiles; with no library loaded
+                # there is nothing to name, and intake refuses the item.
+                config_mod.load_repos(candidate, steering=deps.library_steering(st))
+            config_mod.load_workspaces(candidate)
         except config_mod.ConfigError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -101,10 +164,18 @@ def _validate_repos(st, repos: list[dict]) -> None:
 @api_router.get("/repos")
 async def list_repos(request: Request):
     st = request.app.state
-    # No steering validation on the read path (config.load_repos): a steering
-    # file deleted out from under an entry must not 422 the screen that would
-    # let an operator clear it. See `config.load_repos`'s docstring.
-    return {"repos": config_mod.load_repos(deps.repos_path(st), validate_steering=False)}
+    # No steering validation on the read path (config.load_repos): a profile
+    # removed out from under an entry must not 422 the screen that would let
+    # an operator clear it. See `config.load_repos`'s docstring.
+    path = deps.repos_path(st)
+    return {
+        "repos": [r.model_dump_repo(mode="json") for r in config_mod.load_repos(path)],
+        "workspaces": {
+            ws_id: ws.model_dump(mode="json")
+            # Unrefused, so doctor can fail a sandboxed workspace's row by name.
+            for ws_id, ws in config_mod.load_workspaces(path, refuse_sandboxed=False).items()
+        },
+    }
 
 
 @api_router.post("/repos/probe")
@@ -123,7 +194,7 @@ async def add_repo(body: RepoBody, request: Request):
         probed = config_mod.probe_repo(body.path, test_command=body.test_command)
     except config_mod.ConfigError as exc:
         raise HTTPException(400, str(exc)) from exc
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
+    repos, _ = _editable_repos(st)
     if any(r["path"] == probed["path"] for r in repos):
         raise HTTPException(409, f"{probed['path']} is already connected")
     test_command = body.test_command or probed["test_command"]
@@ -159,20 +230,21 @@ async def add_repo(body: RepoBody, request: Request):
         "forge": body.forge or probed["forge"],
         "project": body.project or probed["project"],
         "enabled": body.enabled if body.enabled is not None else bool(test_command or test_scopes),
-        "default_model": body.default_model,
+        "models": body.models or {},
         "deny_tools": body.deny_tools or [],
         "steering": body.steering or [],
-        "default_root_merge_policy": body.default_root_merge_policy or "bump",
         # A human typed this path. Set here rather than defaulted in the
         # loader, because `_auto_connect_children` below writes entries
         # through the same file and must NOT get this value.
         "managed": True,
     }
     repos.append(entry)
-    _auto_connect_children(repos, entry, probed["submodules"])
-    _refuse_enable_without_test_command(st, entry)
-    _validate_repos(st, repos)
-    config_mod.save_repos(deps.repos_path(st), repos)
+    children = _auto_connect_children(repos, entry, probed["submodules"])
+    workspaces = _workspaces(st)
+    _declare_workspace(workspaces, repos, entry, children)
+    _refuse_enable_without_test_command(entry)
+    _validate_repos(st, repos, workspaces)
+    config_mod.save_repos(deps.repos_path(st), repos, workspaces)
     # Index it now: a repo connected mid-session would otherwise stay invisible
     # to search (and to the intake picker) until the next restart. The scan is
     # `git ls-files .engineering/` — cheap enough to await. A scan failure must
@@ -181,7 +253,8 @@ async def add_repo(body: RepoBody, request: Request):
         await st.indexer.rescan_repo(entry["path"])
     except Exception:  # noqa: BLE001 -- scan_repo touches git and the filesystem
         logger.exception("index scan failed for newly connected repo %s", entry["path"])
-    return entry
+    # Told, not stored: which marker files the proposed commands came from.
+    return {**entry, "test_markers": probed["test_markers"]}
 
 
 class RepoPatch(BaseModel):
@@ -193,51 +266,64 @@ class RepoPatch(BaseModel):
     forge: str | None = None
     project: str | None = None
     enabled: bool | None = None
-    default_model: str | None = None
+    models: dict[str, str] | None = None
     deny_tools: list[str] | None = None
     steering: list[str] | None = None
     local_files: list[str] | None = None
-    default_root_merge_policy: str | None = None
+    intent_dir: str | None = None
 
 
-def _refuse_enable_without_test_command(st, entry: dict) -> None:
+def _has_tests(entry: dict) -> bool:
+    return bool(entry.get("test_command") or entry.get("test_scopes"))
+
+
+def _refuse_enable_without_test_command(entry: dict) -> None:
     """25's "disabled — new items can't target it" is the read side of this:
-    the write side refuses to flip a repo on with nothing for `on.test.run`
-    to run, rather than let it enable silently and fail every verify.
+    the write side refuses to flip a repo on with nothing for verification to
+    run, rather than let it enable silently and fail every verify.
 
-    A repo with neither `test_command` nor `test_scopes` still has something
-    to run: `executor.dispatch` falls back to the registry's `on.test.run`
-    binding (config.load_repos: "None keeps the registry's command"). Only
-    refuse when that fallback is also empty.
+    The repo's own `test_command`/`test_scopes` only. V1 verification has no
+    registry fallback (`executor.dispatch._select_scopes`): a repo declaring
+    neither stops every item (Kraft-vd1ed).
     """
-    if entry.get("enabled") and not (entry.get("test_command") or entry.get("test_scopes")):
-        registry_command = st.registry.hooks.get("on.test.run", {}).get("command")
-        if not registry_command:
-            raise HTTPException(
-                422,
-                "cannot enable a repo with no test command — set one first "
-                "(Plugins → on.test.run, or per repo)",
-            )
+    # Absent means enabled (Ruling 212), as RepoEntry.enabled defaults.
+    if entry.get("enabled", True) and not _has_tests(entry):
+        raise HTTPException(
+            422,
+            "cannot enable a repo with no test command — set its test command or test scopes first",
+        )
 
 
 @api_router.patch("/repos")
 async def update_repo(body: RepoPatch, request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
-    entry = deps._connected(repos, path)
+    repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     # exclude_unset, not `v is not None`: a field the caller left out of the
     # JSON body must not clobber the saved value, but one sent as an explicit
-    # `null` (clearing forge, test_command, default_model, project — the
+    # `null` (clearing forge, test_command, project — the
     # RepoDetail draft round-trips the whole Repo, nulls included) has to
     # actually take effect rather than being silently dropped.
-    entry.update(body.model_dump(exclude_unset=True))
+    had_tests = _has_tests(entry)
+    patch = body.model_dump(exclude_unset=True)
+    entry.update(patch)
     # Any save is a touch -- editing a detected child's test command without
     # enabling it still promotes it out of the Detected section. One-way: a
     # later disable leaves this True, so the row reads as deliberately off.
     entry["managed"] = True
-    _refuse_enable_without_test_command(st, entry)
+    # Only a PATCH that *makes* the repo enabled-without-tests is refused: one
+    # that turns it on, or clears its last test command. A rename on an entry
+    # already in that state (absent `enabled`, Ruling 212) goes through.
+    if entry.get("enabled", True) and not _has_tests(entry):
+        if patch.get("enabled") is True:
+            _refuse_enable_without_test_command(entry)
+        elif had_tests:
+            raise HTTPException(
+                422,
+                "cannot clear the test command of an enabled repo — "
+                "disable it, or set test scopes, in the same change",
+            )
     _validate_repos(st, repos)
     config_mod.save_repos(deps.repos_path(st), repos)
     return entry
@@ -246,11 +332,14 @@ async def update_repo(body: RepoPatch, request: Request, path: str):
 @api_router.delete("/repos", status_code=204)
 async def remove_repo(request: Request, path: str):
     st = request.app.state
-    repos = config_mod.load_repos(deps.repos_path(st), validate_steering=False)
-    entry = deps._connected(repos, path)
+    repos, entry = _editable_repos(st, path)
     if entry is None:
         raise HTTPException(404, f"{path} is not connected")
     kept = [r for r in repos if r["path"] != entry["path"]]
+    # A workspace still naming it would no longer load; refused, not dropped.
+    # Steering is not re-checked: a profile removed from the library must not
+    # block a disconnect.
+    _validate_repos(st, kept, steering=False)
     config_mod.save_repos(deps.repos_path(st), kept)
     # Mirror of the connect-time scan. A repo with work items stays in
     # `Indexer.repos()` and is simply re-ingested by the next rescan.

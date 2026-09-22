@@ -1191,12 +1191,6 @@ a[href]:not([class]) { color: var(--color-accent-400); }
 }
 .log-line[data-src="agent"] { color: var(--color-neutral-300); }
 .log-line[data-src="sys"] { color: var(--color-neutral-500); }
-/* A task_progress sys line is a task boundary among hundreds of tool calls —
-   tint it so it reads as one. */
-.log-line[data-task-progress="true"] {
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  color: var(--color-accent-200);
-}
 /* neutral-700 read 2.69:1 on the pane; timestamps are quiet, not illegible. */
 .log-t { color: var(--color-neutral-500); }
 .log-src { color: var(--color-text-muted); }

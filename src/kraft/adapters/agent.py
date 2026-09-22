@@ -1,14 +1,27 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
-from kraft import sandbox as _sandbox
+from kraft import policy as _policy
 from kraft import skill as _skill
-from kraft import steering as _steering
+from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import subprocess as _subprocess
+from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use `agent.<name>`
+    HarnessUnavailable,
+    ProfileUnavailable,
+    harness_profile,
+    harness_table,
+    resolve_profile,
+    select_profile,
+)
+from kraft.config import RepoEntry
+from kraft.policy import InstancePolicy
+from kraft.templates.models import AgentTask
+from kraft.worker import steering as _steering
 
 _CTX = (
     "You are working on a Kraft work item.\n"
@@ -21,7 +34,7 @@ _CTX = (
     "Worker session: {session_id}\n"
     "\n"
     "When you are done, write a short session summary to "
-    ".engineering/sessions/{session_id}.md under the repo, starting with YAML "
+    ".engineering/sessions/{summary_name}.md under the repo, starting with YAML "
     "front-matter carrying exactly these keys and values:\n"
     "---\n"
     "work_item_ids: [{work_item_id}]\n"
@@ -41,13 +54,12 @@ _CTX = (
     "up, so if you are missing more than one fact, ask for all of them in "
     "that one question rather than stopping once per fact.\n"
     "\n"
-    "This session ends the moment your turn ends — there is no notification, "
-    "no callback, and nothing runs after you stop responding. Do not run a "
-    "command with run_in_background and end your turn to wait for it: run "
-    "every command to completion in the foreground, however long it takes, "
-    "before you write your result and report status. The Monitor tool is "
-    "disabled here for the same reason — it has no later turn to resume "
-    "into.\n"
+    "This session ends the moment your turn ends: nothing runs after you stop "
+    "responding, and a turn that ends with a background job still running fails, "
+    "naming the job. Run every command to completion in the foreground before you "
+    "report status (the Monitor tool is disabled for the same reason). Run the "
+    "tests your change touches, by path or name as this repo's own instructions "
+    "say, not the whole suite: the verification after you runs that.\n"
     "\n"
     "You are working in a git worktree cut for this work item, on its own "
     "branch. Commit everything you change before you exit — `git add` and "
@@ -62,6 +74,37 @@ _CTX = (
     "not reach the merge request. If `git add` refuses one of those paths, "
     "that is git working as intended — do not `git add -f` it or otherwise "
     "force it in."
+)
+
+#: Kraft's own safety rules, part of the contract every agent launch carries
+#: (`every-agent-launch-carries-kraft-safety-rules`). Not steering: nothing a
+#: task, chain, repo or operator writes can select it away. A worker once
+#: SIGKILLed the Kraft daemon it was running under (Kraft-f8u3); the legacy
+#: registry answered with a default steering on every agent hook, and V1 has no
+#: such default (Kraft-5x93b), so the rule lives here instead.
+SAFETY_RULES = (
+    "\n\nNever signal a process you did not start. If something is already "
+    "listening on a port you need, it is not a stale leftover to clear -- it "
+    "might be the Kraft daemon serving other work right now. Check "
+    "$KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before "
+    "touching anything you find on a port: if the pid or the port matches, it "
+    "is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill` "
+    "would take down orchestration for every other work item on this install, "
+    "including this one. Ask any server you start yourself for an ephemeral "
+    "port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the "
+    "daemon's. If a task genuinely needs the daemon's own port, that is a "
+    "question for a human, not something to resolve by killing what is "
+    "already there."
+)
+
+#: Intent-process design §4. Kraft-authored, and its only input is the repo's
+#: own repos.yaml entry: it names a directory and inlines no file from the repo,
+#: so the context-injection boundary below is not crossed.
+INTENT_HEADING = "\n\n## Intent tree\n\n"
+_INTENT = (
+    "This repository states its intended behaviour in `{dir}/`, one file per "
+    "capability. Read `{dir}/README.md` for the format before you change "
+    "anything there."
 )
 
 #: Asked only of a harness whose `usage` capability says `result_file` -- the
@@ -91,8 +134,8 @@ def artifact_path(kind: str, work_item_id: str) -> str:
 
 #: The contract a hook with an `artifact:` binding is held to. Not part of the
 #: method: the method says *how* to think about a spec, this says where the
-#: result goes and how a reviewer will find it. Swapping the method must not be
-#: able to lose the contract.
+#: result goes, how a reviewer finds it and what the chain does with it next
+#: (`artifact_notes`). Swapping the method must not be able to lose the contract.
 _ARTIFACT = (
     "\n\nWrite your {kind} to {path}, relative to the repo root, creating that "
     "directory if it does not exist, and to no other path. Start it with YAML "
@@ -132,15 +175,16 @@ class Invocation(NamedTuple):
     steering_texts: tuple[str, ...]
     method_text: str | None = None
     effort: str | None = None
-    allowed_tools: tuple[str, ...] = ()
+    #: `None` is unbounded -- no layer of the task's policy set one -- and
+    #: `()` allows nothing. Never conflate them: an absent allowlist silently
+    #: reading as "every tool" is how a restriction goes missing.
+    allowed_tools: tuple[str, ...] | None = None
     permission_mode: str | None = None
-    sandbox: dict | None = None
 
 
 def resolve_invocation(
     binding: dict,
-    repo_entry: dict | None,
-    steering_dir: Path | None,
+    repo_entry: RepoEntry | None,
     *,
     skills_dir: Path | None = None,
     escalate: bool = False,
@@ -148,6 +192,15 @@ def resolve_invocation(
     #: validated by `validate_agent_overrides`. `None` or `{}` both mean "no
     #: override", so a caller does not have to special-case an unset column.
     item_override: dict | None = None,
+    #: A harness profile's `defaults:` (`resolve_agent_task`): the lowest rung,
+    #: filling only what the item, the binding and the repo all left unset.
+    profile_defaults: dict | None = None,
+    #: The harness profile id the launch runs on: the key the repo's
+    #: per-profile `models:` is read at (Ruling 165). None reads no repo model.
+    profile: str | None = None,
+    #: The launch's steering texts, the repository's then the task's, already
+    #: resolved from the item's snapshot (`resolve_agent_task`).
+    steering_texts: tuple[str, ...] = (),
 ) -> Invocation:
     """Fold a hook binding, a repo entry, and an item's own override into one
     launch.
@@ -155,37 +208,14 @@ def resolve_invocation(
     Precedence lives here and only here. Spelling it out at each call site is how
     three features that touch the same twenty lines end up disagreeing.
     """
-    repo = repo_entry or {}
     io = item_override or {}
-    deny: list[str] = []
-    for name in (*repo.get("deny_tools", ()), *binding.get("deny_tools", ())):
-        if name not in deny:
-            deny.append(name)
-    names = [*repo.get("steering", ()), *binding.get("steering", ())]
-    if names and steering_dir is None:
-        # A configured `steering:` key evaporating silently is worse than a
-        # raise — unreachable in production (every real caller resolves a
-        # steering_dir), but a caller that passes None with names configured
-        # has a bug worth surfacing, not a launch worth degrading quietly.
-        raise _steering.SteeringError(
-            f"resolve_invocation: steering {names!r} configured but no steering_dir was given"
-        )
-    # repo first, then hook: the wider context before the narrower one, and
-    # fixed rather than merged cleverly — a reader debugging a prompt has to
-    # be able to predict what the agent saw.
-    steering_texts = _steering.read(steering_dir, names) if names else ()
-    if steering_texts:
-        # `steering.validate` (config load) checked repos.yaml's names and the
-        # hook's names as two separate lists, each against the budget on its
-        # own — two individually-valid lists can still blow the shared budget
-        # once combined here, which is the only place the real concatenation
-        # exists. Re-check it here, over what run_agent_task actually injects.
-        total = _steering.assembled_bytes(steering_texts)
-        if total > _steering.MAX_BYTES:
-            raise _steering.SteeringError(
-                f"resolve_invocation: steering {names!r} totals {total} bytes combined, "
-                f"over the {_steering.MAX_BYTES} byte budget"
-            )
+    pd = profile_defaults or {}
+    repo_deny = repo_entry.deny_tools if repo_entry else []
+    deny = list(dict.fromkeys([*repo_deny, *binding.get("deny_tools", ())]))
+    # The repository's and the task's lists were each checked on their own
+    # (repo save, intake); joined here, two that each fit can still blow the
+    # shared budget, and this is the only place the real concatenation exists.
+    _steering.Steering.check_budget(steering_texts, where="resolve_invocation: steering combined")
     # Hook-level only, deliberately: a method is what this *hook* does, where
     # steering is what a repo demands of every hook. A repo-level default would
     # make one hook's method depend on which repo it ran in.
@@ -206,7 +236,10 @@ def resolve_invocation(
         harness=binding.get("harness", "claude"),
         # `escalate` is the fix loop asking for a capability bump, not naming a
         # model: an unset `escalate_model` falls through to the ordinary chain.
-        model=(eff_escalate_model if escalate else None) or eff_model or repo.get("default_model"),
+        model=(eff_escalate_model if escalate else None)
+        or eff_model
+        or (repo_entry.models.get(profile) if profile and repo_entry is not None else None)
+        or pd.get("model"),
         deny_tools=tuple(deny),
         steering_texts=steering_texts,
         method_text=method_text,
@@ -217,15 +250,129 @@ def resolve_invocation(
         # Deliberately no `escalate_effort`: `escalate_model` is already the fix
         # loop's capability bump, and two bump knobs is one too many. The
         # item's own override, when set, wins over the binding's either way.
-        effort=io.get("effort") if io.get("effort") is not None else binding.get("effort"),
+        effort=next(
+            (
+                v
+                for v in (io.get("effort"), binding.get("effort"), pd.get("effort"))
+                if v is not None
+            ),
+            None,
+        ),
         # Hook-level only, like `effort` and unlike `deny_tools`. Unioning a
         # repo allowlist with a hook's would *widen* the narrower one, which is
         # the opposite of what an allowlist is for; a deny list only ever
         # narrows, which is why that one unions.
-        allowed_tools=tuple(binding.get("allowed_tools", ())),
-        permission_mode=binding.get("permission_mode"),
-        sandbox=_sandbox.resolve(binding, repo),
+        allowed_tools=(
+            tuple(binding["allowed_tools"]) if binding.get("allowed_tools") is not None else None
+        ),
+        permission_mode=binding.get("permission_mode") or pd.get("permission_mode"),
     )
+
+
+class LaunchRefused(ValueError):
+    """`run_agent_task` refused to start anything: the harness is unknown, or a
+    merged option names a capability it does not declare. A configuration
+    stop that names its cause, never a task failure a fix loop could repair
+    (Kraft-hr0xr). A `ValueError` still, for callers that catch that."""
+
+
+def resolve_agent_task(
+    task: AgentTask,
+    repo_entry: RepoEntry | None,
+    library_steering: Mapping[str, str] | None = None,
+    *,
+    skills_dir: Path | None = None,
+    escalate: bool = False,
+    item_override: dict | None = None,
+    harnesses: _harness.HarnessSet | None = None,
+    steering: dict[str, str] | None = None,
+    repository_steering: Mapping[str, Mapping[str, str]] | None = None,
+    policy: InstancePolicy | None = None,
+) -> Invocation:
+    """One V1 `AgentTask`'s launch.
+
+    The typed entry point to `resolve_invocation`'s precedence rules, so the
+    executor hands over a model and never a hook dictionary. The dict is built
+    here, inside the adapter, and only from fields the task actually sets: an
+    absent `model`/`effort`/`skill` must stay absent so the repo's own default
+    and the item's override still win where `resolve_invocation` says they do.
+
+    `task.harness` is a *profile* id (`harness_profile`): the launch runs the
+    profile's provider, from its `executable` when it sets one, and its
+    `defaults` fill whatever nothing else chose -- they are the lowest rung,
+    under the item's override, the task's own field and the repo's model for
+    this profile (`models:`). Raises `HarnessUnavailable`.
+
+    `policy` is the task's resolved policy (`MaterializedChain.policy_for`),
+    the only source of its tool lists: `allowed_tools` is the policy's
+    (unbounded only when no layer set it), `deny_tools` the policy's plus the
+    repository entry's live ones (a later denial still applies). A profile
+    outside the policy's `allowed_harnesses` raises `HarnessUnavailable`.
+    `None` leaves the tool lists to the repository entry; no launch passes it
+    (Kraft-l8ype: the escalation turn runs under its node's policy too). The
+    sandbox is not an invocation's: every launch reads the item's from
+    `dispatch.item_sandbox` (Ruling 189).
+
+    `steering` is the item's snapshot's frozen steering (`ResolvedChain.steering`),
+    and the only place a task's `steering:` names are read from -- never
+    `library.yaml`. `None` is a snapshot stored before steering was frozen:
+    a task selecting steering then raises `SteeringError` rather than run
+    unsteered or on today's text. `repository_steering` is the snapshot's
+    frozen repository steering, injected first (`steering.for_repository`);
+    `library_steering`, the live library's profiles, is read only for a
+    snapshot stored before that was frozen. The profile is looked up after
+    both, so a harness problem still reports as one.
+    """
+    repo_texts = _steering.for_repository(repo_entry, repository_steering, library_steering)
+    if task.steering and steering is None:
+        raise _steering.SteeringError(
+            f"selects steering {list(task.steering)!r}, but this work item was materialized "
+            "before steering was frozen into its snapshot, so there is no intake-time text "
+            "to run it with. Re-file the item, or switch its chain template before it starts."
+        )
+    missing = [n for n in task.steering if n not in (steering or {})]
+    if missing:
+        raise _steering.SteeringError(
+            f"selects steering {missing!r}, which this work item's snapshot does not carry"
+        )
+    allowed = policy.allowed_harnesses if policy is not None else None
+    if allowed is not None and task.harness not in allowed:
+        # A snapshot materialization never checked (an older build's, a
+        # hand-edited row) is held to its policy here, at every launch.
+        raise HarnessUnavailable(
+            f"its policy's allowed_harnesses {sorted(allowed)!r} does not include it"
+        )
+    harnesses = harnesses if harnesses is not None else _harness.load(None)
+    table, path = harness_table(harnesses)
+    profile = select_profile(table.profiles, task.harness, path)
+    # The task's own rung: its agent profile, read live, or its own fields.
+    model, effort = task.model, task.effort
+    if task.profile is not None:
+        model, effort = resolve_profile(task.profile, profile, table, harnesses.valid)
+    inv = resolve_invocation(
+        {
+            "kind": "agent",
+            "harness": profile.provider,
+            **({"command": profile.executable} if profile.executable else {}),
+            **({"skill": task.skill} if task.skill is not None else {}),
+            **({"model": model} if model is not None else {}),
+            **({"effort": effort} if effort is not None else {}),
+            **({"deny_tools": list(policy.deny_tools)} if policy is not None else {}),
+        },
+        repo_entry,
+        skills_dir=skills_dir,
+        escalate=escalate,
+        item_override=item_override,
+        profile_defaults=profile.defaults,
+        profile=profile.id,
+        # Repository first, then task: the wider context before the narrower
+        # one, fixed rather than merged, so a reader debugging a prompt can
+        # predict what the agent saw.
+        steering_texts=repo_texts + tuple((steering or {})[n] for n in task.steering),
+    )
+    if policy is None:
+        return inv
+    return inv._replace(allowed_tools=policy.allowed_tools)
 
 
 def _envelope_is_error(
@@ -290,11 +437,17 @@ def build_context(
     hook_point: str,
     session_id: str,
     artifact: str | None = None,
+    #: The path `executor.prompts.review_package` wrote, for a task declaring
+    #: `inputs: [review_package]` (`AgentTask.inputs`); None for every other.
     review_package: str | None = None,
     method_text: str | None = None,
+    #: The repo's `intent_dir` (`RepoEntry.intent_dir`); None names no tree.
+    intent_dir: str | None = None,
     steering_texts: tuple[str, ...] = (),
+    summary_name: str | None = None,  # else session_id: `escalate.thread_files`
 ) -> str:
-    """Kraft's contract, method and steering, folded into one block of text.
+    """Kraft's contract, method, intent tree and steering, folded into one
+    block of text.
 
     A pure function of its arguments -- it takes the two resolved harness
     *facts* (`usage_source`, `context_channel`) rather than a harness id, so a
@@ -312,6 +465,7 @@ def build_context(
         node_id=node_id,
         hook_point=hook_point,
         session_id=session_id,
+        summary_name=summary_name or session_id,
     )
     if artifact:
         title_line = _MR_META_KEYS if artifact == "mr_meta" else _TITLE_LINE.format(kind=artifact)
@@ -322,7 +476,7 @@ def build_context(
             node_id=node_id,
             hook_point=hook_point,
             title_line=title_line,
-        )
+        ) + _artifact_notes.NOTES.get(artifact, "")
     if review_package:
         # By path, like $KRAFT_RESULT_PATH. A diff pasted into every review of
         # every cycle of every work item is the token cost sub-project G §4
@@ -344,24 +498,95 @@ def build_context(
             "read with the git command that header names -- use it when you "
             "need to judge the change as a whole.\n"
         )
+    # Unconditional, and here because every agent launch -- chain dispatch,
+    # gate auto-review, escalation -- builds its context through this function
+    # and `run_agent_task` is `harness.build_argv`'s only caller.
+    ctx += SAFETY_RULES
     if method_text:
         # After the contract, before steering: the agent reads what it must
         # produce, then how to produce it, then the house rules that apply to
         # everything. Steering stays last so it is never buried.
         ctx += _skill.HEADING + method_text + _skill.UNAVAILABLE
+    if intent_dir:
+        # After the method, before steering: a property of the repo, like
+        # steering, but Kraft's own text (design §4).
+        ctx += INTENT_HEADING + _INTENT.format(dir=intent_dir.rstrip("/"))
     if steering_texts:
         # The context-injection boundary (00_overview.md glossary) bans
         # CLAUDE.md, AGENTS.md and any repo file as a context channel. That
         # rule governs the *channel*: this is the sanctioned one — the
-        # per-invocation system prompt — carrying files Kraft owns under
-        # $KRAFT_HOME/templates/steering/. Kraft reads nothing from inside
+        # per-invocation system prompt — carrying the steering profiles of
+        # Kraft's own library.yaml. Kraft reads nothing from inside
         # the target repo to build this. Written here because a future
         # reader finding a steering feature beside a rule banning steering
         # files would otherwise assume the rule was forgotten.
-        ctx += _steering.HEADING + "\n\n".join(steering_texts)
+        ctx += _steering.Steering.block(steering_texts)
     if usage_source == "result_file":
         ctx += _USAGE_REQUEST
     return ctx
+
+
+#: The most of a task's instruction that rides in the launch argv. The
+#: instruction is the prompt argument *and* part of the context argument, and
+#: much of it is runtime-grown with no bound of its own: the steer and
+#: rejection note, the work item's description, carried and deferred findings,
+#: a fix cycle's findings and round history, the judge's history. Linux refuses
+#: any single argument over 128 KiB and macOS a whole argv over 1 MiB, so an
+#: instruction past this is written to a file and the argv carries its head and
+#: the file's path instead (Kraft-rmz4g).
+INSTRUCTION_MAX_BYTES = 24 * 1024
+
+
+def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
+    """`task_instruction`, or its head plus where the whole of it is written.
+
+    One place for every note an agent is launched with, because
+    `run_agent_task` is the one door into `harness.build_argv`: no caller has
+    to know which of its notes might grow."""
+    raw = task_instruction.encode()
+    if len(raw) <= INSTRUCTION_MAX_BYTES:
+        return task_instruction
+    path = run_dirs.results / f"{session_id}.instruction.md"
+    path.write_text(task_instruction)
+    head = raw[:INSTRUCTION_MAX_BYTES].decode(errors="ignore")
+    head = head[: head.rfind("\n")] if "\n" in head else head
+    return (
+        f"{head}\n\n[Kraft cut this instruction at {len(head.encode())} of {len(raw)} "
+        f"bytes to keep the launch within the OS argument limit. The whole instruction, "
+        f"including everything after this point, is at {path}. Read that file before "
+        f"you start: the part cut here is as much your task as the part above.]"
+    )
+
+
+def _restricted(
+    h: _harness.Harness, harness: str, allowed: tuple[str, ...], mode: str | None
+) -> dict[str, str | tuple[str, ...]]:
+    """The options that hold a launch to its allowlist (Kraft-nt6tt), or
+    `LaunchRefused`: a tool outside `allowed` must not run, and pre-approving
+    the listed ones (`allowed_tools`) is not that. The harness's own tool
+    restriction removes the unlisted built-ins, and its `under_allowlist` mode
+    sends every other ask to the permission gate instead of approving it. A
+    harness missing either half (no `restrict_tools` is refused with every
+    other undeclared option), or a launch that chose a mode of its own, is
+    refused rather than run with the bound unenforced."""
+    cap = h.capabilities.get("permission_mode")
+    asking = cap.under_allowlist if cap is not None else None
+    # No `permission_mode` at all is no asking mode either (Kraft-pdrsi).
+    if asking is None:
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) cannot hold an agent to a tool list, and this "
+            f"launch's policy sets allowed_tools={list(allowed)!r}"
+        )
+    if mode is not None and mode != asking:
+        raise LaunchRefused(
+            f"this launch's policy sets allowed_tools={list(allowed)!r}, but it asks for "
+            f"permission_mode={mode!r}; under an allowlist harness {harness!r} runs in "
+            f"{asking!r}, the mode that asks the permission gate"
+        )
+    # Built-in names only: an `mcp__` tool is not the restriction flag's to
+    # govern. Policy holds tool names, never rules (Kraft-9i6xy).
+    names = tuple(t for t in allowed if not t.startswith("mcp__"))
+    return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
 async def run_agent_task(
@@ -383,37 +608,45 @@ async def run_agent_task(
     model: str | None = None,
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
-    allowed_tools: tuple[str, ...] = (),
+    allowed_tools: tuple[str, ...] | None = None,
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
+    #: PARKED: see `build_context`'s own note on this parameter.
     review_package: str | None = None,
     artifact: str | None = None,
     method_text: str | None = None,
-    #: `--resume <id>` when set — an escalation turn continuing its item's
-    #: existing thread. `None` (every chain dispatch) omits the flag entirely,
-    #: same as today.
+    #: `--resume <id>`: an escalation turn continuing its item's thread.
     resume_session_id: str | None = None,
-    #: `--autocompact <value>` when set. Paired with `resume_session_id` by
-    #: `escalate.dispatch`; no chain dispatch sets it.
+    #: `--autocompact <value>`; only `escalate.dispatch` sets it.
     autocompact: str | None = None,
     #: `False` only for an escalation turn: the child then gets no
     #: `KRAFT_WORK_ITEM_ID`, so `client.resolve_context()` resolves it as a
-    #: human's own session rather than a worker's, and the existing
-    #: self-action guard (`client.context._forbid_self_action`) lets it act on the
-    #: very item it is escalating — see spec "The self-resume trick". Every
-    #: existing caller keeps today's behavior by leaving this `True`.
+    #: human's own session rather than a worker's, and the self-action guard
+    #: (`client.context._forbid_self_action`) lets it act on the very item it
+    #: is escalating — see spec "The self-resume trick".
     identify_as_worker: bool = True,
     head_sha: str | None = None,
     thread: int = 1,
-    repo_entry: dict | None = None,
+    repo_entry: RepoEntry | None = None,
+    time_cap=None,
+    files: str | None = None,  # result and summary name, else session_id (Kraft-s7c04.54)
+    harness_id: str | None = None,  # the harnesses.yaml id; keys `rate_limit_hit`
 ) -> str:
+    # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
+    # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
+    for field, names in (("allowed_tools", allowed_tools or ()), ("deny_tools", deny_tools)):
+        if why := _policy.tool_name_refusal(field, names):
+            raise LaunchRefused(f"this launch's policy {why}")
     hs = harnesses if harnesses is not None else _harness.load(None)
     try:
         h = hs.valid[harness]
     except KeyError:
-        raise ValueError(f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}") from None
+        raise LaunchRefused(
+            f"unknown agent harness {harness!r}; known: {sorted(hs.valid)}"
+        ) from None
 
+    task_instruction = _bounded_instruction(run_dirs, session_id, task_instruction)
     ctx = build_context(
         usage_source=h.capabilities["usage"].source,
         context_channel=h.capabilities["context"].channel,
@@ -427,7 +660,9 @@ async def run_agent_task(
         artifact=artifact,
         review_package=review_package,
         method_text=method_text,
+        intent_dir=repo_entry.intent_dir if repo_entry is not None else None,
         steering_texts=steering_texts,
+        summary_name=files,
     )
     options = {
         k: v
@@ -436,27 +671,31 @@ async def run_agent_task(
             ("effort", effort),
             ("permission_mode", permission_mode),
             ("deny_tools", tuple(deny_tools) or None),
-            ("allowed_tools", tuple(allowed_tools) or None),
+            # `()` -- allow nothing -- pre-approves nothing, so it passes no
+            # flag; `_restricted` below is what holds it to nothing.
+            ("allowed_tools", tuple(allowed_tools or ()) or None),
             ("autocompact", autocompact),
         )
         if v
     }
-    # `load_registry` checks that a binding's own model/effort/deny_tools/etc.
-    # names a capability its harness declares, at config load -- but
-    # `resolve_invocation` folds in values `load_registry` never sees: a
-    # repo's `deny_tools`/`default_model` (repos.yaml, editable in Settings ->
+    if allowed_tools is not None:
+        options |= _restricted(h, harness, allowed_tools, permission_mode)
+    # Loading the library and `harnesses.yaml` checks that a task's or a
+    # profile's own options name capabilities its harness declares -- but
+    # `resolve_invocation` folds in values that load never sees: a
+    # repo's `deny_tools`/`models` (repos.yaml, editable in Settings ->
     # Repos) and a work item's own `agent_overrides` (model/effort). This is
     # the one place the fully merged value and the resolved harness are both
     # in hand, so a capability the harness does not declare is refused loudly
     # here rather than dropped flagless by `build_argv`. Not a value-pattern
-    # check (`h.value_ok`): unlike a binding's own fields, an override's
+    # check (`h.value_ok`): unlike a task's own fields, an override's
     # value is never checked against a harness's `values:` pattern anywhere
     # in this codebase -- only that the capability itself exists.
     for name, value in options.items():
         if name == "autocompact":
             continue
         if not h.supports(name):
-            raise ValueError(
+            raise LaunchRefused(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
@@ -470,7 +709,7 @@ async def run_agent_task(
     )
     # One name serves usage-envelope reading, live progress and rate-limit
     # detection alike (usage.READERS): every shipped harness that declares
-    # either gives it the same reader, and `harness.parse` requires
+    # either gives it the same reader, and `Harness.from_input` requires
     # `structured_log` behind both, so there is one schema to pick from.
     usage_cap = h.capabilities["usage"]
     rate_limit_cap = h.capabilities.get("rate_limit_signal")
@@ -504,4 +743,7 @@ async def run_agent_task(
         require_result_file=True,
         repo_entry=repo_entry,
         reader=reader,
+        time_cap=time_cap,
+        files=files,
+        rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
     )

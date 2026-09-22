@@ -6,7 +6,6 @@ import * as api from "../../../api";
 import { ago, cleanTitle, docBody, docTitle, runLabel } from "../../../format";
 import type { DocumentLink, WorkerSession, WorkItem } from "../../../types";
 import { ShortId } from "../../../components/ShortId";
-import { ChainReviewDiff } from "../../../components/ChainReviewDiff";
 import { Composer } from "../ActionBar/Composer";
 import { rejectTarget } from "../ActionBar/ItemCard";
 import { useActionBar } from "../ActionBar/useActionBar";
@@ -62,6 +61,7 @@ type Viewed = {
   origin?: string;
   source_kind?: string;
   links?: DocumentLink[];
+  digest?: string;
 };
 
 const KIND_WORDS: Record<string, string> = { specs: "spec", plans: "plan", reviews: "review", sessions: "session" };
@@ -110,6 +110,7 @@ export function Doc({
               path: a.path,
               content: a.content,
               truncated: a.truncated,
+              digest: a.digest,
             }),
           );
     p.then((v) => live && setDoc(v)).catch(
@@ -262,7 +263,7 @@ export function Doc({
               <button
                 className="btn btn-primary"
                 disabled={gateBusy}
-                onClick={() => runGate(() => api.approveGate(item.id, gate!), "Approved — chain continues")}
+                onClick={() => runGate(() => (doc?.digest ? api.approveGate(item.id, gate!, doc.digest) : api.approveGate(item.id, gate!)), "Approved — chain continues")}
               >
                 <Check size={14} /> Approve
               </button>
@@ -304,11 +305,7 @@ export function Doc({
       <div className="doc-modal-body">
         {error && <p className="form-error">{error}</p>}
         {!doc && !error && <p className="empty">loading…</p>}
-        {doc && item && gate === "chain_finalized" && isGateDoc ? (
-          <ChainReviewDiff item={item} content={doc.content} />
-        ) : (
-          doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>
-        )}
+        {doc && <Markdown remarkPlugins={[remarkGfm]}>{docBody(doc.content, doc.title)}</Markdown>}
         {doc?.truncated && <p className="doc-modal-note">truncated — the rest is in the file</p>}
         {doc && (
           <p className="doc-modal-foot">

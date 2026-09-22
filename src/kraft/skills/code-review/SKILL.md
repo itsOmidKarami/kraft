@@ -1,14 +1,14 @@
 ---
 name: code-review
-description: Use when the verify node asks for a review of the diff this work item has produced so far. Emits findings the fix loop reads, at severities that decide whether implementation runs again.
+description: Use when the verification node asks for a review of the diff this work item has produced so far. Emits findings the fix loop reads, at severities that decide whether a repair runs.
 ---
 
 # Reviewing this work item's diff
 
 You are the second pair of eyes on a change that has already been written and
-has already had its tests run. You are not here to re-run the tests — the
-`on.test.run` task in this same node did that, and its result is separate from
-yours. You are here to catch what a passing test suite does not: a wrong
+whose tests have already passed. You are not here to re-run the tests — the
+test step before yours in this same node did that, and you only run once it is
+green. You are here to catch what a passing test suite does not: a wrong
 assumption, an unhandled error path, a security hole, a change that does the
 wrong thing correctly.
 
@@ -40,6 +40,12 @@ Look for, in rough order of what actually bites:
   that some other caller in this repo still expects the old version of. Grep
   for the callers; do not assume the author did.
 
+If your instructions name an intent tree, two more cases earn an `important`
+finding: the diff changes behaviour a requirement in the tree describes without
+changing that requirement; or a requirement this diff adds or changes is stated
+more broadly than the test it is pinned to enforces. A new requirement with no
+pin yet is not a finding — it is legal, and the check reports it.
+
 Do not report style, formatting, or naming preferences. The linter runs in CI
 and has opinions that are enforced; yours are not.
 
@@ -47,10 +53,11 @@ and has opinions that are enforced; yours are not.
 
 Every finding carries a severity, and severity is not decoration — the
 orchestrator's `policy.loop_severities` decides which severities open a **fix
-cycle**, and a fix cycle re-runs the whole implementation agent against your
-finding and then re-measures. By default that is `critical` and `important`.
-Getting this wrong is expensive in both directions: an inflated nitpick burns a
-cycle re-running implementation for nothing, and a deflated real defect ships.
+cycle**, and a fix cycle dispatches a repair agent against your finding and then
+re-runs the tests and this review. By default that is `critical` and
+`important`. Getting this wrong is expensive in both directions: an inflated
+nitpick burns a repair and a second review for nothing, and a deflated real
+defect ships.
 
 - **`critical`** — this change is broken or dangerous as written. Data loss,
   a security hole, a crash on a path that will be hit, the change not doing
@@ -58,8 +65,8 @@ cycle re-running implementation for nothing, and a deflated real defect ships.
 - **`important`** — a real defect that will cause a wrong result or a bad
   failure mode, but is bounded: an unhandled edge case, a missed caller of a
   changed contract, an error swallowed where it should surface.
-- **`minor`** — genuinely worth someone's attention but not worth re-running
-  implementation for. It is recorded and stays on the item; it does not burn
+- **`minor`** — genuinely worth someone's attention but not worth a repair
+  cycle for. It is recorded and stays on the item; it does not burn
   a cycle.
 
 If you are between two levels, take the lower one. Nothing you report is
@@ -72,7 +79,7 @@ another fix cycle) is not yours to know or narrate.
 
 A clean diff is the common case, and reporting no findings is the correct
 result for one. Do not manufacture a finding to look thorough — a fabricated
-`important` costs a full implementation re-run and teaches the loop to
+`important` costs a repair cycle and teaches the loop to
 distrust you. An empty findings list from a review that actually ran is a
 pass.
 

@@ -58,6 +58,8 @@ export interface WorkItemArtifact {
   content: string;
   truncated: boolean;
   artifact_max_bytes: number;
+  /** A chain revision's; its approval sends it back (Kraft-ec66w). */
+  digest?: string;
 }
 
 export interface SearchResult {

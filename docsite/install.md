@@ -18,6 +18,14 @@ and worth reading before you pipe it to a shell. `kraft admin update` installs t
 newest release later on (`--restart` also restarts a running server, the same
 way it was running), and `kraft --version` says what you have.
 
+An install older than the package's rename to `kraft-sdlc` can still hold a
+`kraft` uv tool next to it; `kraft admin update` stops and names the two
+commands that clear it (`uv tool uninstall kraft`, then `uv tool install
+--force --reinstall kraft-sdlc`, since the uninstall removes the `kraft`
+command both share).
+
+Upgrading from a 0.x install? Read the [1.0.0 changelog](https://github.com/itsOmidKarami/kraft/blob/main/CHANGELOG.md#100) first: finish or abandon in-flight items, and note that harness profile names and the template layout changed.
+
 Prefer driving Kraft from a coding agent instead of this shell? `kraft admin
 init` above already installs the `/kraft:*` skills alongside the MCP server —
 or skip it and go straight to the [Claude Code plugin
@@ -56,7 +64,7 @@ Releasing, and the labels a pull request needs:
 | | |
 |---|---|
 | `~/.kraft/run/` | `orchestrator.db`, `index.db`, `logs/`, `results/`, `worktrees/`, `attachments/` |
-| `~/.kraft/templates/` | the YAML the Settings screens edit — chain templates, `registry.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
+| `~/.kraft/templates/` | the YAML the Settings screens edit — `library.yaml`, `chains/`, `harnesses.yaml`, `policy.yaml`, `repos.yaml`, `access.yaml` |
 
 `templates/` is seeded from the packaged defaults on first run and never overwritten
 after, so an upgrade cannot clobber an edited policy. It is a plain directory of

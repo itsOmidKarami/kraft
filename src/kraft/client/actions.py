@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import EllipsisType
+from urllib.parse import quote
 
 from kraft import config
 from kraft.client import context, reads, transport
@@ -18,8 +20,20 @@ async def create_work_item(
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
     implements_beads: list[str] | None = None,
+    policy: dict | None = None,
+    base_branch: str | None = None,
+    skip_nodes: list[str] | None = None,
+    budget_usd: float | None | EllipsisType = ...,
+    node_overrides: dict | None = None,
+    autostart: bool = False,
 ) -> dict:
     """Create a work item. It lands paused: an agent files work, a human starts it.
+
+    `autostart` is the human's shortcut past pressing Start (Kraft-s7c04.31).
+    The server refuses it (403) from a Kraft session or an MCP client, so a
+    worker asking for it files nothing; the default stays paused on purpose.
+
+    `policy` is the item's own policy override (`set_work_item_policy`).
 
     `repo` defaults to the repo of the work item this session is standing in,
     which is the common case for a worker filing follow-up work.
@@ -32,6 +46,14 @@ async def create_work_item(
     Kraft worktree and not the registered repo (Kraft-85wk). It is sent only
     when there is a path to resolve: a call with no attachments names no file,
     so it hands over no directory either.
+
+    `base_branch` is the branch the work starts from and its merge request
+    targets; unset, the repo's default branch (Kraft-v9gbi).
+
+    `skip_nodes`, `budget_usd` and `node_overrides` are POST /work-items' own
+    intake fields (Kraft-s7c04.33), validated there. `budget_usd` keeps the
+    API's presence rule: left at `...` it is not sent and the policy default
+    applies; `None` is an explicit "no cap".
     """
     if repo is None:
         work_item_id, _origin = context.resolve_context()
@@ -50,9 +72,14 @@ async def create_work_item(
             "title": title,
             "repo": repo,
             "chain_template": chain_template,
-            "autostart": False,
+            "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
+            **({"policy": policy} if policy else {}),
+            **({"base_branch": base_branch} if base_branch else {}),
+            **({"skip_nodes": skip_nodes} if skip_nodes else {}),
+            **({"budget_usd": budget_usd} if budget_usd is not ... else {}),
+            **({"node_overrides": node_overrides} if node_overrides else {}),
             **({"description": description} if description else {}),
             **({"attachments": attachments, "cwd": str(Path.cwd())} if attachments else {}),
         },
@@ -60,8 +87,9 @@ async def create_work_item(
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
-    if body.get("bead_warning"):
-        result["bead_warning"] = body["bead_warning"]
+    for warning in ("bead_warning", "duplicate_warning"):
+        if body.get(warning):
+            result[warning] = body[warning]
     return result
 
 
@@ -151,11 +179,17 @@ async def _pending_gate_of(work_item_id: str) -> str:
     return gate
 
 
-async def approve_gate(gate: str | None = None, work_item_id: str | None = None) -> dict:
-    """Approve the gate a work item is waiting on."""
+async def approve_gate(
+    gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
+) -> dict:
+    """Approve the gate a work item is waiting on. A chain revision's approval
+    needs the `digest` its artifact carried (Kraft-ec66w)."""
     target = context._forbid_self_action(work_item_id)
     gate = gate or await _pending_gate_of(target)
-    return await transport._act(f"/work-items/{target}/gates/{gate}/approve")
+    return await transport._act(
+        f"/work-items/{target}/gates/{quote(gate, safe='')}/approve",
+        {"digest": digest} if digest else None,
+    )
 
 
 async def reject_gate(
@@ -177,7 +211,9 @@ async def reject_gate(
     payload: dict = {"note": note.strip()}
     if node:
         payload["node"] = node
-    return await transport._act(f"/work-items/{target}/gates/{gate}/reject", payload)
+    return await transport._act(
+        f"/work-items/{target}/gates/{quote(gate, safe='')}/reject", payload
+    )
 
 
 async def pause(work_item_id: str | None = None) -> dict:
@@ -192,19 +228,34 @@ async def abandon(work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{target}/abandon")
 
 
-async def resume(steer: str | None = None, work_item_id: str | None = None) -> dict:
-    """Restart a paused item, optionally carrying a steer into the next attempt.
+async def resume(
+    steer: str | None = None,
+    work_item_id: str | None = None,
+    steers: dict[str, str] | None = None,
+) -> dict:
+    """Restart a paused item. `steer` reaches every paused agent task;
+    `steers` gives individual paused agent tasks their own, by canonical task
+    path (`node.step.task`).
 
     This is also how a created-paused item is started for the first time: a NULL
     current_node_id resolves to node zero (design §6 rule 1).
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"steer": steer.strip()} if steer and steer.strip() else {}
+    payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
+    if steers:
+        payload["steers"] = steers
     return await transport._act(f"/work-items/{target}/resume", payload)
 
 
-async def retry(steer: str | None = None, work_item_id: str | None = None) -> dict:
-    """Re-run the node an item stopped on, optionally with a steer.
+async def retry(
+    steer: str | None = None,
+    work_item_id: str | None = None,
+    path: str | None = None,
+    restart: bool = False,
+) -> dict:
+    """Rerun work on a new run fork, optionally with a steer: the node an item
+    stopped on, or `path` (`node`, `node.step`, `node.step.task`) and
+    everything after it; `restart` reruns the whole chain.
 
     The only door back onto a `needs_human` stop: resume wants `paused`, pause
     wants `running`, and approve/reject want a pending gate. `_forbid_self_action`
@@ -212,19 +263,43 @@ async def retry(steer: str | None = None, work_item_id: str | None = None) -> di
     running you.
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"steer": steer.strip()} if steer and steer.strip() else {}
+    payload: dict = {"steer": steer.strip()} if steer and steer.strip() else {}
+    if path:
+        payload["path"] = path
+    if restart:
+        payload["restart"] = True
     return await transport._act(f"/work-items/{target}/retry", payload)
 
 
-async def skip(note: str | None = None, work_item_id: str | None = None) -> dict:
+async def skip(
+    note: str | None = None, work_item_id: str | None = None, path: str | None = None
+) -> dict:
     """Advance past the current node or pending gate without running or
-    approving it. The one door that bypasses a step outright, rather than
-    retrying, resuming, or approving/rejecting it — works whether the item
-    is running, paused, or stopped for a human.
+    approving it -- or, with `path`, skip only a `node.step` or
+    `node.step.task` inside the current node, stopping nothing beside it.
+    Works whether the item is running, paused, or stopped for a human.
     """
     target = context._forbid_self_action(work_item_id)
-    payload = {"note": note.strip()} if note and note.strip() else {}
+    payload: dict = {"note": note.strip()} if note and note.strip() else {}
+    if path:
+        payload["path"] = path
     return await transport._act(f"/work-items/{target}/skip", payload)
+
+
+async def complete(reason: str, work_item_id: str | None = None, close_beads: bool = False) -> dict:
+    """End the item as completed by hand. A reason is required and recorded;
+    its beads close only with `close_beads`."""
+    target = context._forbid_self_action(work_item_id)
+    payload: dict = {"reason": reason}
+    if close_beads:
+        payload["close_beads"] = True
+    return await transport._act(f"/work-items/{target}/complete", payload)
+
+
+async def cancel(reason: str, work_item_id: str | None = None) -> dict:
+    """Cancel the item. A reason is required and recorded; the worktree stays."""
+    target = context._forbid_self_action(work_item_id)
+    return await transport._act(f"/work-items/{target}/cancel", {"reason": reason})
 
 
 async def report_progress(task: int, work_item_id: str | None = None) -> dict:
@@ -287,6 +362,30 @@ async def set_chain_template(template: str, work_item_id: str | None = None) -> 
     return await transport._patch(f"/work-items/{target}", {"chain_template": template})
 
 
+async def set_attachments(
+    spec: str | None = None,
+    plan: str | None = None,
+    drop: list[str] | None = None,
+    work_item_id: str | None = None,
+) -> dict:
+    """Replace or drop a not-yet-started work item's spec/plan attachment
+    (Kraft-s7c04.28), instead of abandoning it and filing it again. A path is
+    re-copied into Kraft's own storage and resolved the way `create_work_item`
+    resolves one; a kind in `drop` is removed, which puts back the gate it
+    trimmed. A kind not named keeps its copy. 409s once the item has started.
+    `_forbid_self_action`, like the other setters: a worker does not revise the
+    documents it was handed.
+    """
+    changes: dict = {k: v for k, v in (("spec", spec), ("plan", plan)) if v}
+    changes |= dict.fromkeys(drop or [])
+    if not changes:
+        raise ValueError("kraft: set-attachments needs --spec, --plan or --drop")
+    target = context._forbid_self_action(work_item_id)
+    return await transport._patch(
+        f"/work-items/{target}", {"attachments": changes, "cwd": str(Path.cwd())}
+    )
+
+
 async def set_agent_overrides(
     model: str | None = None,
     escalate_model: str | None = None,
@@ -330,13 +429,18 @@ async def set_node_overrides(
     auto_escalate_stuck: bool | None = None,
     auto_escalate_delay_s: int | None = None,
     *,
+    model: str | None = None,
+    effort: str | None = None,
+    extra_prompt: str | None = None,
     clear: bool = False,
     work_item_id: str | None = None,
 ) -> dict:
     """Set or clear one node's per-item override on a Kraft work item
     (Kraft-uxm3), the door onto the same `auto_escalate`/`auto_escalate_stuck`/
     `auto_escalate_delay_s` fields the Policy screen sets system-wide and a
-    chain template sets per node -- without touching either of those. `clear`
+    chain template sets per node -- without touching either of those -- plus
+    the `model`/`effort` its agent tasks launch with and an `extra_prompt`
+    appended to each of their instructions (Kraft-a7ers). `clear`
     sends `{}` for this node, dropping its overrides back to the template;
     naming a field *replaces* that node's whole stored override, it does not
     merge with what is already there. 409s once the node has started.
@@ -353,18 +457,40 @@ async def set_node_overrides(
                 "auto_escalate": auto_escalate,
                 "auto_escalate_stuck": auto_escalate_stuck,
                 "auto_escalate_delay_s": auto_escalate_delay_s,
+                "model": model,
+                "effort": effort,
+                "extra_prompt": extra_prompt,
             }.items()
             if v is not None
         }
         if not fields:
             raise ValueError(
                 "kraft: set-node-override needs --auto-escalate, --auto-escalate-stuck, "
-                "--auto-escalate-delay-s, or --clear"
+                "--auto-escalate-delay-s, --model, --effort, --extra-prompt, or --clear"
             )
     return await transport._patch(f"/work-items/{target}", {"node_overrides": {node_id: fields}})
 
 
+async def set_work_item_policy(
+    policy: dict | None = None, *, clear: bool = False, work_item_id: str | None = None
+) -> dict:
+    """Set or clear a work item's own policy override (Kraft-ab1bh): item-wide
+    fields (`max_attempts`, `timeout_minutes`, `allowed_harnesses`; the time
+    caps `time_cap_minutes` and `total_time_cap_minutes`, and the safety
+    fields, which only tighten) plus
+    `paths: {canonical path: {field: value}}` for one node, step or task. It
+    *replaces* the whole stored override; `clear` sends `{}`. Held to the
+    same bounds as every policy layer, and 422s naming the field it refuses.
+    On a running or waiting item it binds from the next node entered and the
+    next observation of a wait. `_forbid_self_action`: a worker raising its
+    own caps is exactly the self-action the other verbs refuse."""
+    target = context._forbid_self_action(work_item_id)
+    if not clear and not policy:
+        raise ValueError("kraft: set-policy needs --policy FIELD=VALUE or --clear")
+    return await transport._patch(f"/work-items/{target}", {"policy": {} if clear else policy})
+
+
 async def reload_templates() -> dict:
-    """Reread every chain template and the hook registry from disk into the
-    running server, no restart."""
+    """Reread the template library from disk into the running server, no
+    restart."""
     return await transport._act("/templates/reload")

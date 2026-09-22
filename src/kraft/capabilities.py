@@ -7,8 +7,8 @@ capabilities shipped inside a week were not running, and the P1 bug one of them
 fixed was closed in the tracker while still live in production.
 
 Hand-maintained on purpose, and deliberately NOT a diff of shipped-vs-live
-config. A live registry carries operator intent the shipped defaults do not --
-per-hook `model`, `escalate_model` and `effort` choices -- so a diff reports
+config. A live library carries operator intent the shipped defaults do not --
+per-task `model` and `effort` choices -- so a diff reports
 every deliberate edit as drift, and applying one destroys the edits. This list
 answers the useful question instead: what is available, and how do I take it.
 
@@ -48,58 +48,19 @@ def _key(version: str) -> tuple[int, ...]:
 
 
 #: Oldest first. `added_since` relies on this order for its output.
+#:
+#: Empty since Template Schema V1: every entry before it told an operator how to
+#: adopt a capability in the legacy `registry.yaml` and hook-chain files, which
+#: V1 does not read. A V1 home is seeded from the V1 bundle (or replaced by
+#: `kraft admin update`), so it already has everything those entries described.
 MANIFEST: tuple[Capability, ...] = (
     Capability(
-        version="0.65.0",
-        name="extends",
-        what="compose a chain template instead of copying all of its nodes",
-        how="add `extends: default` to your template and delete the nodes you inherit; "
-        "`remove`, `insert_before` and `insert_after` adjust what you got",
-    ),
-    Capability(
-        version="0.65.0",
-        name="defaults",
-        what="settings applied to every `kind: agent` binding in registry.yaml",
-        how="add a top-level `defaults:\\n  agent: { steering: [...] }` block and delete "
-        "the per-hook copies it replaces",
-    ),
-    Capability(
-        version="0.68.0",
-        name="on_failure (binding-level)",
-        what="a repair that travels with a task instead of with one node, and "
-        "re-dispatches just that task",
-        how="add `on_failure: [on.ci.repair]` to the `on.ci.poll` binding in "
-        "registry.yaml, and bind `on.ci.repair` beside it",
-    ),
-    Capability(
-        version="0.71.0",
-        name="steps",
-        what="ordered groups of concurrent tasks inside one node, so sequencing "
-        "no longer needs a node of its own",
-        how="replace a node's `tasks: [a, b]` with `steps:` and one list per "
-        "ordered group, e.g. `steps:\\n  - [on.implementation.start]\\n  - [on.repos.scan]`",
-    ),
-    Capability(
-        version="0.72.0",
-        name="inputs",
-        what="a hook binding declares what it is fed and on which channel, so a "
-        "review hook bound to a CLI gets the same diff and findings an agent one does",
-        how="add `inputs:` to a subprocess binding in registry.yaml, e.g. "
-        "`inputs:\\n  review_package: { channel: env, name: KRAFT_REVIEW_PACKAGE }`",
-    ),
-    Capability(
-        version="0.74.0",
-        name="rebase steps",
-        what="every node that authors or measures code rebases onto the fetched "
-        "tip of the target branch first and re-prepares its environment "
-        "afterwards, and the three merge-request nodes became one that stops "
-        "when its rebase moves the base",
-        how="give `spec`, `plan`, `implementation` and `verify` a first step of "
-        "`[on.mr.rebase]`, and give `implementation` and `verify` a second "
-        "step of `[on.env.prepare]` (the `env_setup` node is then redundant "
-        "and goes); replace `pre_mr_rebase`, `mr_meta` and `open_mr` with one "
-        "`open_mr` whose steps are `[on.mr.rebase]`, `[on.mr.describe]`, "
-        "`[on.mr.open]` and which keeps `rebase_bounce_to: verify`",
+        version="1.0.0",
+        name="profiles",
+        what="named model tiers (deep, strong, fast) a library agent task selects "
+        "instead of spelling out model/effort",
+        how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
+        "set `profile: strong` on a task in place of its `model:`/`effort:`",
     ),
 )
 

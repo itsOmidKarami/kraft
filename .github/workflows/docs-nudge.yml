@@ -40,7 +40,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE" "$HEAD")
-          SOURCE=$(echo "$CHANGED" | grep -E '^(src/kraft/(cli/|config\.py|policy\.py|templates\.py|harness\.py|harnesses/|mcp\.py)|templates/(default|quick-task)\.yaml)' || true)
+          SOURCE=$(echo "$CHANGED" | grep -E '^(src/kraft/(cli/|config\.py|policy\.py|templates/|harness\.py|harnesses/|mcp\.py)|templates/(default|quick-task)\.yaml)' || true)
           DOCS=$(echo "$CHANGED" | grep -E '^docsite/' || true)
 
           if [ -z "$SOURCE" ] || [ -n "$DOCS" ]; then

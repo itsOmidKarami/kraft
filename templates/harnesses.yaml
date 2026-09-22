@@ -1,0 +1,42 @@
+# harnesses.yaml — Template Schema V1
+#
+# A harness *profile* is a configured instance of a provider: which executable
+# to run and what runtime options to start from. It is never provider command
+# syntax or result parsing — those belong to the provider package
+# (`src/kraft/harnesses/<provider>.yaml`), which declares the capability
+# surface a profile may select from. A `defaults:` key the provider does not
+# declare, or a value it does not accept, is refused at load.
+#
+# The ids below are the ones `library.yaml`'s tasks name in their `harness:`.
+# Seeded once and never overwritten, so edit freely.
+harnesses:
+  codex:
+    provider: codex
+    enabled: true
+    executable: codex
+    defaults:
+      effort: medium
+
+  claude:
+    provider: claude
+    enabled: true
+    executable: claude
+    defaults:
+      model: sonnet
+
+# An agent *profile* is a named model tier a library task selects with
+# `profile:` instead of spelling out `model:`/`effort:` itself. `model` is keyed
+# by provider id, so one tier means the same thing on every harness of that
+# provider. A profile may omit a provider; only a task pairing it with a
+# harness of that provider is refused. Read live at every launch: editing a
+# tier changes every later launch that selects it.
+profiles:
+  deep:
+    effort: high
+    model: { claude: opus, codex: gpt-5.6-sol }
+  strong:
+    effort: high
+    model: { claude: sonnet, codex: gpt-5.6-terra }
+  fast:
+    effort: low
+    model: { claude: haiku }

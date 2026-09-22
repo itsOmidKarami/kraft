@@ -5,14 +5,10 @@ import * as api from "../../../api";
 import { useStore } from "../../../store";
 import type { LogLine, WorkerSession } from "../../../types";
 import { Log } from "./Log";
+import { session as baseSession } from "../../../testFixtures";
 
 const session = (over: Partial<WorkerSession> = {}): WorkerSession =>
-  ({
-    id: "s1", work_item_id: "w1", node_id: "verify", hook_point: "on.test.run",
-    status: "done", attempt: 1, round: 0, created_at: "t", started_at: null, exited_at: null,
-    tokens_in: null, tokens_out: null, cost_usd: null, wall_ms: null, model: null, head_sha: null,
-    ...over,
-  }) as WorkerSession;
+  baseSession({ status: "done", started_at: null, thread: undefined, ...over });
 
 const line = (n: number): LogLine => ({ n, t: null, src: "stdout", text: `line ${n}` });
 
@@ -109,6 +105,15 @@ describe("RightPane · Log", () => {
     expect(screen.queryByText("offline")).not.toBeInTheDocument();
   });
 
+  it("counts the session's cache tokens in its token figure (Ruling 211)", async () => {
+    const kinds = { tokens_in: 7, tokens_cache_write: 40, tokens_cache_read: 900, tokens_out: 3 };
+    useStore.setState({ sessionsByItem: { w1: [session(kinds)] } } as never);
+    vi.spyOn(api, "getLogLines").mockResolvedValue({ session_id: "s1", status: "done", lines: [line(0)] });
+    render(<Log sessionId="s1" />);
+    await screen.findByText("line 0");
+    expect(document.querySelector(".log-head")?.textContent).toContain("950 tokens");
+  });
+
   it("renders one header row, with the chips in it and no title block above", async () => {
     vi.spyOn(api, "getLogLines").mockResolvedValue({
       session_id: "s1", status: "done", lines: [line(0)],
@@ -120,18 +125,5 @@ describe("RightPane · Log", () => {
     const head = document.querySelector(".log-head") as HTMLElement;
     expect(head.textContent).toContain("Log");
     expect(within(head).getByRole("button", { name: /^all$/i })).toBeTruthy();
-  });
-
-  it("tints a task_progress line and reads it as a task boundary", async () => {
-    vi.spyOn(api, "getLogLines").mockResolvedValue({
-      session_id: "s1",
-      status: "done",
-      lines: [{ n: 1, t: null, src: "sys", text: 'task_progress task=3 "wire the thing"' }],
-    });
-    render(<Log sessionId="s1" />);
-    const line = await screen.findByText(/task_progress/);
-    const lineEl = line.closest(".log-line") as HTMLElement;
-    expect(lineEl).toHaveAttribute("data-task-progress", "true");
-    expect(lineEl.textContent).toContain("task 3");
   });
 });

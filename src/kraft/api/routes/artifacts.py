@@ -4,11 +4,13 @@ import logging
 
 from fastapi import HTTPException, Request
 
-from kraft import events, review
+from kraft import events, review, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
+from kraft.executor import stops
 from kraft.index import ingest as ingest_mod
-from kraft.worktree_read import read_worktree_file
+from kraft.templates import revision
+from kraft.worker.worktree_read import read_worktree_file
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,14 @@ async def get_work_item_diff(wid: str, request: Request):
     if not worktree.is_dir():
         raise HTTPException(404, "this work item has no worktree yet")
 
+    try:
+        # No host git in a sandboxed worktree while its worker can still
+        # write it (Kraft-69rwp): a 409 a reviewer can act on.
+        stops.refuse_live_sandboxed_session(
+            st.db, row, deps.launch(st, row["repo"]), what="the diff"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
     change = review.read_change(worktree, "HEAD")
     landed = review.read_change(worktree, base, head="HEAD")
     if change is None or landed is None:
@@ -160,7 +170,8 @@ async def get_work_item_artifact(wid: str, request: Request):
     """
     st = request.app.state
     row = deps._work_item_row(st, wid)  # 404s on an unknown work item
-    rel = board._gate_artifact(st, row, board._pending_gate(st, wid))
+    gate = board._pending_gate(st, wid)
+    rel = board._gate_artifact(st, row, gate)
     if rel is None:
         raise HTTPException(404, "this work item's gate has no artifact")
     result = await _read_worktree_artifact(st, wid, rel)
@@ -168,9 +179,24 @@ async def get_work_item_artifact(wid: str, request: Request):
         raise HTTPException(404, "this work item's gate has no artifact")
     text, truncated = result
     fm, body = ingest_mod.split_front_matter(text)
+    chain = store.materialized_chain_of(row)
+    shown = None
+    if chain is not None and any(
+        n.id == gate and n.node.artifact == revision.CHAIN_REVISION for n in chain.chain.nodes
+    ):
+        # A change set is JSON for Kraft to apply; the person deciding reads
+        # it rendered, with the diff it makes and anything that stops it.
+        body, revised = revision.render(text, chain, gate, st.library)
+        # What an approval must still apply (Kraft-ze1yj).
+        if revised is not None and revised is not chain:
+            shown = revision.digest(revised)
+            await st.db.write(lambda c: store.show_revision(c, wid, gate, shown))
     return {
         "work_item_id": wid,
         "path": rel,
+        # A chain revision's approval sends this back (Kraft-ec66w); absent
+        # where approving applies nothing.
+        **({"digest": shown} if shown else {}),
         "title": ingest_mod.derive_title(rel, fm, body),
         # Front matter stripped: it is the contract's plumbing, not the
         # document, and a reviewer reading a spec should not have to skip it.

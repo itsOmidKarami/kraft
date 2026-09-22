@@ -5,19 +5,20 @@ scenario(): ...` under `asyncio.run`) rather than editing that file or
 `tests/test_findings_loop.py`, both of which stay green and unedited.
 """
 
-import asyncio
-import json
+import shlex
 import sys
 from pathlib import Path
 
-from support.harness import fake_registry, isolated_bd, make_repo
+from support.chain_run import loop_policy, run_chain
+from support.harness import isolated_bd, v1_fix_loop_node, v1_seeded_chain
 
-from kraft import db, executor, policy, store
+from kraft import executor, policy, store
 from kraft.adapters.subprocess import read_concerns
-from kraft.paths import RunDirs
-from kraft.templates import Registry, Template
 
 _FAKE_AGENT = Path(__file__).parent / "support" / "fake_agent.py"
+_FAKE = f"{sys.executable} {_FAKE_AGENT}"
+#: The fix loop's one task, where its sessions land.
+_FIX = "verify.fix_loop.main.fix"
 
 #: A "never fixed" `on.test.run` whose failure text differs every invocation
 #: (via a `KRAFT_FAKE_TESTRUN_COUNTER` sidecar, same pattern as
@@ -40,113 +41,51 @@ _VARYING_FAILING_SUBPROCESS = (
 )
 
 
-def _registry():
-    base = fake_registry(sys.executable, _FAKE_AGENT)
-    hooks = dict(base.hooks)
-    hooks["on.test.run"] = {
+def _fixloop_template(tmp_path, *, fix_model: str | None = None):
+    """`verify` measured by the never-fixed varying subprocess, with the fix
+    loop on the fake agent.
+
+    No fix-loop judge in this suite. Bound to the same fake agent as the fix
+    task it would write the same `KRAFT_FAKE_AGENT_CONCERNS` text, which
+    `prompts.judge_note` carries into the next fix prompt (Kraft-s7c04.5) --
+    so the marker `test_the_path_is_passed_not_the_contents` looks for would
+    become ambiguous between "the previous fix's contents were pasted" (the
+    bug it guards) and "the judge said the same words" (fine). The judge's
+    own handoff is covered by tests/skills/test_fix_loop_judge.py. No
+    `env_setup` node: V1 prepares the worktree first."""
+    suite = {
+        "id": "suite",
         "kind": "subprocess",
-        "command": [sys.executable, "-c", _VARYING_FAILING_SUBPROCESS],
+        "command": shlex.join([sys.executable, "-c", _VARYING_FAILING_SUBPROCESS]),
     }
-    # No fix-loop judge in this suite. It is bound to the same fake agent as the
-    # fix task and therefore writes the same `KRAFT_FAKE_AGENT_CONCERNS` text,
-    # which `prompts.judge_note` now carries into the next fix prompt
-    # (Kraft-s7c04.5) -- so the marker `test_the_path_is_passed_not_the_contents`
-    # looks for becomes ambiguous between "the previous fix's contents were
-    # pasted" (the bug it guards) and "the judge said the same words" (fine).
-    # The judge's own handoff is covered by tests/test_fix_loop_judge.py;
-    # `judge_verdict` fails open to "continue" with no reasoning when the hook
-    # is absent, which is exactly the pre-judge behaviour this suite was
-    # written against.
-    hooks.pop(executor.JUDGE_HOOK, None)
-    return Registry(hooks=hooks)
-
-
-def _fixloop_template() -> Template:
-    return Template(
-        id="fixloop-handoff",
-        nodes=[
-            {"id": "env_setup", "tasks": ["on.env.prepare"], "gate_after": None, "fix_loop": None},
-            {
-                "id": "verify",
-                "tasks": ["on.test.run"],
-                "gate_after": None,
-                "fix_loop": "verify_fix_loop",
-            },
-        ],
-    )
-
-
-def _make_policy(tmp_path, *, attempts=5, wall_clock_s=3600) -> policy.Policy:
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        f"loops:\n  verify_fix_loop: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        f"default: {{ attempts: {attempts}, wall_clock_s: {wall_clock_s} }}\n"
-        # Kraft-lpdd: this suite is about fix-cycle handoff, not the
-        # unrelated auto-escalate trigger a `needs_human` cap breach would
-        # otherwise also fire.
-        "auto_escalate_stuck: false\n"
-    )
-    return policy.load_policy(p)
+    node = v1_fix_loop_node("verify", suite, judge=False)
+    if fix_model is not None:
+        node["fix_loop"]["tasks"][0]["model"] = fix_model
+    return v1_seeded_chain(tmp_path / "templates", [node], agent_command=_FAKE)
 
 
 def _run(tmp_path, monkeypatch, prompts_path):
     """Drive a fix loop that never fixes the code, so it runs multiple cycles.
 
-    Returns (worker_sessions rows for the fix task, ordered by round).
+    Returns the fix task's worker_sessions rows, ordered by round.
     """
     monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = _registry()
-            pol = _make_policy(tmp_path)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="never fixed",
-                repo=str(repo),
-                template=_fixloop_template(),
-                bd_cwd=str(tracker),
-            )
-            result = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-            assert result == "needs_human"  # cap breaches; irrelevant to what's asserted below
-            return database.read(
-                lambda c: c.execute(
-                    "SELECT result_path, session_summary_ref, round FROM worker_sessions "
-                    "WHERE work_item_id = ? AND hook_point = 'on.implementation.start' "
-                    "ORDER BY round",
-                    (wid,),
-                ).fetchall()
-            )
-        finally:
-            await database.close()
-
-    return asyncio.run(scenario())
+    out = run_chain(
+        tmp_path,
+        _fixloop_template(tmp_path),
+        policy=loop_policy(tmp_path, "verify.fix_loop", attempts=5),
+        title="never fixed",
+    )
+    assert out["result"] == "needs_human"  # cap breaches; irrelevant to what's asserted below
+    return sorted((s for s in out["sessions"] if s["hook_point"] == _FIX), key=lambda s: s["round"])
 
 
 def _sent_prompts(prompts_path):
-    """Fix-agent prompts only. The fix-loop judge shares this same prompt
-    log (`fake_registry()` binds it to the same fake agent) and is asked
-    before every fix cycle past the first -- filtered out here since this
-    suite is about the *fix* agent's own handoff, not the judge's."""
-    return [
-        p
-        for p in prompts_path.read_text().split("\n\x00\n")
-        if p.strip() and "is about to spend another cycle" not in p
-    ]
+    """Fix-agent prompts: the suite's only agent task, since it declares no
+    judge."""
+    return [p for p in prompts_path.read_text().split("\n\x00\n") if p.strip()]
 
 
 def test_fix_cycle_two_names_the_previous_result_file(tmp_path, monkeypatch):
@@ -208,7 +147,9 @@ def test_the_path_is_passed_not_the_contents(tmp_path, monkeypatch):
 # call), so they cannot exercise either failure mode.
 
 
-def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(tmp_path, monkeypatch):
+async def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """`/retry` (`store.retry_after_cap`) deletes the loop counter and starts a
     fresh budget, so post-retry round numbers collide with the abandoned
     pre-retry attempt's. The second post-retry cycle must name the first
@@ -220,56 +161,43 @@ def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(tmp_path, 
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = _registry()
-            # attempts=2 on both sides of the retry: 2 abandoned pre-retry cycles,
-            # then 2 post-retry cycles reusing the exact same round numbers (1, 2).
-            pol = _make_policy(tmp_path, attempts=2)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="never fixed",
-                repo=str(repo),
-                template=_fixloop_template(),
-                bd_cwd=str(tracker),
-            )
-            first = await executor.run(
-                database, rd, work_item_id=wid, registry=registry, bd_cwd=str(tracker), policy=pol
-            )
-            assert first == "needs_human"  # cap breached; 2 abandoned fix sessions exist
+    # attempts=2 on both sides of the retry: 2 abandoned pre-retry cycles,
+    # then 2 post-retry cycles reusing the exact same round numbers (1, 2).
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="never fixed",
+        repo=str(repo),
+        chain=_fixloop_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    first = await executor.run(
+        database, run_dirs, work_item_id=wid, bd_cwd=str(tracker), policy=pol
+    )
+    assert first == "needs_human"  # cap breached; 2 abandoned fix sessions exist
 
-            await database.write(
-                lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
-            )
-            await database.write(
-                lambda c: store.retry_after_cap(c, wid, "verify", "verify_fix_loop", None)
-            )
-            second = await executor.run(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                bd_cwd=str(tracker),
-                policy=pol,
-                start_index=1,
-            )
-            assert second == "needs_human"  # the fresh post-retry budget breaches too
-            return database.read(
-                lambda c: c.execute(
-                    "SELECT result_path FROM worker_sessions WHERE work_item_id = ? "
-                    "AND hook_point = 'on.implementation.start' ORDER BY created_at",
-                    (wid,),
-                ).fetchall()
-            )
-        finally:
-            await database.close()
-
-    fix_sessions = asyncio.run(scenario())
+    await database.write(lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"]))
+    await database.write(
+        lambda c: store.retry_after_cap(c, wid, "verify", "verify.fix_loop", None, by_person=True)
+    )
+    second = await executor.run(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        bd_cwd=str(tracker),
+        policy=pol,
+        start_index=0,
+    )
+    assert second == "needs_human"  # the fresh post-retry budget breaches too
+    fix_sessions = database.read(
+        lambda c: c.execute(
+            "SELECT result_path FROM worker_sessions WHERE work_item_id = ? "
+            "AND hook_point = ? ORDER BY created_at",
+            (wid, _FIX),
+        ).fetchall()
+    )
     # 2 abandoned pre-retry cycles + 2 post-retry cycles, in creation order.
     assert len(fix_sessions) == 4
     abandoned_cycle1_path = fix_sessions[0]["result_path"]  # pre-retry round 1
@@ -282,7 +210,9 @@ def test_fix_cycle_names_the_post_retry_attempt_not_the_abandoned_one(tmp_path, 
     assert post_retry_cycle1_path in post_retry_cycle2_prompt
 
 
-def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(tmp_path, monkeypatch):
+async def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(
+    tmp_path, monkeypatch, database, run_dirs, repo
+):
     """Crash-recovery re-enters `_walk_node` with a fresh local `round = 0`
     while cycle 1's fix session from before the crash is still in
     `worker_sessions`. A round-keyed lookup finds nothing at round 0 and the
@@ -293,95 +223,84 @@ def test_fix_dispatch_after_resume_still_carries_the_previous_attempt(tmp_path, 
     monkeypatch.setenv("KRAFT_FAKE_AGENT_PROMPT_LOG", str(prompts_path))
     monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
     tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
 
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            registry = _registry()
-            pol = _make_policy(tmp_path, attempts=2)
-            wid = await executor.intake(
-                database,
-                rd,
-                title="resume mid loop",
-                repo=str(repo),
-                template=_fixloop_template(),
-                bd_cwd=str(tracker),
-            )
-            row = database.read(
-                lambda c: c.execute("SELECT * FROM work_items WHERE id=?", (wid,)).fetchone()
-            )
-            wt = rd.worktrees / wid
-            # env_setup for real so the worktree pytest runs inside exists.
-            await database.write(lambda c: store.load_chain(c, wid, "env_setup"))
-            env_node = {"id": "env_setup", "tasks": ["on.env.prepare"], "fix_loop": None}
-            assert await executor.walk_node(database, rd, wid, env_node, row, registry, wt) == "ok"
+    pol = loop_policy(tmp_path, "verify.fix_loop", attempts=2)
+    wid = await executor.intake(
+        database,
+        run_dirs,
+        title="resume mid loop",
+        repo=str(repo),
+        chain=_fixloop_template(tmp_path),
+        bd_cwd=str(tracker),
+    )
+    # The worktree the suite runs inside, cut for real -- the
+    # preparation V1 runs before the first node.
+    from kraft import builtins
 
-            # Seed a full cycle 1 that ran before the crash: cycle-0 measure fails,
-            # a fix task runs and reports done, and its re-measure fails again --
-            # then the crash lands before cycle 2 is dispatched.
-            await database.write(lambda c: store.enter_node(c, wid, "verify"))
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="s-m0",
-                    work_item_id=wid,
-                    node_id="verify",
-                    hook_point="on.test.run",
-                    log_path="/l0",
-                    result_path="/r0",
-                )
-            )
-            await database.write(lambda c: store.session_exited(c, "s-m0", "failed"))
-            cap = policy.resolve_cap(pol, "verify_fix_loop")
-            n0, _started0, _ = await database.write(
-                lambda c: store.bump_counter(c, wid, "verify_fix_loop", cap)
-            )
-            assert n0 == 1
+    await builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=wid, repo_entry=None
+    )
+    await database.write(lambda c: store.load_chain(c, wid, "verify"))
 
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="s-fix1",
-                    work_item_id=wid,
-                    node_id="verify",
-                    hook_point="on.implementation.start",
-                    log_path="/l1",
-                    result_path="/marker/pre-crash-fix-result.json",
-                    round=1,
-                )
-            )
-            await database.write(
-                lambda c: store.session_exited(c, "s-fix1", "done", "pre-crash-summary.md")
-            )
-            await database.write(
-                lambda c: store.create_session(
-                    c,
-                    id="s-m1",
-                    work_item_id=wid,
-                    node_id="verify",
-                    hook_point="on.test.run",
-                    log_path="/l2",
-                    result_path="/r1",
-                    round=1,
-                )
-            )
-            await database.write(lambda c: store.session_exited(c, "s-m1", "failed"))
+    # Seed a full cycle 1 that ran before the crash: cycle-0 measure fails,
+    # a fix task runs and reports done, and its re-measure fails again --
+    # then the crash lands before cycle 2 is dispatched.
+    await database.write(lambda c: store.enter_node(c, wid, "verify"))
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s-m0",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point="verify.main.suite",
+            log_path="/l0",
+            result_path="/r0",
+        )
+    )
+    await database.write(lambda c: store.session_exited(c, "s-m0", "failed"))
+    cap = policy.resolve_cap(pol, "verify.fix_loop")
+    n0, _started0, _ = await database.write(
+        lambda c: store.bump_counter(c, wid, "verify.fix_loop", cap)
+    )
+    assert n0 == 1
 
-            return await executor.resume(
-                database,
-                rd,
-                work_item_id=wid,
-                registry=registry,
-                adopted={},
-                bd_cwd=str(tracker),
-                policy=pol,
-            )
-        finally:
-            await database.close()
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s-fix1",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point=_FIX,
+            log_path="/l1",
+            result_path="/marker/pre-crash-fix-result.json",
+            round=1,
+        )
+    )
+    await database.write(
+        lambda c: store.session_exited(c, "s-fix1", "done", "pre-crash-summary.md")
+    )
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="s-m1",
+            work_item_id=wid,
+            node_id="verify",
+            hook_point="verify.main.suite",
+            log_path="/l2",
+            result_path="/r1",
+            round=1,
+        )
+    )
+    await database.write(lambda c: store.session_exited(c, "s-m1", "failed"))
 
-    result = asyncio.run(scenario())
+    result = await executor.resume(
+        database,
+        run_dirs,
+        work_item_id=wid,
+        adopted={},
+        bd_cwd=str(tracker),
+        policy=pol,
+    )
     assert result == "needs_human"  # the resumed cycle (n=2) breaches the attempts=2 cap
 
     sent = _sent_prompts(prompts_path)
@@ -414,71 +333,3 @@ def test_previous_attempt_note_includes_the_summary_sentence_when_present():
 
 def test_previous_attempt_note_is_empty_with_no_previous_attempt():
     assert executor.previous_attempt_note(None) == ""
-
-
-def test_a_fix_cycle_past_escalate_after_launches_with_escalate_model(tmp_path, monkeypatch):
-    """Spec §6: cycles at or below `escalate_after` use `model`, cycles above it
-    use `escalate_model`. Rounds 1-3 resume the same approach; a loop that
-    survives them usually needs a capability bump, not another identical try."""
-    argv_log = tmp_path / "argv.jsonl"
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "noop")  # never patches calc.py, so it never converges
-    monkeypatch.setenv("KRAFT_FAKE_AGENT_ARGV_LOG", str(argv_log))
-    monkeypatch.setenv("KRAFT_FAKE_TESTRUN_COUNTER", str(tmp_path / "attempt.count"))
-    tracker = isolated_bd(tmp_path)
-    repo = make_repo(tmp_path)
-
-    registry = _registry()
-    registry.hooks["on.implementation.start"] = {
-        **registry.hooks["on.implementation.start"],
-        "model": "sonnet",
-        "escalate_model": "opus",
-    }
-
-    p = tmp_path / "policy.yaml"
-    p.write_text(
-        "loops:\n  verify_fix_loop: { attempts: 4, wall_clock_s: 3600, escalate_after: 2 }\n"
-        "default: { attempts: 4, wall_clock_s: 3600 }\n"
-        "auto_escalate_stuck: false\n"
-    )
-    pol = policy.load_policy(p)
-
-    async def scenario():
-        rd = RunDirs(tmp_path / "run").ensure()
-        database = await db.Database.open(rd.db)
-        try:
-            wid = await executor.intake(
-                database,
-                rd,
-                title="never fixed",
-                repo=str(repo),
-                template=_fixloop_template(),
-                bd_cwd=str(tracker),
-            )
-            assert (
-                await executor.run(
-                    database,
-                    rd,
-                    work_item_id=wid,
-                    registry=registry,
-                    bd_cwd=str(tracker),
-                    policy=pol,
-                )
-                == "needs_human"  # the cap breaches; the models used on the way are the point
-            )
-        finally:
-            await database.close()
-
-    asyncio.run(scenario())
-
-    models = []
-    for line in argv_log.read_text().splitlines():
-        argv = json.loads(line)
-        # The fix-loop judge shares this same fake agent and has no
-        # `model`/`escalate_model` of its own configured on its hook binding
-        # -- filtered out here since this test is about the *fix* cycle's
-        # escalation, not the judge's.
-        if "is about to spend another cycle" in " ".join(argv):
-            continue
-        models.append(argv[argv.index("--model") + 1] if "--model" in argv else None)
-    # cycles 1 and 2 are at or below the threshold, cycle 3 is past it
-    assert models[:3] == ["sonnet", "sonnet", "opus"]

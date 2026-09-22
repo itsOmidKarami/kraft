@@ -255,6 +255,35 @@ export function tokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
+/** A row's token kinds (Ruling 211). The cache kinds are optional: a row
+ *  from before the split has them null, a fixture may leave them out. */
+type TokenKinds = {
+  tokens_in: number | null;
+  tokens_out: number | null;
+  tokens_cache_write?: number | null;
+  tokens_cache_read?: number | null;
+  split_complete?: boolean;
+};
+
+/** Every token a session or rollup spent: uncached in, cache writes, cache
+ *  reads, out. The one number shown wherever tokens are, and what a
+ *  token_budget counts. */
+export function tokenTotal(r: TokenKinds): number {
+  return (r.tokens_in ?? 0) + (r.tokens_cache_write ?? 0) + (r.tokens_cache_read ?? 0) + (r.tokens_out ?? 0);
+}
+
+/** `1.2k in · 3k cache write · 80k cache read · 11k out`. A session from
+ *  before the split has its cache use inside `in`, and says so. */
+export function tokenSplit(r: TokenKinds): string {
+  const known = r.split_complete ?? r.tokens_cache_read != null;
+  return [
+    `${tokens(r.tokens_in ?? 0)} in${known ? "" : " (cache not split on older sessions)"}`,
+    `${tokens(r.tokens_cache_write ?? 0)} cache write`,
+    `${tokens(r.tokens_cache_read ?? 0)} cache read`,
+    `${tokens(r.tokens_out ?? 0)} out`,
+  ].join(" · ");
+}
+
 /** USD, with enough places to be useful at agent-run scale.
  *
  * `complete: false` marks a sum that is missing an agent's unreported cost —
@@ -294,17 +323,6 @@ const STATUS_WORDS: Record<string, string> = {
 
 export function statusWord(status: string): string {
   return STATUS_WORDS[status] ?? status;
-}
-
-/** A hook binding's plain-text summary — the Plugins list's "Adapter" column
- *  and the Chains node form's per-task line share this, so both read the
- *  same command the same way. Display formatting with no view of its own. */
-export function adapterOf(b: { kind: string; handler?: string; command?: string | string[] }) {
-  return b.kind === "builtin"
-    ? `builtin · ${b.handler}`
-    : Array.isArray(b.command)
-      ? b.command.join(" ")
-      : (b.command ?? b.kind);
 }
 
 /** `item.stop_reason`'s reasoning when the stop was a fix-loop judge

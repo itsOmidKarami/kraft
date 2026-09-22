@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
-from support.harness import _git
+import pytest
+from support import harness
+from support.fake_beads import ON_FAKE_AND_REAL_BD
+from support.harness import _git, isolated_bd, make_repo
 
 
 def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
@@ -30,3 +37,108 @@ def test_git_commits_with_no_ambient_identity(tmp_path, monkeypatch):
     _git(repo, "commit", "-m", "no ambient identity")  # must not exit 128
     log = Path.read_text(repo / ".git" / "HEAD")
     assert log  # the commit landed; a 128 exit would have raised in _git first
+
+
+def test_a_make_repo_copy_reads_clean_to_git_plumbing(tmp_path):
+    """`make_repo` copies a cached template (Kraft-qmhfc). Its index must not
+    keep the template's stat data: `git diff-index` does not refresh the index
+    the way porcelain does, and on a stale one it calls every tracked file
+    modified, which a fresh build never would (PR #88 review, F3)."""
+    repo = make_repo(tmp_path)
+    out = subprocess.run(
+        ["git", "diff-index", "--name-only", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out == ""
+
+
+def test_a_server_child_finds_the_loud_bd_stub_before_the_real_one(tmp_path, monkeypatch):
+    """Kraft-vrcw3: the beads fake cannot reach a `python -m kraft` child, so a
+    unit test's child must resolve `bd` to the stub that refuses loudly, never
+    the real binary; an `e2e("bd")` test's child keeps the real one."""
+    from support import server
+
+    env = server.child_env()
+    stub = shutil.which("bd", path=env["PATH"])
+    assert stub == str(server._bd_stub_dir() / "bd")
+    refused = subprocess.run([stub, "create"], capture_output=True, text=True, env=env)
+    assert refused.returncode == 127
+    assert server.BD_STUB_MESSAGE in refused.stderr
+
+    monkeypatch.setattr(harness, "REAL_BD", True)
+    real_env = server.child_env()
+    assert str(server._bd_stub_dir()) not in real_env["PATH"].split(os.pathsep)
+
+
+@pytest.mark.slow
+def test_a_bd_call_from_a_server_child_shows_in_the_test_result(tmp_path):
+    """Kraft-vrcw3's stub refuses loudly in the child's log; Kraft degrades on
+    the refusal and the test passes. `running_server` also reports each call
+    as a `BdStubRefused` warning, so it is on the test's own result."""
+    from support.server import BdStubRefused, running_server
+
+    repo = make_repo(tmp_path)
+    templates = harness.fake_templates_dir(tmp_path, "true")
+    harness.connect_repo(repo, templates)
+    with pytest.warns(BdStubRefused, match="create --json --title filed from a child"):
+        with running_server(
+            run_dir=tmp_path / "run", templates_dir=templates, bd_cwd=isolated_bd(tmp_path)
+        ) as srv:
+            r = srv.client.post(
+                "/api/work-items",
+                json={"title": "filed from a child", "repo": str(repo), "autostart": False},
+            )
+            assert r.status_code == 201, r.text
+            assert r.json()["bead_warning"]
+
+
+@ON_FAKE_AND_REAL_BD
+def test_the_beads_fake_and_real_bd_agree(bd, tmp_path):
+    """One scenario, run against the autouse fake (tests/support/fake_beads.py)
+    and against real bd: filing, blocking, closing, `ready`, `blocked_by` and
+    `search` must answer the same from both, per workspace, and both must
+    refuse to file a bead where there is no workspace. The `bd` case is
+    what keeps the fake from drifting from bd -- if bd's answers change, this
+    test fails there, next to the fake it has to change with."""
+    from kraft.adapters import beads
+
+    ws, other = str(isolated_bd(tmp_path)), str(isolated_bd(tmp_path, "other"))
+
+    async def scenario():
+        a = await beads.intake("the blocker", cwd=ws)
+        b = await beads.intake("the blocked", description="brief", cwd=ws)
+        assert a != b
+        bd.block(b, a, cwd=ws)
+        assert await beads.blocked_by([b], cwd=ws) == [a]
+        assert await beads.blocked_by([a], cwd=ws) == []
+        assert [r["id"] for r in await beads.ready(cwd=ws)] == [a]
+        assert await beads.ready(cwd=other) == []
+        await beads.complete(a, cwd=ws)
+        assert await beads.blocked_by([b], cwd=ws) == []
+        assert [(r["id"], r["description"]) for r in await beads.ready(cwd=ws)] == [(b, "brief")]
+        assert [(h["id"], h["status"]) for h in await beads.search("blocker", cwd=ws)] == [
+            (a, "closed")
+        ]
+        # No `.beads/` at or above cwd: bd refuses to file, and the readers
+        # answer nothing rather than raise.
+        nowhere = tmp_path / "nowhere"
+        nowhere.mkdir()
+        with pytest.raises(RuntimeError, match="no beads database found"):
+            await beads.intake("filed nowhere", cwd=str(nowhere))
+        assert await beads.ready(cwd=str(nowhere)) == []
+        assert await beads.search("blocker", cwd=str(nowhere)) == []
+        # A cwd that does not exist, even inside a workspace: bd never
+        # starts. Filing and closing raise the OSError, the readers answer
+        # nothing rather than the enclosing workspace's beads.
+        gone = str(Path(ws) / "gone")
+        with pytest.raises(OSError):
+            await beads.intake("filed nowhere", cwd=gone)
+        with pytest.raises(OSError):
+            await beads.complete(b, cwd=gone)
+        assert await beads.ready(cwd=gone) == []
+        assert await beads.blocked_by([b], cwd=gone) == []
+
+    asyncio.run(scenario())

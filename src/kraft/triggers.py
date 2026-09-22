@@ -13,6 +13,7 @@ import logging
 from datetime import UTC, datetime
 
 from kraft import executor
+from kraft.api import deps as api_deps
 from kraft.policy import cron_due
 
 logger = logging.getLogger(__name__)
@@ -43,20 +44,40 @@ async def tick(app, *, now: datetime | None = None) -> list[str]:
         if st.trigger_last_fired.get(index) == stamp:
             continue
         st.trigger_last_fired[index] = stamp
-        template = st.templates.valid.get(trig.chain)
-        if template is None:
+        if getattr(st, "library", None) is None:
+            # Not "unknown chain template": see `intake._start`. One bad file
+            # makes every chain unresolvable, and naming the chain id sends the
+            # operator to the wrong file.
+            logger.warning(
+                "trigger %d: the template library is invalid (%s), skipped",
+                index,
+                "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
+            )
+            continue
+        chain = api_deps.resolve_chain(st, trig.chain)
+        if chain is None:
             logger.warning("trigger %d: unknown chain template %r, skipped", index, trig.chain)
             continue
-        wid = await executor.intake(
-            st.db,
-            st.run_dirs,
-            title=trig.title,
-            description=trig.description,
-            repo=trig.repo,
-            template=template,
-            chain_template=trig.chain,
-            status="paused",
-        )
+        try:
+            wid = await executor.intake(
+                st.db,
+                st.run_dirs,
+                title=trig.title,
+                description=trig.description,
+                repo=trig.repo,
+                chain=chain,
+                effective_policy=api_deps.item_policy(st, trig.repo),
+                repository_steering=api_deps.repository_steering(st, trig.repo),
+                chain_template=trig.chain,
+                status="paused",
+            )
+        except ValueError as exc:
+            # Intake's own refusal (a chain `policy:` past the instance maxima,
+            # an unreadable attachment), raised before any side effect. One
+            # trigger's bad config skips that trigger, not the rest of the tick
+            # (Kraft-ib2af).
+            logger.warning("trigger %d: refused at intake, skipped: %s", index, exc)
+            continue
         filed.append(wid)
     return filed
 

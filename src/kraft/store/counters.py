@@ -36,13 +36,27 @@ def bump_counter(
         "UPDATE retry_counters SET count = ?, updated_at = ? WHERE work_item_id = ? AND key = ?",
         (new_count, now, work_item_id, key),
     )
-    # `escalate_after` comes from the freshly-resolved cap, not the row: it is a
-    # routing hint for the next launch, not a limit the item was admitted under,
-    # so there is nothing to hold steady across an edited policy.yaml.
-    return (
-        new_count,
-        row["started_at"],
-        Cap(row["cap_attempts"], row["cap_wall_s"], escalate_after=cap.escalate_after),
+    return new_count, row["started_at"], Cap(row["cap_attempts"], row["cap_wall_s"])
+
+
+def refund_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:
+    """Give back the attempt the last `bump_counter` spent, for an attempt that
+    never became one (Kraft-jdkoq: a fix pass that was paused, rate limited or
+    could not run). A first attempt refunded leaves no row, so the next bump
+    starts the clock afresh exactly as if it had never fired."""
+    conn.execute(
+        "UPDATE retry_counters SET count = count - 1 WHERE work_item_id = ? AND key = ?",
+        (work_item_id, key),
+    )
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ? AND count <= 0",
+        (work_item_id, key),
+    )
+
+
+def delete_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> None:
+    conn.execute(
+        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?", (work_item_id, key)
     )
 
 
@@ -52,17 +66,32 @@ def clear_loop_counters(
     """Delete the loop clocks a fresh pass over `node_id` must not inherit.
 
     `key` is the node's `fix_loop`, None for a node without one. The
-    `ci_wait:`/`ci_infra:` keys are built from `node_id` here rather than
-    threaded in, the same way `retry_after_cap` already does -- see its
-    docstring for why that duplication with `ci_wait.py` is contained
-    rather than spread.
+    `ci_infra:` key and the node's stuck-escalation bound
+    (`walk._escalation_key`) are built from `node_id` here rather than threaded
+    in, the same way `retry_after_cap` already does. (No `ci_wait:` key: a
+    wait's clock is its `external_wait_started` event since Task 9.)
     """
-    for counter in (key, f"ci_wait:{node_id}", f"ci_infra:{node_id}"):
+    for counter in (key, f"ci_infra:{node_id}", f"{node_id}.escalation"):
         if counter is not None:
             conn.execute(
                 "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
                 (work_item_id, counter),
             )
+
+
+def reject_loop_key(gate: str) -> str:
+    """The `retry_counters` key a gate's reject loop counts under.
+
+    One definition for its two sites: `executor.gates.apply_rejection` bumps
+    it, and a retry's run fork (`store.forks.fork_run`) clears it for every
+    gate it reopens. Hand-spelled in each they agreed only because a V1 gate's
+    node id *is* its gate name -- a coincidence that stops being true quietly,
+    and a retry that cleared a key nothing bumped leaves the gate re-opening
+    onto a spent counter, every rejection after it refused forever (Kraft-ko7j
+    §A4, Ruling 67). Here, not in the executor, because the store must not
+    import the executor.
+    """
+    return f"{gate}_reject_loop"
 
 
 def retry_after_cap(
@@ -72,11 +101,17 @@ def retry_after_cap(
     key: str | None,
     steer,
     *,
-    gate_key: str | None = None,
+    by_person: bool,
     escalated: bool = False,
     seeded: bool = False,
 ):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
+
+    Only when `by_person` (`only-a-person-resets-a-cap-counter`, Kraft-s7c04.22):
+    a cap bounds what agents and Kraft do on their own, so a retry an agent
+    asked for (a worker, an escalation turn, an MCP assistant) or Kraft ran
+    itself (the rate-limit relaunch) leaves every counter where it stands.
+    Required, not defaulted, so a new door has to say which it is.
 
     The counter row is deleted rather than zeroed: `bump_counter` snapshots the
     cap and the wall-clock start on first fire, and a retry is a fresh budget,
@@ -87,25 +122,18 @@ def retry_after_cap(
     the item still has to be put back to work. A plain task failure strands an
     item exactly as hard as a breached cap does (Kraft-bzwi).
 
-    `gate_key` is the `<gate>_reject_loop` of the node's own gate, when it has
-    one. Retry is the human's override of the reject cap too (Kraft-ko7j §A4);
-    without clearing it, the retried node re-opens its gate onto a spent
-    counter and every rejection after that is refused forever.
+    A gate's reject loop is not cleared here: every retry forks its run, and
+    `store.forks.fork_run` clears the reject loop of each gate it reopens --
+    the human's override of that cap (Kraft-ko7j §A4) -- under
+    `reject_loop_key`, the key `apply_rejection` bumps.
 
-    Also clears `ci_wait:<node_id>` and `ci_infra:<node_id>` unconditionally,
-    built here from `node_id` rather than threaded in by the caller. A node
-    can have been parked mid-poll, or mid-infra-retry (the persisted
-    `ci_infra:<node_id>` counter Task 4 added), regardless of whether it has
-    a fix loop at all, and a retry is the human's explicit "give this a fresh
-    budget" for both of those too (Kraft-cs4s) -- not just for `key`, which is
-    None for a node with no fix loop.
-
-    Duplicates `ci_wait.py`'s private `_key()` format string (`f"ci_wait:
-    {node_id}"`) and Task 4's `ci_infra:{node_id}` format, the same way
-    `templates._FORGE_BACKENDS`/`adapters.forge.resolve` already duplicate
-    each other's backend name list, with the same "edit both together"
-    comment -- the duplication is contained to this one function and
-    `ci_wait.py`, not spread to every caller that wants a retry.
+    Also clears `ci_infra:<node_id>` unconditionally, built here from
+    `node_id` rather than threaded in by the caller. A node can have been
+    parked mid-infra-retry (the persisted `ci_infra:<node_id>` counter
+    `adapters/forge/run.py` bumps), regardless of whether it has a fix loop at
+    all, and a retry is the human's explicit "give this a fresh budget" for
+    that too (Kraft-cs4s) -- not just for `key`, which is None for a node with
+    no fix loop. The format string is `run.py`'s; edit both together.
 
     `escalated` is True only for a retry `gates.auto_escalate_stuck` performed
     on the escalated agent's own behalf, after its escalation session exited.
@@ -126,21 +154,20 @@ def retry_after_cap(
     not this function's -- called before the awaited worktree rebase
     (Kraft-11e0), so this only clears counters and narrates the retry.
     """
-    clear_loop_counters(conn, work_item_id, node_id, key)
-    if gate_key is not None:
-        conn.execute(
-            "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-            (work_item_id, gate_key),
-        )
+    if by_person:
+        clear_loop_counters(conn, work_item_id, node_id, key)
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
-    # "give this a fresh budget" for the rebase-conflict resolver
-    # (Kraft-s7c04.23) that it already is for every other loop cap here.
-    conn.execute(
-        "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-        (work_item_id, "rebase_conflict"),
-    )
+    # "give this a fresh budget" for every node's base-change restarts
+    # (`walk._restart_for_base_change`) that it already is for every other
+    # loop cap here. A restart span never clears these itself: that is what
+    # bounds a base that keeps moving.
+    if by_person:
+        conn.execute(
+            "DELETE FROM retry_counters WHERE work_item_id = ? AND key LIKE ?",
+            (work_item_id, "%.on_base_changed"),
+        )
     # A stale pinned pipeline must not survive a manual retry any more than
-    # the exhausted ci_wait/ci_infra counters above do (Kraft-ivh1).
+    # the exhausted ci_infra counter above does (Kraft-ivh1).
     conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))
     events.append(
         conn,
@@ -154,6 +181,14 @@ def retry_after_cap(
             "seeded": seeded,
         },
     )
+
+
+def cap_counts(conn: sqlite3.Connection, work_item_id: str) -> dict[str, int]:
+    """Every counter this item has, key to count."""
+    rows = conn.execute(
+        "SELECT key, count FROM retry_counters WHERE work_item_id = ?", (work_item_id,)
+    ).fetchall()
+    return {r["key"]: r["count"] for r in rows}
 
 
 def read_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> sqlite3.Row | None:
@@ -173,8 +208,8 @@ def mark_sessions_capped_out(
     # is not license to overwrite its status or lose its concerns text. Scoped
     # to the node's measuring hook points so the fix task's own session
     # (on.implementation.start) is not mislabelled as a capped-out measurement.
-    # 'waiting' is left alone too (Kraft-ivh1): an on.ci.poll session still
-    # waiting on a pipeline has its own separate cap (ci_wait:<node_id>) --
+    # 'waiting' is left alone too (Kraft-ivh1): a forge session still waiting
+    # on a pipeline is bounded by its own wait timeout --
     # this sweep is the node's *fix-cycle* cap, and breaching that is not
     # license to steal a still-legitimately-waiting session out from under
     # the cap that already governs it.

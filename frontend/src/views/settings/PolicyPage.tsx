@@ -12,9 +12,8 @@ const SEVERITIES = ["critical", "important", "minor", "info"] as const;
 
 /** Template ids with a node keyed to this loop cap — `fix_loop` for a
  *  regular loop, `<gate>_reject_loop` for a gate's reject loop
- *  (`executor.gates.reject_target`) — same "used by" idiom PluginsPage's
- *  `templatesUsingHook` reads for hooks. */
-function templatesUsingLoop(templates: TemplateSummary[], key: string) {
+ *  (`executor.gates.reject_target`). */
+export function templatesUsingLoop(templates: TemplateSummary[], key: string) {
   return templates
     .filter((t) =>
       t.nodes.some((n) => n.fix_loop === key || (n.gate_after && `${n.gate_after}_reject_loop` === key)),
@@ -67,7 +66,7 @@ export function PolicyPage() {
 
   const addLoop = () => {
     if (!policy) return;
-    const name = window.prompt("Loop key (the node's own `fix_loop`, e.g. `verify_fix_loop`)");
+    const name = window.prompt("Loop key (the node's own `fix_loop`, e.g. `verification.fix_loop`)");
     if (!name || policy.loops[name]) return;
     setDraft({ ...policy, loops: { ...policy.loops, [name]: { ...policy.default } } });
   };

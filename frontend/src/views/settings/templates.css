@@ -1,9 +1,9 @@
 /* Chains editor (design 27 / m13; W11 · D) — a head row with the template
- * dropdown, the node pill strip, and one editor card under it. `.validation`,
+ * dropdown, the node pill strip, and the chain file under it. `.validation`,
  * `.validation-badge` and `.template-yaml` live in styles.css and are reused.
  * This file is bundled after styles.css, so a one-class rule here wins a tie. */
 
-/* D.1: name · valid · counts · spacer · template ▾ · YAML · Revert · Save. */
+/* D.1: name · valid · counts · spacer · template ▾ · Revert · Save. */
 .chain-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .chain-head-name { font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
 .chain-head .validation-badge { margin-top: 0; align-self: center; }
@@ -24,6 +24,9 @@
   color: var(--color-text-muted);
   margin: 0 0 0 auto;
 }
+
+/* Each node's library components, links onto the Library screen. */
+.chain-uses { margin-left: 0; gap: 4px 12px; }
 
 .chain-graph {
   display: flex;
@@ -48,91 +51,12 @@
   background: transparent;
   color: var(--color-text-muted);
   font-size: 12px;
-  cursor: pointer;
-}
-
-.chain-pill[data-selected] {
-  border-color: var(--color-accent-700);
-  background: var(--color-accent-900);
-  color: var(--color-accent-300);
 }
 
 .chain-pill-count {
   font-size: 10px;
   color: var(--color-neutral-500);
 }
-
-.chain-insert {
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-}
-
-.chain-insert:hover {
-  color: var(--color-text);
-}
-
-.chain-move {
-  display: flex;
-  gap: 2px;
-}
-
-.chain-move button {
-  border: 1px solid var(--color-divider);
-  background: transparent;
-  color: var(--color-text-muted);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  padding: 1px 4px;
-}
-
-/* D.3: one card -- the node form left, the node's YAML right, a footer row. */
-.chain-card { gap: 12px; padding: 16px; }
-.chain-card-body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 20px; align-items: start; }
-/* on_failure's tags are <button>s with no tone class, so they kept the UA
-   button fill (light, ~1.8:1 under the "+ add" text). Outline them instead. */
-.chain-node-form button.tag {
-  background: transparent; border: 1px solid var(--color-divider); color: var(--color-text);
-}
-.chain-node-form button.tag-off { color: var(--color-neutral-400); }
-.chain-card-foot {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  border-top: 1px solid var(--color-divider); padding-top: 10px;
-}
-
-.chain-node-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.chain-node-title { font-size: 14px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
-/* W12.3: an id or a delay is a short value; the selects keep settings' 420px. */
-.chain-node-form input.input { max-width: 320px; }
-
-.chain-task-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.chain-fragment { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-/* `textarea.` outranks nocturne.css's `textarea.input` (one element + one class). */
-textarea.chain-fragment-yaml {
-  min-height: 240px; font-size: 12px; line-height: 1.5;
-  white-space: pre; overflow-x: auto; resize: vertical;
-}
-
-/* D.5: nothing selected -- what the template is. */
-.chain-summary { display: flex; flex-direction: column; gap: 6px; }
-.chain-summary-line { margin: 0; font-size: 13px; color: var(--color-neutral-300); overflow-wrap: anywhere; }
-.chain-summary-line code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 
 .chain-yaml-pane {
   display: flex;
@@ -143,18 +67,17 @@ textarea.chain-fragment-yaml {
 
 .chain-template-select { width: 100%; }
 
-@media (max-width: 1023px) {
-  /* D.6: the card stacks -- the form, then its YAML. */
-  .chain-card-body { grid-template-columns: minmax(0, 1fr); }
-}
-
 @media (max-width: 767px) {
   /* D.6: the pill strip scrolls sideways; its pills and buttons are thumb targets. */
   .chain-graph { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .chain-graph-item, .chain-pill { flex: none; }
-  .chain-pill, .chain-insert, .chain-move button { min-height: 44px; min-width: 44px; justify-content: center; }
+  .chain-pill { min-height: 44px; min-width: 44px; justify-content: center; }
   .chain-legend { margin-left: 0; }
-  /* styles.css's phone `input, select, textarea { 16px }` loses to `.input`
-     and to `textarea.chain-fragment-yaml` above; restate it at this page. */
+  /* styles.css's phone `input, select, textarea { 16px }` loses to `.input`;
+     restate it at this page. */
   .chain-page :is(input, select, textarea) { font-size: 16px; }
 }
+
+/* Harnesses: a provider's capabilities, one row each (Kraft-ok48k). */
+.capability-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.capability-list code { font-size: 12px; }

@@ -6,36 +6,64 @@ import json
 import logging
 import shlex
 import sqlite3
+import traceback
 import uuid
-from dataclasses import asdict, replace
+from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
+from kraft import caps as _caps
 from kraft import config as _config
 from kraft import events, store
 from kraft import findings as _findings
+from kraft import harness as _harness
+from kraft import overrides as _overrides
 from kraft import policy as _policy
-from kraft import sandbox as _sandbox
-from kraft import templates as _templates
+from kraft import skill as _skill
+from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters import forge as _forge
 from kraft.adapters import subprocess as _subprocess
+from kraft.automated_review import AutomatedReview
+from kraft.config import RepoEntry
 from kraft.executor import entry, prompts, stops
+from kraft.executor import fallback as _fallback
+from kraft.executor import read_only as _read_only
 from kraft.executor.context import (
     _ADVANCING,
     BASE_MOVED,
     BUDGET,
     CONFIG_ERROR,
+    CONFLICT,
     INFRA_STOP,
     RATE_LIMITED,
+    READ_ONLY_VIOLATED,
+    REPAIR_DOUBTED,
     SCOPE,
+    TIME_CAPPED,
+    WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
     Steer,
 )
 from kraft.store import _now as _now
-from kraft.templates import Registry
+from kraft.templates import revision
+from kraft.templates.models import (
+    AgentInput,
+    AgentTask,
+    BuiltinTask,
+    ExecutionMode,
+    ForgeTask,
+    ResolvedNode,
+    ResolvedStep,
+    ResolvedTask,
+    SubprocessTask,
+    TaskScope,
+)
+from kraft.worker import sandbox as _sandbox
+from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +126,7 @@ def _last_own_round_head(
     ran at, if every scope in that dispatch finished `done` -- otherwise
     `None` (C7 review fix, Kraft-s7c04.14).
 
-    `prompts._last_review_session` is the wrong source for this: it is keyed
+    `prompts.last_review_session` is the wrong source for this: it is keyed
     on `(work_item_id, hook_point)` alone, not `node_id`, and takes the
     latest `done` row regardless of its siblings. For a while (C1,
     Kraft-s7c04.8, reverted 2026-09-16) `on.test.run` was dispatched by both
@@ -131,34 +159,6 @@ def _last_own_round_head(
     return heads.pop() if len(heads) == 1 else None
 
 
-def _write_carried_findings(results_dir, session_id: str, found: list) -> str | None:
-    """The previous round's findings as JSON, for a hook that cannot read the
-    prose block. `asdict` over the same `Finding` objects `carried_findings_note`
-    renders, so the two channels differ in format and never in content."""
-    if not found:
-        return None
-    path = results_dir / f"{session_id}.findings.json"
-    path.write_text(json.dumps([asdict(f) for f in found], indent=2))
-    return str(path)
-
-
-def _input_env(
-    resolved: dict, *, review_package: str | None, carried_findings: str | None = None
-) -> dict:
-    """The env vars a binding's `inputs:` asks for, for whichever of them this
-    dispatch actually produced. An input declared but unavailable this round
-    is simply absent -- an env var naming a file that was never written is
-    worse than no var at all."""
-    out = {}
-    cfg = resolved.get("review_package")
-    if cfg and cfg["channel"] == "env" and review_package:
-        out[cfg["name"]] = review_package
-    cfg = resolved.get("carried_findings")
-    if cfg and cfg["channel"] == "env" and carried_findings:
-        out[cfg["name"]] = carried_findings
-    return out
-
-
 def _select_scopes(
     db,
     work_item_id: str,
@@ -166,12 +166,11 @@ def _select_scopes(
     node_id: str,
     task_hook: str,
     round: int,
-    binding: dict,
-    repo_entry: dict,
-) -> tuple[list[dict], dict | None]:
-    """The scopes a `kind: subprocess` `on.test.run`-style dispatch should
-    run, and the sandbox to run them under (test-scope design §3.2-3.3, C7
-    Kraft-s7c04.14).
+    repo_entry: RepoEntry | None,
+) -> list[dict]:
+    """The scopes the `kraft.verify_changed_test_scopes` builtin should run
+    (test-scope design §3.2-3.3, C7 Kraft-s7c04.14). Their sandbox is the
+    item's (`item_sandbox`).
 
     Pulled out of `dispatch_node`'s subprocess branch (batch-c1 spec Task 3).
     C1 briefly gave `implementation` its own `on.test.run` dispatch through
@@ -183,13 +182,16 @@ def _select_scopes(
     (`prompts.scope_note`) built from the repo's scope table, so it can apply
     the same rule to its own diff before it finishes.
 
-    The repo's own command(s) win over the registry's. The registry is per
-    install and one command for every repo on it; test_scopes is a property
-    of the repo, and a hardcoded single command is how verify ends up running
-    something CI does not, or the wrong stack's suite entirely (Kraft-579,
-    Kraft-9wzy). `config.load_repos` already wraps a legacy `test_command`
-    into a single `["**"]` scope, so this is one shape regardless of which
-    field an operator set.
+    The commands are the repo's, and only the repo's. V1 has no registry to
+    fall back to and deliberately no command on the task: the task names an
+    action Kraft owns, and what that action runs is a property of the
+    repository (`repository-area-can-declare-setup-and-test-scopes`). A
+    hardcoded single command is how verify ends up running something CI does
+    not, or the wrong stack's suite entirely (Kraft-579, Kraft-9wzy).
+    A bare `test_command` is read as a single `["**"]` scope, so this is one
+    shape regardless of which field an operator set; a repo that declares
+    neither returns no scopes at all and the caller stops for a human rather
+    than inventing a command.
 
     C7: round 0 (and a round-0 re-entry, e.g. after `retry_after_cap` wipes
     the round counter) always selects from the whole branch diff since
@@ -208,24 +210,32 @@ def _select_scopes(
     only the one(s) that failed. Selecting less is only ever safe for a
     scope that passed.
     """
-    sandbox = _sandbox.resolve(binding, repo_entry)
-    # Kraft-ouoqx: keyed on what the binding asks for, not on its `kind`. The
-    # repo's command beating the registry's is right for the *test* hook and
-    # wrong for every other subprocess hook, whose own command was silently
-    # discarded on any repo that declares test_scopes.
-    wants_scopes = "test_scopes" in _templates.with_inputs(binding, task_hook)
-    repo_scopes = repo_entry.get("test_scopes") if wants_scopes else None
-    if wants_scopes and not repo_scopes and repo_entry.get("test_command"):
-        # `config.load_repos` already wraps a bare `test_command` into a
-        # `test_scopes` entry for any repo it reads off disk -- this mirrors
-        # that for a `LaunchContext` built by hand (tests, or any future
-        # caller that skips the yaml round-trip).
-        repo_scopes = [{"paths": ["**"], "command": repo_entry["test_command"]}]
-    scopes = (
-        [{"paths": s["paths"], "cmd": shlex.split(s["command"])} for s in repo_scopes]
-        if repo_scopes
-        else [{"paths": ["**"], "cmd": list(binding["command"])}]
-    )
+    if repo_entry is None:
+        return []
+    repo_scopes = [s.model_dump() for s in repo_entry.test_scopes or ()]
+    if not repo_scopes and repo_entry.test_command:
+        # Wrapped here, at the point of use, never in the loaded entry: a
+        # re-save would persist it (`config.TestScope`, Kraft-9wzy).
+        repo_scopes = [{"paths": ["**"], "command": repo_entry.test_command}]
+    # One table after resolution: the repository's scopes, then each area's,
+    # every area scope carrying the setup it needs first
+    # (`repository-area-can-declare-setup-and-test-scopes`).
+    area_scopes = [
+        {**scope, "area": name, "setup": area.get("setup")}
+        for name, area in repo_entry.areas.items()
+        for scope in (area.get("verification") or {}).get("test_scopes") or []
+    ]
+    if not repo_scopes and not area_scopes:
+        return []
+    scopes = [
+        {
+            "paths": s["paths"],
+            "cmd": shlex.split(s["command"]),
+            "area": s.get("area"),
+            "setup": shlex.split(s["setup"]) if s.get("setup") else None,
+        }
+        for s in [*(repo_scopes or []), *area_scopes]
+    ]
     base_ref = _current_base_ref(db, work_item_id)
     # `since` is the diff's lower bound: round <= 0 always measures the whole
     # branch (never reads another round or another node's head), and only a
@@ -246,16 +256,320 @@ def _select_scopes(
         else None
     )
     to_run = scopes if diff is None else _matched_scopes(scopes, diff.splitlines())
-    return to_run, sandbox
+    return to_run
+
+
+async def config_error_session(db, run_dirs, common: dict, log: str) -> str:
+    """A task that could not start, recorded as its own session (Kraft-579).
+
+    `CONFIG_ERROR` is terminal at every tier (`context.SCOPE`), so the row is
+    what a human reads to find out why -- without it the stop would name a task
+    with no session to open.
+    """
+    _, log_path, result_path = await _builtins.start_session(db, run_dirs, **common)
+    return await _builtins.finish_session(
+        db,
+        log_path,
+        result_path,
+        session_id=common["session_id"],
+        status=CONFIG_ERROR,
+        log=log,
+    )
+
+
+async def time_capped_session(db, run_dirs, common: dict, hit: _caps.Hit) -> str:
+    """A launch a spent time cap refused, recorded as its own session: it
+    exits `capped_out`, and `caps.REACHED` names the scope and the cap, so the
+    stop and analytics read it the same as a run killed at its deadline."""
+    _, log_path, result_path = await _builtins.start_session(db, run_dirs, **common)
+    await _builtins.finish_session(
+        db,
+        log_path,
+        result_path,
+        session_id=common["session_id"],
+        status="capped_out",
+        log=f"not started: {hit.reason}\n",
+    )
+    await db.write(
+        lambda c: events.append(
+            c,
+            common["work_item_id"],
+            _caps.REACHED,
+            hit.payload(
+                node_id=common["node_id"],
+                task=common["hook_point"],
+                session_id=common["session_id"],
+            ),
+        )
+    )
+    return TIME_CAPPED
+
+
+def scope_policy(
+    row, scope: ResolvedNode | ResolvedStep | ResolvedTask, repository: str | None = None
+) -> _policy.InstancePolicy:
+    """The effective policy `scope` runs under, from its item's snapshot
+    (`MaterializedChain.policy_for`) -- `repository`'s own when the task is
+    fanned out to one (Kraft-jc39p). A V1 walk only ever runs a chain read out
+    of that snapshot, so a row without one has no policy anyone could know --
+    and running it unbounded is the silent reading this refuses."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        raise LookupError(f"work item {row['id']} has no materialized chain to read policy from")
+    return snapshot.policy_for(scope, repository)
+
+
+class SandboxUnresolved(RuntimeError):
+    """`item_sandbox` could not tell which sandbox an item runs in (Kraft-9t2dp).
+    A `RuntimeError`, so the walk's entry keeps stopping on it as before; every
+    launch door (`dispatch_node`, `gate_review.review`, `escalate.dispatch`)
+    catches this type and records a `config_error` session naming the cause,
+    never a host launch and never an unattributed crash."""
+
+
+def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
+    """The sandbox every project-controlled launch of this item runs in, or
+    None for an item nothing sandboxes -- the one resolution (Ruling 189).
+    Every task, recovery, judge, escalation turn, gate review, test scope,
+    area setup and the repository's `setup_command` reads it here: a sandbox
+    wraps the item, not the scope that set it, because once one task has run
+    in it the worktree is the worker's to write (Kraft-p8nem, Kraft-h10e5).
+
+    Whichever scope of the snapshot froze one wins, and the entry's live value
+    -- `false` included -- cannot turn it off (Ruling 105: `sandbox` only
+    tightens); without one, the entry's live value applies.
+    `SandboxUnresolved` when that cannot be told: a snapshot freezing two
+    (filed before the ruling), repositories setting two live, or a poisoned
+    `repos.yaml` -- unreadable is never "no sandbox"."""
+    snapshot = store.materialized_chain_of(row)
+    try:
+        frozen = snapshot.item_sandbox() if snapshot is not None else None
+        if frozen is not None:
+            return frozen.model_dump()
+        # Every repository the item launches against, members included: a
+        # member's live sandbox wraps the root's runs too.
+        entries = [launch.repo_entry, *launch.repositories.values()] if launch else []
+        live = list(dict.fromkeys(s for e in entries if e and (s := e.effective_sandbox)))
+    except (_policy.PolicyError, _config.ConfigError) as exc:
+        raise SandboxUnresolved(f"cannot tell whether {row['id']} runs sandboxed: {exc}") from exc
+    if len(live) > 1:
+        raise SandboxUnresolved(
+            f"{row['id']}'s repositories set different sandboxes "
+            f"{[s.model_dump() for s in live]!r} in repos.yaml: "
+            "a sandbox wraps the whole work item (Ruling 189), so they must agree"
+        )
+    return live[0].model_dump() if live else None
+
+
+def frozen_steering(row) -> dict:
+    """The steering frozen into this item's snapshot at intake: the task
+    steering and the repository steering `resolve_agent_task` takes."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        return {"steering": None, "repository_steering": None}
+    return {
+        "steering": snapshot.chain.steering,
+        "repository_steering": snapshot.repository_steering,
+    }
+
+
+def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Path, LaunchContext]]:
+    """Where a `scope: each_repository` task runs: once per repository the
+    item's frozen target selects -- the root in the assembled checkout, each
+    member in its own mount -- with that repository's own entry
+    (`task-may-explicitly-fan-out-by-repository`). One repository is one
+    run, in the ordinary context: returns `[]`."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None or snapshot.target.kind != "workspace":
+        return []
+    target = snapshot.target
+    entries = launch.repositories if launch is not None else {}
+    base = launch or LaunchContext(repo_entry=None)
+    runs = [(target.root, Path(worktree), base)] if target.root else []
+    for mount in target.mounts.values():
+        entry = entries.get(mount.repository)
+        runs.append(
+            (mount.repository, Path(worktree) / mount.path, replace(base, repo_entry=entry))
+        )
+    return runs
+
+
+async def _run_changed_test_scopes(
+    db,
+    run_dirs,
+    task: ResolvedTask,
+    node: ResolvedNode,
+    work_item_row,
+    worktree,
+    *,
+    common: dict,
+    execution: ExecutionMode,
+    launch: LaunchContext | None,
+    round: int,
+    sandbox: dict | None,
+    time_cap: _caps.Deadline | None = None,
+) -> str:
+    """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
+    the branch's changed paths select, and report one aggregate result.
+
+    Every selected scope runs, not just the ones before the first failure (C2,
+    Kraft-s7c04.9): on 49c0cefd the third scope -- ruff + 2,294 tests + intent
+    -- never ran until 5h49m into verify because an earlier scope's failure
+    short-circuited it, and every commit before that point was silently
+    unverified. The aggregate still fails the node on any scope's failure; it
+    just no longer costs a whole extra round to find out about a second,
+    unrelated failure.
+
+    Infra-level statuses are the one exception (`_SCOPE_STOP_STATUSES`): they
+    say nothing about the code, and running further scopes after one cannot be
+    trusted either -- a human paused the item, the next scope's own binary may
+    be missing too, a rate limit applies to every scope alike.
+
+    Sequential unless the task asks for parallel
+    (`changed-test-scope-verification-is-sequential-by-default`): the scopes
+    share one worktree, and two suites writing the same build artifacts is a
+    flake nobody can reproduce. `parallel` is bounded by the number of selected
+    scopes, which the repo's own table bounds.
+    """
+    repo_entry = launch.repo_entry if launch else None
+    to_run = _select_scopes(
+        db, work_item_row["id"], worktree, node.id, task.path, round, repo_entry
+    )
+    if not to_run:
+        return await config_error_session(
+            db,
+            run_dirs,
+            common,
+            f"{task.path} verifies changed test scopes, but {work_item_row['repo']} declares "
+            "neither test_scopes nor test_command in repos.yaml — there is nothing to run "
+            "and Kraft will not guess a command\n",
+        )
+
+    async def _run(cmd: list[str]) -> str:
+        return await _subprocess.run_task(
+            db,
+            run_dirs,
+            cmd=cmd,
+            cwd=worktree,
+            repo_entry=repo_entry,
+            # The fix loop re-runs the test command after an agent edits source in
+            # the same worktree. A .pyc written on an earlier cycle has the same
+            # second-resolution mtime and (often) size as the fixed source, so
+            # CPython would import the stale bytecode and the re-measure would
+            # never see the fix. Never writing bytecode keeps every cycle honest.
+            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            sandbox=sandbox,
+            time_cap=time_cap,
+            **{**common, "session_id": uuid.uuid4().hex},
+        )
+
+    # An area's setup runs once, before the first of its scopes -- including
+    # an area nobody chose at intake that the changed paths selected anyway
+    # (`selected-test-scope-activates-its-area-setup`, `unexpected-area-
+    # changes-are-tested`). A setup that does not finish is its scopes' result.
+    setups: dict[str, asyncio.Task] = {}
+
+    async def _scope(scope: dict) -> str:
+        if scope["setup"]:
+            if scope["area"] not in setups:
+                setups[scope["area"]] = asyncio.ensure_future(_run(scope["setup"]))
+            ready = await setups[scope["area"]]
+            if ready != "done":
+                return ready
+        return await _run(scope["cmd"])
+
+    if execution is ExecutionMode.PARALLEL:
+        results = list(await asyncio.gather(*(_scope(s) for s in to_run)))
+    else:
+        results = []
+        for scope in to_run:
+            status = await _scope(scope)
+            results.append(status)
+            if status in _SCOPE_STOP_STATUSES:
+                break
+    stopped = next((s for s in results if s in _SCOPE_STOP_STATUSES), None)
+    if stopped is not None:
+        return stopped
+    return next((s for s in results if s != "done"), "done")
+
+
+def _automated_review(launch: LaunchContext | None) -> AutomatedReview | None:
+    """The repository's named automated reviewer (Ruling 171), if any."""
+    return launch.repo_entry.automated_review if launch and launch.repo_entry else None
 
 
 async def dispatch_node(
+    db, run_dirs, task: ResolvedTask, node: ResolvedNode, work_item_row, worktree, **kw
+) -> str:
+    """`_dispatch_task`, and a session row for whatever it raised.
+
+    `measure_node` folds a raised exception into the node's verdict, so the
+    chain stops correctly -- but a task that raised before its session row
+    existed (a rebase conflict, a git error) left nothing for `kraft view
+    logs` or the Tasks tab, and one that raised after left its row running
+    (Kraft-s7c04.55; forge/run.py's Kraft-41b is the same wound). One door
+    for every task kind: the rows this dispatch made that are still open are
+    closed, or one is made, with the traceback as the log. Then it re-raises,
+    so the verdict is unchanged.
+    """
+    since = db.read(
+        lambda c: c.execute("SELECT COALESCE(MAX(rowid), 0) FROM worker_sessions").fetchone()[0]
+    )
+    try:
+        return await _dispatch_task(db, run_dirs, task, node, work_item_row, worktree, **kw)
+    except Exception as exc:
+        try:
+            await _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc)
+        except Exception:
+            logger.exception("could not record the session %s raised", task.path)
+        raise
+
+
+async def _record_raised(db, run_dirs, task, node, work_item_row, worktree, kw, since, exc) -> None:
+    status = "conflict" if isinstance(exc, _builtins.RebaseConflict) else "failed"
+    log = "".join(traceback.format_exception(exc))
+    # This dispatch's own rows, and the `waiting` row a forge wait resumes
+    # rather than mints (Kraft-ivh1): older than `since`, but this episode's
+    # (Kraft-evyc7).
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT id, status, log_path, result_path FROM worker_sessions "
+            "WHERE work_item_id = ? AND hook_point = ? AND (rowid > ? OR "
+            "(status = 'waiting' AND node_id = ? AND round = ?))",
+            (work_item_row["id"], task.path, since, node.id, kw.get("round", 0)),
+        ).fetchall()
+    )
+    open_rows = [r for r in rows if r["status"] in ("pending", "running", "waiting")]
+    if not rows:
+        sid, log_path, result_path = await _builtins.start_session(
+            db,
+            run_dirs,
+            session_id=uuid.uuid4().hex,
+            work_item_id=work_item_row["id"],
+            node_id=node.id,
+            hook_point=task.path,
+            round=kw.get("round", 0),
+            head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
+        )
+        open_rows = [{"id": sid, "log_path": log_path, "result_path": result_path}]
+    for r in open_rows:
+        await _builtins.finish_session(
+            db,
+            Path(r["log_path"]),
+            Path(r["result_path"]),
+            session_id=r["id"],
+            status=status,
+            log=log,
+            reused=True,
+        )
+
+
+async def _dispatch_task(
     db,
     run_dirs,
-    task_hook,
-    node,
+    task: ResolvedTask,
+    node: ResolvedNode,
     work_item_row,
-    registry: Registry,
     worktree,
     *,
     instruction_override: str | None = None,
@@ -265,304 +579,141 @@ async def dispatch_node(
     budget: _policy.Budget = _policy.NO_BUDGET,
     escalate: bool = False,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+    #: The repository a fanned-out run is for (`_fan_out`): its policy is
+    #: that repository's, and it does not fan out again.
+    repository: str | None = None,
 ) -> str:
-    binding = registry.hooks[task_hook]
+    """Run one resolved task and report its status.
+
+    The task's *type* chooses the adapter (`task-kinds-are-discriminated`):
+    there is no name to look up and no binding to resolve, so a task Kraft
+    cannot run is unrepresentable rather than a `KeyError` at dispatch. Every
+    adapter still does its own side effects; this function only picks one and
+    hands it the task's own fields.
+
+    The task is identified everywhere by its canonical path --
+    `worker_sessions.hook_point`, every event payload, every steering and
+    session lookup. A path is unique within a resolved chain
+    (`component-identifiers-are-qualified-by-node-instance`), which a hook name
+    reused by two nodes never was.
+    """
+    t = task.task
+    # The policy this task runs under, resolved at the scope it sits in
+    # (`MaterializedChain.policy_for`): its sandbox, tool lists, harness
+    # allowlist and token budget are all read from here.
+    if t.scope is TaskScope.EACH_REPOSITORY and repository is None and not isinstance(t, ForgeTask):
+        # A forge task is exempt: `forge.run_task` already walks every
+        # selected repository itself, in publication order.
+        runs = _fan_out(work_item_row, worktree, launch)
+        if runs:
+            status = "done"
+            for rid, cwd, member_launch in runs:
+                status = await dispatch_node(
+                    db,
+                    run_dirs,
+                    task,
+                    node,
+                    work_item_row,
+                    cwd,
+                    instruction_override=instruction_override,
+                    round=round,
+                    steer=steer,
+                    launch=member_launch,
+                    budget=budget,
+                    escalate=escalate,
+                    loop_severities=loop_severities,
+                    repository=rid,
+                )
+                if status != "done":
+                    break
+            return status
+    task_policy = scope_policy(work_item_row, task, repository)
     session_id = uuid.uuid4().hex
-    kind = binding["kind"]
     # The commit the measurement is about (Kraft-lu2). Resolved here, once, at
     # dispatch: a sha read later would be whatever HEAD moved to while the task
     # ran, which is the opposite of the question the gate asks. `git_read`
-    # never raises -- None for on.env.prepare, whose worktree does not exist yet.
+    # never raises.
     common = dict(
         session_id=session_id,
         work_item_id=work_item_row["id"],
-        node_id=node["id"],
+        node_id=node.id,
+        hook_point=task.path,
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
-    # Built before the kind switch (Kraft-t3bny): a review hook bound to a CLI
-    # needs the same diff an agent one gets. `review_package` returns None for
-    # every non-review hook, so this costs nothing anywhere else.
-    resolved_inputs = _templates.with_inputs(binding, task_hook)
-    pkg = prompts.review_package(db, run_dirs, work_item_row["id"], worktree, task_hook, session_id)
-    # A review hook with nothing to review is a configuration problem no
-    # agent can fix by writing code (Kraft-579's posture), not a task to
-    # launch anyway and let read an empty package. `review_package`
-    # returns None for three reasons -- a non-review hook (excluded by the
-    # `REVIEW_HOOKS` check itself), an item legitimately with no
-    # `base_ref` yet (pre-migration, or a template with no `env_setup`
-    # node -- must still run unchanged), and a git failure. The last two
-    # are not distinguished here and collapse into the same stop: telling
-    # them apart needs `review_package` to say why it returned None, which
-    # is more than this fix needs.
-    if (
-        task_hook in prompts.REVIEW_HOOKS
-        and pkg is None
-        and _current_base_ref(db, work_item_row["id"]) is not None
-    ):
-        _, log_path, result_path = await _builtins.start_session(
-            db, run_dirs, hook_point=task_hook, **common
-        )
-        return await _builtins.finish_session(
-            db,
-            log_path,
-            result_path,
-            session_id=session_id,
-            status=CONFIG_ERROR,
-            log=f"could not build a review package for {task_hook} — no diff to review\n",
-        )
-    if kind == "builtin" and binding.get("handler") == "env_setup":
-        return await _builtins.env_setup(
+    # Before any task runs host git here: a sandboxed worker earlier in this
+    # walk may have left a repository of its own in the worktree (Kraft-nx4id).
+    # `rev-parse` above reads HEAD alone and never looks at a gitlink.
+    try:
+        stops.refuse_planted_repos(work_item_row, launch, Path(worktree))
+    except RuntimeError as exc:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+    # Every enclosing scope's time cap, and this task's own (`kraft.caps`):
+    # spent already refuses the launch; otherwise the one run is killed at
+    # the tightest deadline. One deadline for every process the task starts.
+    hit = db.read(lambda c: _caps.at_launch(c, work_item_row, task))
+    if hit is not None and hit.remaining_s <= 0:
+        return await time_capped_session(db, run_dirs, common, hit)
+    time_cap = _caps.Deadline(_caps.monotonic() + hit.remaining_s, hit) if hit else None
+    if not isinstance(t, ForgeTask):
+        # Resolved here, once, for every launch this task makes (Ruling 189):
+        # a sandbox nobody can resolve stops this task for a human, recorded
+        # as its session, and nothing launches (Kraft-9t2dp).
+        try:
+            sandbox = item_sandbox(work_item_row, launch)
+        except SandboxUnresolved as exc:
+            return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+    if isinstance(t, BuiltinTask):
+        # `BuiltinAction` has exactly one member, so there is no branch to take
+        # on `ref`: a reference Kraft does not own was rejected by the type
+        # long before this (`builtin-task-references-code-owned-actions`).
+        return await _run_changed_test_scopes(
             db,
             run_dirs,
-            repo=work_item_row["repo"],
-            attachments=entry.attachments_of(work_item_row),
-            repo_entry=launch.repo_entry if launch else None,
-            **common,
+            task,
+            node,
+            work_item_row,
+            worktree,
+            common=common,
+            execution=t.execution,
+            launch=launch,
+            round=round,
+            sandbox=sandbox,
+            time_cap=time_cap,
         )
-    if kind == "builtin" and binding.get("handler") == "noop":
-        return await _builtins.noop(db, run_dirs, hook_point=task_hook, **common)
-    if kind == "builtin" and binding.get("handler") == "scan_submodules":
-        return await _builtins.scan_submodules(
+
+    if isinstance(t, SubprocessTask):
+        try:
+            cmd = shlex.split(t.command)
+        except ValueError as exc:
+            # Never started, so not a failure a fix loop could repair
+            # (Kraft-hr0xr): it stops naming the command it could not read.
+            return await config_error_session(
+                db, run_dirs, common, f"{task.path}: cannot parse command {t.command!r}: {exc}\n"
+            )
+        return await _subprocess.run_task(
             db,
             run_dirs,
-            hook_point=task_hook,
-            repo=work_item_row["repo"],
-            worktree=str(worktree),
-            **common,
-        )
-    if kind == "builtin" and binding.get("handler") == "mr_rebase":
-        return await _builtins.mr_rebase(
-            db,
-            run_dirs,
-            hook_point=task_hook,
-            repo=work_item_row["repo"],
-            worktree=str(worktree),
-            branch=store.branch_for(work_item_row),
-            has_rebase_bounce=bool(node.get("rebase_bounce_to")),
-            **common,
-        )
-    if kind == "agent":
-        # Only agent tasks. A subprocess or builtin costs nothing, and stopping
-        # `on.test.run` for a budget would strand the item mid-node for no saving.
-        if stops.budget_breach(db, work_item_row["id"], budget) is not None:
-            return BUDGET
-        # Authorship travels with the note, not with the caller: a seeded
-        # steer is Kraft's own recap of the last review's unresolved findings,
-        # and the human templates in `steer_prefix` would tell the agent a
-        # person wrote it (the same misattribution `Steer.human` keeps out of
-        # the fix-loop judge). Read before `take()`, and on `is not None`, not
-        # truthiness: `Steer.__bool__` is about having text left, and `take()`
-        # has just emptied it.
-        note_source = steer.source if steer is not None else "human"
-        note = steer.take() if steer else None
-        # A binding with a `skill:` already states its own job, so it must not
-        # also be told to implement the work item from the plan.
-        # `on.implementation.start` is the one agent hook with no skill,
-        # because for it the brief IS the method; it gets today's wording
-        # unchanged. Selected from the binding rather than a list of hook
-        # names so a plugin's own agent hook is classified by what it
-        # declares (Kraft-s7c04.52). The brief itself is untouched for every
-        # hook: `skills/spec` tells that agent the description is its
-        # requirement.
-        method_is_own = bool(binding.get("skill"))
-        instruction = (
-            instruction_override
-            or (
-                prompts.brief(work_item_row)
-                + prompts.attachment_note(
-                    entry.attachments_of(work_item_row), method_is_own=method_is_own
-                )
-                + (prompts.METHOD_NOTE if method_is_own else "")
-                + prompts.scope_note(task_hook, launch.repo_entry if launch else None)
-                + prompts.progress_note(task_hook, work_item_row, worktree)
-            )
-        ) + prompts.BEAD_NOTE
-        # What this reviewer said last round, with the tags that let it say
-        # "this is that one again" (Kraft-s7c04.1 + .2). Before this, every
-        # round was measured cold: on 6c712ea8 findings went 3 -> 2 -> 3 -> 4,
-        # all new fingerprints, and the loop exited only because one round
-        # happened to grade everything minor. "" on round 0, so a work item's
-        # first review is unchanged.
-        if task_hook in prompts.REVIEW_HOOKS:
-            previous, _, _ = last_measurement(db, work_item_row["id"], node["id"])
-            instruction += prompts.carried_findings_note(previous or [])
-            # The reviewer's own last session, and the fix cycle that produced
-            # what it is about to read (Kraft-qzkux). Both by path, both "" on
-            # round 0. Order follows the conversation: findings, the
-            # reviewer's own reasoning, then the fixer's answer to it.
-            instruction += prompts.previous_review_note(
-                prompts._last_review_session(db, work_item_row["id"], task_hook)
-            )
-            instruction += prompts.fix_attempt_note(
-                previous_fix_session(db, work_item_row["id"], node["id"])
-            )
-        # The findings that never entered the fix loop, for the brief the human
-        # actually reads (Kraft-s7c04.4). `skills/review-brief/SKILL.md` already
-        # promises them -- "the local review findings, including the ones ruled
-        # minor" -- and the dispatch gave the agent no way to know them, so on
-        # 6c712ea8 four real minor defects never reached the brief and a human
-        # later hand-filed three different ones. Keyed on the artifact rather
-        # than the hook name, like `chain_review` below, so a chain that binds a
-        # different hook to the brief still gets them.
-        if binding.get("artifact") == "review_brief":
-            instruction += prompts.deferred_findings_note(
-                deferred_findings(db, work_item_row["id"], loop_severities)
-            )
-        if binding.get("artifact") == "chain_review":
-            chain_nodes = json.loads(work_item_row["chain_definition"])["nodes"]
-            at = next((i for i, n in enumerate(chain_nodes) if n["id"] == node["id"]), None)
-            tail = chain_nodes[at + 1 :] if at is not None else []
-            preceding = tuple(n["id"] for n in chain_nodes[: at + 1]) if at is not None else ()
-            instruction += prompts.chain_review_context(tail, registry, preceding)
-        item_override = (
-            json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
-        )
-        node_override = store.node_overrides_of(work_item_row).get(node["id"], {})
-        model_effort = {
-            k: v for k, v in node_override.items() if k in ("model", "escalate_model", "effort")
-        }
-        merged_override = {**item_override, **model_effort}
-        inv = _agent.resolve_invocation(
-            binding,
-            launch.repo_entry if launch else None,
-            launch.steering_dir if launch else None,
-            skills_dir=launch.skills_dir if launch else None,
-            escalate=escalate,
-            item_override=merged_override or None,
-        )
-        status = await _agent.run_agent_task(
-            db,
-            run_dirs,
-            hook_point=task_hook,
-            review_package=pkg,
-            command=inv.command,
-            harness=inv.harness,
-            model=inv.model,
-            deny_tools=inv.deny_tools,
-            effort=inv.effort,
-            allowed_tools=inv.allowed_tools,
-            permission_mode=inv.permission_mode,
-            sandbox=inv.sandbox,
-            steering_texts=inv.steering_texts,
-            artifact=binding.get("artifact"),
-            method_text=inv.method_text,
-            title=work_item_row["title"],
-            task_instruction=(
-                prompts.steer_prefix(binding, work_item_row, worktree, note, source=note_source)
-                if note
-                else ""
-            )
-            + instruction,
-            repo_path=work_item_row["repo"],
+            cmd=cmd,
             cwd=worktree,
             repo_entry=launch.repo_entry if launch else None,
+            env={"PYTHONDONTWRITEBYTECODE": "1"},
+            sandbox=sandbox,
+            time_cap=time_cap,
             **common,
         )
-        # The agent is told to commit everything it changes before it exits.
-        # When it does not, the work is still on disk -- so `verify` passes,
-        # and only `_assert_clean` two nodes later notices, by which point the
-        # failure names a hook rather than the cause and a human has to type
-        # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
-        # worktree, so it takes the work rather than reporting it missing.
-        #
-        # Never at the cost of the run itself: an index lock a co-task holds, a
-        # submodule that `add -A` finds nothing to stage in -- either of those
-        # would turn a *successful* agent task into a failed node, and on the
-        # fix-loop's direct dispatch would escape `run()` entirely. (Unset
-        # `user.email` used to be on this list too; `ensure_worktree` now pins
-        # identity before any node dispatches, so it is structurally prevented
-        # rather than tolerated here -- Kraft-cppp.) Losing the sweep only puts
-        # us back where Kraft-7fip found us: the work is still on disk and
-        # `_assert_clean` names it at open_mr.
-        # Before the sweep, not after: a straggler committed while HEAD sat on
-        # a diagnostic branch an agent forgot to check out of would land on
-        # that branch instead of the item's own (Kraft-v5qd).
-        _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row))
-        try:
-            await _forge.commit_stragglers(
-                Path(worktree), message=f"wip: uncommitted work from {node['id']}"
-            )
-        except _forge.ForgeError as exc:
-            logger.warning("could not commit stragglers after %s: %r", task_hook, exc)
-            # A log line only reaches whoever is tailing the server at the
-            # time. The failure it describes doesn't surface again until
-            # `_assert_clean` refuses `open_mr`, nodes later, with no trail
-            # back to why the work was left uncommitted (Kraft-hf12) -- so a
-            # human debugging that refusal has something to find.
-            await db.write(
-                lambda c, task_hook=task_hook, exc=exc: events.append(
-                    c,
-                    work_item_row["id"],
-                    "sweep_failed",
-                    {"node_id": node["id"], "task_hook": task_hook, "error": str(exc)},
-                )
-            )
-        return status
-    if kind == "subprocess":
-        repo_entry = (launch.repo_entry or {}) if launch else {}
-        to_run, sandbox = _select_scopes(
-            db, work_item_row["id"], worktree, node["id"], task_hook, round, binding, repo_entry
-        )
-        # C2 (Kraft-s7c04.9): every matched scope runs, not just the ones
-        # before the first failure. On 49c0cefd the third scope (just
-        # ci-test -- ruff + 2,294 tests + intent) never ran until 5h49m into
-        # verify because an earlier scope's failure short-circuited it, and
-        # every commit before that point was silently unverified. The
-        # aggregate below still fails the node on any scope's failure -- it
-        # just no longer costs a whole extra round to find out about a
-        # second, unrelated failure a first scope's break used to hide.
-        #
-        # Infra-level statuses are the one exception: they say nothing about
-        # the code, and running further scopes after one can't be trusted
-        # either (a human paused the item; the next scope's own binary might
-        # be missing too; a rate limit applies to every scope alike).
-        carried_path = None
-        if "carried_findings" in resolved_inputs and task_hook in prompts.REVIEW_HOOKS:
-            previous, _, _ = last_measurement(db, work_item_row["id"], node["id"])
-            carried_path = _write_carried_findings(run_dirs.results, session_id, previous or [])
-        status = "done"
-        for scope in to_run:
-            scope_status = await _subprocess.run_task(
-                db,
-                run_dirs,
-                hook_point=task_hook,
-                cmd=scope["cmd"],
-                cwd=worktree,
-                repo_entry=repo_entry,
-                # The fix loop re-runs the test command after an agent edits source in
-                # the same worktree. A .pyc written on an earlier cycle has the same
-                # second-resolution mtime and (often) size as the fixed source, so
-                # CPython would import the stale bytecode and the re-measure would
-                # never see the fix. Never writing bytecode keeps every cycle honest.
-                env={
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                    **_input_env(
-                        resolved_inputs, review_package=pkg, carried_findings=carried_path
-                    ),
-                },
-                sandbox=sandbox,
-                **{**common, "session_id": uuid.uuid4().hex},
-            )
-            if scope_status in _SCOPE_STOP_STATUSES:
-                return scope_status
-            if status == "done":
-                status = scope_status  # the first failure wins; later scopes still run
-        return status
-    if kind == "forge":
-        # Only what the binding actually sets, so the adapter's constants stay
-        # the one place a default lives.
-        poll = {k: binding[k] for k in ("poll_timeout", "poll_interval") if k in binding}
+
+    if isinstance(t, ForgeTask):
         return await _forge.run_task(
             db,
             run_dirs,
-            hook_point=task_hook,
-            handler=binding["handler"],
-            backend=binding["backend"],
-            # `backend: auto` resolves against the forge recorded for this repo
-            # (repos.yaml), because the registry is per install and the forge is
-            # a property of the repo. Same source the agent branch reads above.
-            repo_forge=(launch.repo_entry or {}).get("forge") if launch else None,
+            handler=_forge.handler_for(t.target.value),
+            # The forge is a property of the repo (repos.yaml), never of the
+            # template: one install's chains run against whatever forge each
+            # repo is on.
+            backend="auto",
+            repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
+            automated_review=_automated_review(launch),
             # The worktree, not the repo: every forge CLI resolves the merge
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.
@@ -573,196 +724,670 @@ async def dispatch_node(
             orig_repo=Path(work_item_row["repo"]),
             branch=store.branch_for(work_item_row),
             title=work_item_row["title"],
-            # `merge`'s conflict-rebase shortcut may only report "done"
-            # without calling forge.merge when this node's own frozen
-            # chain_definition will actually bounce the walk back to verify
-            # afterwards (code-review) -- not whatever the current
-            # templates/default.yaml happens to say.
-            has_rebase_bounce=bool(node.get("rebase_bounce_to")),
-            **poll,
+            # A node that declares `on_base_changed` restarts its span when a
+            # rebase moves the base, so the forge may report the move instead
+            # of re-verifying the rebased head itself (`merge`'s conflict
+            # rebase leans on this).
+            has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
+            # Resolved through this task's own policy (Kraft-5p69g); already
+            # checked against its maximum when the item was filed.
+            wait=t.wait_bounds(task_policy) if t.target.waits else None,
             **common,
         )
-    raise RuntimeError(
-        f"unhandled binding for {task_hook!r}: kind={kind!r} handler={binding.get('handler')!r}"
+
+    if not isinstance(t, AgentTask):  # pragma: no cover -- the union is closed
+        raise RuntimeError(f"unhandled task kind for {task.path!r}: {t!r}")
+
+    # Only agent tasks. A subprocess or builtin costs nothing, and stopping
+    # verification for a budget would strand the item mid-node for no saving.
+    # Checked again before every fallback launch (`executor.fallback`).
+    async def over_budget() -> bool:
+        breach = stops.budget_breach(
+            db, work_item_row["id"], budget, row=work_item_row, path=task.path
+        )
+        if breach is None:
+            return False
+        # A scope's own cap (Ruling 195) is known only here, where the scope
+        # is: recorded for the stop to name.
+        if breach["scope"] in ("tokens", "usd"):
+            await db.write(
+                lambda c: events.append(
+                    c, work_item_row["id"], "scope_budget_reached", {**breach, "task": task.path}
+                )
+            )
+        return True
+
+    if await over_budget():
+        return BUDGET
+    # A harness the runtime cannot offer stops for a human and never silently
+    # substitutes another (`unavailable-selected-harness-needs-human`): the
+    # profile lookup in `resolve_agent_task` raises `HarnessUnavailable`,
+    # caught below, rather than a `ValueError` from `run_agent_task` that
+    # would surface as a crash in whatever gathered this task.
+    harnesses = _harness.load(None)
+    # Authorship travels with the note, not with the caller: a seeded
+    # steer is Kraft's own recap of the last review's unresolved findings,
+    # and the human templates in `steer_prefix` would tell the agent a
+    # person wrote it (the same misattribution `Steer.human` keeps out of
+    # the fix-loop judge). Read before `take()`, and on `is not None`, not
+    # truthiness: `Steer.__bool__` is about having text left, and `take()`
+    # has just emptied it.
+    note_source = steer.source if steer is not None else "human"
+    note = steer.take(task.path) if steer else None
+    # A task with a `skill:` already states its own job, so it must not also be
+    # told to implement the work item from the plan. A task without one is the
+    # one doing the work from the brief, and gets the implementer's notes.
+    method_is_own = t.skill is not None
+    instruction = (
+        instruction_override
+        or (
+            f"{t.prompt}\n\n"
+            + prompts.brief(work_item_row)
+            + prompts.attachment_note(
+                entry.attachments_of(work_item_row), method_is_own=method_is_own
+            )
+            + (prompts.METHOD_NOTE if method_is_own else "")
+            + prompts.scope_note(t, launch.repo_entry if launch else None)
+            + prompts.progress_note(t, work_item_row, worktree)
+        )
+    ) + prompts.BEAD_NOTE
+    # The findings that never entered the fix loop, for the brief the human
+    # actually reads (Kraft-s7c04.4). `skills/review-brief/SKILL.md` already
+    # promises them -- "the local review findings, including the ones ruled
+    # minor" -- and the dispatch gave the agent no way to know them, so on
+    # 6c712ea8 four real minor defects never reached the brief and a human
+    # later hand-filed three different ones. Keyed on the artifact the task
+    # produces, not on its path, so a chain that writes the brief from a
+    # differently-named task still gets them.
+    if t.produces == "review_brief":
+        instruction += prompts.deferred_findings_note(
+            deferred_findings(db, work_item_row["id"], loop_severities)
+        )
+    if t.produces == revision.CHAIN_REVISION:
+        instruction += revision.context_note(store.materialized_chain_of(work_item_row), node.id)
+    # A reviewing task's continuity, delivered only when it declares it
+    # (`AgentTask.inputs`): what the node's last measurement found, tagged so a
+    # repeat keeps its identity (the tags `walk` then trusts, and no others --
+    # `findings.resolve_identity`), and where its own last review wrote. Only on
+    # its own pass: a fix loop's or recovery's override is a new job.
+    if instruction_override is None:
+        if AgentInput.CARRIED_FINDINGS in t.inputs:
+            carried, _, _ = last_measurement(db, work_item_row["id"], node.id)
+            instruction += prompts.carried_findings_note(carried or [])
+        if AgentInput.PREVIOUS_REVIEW in t.inputs:
+            instruction += prompts.previous_review_note(
+                prompts.last_review_session(db, work_item_row["id"], task.path)
+            )
+    item_override = (
+        json.loads(work_item_row["agent_overrides"]) if work_item_row["agent_overrides"] else {}
     )
+    node_override = store.node_overrides_of(work_item_row).get(node.id, {})
+    instruction += _overrides.extra_prompt_note(node_override.get("extra_prompt"))
+    keys = ("model", "escalate_model", "effort")
+    merged_override = {**item_override, **{k: v for k, v in node_override.items() if k in keys}}
+    # The task's own launch, then its `fallback:` entries (`executor.fallback`,
+    # Kraft-0a3h8). Without a list this loop runs once, exactly as before
+    # (`fallback-is-opt-in`); with one, a candidate that is unavailable or
+    # known to be rate-limited is skipped and a rate-limited launch moves on,
+    # every skip or switch logged. Overrides and escalation are the task's own
+    # launch's; a fallback entry runs as written.
+    try:
+        # A profile's own list is live configuration, like the profile body;
+        # a file that does not load has none, and the launch below says why.
+        table = _agent.harness_table(harnesses)[0] if t.fallback is None and t.profile else None
+    except _agent.HarnessUnavailable:
+        table = None
+    cands = _fallback.candidates(t, table)
+    listed = len(cands) > 1
+    tried = _fallback.Attempts(
+        db, work_item_row["id"], node.id, task.path, overridden=bool(merged_override)
+    )
+    status = None
+    for i, cand in enumerate(cands):
+        primary = i == 0
+        try:
+            inv = _agent.resolve_agent_task(
+                cand,
+                launch.repo_entry if launch else None,
+                launch.library_steering if launch else None,
+                skills_dir=launch.skills_dir if launch else None,
+                escalate=escalate and primary,
+                item_override=(merged_override or None) if primary else None,
+                harnesses=harnesses,
+                **frozen_steering(work_item_row),
+                policy=task_policy,
+            )
+            if listed and not sandbox:
+                _fallback.require_on_path(inv, harnesses)
+        except (_agent.HarnessUnavailable, _fallback.Unavailable) as exc:
+            if not listed:
+                why = (
+                    f"{task.path}: {exc}"  # its harness is there; its agent profile is not
+                    if isinstance(exc, _agent.ProfileUnavailable)
+                    else f"{task.path} selects harness {t.harness!r}, which is not available: {exc}"
+                )
+                return await config_error_session(db, run_dirs, common, why + "\n")
+            await tried.skip(_fallback.describe(cand), "unavailable", detail=str(exc))
+            continue
+        except (_skill.SkillError, _steering.SteeringError) as exc:
+            # A selected skill the environment cannot load stops for a human and
+            # never substitutes a method (`selected-skill-must-be-available`). A
+            # plugin-qualified reference is not checked here -- Kraft cannot read
+            # another tool's plugin cache, so `skill.UNAVAILABLE` tells the agent
+            # to stop with `needs_context` instead. A steering selection the
+            # snapshot cannot supply stops the same way rather than run unsteered.
+            return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+        here = _fallback.describe(cand, inv)
+        until = (
+            db.read(lambda c, h=cand.harness, m=inv.model: _fallback.known_limited(c, h, m))
+            if listed
+            else None
+        )
+        if until is not None:
+            await tried.skip(here, "known_limited", resets_at_iso=until)
+            continue
+        if not primary:
+            if await over_budget():
+                await tried.flush()
+                return BUDGET
+            common = {**common, "session_id": uuid.uuid4().hex}
+        await tried.launching(here, common["session_id"])
+        status, final = await _launch_agent(
+            db,
+            run_dirs,
+            t,
+            node,
+            work_item_row,
+            worktree,
+            task=task,
+            inv=inv,
+            harness_id=cand.harness,
+            harnesses=harnesses,
+            sandbox=sandbox,
+            launch=launch,
+            common=common,
+            # A resumed provider session is the task's own launch's, never a
+            # fallback's: no `--resume` across a switch.
+            resumable=primary and instruction_override is None,
+            instruction=instruction + tried.note,
+            note=note,
+            note_source=note_source,
+            time_cap=time_cap,
+        )
+        if final:
+            return status
+        if status != RATE_LIMITED or not listed:
+            break
+        hit = stops.latest_rate_limit(db, work_item_row["id"]) or {}
+        await tried.skip(here, "rate_limit_hit", resets_at_iso=hit.get("resets_at_iso"))
+    else:
+        # No candidate left. Limited somewhere: park until the earliest reset
+        # (`stops.stop_for_rate_limit`), and the poller's relaunch starts from
+        # the top. Only unavailable: stop for a human naming each.
+        await tried.flush()
+        if tried.resets:
+            earliest = min(tried.resets)
+            await db.write(
+                lambda c, e=earliest: events.append(
+                    c,
+                    work_item_row["id"],
+                    "launch_fallback_exhausted",
+                    {"node_id": node.id, "task": task.path, "resets_at_iso": e},
+                )
+            )
+            if status is None:
+                return RATE_LIMITED
+        else:
+            return await config_error_session(
+                db,
+                run_dirs,
+                common,
+                f"{task.path}: no launch candidate is available:\n"
+                + "".join(f"  - {why}\n" for why in tried.unavailable),
+            )
+    # The agent is told to commit everything it changes before it exits.
+    # When it does not, the work is still on disk -- so verification passes,
+    # and only `_assert_clean` two nodes later notices, by which point the
+    # failure names a task rather than the cause and a human has to type
+    # `git commit` in someone else's worktree (Kraft-7fip). Kraft owns the
+    # worktree, so it takes the work rather than reporting it missing.
+    #
+    # Never at the cost of the run itself: an index lock a co-task holds, a
+    # submodule that `add -A` finds nothing to stage in -- either of those
+    # would turn a *successful* agent task into a failed node, and on the
+    # fix-loop's direct dispatch would escape `run()` entirely. (Unset
+    # `user.email` used to be on this list too; `ensure_worktree` now pins
+    # identity before any node dispatches, so it is structurally prevented
+    # rather than tolerated here -- Kraft-cppp.) Losing the sweep only puts
+    # us back where Kraft-7fip found us: the work is still on disk and
+    # `_assert_clean` names it at open_mr.
+    # Before the sweep, not after: a straggler committed while HEAD sat on
+    # a diagnostic branch an agent forgot to check out of would land on
+    # that branch instead of the item's own (Kraft-v5qd).
+    # A fanned-out member run stands in the member's checkout, whose base is
+    # its own default branch; every other run is on the item's base branch.
+    snapshot = store.materialized_chain_of(work_item_row)
+    member = repository is not None and snapshot is not None and repository != snapshot.target.root
+    base = await _builtins.base_branch(
+        db, work_item_row["id"], Path(worktree if member else work_item_row["repo"]), member=member
+    )
+    #
+    # Not after a sandboxed session that left a repository of its own in the
+    # worktree (Kraft-nx4id): the checkout and the commit would both read its
+    # config. The next dispatch, or the door a human uses, stops the item on
+    # the same check and names the paths.
+    #
+    # Nor while a sandboxed co-task is still live (Kraft-69rwp): it can write
+    # the worktree under the sweep. The last task of the step to finish
+    # sweeps for all of them.
+    try:
+        stops.refuse_live_sandboxed_session(db, work_item_row, launch, what="the straggler sweep")
+    except RuntimeError as exc:
+        await db.write(
+            lambda c, exc=exc: events.append(
+                c,
+                work_item_row["id"],
+                "sweep_failed",
+                {"node_id": node.id, "task": task.path, "error": f"deferred: {exc}"},
+            )
+        )
+        return status
+    if sandbox and _sandbox.planted_repos(Path(worktree), work_item_row["base_ref"]) != []:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_row["id"],
+                "sweep_failed",
+                {
+                    "node_id": node.id,
+                    "task": task.path,
+                    "error": "skipped: the sandboxed worktree holds a git repository "
+                    "Kraft did not create",
+                },
+            )
+        )
+        return status
+    _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
+    try:
+        await _forge.commit_stragglers(
+            Path(worktree),
+            base=base,
+            message=f"wip: uncommitted work from {node.id}",
+            mounts=_builtins.item_mounts(work_item_row),
+        )
+    except _forge.ForgeError as exc:
+        logger.warning("could not commit stragglers after %s: %r", task.path, exc)
+        # A log line only reaches whoever is tailing the server at the
+        # time. The failure it describes doesn't surface again until
+        # `_assert_clean` refuses `open_mr`, nodes later, with no trail
+        # back to why the work was left uncommitted (Kraft-hf12) -- so a
+        # human debugging that refusal has something to find.
+        await db.write(
+            lambda c, exc=exc: events.append(
+                c,
+                work_item_row["id"],
+                "sweep_failed",
+                {"node_id": node.id, "task": task.path, "error": str(exc)},
+            )
+        )
+    return status
 
 
-#: The round a task-level repair and its re-dispatch write their sessions
-#: under. Distinct from `walk._REPAIR_ROUND` (-1, the node-level repair) and
-#: `walk._RESOLVE_ROUND` (-2) so a node carrying both layers cannot alias one
-#: layer's sessions onto the other's in `sessions_for_round`. Never a value
-#: `bump_counter` can produce -- those start at 1 and only climb.
-_TASK_REPAIR_ROUND = -3
+async def _launch_agent(
+    db,
+    run_dirs,
+    t: AgentTask,
+    node,
+    work_item_row,
+    worktree,
+    *,
+    task,
+    inv,
+    harness_id: str,
+    harnesses,
+    sandbox,
+    launch,
+    common: dict,
+    resumable: bool,
+    instruction: str,
+    note,
+    note_source: str,
+    time_cap,
+) -> tuple[str, bool]:
+    """One candidate's launch for `dispatch_node`: `(status, final)`, `final`
+    when the launch never started and the status is the task's answer as it
+    stands (a refusal is a configuration stop, not a straggler to sweep)."""
+    # A task an operator paused mid-turn resumes its own provider session when
+    # it can, told to carry on with any steer in hand; otherwise it restarts
+    # with its original instruction (`resumed-agent-task-preserves-its-
+    # session-when-possible`). Never on a fix loop's or a recovery's own
+    # instruction, which is a new job, not the paused one.
+    resumed = (
+        _resumable_session(db, work_item_row["id"], node, task, harnesses.valid.get(inv.harness))
+        if resumable
+        else None
+    )
+    if resumed is not None:
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_row["id"],
+                "agent_session_resumed",
+                {"task": task.path, "session_id": resumed[0]},
+            )
+        )
+    # Delivered only to a task that declares it (`AgentTask.inputs`, Ruling 47):
+    # the change under review, written out for this session.
+    package = None
+    if AgentInput.REVIEW_PACKAGE in t.inputs:
+        # The package is read off the worktree with host git, which must not
+        # race a sandboxed co-task still writing it (Kraft-69rwp).
+        try:
+            stops.refuse_live_sandboxed_session(
+                db, work_item_row, launch, what="the review package"
+            )
+        except RuntimeError as exc:
+            status = await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+            return status, True
+        package = prompts.review_package(
+            db, run_dirs, work_item_row["id"], worktree, task.path, common["session_id"]
+        )
+    try:
+        status = await _agent.run_agent_task(
+            db,
+            run_dirs,
+            command=inv.command,
+            harness=inv.harness,
+            harnesses=harnesses,
+            model=inv.model,
+            deny_tools=inv.deny_tools,
+            effort=inv.effort,
+            allowed_tools=inv.allowed_tools,
+            permission_mode=inv.permission_mode,
+            sandbox=sandbox,
+            steering_texts=inv.steering_texts,
+            artifact=t.produces,
+            method_text=inv.method_text,
+            title=work_item_row["title"],
+            task_instruction=(
+                prompts.steer_prefix(t.produces, work_item_row, worktree, note, source=note_source)
+                if note
+                else ""
+            )
+            + (prompts.AGENT_RESUMED_NOTE if resumed is not None else instruction),
+            resume_session_id=resumed[1] if resumed is not None else None,
+            repo_path=work_item_row["repo"],
+            cwd=worktree,
+            repo_entry=launch.repo_entry if launch else None,
+            review_package=package,
+            time_cap=time_cap,
+            harness_id=harness_id,
+            **common,
+        )
+    except _agent.LaunchRefused as exc:
+        # Refused before anything started (Kraft-hr0xr): the same stop as an
+        # unavailable harness, never a failed task for a fix loop to relaunch
+        # into the same refusal.
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n"), True
+    return status, False
+
+
+def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str, str] | None:
+    """`(session id, provider session id)` of the paused session `task`
+    resumes, or None to restart it. Only a harness that can resume, only the
+    task's latest session and only if an operator paused it, never from before
+    a retry or a restart (7a's rule: a new pass never reuses a pre-retry
+    session), and only when its log names the provider's own session id."""
+    if harness is None or not harness.supports("resume"):
+        return None
+    paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
+    if paused is None:
+        return None
+    provider = _usage.READERS["claude-stream-json"].session_id(Path(paused["log_path"]))
+    return (paused["id"], provider) if provider else None
 
 
 async def measure_node(
     db,
     run_dirs,
     work_item_id,
-    node,
+    node: ResolvedNode,
     row,
-    registry,
     worktree,
     *,
+    steps: tuple[ResolvedStep, ...] | None = None,
+    instruction_override: str | None = None,
     round: int = 0,
     steer: Steer | None = None,
     launch: LaunchContext | None = None,
     budget: _policy.Budget = _policy.NO_BUDGET,
     loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
     start_step: int = 0,
-) -> tuple[str, list[str], list[BaseException]]:
-    await db.write(lambda c, node=node: store.enter_node(c, work_item_id, node["id"]))
+    spent: set[str] | None = None,
+    preserve: frozenset[str] = frozenset(),
+) -> tuple[str, list[ResolvedTask], list[BaseException]]:
+    """Run `steps` (the node's own, by default) and report one verdict.
+
+    `steps` is what makes one execution shape enough: a recovery plan and a fix
+    loop are the same ordered-steps walk over a different group of steps from
+    the same node, so `walk` hands its own group in rather than this function
+    growing a second branch for each.
+
+    `spent` arms task- and step-level recovery for the node's own steps
+    (`nearest-recovery-handler-wins`): once a step has settled
+    (`parallel-step-settles-before-recovery`), each failed task's nearest
+    handler below the node runs -- task handlers one at a time
+    (`recovery-tasks-run-after-a-concurrent-step-settles`) and each followed by
+    a retry of that task alone (`task-recovery-retries-only-the-task`), then
+    the step's handler for the failed tasks that declare none, followed by a
+    retry of the whole step (`step-recovery-retries-the-entire-step`). Each
+    handler's path goes into `spent`, so it runs at most once for as long as
+    the caller keeps the set -- `walk.walk_node` keeps one per entry into the
+    node. A node-level handler is `walk`'s, not this function's. `None`, as
+    for a recovery plan or a fix loop, means no handler here runs at all.
+    """
+    groups = node.steps if steps is None else steps
+    # Only the node's own steps are the node's progress. A recovery plan or a
+    # fix loop is work *about* the node, so it neither re-enters it nor moves
+    # the resume cursor a later measuring pass reads back.
+    own = steps is None
+    if own:
+        await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move
     # while this node's own tasks are still being measured", which stopped
-    # being true the moment a task-level repair (spec §4) could commit a fix
-    # mid-node -- and stops being true again when an ordered step rebases.
+    # being true the moment a fix cycle could commit mid-node.
     # `git_read` never raises; None just means "never reusable", same as
     # before. `worktree` is None only in a unit test that stubs `dispatch_node`
     # out entirely.
     def _head() -> str | None:
         return _config.git_read(Path(worktree), "rev-parse", "HEAD") if worktree else None
 
-    async def _measure(t: str, *, repair: bool = True) -> str:
+    def _skipped(task: ResolvedTask) -> bool:
+        """Under a task or step path an operator skipped in this run."""
+        if not own:
+            return False
+        skipped = db.read(lambda c: store.skipped_paths(c, work_item_id))
+        return any(task.path == p or task.path.startswith(p + ".") for p in skipped)
+
+    async def _measure(task: ResolvedTask, *, retry: bool = False) -> str:
+        if _skipped(task):
+            return "done"
+        verdict = await _measure_task(task, retry=retry)
+        # Skipped while it ran: the skip stopped its session, which ends
+        # `paused`, and a skip is not a pause of the walk.
+        return "done" if verdict == "paused" and _skipped(task) else verdict
+
+    async def _measure_task(task: ResolvedTask, *, retry: bool = False) -> str:
+        if task.path in preserve and not retry:
+            # A task retry's completed sibling (`RunFork.preserved`): its latest
+            # outcome stands, whatever HEAD the retried task later moves.
+            kept = db.read(
+                lambda c: store.latest_session_per_task(c, work_item_id, node.id, [task.path])
+            )
+            if kept and kept[0]["status"] in _ADVANCING:
+                return kept[0]["status"]
         # Kraft-gl9d: a crash/resume re-entry into this same (node, round) must
         # not re-spend an agent session on a task whose session already reached
         # 'done' against the worktree as it stands right now.
         head_sha = _head()
         # A null head_sha is never reusable (`reusable_session` itself would
         # say so) -- skip the read entirely rather than asking a test double
-        # that has no worktree, and thus no HEAD, to answer it.
+        # that has no worktree, and thus no HEAD, to answer it. Nor is a
+        # recovery's retry: it exists to run the task again, and a sibling's
+        # `done` from the settled step is exactly what it must not stand in for.
+        # Whether a session from before a `/retry` is stale is
+        # `reusable_session`'s own call (Kraft-znsvg), for every caller alike.
         reused = (
             db.read(
-                lambda c: store.reusable_session(c, work_item_id, node["id"], t, round, head_sha)
+                lambda c: store.reusable_session(
+                    c, work_item_id, node.id, task.path, round, head_sha
+                )
             )
-            if head_sha is not None
+            if head_sha is not None and not retry
             else None
         )
         if reused is not None:
             return reused["status"]
-        status = await dispatch_node(
+        return await dispatch_node(
             db,
             run_dirs,
-            t,
+            task,
             node,
             row,
-            registry,
             worktree,
+            instruction_override=instruction_override,
             loop_severities=loop_severities,
             round=round,
             steer=steer,
             launch=launch,
             budget=budget,
         )
-        # Layer 1 of the two-layer repair (spec §4). Only `_FAILING_STATUSES`
-        # counts: a pause is a human's instruction, and a rate limit or a
-        # budget breach is a refusal to start, so none of them is evidence
-        # about this task and none may spend a repair.
-        #
-        # `repair=False` on the re-dispatch is what keeps this one layer deep,
-        # and is also why a repair hook's own `on_failure` is never reached: a
-        # repair that did not take is a blocker Kraft does not understand, and
-        # the honest move is to report the original failure and let layer 2 or
-        # a human look at it, not to keep pulling levers.
-        if not repair or status not in _FAILING_STATUSES:
-            return status
-        repair_hooks = registry.hooks.get(t, {}).get("on_failure")
-        if not repair_hooks:
-            return status
-        failed_session = next(
-            (
-                s
-                for s in reversed(
-                    db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
-                )
-                if s["hook_point"] == t
-            ),
-            None,
-        )
-        context = prompts.task_failure_note(t, status, failed_session)
-        # Same shape as `walk.recover_node`: a human's steer leads and keeps
-        # its template; otherwise Kraft's own context is a seeded one.
-        repair_steer = (
-            Steer(f"{steer.take()}\n\n{context}", source=steer.source)
-            if steer is not None and steer
-            else Steer(context, source="seeded")
-        )
-        await db.write(
-            lambda c, t=t, h=list(repair_hooks): events.append(
-                c,
-                work_item_id,
-                "task_recovery_started",
-                {
-                    "node_id": node["id"],
-                    "failed_task": t,
-                    "tasks": h,
-                    "status": status,
-                    "log_path": failed_session["log_path"] if failed_session else None,
-                },
-            )
-        )
-        for r in repair_hooks:
-            r_status = await dispatch_node(
-                db,
-                run_dirs,
-                r,
-                node,
-                row,
-                registry,
-                worktree,
-                loop_severities=loop_severities,
-                round=_TASK_REPAIR_ROUND,
-                steer=repair_steer,
-                launch=launch,
-                budget=budget,
-            )
-            if r_status in _FAILING_STATUSES:
-                return status
-            # A pause, budget breach, config error or rate limit on the repair
-            # itself is not evidence about the original failure -- it must
-            # propagate as-is, not be swallowed by falling through to the
-            # re-measure below (whose own status would replace it).
-            if r_status in _SCOPE_STOP_STATUSES or r_status == BUDGET:
-                return r_status
-        # The re-measure is the point: a repair is believed only when the task
-        # it repaired passes on its own, not when the remediator says so. The
-        # `_head()` read inside this call is why Task 2 had to land first --
-        # the repair may well have committed.
-        return await _measure(t, repair=False)
 
-    # One group at a time, concurrently within a group (spec: "Executor
-    # semantics"). `steps` is always present -- `templates.with_steps` puts it
-    # on every node both producers of `chain_definition` build -- but an older
-    # item materialized before this shipped has none, so fall back rather than
-    # KeyError a chain that is mid-flight across the upgrade.
-    groups = node.get("steps") or [list(node["tasks"])]
-
+    # One step at a time, concurrently within a step
+    # (`exec-node-orders-concurrent-task-groups`).
+    #
     # (task, result) pairs, never positional indices into a flat task list: a
-    # group that stops the node leaves `results` shorter than `tasks`, and
+    # step that stops the node leaves `results` shorter than the task list, and
     # `tasks[i]` would then name the wrong task in `failed` -- silently, into
     # the fix loop and the on_failure repair.
-    outcomes: list[tuple[str, object]] = []
-    for index, group in enumerate(groups):
-        # A resumed node skips the groups before `start_step` -- they already
-        # passed -- EXCEPT its rebase step: detecting drift is that step's whole
-        # job, and skipping it is how a moved base goes unnoticed.
-        if index < start_step:
-            if not any(is_rebase_hook(registry, t) for t in group):
-                continue
+    async def _wrote(before, scope: str) -> bool:
+        return await _read_only.violation(
+            db, row, launch, worktree, before, node_id=node.id, scope=scope
+        )
+
+    def _snapshot(flagged: bool):
+        return _read_only.snapshot(db, row, launch, worktree) if flagged else None
+
+    async def _settle(tasks, step: ResolvedStep, *, retry: bool = False) -> list:
+        # A read_only step is checked around every run of its tasks, a
+        # recovery's retry included; the handler itself runs outside it.
+        before = _snapshot(step.read_only)
+        results = await asyncio.gather(
+            *(_measure(t, retry=retry) for t in tasks), return_exceptions=True
+        )
+        # An `AssertionError` is Kraft's own broken invariant (and, under
+        # pytest, the real-agent guard), never evidence about the code a task
+        # measured -- so it is not a failed task for a fix loop to spend paid
+        # cycles on. It propagates, once every co-task has settled: the daemon's
+        # `deps` crash handler stops the item naming it, and a test fails
+        # (Kraft-cpotk).
+        for r in results:
+            if isinstance(r, AssertionError):
+                raise r
+        if await _wrote(before, step.path):
+            return [READ_ONLY_VIOLATED] * len(tasks)
+        return list(results)
+
+    async def _handle(handler, scope: str, failed: list[ResolvedTask]):
+        if scope == "step":
+            note = prompts.failure_note(node, [t.task.id for t in failed])
         else:
-            # Recorded before the group runs, not after, so a crash mid-group
-            # resumes at that group rather than past it.
+            session = _latest_session(db, work_item_id, node, failed[0])
+            status = session["status"] if session is not None else "failed"
+            note = prompts.task_failure_note(failed[0].task.id, status, session)
+        return await run_recovery(
+            db,
+            run_dirs,
+            work_item_id,
+            node,
+            row,
+            worktree,
+            handler=handler,
+            scope=scope,
+            failed=failed,
+            note=note,
+            steer=steer,
+            launch=launch,
+            budget=budget,
+            measured_round=round,
+            round=round,
+            loop_severities=loop_severities,
+        )
+
+    async def _recover(step: ResolvedStep, results: list) -> tuple[list, tuple | None]:
+        """`results` after this step's own handlers ran, or the handler's own
+        stop when one could not finish (a pause, a config error, a rate limit
+        ...): that is the verdict, not the task failure it was answering."""
+        if spent is None or any(_is_stop(r) for r in results):
+            return results, None
+        status = {t.path: r for t, r in zip(step.tasks, results, strict=True)}
+        failed = [t for t in step.tasks if _recoverable(status[t.path], node)]
+        if not failed:
+            return results, None
+        for task in failed:
+            if not task.on_failure or task.path in spent:
+                continue
+            spent.add(task.path)
+            verdict, h_failed, h_excs = await _handle(task.on_failure, "task", [task])
+            if verdict == "ok":
+                (status[task.path],) = await _settle([task], step, retry=True)
+            elif verdict != "failed":
+                return results, (verdict, h_failed, h_excs)
+        rest = [t for t in failed if not t.on_failure]
+        if rest and step.on_failure and step.path not in spent:
+            spent.add(step.path)
+            verdict, h_failed, h_excs = await _handle(step.on_failure, "step", rest)
+            if verdict == "ok":
+                # Every task, a task-recovered one too (step-recovery-retries-the-entire-step).
+                return await _settle(step.tasks, step, retry=True), None
+            if verdict != "failed":
+                return results, (verdict, h_failed, h_excs)
+        return [status[t.path] for t in step.tasks], None
+
+    # A read_only node is checked around its own steps, a step around its
+    # tasks (`_settle`); recovery and fix loops run outside either check.
+    node_before = _snapshot(own and getattr(node.node, "read_only", False))
+    outcomes: list[tuple[ResolvedTask, object]] = []
+    for index, step in enumerate(groups):
+        # A resumed node skips the steps before `start_step` -- they already
+        # passed.
+        if index < start_step:
+            continue
+        if own:
+            # Recorded before the step runs, not after, so a crash mid-step
+            # resumes at that step rather than past it.
             await db.write(lambda c, i=index: store.set_current_step(c, work_item_id, i))
-        group_results = await asyncio.gather(*(_measure(t) for t in group), return_exceptions=True)
-        outcomes.extend(zip(group, group_results, strict=True))
-        # Anything but a clean pass stops the node: a later group exists
+        results = await _settle(step.tasks, step)
+        if own:
+            results, stopped = await _recover(step, results)
+            if stopped is not None:
+                return stopped
+        outcomes.extend(zip(step.tasks, results, strict=True))
+        # Anything but a clean pass stops the node: a later step exists
         # precisely because it must not run against an unsettled earlier one.
         # `_ADVANCING` (executor/context.py) is the existing definition of
         # "this task moved the node forward": ("done", "done_with_concerns").
-        if any(isinstance(r, BaseException) or r not in _ADVANCING for r in group_results):
+        if any(isinstance(r, BaseException) or r not in _ADVANCING for r in results):
             break
+    if all(r != READ_ONLY_VIOLATED for _, r in outcomes) and await _wrote(node_before, node.id):
+        outcomes = [(t, READ_ONLY_VIOLATED) for t, _ in outcomes]
     results = [r for _, r in outcomes]
+    # Outranks every other outcome, a pause too: whatever else happened, the
+    # worktree a read_only scope promised to leave alone is not the one it found.
+    if READ_ONLY_VIOLATED in results:
+        return READ_ONLY_VIOLATED, [t for t, r in outcomes if r == READ_ONLY_VIOLATED], []
     # A pause stops the walk where it stands: the node is neither done nor failed,
     # and resume relaunches it. It outranks a co-task's failure, which was almost
     # certainly the same SIGTERM arriving on a different row.
@@ -773,24 +1398,40 @@ async def measure_node(
     # none of those are evidence about anything while a task in this node
     # could not even start (Kraft-579).
     if any(r == CONFIG_ERROR for r in results):
-        failed = [t for t, r in outcomes if r == CONFIG_ERROR]
-        return CONFIG_ERROR, failed, []
+        return CONFIG_ERROR, [t for t, r in outcomes if r == CONFIG_ERROR], []
+    # A scope's time ran out (Ruling 194): nothing about the code failed, and
+    # no recovery or fix cycle may spend more of the time that is gone.
+    if any(r == TIME_CAPPED for r in results):
+        return TIME_CAPPED, [t for t, r in outcomes if r == TIME_CAPPED], []
     if any(r == RATE_LIMITED for r in results):
         return RATE_LIMITED, [], []
+    if any(r == WAIT_TIMED_OUT for r in results):
+        return WAIT_TIMED_OUT, [t for t, r in outcomes if r == WAIT_TIMED_OUT], []
     if any(r == WAITING for r in results):
-        return WAITING, [], []
+        # The waiting tasks, so the stop can park the item until the earliest
+        # of their next observations.
+        return WAITING, [t for t, r in outcomes if r == WAITING], []
     if any(r == INFRA_STOP for r in results):
         return INFRA_STOP, [], []
     # Not a failure, so it must not reach `failed` and open a fix loop or an
-    # on_failure repair. The node stopped on purpose: `run_once` sees the moved
-    # base_ref and bounces.
+    # on_failure repair. The node stopped on purpose.
     if any(r == BASE_MOVED for r in results):
         return BASE_MOVED, [], []
+    # A rebase conflict, in a node that declares the handler for one
+    # (`rebase-conflict-requires-explicit-handler`): that handler, not a
+    # recovery or a fix cycle, answers it. Without one it is a task failure
+    # like any other, below.
+    if own and node.on_conflict:
+        conflicted = [
+            t for t, r in outcomes if r == CONFLICT or isinstance(r, _builtins.RebaseConflict)
+        ]
+        if conflicted:
+            return CONFLICT, conflicted, [r for r in results if isinstance(r, BaseException)]
     # Logged before the BUDGET rung returns: a co-task can raise in the same node
     # as a budget-refused agent, and that traceback is the only record of it.
     excs = [r for r in results if isinstance(r, BaseException)]
     for exc in excs:
-        logger.error("measuring task raised in node %s: %r", node["id"], exc)
+        logger.error("measuring task raised in node %s: %r", node.id, exc)
     # paused > rate_limited > budget > failed. A pause is a human's instruction
     # and outranks everything. A rate limit and a budget breach both outrank a
     # co-task's failure because the agent's "failure" is not evidence about the
@@ -798,42 +1439,182 @@ async def measure_node(
     # spend policy refusing to start, not an external constraint the agent hit.
     if any(r == BUDGET for r in results):
         return BUDGET, [], []
-    failed = [
-        t
-        for t, r in outcomes
-        if isinstance(r, BaseException) or r in ("failed", "needs_context", "conflict")
-    ]
+    # Fail closed: only an advancing status is a pass. `failed`, `needs_context`
+    # and `conflict` are the statuses a task is expected to fail with, and
+    # anything else -- `infra`, `unknown`, a status some adapter invents later --
+    # is a result nobody here understands, which must never read as success
+    # (Kraft-tfnjt). Every stop sentinel has already returned above.
+    failed = [t for t, r in outcomes if isinstance(r, BaseException) or r not in _ADVANCING]
     if failed:
         return "failed", failed, excs
     return "ok", [], []
 
 
-def is_rebase_hook(registry: Registry, hook: str) -> bool:
-    """Whether `hook` is bound to the rebase builtin. Read from the binding, not
-    the name, so a repo that rebinds `on.mr.rebase` keeps the resume exemption."""
-    return registry.hooks.get(hook, {}).get("handler") == "mr_rebase"
-
-
-#: A task in one of these states failed outright -- the same set
-#: `measure_node` treats as failed.
+#: A task in one of these states failed outright. `measure_node` fails these
+#: and, closed, any status it does not recognize too.
 _FAILING_STATUSES = tuple(s for s, tier in SCOPE.items() if tier == "task")
 
+#: Every status that stops a node rather than failing it (`context.SCOPE`'s
+#: `stop` and `chain` tiers). None of them is evidence about the code, so none
+#: of them may spend a recovery.
+_STOPS = frozenset(s for s, tier in SCOPE.items() if tier in ("stop", "chain"))
 
-def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Registry):
-    """(findings, hook points that reported at least one) for one cycle.
+
+def _is_stop(result: object) -> bool:
+    return not isinstance(result, BaseException) and result in _STOPS
+
+
+def _recoverable(result: object, node: ResolvedNode) -> bool:
+    """Whether a task's result is a failure a recovery handler answers.
+
+    Not a stop (`_STOPS`), not a pass, and not `needs_context`: a question an
+    agent asked is addressed to a human, and no repair task can answer it
+    (Kraft-rv6i). A rebase `conflict` belongs to the node's explicit conflict
+    handler when it declares one (`rebase-conflict-requires-explicit-
+    handler`), so no recovery handler spends itself on it first."""
+    if isinstance(result, BaseException) and not isinstance(result, _builtins.RebaseConflict):
+        return True
+    if result in _ADVANCING or result in _STOPS or result == "needs_context":
+        return False
+    conflict = result == CONFLICT or isinstance(result, _builtins.RebaseConflict)
+    return not (conflict and node.on_conflict)
+
+
+def _latest_session(db, work_item_id: str, node: ResolvedNode, task: ResolvedTask):
+    return db.read(
+        lambda c: c.execute(
+            "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
+            "AND hook_point = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (work_item_id, node.id, task.path),
+        ).fetchone()
+    )
+
+
+async def run_recovery(
+    db,
+    run_dirs,
+    work_item_id: str,
+    node: ResolvedNode,
+    row,
+    worktree,
+    *,
+    handler: tuple[ResolvedStep, ...],
+    scope: str,
+    failed: list[ResolvedTask],
+    note: str,
+    steer: Steer | None,
+    launch: LaunchContext | None,
+    budget: _policy.Budget,
+    measured_round: int,
+    round: int,
+    loop_severities: frozenset[str] = _policy.DEFAULT_LOOP_SEVERITIES,
+) -> tuple[str, list[ResolvedTask], list[BaseException]]:
+    """Run one recovery handler -- a task's, a step's, the node's, or the
+    node's conflict handler -- and report its own verdict. Retrying what it
+    recovered is the caller's, because only the caller knows the scope.
+
+    The handler is told what the orchestrator already knows (`note`, and the
+    findings the failing measurement left) so it does not rediscover it
+    (Kraft-s7c04.26). A person's own steer leads and keeps its own template;
+    Kraft's context is appended to it, never substituted for it.
+    """
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "node_recovery_started",
+            {
+                "node_id": node.id,
+                "scope": scope,
+                "failed_tasks": [t.path for t in failed],
+                "tasks": [t.path for step in handler for t in step.tasks],
+            },
+        )
+    )
+    found, _reported = collect_findings(db, work_item_id, node, measured_round)
+    seeded = prompts.seeded_findings_note(found) if found else None
+    note = f"{note}\n{prompts.SUGGEST_ACTION}"
+    context = f"{note}\n\n{seeded}" if seeded else note
+    if steer is not None and steer and not steer.targeted:
+        # A steer addressed to tasks by path is theirs, never a repair's.
+        # `.take()` because the incoming note is folded into the one replacing
+        # it -- leaving it undelivered here would deliver it twice
+        # (Kraft-s7c04.58 covers the two-hook case this single Steer cannot
+        # serve).
+        repair_steer = Steer(f"{steer.take()}\n\n{context}", source=steer.source)
+    else:
+        repair_steer = Steer(context, source="seeded")
+    verdict, h_failed, h_excs = await measure_node(
+        db,
+        run_dirs,
+        work_item_id,
+        node,
+        row,
+        worktree,
+        steps=handler,
+        round=round,
+        steer=repair_steer,
+        launch=launch,
+        budget=budget,
+        loop_severities=loop_severities,
+    )
+    if verdict == "ok" and scope != "conflict":
+        doubted = [
+            t for step in handler for t in step.tasks if repair_doubts(db, work_item_id, node, [t])
+        ]
+        if doubted:
+            return REPAIR_DOUBTED, doubted, []
+    return verdict, h_failed, h_excs
+
+
+def repair_doubts(
+    db, work_item_id: str, node: ResolvedNode, tasks: list[ResolvedTask]
+) -> list[str]:
+    """`task: concerns` for each of `tasks` whose latest session ended
+    `done_with_concerns` -- what `REPAIR_DOUBTED` stops on."""
+    doubts = []
+    for task in tasks:
+        session = _latest_session(db, work_item_id, node, task)
+        if session is not None and session["status"] == "done_with_concerns":
+            concerns = _subprocess.read_concerns(Path(session["result_path"]))
+            doubts.append(f"{task.task.id}: {concerns or '(no concerns given)'}")
+    return doubts
+
+
+def measured_tasks(
+    node: ResolvedNode, steps: tuple[ResolvedStep, ...] | None = None
+) -> dict[str, ResolvedTask]:
+    """The tasks one measuring pass ran, by canonical path.
+
+    The same `steps` defaulting `measure_node` uses, so a readback of a pass
+    over a recovery plan or a fix loop looks at that group's own tasks and not
+    the node's.
+    """
+    return {t.path: t for step in (node.steps if steps is None else steps) for t in step.tasks}
+
+
+def collect_findings(
+    db,
+    work_item_id: str,
+    node: ResolvedNode,
+    round: int,
+    *,
+    steps: tuple[ResolvedStep, ...] | None = None,
+):
+    """(findings, task paths that reported at least one) for one cycle.
 
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
     unfiltered query folds the fix agent's result file into the cycle. Only the
     most recent row per hook point, because a re-entry can measure at a round a
     previous pass already used -- `round` seeds from the persisted fix-loop
-    counter, which a gate rejection or a `ci_wait` poll does not clear, and a
+    counter, which a gate rejection or a wait re-entry does not clear, and a
     `/retry` deletes the counter row so the next pass restarts at 1 instead.
     Either way stale rows sit at the same number.
 
-    A hook that failed without writing a findings file at all -- `on.test.run`
-    is the common case, `kind: subprocess` with no findings schema to write to
-    -- gets a synthesized `Finding` via `_findings.from_blind_failure` instead
+    A task that failed without writing a findings file at all -- the
+    changed-test-scope builtin is the common case, a subprocess with no findings
+    schema to write to -- gets a synthesized `Finding` via `_findings.from_blind_failure` instead
     of vanishing (traced live on a work item that spun for 7 cycles on an
     identical, invisible test failure). `reported` is not extended for it:
     that set means "wrote a real, parseable result file", which a synthesized
@@ -841,9 +1622,9 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     same way and still forces the loop open, now redundantly with `eligible`,
     which is harmless.
 
-    One hook_point can carry more than one row in a single round --
-    `on.test.run`'s scope loop mints one session per matching scope, all under
-    this same hook_point (the identity problem, batch-c1 spec's "The identity
+    One task path can carry more than one row in a single round -- the
+    changed-test-scope builtin mints one session per matching scope, all under
+    this same path (the identity problem, batch-c1 spec's "The identity
     problem underneath all three"). A bare "last wins" read would let a later
     scope's pass silently overwrite an earlier scope's real failure once C2
     stops the loop from short-circuiting on it. Every row for the *latest*
@@ -853,9 +1634,9 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     collapses to the single most recent row for a hook that only ever mints
     one (a re-entry at a *different* head still keeps last-wins there).
 
-    That multi-row read is scoped to `kind: subprocess` hooks -- the only
-    ones a scope loop mints more than one session for -- and not to an agent
-    reviewer. A reviewer that exits `needs_context` stops before
+    That multi-row read is scoped to builtin tasks -- the only ones a scope
+    loop mints more than one session for -- and not to an agent reviewer. A
+    reviewer that exits `needs_context` stops before
     `bump_counter`, so a resume re-enters the same round at the same head:
     without this filter, the stale `needs_context` row (no findings file)
     would still share the latest head_sha, hit the `_FAILING_STATUSES` branch
@@ -870,15 +1651,16 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
     failing job, not several near-identical findings -- the fix agent gets
     one coherent notice about the hook, not a fragmented list.
     """
-    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+    tasks = measured_tasks(node, steps)
+    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
     by_hook: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
-        if row["hook_point"] in node["tasks"]:
+        if row["hook_point"] in tasks:
             by_hook.setdefault(row["hook_point"], []).append(row)  # ordered by created_at
     found: list[_findings.Finding] = []
     reported: set[str] = set()
     for hook, hook_rows in by_hook.items():
-        is_scope_loop = registry.hooks.get(hook, {}).get("kind") == "subprocess"
+        is_scope_loop = isinstance(tasks[hook].task, BuiltinTask)
         latest_head = hook_rows[-1]["head_sha"]
         rows_to_read = (
             [row for row in hook_rows if row["head_sha"] == latest_head]
@@ -895,11 +1677,16 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
                 )
                 found.extend(replace(f, jobs=(job,)) for f in parsed)
             elif row["status"] in _FAILING_STATUSES:
-                binding = registry.hooks.get(hook, {})
-                command = row["command"] or (
-                    shlex.join(binding["command"])
-                    if binding.get("kind") == "subprocess" and binding.get("command")
-                    else None
+                task = tasks[hook].task
+                # An agent's recorded command is its whole argv, prompt and all:
+                # nothing to re-run, and a prompt that carries last round's
+                # findings (`inputs: [carried_findings]`) would fold into this
+                # finding and grow it every round.
+                command = (
+                    None
+                    if isinstance(task, AgentTask)
+                    else row["command"]
+                    or (task.command if isinstance(task, SubprocessTask) else None)
                 )
                 blind_jobs.append(
                     _findings.BlindJob(
@@ -912,30 +1699,29 @@ def collect_findings(db, work_item_id: str, node: dict, round: int, registry: Re
 
 
 def needs_context_question(
-    db, work_item_id: str, node: dict, round: int, *, first_iteration: bool = False
+    db, work_item_id: str, node: ResolvedNode, round: int, *, first_iteration: bool = False
 ) -> str | None:
     """The question from a `needs_context` row in this round, or None.
 
     Same latest-row-per-hook-point read as `collect_findings` (a resume or
     `/retry` re-enters with stale rows still sitting there, so a first-match
     scan could re-stop the item on a historical row forever) but deliberately
-    NOT its `row["hook_point"] in node["tasks"]` filter: the fix task
-    (`on.implementation.start`) is dispatched with this same round, and
-    including it is exactly how a fix task's own `needs_context` is meant to
-    surface, one iteration later.
+    NOT its "only the measured tasks" filter: the fix loop's own tasks are
+    dispatched with this same round, and including them is exactly how a fix
+    task's own `needs_context` is meant to surface, one iteration later.
 
     `first_iteration` is the exception to that, and only that: on the entry's
     very first pass there is by definition no fix from *this* entry yet, so
     any fix row at this round belongs to a bygone one. It matters because
     `walk_node` now seeds `round` from the persisted counter, and it is also
     re-entered on paths that are not resumes -- a gate rejection walking back
-    to a fix_loop node, and the `ci_wait` poller -- where the `retry_counters`
+    to a fix_loop node, and the wait scheduler -- where the `retry_counters`
     row survives (only `retry_after_cap` deletes it). Without this, the last
     pass's fix question would stop the new pass before it ran a single cycle:
     the same stranding `ESCALATION_HOOK` below closes, through a third door.
     Defaults off so every other caller keeps today's behaviour.
 
-    `JUDGE_HOOK` is the one exception. The judge is a brake bolted onto the
+    The fix loop's judge is the one exception. The judge is a brake bolted onto the
     cap and never a second way to get stuck (`_judge_result` fails open
     in-process), but its session row persists -- so without this filter a
     judge that exited `needs_context` would strand the item on the judge's
@@ -951,12 +1737,13 @@ def needs_context_question(
     reviewed and discarded twice with no code changed, and the item was then
     skipped with a CRITICAL finding still open (Kraft-7itv follow-up).
     """
-    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round))
+    skip = {ESCALATION_HOOK} | ({node.judge.path} if node.judge is not None else set())
+    if first_iteration:
+        skip |= {t.path for step in node.fix_loop for t in step.tasks}
+    rows = db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round))
     latest: dict[str, sqlite3.Row] = {}
     for row in rows:
-        if row["hook_point"] in (JUDGE_HOOK, ESCALATION_HOOK):
-            continue
-        if first_iteration and row["hook_point"] == "on.implementation.start":
+        if row["hook_point"] in skip:
             continue
         latest[row["hook_point"]] = row  # ordered by created_at, so last wins
     for row in latest.values():
@@ -965,7 +1752,17 @@ def needs_context_question(
     return None
 
 
-def previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | None:
+def fix_task_paths(node: ResolvedNode) -> list[str]:
+    """Every canonical path this node's fix loop dispatches under.
+
+    A fix loop is an ordered shape like any other, so it can hold several
+    tasks; the readbacks below want "any of this node's fix work", which is the
+    whole set rather than one name.
+    """
+    return [t.path for step in node.fix_loop for t in step.tasks]
+
+
+def previous_fix_session(db, work_item_id: str, node: ResolvedNode) -> sqlite3.Row | None:
     """The most recently dispatched fix task for this node, or None if none
     has run yet.
 
@@ -973,7 +1770,7 @@ def previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | N
     `walk_node`'s own local counter, and on a fresh entry into that function it
     seeds from the persisted `retry_counters` row -- so it lands back on a
     number a *previous* pass over this node already used (a gate rejection
-    walking back here, or the `ci_wait` poller, neither of which clears the
+    walking back here, or the wait scheduler, neither of which clears the
     counter), or on 0 after a `/retry` that deleted the row so the next
     `bump_counter` restarts at 1. Either way the `worker_sessions` rows from
     before that re-entry are still in the table. A lookup keyed on the caller's
@@ -986,11 +1783,14 @@ def previous_fix_session(db, work_item_id: str, node_id: str) -> sqlite3.Row | N
     forward, regardless of what round it or the caller's local counter think
     they're at.
     """
+    paths = fix_task_paths(node)
+    if not paths:
+        return None
     rows = db.read(
         lambda c: c.execute(
             "SELECT * FROM worker_sessions WHERE work_item_id = ? AND node_id = ? "
-            "AND hook_point = 'on.implementation.start' ORDER BY created_at",
-            (work_item_id, node_id),
+            f"AND hook_point IN ({','.join('?' * len(paths))}) ORDER BY created_at",
+            (work_item_id, node.id, *paths),
         ).fetchall()
     )
     return rows[-1] if rows else None
@@ -1011,9 +1811,10 @@ def last_measurement(
     guessing.
 
     The whole findings, not their fingerprints: the caller derives the tags it
-    used to get, and the messages and severities are what `prompts.
-    carried_findings_note` hands the next reviewer (Kraft-s7c04.1) and what
-    `walk._carry_severity` floors a repeat's rating against (Kraft-s7c04.3).
+    used to get, and the messages and severities are what `walk._carry_severity`
+    floors a repeat's rating against (Kraft-s7c04.3) -- and what
+    `prompts.carried_findings_note` hands the next reviewer that declares
+    `inputs: [carried_findings]` (Kraft-s7c04.1).
     Returning both would make this the second reader of `findings_measured` in
     this module, which `unresolved_findings_steer`'s docstring forbids for good
     reason -- three readers of one event is three things to keep in step.
@@ -1026,9 +1827,9 @@ def last_measurement(
     measurement is ever returned, so nothing older than one round can leak into
     `resolve_identity`'s `known` however long the item's history is.
 
-    Read from the event log rather than carried in a local: `kraft.executor.
-    resuming.reconcile_current_node` re-enters `kraft.executor.walk.walk_node`
-    after a crash or a resume with the counter intact, and a loop holding its
+    Read from the event log rather than carried in a local: crash resume and
+    `/resume` re-enter the node through `kraft.executor.walk.run_once` with the
+    counter intact, and a loop holding its
     history in the stack frame forgets everything it has seen — on exactly the
     path that motivates escalation.
 
@@ -1045,10 +1846,17 @@ def last_measurement(
     """
     evts = db.read(lambda c: events.read_after(c, 0, work_item_id))
     fix_seen = False
+    # A cycle that started and was refunded (`fix_cycle_refunded`, Kraft-jdkoq)
+    # never repaired anything, so it is not a fix having run.
+    refunded: set[int] = set()
     for e in reversed(evts):
-        if e["type"] == "fix_cycle_started" and e["payload"].get("node_id") == node_id:
+        if e["payload"].get("node_id") != node_id:
+            continue
+        if e["type"] == "fix_cycle_refunded":
+            refunded.add(e["payload"].get("cycle"))
+        elif e["type"] == "fix_cycle_started" and e["payload"].get("cycle") not in refunded:
             fix_seen = True
-        elif e["type"] == "findings_measured" and e["payload"].get("node_id") == node_id:
+        elif e["type"] == "findings_measured":
             return (
                 [_findings.from_payload(f) for f in e["payload"].get("findings", [])],
                 fix_seen,
@@ -1057,17 +1865,9 @@ def last_measurement(
     return None, False, None
 
 
-#: The fix loop's judge hook (2026-09-12-verify-fix-loop-judge-design):
-#: dispatched directly by `kraft.executor.walk.walk_node`, the same way
-#: `on.implementation.start` is -- not from a node's own `tasks` list, so it
-#: never contaminates `collect_findings`/`needs_context_question`'s per-task
-#: reads, and every node with a `fix_loop` gets it unconditionally (spec
-#: decision 4: no new policy field).
-JUDGE_HOOK = "on.fix_loop.judge"
-
 #: The escalation hook's own `hook_point`. Not a node task and not dispatched
 #: from a `tasks` list -- `escalate.dispatch` writes it directly -- so, like
-#: `JUDGE_HOOK`, its session rows sit in the same `(node, round)` scan that
+#: the node's judge, its session rows sit in the same `(node, round)` scan that
 #: `needs_context_question` reads and must be skipped there. Named rather than
 #: spelled out at each site because `reattach` compares against it too.
 ESCALATION_HOOK = "escalation"
@@ -1097,6 +1897,7 @@ def judge_history(
     node_id: str,
     loop_severities: frozenset[str],
     evts: list | None = None,
+    fix_paths: Sequence[str] = (),
 ) -> list[dict]:
     """Every round measured so far for this node, oldest first: the judge's
     cross-round view (spec's "cheap pointers, not full transcripts" input) --
@@ -1111,7 +1912,7 @@ def judge_history(
     """
     # Kept in event order in a list, never keyed by the event's own `cycle`:
     # `walk_node` seeds `round` from the loop counter on every re-entry
-    # (ci_wait poller, crash resume, /retry), and that counter persists across
+    # (wait scheduler, crash resume, /retry), and that counter persists across
     # the re-entries that are not resumes -- so a new entry's first measurement
     # lands on a cycle number the previous entry already measured at, and a
     # /retry that cleared the counter lands back on 0 where the first entry
@@ -1141,12 +1942,21 @@ def judge_history(
                     ],
                 )
             )
-    fix_rows = db.read(
-        lambda c: c.execute(
-            "SELECT round, result_path FROM worker_sessions WHERE work_item_id = ? "
-            "AND node_id = ? AND hook_point = 'on.implementation.start' ORDER BY round",
-            (work_item_id, node_id),
-        ).fetchall()
+    #: `fix_paths` is the node's own fix-loop task paths (`fix_task_paths`).
+    #: A caller that only wants the per-round findings -- `/retry`'s seeded
+    #: steer, which has a node id and no resolved node -- passes none and gets
+    #: no fix pointers rather than a second chain read it has no use for.
+    fix_rows = (
+        db.read(
+            lambda c: c.execute(
+                "SELECT round, result_path FROM worker_sessions WHERE work_item_id = ? "
+                f"AND node_id = ? AND hook_point IN ({','.join('?' * len(fix_paths))}) "
+                "ORDER BY round",
+                (work_item_id, node_id, *fix_paths),
+            ).fetchall()
+        )
+        if fix_paths
+        else []
     )
     # Fix rounds come from `bump_counter`, which does not reset across
     # re-entries, so unlike the measurements these are collision-free.
@@ -1271,14 +2081,13 @@ async def judge_verdict(
     db,
     run_dirs,
     work_item_id: str,
-    node: dict,
+    node: ResolvedNode,
     row,
-    registry: Registry,
     worktree,
     *,
     round: int,
     key: str,
-    eligible: list[_findings.Finding],
+    cap: _policy.Cap,
     policy: _policy.Policy,
     launch: LaunchContext | None,
     budget: _policy.Budget,
@@ -1289,21 +2098,26 @@ async def judge_verdict(
     one of `"continue"`/`"stop_needs_human"`/`"stop_downgrade"`, never
     anything else -- `_judge_result` is the only place that decides which.
 
-    A registry with no `JUDGE_HOOK` binding at all -- a hand-built test
-    registry, or a real install's `registry.yaml` from before this feature
-    landed -- fails open the same as any other untrusted outcome, rather
-    than a `KeyError` out of `dispatch_node`'s own lookup.
+    A fix loop with no judge at all (`fix-loop-judge-is-optional`) fails open
+    the same as any other untrusted outcome, rather than dispatching a task
+    that does not exist.
+
+    `cap` is the caller's already-resolved cap, not re-resolved here: the judge
+    is shown the same budget the loop will actually enforce, and one resolution
+    per cycle cannot disagree with itself.
     """
-    if JUDGE_HOOK not in registry.hooks:
+    judge = node.judge
+    if judge is None:
         return "continue", ""
-    cap = _policy.resolve_cap(policy, key, store.node_overrides_of(row).get(node["id"]))
     counter = db.read(lambda c: store.read_counter(c, work_item_id, key))
     attempts_used = counter["count"] if counter else 0
     started_at = counter["started_at"] if counter else _now()
     elapsed = (datetime.fromisoformat(_now()) - datetime.fromisoformat(started_at)).total_seconds()
-    history = judge_history(db, work_item_id, node["id"], policy.loop_severities)
+    history = judge_history(
+        db, work_item_id, node.id, policy.loop_severities, fix_paths=fix_task_paths(node)
+    )
     instruction = prompts.JUDGE_PROMPT.format(
-        node_id=node["id"],
+        node_id=node.id,
         history=prompts.format_judge_history(history),
         attempts_used=attempts_used,
         cap_attempts=cap.attempts,
@@ -1313,10 +2127,9 @@ async def judge_verdict(
     status = await dispatch_node(
         db,
         run_dirs,
-        JUDGE_HOOK,
+        judge,
         node,
         row,
-        registry,
         worktree,
         instruction_override=instruction,
         round=round,
@@ -1326,8 +2139,8 @@ async def judge_verdict(
     if status == "paused":
         return "paused", ""
     session = None
-    for s in db.read(lambda c: store.sessions_for_round(c, work_item_id, node["id"], round)):
-        if s["hook_point"] == JUDGE_HOOK:
+    for s in db.read(lambda c: store.sessions_for_round(c, work_item_id, node.id, round)):
+        if s["hook_point"] == judge.path:
             session = s  # ordered by created_at -- last one wins
     if session is None:
         return "continue", ""

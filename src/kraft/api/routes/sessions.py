@@ -11,9 +11,12 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
-from kraft import events
+from kraft import escalate, events, store
 from kraft import logs as logs_mod
-from kraft.api import api_router, perimeter
+from kraft.adapters import agent as _agent
+from kraft.api import api_router, deps, perimeter
+from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
+from kraft.templates.models import AgentTask
 
 
 def _session_row(st, sid: str):
@@ -32,13 +35,18 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
 
     Stops one poll *after* the session stops being pending or running, so the
     lines written between the last poll and the exit are not dropped on the
-    floor.
+    floor. That last read is `final`, so a line the agent never finished is
+    sent too.
+
+    One `logs.Tail` per stream, read in a worker thread: each poll reads only
+    what was written since the last, and never on the loop that serves every
+    other request (Kraft-21jy). The status check stays on the loop -- a primary
+    key lookup on the reader connection, which belongs to this thread.
     """
-    sent = 0
+    tail = logs_mod.Tail(path)
     running = True
     while True:
-        for line in logs_mod.jsonl(path, start_line=sent):
-            sent = line["n"] + 1
+        for line in await asyncio.to_thread(tail.read, final=not running):
             yield f"data: {json.dumps(line)}\n\n"
         if not running:
             break
@@ -53,7 +61,11 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
 @api_router.get("/worker-sessions/{sid}/log")
 async def get_log(sid: str, request: Request, format: str | None = None, follow: bool = False):
     """Plain text by default (the modal's copy button); `format=jsonl` for the
-    filterable, followable view (design 6c)."""
+    filterable, followable view (design 6c).
+
+    The jsonl views are bounded (`logs.MAX_LOG_BYTES`, with a marker row when
+    they had to be); plain text is the whole file, streamed from disk, which is
+    what that marker points a reader at."""
     st = request.app.state
     row = _session_row(st, sid)
     path = Path(row["log_path"])
@@ -64,7 +76,16 @@ async def get_log(sid: str, request: Request, format: str | None = None, follow:
                 media_type="text/event-stream",
                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
             )
-        return {"session_id": sid, "status": row["status"], "lines": list(logs_mod.jsonl(path))}
+        tail = logs_mod.Tail(path)
+        lines = await asyncio.to_thread(tail.read, final=True)
+        # `next_line`: where a follow resumes when no line was printed to
+        # resume after (`kraft view logs -n 0 -f`, Kraft-tbnse).
+        return {
+            "session_id": sid,
+            "status": row["status"],
+            "lines": lines,
+            "next_line": tail.next_line,
+        }
     if not path.exists():
         raise HTTPException(404, "log not found")
     return FileResponse(path, media_type="text/plain")
@@ -80,16 +101,64 @@ class PermissionAsk(BaseModel):
     tool_use_id: str | None = None
 
 
+def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
+    """`(allowed_tools, deny_tools)` as this session's own launch resolved
+    them, or raise naming why they cannot be known.
+
+    From the V1 task at the session's canonical path, under the policy it
+    resolves at its scope (`MaterializedChain.policy_for`, Kraft-v4nrd), through
+    the same `resolve_agent_task` the launch passed to `--allowedTools`/
+    `--disallowed-tools` -- never the legacy registry keyed by hook name, which
+    no V1 path matches (Kraft-hwrks). An allowlist of `None` is unbounded: no
+    layer set one. An escalation turn is node-scoped (Kraft-l8ype): it is
+    answered from the policy of the node its session sits at, as
+    `escalate.dispatch` launched it.
+    """
+    item = st.db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_items WHERE id = ?", (row["work_item_id"],)
+        ).fetchone()
+    )
+    snapshot = store.materialized_chain_of(item) if item is not None else None
+    if snapshot is None:
+        raise LookupError("its work item has no materialized chain")
+    if row["hook_point"] == ESCALATION_HOOK:
+        scope = next((n for n in snapshot.chain.nodes if n.id == row["node_id"]), None)
+        if scope is None:
+            raise LookupError(f"no node {row['node_id']!r} in its work item's chain")
+        agent_task = escalate.ESCALATION_TASK
+    else:
+        scope = next(
+            (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
+            None,
+        )
+        if scope is None or not isinstance(scope.task, AgentTask):
+            raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
+        agent_task = scope.task
+    launch = deps.launch(st, item["repo"])
+    inv = _agent.resolve_agent_task(
+        agent_task,
+        launch.repo_entry,
+        launch.library_steering,
+        skills_dir=launch.skills_dir,
+        steering=snapshot.chain.steering,
+        repository_steering=snapshot.repository_steering,
+        policy=scope_policy(item, scope),
+    )
+    return inv.allowed_tools, inv.deny_tools
+
+
 @api_router.post("/worker-sessions/{sid}/permission")
 async def permission_request(sid: str, body: PermissionAsk, request: Request):
-    """Answer a worker's permission prompt from its node's grant (Kraft-oor).
+    """Answer a worker's permission prompt from its task's grant (Kraft-oor).
 
-    The policy is the hook binding's `allowed_tools` (Kraft-3tw), resolved
-    session -> hook_point -> binding. A binding that declares none allows
-    everything: `--permission-mode auto` already resolves these asks silently
-    today, and a default that denied would turn an observability change into a
-    behaviour change on every node at once. A binding that *does* declare an
-    allowlist is taken at its word.
+    The grant is the task's resolved policy, as its launch resolved it
+    (`_resolved_tools`): a tool in `deny_tools` is denied; otherwise, when no
+    layer set `allowed_tools`, every tool is allowed -- an unset
+    `maxima.allowed_tools` bounds nothing -- and when one did, only what it
+    lists, so an empty allowlist allows nothing. A grant that cannot be
+    resolved at all -- the task or its profile gone -- is denied: not knowing
+    is not a grant.
 
     Every decision appends an event. That is the whole point -- it is the only
     way the orchestrator ever learns what a worker decided it was allowed to do.
@@ -102,16 +171,23 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     )
     if row is None:
         raise HTTPException(404, "unknown session")
-    allowed = st.registry.hooks.get(row["hook_point"], {}).get("allowed_tools") or []
-    if not allowed:
-        decision, reason = "allow", f"{row['node_id']} declares no allowed_tools"
-    elif body.tool_name in allowed:
-        decision, reason = "allow", f"{body.tool_name} is in {row['node_id']}'s allowed_tools"
+    task = row["hook_point"]
+    try:
+        allowed, denied = _resolved_tools(st, row)
+    except Exception as exc:  # noqa: BLE001 -- fail closed on any resolution failure
+        decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
-        decision, reason = (
-            "deny",
-            f"{body.tool_name} is not in {row['node_id']}'s allowed_tools ({', '.join(allowed)})",
-        )
+        if body.tool_name in denied:
+            decision, reason = "deny", f"{body.tool_name} is in {task}'s deny_tools"
+        elif allowed is None:
+            decision, reason = "allow", f"no layer of {task}'s policy sets allowed_tools"
+        elif body.tool_name in allowed:
+            decision, reason = "allow", f"{body.tool_name} is in {task}'s allowed_tools"
+        else:
+            decision, reason = (
+                "deny",
+                f"{body.tool_name} is not in {task}'s allowed_tools ({', '.join(allowed)})",
+            )
     await st.db.write(
         lambda c: events.append(
             c,

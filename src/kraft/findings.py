@@ -199,9 +199,13 @@ def resolve_identity(found: list[Finding], known: frozenset[str] | set[str]) -> 
     fiction, stopping a loop that is converging.
 
     `known` is the set of tags this round's reviewer was actually handed, which
-    is exactly what `prompts.carried_findings_note` listed for it. A finding
+    was exactly what `prompts.carried_findings_note` listed for it. A finding
     whose claim fails falls back to its own prose hash, which is what it would
     have had before it claimed anything.
+
+    Under Template Schema V1 a reviewer is shown tags only when its task
+    declares `inputs: [carried_findings]`; for one that does not, no `same_as`
+    can legitimately arrive and this strips any that does.
     """
     return [f if not f.same_as or f.same_as in known else replace(f, same_as=None) for f in found]
 

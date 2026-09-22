@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Literal, get_args
 
 from kraft.store import _now as _now  # test seam for wall-clock checks
 
 #: Root merge policies (design 1g). What happens to the root repo's submodule
 #: pointer once the submodule MRs land.
-ROOT_MERGE_POLICIES = ("bump", "skip", "bump_no_mr")
+RootMergePolicy = Literal["bump", "skip", "bump_no_mr"]
+ROOT_MERGE_POLICIES = get_args(RootMergePolicy)
 
 
 def merge_rank_order(paths: list[str]) -> list[str]:
@@ -67,8 +69,11 @@ def repos_for(conn: sqlite3.Connection, work_item_id: str) -> list[dict]:
 def update_repo_state(
     conn: sqlite3.Connection, repo_row_id: int, *, merge_state: str, mr_ref: dict | None = None
 ) -> None:
-    """Record what a forge call just learned about one repo's merge request."""
+    """Record what a forge call just learned about one repo's merge request.
+    No `mr_ref` keeps the one already recorded: a merge changes the state,
+    not which merge request it was (Kraft-mjsf)."""
     conn.execute(
-        "UPDATE work_item_repos SET merge_state = ?, mr_ref = ?, updated_at = ? WHERE id = ?",
+        "UPDATE work_item_repos SET merge_state = ?, mr_ref = COALESCE(?, mr_ref), "
+        "updated_at = ? WHERE id = ?",
         (merge_state, json.dumps(mr_ref) if mr_ref else None, _now(), repo_row_id),
     )

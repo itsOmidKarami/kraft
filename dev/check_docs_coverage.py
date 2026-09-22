@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -88,19 +89,19 @@ def policy_fields() -> set[str]:
 def access_fields() -> set[str]:
     from kraft import config
 
-    return set(config.ACCESS_DEFAULT)
+    return set(config.Access.model_fields)
 
 
-def registry_agent_default_keys() -> set[str]:
-    from kraft import templates
+def agent_task_keys() -> set[str]:
+    from kraft.templates.models import AgentTask
 
-    return set(templates._AGENT_ONLY_KEYS)
+    return set(AgentTask.model_fields)
 
 
-def template_composition_keys() -> set[str]:
-    from kraft import templates
+def library_sections() -> set[str]:
+    from kraft.templates.library import Namespace
 
-    return set(templates._COMPOSITION_KEYS)
+    return {n.value for n in Namespace}
 
 
 def harness_capabilities() -> set[str]:
@@ -116,15 +117,45 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("MCP tools", mcp_tool_names, "agent-integration.md"),
     ("policy.yaml fields", policy_fields, "configuration.md"),
     ("access.yaml fields", access_fields, "configuration.md"),
-    ("registry.yaml defaults.agent keys", registry_agent_default_keys, "configuration.md"),
-    ("chain template composition keys", template_composition_keys, "concepts.md"),
+    ("library.yaml agent task keys", agent_task_keys, "configuration.md"),
+    ("library.yaml sections", library_sections, "configuration.md"),
     ("harness capabilities", harness_capabilities, "harnesses.md"),
 ]
+
+
+#: A backticked gate-shaped name in the docsite: `spec_approval`, and the
+#: legacy `human_review_approval` this check exists to catch (Kraft-cusz8).
+_GATE_NAME = re.compile(r"`([a-z][a-z0-9_]*_approval)`")
+
+
+def unknown_gates() -> list[str]:
+    """`page: name` for every gate-shaped name the docsite gives that no
+    shipped chain has -- the reverse direction of CHECKS: a doc naming a gate
+    that does not exist sends a reader looking for it."""
+    from kraft.templates.library import TemplateLibrary
+    from kraft.templates.models import GateNode
+
+    library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
+    gates = {
+        n.id
+        for id in library.chain_ids
+        for n in library.resolve_chain(id).nodes
+        if isinstance(n.node, GateNode)
+    }
+    return [
+        f"{page.name}: {name}"
+        for page in sorted(DOCSITE.glob("*.md"))
+        for name in sorted(set(_GATE_NAME.findall(page.read_text())))
+        if name not in gates
+    ]
 
 
 def main() -> int:
     sys.path.insert(0, str(ROOT / "src"))
     failed = False
+    for unknown in unknown_gates():
+        failed = True
+        print(f"docsite/{unknown}: names a gate no shipped chain has")
     for label, extractor, page in CHECKS:
         text = (DOCSITE / page).read_text()
         missing = sorted(term for term in extractor() if term not in text)

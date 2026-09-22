@@ -27,7 +27,9 @@ import sqlite3
 import statistics
 from datetime import UTC, datetime, timedelta
 
-from kraft.store._common import session_wall_ms
+from kraft import caps as _caps
+from kraft.store._common import session_wall_ms, wait_timed_out_sessions
+from kraft.usage import KINDS, spent
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
 
@@ -49,6 +51,37 @@ def _parse(ts: str | None) -> datetime | None:
         return datetime.fromisoformat(ts) if ts else None
     except ValueError:
         return None
+
+
+def _node_roles(row) -> tuple[set[str], set[str]]:
+    """This item's (merge nodes, fix-loop nodes), by what each node does and
+    never by its name (Kraft-hicln): a V1 row's `chain_definition` is `"{}"`
+    and no seeded V1 node is called `verify`.
+
+    V1 reads the materialized chain: a merge node runs a forge task targeting
+    `mr.merge`, a fix-loop node declares a `fix_loop`. A legacy row, filed
+    before V1 and still in the database, keeps the legacy reading of the same
+    two facts: an `on.merge` task, a `fix_loop` key.
+    """
+    from kraft.store.chain import materialized_chain_of
+    from kraft.templates.models import ForgeAction, ForgeTask
+
+    chain = materialized_chain_of(row)
+    if chain is not None:
+        merge = {
+            n.id
+            for n in chain.chain.nodes
+            if any(
+                isinstance(t.task, ForgeTask) and t.task.target is ForgeAction.MR_MERGE
+                for t in n.tasks()
+            )
+        }
+        return merge, {n.id for n in chain.chain.nodes if n.fix_loop}
+    nodes = json.loads(row["chain_definition"] or "{}").get("nodes", [])
+    return (
+        {n["id"] for n in nodes if "on.merge" in (n.get("tasks") or [])},
+        {n["id"] for n in nodes if n.get("fix_loop")},
+    )
 
 
 def _week_start(ts: str) -> str | None:
@@ -261,8 +294,8 @@ def compute(
         args.append(template)
 
     items = conn.execute(
-        f"SELECT id, repo, chain_template, status, chain_definition, created_at, updated_at "
-        f"FROM work_items WHERE {' AND '.join(where)}",
+        f"SELECT id, repo, chain_template, status, chain_definition, materialized_chain, "
+        f"created_at, updated_at FROM work_items WHERE {' AND '.join(where)}",
         args,
     ).fetchall()
     ids = [r["id"] for r in items]
@@ -277,8 +310,9 @@ def compute(
         "mrs_merged": 0,
         "wall_ms": 0,
         "human_wait_ms": 0,
-        "tokens_in": 0,
-        "tokens_out": 0,
+        # each kind apart (Ruling 211); `split_complete` as in `usage_rollup`
+        **dict.fromkeys(KINDS, 0),
+        "split_complete": True,
         "cost_usd": 0.0,
         # false once a session has spent tokens without reporting a cost: the sum
         # is then a floor, and the view says so rather than showing a total that
@@ -286,6 +320,8 @@ def compute(
         "cost_complete": True,
         "rounds": 0,
         "capped_out": 0,
+        "wait_timed_out": 0,
+        "time_capped": 0,
         "completed": 0,
         "median_lead_ms": 0,
         "human_wait_pct": 0,
@@ -339,12 +375,17 @@ def compute(
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
     holes = ",".join("?" * len(ids))
     sessions = conn.execute(
-        f"SELECT work_item_id, node_id, round, tokens_in, tokens_out, cost_usd, wall_ms, "
+        f"SELECT id, work_item_id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, "
         f"status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
         ids,
     ).fetchall()
     repo_of = {r["id"]: r["repo"] for r in items}
+    # A wait that ran out also exits `capped_out`; it is counted on its own,
+    # never as a fix loop's cap (Kraft-uwbc8).
+    timed_out = wait_timed_out_sessions(conn, ids)
+    # So is a time cap's stop (Ruling 194).
+    time_capped = _caps.time_capped_sessions(conn, ids)
     node_rounds: dict[str, set[tuple[str, int]]] = {}
     item_node_rounds: dict[str, set[tuple[str, int]]] = {}
     node_capped_items: dict[str, set[str]] = {}
@@ -361,9 +402,11 @@ def compute(
                 "cost_complete": True,
                 "rounds": 0,
                 "capped_out": 0,
+                "wait_timed_out": 0,
+                "time_capped": 0,
             },
         )
-        tok = (s["tokens_in"] or 0) + (s["tokens_out"] or 0)
+        tok = spent(s)
         # Derived when the column is NULL: only `session_exited` writes it, and
         # a paused session never gets there -- 71 rows, every one of them with
         # the stamps to answer with (Kraft-s7c04.18). This rollup is the one
@@ -373,8 +416,13 @@ def compute(
         node["wall_ms"] += wall
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
-        node["capped_out"] += 1 if s["status"] == "capped_out" else 0
-        if s["status"] == "capped_out":
+        waited_out = s["id"] in timed_out
+        cut = s["id"] in time_capped
+        capped = s["status"] == "capped_out" and not (waited_out or cut)
+        node["capped_out"] += 1 if capped else 0
+        node["wait_timed_out"] += 1 if waited_out else 0
+        node["time_capped"] += 1 if cut else 0
+        if capped:
             node_capped_items.setdefault(s["node_id"], set()).add(s["work_item_id"])
         if s["cost_usd"] is None and tok:
             node["cost_complete"] = False
@@ -383,11 +431,15 @@ def compute(
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 
-        totals["tokens_in"] += s["tokens_in"] or 0
-        totals["tokens_out"] += s["tokens_out"] or 0
+        for k in KINDS:
+            totals[k] += s[k] or 0
+        if s["tokens_cache_read"] is None and tok:
+            totals["split_complete"] = False
         totals["cost_usd"] += s["cost_usd"] or 0.0
         totals["wall_ms"] += wall
-        totals["capped_out"] += 1 if s["status"] == "capped_out" else 0
+        totals["capped_out"] += 1 if capped else 0
+        totals["wait_timed_out"] += 1 if waited_out else 0
+        totals["time_capped"] += 1 if cut else 0
 
         rr = by_repo[repo_of[s["work_item_id"]]]
         rr["tokens"] += tok
@@ -395,11 +447,24 @@ def compute(
 
     for node_id, seen in node_rounds.items():
         by_node[node_id]["rounds"] = len(seen)
-    verify_rounds = node_rounds.get("verify")
-    if verify_rounds:
-        verify_items = {wid for wid, _ in verify_rounds}
-        totals["fix_cycles"] = round(len(verify_rounds) / len(verify_items), 1)
-        totals["fix_cycles_capped"] = len(node_capped_items.get("verify", ()))
+    roles = {r["id"]: _node_roles(r) for r in items}
+    loop_rounds = {
+        (wid, node_id, rnd)
+        for node_id, seen in node_rounds.items()
+        for wid, rnd in seen
+        if node_id in roles[wid][1]
+    }
+    if loop_rounds:
+        loop_items = {wid for wid, _, _ in loop_rounds}
+        totals["fix_cycles"] = round(len(loop_rounds) / len(loop_items), 1)
+        totals["fix_cycles_capped"] = len(
+            {
+                wid
+                for node_id, wids in node_capped_items.items()
+                for wid in wids
+                if node_id in roles[wid][1]
+            }
+        )
     for node in by_node.values():
         node["avg_ms"] = node["wall_ms"] // node["runs"] if node["runs"] else 0
     # an item's rounds is the deepest single node's loop count, summed over items
@@ -416,14 +481,7 @@ def compute(
         rr["cycles"] = round(sum(rl) / len(rl), 1) if rl else 0.0
 
     # ── events: merges and human wait ────────────────────────────────────────
-    merge_nodes = {
-        r["id"]: {
-            n["id"]
-            for n in json.loads(r["chain_definition"]).get("nodes", [])
-            if "on.merge" in (n.get("tasks") or [])
-        }
-        for r in items
-    }
+    merge_nodes = {wid: merge for wid, (merge, _) in roles.items()}
     events = conn.execute(
         f"SELECT work_item_id, type, payload, created_at FROM events "
         f"WHERE work_item_id IN ({holes}) ORDER BY seq",

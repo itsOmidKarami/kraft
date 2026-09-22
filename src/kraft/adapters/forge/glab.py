@@ -7,17 +7,28 @@ from pathlib import Path
 
 from kraft.adapters.forge import git
 from kraft.adapters.forge import mr as mr_ops
-from kraft.adapters.forge.models import MR, CIState, CIStatus, FailedJob, ForgeError, MRRef
+from kraft.adapters.forge.models import (
+    MR,
+    CIState,
+    CIStatus,
+    FailedJob,
+    ForgeError,
+    MRRef,
+    ReviewResult,
+)
 
 #: glab's pipeline vocabulary, from `glab ci list --help` (glab 1.116.0).
 #: 'skipped' is deliberately not success: nothing proved the branch green, and
 #: the next node is merge. Anything unrecognised falls through to 'failed' for
 #: the same reason — guessing in the direction of merging is the one guess that
-#: cannot be walked back.
+#: cannot be walked back. 'canceled' is a wait, not red: a cancelled pipeline
+#: is never a verdict (Kraft-zn8me). `set_labels` re-creates the MR pipeline
+#: and auto-cancel of redundant pipelines cancels the old one; a pipeline a
+#: person cancelled with no successor is `ci.render_ci`'s "abandoned".
 _GLAB_STATES: dict[str, CIState] = {
     "success": "success",
     "failed": "failed",
-    "canceled": "failed",
+    "canceled": "pending",
     "skipped": "failed",
     "running": "pending",
     "pending": "pending",
@@ -52,7 +63,7 @@ _GLAB_MR_STATES: dict[str, str] = {
 _UNREADABLE_JOBS = (FailedJob("(unreadable)", "failed", None),)
 
 
-class GlabCli:
+class GlabCli(mr_ops.CliWaits):
     """GitLab through `glab`. Credentials stay in glab's own keyring."""
 
     async def open_mr(
@@ -60,11 +71,12 @@ class GlabCli:
         *,
         repo: Path,
         branch: str,
+        base: str,
         title: str,
         body: str,
         meta: mr_ops.MRMeta | None = None,
     ) -> MR:
-        await git.assert_clean(repo)
+        await git.assert_clean(repo, base)
         # Both forges refuse to create against an unpushed branch. `--fill --yes`
         # would push too, but pushing explicitly keeps the failure legible when
         # it is the push that fails rather than the create.
@@ -83,6 +95,8 @@ class GlabCli:
                 # the gate that decides it's ready, not this call (draft-MR
                 # workflow spec). `mr_sync` un-drafts it after the gate.
                 "--draft",
+                "--target-branch",
+                base,
                 "--title",
                 mr_ops.mr_title(title),
                 "--description",
@@ -149,7 +163,7 @@ class GlabCli:
         self, *, repo: Path, mr: MR, branch: str = "", pipeline_id: str = ""
     ) -> CIStatus:
         # The merge request's own state first: a conflict fails the check node
-        # whatever colour the pipeline is, and `ci.poll_ci` must not wait out a
+        # whatever colour the pipeline is, and no wait should sit out a
         # pipeline to learn it (Kraft-ejj9). Only meaningful pre-merge, on the
         # checked-out feature branch that actually has an open MR -- see
         # `branch_ci_status` for the post-merge, no-MR read.
@@ -212,7 +226,8 @@ class GlabCli:
                 top = mr_ops.parse_json(raw, "glab ci get")
             except ForgeError:
                 top = None
-            if isinstance(top, dict) and top:
+            # A cancelled pin has a successor to find, so it falls through too.
+            if isinstance(top, dict) and top and top.get("status") != "canceled":
                 raw_state = str(top.get("status", ""))
                 state: CIState = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
@@ -241,7 +256,7 @@ class GlabCli:
         rows = mr_ops.parse_json(raw, "glab ci list")
         # No pipeline yet is not a green one.
         state = "pending"
-        url, jobs, sha, pipeline_ref = "", ("no pipeline yet",), "", ""
+        url, jobs, sha, pipeline_ref, cancelled_at = "", ("no pipeline yet",), "", "", ""
         failed_jobs = ()
         if rows:
             top = rows[0]
@@ -262,8 +277,11 @@ class GlabCli:
                 raw_state = str(top.get("status", ""))
                 state = _GLAB_STATES.get(raw_state, "failed")
                 url = str(top.get("web_url", ""))
-                pipeline_ref = str(top.get("id", ""))
+                # Never pin a cancelled pipeline: its successor is the one to read.
+                pipeline_ref = "" if raw_state == "canceled" else str(top.get("id", ""))
                 jobs = (f"pipeline {top.get('id')}: {raw_state}",)
+                if raw_state == "canceled":  # when, for `render_ci` (Kraft-kbqmk)
+                    cancelled_at = str(top.get("updated_at") or "")
                 if state == "failed":
                     detail_lines, failed_jobs = await self._failure_detail(repo, pipeline_ref)
                     jobs += detail_lines
@@ -274,6 +292,7 @@ class GlabCli:
             sha=sha,
             failed_jobs=failed_jobs,
             pipeline_ref=pipeline_ref,
+            cancelled_at=cancelled_at,
         )
 
     async def _failure_detail(
@@ -352,6 +371,69 @@ class GlabCli:
         ]
         return detail, tuple(failed_jobs)
 
+    async def _json(self, repo: Path, args: list[str], what: str):
+        return mr_ops.parse_json(await git.run_git(repo, ["glab", *args]), what)
+
+    async def _bot_review(self, repo: Path, bot: str) -> ReviewResult:
+        """GitLab has no review state: `bot`'s unresolved discussions are
+        actionable, one finding each; its approval is clean; neither yet is
+        pending."""
+        # ponytail: an approval is not tied to a head here -- a project that
+        # keeps approvals across pushes lets an old approval settle a new head.
+        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        iid = mr["iid"]
+        discussions = await self._json(
+            repo,
+            ["api", f"projects/:id/merge_requests/{iid}/discussions?per_page=100"],
+            "glab api discussions",
+        )
+        findings = tuple(
+            f"{(n.get('position') or {}).get('new_path')}:"
+            f"{(n.get('position') or {}).get('new_line')}: {n.get('body', '')}"
+            if n.get("position")
+            else str(n.get("body", ""))
+            for d in discussions
+            for n in (d.get("notes") or [])
+            if mr_ops.same_login(str((n.get("author") or {}).get("username", "")), bot)
+            and n.get("resolvable")
+            and not n.get("resolved")
+        )
+        if findings:
+            return ReviewResult("actionable", findings=findings, detail=f"{bot}: unresolved")
+        approvals = await self._json(
+            repo, ["api", f"projects/:id/merge_requests/{iid}/approvals"], "glab api approvals"
+        )
+        approved = any(
+            mr_ops.same_login(str((a.get("user") or {}).get("username", "")), bot)
+            for a in approvals.get("approved_by") or []
+        )
+        if approved:
+            return ReviewResult("clean", detail=f"{bot}: approved")
+        return ReviewResult("pending", detail=f"waiting for {bot} to review")
+
+    async def _check_review(self, repo: Path, check: str) -> ReviewResult:
+        """The commit status (a CI job or an external status) named `check`
+        on the MR's head, its latest if it ran more than once."""
+        mr = await self._json(repo, ["mr", "view", "-F", "json"], "glab mr view")
+        head = mr["sha"]
+        statuses = await self._json(
+            repo,
+            ["api", f"projects/:id/repository/commits/{head}/statuses?per_page=100"],
+            "glab api statuses",
+        )
+        mine = sorted((s for s in statuses if s.get("name") == check), key=lambda s: s["id"])
+        if not mine:
+            return ReviewResult("pending", detail=f"waiting for {check} on {head[:7]}")
+        status = str(mine[-1].get("status"))
+        if status in ("success", "skipped"):
+            return ReviewResult("clean", detail=f"{check}: {status}")
+        if status == "failed":  # 'canceled' is never a verdict; it waits below
+            return ReviewResult(
+                "actionable",
+                findings=(f"{check} {status}: {mine[-1].get('description') or ''}",),
+            )
+        return ReviewResult("pending", detail=f"{check}: {status}")
+
     async def retry_jobs(self, *, repo: Path, ci: CIStatus) -> None:
         """Retries every failed/canceled job in the pipeline `ci` read.
         A no-op on GitLab's side if none are (docs), so calling this
@@ -388,12 +470,7 @@ class GlabCli:
         data = mr_ops.parse_json(raw, "glab mr view")
         number = mr.number if mr.number > 0 else int(data["iid"])
         current = [str(label) for label in data.get("labels") or []]
-        scopes = {label.split("::", 1)[0] + "::" for label in labels if "::" in label}
-        drop = [
-            label
-            for label in current
-            if label not in labels and any(label.startswith(scope) for scope in scopes)
-        ]
+        drop = mr_ops.same_scope_labels(current, labels)
         args = ["glab", "mr", "update", *target, "--label", ",".join(labels)]
         for label in drop:
             args += ["--unlabel", label]
@@ -426,7 +503,15 @@ class GlabCli:
                     number=int(r["iid"]),
                     url=str(r.get("web_url", "")),
                     state=_GLAB_MR_STATES.get(str(r.get("state", "")), "closed"),
+                    merge_queued=bool(r.get("merge_when_pipeline_succeeds")),
+                    merged_sha=_landed(r) if r.get("state") == "merged" else "",
                 )
                 for r in rows
             ]
         )
+
+
+def _landed(r: dict) -> str:
+    """What a merged merge request landed on its target: its merge commit,
+    else a squash fast-forwarded onto it, else its fast-forwarded head."""
+    return str(r.get("merge_commit_sha") or r.get("squash_commit_sha") or r.get("sha") or "")

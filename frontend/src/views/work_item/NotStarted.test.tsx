@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import { item } from "./ActionBar/testFixtures";
+import { item } from "../../testFixtures";
 import { ChainDescription, NotStartedCard } from "./NotStarted";
 
 const notStarted = item({

@@ -31,13 +31,18 @@ _STOP_BOUNDARY = (
 )
 
 
-def _stop_reason(st, wid: str) -> str | None:
-    """The reason of the stop the item is *currently* sitting on, or None if
-    anything in `_STOP_BOUNDARY` superseded it."""
+def _current_stop(st, wid: str) -> dict | None:
+    """The `work_item_needs_human` payload of the stop the item is *currently*
+    sitting on, or None if anything in `_STOP_BOUNDARY` superseded it."""
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
         if e["type"] in _STOP_BOUNDARY:
-            return e["payload"]["reason"] if e["type"] == "work_item_needs_human" else None
+            return e["payload"] if e["type"] == "work_item_needs_human" else None
     return None
+
+
+def _stop_reason(st, wid: str) -> str | None:
+    stop = _current_stop(st, wid)
+    return stop["reason"] if stop is not None else None
 
 
 def _needs_context_stop(st, wid: str) -> bool:
@@ -49,12 +54,16 @@ def _needs_context_stop(st, wid: str) -> bool:
     return reason is not None and reason.startswith("needs_context:")
 
 
-def _gate_node_index(chain: dict, gate: str) -> int:
-    return executor.gate_node_index(chain, gate)
+def _gate_node_index(nodes, gate: str) -> int:
+    return executor.gate_node_index(nodes, gate)
 
 
 def _gate_artifact(st, row, gate: str | None) -> str | None:
-    return executor.gate_artifact(st.registry, st.run_dirs, row, gate)
+    """The document the pending gate decides, from the gate's own `artifact`
+    field. `st.registry` is gone from the call: the artifact kind used to be
+    scanned out of the *preceding* node's hook bindings, and a V1 gate declares
+    it itself (`gate-owns-gate-behaviour`)."""
+    return executor.gate_artifact(st.run_dirs, row, gate)
 
 
 @api_router.get("/work-items")
@@ -83,9 +92,20 @@ async def list_work_items(request: Request):
             "  WHERE type IN ('gate_requested', 'gate_approved', 'gate_rejected')"
             "  GROUP BY work_item_id)"
         ).fetchall()
-        return rows, cursor, gates
+        # The latest fallback switch and session start per item: the card
+        # marks an item whose last launch ran on a fallback (Kraft-0a3h8).
+        launches = c.execute(
+            "SELECT work_item_id, type, payload FROM events WHERE seq IN ("
+            "  SELECT MAX(seq) FROM events"
+            "  WHERE type IN ('launch_fallback', 'worker_session_started')"
+            "  GROUP BY work_item_id, type)"
+        ).fetchall()
+        return rows, cursor, gates, launches
 
-    rows, cursor, gate_rows = st.db.read(_read)
+    rows, cursor, gate_rows, launch_rows = st.db.read(_read)
+    latest: dict[tuple[str, str], dict] = {
+        (e["work_item_id"], e["type"]): json.loads(e["payload"]) for e in launch_rows
+    }
     pending = {
         g["work_item_id"]: json.loads(g["payload"])["gate"]
         for g in gate_rows
@@ -99,7 +119,10 @@ async def list_work_items(request: Request):
             "repo": r["repo"],
             "status": r["status"],
             "chain_template": r["chain_template"],
-            "chain_definition": json.loads(r["chain_definition"]),
+            # `store.chain_view`, not the raw column: a V1 row's
+            # `chain_definition` is `"{}"`, and the board draws its stage bar
+            # and names the current node from `chain_definition.nodes`.
+            "chain_definition": store.chain_view(r),
             "current_node_id": r["current_node_id"],
             "bead_id": r["bead_id"],
             "created_at": r["created_at"],
@@ -110,10 +133,21 @@ async def list_work_items(request: Request):
             "archived_at": r["archived_at"],
             "archived_by": r["archived_by"],
             "progress": _board_progress(st, r),
+            "fallback": _ran_on_fallback(latest, r["id"]),
         }
         for r in rows
     ]
     return {"items": items, "cursor": cursor}
+
+
+def _ran_on_fallback(latest: dict, wid: str) -> dict | None:
+    """The `launch_fallback` payload whose launch is the item's latest session
+    start, or None: the item's current or last launch ran on a fallback."""
+    switch = latest.get((wid, "launch_fallback"))
+    started = latest.get((wid, "worker_session_started"))
+    if switch is None or started is None or switch.get("to") is None:
+        return None
+    return switch if started.get("session_id") == switch.get("session_id") else None
 
 
 def _board_progress(st, row) -> dict | None:
@@ -193,12 +227,20 @@ def _concerns(st, wid: str) -> list[str]:
     concern the human owes an answer for, rather than the judge's own routine
     chatter.
     """
+    row = st.db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (wid,)).fetchone()
+    )
+    snapshot = store.materialized_chain_of(row) if row is not None else None
+    # A judge's session is recorded under its canonical path
+    # (`<node>.fix_loop.judge`), the key `walk._diagnosis_bundle` skips too.
+    judges = [n.judge.path for n in snapshot.chain.nodes if n.judge] if snapshot else []
     judge_session_ids = st.db.read(
         lambda c: {
             r["id"]
             for r in c.execute(
-                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point = ?",
-                (wid, executor.JUDGE_HOOK),
+                "SELECT id FROM worker_sessions WHERE work_item_id = ? AND hook_point IN "
+                f"({','.join('?' * len(judges))})",
+                (wid, *judges),
             ).fetchall()
         }
     )
@@ -228,15 +270,15 @@ def _mr_ref(st, wid: str) -> dict | None:
     MR still logs a fresh event, so this always names the current one, not a
     stale first-open URL for a since-force-pushed branch.
 
-    Single-repo only: a multi-repo item's `open_mr` node emits one
-    `mr_opened` per target repo (root and every declared submodule), and the
-    event carries no repo identifier to tell them apart. Returning "the
-    latest one" there would as often name a submodule's merge request as the
-    root's and label it "the" MR regardless -- silence until a per-repo
-    answer exists is better than a link to the wrong PR.
+    A multi-repo item's `open_mr` node emits one `mr_opened` per target repo
+    (root and every declared submodule), and the event carries no repo
+    identifier to tell them apart, so the events are never read for one: the
+    latest would as often name a submodule's merge request as the root's.
+    Its root's own row records the root's merge request (Kraft-mjsf), and
+    that is the item's; a root with none has no one merge request to link.
     """
-    if st.db.read(lambda c: store.repos_for(c, wid)):
-        return None
+    if rows := st.db.read(lambda c: store.repos_for(c, wid)):
+        return next((r["mr_ref"] for r in rows if r["role"] == "root"), None)
     for e in reversed(st.db.read(lambda c: events.read_after(c, 0, wid))):
         if e["type"] == "mr_opened":
             return {"number": e["payload"]["number"], "url": e["payload"]["url"]}
@@ -285,7 +327,9 @@ async def get_work_item(wid: str, request: Request):
         ).fetchall()
     )
     pending = _pending_gate(st, wid)
-    chain = json.loads(row["chain_definition"])
+    # Over both chain shapes, so a V1 item's stage bar is *correct* rather than
+    # merely not crashing. `steerable` below reads the frozen snapshot directly.
+    chain = store.chain_view(row)
     node_overrides = store.node_overrides_of(row)
     budget = st.policy.budget if st.policy else policy_mod.NO_BUDGET
     cap_usd, cap_source = store.effective_work_item_cap(row, budget)
@@ -300,6 +344,8 @@ async def get_work_item(wid: str, request: Request):
         "effective_chain": store.effective_chain(chain, node_overrides),
         "node_overrides": node_overrides,
         "node_overrides_count": len(node_overrides),
+        # The item's own policy override (Kraft-ab1bh), decoded from its column.
+        "policy_override": json.loads(row["policy_override"] or "null"),
         # The Config tab's "$5.00 · $2.41 used" and "policy default" / "item"
         # source line (point 4). Deliberately not `budget` -- that key is
         # `item.budget` client-side, `{scope, spent_usd, cap_usd} | null`,
@@ -315,7 +361,7 @@ async def get_work_item(wid: str, request: Request):
         "attachments": json.loads(row["attachments"]) if row["attachments"] else [],
         "worker_sessions": [{k: s[k] for k in s.keys()} for s in sessions],
         "usage": st.db.read(lambda c: store.usage_rollup(c, wid)),
-        # Where the implementer is in its plan ("Task 3 of 6"), or None off the
+        # Where the implementer is in its plan ("3 of 6 · title"), or None off the
         # implementation node or for a plan with no `## Task N` headings.
         "progress": progress_mod.for_item(st.db, row, st.run_dirs.worktrees / wid),
         # empty on a single-repo item; the detail's repos panel is multi-repo only
@@ -341,6 +387,10 @@ async def get_work_item(wid: str, request: Request):
         # Why the item is stopped, when it is: the detail screen has to tell a
         # loop escalation from an unrelated crash on the same node (Kraft-esc).
         "stop_reason": _stop_reason(st, wid),
+        # What the chain or a repair concluded a person should do about that
+        # stop -- `{action: skip|retry|abandon, reason}` -- or None
+        # (Kraft-s7c04.27). Each action is one existing verb.
+        "suggested_action": (_current_stop(st, wid) or {}).get("suggested_action"),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),
@@ -348,17 +398,12 @@ async def get_work_item(wid: str, request: Request):
         # The root repo's merge request, once `open_mr` has run -- the detail
         # screen's one link out to the forge.
         "mr_ref": _mr_ref(st, wid),
-        # Whether a stranded-at-this-node retry could ever carry a steer note
-        # anywhere downstream (Kraft-bz9b): the detail screen uses this to
-        # drop the steer box entirely rather than offer text `retry` would
-        # 409 on. Fails open (True) when the node isn't in its own chain --
-        # an unmapped edge case is not a reason to hide a control that may
-        # still work.
-        "steerable": (
-            lifecycle._steer_reachable(chain["nodes"], row["current_node_id"], st.registry)
-            if any(n["id"] == row["current_node_id"] for n in chain["nodes"])
-            else True
-        ),
+        # Whether a steer given now would be accepted (Kraft-bz9b, Ruling
+        # 183): the detail screen uses this to drop the steer box entirely
+        # rather than offer text the route would 409 on. A paused item needs
+        # a paused agent task; a stranded one an agent task downstream, failing
+        # open (True) when the node isn't in its own chain.
+        "steerable": lifecycle.steerable(st, row),
     }
 
 

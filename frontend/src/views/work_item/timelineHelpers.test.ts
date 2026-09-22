@@ -1,7 +1,8 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildItem } from "../../../sweep/fixtures";
 import { streamRows } from "./RightPane/Events";
-import { detailOf, findingsOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
+import { detailOf, fallbackSentence, findingsOf, groupByNode, nodeRounds, roundsOf, taskRunLabel, titleOf, verdictWord } from "./timelineHelpers";
 import type { KraftEvent, WorkerSession } from "../../types";
 
 const ev = (over: Partial<KraftEvent>): KraftEvent =>
@@ -23,6 +24,14 @@ describe("timelineHelpers: judge_verdict", () => {
   it("shows the judge's reasoning as the detail line", () => {
     const e = ev({ type: "judge_verdict", payload: { verdict: "continue", reasoning: "two findings cleared" } });
     expect(detailOf(e)).toBe("two findings cleared");
+  });
+});
+
+describe("timelineHelpers: plan_progress", () => {
+  it("titles a plan_progress event with the plan task's own title, no bare 'task' noun", () => {
+    const e = ev({ type: "plan_progress", payload: { node_id: "implementation", task: 3, total: 6, title: "wire the thing" } });
+    expect(titleOf(e, new Map())).toBe("wire the thing");
+    expect(detailOf(e)).toBe("3 of 6");
   });
 });
 
@@ -167,7 +176,7 @@ describe("nodeRounds entries (W14 · A)", () => {
   it("lists rounds, not what happened inside them, and drops lifecycle events at a round's edge", () => {
     const events = [
       wev(1, "node_started", at(0)),
-      wev(2, "task_progress", at(1), { task: 1, total: 3 }), // inside round 1
+      wev(2, "plan_progress", at(1), { task: 1, total: 3 }), // inside round 1
       wev(3, "judge_verdict", at(5), { verdict: "continue" }),
       wev(4, "gate_requested", at(10), { gate: "code_review" }), // outside every round
       wev(9, "gate_approved", at(5), { gate: "spec_approval" }), // at round 1's end: the node's
@@ -192,15 +201,15 @@ describe("streamRows (W13 · E)", () => {
     expect(rows[0]).toMatchObject({ kind: "session", run: { id: "s1", hook: "on.test.run", started: at(0, 5), exited: at(1, 2), status: "done" } });
   });
 
-  it("collapses a run of task_progress into one row", () => {
+  it("collapses a run of plan_progress into one row", () => {
     const rows = streamRows([
-      wev(1, "task_progress", at(0), { task: 3, total: 6 }),
-      wev(2, "task_progress", at(0, 20), { task: 4, total: 6 }),
-      wev(3, "task_progress", at(0, 40), { task: 6, total: 6 }),
+      wev(1, "plan_progress", at(0), { task: 3, total: 6 }),
+      wev(2, "plan_progress", at(0, 20), { task: 4, total: 6 }),
+      wev(3, "plan_progress", at(0, 40), { task: 6, total: 6 }),
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].kind).toBe("tasks");
-    if (rows[0].kind === "tasks") expect(taskRunLabel(rows[0].first, rows[0].last)).toBe("Task 3 → 6 of 6");
+    if (rows[0].kind === "tasks") expect(taskRunLabel(rows[0].first, rows[0].last)).toBe("3 → 6 of 6");
   });
 
   it("puts a waiting row only over a gap longer than two minutes", () => {
@@ -244,5 +253,40 @@ describe("timelineHelpers: findingsOf and an overridden severity", () => {
       measured([{ severity: "minor", message: "m", file: null, line: null, source_plugin: "p" }]),
     );
     expect(f.reported_severity).toBeUndefined();
+  });
+});
+
+describe("timelineHelpers: launch_fallback (Kraft-0a3h8)", () => {
+  const at = "2026-09-22T13:40:00+00:00";
+  const hhmm = new Date(at).toTimeString().slice(0, 5);
+  const opus = { harness: "claude", model: "opus", effort: "high" };
+  const sol = { harness: "codex", model: "gpt-5.6-sol", effort: "high" };
+  const sentence = (payload: Record<string, unknown>) => detailOf(ev({ type: "launch_fallback", payload }));
+
+  it("reads a switch after a limited launch", () => {
+    expect(sentence({ reason: "rate_limit_hit", from: opus, to: sol, resets_at_iso: at, session_id: "s2" })).toBe(
+      `Ran on codex / gpt-5.6-sol instead of claude / opus: claude / opus is rate-limited until ${hhmm}.`,
+    );
+  });
+
+  it("reads a skip from memory", () => {
+    expect(sentence({ reason: "known_limited", from: opus, to: sol, resets_at_iso: at, session_id: "s2" })).toBe(
+      `Skipped claude / opus (rate-limited until ${hhmm}); started on codex / gpt-5.6-sol.`,
+    );
+  });
+
+  it("reads an unavailable harness and a list that ran out", () => {
+    const codex = { harness: "codex", model: null, effort: null };
+    expect(sentence({ reason: "unavailable", detail: "harness disabled", from: codex, to: null, session_id: null })).toBe(
+      "Skipped codex (harness disabled); no fallback is left.",
+    );
+    expect(sentence({ reason: "unavailable", detail: "harness disabled", from: codex, to: opus, session_id: null })).toBe(
+      "Skipped codex (harness disabled); trying claude / opus.",
+    );
+  });
+
+  it("is the same sentence the board marker shows", () => {
+    const p = { reason: "rate_limit_hit", from: opus, to: sol, resets_at_iso: at, session_id: "s2" };
+    expect(fallbackSentence(p)).toBe(sentence(p));
   });
 });

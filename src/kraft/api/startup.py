@@ -11,11 +11,10 @@ from fastapi import FastAPI
 from kraft import (
     archive,
     auto_escalate_delay,
-    ci_wait,
+    caps,
     executor,
     rate_limit_retry,
-    reattach,
-    sandbox,
+    waits,
 )
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -29,7 +28,8 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
-from kraft.templates import load_registry, load_templates
+from kraft.worker import reattach, sandbox
+from kraft.worker import steering as steering_mod
 from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
@@ -72,24 +72,41 @@ async def lifespan(app: FastAPI):
     # Where an operator may override a bundled method file. Absent on almost
     # every install; `kraft.skill` falls back to the packaged copy.
     app.state.skills_dir = Path(os.environ.get("KRAFT_SKILLS_DIR") or default_skills_dir())
-    registry = load_registry(templates_dir / "registry.yaml", skills_dir=app.state.skills_dir)
-    templates = load_templates(templates_dir, registry)
+    # Before the library loads: pre-1.0 `steering/*.md` files become its
+    # steering profiles, once, so a repos.yaml naming them still resolves.
+    try:
+        steering_mod.migrate_files(templates_dir)
+    except OSError:
+        # Not a refused boot: the files stay put and the next start retries.
+        logger.exception("steering migration failed; templates/steering/ left in place")
+    library, invalid_library = deps.load_library(templates_dir, app.state.skills_dir)
+    # Now, not with the rest of app.state below: reattach's launch factory
+    # reads it, for an item filed before repository steering was frozen.
+    app.state.library = library
 
     # Config the Settings screens edit. Read once here and re-read on every save,
     # so a hand edit and a UI edit are the same operation to the rest of the app.
-    access = config_mod.load_access(templates_dir / "access.yaml").model_dump()
+    access = config_mod.Access.load(templates_dir / "access.yaml").model_dump()
     # A hand-edit typo must not refuse the boot: degrade to the default — off —
     # so Settings → Auto-intake comes up and can be used to fix the file.
     try:
-        app.state.intake = config_mod.load_intake(templates_dir / "intake.yaml").model_dump()
+        app.state.intake = config_mod.Intake.load(templates_dir / "intake.yaml").model_dump()
     except config_mod.ConfigError as exc:
         logger.warning("intake.yaml is unreadable, auto-intake stays off: %s", exc)
         app.state.intake = dict(config_mod.INTAKE_DEFAULT)
 
     policy_obj = None
     invalid_policy: list[str] = []
+    # One read of one file (Ruling 37): the legacy loop-cap `Policy` the
+    # executor reads and V1's `defaults:`/`maxima:` instance policy come out of
+    # the same parse, so the two can never disagree about what policy.yaml
+    # says. An unreadable file leaves the *empty* instance policy rather than
+    # None -- an unset maximum is no bound at all, which is what a materialized
+    # chain needs when the process is already refusing work over
+    # `invalid_policy`.
+    instance_policy = policy_mod.InstancePolicy.from_input(policy_mod.InstancePolicyInput())
     try:
-        policy_obj = policy_mod.load_policy(templates_dir / "policy.yaml")
+        policy_obj, instance_policy = deps.read_policy(templates_dir)
     except policy_mod.PolicyError as exc:
         invalid_policy = [str(exc)]
 
@@ -109,7 +126,6 @@ async def lifespan(app: FastAPI):
     summary, adopted = await reattach.reattach(
         database,
         run_dirs,
-        registry,
         policy=policy_obj,
         launch_factory=lambda repo: deps.launch(app.state, repo),
         bd_cwd=deps.bd_cwd(),
@@ -137,7 +153,6 @@ async def lifespan(app: FastAPI):
                     database,
                     run_dirs,
                     work_item_id=wid,
-                    registry=registry,
                     adopted=adopted,
                     bd_cwd=deps.bd_cwd(),
                     policy=policy_obj,
@@ -149,9 +164,11 @@ async def lifespan(app: FastAPI):
 
     app.state.db = database
     app.state.run_dirs = run_dirs
-    app.state.registry = registry
-    app.state.templates = templates
+    app.state.library = library
+    app.state.invalid_library = invalid_library
     app.state.policy = policy_obj
+    app.state.instance_policy = instance_policy
+    deps.lint_loaded(app.state)
     if policy_obj:
         forge_git.CLI_TIMEOUT_S = policy_obj.forge_cli_timeout_s
     app.state.access = access
@@ -203,15 +220,19 @@ async def lifespan(app: FastAPI):
     # behaviour an operator enables, it is what this feature promises.
     app.state.rate_limit_task = asyncio.ensure_future(rate_limit_retry.poller(app))
     # Always on, for the same reason the rate-limit poller is: a work item
-    # parked on a pipeline has to be woken by something, and that something
-    # cannot be the coroutine that used to sit in the wait (Kraft-ru98).
-    app.state.ci_wait_task = asyncio.ensure_future(ci_wait.poller(app))
-    # Always on, for the same reason rate-limit/ci-wait are: an item sitting
+    # parked on an external wait has to be woken by something, and that
+    # something cannot be the coroutine that used to sit in the wait
+    # (Kraft-ru98). One scheduler for every wait kind.
+    app.state.wait_task = asyncio.ensure_future(waits.poller(app))
+    # Always on: a parked item's total time cap and a gate's own timeout run
+    # out while nothing of the item runs, so no launch is there to see it.
+    app.state.caps_task = asyncio.ensure_future(caps.poller(app))
+    # Always on, for the same reason rate-limit/waits are: an item sitting
     # past its own auto_escalate_delay_s has to be re-checked by something,
     # and that something cannot be the coroutine that made the original
     # inline call and already returned (Kraft-vyk8).
     app.state.auto_escalate_delay_task = asyncio.ensure_future(auto_escalate_delay.poller(app))
-    # Always on, for the same reason the rate-limit and ci-wait pollers are:
+    # Always on, for the same reason the rate-limit poller and wait scheduler are:
     # an item aged past policy.archive_after_days has to be archived by
     # something, and an operator who forgets to check the board is exactly
     # who auto-archive exists for (UI v2 · 03).
@@ -222,11 +243,10 @@ async def lifespan(app: FastAPI):
     # the other ticks on, uncancellable, past shutdown.
     app.state.intake_lock = asyncio.Lock()
     app.state.trigger_last_fired = {}
-    app.state.trigger_task = (
-        asyncio.ensure_future(triggers_mod.poller(app))
-        if app.state.policy and app.state.policy.triggers
-        else None
-    )
+    # Always, not only for boot-time triggers: each tick reads st.policy, so a
+    # trigger added by PUT /policy or `kraft admin reload` fires without a
+    # restart (Kraft-ygnw6). A tick with no triggers files nothing.
+    app.state.trigger_task = asyncio.ensure_future(triggers_mod.poller(app))
     try:
         yield
     finally:
@@ -246,11 +266,12 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(live_intake_task, return_exceptions=True)
         app.state.rate_limit_task.cancel()
         await asyncio.gather(app.state.rate_limit_task, return_exceptions=True)
-        if app.state.trigger_task is not None:
-            app.state.trigger_task.cancel()
-            await asyncio.gather(app.state.trigger_task, return_exceptions=True)
-        app.state.ci_wait_task.cancel()
-        await asyncio.gather(app.state.ci_wait_task, return_exceptions=True)
+        app.state.trigger_task.cancel()
+        await asyncio.gather(app.state.trigger_task, return_exceptions=True)
+        app.state.wait_task.cancel()
+        await asyncio.gather(app.state.wait_task, return_exceptions=True)
+        app.state.caps_task.cancel()
+        await asyncio.gather(app.state.caps_task, return_exceptions=True)
         app.state.auto_escalate_delay_task.cancel()
         await asyncio.gather(app.state.auto_escalate_delay_task, return_exceptions=True)
         app.state.archive_task.cancel()
