@@ -749,10 +749,13 @@ async def _dispatch_task(
             return False
         # A scope's own cap (Ruling 195) is known only here, where the scope
         # is: recorded for the stop to name.
-        if breach["scope"] in ("tokens", "usd"):
+        if isinstance(breach, _caps.TokenBreach | _caps.UsdBreach):
             await db.write(
                 lambda c: events.append(
-                    c, work_item_row["id"], "scope_budget_reached", {**breach, "task": task.path}
+                    c,
+                    work_item_row["id"],
+                    "scope_budget_reached",
+                    {**breach.model_dump(), "task": task.path},
                 )
             )
         return True

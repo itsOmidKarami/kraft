@@ -5,15 +5,24 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import events, store, waits
 from kraft import policy as _policy
 from kraft.adapters import subprocess as _subprocess
+from kraft.caps import Breach, DailyBreach, TokenBreach, UsdBreach, WorkItemBreach
 from kraft.executor.context import RATE_LIMITED, WAITING, LaunchContext
 from kraft.store import _now as _now
 from kraft.templates.models import DEFAULT_WAIT, ResolvedNode, ResolvedTask
 from kraft.worker import sandbox as _sandbox
+
+#: Parses a raw event payload (the DB's dict, read back from JSON) into the
+#: right `Breach` shape. Used only where a breach might come from history
+#: instead of a fresh `budget_breach` call (`stop_for_budget`'s fallback) --
+#: everywhere else a `Breach` is already a model, built by `budget_breach`.
+_breach_adapter: TypeAdapter[Breach] = TypeAdapter(Breach)
 
 
 @asynccontextmanager
@@ -87,7 +96,7 @@ async def claimed_or_stopped(
 
 def budget_breach(
     db, work_item_id: str, budget: _policy.Budget, *, row=None, path: str | None = None
-) -> dict | None:
+) -> Breach | None:
     """The breached cap, or None. Evaluated fresh: it is a query, not a counter.
 
     A breach refuses the *next* launch. It cannot stop a running agent — cost is
@@ -108,35 +117,38 @@ def budget_breach(
     since = store.local_midnight_utc() if budget.daily_usd is not None else None
     item_usd, daily_usd = db.read(lambda c: store.budget_spend(c, work_item_id, since=since))
     if budget.work_item_usd is not None and item_usd >= budget.work_item_usd:
-        return {"scope": "work_item", "spent_usd": item_usd, "cap_usd": budget.work_item_usd}
+        return WorkItemBreach(scope="work_item", spent_usd=item_usd, cap_usd=budget.work_item_usd)
     if budget.daily_usd is not None and daily_usd >= budget.daily_usd:
-        return {"scope": "daily", "spent_usd": daily_usd, "cap_usd": budget.daily_usd}
+        return DailyBreach(scope="daily", spent_usd=daily_usd, cap_usd=budget.daily_usd)
     return None
 
 
-def budget_reason(breach: dict) -> str:
-    where = f"`{breach['path']}`" if breach.get("path") else "the work item"
+def budget_reason(breach: Breach) -> str:
     tail = " Nothing new was started; a running agent was not interrupted."
-    if breach["scope"] == "tokens":
+    if isinstance(breach, TokenBreach):
+        where = f"`{breach.path}`" if breach.path else "the work item"
         return (
-            f"token budget reached: {breach['spent_tokens']} tokens spent in {where}, "
-            f"cap {breach['cap_tokens']} tokens." + tail
+            f"token budget reached: {breach.spent_tokens} tokens spent in {where}, "
+            f"cap {breach.cap_tokens} tokens." + tail
         )
-    if breach["scope"] == "usd":
-        if breach.get("unknown_launches"):
+    if isinstance(breach, UsdBreach):
+        where = f"`{breach.path}`" if breach.path else "the work item"
+        if breach.unknown_launches:
             return (
-                f"budget_usd cannot be checked: {breach['unknown_launches']} launch(es) in "
+                f"budget_usd cannot be checked: {breach.unknown_launches} launch(es) in "
                 f"{where} reported no cost, and unknown spend is never counted as free "
-                f"(${breach['spent_usd']:.2f} known, cap ${breach['cap_usd']:.2f})." + tail
+                f"(${breach.spent_usd:.2f} known, cap ${breach.cap_usd:.2f})." + tail
             )
         return (
-            f"budget_usd reached: ${breach['spent_usd']:.2f} spent in {where}, "
-            f"cap ${breach['cap_usd']:.2f}." + tail
+            f"budget_usd reached: ${breach.spent_usd:.2f} spent in {where}, "
+            f"cap ${breach.cap_usd:.2f}." + tail
         )
-    where = "this work item" if breach["scope"] == "work_item" else "today, across every work item"
+    where = (
+        "this work item" if isinstance(breach, WorkItemBreach) else "today, across every work item"
+    )
     return (
-        f"budget cap reached: ${breach['spent_usd']:.2f} spent on {where}, "
-        f"cap ${breach['cap_usd']:.2f}." + tail
+        f"budget cap reached: ${breach.spent_usd:.2f} spent on {where}, "
+        f"cap ${breach.cap_usd:.2f}." + tail
     )
 
 
@@ -157,15 +169,17 @@ async def stop_for_budget(db, work_item_id: str, node: ResolvedNode, budget: _po
     )
     breach = (
         budget_breach(db, work_item_id, budget)
-        or tokens
-        or {
-            "scope": "work_item",
-            "spent_usd": 0.0,
-            "cap_usd": 0.0,
-        }
+        # `extra="ignore"` here, not the model's own `"forbid"`: this event's
+        # payload is a breach's fields plus the launching task's own path
+        # (`executor.dispatch.over_budget` writes `{**breach.model_dump(),
+        # "task": ...}`), which is a legitimate extra key on this one
+        # round-trip -- not a reader reaching for another scope's number.
+        or (_breach_adapter.validate_python(tokens, extra="ignore") if tokens is not None else None)
+        or WorkItemBreach(scope="work_item", spent_usd=0.0, cap_usd=0.0)
     )
     reason = budget_reason(breach)
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, None, breach))
+    dump = breach.model_dump()
+    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node.id, reason, None, dump))
     return "needs_human"
 
 

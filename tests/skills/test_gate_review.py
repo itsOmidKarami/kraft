@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from support.harness import entry_of, v1_chain, v1_item, write_harness_profiles
 
+from kraft import caps as _caps
 from kraft import events, executor, gate_review, store
 from kraft import policy as _policy
 from kraft.db import Database
@@ -512,11 +513,9 @@ async def test_budget_exhaustion_skips_the_review(monkeypatch, database, run_dir
     monkeypatch.setattr("kraft.executor.gate_review.review", fake_review)
     monkeypatch.setattr(
         "kraft.executor.stops.budget_breach",
-        lambda db, wid, budget, **_tokens: {
-            "scope": "work_item",
-            "spent_usd": 11.0,
-            "cap_usd": 10.0,
-        },
+        lambda db, wid, budget, **_tokens: _caps.WorkItemBreach(
+            scope="work_item", spent_usd=11.0, cap_usd=10.0
+        ),
     )
 
     status = await _review_from_gate(database, run_dirs, auto_gate=True)
