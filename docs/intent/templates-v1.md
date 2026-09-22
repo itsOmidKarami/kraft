@@ -874,7 +874,7 @@ enforced-by: tests/test_builtins.py::test_a_workspace_item_assembles_its_selecte
 
 When publishing a workspace work item, the system SHALL create one draft merge
 request for each changed child repository.
-enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge_request_per_repo_deepest_first[bump], tests/adapters/forge/test_run_chain.py::test_root_with_no_changes_of_its_own_never_opens_a_merge_request, tests/adapters/forge/test_run_chain.py::test_a_member_changed_without_being_selected_stops_publication
+enforced-by: tests/adapters/forge/test_run_chain.py::test_run_task_opens_a_merge_request_per_repo_deepest_first[bump], tests/adapters/forge/test_run_chain.py::test_root_with_no_changes_of_its_own_never_opens_a_merge_request, tests/adapters/forge/test_run_chain.py::test_a_member_changed_without_being_selected_stops_publication, tests/templates/test_workspace_publication.py::test_an_untouched_selected_member_gets_no_merge_request_and_the_item_completes
 
 ## REQ draft-merge-request-enables-external-checks
 

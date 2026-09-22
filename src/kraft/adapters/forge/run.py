@@ -214,8 +214,20 @@ async def _run_one(
     """
     findings: list[dict] | None = None
     body = mr_ops.mr_body(work_item_id, branch, await git.commits_on(repo, branch, base), meta)
+    # Kraft-vz8e: an MR with no commits runs no CI, so `mr_checks` would wait
+    # out its cap on a pipeline that never starts. Refused before it is
+    # opened or readied, as a `config_error`: a fix loop has nothing to fix.
+    # Read after the "already merged" shortcuts, which a merged branch --
+    # empty against its base -- must still take.
+    verb = "open" if handler == "open_mr" else "ready"
+    empty = (
+        f"refusing to {verb} a merge request for {branch}: it has no commits beyond "
+        f"origin/{base} -- the implementation committed nothing\n"
+    )
     match handler:
         case "open_mr":
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             # Ask first: a rejected review re-entering the chain at
             # implementation walks back through this node, and a retry of
             # an open_mr that crashed after the create lands here too. A
@@ -470,6 +482,8 @@ async def _run_one(
             existing = await forge.find_mr(repo=repo, branch=branch)
             if existing is not None and existing.state == "merged":
                 return f"already merged (!{existing.number}); nothing to sync\n", "done", findings
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             # Undraft before anything else: every MR opens as a draft now
             # (open_mr always does), and mr_sync is the one node every
             # chain shape runs before merge, gated or not -- see the
@@ -509,6 +523,8 @@ async def _run_one(
                     "done",
                     findings,
                 )
+            if await git.commits_ahead(repo, branch, base) == 0:
+                return empty, "config_error", findings
             await forge.mark_ready(
                 repo=repo,
                 branch=branch,
@@ -998,6 +1014,19 @@ async def run_task(
             # merged yet, so a root MR here would review a pointer that
             # doesn't exist.
             targets = [t for t in targets if t[2] != "root"]
+        # An item selects more members than it changes, and only a changed
+        # one is published (`changed-child-repositories-get-separate-merge-
+        # requests`): a member with nothing beyond its own base gets no merge
+        # request and is no reason to stop (Kraft-j14jn). Only one that never
+        # opened one -- an open merge request is followed to its end.
+        untouched = set()
+        for r in rows:
+            if r["role"] == "submodule" and r["merge_state"] == "pending":
+                sub = Path(r["repo_path"])
+                sub_base = await _builtins.base_branch(db, work_item_id, sub, member=True)
+                if await git.commits_ahead(sub, branch, sub_base) == 0:
+                    untouched.add(r["id"])
+        targets = [t for t in targets if t[0] not in untouched]
 
     if handler == "merge_watch" and targets:
         # `merge_watch` ignores the per-target `repo` entirely -- it reads
@@ -1011,6 +1040,19 @@ async def run_task(
         # needs the root row to resolve `root_has_changes`.
         targets = [next((t for t in targets if t[2] == "root"), targets[0])]
 
+    if handler == "open_mr" and multi and not targets:
+        # Every selected repository untouched: the workspace form of
+        # Kraft-vz8e's empty branch, refused the same way.
+        return await _builtins.finish_session(
+            db,
+            log_path,
+            result_path,
+            session_id=session_id,
+            status="config_error",
+            log=f"refusing to open a merge request for {branch}: no selected repository has "
+            "commits beyond its base -- the implementation committed nothing\n",
+            reused=reused,
+        )
     try:
         live_forge = resolve(backend_for(backend, repo_forge))
     except ForgeError as exc:
