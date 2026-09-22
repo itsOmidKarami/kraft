@@ -189,6 +189,11 @@ tasks:
     model: gpt-5.6-terra
     effort: high
     prompt: Implement the approved plan.
+    policy:
+      # One run's running time. Every successful implementer run on record
+      # finished inside 96 minutes (p99 73), so this binds only a run that has
+      # already gone wrong (Kraft-nxqft), and stops it for a person.
+      time_cap_minutes: 120
 
   verify_changed_scopes:
     kind: builtin

@@ -236,3 +236,14 @@ async def test_a_session_adopted_after_a_restart_is_held_to_the_same_rule(
 
     assert it.sessions()[0]["status"] == "failed"
     assert [e["payload"]["jobs"] for e in it.events(sp.JOBS_ABANDONED)] == [[SUITE, WAIT]]
+
+
+def test_every_agent_launch_is_told_the_rule_and_where_the_full_suite_runs(run):
+    """The prompt half: the rule it is now held to, and that the full suite is
+    the verification node's job. A plan that asked for `--no-testmon` is what
+    put a 14-minute run in the incident's turn."""
+    cmd = run()["cmd"]
+    prompt = cmd[cmd.index("--append-system-prompt") + 1]
+
+    assert "a turn that ends with a background job still running fails" in prompt
+    assert "not the whole suite" in prompt and "verification" in prompt

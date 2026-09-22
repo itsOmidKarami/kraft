@@ -225,6 +225,22 @@ launched under. An instance or repository default binds a task's own run
 where nothing more specific was set (Ruling 198); the work item, its nodes and
 its steps are bound only by a cap the chain or the item set, or by `maxima`.
 
+The shipped `implementer` task, which both shipped chains run, sets
+`time_cap_minutes: 120`. Every successful implementer run on record finished
+inside 96 minutes (p99 73), so the cap binds only a run that has already gone
+wrong, like the worker that spent 68 minutes and $9.46 waiting on a test run
+it had backgrounded (Kraft-nxqft). A long plan can take more: raise the
+item's own cap, or set a larger one on the task in `library.yaml`. A
+`maxima.time_cap_minutes` under 120 refuses both shipped chains until the
+task's cap is lowered to fit.
+
+**Background jobs.** A worker's session ends with its turn. When an agent's
+turn ends with a background job still running (a `run_in_background` call,
+or a command Claude Code backgrounded when it outlived its timeout), the
+session fails at once. Its log's last line and a `background_jobs_abandoned`
+event name each job. A `needs_context` stop keeps its question, and the jobs
+are still named.
+
 Both tool lists hold tool names, never permission rules: a bare tool (`Bash`,
 `Read`) or one exact MCP tool (`mcp__kraft__report_progress`). The permission
 gate matches a name exactly, so a scoped rule (`Bash(git *)`), a glob
