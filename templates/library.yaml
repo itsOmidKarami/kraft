@@ -20,6 +20,15 @@ tasks:
     produces: plan
     skill: kraft:plan
 
+  revise_chain:
+    kind: agent
+    harness: claude
+    prompt: >-
+      Decide whether the rest of this chain still fits the approved spec and
+      plan, and propose the smallest change set if it does not.
+    produces: chain_revision
+    skill: kraft:chain-review
+
   implementer:
     kind: agent
     harness: claude

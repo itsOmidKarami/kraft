@@ -69,7 +69,7 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
 
     approved, parked = _walk_to_the_end(client, wid)
 
-    assert approved == ["spec_approval", "plan_approval", "local_review", "chain_review"]
+    assert approved == ["spec_approval", "plan_approval", "local_review", "final_review"]
     assert parked == [
         "merge_request_feedback",
         "merge_request_feedback",
@@ -90,6 +90,10 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "spec_approval",
         "plan",
         "plan_approval",
+        # Kraft-oydes: the fake revision proposes no change, so its gate
+        # completes without being approved by anyone above.
+        "chain_revision",
+        "chain_revision_approval",
         "implementation",
         "verification",
         "work_brief",
@@ -98,7 +102,7 @@ def test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_me
         "draft_merge_request",
         "merge_request_feedback",
         "work_item_summary",
-        "chain_review",
+        "final_review",
         "mark_ready",
         "external_approval",
         "merge",

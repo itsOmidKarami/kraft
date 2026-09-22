@@ -93,7 +93,9 @@ kraft view docs        # read the spec and plan Kraft wrote
 kraft item approve     # or Approve on the board
 ```
 
-Approving walks it to `plan_approval`, then on into implementation. Reject
+Approving walks it to `plan_approval`, then to a chain revision (which
+usually proposes nothing and passes on its own; see
+[Concepts](concepts.md#chain)), then on into implementation. Reject
 instead, with `kraft item reject --note "..."`, and the producing node re-runs
 with your note as its steer — see
 [Concepts → Gate](concepts.md#gate).
@@ -108,7 +110,7 @@ kraft view diff          # the coloured body, through $PAGER
 Two gates stand between the work and a merge. `local_review` comes first, with
 the work brief the chain wrote: approving it opens a draft merge request, and
 Kraft then watches CI and the automated review, repairing what they report.
-`chain_review` is the last gate, with the review brief: approving it marks the
+`final_review` is the last gate, with the review brief: approving it marks the
 merge request ready, waits for its external approval, merges, and watches the
 post-merge pipeline — no further input needed unless something goes red. A
 rebase that moves the base re-runs `verification` rather than merging over

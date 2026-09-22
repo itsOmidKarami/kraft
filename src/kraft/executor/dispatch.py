@@ -45,6 +45,7 @@ from kraft.executor.context import (
     Steer,
 )
 from kraft.store import _now as _now
+from kraft.templates import revision
 from kraft.templates.models import (
     AgentInput,
     AgentTask,
@@ -784,6 +785,8 @@ async def _dispatch_task(
         instruction += prompts.deferred_findings_note(
             deferred_findings(db, work_item_row["id"], loop_severities)
         )
+    if t.produces == revision.CHAIN_REVISION:
+        instruction += revision.context_note(store.materialized_chain_of(work_item_row), node.id)
     # A reviewing task's continuity, delivered only when it declares it
     # (`AgentTask.inputs`): what the node's last measurement found, tagged so a
     # repeat keeps its identity (the tags `walk` then trusts, and no others --

@@ -132,6 +132,44 @@ def set_attachments(
     )
 
 
+def revise_chain(
+    conn: sqlite3.Connection,
+    work_item_id,
+    revised: str,
+    payload: dict,
+    *,
+    seen: tuple[str | None, str | None],
+) -> None:
+    """Replace the chain this item runs with an approved revision
+    (`MaterializedChain.to_json`), and record it as `chain_revised` -- one
+    transaction, so a reader sees the old chain or the new one and its event,
+    never half of it.
+
+    The chain it runs is the run fork's copy once a retry made one
+    (`materialized_chain_of` reads `run_chain` first), and the intake snapshot
+    before that; the revision replaces whichever that is. The intake snapshot
+    of a forked item stays what intake froze, and so does every `run_forks`
+    row: those are records of earlier runs, not the chain a reader runs. A
+    later retry forks from the revised chain, so it keeps the revision.
+
+    A compare-and-set on `seen`, the `(materialized_chain, run_chain)` the
+    revision was computed from, as `set_attachments` is: `ValueError` if a
+    write changed either since (a retry's fork, an attachment change, another
+    approval), which a revision of the old chain must not overwrite.
+    """
+    row = conn.execute(
+        "SELECT materialized_chain, run_chain FROM work_items WHERE id = ?", (work_item_id,)
+    ).fetchone()
+    if (row["materialized_chain"], row["run_chain"]) != seen:
+        raise ValueError("the chain changed while this approval was made; approve it again")
+    column = "run_chain" if row["run_chain"] is not None else "materialized_chain"
+    conn.execute(
+        f"UPDATE work_items SET {column} = ?, updated_at = ? WHERE id = ?",
+        (revised, _now(), work_item_id),
+    )
+    events.append(conn, work_item_id, "chain_revised", payload)
+
+
 def skip_node(
     conn: sqlite3.Connection,
     work_item_id: str,

@@ -116,7 +116,7 @@ def test_the_seeded_default_chain_publishes_in_the_required_order():
         "mr.post_merge_ci",
     ]
     ids = [n.id for n in chain.nodes]
-    assert ids.index("work_item_summary") < ids.index("chain_review") < ids.index("mark_ready")
+    assert ids.index("work_item_summary") < ids.index("final_review") < ids.index("mark_ready")
 
 
 async def test_a_pre_draft_gate_keeps_the_work_local(item_on, database, run_dirs, monkeypatch):

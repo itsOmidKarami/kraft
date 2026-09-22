@@ -44,6 +44,45 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
     chain.complete_node(conn, work_item_id, gate)
 
 
+def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, rationale) -> None:
+    """Clear a chain revision gate whose proposal changes nothing, without
+    asking anyone (Kraft-oydes): the proposal's rationale on
+    `chain_revision_unchanged`, then an approval by `kraft` -- neither a person
+    nor an agent decided it, so a reader of `by` cannot mistake it for either."""
+    events.append(
+        conn, work_item_id, "chain_revision_unchanged", {"gate": gate, "rationale": rationale}
+    )
+    approve_gate(conn, work_item_id, gate, by="kraft")
+
+
+def _since_requested(conn: sqlite3.Connection, work_item_id, gate, type: str) -> list[dict]:
+    """`type` events about `gate` since it was last requested, oldest first."""
+    found = []
+    for e in reversed(events.read_after(conn, 0, work_item_id)):
+        if e["payload"].get("gate") != gate:
+            continue
+        if e["type"] == "gate_requested":
+            break
+        if e["type"] == type:
+            found.insert(0, e["payload"])
+    return found
+
+
+def shown_revision(conn: sqlite3.Connection, work_item_id, gate) -> str | None:
+    """The digest of the chain revision `gate` last showed a person since it
+    was requested (`revision.digest`), or None if nobody has looked."""
+    shown = _since_requested(conn, work_item_id, gate, "chain_revision_shown")
+    return shown[-1]["digest"] if shown else None
+
+
+def show_revision(conn: sqlite3.Connection, work_item_id, gate, digest: str) -> None:
+    """Record that `gate` showed the revision `digest` (Kraft-ze1yj): what an
+    approval of it must still apply. Once per distinct result, so a board
+    polling the document writes nothing new."""
+    if shown_revision(conn, work_item_id, gate) != digest:
+        events.append(conn, work_item_id, "chain_revision_shown", {"gate": gate, "digest": digest})
+
+
 def reject_gate(
     conn: sqlite3.Connection,
     work_item_id,

@@ -50,12 +50,27 @@ from `repos.yaml`. On a repo that declares neither, `quick-task` (and
 a guessed command.
 
 The shipped `default` chain is the real one: a spec and a plan, each with its
-own approval gate; implementation; verification (the changed test scopes, then
+own approval gate; a chain revision (below); implementation; verification (the changed test scopes, then
 a code review) inside a fix loop; a work brief and a `local_review` gate before
 a draft merge request exists; CI and automated review on the draft, with its own
-fix loop; a summary and the final `chain_review` gate; then ready, external
+fix loop; a summary and the final `final_review` gate; then ready, external
 approval, merge, and the post-merge pipeline. `kraft admin templates show
 default --resolved` prints it with every library component expanded.
+
+**Chain revision.** A chain is picked at intake, before its spec and plan
+exist. Once the plan is approved, `default`'s `chain_revision` node has an agent
+read both against the nodes still to run and propose a change set: skip a node,
+add one built from library components, or set a task's `model`/`effort` or an
+operational policy value (a cap, a budget, a fix loop's bound) within the
+administrator maxima. Only nodes after its gate may change, a gate never
+does, and no node that opens, describes, syncs, readies or merges the merge
+request (or waits on its checks) can be skipped. Usually it proposes nothing, and the `chain_revision_approval` gate passes
+without asking anyone. When it does propose something, that gate shows the
+rationale, each change with the line of the spec or plan behind it, and the diff;
+approving replaces the item's chain with exactly the revision the gate showed (a
+`chain_revised` event; if the library changed since, the approval is refused
+until you look again), and a proposal that would not validate cannot be approved — reject it
+back to `chain_revision` with the reason the gate gives.
 
 ## Node
 
