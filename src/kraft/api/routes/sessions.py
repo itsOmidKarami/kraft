@@ -35,13 +35,18 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
 
     Stops one poll *after* the session stops being pending or running, so the
     lines written between the last poll and the exit are not dropped on the
-    floor.
+    floor. That last read is `final`, so a line the agent never finished is
+    sent too.
+
+    One `logs.Tail` per stream, read in a worker thread: each poll reads only
+    what was written since the last, and never on the loop that serves every
+    other request (Kraft-21jy). The status check stays on the loop -- a primary
+    key lookup on the reader connection, which belongs to this thread.
     """
-    sent = 0
+    tail = logs_mod.Tail(path)
     running = True
     while True:
-        for line in logs_mod.jsonl(path, start_line=sent):
-            sent = line["n"] + 1
+        for line in await asyncio.to_thread(tail.read, final=not running):
             yield f"data: {json.dumps(line)}\n\n"
         if not running:
             break
@@ -56,7 +61,11 @@ async def _tail(st, sid: str, path: Path, *, poll_s: float = 0.4):
 @api_router.get("/worker-sessions/{sid}/log")
 async def get_log(sid: str, request: Request, format: str | None = None, follow: bool = False):
     """Plain text by default (the modal's copy button); `format=jsonl` for the
-    filterable, followable view (design 6c)."""
+    filterable, followable view (design 6c).
+
+    The jsonl views are bounded (`logs.MAX_LOG_BYTES`, with a marker row when
+    they had to be); plain text is the whole file, streamed from disk, which is
+    what that marker points a reader at."""
     st = request.app.state
     row = _session_row(st, sid)
     path = Path(row["log_path"])
@@ -67,7 +76,8 @@ async def get_log(sid: str, request: Request, format: str | None = None, follow:
                 media_type="text/event-stream",
                 headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
             )
-        return {"session_id": sid, "status": row["status"], "lines": list(logs_mod.jsonl(path))}
+        lines = await asyncio.to_thread(lambda: list(logs_mod.jsonl(path)))
+        return {"session_id": sid, "status": row["status"], "lines": lines}
     if not path.exists():
         raise HTTPException(404, "log not found")
     return FileResponse(path, media_type="text/plain")

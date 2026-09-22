@@ -159,12 +159,20 @@ async def log_backlog(session_id: str, limit: int | None = None) -> list[dict]:
 
     `limit` is `None` for everything and `0` for none; `0` cannot be spelled as
     a falsy "no limit", which is the bug the slice invites.
+
+    The server bounds what it returns and leads with a `truncated` marker row
+    when it had to. `limit` is the reader's own cut, the marker the server's:
+    it stays whenever the slice reaches back to it, so the cap is never silent.
     """
     payload = await transport._get(f"/worker-sessions/{session_id}/log", format="jsonl")
     lines = payload.get("lines", [])
     if limit is None:
         return lines
-    return lines[-limit:] if limit > 0 else []
+    rows = [line for line in lines if "truncated" not in line]
+    kept = rows[-limit:] if limit > 0 else []
+    if kept and len(kept) == len(rows):
+        return [line for line in lines if "truncated" in line] + kept
+    return kept
 
 
 async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict]:
@@ -175,7 +183,8 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
     its own — a follow that outlives the agent is worse than no follow.
 
     `after_line` is applied here rather than sent: the follow endpoint replays
-    from the top of the file and takes no offset, so skipping is the client's
+    the log's bounded tail (a `truncated` marker row, `n` -1, first when it
+    had to cut) and takes no offset, so skipping is the client's
     job. Cheap, and it keeps the resume semantics in one place.
 
     Not an MCP tool: a tool returns a value and a generator has none. An agent

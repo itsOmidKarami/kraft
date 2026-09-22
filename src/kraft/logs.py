@@ -12,6 +12,7 @@ through the parent instead of handing it an fd (Kraft-7z6.19).
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -161,37 +162,153 @@ def read_times(path: Path) -> dict[int, str]:
     times: dict[int, str] = {}
     try:
         for line in split_lines(path.read_text(errors="replace", newline="")):
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(row, dict) and isinstance(row.get("n"), int):
-                times[row["n"]] = row.get("t")
+            _stamp(line, times, 0)
     except OSError:
         pass
     return times
+
+
+def _stamp(line: str | bytes, times: dict[int, str], first: int) -> None:
+    """One sidecar row into `times`, if it names a line numbered `first` or later."""
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    if isinstance(row, dict) and isinstance(row.get("n"), int) and row["n"] >= first:
+        times[row["n"]] = row.get("t")
 
 
 def times_path(log_path: Path) -> Path:
     return log_path.with_suffix(".times.jsonl")
 
 
+#: What any reader hands back of one log, at most: the last this-many bytes. A
+#: runaway session wrote 187MB into one log (Kraft-2vvus); the whole-file view
+#: is the plain-text endpoint, which streams the file from disk.
+MAX_LOG_BYTES = 2 * 1024 * 1024
+#: One line is held in memory up to this size; the rest of it is read past.
+#: Rendering keeps only `MAX_TEXT` characters of it anyway.
+MAX_LINE_BYTES = 1024 * 1024
+_CHUNK = 64 * 1024
+
+
+def _row(n: int, line: str, times: dict[int, str]) -> dict:
+    obj = _decode(line)
+    src, t = _classify_obj(obj)
+    return {
+        "n": n,
+        "t": t or times.get(n),
+        "src": src,
+        "text": _shorten(line),
+        "summary": summary(obj, line),
+    }
+
+
+def _marker(lines: int, nbytes: int) -> dict:
+    """The row that says a reader was handed a tail, not the log. `n` is -1:
+    it is no line of the file, and it sorts before every line that is."""
+    text = (
+        f"… {lines} earlier lines ({nbytes} bytes) not shown: this log is over "
+        f"{MAX_LOG_BYTES} bytes, so only its end is read. The plain-text log has all of it."
+    )
+    return {
+        "n": -1,
+        "t": None,
+        "src": "sys",
+        "text": text,
+        "summary": text,
+        "truncated": {"lines": lines, "bytes": nbytes},
+    }
+
+
+class Tail:
+    """One reader's place in one session log: each byte is read once.
+
+    The first read opens on the last `MAX_LOG_BYTES` of the file, at a line
+    boundary, and says so with a `_marker` row; every read after it seeks to
+    where the last one stopped. A line still being written is held back until
+    its newline arrives, or until the `final` read after the session ended --
+    `split_lines`' rule that a file ending mid-line still counts that line. The
+    sidecar of timestamps is read forward the same way.
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._offset: int | None = None  # None until the file has been opened
+        self._n = 0
+        self._pending = bytearray()
+        self._pending_open = False  # a line has begun that has no newline yet
+        self._times_offset = 0
+        self._times: dict[int, str] = {}
+
+    def read(self, *, final: bool = False) -> list[dict]:
+        """The rows written since the last read. A missing log is no rows."""
+        try:
+            with self.path.open("rb") as fh:
+                rows = [] if self._offset is not None else self._open_window(fh)
+                fh.seek(self._offset or 0)
+                lines = self._complete_lines(fh, final)
+                self._offset = fh.tell()
+        except OSError:
+            return []
+        first = self._n - len(lines)
+        self._read_times(first)
+        rows += [_row(first + i, line, self._times) for i, line in enumerate(lines)]
+        self._times = {n: t for n, t in self._times.items() if n >= self._n}
+        return rows
+
+    def _open_window(self, fh) -> list[dict]:
+        """Skip to the last `MAX_LOG_BYTES`, counting the lines skipped."""
+        start = os.fstat(fh.fileno()).st_size - MAX_LOG_BYTES
+        if start <= 0:
+            self._offset = 0
+            return []
+        while chunk := fh.read(min(_CHUNK, start - fh.tell())):
+            self._n += chunk.count(b"\n")
+        fh.seek(start - 1)
+        if fh.read(1) != b"\n":  # the window opens mid-line: skip that line whole
+            while (part := fh.readline(_CHUNK)) and not part.endswith(b"\n"):
+                pass
+            self._n += 1 if part else 0
+        self._offset = fh.tell()
+        self._times_offset = 0
+        return [_marker(self._n, self._offset)]
+
+    def _complete_lines(self, fh, final: bool) -> list[str]:
+        lines = []
+        while chunk := fh.readline(_CHUNK):
+            self._pending_open = True
+            room = MAX_LINE_BYTES - len(self._pending)
+            if room > 0:
+                self._pending += chunk[:room]
+            if chunk.endswith(b"\n"):
+                lines.append(self._take())
+        if final and self._pending_open:
+            lines.append(self._take())
+        return lines
+
+    def _take(self) -> str:
+        line = bytes(self._pending).removesuffix(b"\n")
+        self._pending.clear()
+        self._pending_open = False
+        self._n += 1
+        return line.decode("utf-8", errors="replace")
+
+    def _read_times(self, first: int) -> None:
+        """New sidecar rows, keeping only lines numbered `first` or later."""
+        try:
+            with times_path(self.path).open("rb") as fh:
+                fh.seek(self._times_offset)
+                while (row := fh.readline(_CHUNK)).endswith(b"\n"):
+                    _stamp(row, self._times, first)
+                    self._times_offset = fh.tell()
+        except OSError:
+            pass
+
+
 def jsonl(path: Path, *, start_line: int = 0) -> Iterator[dict]:
-    """Structured lines from `start_line` onward. Missing file yields nothing."""
-    try:
-        text = path.read_text(errors="replace", newline="")
-    except OSError:
-        return
-    times = read_times(times_path(path))
-    for n, line in enumerate(split_lines(text)):
-        if n < start_line:
-            continue
-        obj = _decode(line)
-        src, t = _classify_obj(obj)
-        yield {
-            "n": n,
-            "t": t or times.get(n),
-            "src": src,
-            "text": _shorten(line),
-            "summary": summary(obj, line),
-        }
+    """Structured lines from `start_line` onward, bounded as `Tail` bounds them,
+    behind a truncation marker when it had to. Missing file yields nothing."""
+    for row in Tail(path).read(final=True):
+        if row["n"] >= start_line or "truncated" in row:
+            yield row
