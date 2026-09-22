@@ -44,9 +44,9 @@ from pydantic import (
     model_validator,
 )
 
+from kraft.cap_levels import LEVEL_OF
 from kraft.policy import (
     FROZEN,
-    LEVEL_OF,
     RETIRED_WAIT_TIMEOUT,
     SCOPE_CAP_FIELDS,
     InstancePolicy,
