@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import logging
 import sqlite3
 
 from kraft import events
-from kraft.policy import RETIRED_WAIT_TIMEOUT
+from kraft.policy import RETIRED_WAIT_TIMEOUT, deprecated
 from kraft.store import _now as _now  # test seam for wall-clock checks
 from kraft.store._common import write_status
-
-logger = logging.getLogger(__name__)
 
 #: Node fields a per-item override may touch (UI v2 · 04, point 1). Anything
 #: else in a `node_overrides` patch is rejected by the route before it gets
@@ -231,7 +228,7 @@ def _spread_retired_wait_timeout(row, data: dict) -> dict:
     already sets one keeps it."""
     from kraft.templates.models import MaterializedChain
 
-    logger.warning(
+    deprecated(
         "%s: an item-wide %s is deprecated (Ruling 196); read as each wait task's "
         "total_time_cap_minutes",
         row["id"] if "id" in row.keys() else "a work item",

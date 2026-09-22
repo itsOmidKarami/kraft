@@ -24,7 +24,6 @@ still reads the legacy `kraft.templates` shapes.
 
 from __future__ import annotations
 
-import logging
 import math
 import re
 from collections.abc import Container, Iterator, Mapping
@@ -55,10 +54,9 @@ from kraft.policy import (
     TaskPolicyOverride,
     TemplatePolicyOverride,
     WorkItemPolicy,
+    deprecated,
 )
 from kraft.templates.environment import Identifier, WorkItemTarget
-
-logger = logging.getLogger(__name__)
 
 #: Step identifiers Kraft generates itself, so an author cannot occupy one and
 #: make a resolved path ambiguous (docs/templates-v1-design.md "Resolution and
@@ -434,7 +432,7 @@ class ForgeTask(TaskBase):
         if raw is None:
             return data
         minutes = math.ceil(_duration(raw).total_seconds() / 60)
-        logger.warning(
+        deprecated(
             "%s: wait.timeout is deprecated (Ruling 196) and read as "
             "policy.total_time_cap_minutes %s; move it there",
             data.get("id", "a forge task"),
@@ -1353,9 +1351,7 @@ class _StoredMaterialization(BaseModel):
 
         def drop(policy: object) -> object:
             if isinstance(policy, dict) and policy.get(RETIRED_WAIT_TIMEOUT) is not None:
-                logger.warning(
-                    "a stored snapshot's %s is dropped (Ruling 196)", RETIRED_WAIT_TIMEOUT
-                )
+                deprecated("a stored snapshot's %s is dropped (Ruling 196)", RETIRED_WAIT_TIMEOUT)
             return (
                 {k: v for k, v in policy.items() if k != RETIRED_WAIT_TIMEOUT}
                 if isinstance(policy, dict)

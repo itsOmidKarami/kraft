@@ -199,7 +199,15 @@ def _wait_chain(**task) -> dict:
     return {"id": "c", "nodes": [{"id": "feedback", "kind": "exec", "tasks": [wait]}]}
 
 
-def test_a_wait_timeout_written_before_ruling_196_reads_as_the_tasks_total_cap(caplog):
+@pytest.fixture
+def warnings_afresh(monkeypatch):
+    """A deprecation is said once per process; these tests hear it anew."""
+    monkeypatch.setattr(_policy, "_DEPRECATIONS_SAID", set())
+
+
+def test_a_wait_timeout_written_before_ruling_196_reads_as_the_tasks_total_cap(
+    caplog, warnings_afresh
+):
     with caplog.at_level(logging.WARNING):
         chain = _materialize(
             _wait_chain(wait={"timeout": "90s", "polling": {"max_interval": "5m"}})
@@ -212,7 +220,7 @@ def test_a_wait_timeout_written_before_ruling_196_reads_as_the_tasks_total_cap(c
 
 
 def test_a_policy_file_written_before_ruling_196_reads_its_wait_maximum_as_the_total_cap(
-    tmp_path, caplog
+    tmp_path, caplog, warnings_afresh
 ):
     path = tmp_path / "policy.yaml"
     path.write_text(

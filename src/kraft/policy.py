@@ -463,6 +463,18 @@ CAP_FIELDS = ("time_cap_minutes", "total_time_cap_minutes")
 RETIRED_WAIT_TIMEOUT = "wait_timeout_minutes"
 
 
+_DEPRECATIONS_SAID: set[str] = set()
+
+
+def deprecated(message: str, *args: object) -> None:
+    """Warn that a retired key was read, once per message per process: a
+    snapshot is read on every dispatch, and one warning says it."""
+    text = message % args if args else message
+    if text not in _DEPRECATIONS_SAID:
+        _DEPRECATIONS_SAID.add(text)
+        logger.warning("%s", text)
+
+
 def _carry_retired(data: object, where: str, replacement: str) -> object:
     """`data` with a retired `wait_timeout_minutes` read as `replacement`
     (Ruling 196), warning that it is deprecated. A `None` one -- every snapshot
@@ -472,7 +484,7 @@ def _carry_retired(data: object, where: str, replacement: str) -> object:
     data = dict(data)
     value = data.pop(RETIRED_WAIT_TIMEOUT)
     if value is not None:
-        logger.warning(
+        deprecated(
             "%s.%s is deprecated (Ruling 196) and read as %s.%s; rename it",
             where,
             RETIRED_WAIT_TIMEOUT,

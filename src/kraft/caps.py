@@ -335,22 +335,39 @@ def time_capped_sessions(conn, work_item_ids) -> set[str]:
     return {r["sid"] for r in rows if r["sid"]}
 
 
+#: What closes a pending gate (`executor.gates._GATE_CLOSED`), and a cap's own
+#: stop: an item at a gate is measured only while its newest such event is the
+#: request.
+_GATE_SETTLED = (
+    "gate_approved",
+    "gate_rejected",
+    "node_skipped",
+    "work_item_completed",
+    "work_item_abandoned",
+    REACHED,
+)
+
+
 async def tick(db, *, now: str | None = None) -> list[str]:
     """Stop, for a human, every parked item whose cap ran out while nothing
     of it ran: waiting on an external condition, rate limited, or at a gate
     -- a gate's own `timeout` included. Once per park: a gate stays pending
     and answerable, so one stop per request. Returns the items stopped."""
-    from kraft.executor.gates import pending_gate  # the executor imports this module
-
+    marks = ", ".join("?" * len(_GATE_SETTLED))
     rows = db.read(
         lambda c: c.execute(
-            "SELECT * FROM work_items WHERE status IN ('waiting', 'rate_limited', 'needs_human')"
+            "SELECT w.*, (SELECT CASE WHEN e.type = 'gate_requested' "
+            "THEN json_extract(e.payload, '$.gate') END FROM events e "
+            f"WHERE e.work_item_id = w.id AND e.type IN ('gate_requested', {marks}) "
+            "ORDER BY e.seq DESC LIMIT 1) AS pending_gate "
+            "FROM work_items w WHERE w.status IN ('waiting', 'rate_limited', 'needs_human')",
+            _GATE_SETTLED,
         ).fetchall()
     )
     stopped = []
     for row in rows:
-        gate = pending_gate(db, row["id"]) if row["status"] == "needs_human" else None
-        if row["status"] == "needs_human" and (gate is None or _already_stopped(db, row["id"])):
+        gate = row["pending_gate"] if row["status"] == "needs_human" else None
+        if row["status"] == "needs_human" and gate is None:
             continue
         try:
             hit = db.read(lambda c, r=row, g=gate: parked(c, r, gate=g, now=now))
@@ -367,18 +384,6 @@ async def tick(db, *, now: str | None = None) -> list[str]:
         await db.write(_stop)
         stopped.append(row["id"])
     return stopped
-
-
-def _already_stopped(db, work_item_id: str) -> bool:
-    """A cap already stopped this item since its gate was requested."""
-    row = db.read(
-        lambda c: c.execute(
-            "SELECT type FROM events WHERE work_item_id = ? AND type IN ('gate_requested', ?) "
-            "ORDER BY seq DESC LIMIT 1",
-            (work_item_id, REACHED),
-        ).fetchone()
-    )
-    return row is not None and row["type"] == REACHED
 
 
 async def poller(app) -> None:
