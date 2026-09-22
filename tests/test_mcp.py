@@ -67,6 +67,8 @@ def test_create_work_item_tells_the_agent_it_will_not_run():
     """An agent that thinks create means start will file work and walk away."""
     create = next(t for t in _tools() if t.name == "create_work_item")
     assert "paused" in create.description.lower()
+    # and it cannot ask otherwise: autostart is a person's flag (Kraft-s7c04.31)
+    assert "autostart" not in create.input_schema["properties"]
 
 
 def test_create_work_item_offers_a_description_and_says_what_it_is_for():
@@ -182,6 +184,29 @@ def test_create_work_item_forwards_the_base_branch(monkeypatch):
         )
     )
     assert seen["base_branch"] == "release"
+
+
+def test_create_work_item_forwards_skip_nodes_budget_and_node_overrides(monkeypatch):
+    """Kraft-s7c04.33: the MCP door takes the same intake fields as the CLI.
+    An omitted `budget_usd` is not sent as None: None would be an explicit
+    "no cap", and leaving it out is "the policy default"."""
+    seen = []
+
+    async def fake(*args, **kwargs):
+        seen.append(kwargs)
+        return {"id": "w1", "status": "paused", "title": "t"}
+
+    monkeypatch.setattr(mcp.client, "create_work_item", fake)
+    server = mcp.build()
+    fields = {
+        "skip_nodes": ["spec"],
+        "budget_usd": 5.0,
+        "node_overrides": {"plan": {"auto_escalate": True}},
+    }
+    asyncio.run(server.call_tool("create_work_item", {"title": "t", **fields}))
+    asyncio.run(server.call_tool("create_work_item", {"title": "t"}))
+    assert fields.items() <= seen[0].items()
+    assert "budget_usd" not in seen[1]
 
 
 def test_ensure_repo_through_the_mcp_tool_returns_the_stored_entry(app, tmp_path):

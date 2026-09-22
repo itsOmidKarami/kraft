@@ -12,7 +12,7 @@ from kraft import config as config_mod
 from kraft import executor, store
 from kraft.adapters import beads as beads_mod
 from kraft.api import api_router, deps
-from kraft.api.routes import board
+from kraft.api.routes import board, gates
 from kraft.executor import entry
 from kraft.overrides import validate_agent_overrides, validate_node_override_fields
 from kraft.policy import PolicyError, PolicyMaximaInput
@@ -182,6 +182,15 @@ async def create_work_item(body: NewWorkItem, request: Request):
         # posture as an invalid registry — do not accept a run we cannot bound.
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
+    if body.autostart and gates._decided_by(request) != "human":
+        # Design §6 rule 1, at the one door every client reaches (Kraft-s7c04.31):
+        # an agent files work, a human starts it. Refused, not quietly filed
+        # paused, so the caller learns that nothing is running.
+        raise HTTPException(
+            403,
+            "an agent cannot start the work it files: file it paused (no autostart) "
+            "and a human starts it from the board",
+        )
     chain = deps.resolve_chain_or_422(st, body.chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An

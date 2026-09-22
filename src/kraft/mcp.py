@@ -59,6 +59,9 @@ def build() -> MCPServer:
         implements_beads: list[str] | None = None,
         policy: dict | None = None,
         base_branch: str | None = None,
+        skip_nodes: list[str] | None = None,
+        budget_usd: float | None = None,
+        node_overrides: dict | None = None,
     ) -> dict:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
@@ -88,7 +91,13 @@ def build() -> MCPServer:
 
         `base_branch` is the branch the work starts from and its merge request
         targets -- a release branch, say. Unset, it is the repo's default
-        branch. It must already exist on the repo's origin."""
+        branch. It must already exist on the repo's origin.
+
+        `skip_nodes` drops named nodes from the item's chain; `budget_usd` caps
+        its spend in dollars (unset, the policy's cap applies -- this door can
+        set a cap but not lift one); `node_overrides` is `{node_id: {field:
+        value}}`, the fields `set_node_overrides` takes. Leave all three out
+        unless a human asked for them."""
         return await client.create_work_item(
             title,
             repo=repo,
@@ -99,6 +108,9 @@ def build() -> MCPServer:
             implements_beads=implements_beads,
             policy=policy,
             base_branch=base_branch,
+            skip_nodes=skip_nodes,
+            node_overrides=node_overrides,
+            **({"budget_usd": budget_usd} if budget_usd is not None else {}),
         )
 
     @server.tool()
