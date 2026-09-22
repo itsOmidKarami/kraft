@@ -166,6 +166,27 @@ async def _review_and_approve(it, launch):
 # -- Kraft-rndd1 --------------------------------------------------------------
 
 
+async def test_agent_approval_of_an_unedited_artifact_still_applies(item_on, tmp_path, monkeypatch):
+    """The positive case the two refusal tests below need alongside them:
+    when nothing touches the artifact between dispatch and approval, the
+    digest `review_gates` captures matches what `apply_approval` recomputes,
+    and the agent's approval applies exactly as it would have before this
+    fix -- the new check is a real digest comparison, not a check that just
+    happens to always refuse."""
+    it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
+    launch = REVISION_LAUNCH
+    fake_harness_home(tmp_path, ["true"])
+    _approving_agent(it, monkeypatch)
+
+    status = await _walk(it, launch)
+    assert status == "awaiting_gate"
+
+    await _review_and_approve(it, launch)
+
+    [event] = it.events("chain_revised")
+    assert event["payload"]["gate"] == GATE
+
+
 async def test_agent_approval_refuses_an_artifact_edited_after_its_read(
     item_on, tmp_path, monkeypatch
 ):
