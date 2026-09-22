@@ -2,19 +2,11 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import type {
-  HarnessCapability,
-  HarnessProfile,
-  HarnessProviders,
-  Harnesses,
-} from "../../types";
+import type { HarnessCapability, HarnessProfile, HarnessProviders, Harnesses } from "../../types";
 import { renderAt, setupSettingsMocks } from "./testing";
 import { setPhoneWidth } from "../../testFixtures";
 
-const profile = (
-  id: string,
-  extra: Partial<HarnessProfile> = {},
-): HarnessProfile => ({
+const profile = (id: string, extra: Partial<HarnessProfile> = {}): HarnessProfile => ({
   id,
   provider: id,
   enabled: true,
@@ -34,11 +26,7 @@ const HARNESSES: Harnesses = {
       used_by: ["tasks.implementer", "tasks.spec_author"],
       chains: ["default"],
     }),
-    profile("codex", {
-      enabled: false,
-      executable: "codex",
-      defaults: { effort: "medium" },
-    }),
+    profile("codex", { enabled: false, executable: "codex", defaults: { effort: "medium" } }),
   ],
   agent_profiles: [
     {
@@ -55,18 +43,12 @@ const HARNESSES: Harnesses = {
       model: { claude: "haiku" },
       used_by: ["tasks.quick"],
       chains: ["default"],
-      problems: [
-        "chain 'default' task 'q.main.t': profile 'fast' has no model for provider 'codex' (harness 'codex')",
-      ],
+      problems: ["chain 'default' task 'q.main.t': profile 'fast' has no model for provider 'codex' (harness 'codex')"],
     },
   ],
 };
 
-const cap = (
-  values: string[] = [],
-  always: string | string[] | null = null,
-  extra: Partial<HarnessCapability> = {},
-) => ({
+const cap = (values: string[] = [], always: string | string[] | null = null, extra: Partial<HarnessCapability> = {}) => ({
   cli: [],
   values,
   always,
@@ -87,20 +69,13 @@ const PROVIDERS: HarnessProviders = {
       override: false,
       capabilities: {
         model: cap([], null, { cli: ["--model", "{value}"] }),
-        effort: cap(["low", "high", "max"], null, {
-          cli: ["--effort", "{value}"],
-        }),
-        deny_tools: cap([], ["Monitor", "Agent"], {
-          cli: ["--disallowed-tools", "{csv}"],
-        }),
+        effort: cap(["low", "high", "max"], null, { cli: ["--effort", "{value}"] }),
+        deny_tools: cap([], ["Monitor", "Agent"], { cli: ["--disallowed-tools", "{csv}"] }),
         permission_mode: cap(["manual", "auto"], "auto", {
           cli: ["--permission-mode", "{value}"],
           under_allowlist: "manual",
         }),
-        usage: cap([], null, {
-          source: "envelope",
-          reader: "claude-stream-json",
-        }),
+        usage: cap([], null, { source: "envelope", reader: "claude-stream-json" }),
         frobnicate: cap([], null, { cli: ["--frob"] }),
       },
     },
@@ -110,18 +85,14 @@ const PROVIDERS: HarnessProviders = {
       command: ["codex", "exec"],
       path: "/home/templates/harnesses/codex.yaml",
       override: true,
-      capabilities: {
-        model: cap(["(gpt|codex).*"]),
-        effort: cap(["low", "medium", "high"]),
-      },
+      capabilities: { model: cap(["(gpt|codex).*"]), effort: cap(["low", "medium", "high"]) },
     },
   },
   invalid: { gemini: "gemini.yaml: unknown capability 'x'" },
 };
 
 /** The capability list's row for `name`. */
-const row = (name: string) =>
-  screen.getByText(name, { selector: ".capability-name" }).closest("li")!;
+const row = (name: string) => screen.getByText(name, { selector: ".capability-name" }).closest("li")!;
 
 beforeEach(() => {
   setupSettingsMocks();
@@ -132,150 +103,93 @@ beforeEach(() => {
 describe("Settings · harnesses", () => {
   it("lists every profile with how many library tasks select it", async () => {
     renderAt("/settings/harnesses");
-    expect(
-      await screen.findByRole("button", { name: /claude/ }),
-    ).toHaveTextContent("2 tasks");
-    expect(screen.getByRole("button", { name: /codex/ })).toHaveTextContent(
-      "unused · disabled",
-    );
-    expect(
-      screen.getByText(/gemini: gemini.yaml: unknown capability/),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /claude/ })).toHaveTextContent("2 tasks");
+    expect(screen.getByRole("button", { name: /codex/ })).toHaveTextContent("unused · disabled");
+    expect(screen.getByText(/gemini: gemini.yaml: unknown capability/)).toBeInTheDocument();
   });
 
   it("a profile links to the library tasks and chains that select it", async () => {
     renderAt("/settings/harnesses?h=claude");
-    expect(
-      await screen.findByRole("heading", { name: "claude" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "tasks.implementer" }),
-    ).toHaveAttribute("href", "/settings/library?c=tasks.implementer");
-    expect(screen.getByRole("link", { name: "default" })).toHaveAttribute(
+    expect(await screen.findByRole("heading", { name: "claude" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "tasks.implementer" })).toHaveAttribute(
       "href",
-      "/settings/chains?tpl=default",
+      "/settings/library?c=tasks.implementer",
     );
+    expect(screen.getByRole("link", { name: "default" })).toHaveAttribute("href", "/settings/chains?tpl=default");
   });
 
   it("shows the selected profile's provider capabilities, read-only", async () => {
     renderAt("/settings/harnesses?h=codex");
-    expect(
-      await screen.findByRole("heading", { name: "provider codex" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "provider codex" })).toBeInTheDocument();
     expect(row("effort")).toHaveTextContent("accepts low | medium | high");
     // Only the defaults this provider declares are offered.
     expect(screen.getByLabelText(/default effort/)).toHaveValue("medium");
-    expect(
-      screen.queryByLabelText(/default permission_mode/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/default permission_mode/)).not.toBeInTheDocument();
   });
 
   it("each capability row says what it means and the flag it becomes (Kraft-ok48k)", async () => {
     renderAt("/settings/harnesses?h=claude");
     expect(await screen.findByText("Capabilities")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Kraft's neutral option names, and the flags this CLI receives for them/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Kraft's neutral option names, and the flags this CLI receives for them/)).toBeInTheDocument();
     const pm = row("permission_mode");
     expect(pm).toHaveTextContent("--permission-mode <value>");
     expect(pm).toHaveTextContent("accepts manual | auto");
     expect(pm).toHaveTextContent("every launch: auto");
     expect(pm).toHaveTextContent("under a tool allowlist: manual");
-    expect(pm).toHaveTextContent(
-      "How the CLI decides whether a tool call needs approval",
-    );
+    expect(pm).toHaveTextContent("How the CLI decides whether a tool call needs approval");
     expect(row("deny_tools")).toHaveTextContent("--disallowed-tools <a,b,…>");
     expect(row("deny_tools")).toHaveTextContent("every launch: Monitor, Agent");
-    expect(row("usage")).toHaveTextContent(
-      "read from the output stream (claude-stream-json)",
-    );
+    expect(row("usage")).toHaveTextContent("read from the output stream (claude-stream-json)");
     // A name Kraft ships no description for renders bare.
     expect(row("frobnicate").textContent).toBe("frobnicate → --frob");
   });
 
   it("names the packaged definition's path as that, and says how to override it", async () => {
     renderAt("/settings/harnesses?h=claude");
-    expect(
-      await screen.findByText(
-        "Packaged definition: /pkg/harnesses/claude.yaml",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /drop a claude.yaml into \$KRAFT_HOME\/templates\/harnesses\//,
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Packaged definition: /pkg/harnesses/claude.yaml")).toBeInTheDocument();
+    expect(screen.getByText(/drop a claude.yaml into \$KRAFT_HOME\/templates\/harnesses\//)).toBeInTheDocument();
   });
 
   it("an override from $KRAFT_HOME is labelled as yours", async () => {
     renderAt("/settings/harnesses?h=codex");
-    expect(
-      await screen.findByText(
-        "Your override: /home/templates/harnesses/codex.yaml",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Your override: /home/templates/harnesses/codex.yaml")).toBeInTheDocument();
     expect(screen.queryByText(/Packaged definition/)).not.toBeInTheDocument();
   });
 
   it("clicking a profile selects it", async () => {
     renderAt("/settings/harnesses");
     await userEvent.click(await screen.findByRole("button", { name: /codex/ }));
-    expect(
-      await screen.findByRole("heading", { name: "codex" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "codex" })).toBeInTheDocument();
   });
 
   it("saves the edited profile, dropping an emptied default and an empty executable", async () => {
-    const put = vi
-      .spyOn(api, "putHarness")
-      .mockResolvedValue(HARNESSES.profiles[0]);
+    const put = vi.spyOn(api, "putHarness").mockResolvedValue(HARNESSES.profiles[0]);
     renderAt("/settings/harnesses?h=claude");
     const model = await screen.findByLabelText(/default model/);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await userEvent.clear(model);
     await userEvent.type(screen.getByLabelText(/default effort/), "high");
-    await userEvent.click(
-      screen.getByRole("switch", { name: "disable claude" }),
-    );
+    await userEvent.click(screen.getByRole("switch", { name: "disable claude" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(put).toHaveBeenCalledWith("claude", {
-      provider: "claude",
-      enabled: false,
-      defaults: { effort: "high" },
-    });
+    expect(put).toHaveBeenCalledWith("claude", { provider: "claude", enabled: false, defaults: { effort: "high" } });
     expect(await screen.findByText("saved")).toBeInTheDocument();
   });
 
   it("a save the server refuses names why and keeps the draft", async () => {
     vi.spyOn(api, "putHarness").mockRejectedValue(
-      new Error(
-        "chain 'default' task 'impl.main.implementer': profile 'claude' is disabled",
-      ),
+      new Error("chain 'default' task 'impl.main.implementer': profile 'claude' is disabled"),
     );
     renderAt("/settings/harnesses?h=claude");
-    await userEvent.click(
-      await screen.findByRole("switch", { name: "disable claude" }),
-    );
+    await userEvent.click(await screen.findByRole("switch", { name: "disable claude" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(
-      await screen.findByText(/profile 'claude' is disabled/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", { name: "enable claude" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/profile 'claude' is disabled/)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "enable claude" })).toBeInTheDocument();
   });
 
   it("changing the provider offers that provider's defaults", async () => {
     renderAt("/settings/harnesses?h=claude");
-    await userEvent.selectOptions(
-      await screen.findByLabelText("provider"),
-      "codex",
-    );
-    await waitFor(() =>
-      expect(screen.getByLabelText(/default effort/)).toBeInTheDocument(),
-    );
+    await userEvent.selectOptions(await screen.findByLabelText("provider"), "codex");
+    await waitFor(() => expect(screen.getByLabelText(/default effort/)).toBeInTheDocument());
     expect(screen.getByText(/· low \| medium \| high/)).toBeInTheDocument();
   });
 
@@ -289,31 +203,18 @@ describe("Settings · harnesses", () => {
 
   it("lists the agent profiles under the harnesses read-only with any pairing problem", async () => {
     renderAt("/settings/harnesses");
-    const strong = (
-      await screen.findByText("strong", { selector: ".capability-name" })
-    ).closest("li")!;
+    const strong = (await screen.findByText("strong", { selector: ".capability-name" })).closest("li")!;
     expect(strong).toHaveTextContent("effort high");
     expect(strong).toHaveTextContent("claude: sonnet · codex: gpt-5.6-terra");
-    expect(strong.querySelector("a")).toHaveAttribute(
-      "href",
-      "/settings/library?c=tasks.repair",
-    );
+    expect(strong.querySelector("a")).toHaveAttribute("href", "/settings/library?c=tasks.repair");
     expect(screen.getByText(/Edit them in harnesses.yaml/)).toBeInTheDocument();
-    const fast = screen
-      .getByText("fast", { selector: ".capability-name" })
-      .closest("li")!;
-    expect(fast).toHaveTextContent(
-      "profile 'fast' has no model for provider 'codex'",
-    );
+    const fast = screen.getByText("fast", { selector: ".capability-name" }).closest("li")!;
+    expect(fast).toHaveTextContent("profile 'fast' has no model for provider 'codex'");
     expect(strong.querySelector(".form-error")).toBeNull();
   });
 
   it("a harnesses.yaml that does not load says why", async () => {
-    vi.spyOn(api, "getHarnesses").mockResolvedValue({
-      ...HARNESSES,
-      profiles: [],
-      error: "harnesses.yaml: bad",
-    });
+    vi.spyOn(api, "getHarnesses").mockResolvedValue({ ...HARNESSES, profiles: [], error: "harnesses.yaml: bad" });
     renderAt("/settings/harnesses");
     expect(await screen.findByText("harnesses.yaml: bad")).toBeInTheDocument();
   });
@@ -321,8 +222,6 @@ describe("Settings · harnesses", () => {
   it("phone: the header goes back to Settings", async () => {
     setPhoneWidth(true);
     renderAt("/settings/harnesses");
-    expect(
-      await screen.findByRole("link", { name: /Settings/ }),
-    ).toHaveAttribute("href", "/settings");
+    expect(await screen.findByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
   });
 });

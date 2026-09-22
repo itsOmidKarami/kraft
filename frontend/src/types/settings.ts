@@ -107,10 +107,7 @@ export interface HarnessProfile {
 }
 
 /** What a profile save sends (`PUT /harnesses/profiles/{id}`). */
-export type HarnessProfileInput = Pick<
-  HarnessProfile,
-  "provider" | "enabled" | "defaults"
-> & {
+export type HarnessProfileInput = Pick<HarnessProfile, "provider" | "enabled" | "defaults"> & {
   executable?: string;
 };
 
@@ -207,10 +204,7 @@ export interface Intake {
   max_concurrent?: number;
   priority_ceiling: number;
   repos: string[];
-  repo_pickups: Record<
-    string,
-    { items: number | null; last_picked_up: string | null }
-  >;
+  repo_pickups: Record<string, { items: number | null; last_picked_up: string | null }>;
   recent_pickups: {
     work_item_id: string;
     bead_id: string | null;
@@ -273,12 +267,7 @@ export interface Notify {
   url_set: boolean;
   base_url: string | null;
   events: string[];
-  last_test: {
-    at: string;
-    status: number | null;
-    ms: number | null;
-    error: string | null;
-  } | null;
+  last_test: { at: string; status: number | null; ms: number | null; error: string | null } | null;
 }
 
 export interface AuthSession {
