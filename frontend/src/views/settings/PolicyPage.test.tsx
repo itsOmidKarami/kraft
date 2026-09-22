@@ -108,4 +108,20 @@ describe("Settings · policy (5d)", () => {
     expect(await screen.findByLabelText("new_loop attempts")).toHaveValue(3);
   });
 
+  it("saves the per-level caps it does not edit in their nested shape", async () => {
+    // Ruling 211: `defaults:`/`maxima:` caps are nested per level. The page
+    // edits neither section, and a save must hand both back as it read them.
+    const levels = {
+      defaults: { max_attempts: 2, tasks: { time_cap_minutes: 90 } },
+      maxima: { work_item: { time_cap_minutes: 1440 }, tasks: { time_cap_minutes: 240 } },
+    };
+    vi.spyOn(api, "getPolicy").mockResolvedValue({ ...policy, ...levels });
+    const put = vi.spyOn(api, "putPolicy").mockResolvedValue(policy);
+    renderAt("/settings/policy");
+    const input = await screen.findByLabelText(/max concurrent/i);
+    await userEvent.clear(input);
+    await userEvent.type(input, "5");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(put).toHaveBeenCalledWith(expect.objectContaining({ max_concurrent: 5, ...levels }));
+  });
 });
