@@ -467,12 +467,7 @@ class GlabCli(mr_ops.CliWaits):
         data = mr_ops.parse_json(raw, "glab mr view")
         number = mr.number if mr.number > 0 else int(data["iid"])
         current = [str(label) for label in data.get("labels") or []]
-        scopes = {label.split("::", 1)[0] + "::" for label in labels if "::" in label}
-        drop = [
-            label
-            for label in current
-            if label not in labels and any(label.startswith(scope) for scope in scopes)
-        ]
+        drop = mr_ops.same_scope_labels(current, labels)
         args = ["glab", "mr", "update", *target, "--label", ",".join(labels)]
         for label in drop:
             args += ["--unlabel", label]

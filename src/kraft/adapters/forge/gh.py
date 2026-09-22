@@ -399,11 +399,19 @@ class GhCli(mr_ops.CliWaits):
         No pipeline to re-create, unlike GitLab: a workflow that cares about
         labels keys on `pull_request: types: [labeled]` and GitHub re-evaluates
         it on the edit.
+
+        A label that shares a new label's `scope::` prefix is removed in the
+        same edit, as `GlabCli.set_labels` does (Kraft-o9xh1).
         """
         if not labels:
             return
         target = [str(mr.number)] if mr.number > 0 else []
-        await git.run_git(repo, ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)])
+        data = await self._json(repo, ["pr", "view", *target, "--json", "labels"], "gh pr view")
+        current = [str(label.get("name", "")) for label in data.get("labels") or []]
+        args = ["gh", "pr", "edit", *target, "--add-label", ",".join(labels)]
+        for label in mr_ops.same_scope_labels(current, labels):
+            args += ["--remove-label", label]
+        await git.run_git(repo, args)
 
     async def merge(self, *, repo: Path, branch: str, mr: MR) -> None:
         await git._assert_pushed(repo, branch)

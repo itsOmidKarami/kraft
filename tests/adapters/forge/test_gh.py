@@ -232,15 +232,35 @@ async def test_gh_branch_ci_status_judges_the_latest_run_never_a_cancelled_one(
 async def test_gh_set_labels_edits_the_pull_request(cli, tmp_path):
     """GitHub re-evaluates `pull_request: types: [labeled]` itself, so there is
     no pipeline to re-create here -- only the label to add."""
-    cli.stub("gh", "")
+    cli.stub("gh", routes={"pr view": '{"labels":[]}', "pr edit": ""})
 
     await forge.GhCli().set_labels(
         repo=tmp_path, mr=forge.MR(7, "u"), labels=("release::patch", "bug")
     )
 
-    argv = cli.argv("gh")
-    assert argv[:2] == ["pr", "edit"]
-    assert argv[argv.index("--add-label") + 1] == "release::patch,bug"
+    (edit,) = [c for c in cli.calls("gh") if c.startswith("pr edit")]
+    assert edit == "pr edit 7 --add-label release::patch,bug"
+
+
+async def test_gh_set_labels_replaces_an_existing_same_scope_label(cli, tmp_path):
+    """Kraft-o9xh1, as glab does (Kraft-zfdu8): `--add-label` only adds, so a
+    repair pass that moves release::patch to release::minor left both on the PR
+    and `next_tag.py` raises on more than one. The label sharing a new label's
+    `scope::` prefix is removed in the same edit; other labels stay."""
+    cli.stub(
+        "gh",
+        routes={
+            "pr view": '{"labels":[{"name":"release::patch"},{"name":"bug"},{"name":"area::ui"}]}',
+            "pr edit": "",
+        },
+    )
+
+    await forge.GhCli().set_labels(repo=tmp_path, mr=forge.MR(7, "u"), labels=("release::minor",))
+
+    assert cli.calls("gh") == [
+        "pr view 7 --json labels",
+        "pr edit 7 --add-label release::minor --remove-label release::patch",
+    ]
 
 
 async def test_gh_retry_jobs_reruns_the_actions_run_behind_the_failed_check(cli, tmp_path):
