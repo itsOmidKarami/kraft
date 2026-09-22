@@ -180,6 +180,12 @@ class BuiltinAction(StrEnum):
     action a later phase actually wires up."""
 
     VERIFY_CHANGED_TEST_SCOPES = "kraft.verify_changed_test_scopes"
+    #: `builtins.mr_rebase` -- rebasing the worktree onto the item's base
+    #: branch, right before a draft merge request opens (Kraft-3llig). Pure
+    #: local git, no forge CLI call, which is why this is a builtin and not a
+    #: `ForgeAction`: the node's other task (`mr.open_draft`) is the one that
+    #: talks to the forge.
+    MR_REBASE = "kraft.mr_rebase"
 
 
 class ForgeAction(StrEnum):

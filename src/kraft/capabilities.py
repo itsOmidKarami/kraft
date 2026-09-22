@@ -62,6 +62,28 @@ MANIFEST: tuple[Capability, ...] = (
         how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
         "set `profile: strong` on a task in place of its `model:`/`effort:`",
     ),
+    Capability(
+        version="1.0.1",
+        name="mr_rebase",
+        what="draft_merge_request rebases onto the item's base branch before opening the "
+        "draft MR, instead of opening on whatever base the worktree was cut from",
+        how=(
+            "add to library.yaml's `tasks:`:\n"
+            "  mr_rebase:\n"
+            "    kind: builtin\n"
+            "    ref: kraft.mr_rebase\n"
+            "then in chains/default.yaml, replace draft_merge_request's `tasks:` with:\n"
+            "    steps:\n"
+            "      - id: rebase\n"
+            "        tasks:\n"
+            "          - id: rebase\n"
+            "            extends: mr_rebase\n"
+            "      - id: open\n"
+            "        tasks:\n"
+            "          - id: open\n"
+            "            extends: open_draft_mr"
+        ),
+    ),
 )
 
 

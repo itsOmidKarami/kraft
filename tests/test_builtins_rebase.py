@@ -10,6 +10,7 @@ from support import worktree as wtree
 from support.harness import _git, make_repo
 
 from kraft import builtins as kraft_builtins
+from kraft import caps, events
 from kraft.config import git_read
 
 
@@ -443,3 +444,59 @@ async def test_mr_rebase_reports_done_when_it_moved_nothing(database, run_dirs, 
         has_rebase_bounce=True,
     )
     assert status == "done"
+
+
+def _hanging_pre_rebase_hook(repo, seconds: float) -> None:
+    """A real `pre-rebase` hook that sleeps -- `git rebase` runs it before it
+    does anything else, so this hangs the rebase itself, the same shape a
+    slow custom hook or a smudge/LFS filter would (Kraft-3llig)."""
+    hook = repo / ".git" / "hooks" / "pre-rebase"
+    hook.write_text(f"#!/bin/sh\nsleep {seconds}\nexit 0\n")
+    hook.chmod(0o755)
+
+
+async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
+    database, run_dirs, repo
+):
+    """Kraft-3llig review fix 1: a hanging pre-rebase hook must not hold the
+    worker slot forever. `time_cap` bounds the `git rebase` subprocess
+    itself; past it, the rebase is aborted and the stop is recorded the way
+    every other time-capped task's is -- `capped_out`, `caps.REACHED`,
+    `caps.TIME_CAPPED` -- not a new stop kind."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    _hanging_pre_rebase_hook(repo, seconds=30)
+    hit = caps.Hit(scope="", field="time_cap_minutes", minutes=0, remaining_s=1.0)
+    time_cap = caps.Deadline(at=caps.monotonic() + 1.0, hit=hit)
+
+    started = caps.monotonic()
+    status = await kraft_builtins.mr_rebase(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id="w1",
+        node_id="draft_merge_request",
+        hook_point="draft_merge_request.rebase.rebase",
+        round=0,
+        repo=str(repo),
+        worktree=str(worktree),
+        branch=wtree.branch(database),
+        time_cap=time_cap,
+    )
+    elapsed = caps.monotonic() - started
+
+    assert status == caps.TIME_CAPPED
+    # Stopped near the 1s cap, nowhere near the hook's 30s sleep.
+    assert elapsed < 15
+    session = database.read(
+        lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+    )
+    assert session["status"] == "capped_out"
+    evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+    [reached] = [e for e in evts if e["type"] == caps.REACHED]
+    assert reached["payload"]["node_id"] == "draft_merge_request"
+    # The rebase was cleanly aborted, not left mid-operation.
+    assert git_read(worktree, "status", "--porcelain") == ""
+    assert not (worktree / ".git" / "rebase-merge").exists()
+    assert not (worktree / ".git" / "rebase-apply").exists()

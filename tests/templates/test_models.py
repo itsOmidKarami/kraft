@@ -87,6 +87,14 @@ def test_builtin_task_accepts_a_code_owned_ref():
     assert task.execution is tm.ExecutionMode.SEQUENTIAL
 
 
+def test_builtin_task_accepts_the_mr_rebase_ref():
+    """Kraft-3llig: `BuiltinAction`'s second member."""
+    task = tm.BuiltinTask.model_validate(
+        {"id": "rebase", "kind": "builtin", "ref": "kraft.mr_rebase"}
+    )
+    assert task.ref is tm.BuiltinAction.MR_REBASE
+
+
 def test_builtin_task_rejects_an_action_kraft_does_not_support():
     with pytest.raises(ValidationError, match="ref"):
         tm.BuiltinTask.model_validate(

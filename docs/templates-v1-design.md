@@ -291,6 +291,17 @@ tasks:
     skill: kraft:fix-loop-judge
     inputs: [review_package]
 
+  # Kraft-3llig: rebase onto the item's base branch right before the draft MR
+  # opens, so it targets where the base actually is rather than wherever it
+  # was when the worktree was cut. `scope: once` -- not `each_repository` --
+  # deliberately: `builtins.mr_rebase` has no workspace-member awareness
+  # (unlike `open_draft_mr`'s forge handler, which walks every repository
+  # itself). A workspace member's own pre-MR staleness is not this fix's
+  # scope.
+  mr_rebase:
+    kind: builtin
+    ref: kraft.mr_rebase
+
   open_draft_mr:
     kind: forge
     target: mr.open_draft
@@ -543,11 +554,20 @@ nodes:
       - id: author
         extends: describe_mr
 
+  # Kraft-3llig: `steps`, not the `tasks` shorthand -- a `tasks` group is one
+  # concurrent group (`exec-node-orders-concurrent-task-groups`), and the
+  # rebase must finish before `open` runs, not race it.
   - id: draft_merge_request
     kind: exec
-    tasks:
+    steps:
+      - id: rebase
+        tasks:
+          - id: rebase
+            extends: mr_rebase
       - id: open
-        extends: open_draft_mr
+        tasks:
+          - id: open
+            extends: open_draft_mr
 
   - id: merge_request_feedback
     extends: post_draft_feedback

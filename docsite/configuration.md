@@ -82,7 +82,8 @@ returns it as `suggested_action`, and `kraft view show` prints the one command
 that takes it. An infra stop suggests `retry`.
 
 A `subprocess` task has a `command`; a `builtin` task a `ref`
-(`kraft.verify_changed_test_scopes`, which runs the repo's own test scopes); a
+(`kraft.verify_changed_test_scopes`, which runs the repo's own test scopes, or
+`kraft.mr_rebase`, which rebases the worktree onto the item's base branch); a
 `forge` task a `target` (`mr.open_draft`, `mr.ci`, `mr.automated_review`,
 `mr.mark_ready`, `mr.external_approval`, `mr.merge`, `mr.post_merge_ci`, …) and,
 for a wait, `wait: {polling: {initial_interval: 30s, max_interval: 5m}}`. A

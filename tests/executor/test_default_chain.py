@@ -142,6 +142,7 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
         "code_review",
         "author",
         "author",
+        "rebase",
         "open",
         "await_ci",
         "await_review",
@@ -153,3 +154,24 @@ async def test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased
     requested = [e["payload"]["gate"] for e in it.events("gate_requested")]
     assert requested == ["local_review", "final_review"]
     assert it.events("gate_reopened") == []
+
+
+async def test_a_rebase_in_draft_merge_request_does_not_restart_merge_request_feedback(
+    item_on, script, default_chain
+):
+    """Kraft-3llig. `draft_merge_request`'s rebase step moves and persists
+    `base_ref` on the node *before* `merge_request_feedback` -- and
+    `draft_merge_request` itself declares no `on_base_changed`, so its own
+    pass completes ordinarily. `merge_request_feedback` reads `base_ref` as
+    its `pre_base` only once it starts, which is already the moved value by
+    then: nothing restarts, even though `merge_request_feedback` does declare
+    `on_base_changed: {restart_from: verification}`."""
+    it = await item_on(default_chain, "draft_merge_request")
+    await _approved(it, "local_review")
+    script.effects = {"rebase": _moves_base_once(it)}
+
+    assert await _walk(it, default_chain, "draft_merge_request") == "awaiting_gate"
+    assert script.calls == ["rebase", "open", "await_ci", "await_review", "author"]
+    assert it.events("base_change_restart") == []
+    assert gates.pending_gate(it.database, it.id) == "final_review"
+    assert it.row()["base_ref"] == "1" * 40
