@@ -157,8 +157,19 @@ def _cmd_install_service(ns: argparse.Namespace) -> None:
         manager = "launchctl"
     elif sys.platform.startswith("linux"):
         path = _write_systemd_unit(kraft_bin)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", _SYSTEMD_UNIT], check=True)
+        # `enable` by the bare unit name only resolves against the *running
+        # manager's own* unit search path -- fixed to the environment the
+        # manager was started with, not this process's. On a machine whose
+        # $HOME the manager didn't start with (any sandboxed test, notably
+        # GitHub Actions' persistent per-job user session), that search path
+        # will never contain what we just wrote, so `daemon-reload` followed
+        # by `enable --now <bare name>` fails "Unit file ... does not exist"
+        # every time, not intermittently (Kraft-1zvs3 -- confirmed by
+        # instrumenting the manager's own environment in CI). Passing the
+        # absolute path instead makes `enable` link the file into the
+        # manager's real unit directory itself (the documented way to adopt
+        # an out-of-tree unit), sidestepping that mismatch entirely.
+        subprocess.run(["systemctl", "--user", "enable", "--now", str(path)], check=True)
         manager = "systemctl --user"
     else:
         raise SystemExit(f"kraft admin install-service: unsupported platform {sys.platform}")

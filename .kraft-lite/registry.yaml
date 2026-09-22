@@ -64,10 +64,13 @@ on.mr.open:
 
 on.ci.poll:
   kind: subprocess
-  command: [glab, ci, status]
+  command: [gh, pr, checks]
   # Runs once and reports. Never waits - see the `next` skill.
-  # The init skill hardcodes [gh, pr, checks]; this repo's origin is GitLab and it
-  # has .gitlab-ci.yml, so gh could never have worked here. Tracked as Kraft-rje.
+  # Re-bound 2026-09-22 (Kraft-gzzpg): this repo moved forges mid-flight to
+  # GitHub (origin is now git@github.com:itsOmidKarami/kraft.git, and there is
+  # no .gitlab-ci.yml left); kl.py's own detect() already derives this from
+  # origin/CI-file presence (Kraft-rje) and would now propose gh too - this
+  # hand-written file just hadn't been regenerated since the move.
 
 on.review.mr.run:
   kind: skill
