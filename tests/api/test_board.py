@@ -149,8 +149,11 @@ def _seed_repo(client, wid, **kwargs):
     neither of which a detail-payload test needs to actually run."""
     db_path = Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db"
     conn = sqlite3.connect(db_path)
+    mr_ref = kwargs.pop("mr_ref", None)
     try:
-        store.add_repo(conn, work_item_id=wid, **kwargs)
+        row_id = store.add_repo(conn, work_item_id=wid, **kwargs)
+        if mr_ref:
+            store.update_repo_state(conn, row_id, merge_state="open", mr_ref=mr_ref)
         conn.commit()
     finally:
         conn.close()
@@ -335,23 +338,32 @@ def test_mr_ref_reaches_the_detail_payload(client, repo):
     assert body["mr_ref"]["url"] == "https://forge.example/mr/12?refresh"
 
 
-def test_mr_ref_stays_silent_on_a_multi_repo_item(client, repo):
+@pytest.mark.parametrize(
+    "root_mr, expected",
+    [(None, None), ({"number": 2, "url": "https://forge.example/mr/2"}, 2)],
+    ids=["root-has-none", "root-has-one"],
+)
+def test_mr_ref_on_a_multi_repo_item_is_the_root_row_s_own(client, repo, root_mr, expected):
     """A multi-repo item's `open_mr` node emits one `mr_opened` per target
     repo with no repo identifier in the payload -- the latest one is as
-    likely to be a submodule's as the root's, so this must not guess."""
+    likely to be a submodule's as the root's, so it is never read. The root's
+    own row records its merge request (Kraft-mjsf); with none there, there is
+    no one merge request to link."""
     wid = client.post(
         "/api/work-items",
         json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
-    _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1)
+    member_mr = {"number": 1, "url": "https://forge.example/mr/1"}
+    _seed_repo(client, wid, repo_path="/wt/pkg", role="submodule", merge_rank=0, mr_ref=member_mr)
+    _seed_repo(client, wid, repo_path="/wt", role="root", merge_rank=1, mr_ref=root_mr)
     _seed_events(
         client,
         wid,
         [{"number": 3, "url": "https://forge.example/mr/3"}],
         event_type="mr_opened",
     )
-    body = client.get(f"/api/work-items/{wid}").json()
-    assert body["mr_ref"] is None
+    mr_ref = client.get(f"/api/work-items/{wid}").json()["mr_ref"]
+    assert (mr_ref or {}).get("number") == expected
 
 
 def test_stop_reason_reaches_the_detail_payload(client, repo):

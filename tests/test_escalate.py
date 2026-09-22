@@ -2,7 +2,7 @@
 no chain. `escalate.dispatch`'s only external dependency is
 `_agent.run_agent_task`, monkeypatched the same way
 `test_adapters_agent.py::_capture_cmd` does, plus a fake log file so
-`_extract_cli_session_id` has something to read.
+`usage.READERS["claude-stream-json"].session_id` has something to read.
 """
 
 from __future__ import annotations

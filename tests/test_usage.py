@@ -214,6 +214,28 @@ def test_unknown_reader_is_a_config_error_not_a_silent_skip(tmp_path):
         usage.read(tmp_path / "s.log", tmp_path / "s.json", reader="codex-jsonl")
 
 
+def test_claude_reader_extracts_the_cli_session_id_off_the_init_line(tmp_path):
+    """Kraft-cvnx1: the fourth Claude-shaped parser (session id off `--resume`,
+    alongside the stream/envelope/rate_limit ones) now lives behind
+    `READERS`, not standalone in `escalate.py`."""
+    log = tmp_path / "s.log"
+    log.write_text(
+        "some noise\n"
+        + json.dumps({"type": "system", "subtype": "init", "session_id": "cli-abc"})
+        + "\n"
+        + json.dumps({"type": "result", "usage": {"input_tokens": 1}})
+    )
+    assert usage.READERS["claude-stream-json"].session_id(log) == "cli-abc"
+
+
+def test_claude_reader_session_id_survives_missing_and_unparseable_logs(tmp_path):
+    reader = usage.READERS["claude-stream-json"]
+    assert reader.session_id(tmp_path / "nope.log") is None
+    bad = tmp_path / "bad.log"
+    bad.write_text("not json at all\n")
+    assert reader.session_id(bad) is None
+
+
 # ── cost is the agent's, never Kraft's ───────────────────────────────────────
 
 

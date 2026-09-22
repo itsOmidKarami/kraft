@@ -250,8 +250,28 @@ async def test_a_failed_review_check_is_actionable_with_its_output(
                 ),
             },
         ),
+        # A cancelled run is never a verdict (Kraft-zn8me): a review check
+        # superseded by a newer push is waited out, not handed to a repair.
+        (
+            GH,
+            {
+                "pr view": GH_PR,
+                GH_RUNS: json.dumps(
+                    {"check_runs": [{"status": "completed", "conclusion": "cancelled"}]}
+                ),
+            },
+        ),
+        (
+            GLAB,
+            {
+                "mr view": GLAB_MR,
+                GLAB_STATUSES: json.dumps(
+                    [{"id": 3, "name": "review-bot", "status": "canceled", "description": ""}]
+                ),
+            },
+        ),
     ],
-    ids=["gh", "glab"],
+    ids=["gh", "glab", "gh-cancelled", "glab-canceled"],
 )
 async def test_a_review_check_still_running_is_pending(cli, tmp_path, backend, routes):
     assert (await _review(backend, cli, tmp_path, routes, CHECK)).state == "pending"

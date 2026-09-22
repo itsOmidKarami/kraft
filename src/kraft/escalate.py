@@ -11,12 +11,11 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
-import json
 import uuid
-from pathlib import Path
 
 from kraft import events, executor, store
 from kraft import policy as _policy
+from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
@@ -163,32 +162,6 @@ def _judge_line(db, work_item_id: str, node_id: str | None, evts: list | None = 
     return ""
 
 
-def _extract_cli_session_id(log_path: Path) -> str | None:
-    """The `claude` CLI's own session id, off the `system`/`init` line every
-    `--output-format stream-json` run starts with -- the identity `--resume`
-    takes, distinct from Kraft's own `worker_sessions.id`.
-
-    Scanned across every line rather than assumed to be the first, the same
-    defensive shape `adapters.subprocess._rate_limit_rejection` uses reading
-    this same log: a line Kraft cannot parse yet must not crash a session
-    that otherwise ran fine.
-    """
-    try:
-        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
-    except OSError:
-        return None
-    for line in lines:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
-            sid = obj.get("session_id")
-            if isinstance(sid, str) and sid:
-                return sid
-    return None
-
-
 def escalation_running(db, work_item_id: str) -> str | None:
     """The id of a `pending`/`running` escalation session for
     `work_item_id`, or None.
@@ -258,8 +231,8 @@ def session_status(db, session_id: str) -> str | None:
 #: -- its executable and defaults -- and no field special to escalation exists.
 #: A `claude` profile because the turn is a resumable conversation: the thread
 #: id is read off the provider's own `system`/`init` line
-#: (`_extract_cli_session_id`). A disabled or missing profile stops the turn as
-#: a config error rather than substituting another
+#: (`usage.READERS["claude-stream-json"].session_id`). A disabled or missing
+#: profile stops the turn as a config error rather than substituting another
 #: (`unavailable-selected-harness-needs-human`).
 ESCALATION_TASK = AgentTask(
     id="escalation",
@@ -490,7 +463,9 @@ async def dispatch(
     except _agent.LaunchRefused as exc:
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
 
-    cli_session_id = _extract_cli_session_id(run_dirs.logs / f"{session_id}.log")
+    cli_session_id = _usage.READERS["claude-stream-json"].session_id(
+        run_dirs.logs / f"{session_id}.log"
+    )
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))
     return status

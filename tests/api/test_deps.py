@@ -178,6 +178,27 @@ async def test_cancel_on_an_absent_or_already_done_task_is_a_noop():
     assert "w1" not in app.state.tasks
 
 
+async def test_guard_reraises_assertionerror_instead_of_marking_needs_human():
+    """Kraft-hujmb: `deps.guard`'s broad `except Exception` must not treat
+    Kraft's own broken invariant (or the real-agent-binary test guard, which
+    also raises `AssertionError`) as an ordinary executor crash --
+    `dispatch.measure_node` already carves this same exception out and lets
+    it propagate (Kraft-cpotk); `guard` must do the same."""
+    calls = []
+
+    class _DB:
+        async def write(self, fn):
+            calls.append(fn)
+
+    async def boom():
+        raise AssertionError("broken invariant")
+
+    with pytest.raises(AssertionError):
+        await deps.guard(_DB(), "w1", boom())
+
+    assert calls == []  # never tried to mark_needs_human for this
+
+
 def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
     """Kraft-vhcop: a chain's `skill:` is checked when the chain resolves, so
     the app's library must know the operator's overlay -- or a method only the
