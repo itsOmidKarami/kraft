@@ -126,12 +126,12 @@ kraft item set-policy <id> --policy max_attempts=2   # replaces the whole overri
 The fields are the ones `policy.yaml` explains (see [Configuration](configuration.md)):
 `timeout_minutes`, `max_attempts` (execution nodes only) and
 `allowed_harnesses` move within the administrator `maxima`, and win over what
-the chain authored. `allowed_tools`, `deny_tools`, `token_budget` and
-`sandbox` only tighten: a list intersects with what each task already allows,
-a budget takes the lower value. The time caps `time_cap_minutes` and
-`total_time_cap_minutes` are the work item's own item-wide: raising one above
-the chain's, up to the administrator maximum, is how a person unsticks a
-capped item before a retry (Ruling 198). On a path they only tighten, and are
+the chain authored. `allowed_tools`, `deny_tools` and `sandbox` only
+tighten: a list intersects with what each task already allows. The caps --
+`time_cap_minutes`, `total_time_cap_minutes`, `token_budget` and
+`budget_usd` -- are the work item's own item-wide: raising one above the
+chain's, up to the administrator maximum, is how a person unsticks a capped
+item before a retry (Ruling 198). On a path they only tighten, and are
 refused, naming both scopes, above the cap that scope already has (a wait
 task's total cap is its timeout). `wait_timeout_minutes` is retired (Ruling 196) and refused, naming
 `total_time_cap_minutes`. An operational value past its maximum, a path

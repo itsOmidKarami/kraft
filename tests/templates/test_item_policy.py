@@ -115,8 +115,17 @@ def test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stor
             {"paths": {"verification": {"total_time_cap_minutes": 999}}},
             "policy.paths.verification.total_time_cap_minutes",
         ),
+        (
+            {"paths": {"feedback": {"token_budget": 10**9}}},
+            "policy.paths.feedback.token_budget",
+        ),
     ],
-    ids=["attempts-over-maximum", "node-timeout-over-maximum", "total-time-cap-over-maximum"],
+    ids=[
+        "attempts-over-maximum",
+        "node-timeout-over-maximum",
+        "total-time-cap-over-maximum",
+        "budget-above-the-ceiling",
+    ],
 )
 def test_an_override_past_its_bounds_is_refused_naming_the_field(override, field):
     """Operational values move only within the administrator maxima. The
@@ -137,13 +146,11 @@ def test_an_override_past_its_bounds_is_refused_naming_the_field(override, field
     [
         ({"allowed_tools": ["Read", "WebFetch"]}, "verification.check.test", ("Read",)),
         ({"allowed_tools": ["Read", "Edit"]}, "feedback.main.approval", ("Read",)),
-        ({"paths": {"feedback": {"token_budget": 10**9}}}, "feedback.main.ci", 1000),
         ({"paths": {"feedback": {"token_budget": 10}}}, "feedback.main.ci", 10),
     ],
     ids=[
         "allowlist-wider-than-the-ceiling-intersects",
         "allowlist-wider-than-a-narrower-task-intersects",
-        "budget-above-the-ceiling-takes-the-minimum",
         "budget-below-it-binds",
     ],
 )
@@ -151,7 +158,9 @@ def test_an_items_safety_value_only_tightens_whatever_it_lands_on(override, path
     """Ruling 188: an item's safety values combine in no order -- an allowlist
     intersects, a budget takes the minimum -- so one is never refused because
     a ceiling or a narrower chain scope already narrowed the field. It can
-    only ever tighten."""
+    only ever tighten. A budget is a scope's own cap (Ruling 195), so one
+    above the cap it lands on is refused instead
+    (`test_an_override_past_its_bounds_is_refused_naming_the_field`)."""
     chain = _chain(token_budget=1000).with_item_policy(override)
 
     resolved = chain.policy_for(_task(chain, path))

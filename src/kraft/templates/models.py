@@ -45,9 +45,9 @@ from pydantic import (
 )
 
 from kraft.policy import (
-    CAP_FIELDS,
     FROZEN,
     RETIRED_WAIT_TIMEOUT,
+    SCOPE_CAP_FIELDS,
     InstancePolicy,
     PolicyError,
     SandboxPolicy,
@@ -1183,7 +1183,7 @@ class ResolvedChain:
             return f"{kinds[path]} {path}" if path else "the chain"
 
         chain_own = self.chain.policy
-        for name in CAP_FIELDS:
+        for name in SCOPE_CAP_FIELDS:
             root = getattr(chain_own, name) if chain_own is not None else None
             authored: dict[str, int | None] = {"": root}
             for path, _, layers in scopes:
@@ -1195,8 +1195,8 @@ class ResolvedChain:
                 if value is not None and authored[parent] is not None and value > authored[parent]:
                     whose = f"its {named(parent)}'s" if parent else "the chain's"
                     raise PolicyError(
-                        f"{named(path)} sets {name} {value} > {whose} {authored[parent]}: "
-                        "a scope's cap cannot exceed its parent's (Ruling 194)",
+                        f"{path}: {named(path)} sets {name} {value} > {whose} {authored[parent]}: "
+                        "a scope's cap cannot exceed its parent's (Rulings 194, 195)",
                         field=name,
                         path=path,
                     )
@@ -1224,7 +1224,7 @@ class ResolvedChain:
                     raise PolicyError(
                         f"the work item's override sets {name} {own} on {what}, above the "
                         f"{below} it already has: a work item's override only tightens a cap "
-                        "(Ruling 194)",
+                        "(Rulings 194, 195)",
                         field=name,
                         path=path,
                     )

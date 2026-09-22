@@ -443,14 +443,15 @@ def test_template_policy_cannot_exceed_token_budget_ceiling(instance_policy):
         instance_policy.apply_template_override({"token_budget": 3_000_000})
 
 
-def test_token_budget_ratchets_against_the_inherited_value_not_the_maximum(instance_policy):
-    """A safety ceiling tightens against what it inherits: once a layer has
-    narrowed `token_budget` below `maxima`, a narrower layer cannot raise it
-    back, even to a value the administrator maximum would allow."""
+def test_token_budget_moves_within_the_maximum_not_the_inherited_value(instance_policy):
+    """Ruling 198: a budget is a scope's own cap, bounded here by `maxima`
+    alone, as an operational value is. That a nested scope's stays at or under
+    its parent's is `ResolvedChain._check_caps`, which names both scopes."""
     narrowed = instance_policy.apply_template_override({"token_budget": 1_000_000})
     assert narrowed.token_budget == 1_000_000
+    assert narrowed.apply_template_override({"token_budget": 1_500_000}).token_budget == 1_500_000
     with pytest.raises(policy.PolicyError, match="token_budget"):
-        narrowed.apply_template_override({"token_budget": 1_500_000})
+        narrowed.apply_template_override({"token_budget": 3_000_000})
 
 
 # ── allowed_harnesses: operational-with-an-administrator-maximum, not a

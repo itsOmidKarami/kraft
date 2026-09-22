@@ -347,3 +347,48 @@ def test_a_stored_override_reads_its_retired_wait_timeouts_as_the_caps_that_repl
     assert item.total_time_cap_minutes is None
     assert item.paths["feedback.main.ci"].total_time_cap_minutes == 20
     assert item.paths["build.run.impl"].total_time_cap_minutes == 7
+
+
+# ── a spend cap is the same mechanism (Ruling 195) ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("field", "big", "small"), [("token_budget", 20, 10), ("budget_usd", 2.5, 1)]
+)
+def test_a_child_budget_above_its_parents_is_refused_naming_both(field, big, small):
+    with pytest.raises(PolicyError) as refused:
+        _materialize(_nodes(step={field: small}, task={field: big}))
+
+    assert f"task build.run.impl sets {field} {big} > its step build.run's {small}" in str(
+        refused.value
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "big", "small"), [("token_budget", 20, 10), ("budget_usd", 2.5, 1)]
+)
+def test_an_item_may_raise_its_own_budget_above_the_chains_up_to_the_maximum(field, big, small):
+    """Ruling 198: the item is the outer scope; its own budget may exceed the
+    chain's, up to `maxima`, and is refused above it."""
+    chain = _materialize(_nodes(chain={field: small}), maxima={field: big * 2})
+
+    raised = chain.with_item_policy({field: big})
+
+    assert getattr(raised.policy_for(raised.chain.nodes[0]), field) == big
+    with pytest.raises(PolicyError) as refused:
+        chain.with_item_policy({field: big * 3})
+    assert refused.value.field == f"policy.{field}"
+
+
+@pytest.mark.parametrize(("field", "value"), [("token_budget", 900), ("budget_usd", 9)])
+def test_a_budget_may_be_raised_above_the_default_up_to_the_maximum(field, value):
+    """Ruling 198: a `defaults:` budget is a default, not a ceiling."""
+    chain = _materialize(
+        _nodes(node={field: value}),
+        defaults={field: 100 if field == "token_budget" else 1},
+        maxima={field: value},
+    )
+
+    assert getattr(chain.policy_for(chain.chain.nodes[0]), field) == value
+    with pytest.raises(PolicyError, match="administrator maximum"):
+        _materialize(_nodes(node={field: value * 2}), maxima={field: value})
