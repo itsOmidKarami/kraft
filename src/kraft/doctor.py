@@ -26,9 +26,10 @@ from kraft.paths import (
     default_skills_dir,
     default_templates_dir,
 )
-from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
+from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
+from kraft.worker import sandbox
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -499,7 +500,15 @@ async def _repo_checks() -> list[dict]:
     # Read once, not per repo: whether any chain runs a forge task is a fact
     # about the install, and every repo is measured against the same answer.
     auto = _runs_forge_tasks()
-    for repo in await client.repos():
+    repos = await client.repos()
+    # Kraft-dshto: `GET /repos` lists a sandboxed workspace rather than
+    # refusing it, so the repository that sets the sandbox fails its own row.
+    sandboxed = {
+        rid: ws_id
+        for ws_id, ws in (await client.workspaces()).items()
+        for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
+    }
+    for repo in repos:
         path = Path(repo["path"])
         name = f"repo {repo.get('name') or repo['path']}"
         if not path.is_dir():
@@ -535,6 +544,16 @@ async def _repo_checks() -> list[dict]:
                     f"keys {repo.get('name') or repo['path']}",
                     False,
                     f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
+                )
+            )
+        if repo.get("id") in sandboxed:
+            checks.append(
+                _check(
+                    f"sandbox {repo.get('name') or repo['path']}",
+                    False,
+                    sandbox.submodule_refusal(
+                        f"workspaces.{sandboxed[repo['id']]}: repository {repo['id']!r}"
+                    ),
                 )
             )
         if auto:

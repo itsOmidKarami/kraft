@@ -552,29 +552,30 @@ async def ensure_worktree(
         left = await _discard_worktree(Path(repo), worktree)
         suffix = f" (and its worktree could not be removed: {left})" if left else ""
         raise RuntimeError(f"{exc}{suffix}") from exc
-    # The checkout assembles exactly the members the item's frozen target
-    # selected, at their frozen mount paths (`workspace-tasks-have-an-
-    # assembled-checkout`) -- typed membership, never whatever `.gitmodules`
-    # lists or the agent later touches.
-    snapshot = store.materialized_chain_of(row) if row is not None else None
-    mounts = [m.path for m in snapshot.target.mounts.values()] if snapshot is not None else []
-    if (
-        row is not None
-        and row["submodules"]
-        and (snapshot is None or snapshot.target.kind == "repository")
-    ):
-        # Kraft-zvqwl: an item keeps the checkout shape it was born with. One
-        # filed before workspaces has a single-repository target and its
-        # submodules in this column; a worktree rebuilt for it after the
-        # upgrade (a retry, a rejected gate re-entering) assembles them still.
-        # A V1 repository target never writes the column.
-        mounts = json.loads(row["submodules"])
-        logger.info(
-            "%s: filed before workspaces; assembling its submodules %s", work_item_id, mounts
-        )
+    mounts = item_mounts(row) if row is not None else []
     if mounts:
         await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, mounts)
     return worktree
+
+
+def item_mounts(row) -> list[str]:
+    """The submodule paths `row`'s checkout assembles: exactly the members its
+    frozen target selected, at their frozen mount paths (`workspace-tasks-
+    have-an-assembled-checkout`) -- typed membership, never whatever
+    `.gitmodules` lists or the agent later touches. `row` carries
+    `materialized_chain` and `submodules`.
+
+    Kraft-zvqwl: an item keeps the checkout shape it was born with. One filed
+    before workspaces has a single-repository target and its submodules in the
+    `submodules` column; a worktree rebuilt for it after the upgrade (a retry,
+    a rejected gate re-entering) assembles them still. A V1 repository target
+    never writes the column."""
+    snapshot = store.materialized_chain_of(row)
+    mounts = [m.path for m in snapshot.target.mounts.values()] if snapshot is not None else []
+    if row["submodules"] and (snapshot is None or snapshot.target.kind == "repository"):
+        mounts = json.loads(row["submodules"])
+        logger.info("%s: filed before workspaces; its submodules are %s", row["id"], mounts)
+    return mounts
 
 
 async def run_setup_command(worktree: Path, repo: Path, repo_entry: dict | None) -> str:
