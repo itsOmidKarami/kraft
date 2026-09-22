@@ -610,7 +610,8 @@ def _restricted(
     refused rather than run with the bound unenforced."""
     cap = h.capabilities.get("permission_mode")
     asking = cap.under_allowlist if cap is not None else None
-    if cap is not None and asking is None:
+    # No `permission_mode` at all is no asking mode either (Kraft-pdrsi).
+    if asking is None:
         raise LaunchRefused(
             f"harness {harness!r} ({h.path}) cannot hold an agent to a tool list, and this "
             f"launch's policy sets allowed_tools={list(allowed)!r}"
