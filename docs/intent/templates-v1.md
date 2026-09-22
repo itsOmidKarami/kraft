@@ -511,6 +511,37 @@ selected task, step, or node. Skipping a task SHALL NOT skip its sibling
 tasks; an operator MAY skip the step when they intend to skip the group.
 enforced-by: tests/executor/test_skip_scopes.py::test_skip_task_does_not_skip_sibling, tests/api/test_skip.py::test_skipping_a_task_stops_only_its_own_session, tests/store/test_forks.py::test_the_sessions_under_a_path_stop_at_its_separator
 
+## REQ read-only-step-or-node-is-verified
+
+A step or execution node MAY declare `read_only: true`. The system SHALL
+record the worktree of every repository in the checkout (HEAD, status without
+ignored files, and a hash of the diff against HEAD) before the step's tasks, or
+the node's own steps, run and SHALL compare after they settle. Any change SHALL
+stop the work item for a human, naming the changed files, and SHALL NOT count
+as a task failure that recovery or a fix loop spends on.
+enforced-by: tests/executor/test_read_only.py::test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it, tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[untracked], tests/executor/test_read_only.py::test_an_untracked_file_is_a_change_and_an_ignored_one_is_not[ignored], tests/executor/test_read_only.py::test_a_step_that_is_not_read_only_is_not_checked, tests/executor/test_read_only.py::test_a_read_only_node_is_checked_around_all_of_its_steps, tests/executor/test_read_only.py::test_a_read_only_step_over_workspace_members_names_the_member_file, tests/executor/test_read_only.py::test_a_sandboxed_read_only_step_that_plants_a_repository_is_not_read_by_host_git
+origin: src/kraft/executor/read_only.py (Kraft-q2zvw)
+
+## REQ read-only-is-refused-on-a-task
+
+A task SHALL NOT declare `read_only`. The refusal SHALL point to the step:
+tasks in a step share one worktree, so a task-level check would fail on a
+sibling's writes.
+enforced-by: tests/executor/test_read_only.py::test_a_task_level_read_only_is_refused_pointing_at_the_step
+
+## REQ read-only-is-refused-with-a-fix-loop
+
+An execution node that declares a `fix_loop` SHALL NOT be `read_only`, and no
+step inside a recovery plan or a fix loop MAY be `read_only`: both write by
+design.
+enforced-by: tests/executor/test_read_only.py::test_a_node_with_a_fix_loop_cannot_be_read_only, tests/executor/test_read_only.py::test_a_recovery_or_fix_loop_step_cannot_be_read_only[on_failure], tests/executor/test_read_only.py::test_a_recovery_or_fix_loop_step_cannot_be_read_only[fix_loop]
+
+## REQ on-failure-runs-outside-the-read-only-check
+
+An `on_failure` handler SHALL run outside a read_only step's check. The retry
+of the step's tasks that follows a recovery SHALL be checked again.
+enforced-by: tests/executor/test_read_only.py::test_a_recovery_writes_outside_the_check_and_the_retry_it_leads_to_inside_it
+
 ## REQ manual-completion-is-an-explicit-work-item-terminal-action
 
 An operator MAY explicitly mark a work item complete. The action SHALL require
