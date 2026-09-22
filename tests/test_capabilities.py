@@ -54,7 +54,7 @@ def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
     """Kraft-3llig review fix 2: the capability shipped invisibly to every
     existing install without one -- the `how` an operator pastes in must be
     the *shipped* YAML, not a paraphrase that drifts from it."""
-    [entry] = [c for c in capabilities.MANIFEST if c.version == "1.0.1" and c.name == "mr_rebase"]
+    [entry] = [c for c in capabilities.MANIFEST if c.version == "1.0.3" and c.name == "mr_rebase"]
     library = (ROOT / "templates" / "library.yaml").read_text()
     chain = (ROOT / "templates" / "chains" / "default.yaml").read_text()
     assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in library
@@ -72,3 +72,11 @@ def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
     )
     assert steps in chain
     assert steps.rstrip("\n") in entry.how
+
+
+@pytest.mark.parametrize("seeded", ["1.0.0", "1.0.1", "1.0.2"])
+def test_every_install_seeded_before_the_rebase_shipped_is_told_about_it(seeded):
+    """`mr_rebase` shipped in 1.0.3; 1.0.1 and 1.0.2 went out without it, so an
+    install first seeded by either has a `draft_merge_request` with no rebase
+    and must still be told (`added_since` is strictly newer)."""
+    assert "mr_rebase" in [c.name for c in capabilities.added_since(seeded)]

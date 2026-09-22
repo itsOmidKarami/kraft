@@ -63,7 +63,7 @@ MANIFEST: tuple[Capability, ...] = (
         "set `profile: strong` on a task in place of its `model:`/`effort:`",
     ),
     Capability(
-        version="1.0.1",
+        version="1.0.3",
         name="mr_rebase",
         what="draft_merge_request rebases onto the item's base branch before opening the "
         "draft MR, instead of opening on whatever base the worktree was cut from",
