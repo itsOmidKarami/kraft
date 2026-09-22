@@ -17,12 +17,15 @@ zero exit code says the command ran, not that what it did was right.
    terminal) - files the repo and probes it: test command, forge. Read back
    the probed `test_command`.
 
-   Check it against what the repo actually runs: is there a `Justfile` or
-   `justfile` at the repo root with a `test` recipe? If so, and it differs
-   from the probed command, prefer that recipe's command and say so —
-   `probe_repo` has no `Justfile` marker yet (Kraft-reriq), so a repo like
-   this one gets probed with raw `pytest`, which its own CLAUDE.md says never
-   to run directly.
+   Check it against what the repo actually runs. The probe reads markers at
+   the repo root, in order: a `justfile` with a `test` recipe (`just test`),
+   then `pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`. It cannot
+   see a wrapper under any other name — a `make test` target, a
+   `scripts/test` script, a recipe called `check` — or a rule that the raw
+   runner must not be called directly. Read the repo's own README,
+   CONTRIBUTING and agent instructions (`CLAUDE.md`, `AGENTS.md`) for how it
+   says to run its tests; if that differs from the probe, prefer what the
+   repo says and say so.
 
    Neither `ensure_repo`/`kraft repo connect` nor any MCP tool takes a
    `test_command` override — only `PATCH /repos` on the API does, and there
@@ -93,7 +96,7 @@ zero exit code says the command ran, not that what it did was right.
 
    This is the one likeliest to catch a missing pin silently: `requires-python
    = "~=3.11"` is satisfied by 3.14 too, so the wrong interpreter can pass
-   every test without ever saying so (Kraft-gxcmy).
+   every test without ever saying so.
 
    Second probe, opt-in — the repo's own test command, in the same worktree.
    Say what you're about to run and roughly how long it takes before you run
