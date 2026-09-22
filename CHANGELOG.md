@@ -10,8 +10,10 @@ Kraft 1.0 makes the chain a piece of data you can read, lint, and reason
 about. Chains are typed YAML under Template Schema V1. Policy is layered from
 the instance down to a single task and enforced on every agent launch, and
 every scope can be bounded in time and spend. The plan can revise the rest of
-the chain, and a person approves the revision before it applies. A person, not an
-agent, decides whether to skip, abandon, or give more room.
+the chain, and a person approves the revision before it applies. Agent tasks pick
+a named model tier, and can fall back to another harness or model when one is
+rate-limited or unavailable. A person, not an agent, decides whether to skip,
+abandon, or give more room.
 
 ### Before you upgrade from 0.x
 
@@ -34,8 +36,8 @@ agent, decides whether to skip, abandon, or give more room.
   log says so. An item already in flight keeps its steering: it reads its
   repository's names against the library at each launch, as it read the
   files before.
-- **Harness profiles are renamed:** `codex_default` → `codex`, `claude_review`
-  → `claude`. A chain or policy that names an old profile must be updated.
+- **Harnesses are renamed:** `codex_default` → `codex`, `claude_review`
+  → `claude`. A chain or policy that names an old harness must be updated.
 - **Chain API routes moved** from `/api/templates/{id}` to
   `/api/templates/chains/{id}` (and `/resolved`). The old paths answer 404.
 - **Check for a second `kraft` on your PATH**, such as an old Homebrew
@@ -71,9 +73,16 @@ agent, decides whether to skip, abandon, or give more room.
   limit. An escalation agent may retry its own work, and says so when it
   isn't allowed to do more.
 - **Harnesses you can see.** A Harnesses page, `/api/harnesses/profiles` and
-  `/providers`, and `kraft admin harnesses` show each profile, its provider,
+  `/providers`, and `kraft admin harnesses` show each harness, its provider,
   and which tasks use it. Each provider lists its capabilities: the CLI flag
   each one becomes, what it accepts, and what every launch forces.
+- **Model tiers and fallback.** Agent profiles (`deep`, `strong`, `fast`) name
+  a model tier once, with a model per provider, and tasks select a tier
+  instead of spelling out a model. An opt-in fallback list moves a rate-limited
+  or unavailable launch to another harness, tier or model at once, and every
+  switch is logged where you will see it.
+- **One steering store.** Steering profiles live in the Library. A task or a
+  repository names them, and their text is frozen into the item at intake.
 
 ### Added
 
@@ -126,12 +135,12 @@ agent, decides whether to skip, abandon, or give more room.
 - `kraft admin reload` rereads `policy.yaml` too. A file that doesn't validate
   is refused and the running policy is kept.
 - Every settings file loads and saves through a typed model: repositories
-  (with a typed sandbox), harnesses, steering, notify, access, intake, theme.
+  (with a typed sandbox), harnesses, notify, access, intake, theme.
   A repository entry without `enabled` counts as enabled.
 - Tool lists in policy hold exact tool names.
 - Kraft closes a work item's beads only when its branch actually changed
   something, or a member MR merged. Otherwise a `beads_left_open` event says why.
-- Every shipped agent task runs on the `claude` harness profile.
+- Every shipped agent task runs on the `claude` harness.
 - The never-signal-processes-you-didn't-start rule is built into every agent
   launch instead of seeded as a steering file.
 - **One steering store.** A repository's `steering:` in `repos.yaml` names
@@ -190,7 +199,8 @@ agent, decides whether to skip, abandon, or give more room.
 - `wait_timeout_minutes`. It is still read and migrated to the wait task's
   `total_time_cap_minutes`, with a warning, but it is refused on write.
 - The seeded `steering/README.md` and `steering/never-signal-…` files. An
-  existing install keeps its copies.
+  existing install's copies become library steering profiles, like any other
+  steering file.
 - `templates/steering/*.md` as a steering store, the Settings → Steering page
   (its address opens the Library), and the `/api/steering` routes.
 
@@ -202,3 +212,5 @@ agent, decides whether to skip, abandon, or give more room.
 - The merge step does not pin the exact head its CI verified (Kraft-vomwx).
 - An auto-review agent approving a chain revision gate is checked against the
   gate's last recorded view, not a view of its own (Kraft-rndd1).
+- Only Claude launches can trigger a fallback: codex and gemini don't report a
+  rate limit yet. They can still be fallback targets.
