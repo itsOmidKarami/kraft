@@ -6,7 +6,7 @@ import sqlite3
 
 from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
-from kraft.store._common import write_status
+from kraft.store._common import ENDED, write_status
 
 #: How much of the title goes into the branch name. A Kraft title is a
 #: paragraph, not a headline (`forge.mr_title` notes a 360-character one), and
@@ -697,3 +697,25 @@ def last_auto_pickup_at(conn: sqlite3.Connection) -> dict[str, str]:
         "GROUP BY repo"
     ).fetchall()
     return {r["repo"]: r["at"] for r in rows if r["repo"]}
+
+
+def open_duplicates(
+    conn: sqlite3.Connection, repo: str, title: str, implements_beads: list[str]
+) -> list[tuple[sqlite3.Row, str]]:
+    """Open items in `repo` a new filing looks like (Kraft-s7c04.30), each with
+    why: the same title (case and surrounding space aside), or a bead both say
+    they implement. Exact on purpose: no fuzzy match, so no false alarm to
+    learn to ignore."""
+    wanted = title.strip().casefold()
+    out = []
+    for row in conn.execute(
+        "SELECT id, title, status, implements_beads FROM work_items "
+        "WHERE repo = ? AND status NOT IN (?, ?) ORDER BY created_at",
+        (repo, *ENDED),
+    ):
+        shared = sorted(set(implements_beads) & set(json.loads(row["implements_beads"] or "[]")))
+        if shared:
+            out.append((row, f"also implements {', '.join(shared)}"))
+        elif row["title"].strip().casefold() == wanted:
+            out.append((row, "same title"))
+    return out

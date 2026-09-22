@@ -173,18 +173,6 @@ def _copy_attachments(
             continue
         if dest.exists():
             continue
-        if not src.is_file():
-            # Not a skip. `source` is Kraft's own copy since Kraft-eqgn, so a
-            # file missing here means Kraft lost it — and the gate this
-            # document justified was trimmed at intake and cannot be put back.
-            # Continuing would run the item without a document it promised, and
-            # without a gate to notice. Should be unreachable; loud if not.
-            raise FileNotFoundError(
-                f"the {attachment['kind']} attachment for {work_item_id} is missing "
-                f"from Kraft's storage at {src}; this work item's "
-                f"{attachment['kind']} gate was trimmed at intake and cannot be "
-                "restored — re-file the work item"
-            )
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
         written.append(attachment)
@@ -521,6 +509,18 @@ async def ensure_worktree(
     await asyncio.to_thread(
         subprocess.run, ["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True
     )
+    # Not a skip, and before `worktree add`: `source` is Kraft's own copy since
+    # Kraft-eqgn, so a missing one means Kraft lost it, and the gate it justified
+    # is trimmed. A worktree made anyway would take the early return above on a
+    # retry and run without the document (Kraft-s7c04.29).
+    for a in attachments or []:
+        src = Path(a["source"]) if a.get("source") else Path(repo) / a["path"]
+        if not src.is_file():
+            raise FileNotFoundError(
+                f"the {a['kind']} attachment for {work_item_id} is missing from Kraft's "
+                f"storage at {src}; its gate was trimmed at intake, so put the "
+                f"{a['kind']} back at {src} and retry the work item"
+            )
     args = ["git", "worktree", "add"]
     # A sha, not `origin/<default>`: a remote-tracking start point would make
     # git set it as the new branch's upstream.

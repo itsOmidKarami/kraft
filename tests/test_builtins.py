@@ -119,9 +119,12 @@ async def test_a_missing_attachment_source_fails_loudly(tmp_path, database, run_
     """After Kraft-eqgn the source is Kraft's own copy, so a missing file here
     means Kraft lost it. The gate it justified is already trimmed and cannot be
     put back, so continuing would run the item with a document it promised and
-    does not have — silently, which is the bug this closes."""
+    does not have — silently, which is the bug this closes. The remedy it
+    names is one the started item can take: put the copy back and retry, not
+    abandon and re-file (Kraft-s7c04.29)."""
     await wtree.make_item(database, repo)
-    with pytest.raises(FileNotFoundError, match="missing from Kraft's storage"):
+    stored = tmp_path / "run" / "attachments" / "w1" / "spec.md"
+    with pytest.raises(FileNotFoundError, match="missing from Kraft's storage") as raised:
         await wtree.ensure(
             database,
             run_dirs,
@@ -130,10 +133,14 @@ async def test_a_missing_attachment_source_fails_loudly(tmp_path, database, run_
                 {
                     "kind": "spec",
                     "path": ".engineering/specs/s.md",
-                    "source": str(tmp_path / "run" / "attachments" / "w1" / "spec.md"),
+                    "source": str(stored),
                 }
             ],
         )
+    assert f"put the spec back at {stored} and retry" in str(raised.value)
+    assert "re-file" not in str(raised.value)
+    # and before the worktree exists, which a retry would otherwise reuse as-is
+    assert not (run_dirs.worktrees / "w1").exists()
 
 
 def _porcelain(cwd):

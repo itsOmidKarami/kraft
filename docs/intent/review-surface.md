@@ -28,10 +28,25 @@ enforced-by: tests/executor/test_entry.py::test_intake_copies_an_attachment_into
 IF intake cannot copy an attachment, THEN the system SHALL refuse the intake.
 enforced-by: tests/executor/test_entry.py::test_intake_refuses_an_attachment_it_cannot_copy
 
+## REQ attachments-can-change-until-the-item-starts
+WHILE a work item has not started, the system SHALL let a person replace or
+drop its attachments, re-copy a replaced one into Kraft's own storage, and
+re-trim its chain to match from its own snapshot, never the live template. IF
+the item has started, or another change reached its attachments or chain
+first, THEN the system SHALL refuse the change and leave its attachments,
+chain and stored copies as they were.
+enforced-by: tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_chain_frozen_at_intake, tests/api/test_attachment_patch.py::test_dropping_a_spec_filed_at_intake_restores_its_gate_from_the_snapshot, tests/api/test_attachment_patch.py::test_a_snapshot_without_its_untrimmed_chain_refuses_a_drop_and_says_why, tests/api/test_attachment_patch.py::test_a_patch_racing_another_patch_is_refused_and_the_winner_keeps_its_files, tests/cli/test_attachments.py::test_a_worker_cannot_set_its_own_items_attachments, tests/api/test_attachment_patch.py::test_a_revised_spec_replaces_the_snapshot_and_keeps_the_plan, tests/api/test_attachment_patch.py::test_adding_a_spec_trims_its_gate_and_dropping_it_restores_the_gate, tests/api/test_attachment_patch.py::test_an_attachment_patch_keeps_the_nodes_skipped_at_intake, tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[replace], tests/api/test_attachment_patch.py::test_a_started_item_refuses_an_attachment_change_and_keeps_its_snapshot[drop], tests/api/test_attachment_patch.py::test_a_walk_that_starts_mid_patch_keeps_the_snapshot_it_was_filed_with, tests/store/test_chain_gates.py::test_set_attachments_refuses_an_item_that_started_after_the_caller_read_it
+
 ## REQ missing-stored-attachment-fails-loudly
 IF an attachment's stored copy is missing when the worktree is prepared, THEN
 the system SHALL fail rather than run without it.
 enforced-by: tests/test_builtins.py::test_a_missing_attachment_source_fails_loudly
+
+## REQ intake-warns-of-an-open-duplicate
+WHEN a work item is filed with the same title as an open item in the same
+repository, or naming a bead an open item there already implements, the system
+SHALL file it and warn, naming that item.
+enforced-by: tests/api/test_duplicate_intake.py::test_filing_what_an_open_item_already_covers_is_filed_with_a_warning_naming_it[title], tests/api/test_duplicate_intake.py::test_filing_what_an_open_item_already_covers_is_filed_with_a_warning_naming_it[implements-beads], tests/api/test_duplicate_intake.py::test_no_warning_without_an_open_item_in_the_same_repo[abandoned], tests/api/test_duplicate_intake.py::test_no_warning_without_an_open_item_in_the_same_repo[another-repo], tests/api/test_duplicate_intake.py::test_the_warning_reaches_the_client_and_so_the_cli_and_mcp
 
 ## REQ worktree-preparation-pins-the-diff-base
 WHEN the system creates a work item's worktree, it SHALL record the source repo's
