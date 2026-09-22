@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Plus } from "@phosphor-icons/react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import * as api from "../../api";
 import { DraftDiff } from "../../components/DraftDiff";
 import { OverflowMenu, SectionLabel, Tabs } from "../../components/ui";
@@ -193,7 +193,14 @@ export function SteeringPage() {
           </span>
         </button>
       ))}
-      {list.files.length === 0 && <p className="empty">no steering files yet</p>}
+      {list.files.length === 0 && <p className="empty">no repository steering files yet</p>}
+    </>
+  );
+
+  const about = (
+    <>
+      Markdown files a repository selects in repos.yaml (<code>steering:</code>), read at each launch and injected
+      through the system prompt. Task steering profiles live in the <Link to="/settings/library">Library</Link>.
     </>
   );
 
@@ -213,6 +220,7 @@ export function SteeringPage() {
             }
           />
           {error && <p className="form-error">{error}</p>}
+          <p className="settings-note">{about}</p>
           {fileList}
         </>
       );
@@ -238,7 +246,7 @@ export function SteeringPage() {
     <>
       <PageHead
         title="Steering"
-        note="Kraft-owned standards injected through the system prompt — never CLAUDE.md, never a file inside the target repo"
+        note={about}
         action={
           <button className="btn btn-secondary" onClick={create}>
             <Plus size={14} />

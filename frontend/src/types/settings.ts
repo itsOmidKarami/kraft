@@ -121,9 +121,17 @@ export interface Harnesses {
 /** One capability a provider declares. `values` are `re.fullmatch` patterns;
  *  empty means any value. */
 export interface HarnessCapability {
+  /** The `cli:` fragment, with `{value}`/`{csv}` placeholders; empty for one
+   *  that is read (`source`/`reader`) or carried `via` a command prefix. */
+  cli: string[];
   values: string[];
   always: string | string[] | null;
   channel: string | null;
+  source: string | null;
+  reader: string | null;
+  via: string | null;
+  /** `permission_mode` only: the mode a launch under a tool allowlist runs in. */
+  under_allowlist: string | null;
 }
 
 /** A provider package's read-only capability surface (`GET /harnesses/providers`). */
@@ -132,6 +140,8 @@ export interface HarnessProvider {
   kind: string;
   command: string[];
   path: string;
+  /** From `$KRAFT_HOME/templates/harnesses/` rather than the package. */
+  override: boolean;
   capabilities: Record<string, HarnessCapability>;
 }
 

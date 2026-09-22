@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api";
-import type { HarnessProfile, HarnessProviders, Harnesses } from "../../types";
+import type { HarnessCapability, HarnessProfile, HarnessProviders, Harnesses } from "../../types";
 import { renderAt, setupSettingsMocks } from "./testing";
 import { setPhoneWidth } from "../../testFixtures";
 
@@ -30,7 +30,17 @@ const HARNESSES: Harnesses = {
   ],
 };
 
-const cap = (values: string[] = [], always: string | null = null) => ({ values, always, channel: null });
+const cap = (values: string[] = [], always: string | string[] | null = null, extra: Partial<HarnessCapability> = {}) => ({
+  cli: [],
+  values,
+  always,
+  channel: null,
+  source: null,
+  reader: null,
+  via: null,
+  under_allowlist: null,
+  ...extra,
+});
 const PROVIDERS: HarnessProviders = {
   valid: {
     claude: {
@@ -38,18 +48,33 @@ const PROVIDERS: HarnessProviders = {
       kind: "cli",
       command: ["claude"],
       path: "/pkg/harnesses/claude.yaml",
-      capabilities: { model: cap(), effort: cap(["low", "high", "max"]), permission_mode: cap(["auto"], "auto") },
+      override: false,
+      capabilities: {
+        model: cap([], null, { cli: ["--model", "{value}"] }),
+        effort: cap(["low", "high", "max"], null, { cli: ["--effort", "{value}"] }),
+        deny_tools: cap([], ["Monitor", "Agent"], { cli: ["--disallowed-tools", "{csv}"] }),
+        permission_mode: cap(["manual", "auto"], "auto", {
+          cli: ["--permission-mode", "{value}"],
+          under_allowlist: "manual",
+        }),
+        usage: cap([], null, { source: "envelope", reader: "claude-stream-json" }),
+        frobnicate: cap([], null, { cli: ["--frob"] }),
+      },
     },
     codex: {
       id: "codex",
       kind: "cli",
       command: ["codex", "exec"],
-      path: "/pkg/harnesses/codex.yaml",
+      path: "/home/templates/harnesses/codex.yaml",
+      override: true,
       capabilities: { model: cap(["(gpt|codex).*"]), effort: cap(["low", "medium", "high"]) },
     },
   },
   invalid: { gemini: "gemini.yaml: unknown capability 'x'" },
 };
+
+/** The capability list's row for `name`. */
+const row = (name: string) => screen.getByText(name, { selector: ".capability-name" }).closest("li")!;
 
 beforeEach(() => {
   setupSettingsMocks();
@@ -78,10 +103,39 @@ describe("Settings · harnesses", () => {
   it("shows the selected profile's provider capabilities, read-only", async () => {
     renderAt("/settings/harnesses?h=codex");
     expect(await screen.findByRole("heading", { name: "provider codex" })).toBeInTheDocument();
-    expect(screen.getByText(/effort values: low \| medium \| high/)).toBeInTheDocument();
+    expect(row("effort")).toHaveTextContent("accepts low | medium | high");
     // Only the defaults this provider declares are offered.
     expect(screen.getByLabelText(/default effort/)).toHaveValue("medium");
     expect(screen.queryByLabelText(/default permission_mode/)).not.toBeInTheDocument();
+  });
+
+  it("each capability row says what it means and the flag it becomes (Kraft-ok48k)", async () => {
+    renderAt("/settings/harnesses?h=claude");
+    expect(await screen.findByText("Capabilities")).toBeInTheDocument();
+    expect(screen.getByText(/Kraft's neutral option names, and the flags this CLI receives for them/)).toBeInTheDocument();
+    const pm = row("permission_mode");
+    expect(pm).toHaveTextContent("--permission-mode <value>");
+    expect(pm).toHaveTextContent("accepts manual | auto");
+    expect(pm).toHaveTextContent("every launch: auto");
+    expect(pm).toHaveTextContent("under a tool allowlist: manual");
+    expect(pm).toHaveTextContent("How the CLI decides whether a tool call needs approval");
+    expect(row("deny_tools")).toHaveTextContent("--disallowed-tools <a,b,…>");
+    expect(row("deny_tools")).toHaveTextContent("every launch: Monitor, Agent");
+    expect(row("usage")).toHaveTextContent("read from the output stream (claude-stream-json)");
+    // A name Kraft ships no description for renders bare.
+    expect(row("frobnicate").textContent).toBe("frobnicate → --frob");
+  });
+
+  it("names the packaged definition's path as that, and says how to override it", async () => {
+    renderAt("/settings/harnesses?h=claude");
+    expect(await screen.findByText("Packaged definition: /pkg/harnesses/claude.yaml")).toBeInTheDocument();
+    expect(screen.getByText(/drop a claude.yaml into \$KRAFT_HOME\/templates\/harnesses\//)).toBeInTheDocument();
+  });
+
+  it("an override from $KRAFT_HOME is labelled as yours", async () => {
+    renderAt("/settings/harnesses?h=codex");
+    expect(await screen.findByText("Your override: /home/templates/harnesses/codex.yaml")).toBeInTheDocument();
+    expect(screen.queryByText(/Packaged definition/)).not.toBeInTheDocument();
   });
 
   it("clicking a profile selects it", async () => {

@@ -121,6 +121,33 @@ def test_providers_are_each_packages_capability_surface(client):
     assert providers["invalid"] == {}
 
 
+def test_a_capability_says_what_it_becomes_and_where_its_file_is(client):
+    """The Harnesses page renders each capability as the flag it becomes, or
+    what reads it, and says whether the definition is packaged or an override."""
+    claude = client.get("/api/harnesses/providers/claude").json()
+    pm = claude["capabilities"]["permission_mode"]
+    assert pm["cli"] == ["--permission-mode", "{value}"]
+    assert pm["under_allowlist"] == "manual"
+    usage = claude["capabilities"]["usage"]
+    assert (usage["source"], usage["reader"]) == ("envelope", "claude-stream-json")
+    codex = client.get("/api/harnesses/providers/codex").json()
+    assert codex["capabilities"]["resume"]["via"] == "command_resume"
+    # The suite overlays claude with a fake agent (support.harness); codex is packaged.
+    assert codex["override"] is False
+
+
+def test_a_provider_from_kraft_home_is_marked_an_override(client):
+    from kraft.harness import BUNDLED
+    from kraft.paths import default_harnesses_dir
+
+    overlay = default_harnesses_dir()
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "codex.yaml").write_text((BUNDLED / "codex.yaml").read_text())
+    codex = client.get("/api/harnesses/providers/codex").json()
+    assert codex["override"] is True
+    assert codex["path"] == str(overlay / "codex.yaml")
+
+
 def test_one_provider_by_id_and_an_unknown_one_is_404(client):
     assert client.get("/api/harnesses/providers/codex").json()["command"] == ["codex", "exec"]
     response = client.get("/api/harnesses/providers/nope")

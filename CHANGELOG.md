@@ -63,7 +63,8 @@ agent, decides whether to skip, abandon, or give more room.
   isn't allowed to do more.
 - **Harnesses you can see.** A Harnesses page, `/api/harnesses/profiles` and
   `/providers`, and `kraft admin harnesses` show each profile, its provider,
-  and which tasks use it.
+  and which tasks use it. Each provider lists its capabilities: the CLI flag
+  each one becomes, what it accepts, and what every launch forces.
 
 ### Added
 
@@ -79,6 +80,8 @@ agent, decides whether to skip, abandon, or give more room.
   work-brief skills apply it.
 - `kraft view show` prints a usage line with cached and uncached tokens apart.
 - `kraft admin doctor` checks for a shadowing `kraft` on PATH.
+- The Library shows a steering profile's text, and the Library and Steering
+  pages each say which kind of steering they hold and link to the other.
 
 ### Changed
 

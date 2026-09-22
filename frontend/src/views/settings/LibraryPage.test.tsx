@@ -114,4 +114,12 @@ describe("Settings · library", () => {
     renderAt("/settings/library");
     expect(await screen.findByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
   });
+  it("a steering profile shows its instructions as text and points at the Steering page", async () => {
+    renderAt("/settings/library?c=steering.house");
+    const text = await screen.findByText("Be brief.");
+    expect(text.textContent).toBe("Be brief.");
+    expect(screen.queryByText(/"instructions"/)).not.toBeInTheDocument();
+    expect(screen.getByText(/selected by tasks and frozen into an item's chain at intake/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Steering page" })).toHaveAttribute("href", "/settings/steering");
+  });
 });
