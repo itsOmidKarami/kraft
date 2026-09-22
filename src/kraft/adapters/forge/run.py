@@ -220,11 +220,10 @@ async def _run_one(
 
     `has_rebase_bounce` is whether *this* node declares `on_base_changed`
     -- read from the frozen chain, not from whatever the library says
-    today. The `merge` handler's conflict rebase relies on it: without a
-    base-change restart nothing will
-    ever re-verify the rebased head, so reporting "done" without calling
-    `forge.merge` would leave the branch unmerged while the walk moves on
-    regardless (code-review).
+    today. Both conflict rebases rely on it: without a base-change restart
+    nothing will ever re-verify the rebased head, so `merge` reads its
+    pipeline again before merging (code-review) and `ci_poll` waits for it
+    rather than reporting the check green (Kraft-tx0dz).
 
     `merge_requested` is whether the merge wait's last observation already
     asked for *this* repo's merge (`run_task` works out which repo that was).
@@ -410,6 +409,12 @@ async def _run_one(
                     moved=moved,
                 )
                 log += rebase_log
+                if status == "done" and not has_rebase_bounce:
+                    # No base-change restart will check the rebased head, and
+                    # no pipeline for it has been read: wait for its own, as
+                    # `merge` does below (Kraft-tx0dz).
+                    log += "waiting for the rebased head's pipeline\n"
+                    status = "waiting"
             if status == "failed" and ci_status.failed_jobs:
                 findings = [
                     {

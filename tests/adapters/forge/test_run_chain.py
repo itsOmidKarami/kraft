@@ -414,6 +414,46 @@ async def test_run_task_is_unchanged_for_a_single_repo_item(
     assert len(fake.opened) == 1
 
 
+@pytest.mark.parametrize(
+    ("bounce", "expected"),
+    [(True, "done"), (False, "waiting")],
+    ids=["a-declared-restart-re-verifies-it", "undeclared-it-waits-for-the-rebased-heads-ci"],
+)
+async def test_a_ci_poll_conflict_rebase_is_never_a_green_check(
+    item_on, database, run_dirs, repo, monkeypatch, bounce, expected
+):
+    """Kraft-tx0dz, for a single-repo item: `ci_poll` rebasing a conflict
+    away has read no pipeline for the rebased head. Its moved `base_ref`
+    restarts a declared span, which checks it again; with no restart
+    declared, the node itself waits and reads that head's CI next time."""
+    it = await item_on(back_half(), repo=repo)
+
+    async def rebased(*_):
+        return "0ddba11"
+
+    monkeypatch.setattr(forge.run._builtins, "mr_rebase_forced", rebased)
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    await fake.open_mr(repo=repo, branch="kraft/w1", base="main", title="t", body="b")
+
+    status = await _run_task(
+        database,
+        run_dirs,
+        it,
+        repo,
+        "kraft/w1",
+        fake,
+        monkeypatch,
+        handler="ci_poll",
+        has_rebase_bounce=bounce,
+    )
+
+    assert status == expected
+    base_ref = database.read(
+        lambda c: c.execute("SELECT base_ref FROM work_items WHERE id = ?", (it.id,)).fetchone()
+    )["base_ref"]
+    assert base_ref == "0ddba11", "the rebase ran and moved the base"
+
+
 async def test_merge_does_not_treat_a_rebased_submodule_as_landed_in_a_multi_repo_item(
     item_on, database, run_dirs, tmp_path, monkeypatch
 ):
