@@ -665,40 +665,55 @@ async def _dispatch_task(
         except SandboxUnresolved as exc:
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     if isinstance(t, BuiltinTask):
-        if t.ref is BuiltinAction.MR_REBASE:
-            # Pure local git (`builtins.mr_rebase`, Kraft-3llig): rebase the
-            # worktree onto the item's base branch, and persist the moved
-            # `base_ref` itself -- same helper `/retry` and `/resume` already
-            # use. `has_rebase_bounce` is this *task's own node*, the same
-            # rule the forge branch below applies: only a node that itself
-            # declares `on_base_changed` reports `BASE_MOVED` rather than
-            # completing ordinarily.
-            return await _builtins.mr_rebase(
-                db,
-                run_dirs,
-                repo=work_item_row["repo"],
-                worktree=str(worktree),
-                branch=store.branch_for(work_item_row),
-                has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
-                **common,
-            )
-        # The only other member (`builtin-task-references-code-owned-actions`):
-        # a reference Kraft does not own was rejected by the type long before
-        # this.
-        return await _run_changed_test_scopes(
-            db,
-            run_dirs,
-            task,
-            node,
-            work_item_row,
-            worktree,
-            common=common,
-            execution=t.execution,
-            launch=launch,
-            round=round,
-            sandbox=sandbox,
-            time_cap=time_cap,
-        )
+        # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
+        # Kraft owns this vocabulary): a third `BuiltinAction` member added
+        # later without a branch here fails loudly at dispatch, not by
+        # silently running as `verify_changed_test_scopes`.
+        match t.ref:
+            case BuiltinAction.MR_REBASE:
+                # Pure local git (`builtins.mr_rebase`, Kraft-3llig): rebase
+                # the worktree onto the item's base branch, and persist the
+                # moved `base_ref` itself -- same helper `/retry` and
+                # `/resume` already use. `has_rebase_bounce` is this *task's
+                # own node*, the same rule the forge branch below applies:
+                # only a node that itself declares `on_base_changed` reports
+                # `BASE_MOVED` rather than completing ordinarily.
+                #
+                # No `prepare_runtime` re-run after this rebase, even though
+                # it can land a new lockfile: `mr_rebase_forced`'s own
+                # mid-walk rebase (`ci_poll`/`merge`'s conflict path) has
+                # never re-prepared either, and `merge_request_feedback`'s
+                # tasks all read forge/CI state rather than running a local
+                # build, so a stale local environment feeds nothing into what
+                # they report (Kraft-gncrj is the pre-existing gap, not one
+                # this task opens).
+                return await _builtins.mr_rebase(
+                    db,
+                    run_dirs,
+                    repo=work_item_row["repo"],
+                    worktree=str(worktree),
+                    branch=store.branch_for(work_item_row),
+                    has_rebase_bounce=getattr(node.node, "on_base_changed", None) is not None,
+                    time_cap=time_cap,
+                    **common,
+                )
+            case BuiltinAction.VERIFY_CHANGED_TEST_SCOPES:
+                return await _run_changed_test_scopes(
+                    db,
+                    run_dirs,
+                    task,
+                    node,
+                    work_item_row,
+                    worktree,
+                    common=common,
+                    execution=t.execution,
+                    launch=launch,
+                    round=round,
+                    sandbox=sandbox,
+                    time_cap=time_cap,
+                )
+            case _:  # pragma: no cover -- the type already refuses this
+                raise RuntimeError(f"{task.path}: no dispatch branch for builtin ref {t.ref!r}")
 
     if isinstance(t, SubprocessTask):
         try:

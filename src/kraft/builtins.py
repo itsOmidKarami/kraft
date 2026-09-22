@@ -9,7 +9,8 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kraft import logs, store
+from kraft import caps as _caps
+from kraft import events, logs, store
 from kraft.adapters.forge import git
 from kraft.config import RepoEntry, base_ignore_args, git_read
 from kraft.worker import sandbox as _sandbox
@@ -24,6 +25,15 @@ class RebaseConflict(RuntimeError):
     around this call keeps behaving as it did (Kraft-s7c04.23); the type
     exists so the three callers that can now *act* on a conflict can tell
     one apart from any other git failure without matching on message text."""
+
+
+class RebaseTimedOut(RuntimeError):
+    """`refresh_worktree_base` aborted a rebase that ran past its `timeout`
+    (Kraft-3llig): a hanging pre-rebase hook or smudge/LFS filter must not
+    hold the worker slot forever. The worktree is left clean either way, the
+    same posture as `RebaseConflict`. Only `mr_rebase` passes a `timeout`, so
+    only it can see this; the other three `refresh_worktree_base` callers
+    keep today's unbounded behaviour."""
 
 
 class BaseBranchMissing(git.ForgeError):
@@ -751,7 +761,13 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
 
 
 async def refresh_worktree_base(
-    worktree: Path, repo: Path, branch: str, *, base: str, force: bool = False
+    worktree: Path,
+    repo: Path,
+    branch: str,
+    *,
+    base: str,
+    force: bool = False,
+    timeout: float | None = None,
 ) -> str | None:
     """Rebase `worktree`'s branch onto origin's `base` (`upstream_head`) -- the
     item's `base_branch` -- so a paused or retried item's next commit lands on
@@ -781,6 +797,17 @@ async def refresh_worktree_base(
     guard: the caller already read the merge request back and confirmed it
     cannot land as-is, so rewriting a branch a reviewer is looking at is
     exactly what was asked for, not an accident.
+
+    `timeout` (seconds) bounds only the `git rebase` subprocess itself --
+    only `mr_rebase` passes one, from its own time cap; the other three
+    callers (`/retry`, `/resume`, gate self-retry, `mr_rebase_forced`) pass
+    none and keep today's unbounded run. Past it, `git rebase --abort` runs
+    the same as a conflict's, and `RebaseTimedOut` (a `RuntimeError`
+    subclass, distinct from `RebaseConflict`) is raised instead: a hook or a
+    smudge/LFS filter that hangs mid-rebase must not hold the worker's slot
+    forever (Kraft-3llig). `upstream_head`'s own fetch has its own fixed 60s
+    and is not covered by this -- it is a separate subprocess, bounded before
+    this one ever starts.
     """
     if not worktree.is_dir():
         return None
@@ -814,12 +841,25 @@ async def refresh_worktree_base(
     if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
-    done = await asyncio.to_thread(
-        subprocess.run,
-        ["git", "-C", str(worktree), "rebase", head],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        done = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(worktree), "rebase", head],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        # `subprocess.run` already killed the `git rebase` process on the
+        # timeout; its abort left mid-operation, the same clean-up a
+        # conflict's abort below does.
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(worktree), "rebase", "--abort"],
+            capture_output=True,
+            text=True,
+        )
+        raise RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}") from None
     if done.returncode != 0:
         await asyncio.to_thread(
             subprocess.run,
@@ -851,6 +891,14 @@ async def mr_rebase(
     branch: str,
     head_sha: str | None = None,
     has_rebase_bounce: bool = False,
+    #: The tightest time cap over this task (`caps.at_launch`), the same one
+    #: `adapters.subprocess.run_task` kills a launched process at. Threaded
+    #: into `refresh_worktree_base`'s own `git rebase` subprocess as its
+    #: `timeout=` -- a hanging pre-rebase hook or smudge/LFS filter must not
+    #: hold the worker's slot forever (Kraft-3llig). `None` (a chain that
+    #: predates this, or a task with no cap resolved) means unbounded, the
+    #: same as every other `refresh_worktree_base` caller.
+    time_cap: _caps.Deadline | None = None,
 ) -> str:
     """Rebase onto the item's base branch right before `open_mr`, so an item
     that ran straight through the chain -- no pause, no `/retry` -- doesn't
@@ -872,8 +920,11 @@ async def mr_rebase(
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
     base = await base_branch(db, work_item_id, Path(repo))
+    timeout = max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
     try:
-        new_head = await refresh_worktree_base(Path(worktree), Path(repo), branch, base=base)
+        new_head = await refresh_worktree_base(
+            Path(worktree), Path(repo), branch, base=base, timeout=timeout
+        )
     except BaseBranchMissing as exc:
         # Nothing an agent could fix: `config_error` stops the item for a
         # person rather than sending a fix loop round against a missing base.
@@ -889,6 +940,34 @@ async def mr_rebase(
             status="config_error",
             head_sha=head_sha,
         )
+    except RebaseTimedOut as exc:
+        # Recorded the same way a time cap stops any other task
+        # (`dispatch.time_capped_session`, `adapters.subprocess.run_task`'s
+        # own mid-run kill): the session exits `capped_out`, `caps.REACHED`
+        # names the scope and cap, and the walk stops for a human -- not a
+        # new stop kind, the existing one.
+        assert time_cap is not None  # only a passed time_cap can raise this
+        await _record_done(
+            db,
+            run_dirs,
+            session_id=session_id,
+            work_item_id=work_item_id,
+            node_id=node_id,
+            hook_point=hook_point,
+            round=round,
+            log=f"{exc}\n",
+            status="capped_out",
+            head_sha=head_sha,
+        )
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                _caps.REACHED,
+                time_cap.hit.payload(node_id=node_id, task=hook_point, session_id=session_id),
+            )
+        )
+        return _caps.TIME_CAPPED
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
         log = f"rebased {branch} onto {new_head}\n"
