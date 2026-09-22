@@ -111,6 +111,23 @@ def test_a_report_moves_progress_on_the_detail_and_the_board(client, repo):
     assert _board_row(client, wid)["progress"] == {"current": 2, "total": 3, "title": "serve"}
 
 
+def test_a_done_marked_task_does_not_drift_progress_through_the_api(client, repo):
+    """A reused plan's `[DONE]` task walks `current` back to the last task that
+    isn't -- end to end through the route, not just the pure `combine()` unit."""
+    plan = "# p\n\n## Task 1 — parse\n\n## Task 2 — serve [DONE]\n\n## Task 3 — render\n"
+    wid = _paused_item(client, repo)
+    wt = _worktree(wid, plan=plan)
+    _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
+    _git(wt, "commit", "-q", "--allow-empty", "-m", "feat: Task 1: parse")
+    _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
+    _force_node(wid, "implementation", "active")
+
+    detail = client.get(f"/api/work-items/{wid}").json()["progress"]
+    assert (detail["current"], detail["total"], detail["title"]) == (1, 3, "parse")
+    assert [t["state"] for t in detail["tasks"]] == ["current", "done", "pending"]
+    assert _board_row(client, wid)["progress"] == {"current": 1, "total": 3, "title": "parse"}
+
+
 def _set_base_ref(wid: str, sha: str) -> None:
     conn = _db()
     try:

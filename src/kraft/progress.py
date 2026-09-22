@@ -11,6 +11,9 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import Literal, Self
+
+from pydantic import BaseModel, model_validator
 
 from kraft import events
 from kraft import store as _store
@@ -18,6 +21,26 @@ from kraft.adapters.agent import artifact_path
 from kraft.config import git_read
 
 logger = logging.getLogger(__name__)
+
+
+class TaskProgress(BaseModel):
+    n: int
+    title: str
+    state: Literal["done", "current", "pending"]
+
+
+class ProgressReport(BaseModel):
+    current: int
+    total: int
+    title: str
+    tasks: list[TaskProgress]
+
+    @model_validator(mode="after")
+    def _current_capped(self) -> Self:
+        if self.current > self.total:
+            raise ValueError("current task index cannot exceed total")
+        return self
+
 
 IMPLEMENTATION_HOOK = "on.implementation.start"
 
@@ -72,7 +95,7 @@ def committed_task(subjects: list[str]) -> int:
     )
 
 
-def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> dict | None:
+def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> ProgressReport | None:
     """A report means "starting task K"; a commit naming K means K is done, so
     the one after it is current -- unless that lands on a task the plan
     itself marks `[DONE]` (already merged outside this work item), in which
@@ -84,23 +107,19 @@ def combine(tasks: list[tuple[str, bool]], reported: int, committed: int) -> dic
     current = min(total, max(reported, committed + 1))
     while current > 1 and tasks[current - 1][1]:
         current -= 1
-    return {
-        "current": current,
-        "total": total,
-        "title": tasks[current - 1][0],
-        "tasks": [
-            {
-                "n": n,
-                "title": title,
-                "state": "done"
-                if done or n < current
-                else "current"
-                if n == current
-                else "pending",
-            }
+    return ProgressReport(
+        current=current,
+        total=total,
+        title=tasks[current - 1][0],
+        tasks=[
+            TaskProgress(
+                n=n,
+                title=title,
+                state="done" if done or n < current else "current" if n == current else "pending",
+            )
             for n, (title, done) in enumerate(tasks, 1)
         ],
-    }
+    )
 
 
 def implementation_node(chain: dict) -> str | None:
@@ -213,7 +232,7 @@ def run_state(conn, work_item_id: str, node_id: str) -> int:
     )
 
 
-def for_item(db, row, worktree: Path) -> dict | None:
+def for_item(db, row, worktree: Path) -> ProgressReport | None:
     """The API's `progress`, or None when there is nothing honest to show."""
     node_id = active_implementation_node(row)
     if node_id is None:
