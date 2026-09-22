@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import yaml
 from support.harness import make_repo_with_submodule
 
 
@@ -84,3 +85,26 @@ def test_a_workspace_is_filed_only_against_its_own_root(client, tmp_path, repo):
     )
     assert r.status_code == 422, r.text
     assert "rooted" in r.json()["detail"]
+
+
+def test_a_workspace_nesting_one_member_inside_another_is_a_422(client, tmp_path, templates_dir):
+    """Kraft-z0wzd (option A): a member mounted inside another member cannot
+    be assembled, so intake refuses it by name rather than filing an item
+    whose checkout fails later. The CLI and MCP file through this route."""
+    root = _workspace(client, tmp_path)
+    path = templates_dir / "repos.yaml"
+    on_disk = yaml.safe_load(path.read_text())
+    on_disk["workspaces"]["ws"]["members"]["x"] = {"repository": "a", "path": "libs/a/vendor/x"}
+    path.write_text(yaml.safe_dump(on_disk))
+    r = client.post(
+        "/api/work-items",
+        json={
+            "title": "t",
+            "repo": str(root),
+            "autostart": False,
+            "workspace": "ws",
+            "members": ["a"],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "member 'x' at 'libs/a/vendor/x' is inside member 'a' at 'libs/a'" in r.json()["detail"]

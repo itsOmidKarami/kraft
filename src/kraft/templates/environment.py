@@ -15,7 +15,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
 import yaml
@@ -152,6 +152,23 @@ class Workspace(BaseModel):
         RootPointerPolicy.IGNORE
     )
     members: dict[Identifier, WorkspaceMember] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _no_member_inside_another(self) -> Workspace:
+        """A member mounted inside another member cannot be assembled: the
+        root's `git submodule update` does not reach into a submodule
+        (Kraft-z0wzd, option A; nesting is Kraft-37gnq). Here, so every door
+        that reads `workspaces:` -- load, intake, a Settings write -- refuses it."""
+        mounts = {n: PurePosixPath(m.path) for n, m in self.members.items()}
+        for name, path in mounts.items():
+            for outer, outer_path in mounts.items():
+                if outer_path in path.parents:
+                    raise ValueError(
+                        f"member {name!r} at {str(path)!r} is inside member {outer!r} at "
+                        f"{str(outer_path)!r}: a member nested inside another cannot be "
+                        "assembled; mount each member directly in the root"
+                    )
+        return self
 
 
 class WorkItemTarget(BaseModel):

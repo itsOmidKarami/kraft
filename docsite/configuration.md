@@ -299,6 +299,12 @@ you pick one); both are frozen into the item. The item's worktree holds exactly
 those members, each on the item's branch, and a task with `scope:
 each_repository` runs once per selected repository.
 
+Every member mounts directly in the root. A member whose `path` is inside another
+member's (`libs/a/vendor/x` inside `libs/a`) can't be assembled, so `repos.yaml`
+fails to load, and filing an item against that workspace is refused. The error
+names both members. A submodule nested in a member is just part of that member's
+repository; leave it out of `members:`.
+
 Each selected repository binds the tasks that run in it with its own policy
 layer. A task in the assembled worktree, which holds all of them at once, runs
 under the tightest of their layers: allowlists intersect, deny lists add up, and
