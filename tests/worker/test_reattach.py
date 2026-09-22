@@ -250,6 +250,34 @@ async def test_running_dead_pid_resolves_from_result_file(item, database, run_di
     assert summary.resumed_work_items == ["w1"]
 
 
+@pytest.mark.parametrize(
+    ("path", "exit_code", "expected"),
+    [
+        # Kraft-s7c04.38: a green run Kraft merely cannot confirm pages nobody.
+        ("verify.main.check", "0", "done"),
+        ("verify.main.check", "3", "failed"),
+        # No evidence at all still escalates.
+        ("verify.main.check", None, "unknown"),
+        # An agent's exit code never speaks for its missing result file.
+        ("verify.main.review", "0", "unknown"),
+    ],
+    ids=["exit-0", "exit-3", "no-exit-file", "agent-exit-0"],
+)
+async def test_a_dead_unconfirmed_session_reads_its_exit_file_before_paging(
+    item_on, database, run_dirs, path, exit_code, expected
+):
+    it = await item_on(_CHAIN, "verify")
+    await it.session("s1", path, running=DEAD)
+    if exit_code is not None:
+        (run_dirs.results / "s1.exit").write_text(exit_code)
+
+    summary, _ = await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+
+    assert it.sessions()[0]["status"] == expected
+    assert (summary.unknown == ["s1"]) is (expected == "unknown")
+    assert (it.status() == "needs_human") is (expected == "unknown")
+
+
 async def test_resolved_from_file_carries_concerns_question_and_usage(item, database, run_dirs):
     """The same `worker_session_exited` payload `run_task` would have stamped:
     the concerns roll-up at the gate and the needs_context question both read

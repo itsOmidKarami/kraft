@@ -50,9 +50,6 @@ class ReattachSummary:
     resumed_work_items: list[str] = field(default_factory=list)
 
 
-_resolve_file = _resolve_result_file
-
-
 def _pid_alive(pid: int) -> bool:
     """True only if pid names a live process (a zombie/defunct child is NOT alive)."""
     try:
@@ -285,7 +282,7 @@ def _adopted_status(result_path, *, is_agent: bool) -> str:
     """Result file, else the task's own recorded exit code, else `unknown`.
 
     Never `failed` on absent evidence: an adopted process cannot be reaped, so
-    `_resolve_file(...) or "failed"` recorded every green subprocess run as a
+    `_resolve_result_file(...) or "failed"` recorded every green subprocess run as a
     failure and fed the fix loop a defect that was not there (b5afe84c: two
     green 14-minute `just ci-test` runs, 28 minutes re-fixing passing tests).
 
@@ -296,12 +293,20 @@ def _adopted_status(result_path, *, is_agent: bool) -> str:
     which is the one direction that must never happen -- so a session whose
     task cannot be found in its item's chain is treated as an agent too.
     """
-    file_status = _resolve_result_file(result_path)
-    if file_status is not None:
-        return file_status
-    if is_agent:
-        return "failed"
-    return _resolve_exit_file(Path(result_path).with_suffix(".exit")) or "unknown"
+    status = _evidenced_status(result_path, is_agent=is_agent)
+    if status is not None:
+        return status
+    return "failed" if is_agent else "unknown"
+
+
+def _evidenced_status(result_path, *, is_agent: bool) -> str | None:
+    """What a session left on disk says it ended as, or None if nothing does:
+    its result file, else -- never for an agent, see `_adopted_status` -- its
+    own recorded exit code."""
+    status = _resolve_result_file(Path(result_path))
+    if status is None and not is_agent:
+        status = _resolve_exit_file(Path(result_path).with_suffix(".exit"))
+    return status
 
 
 async def _adopt(
@@ -565,7 +570,11 @@ async def reattach(
             summary.adopted.append(sid)
             continue
 
-        status = _resolve_file(Path(r["result_path"]))
+        # A dead process whose identity cannot be confirmed still left its
+        # evidence: the exit sidecar, for a subprocess, as well as the result
+        # file -- so a green run Kraft merely cannot confirm pages nobody
+        # (Kraft-s7c04.38).
+        status = _evidenced_status(r["result_path"], is_agent=_is_agent_hook(db, r))
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             await _exit_from_file(db, sid, Path(r["log_path"]), Path(r["result_path"]), status)
