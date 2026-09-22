@@ -337,34 +337,18 @@ class _LandingForge(forge.FakeForge):
 
 
 async def _publishable(
-    database,
-    run_dirs,
-    tmp_path,
-    *,
-    pointer,
-    root_denies_push=False,
-    second=False,
-    legacy=False,
-    root_source=False,
-    nodes=None,
+    database, run_dirs, tmp_path, *, pointer, root_denies_push=False, root_source=False, **item
 ):
     """A workspace item whose root and member each have an origin that takes a
     push (the member's is its source repository), the member carrying a
     commit, and the root one too when `root_source`. `root_denies_push`
     protects the root's `main` from every push but the forge's own merge.
-    Returns `(row, worktree, root_origin)`."""
+    `item` goes to `_workspace_item`. Returns `(row, worktree, root_origin)`."""
     row, _, worktree = await _workspace_item(
-        database,
-        run_dirs,
-        tmp_path,
-        [_task("t")],
-        pointer=pointer,
-        second=second,
-        legacy=legacy,
-        nodes=nodes,
+        database, run_dirs, tmp_path, [_task("t")], pointer=pointer, **item
     )
     root = Path(row["repo"])
-    members = ["pkg", "pkg2"] if second else ["pkg"]
+    members = ["pkg", "pkg2"] if item.get("second") else ["pkg"]
     origin = tmp_path / "root-origin.git"
     _git(tmp_path, "clone", "-q", "--bare", str(root), str(origin))
     if root_denies_push:
@@ -533,34 +517,18 @@ async def test_a_root_merge_request_opened_for_source_since_reverted_is_still_me
     assert _repos(database, row)["root"] == "merged"
 
 
-#: Publication as a chain walks it: draft, approval, ready, merge.
-_PUBLISH = [
-    {"id": id, "kind": "exec", "tasks": [{"id": id, "kind": "forge", "target": target}]}
-    for id, target in [
-        ("draft", "mr.open_draft"),
-        ("approval", "mr.external_approval"),
-        ("ready", "mr.mark_ready"),
-        ("merge", "mr.merge"),
-    ]
-]
-
-
 async def _walk(database, run_dirs, row, fake, monkeypatch) -> str:
     """`executor.run` on the item from its own cursor, re-entered as the wait
     scheduler would, with every forge task answered by `fake`."""
     from kraft import executor
 
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-    wid = row["id"]
-    status = database.read(
-        lambda c: c.execute("SELECT status FROM work_items WHERE id = ?", (wid,)).fetchone()
-    )["status"]
-    if status == "waiting":
-        await database.write(lambda c: store.mark_reentered(c, wid))
+    # Every item here is active or waiting, and a waiting one is re-entered.
+    await database.write(lambda c: store.mark_reentered(c, row["id"]))
     return await executor.run(
         database,
         run_dirs,
-        work_item_id=wid,
+        work_item_id=row["id"],
         policy=None,
         launch=LaunchContext(repo_entry={**NO_SETUP, "forge": "github"}, steering_dir=None),
     )
@@ -708,6 +676,17 @@ def _chain(*nodes):
 def _forge(id, target):
     return {"id": id, "kind": "exec", "tasks": [{"id": id, "kind": "forge", "target": target}]}
 
+
+#: Publication as a chain walks it: draft, approval, ready, merge.
+_PUBLISH = [
+    _forge(id, f"mr.{target}")
+    for id, target in [
+        ("draft", "open_draft"),
+        ("approval", "external_approval"),
+        ("ready", "mark_ready"),
+        ("merge", "merge"),
+    ]
+]
 
 _FINAL = {"id": "final", "kind": "gate", "message": "m", "chain_finalized": True}
 

@@ -764,7 +764,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_pre
 
 When the system cannot push a requested root-pointer bump directly, it SHALL
 create a merge request for the pointer update instead.
-enforced-by: tests/templates/test_workspace_publication.py::test_pointer_bump_falls_back_to_merge_request_when_push_is_denied
+enforced-by: tests/templates/test_workspace_publication.py::test_pointer_bump_falls_back_to_merge_request_when_push_is_denied, tests/templates/test_workspace_publication.py::test_a_fallback_pointer_merge_request_is_followed_to_its_merge
 
 ## REQ workspace-root-code-change-gets-a-root-merge-request
 
@@ -913,13 +913,13 @@ enforced-by: tests/test_waits.py::test_interval_grows_from_initial_to_max_while_
 
 When an external-wait task reaches its configured timeout, the system SHALL
 stop for human action and SHALL NOT classify the timeout as a code failure.
-enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared]
+enforced-by: tests/test_waits.py::test_wait_timeout_stops_for_human_and_is_not_a_code_failure, tests/adapters/forge/test_merge_watch.py::test_a_post_merge_pipeline_that_never_settles_times_out_for_a_human, tests/test_waits.py::test_a_wait_timeout_and_a_loop_cap_are_reported_apart, tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-declared], tests/executor/test_stuck_escalation.py::test_a_stop_outside_the_stuck_set_goes_straight_to_a_human[wait timeout-undeclared], tests/templates/test_workspace_publication.py::test_a_root_approval_that_never_comes_times_out_for_a_human
 
 ## REQ external-wait-covers-merge-request-lifecycle
 
 The shared external-wait mechanism SHALL support CI completion, automated
 review settlement, external approval, merge completion, and post-merge CI.
-enforced-by: tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci
+enforced-by: tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[ci], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[automated-review], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[external-approval], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[merge-completion], tests/test_waits.py::test_every_wait_kind_parks_and_is_resumed_by_the_one_scheduler[post-merge-ci], tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_workspace_publication.py::test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the_item_completes, tests/templates/test_workspace_publication.py::test_a_fallback_pointer_merge_request_is_followed_to_its_merge, tests/templates/test_workspace_publication.py::test_a_root_merge_request_opened_for_source_since_reverted_is_still_merged
 
 ## REQ automated-review-is-an-explicit-optional-task
 
@@ -984,7 +984,7 @@ enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_rea
 When a workspace work item changes root source and child repositories, the
 system SHALL NOT mark the root merge request ready until the child merge
 requests have merged and the root contains their final pointer revisions.
-enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
+enforced-by: tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged, tests/templates/test_workspace_publication.py::test_a_root_merge_request_awaits_its_own_approval_then_merges_then_the_item_completes
 
 ## REQ blocked-child-merge-leaves-parent-unchanged
 
