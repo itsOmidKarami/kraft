@@ -367,12 +367,14 @@ async def set_attachments(
     re-copied into Kraft's own storage and resolved the way `create_work_item`
     resolves one; a kind in `drop` is removed, which puts back the gate it
     trimmed. A kind not named keeps its copy. 409s once the item has started.
+    `_forbid_self_action`, like the other setters: a worker does not revise the
+    documents it was handed.
     """
     changes: dict = {k: v for k, v in (("spec", spec), ("plan", plan)) if v}
     changes |= dict.fromkeys(drop or [])
     if not changes:
         raise ValueError("kraft: set-attachments needs --spec, --plan or --drop")
-    target = await context.resolve_work_item(work_item_id)
+    target = context._forbid_self_action(work_item_id)
     return await transport._patch(
         f"/work-items/{target}", {"attachments": changes, "cwd": str(Path.cwd())}
     )

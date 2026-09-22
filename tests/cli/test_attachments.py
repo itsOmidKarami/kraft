@@ -8,6 +8,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from kraft import cli, client
 
 
@@ -42,3 +44,20 @@ def test_set_attachments_revises_a_spec_from_a_subdirectory_and_drop_restores_it
     capsys.readouterr()
 
     assert "spec_approval" in _gates(capsys, wid)
+
+
+def test_a_worker_cannot_set_its_own_items_attachments(app, capsys, monkeypatch, make_item, repo):
+    """The same self-action door as `set-policy` and `set-overrides`."""
+    wid = make_item(repo)
+    (repo / "s.md").write_text("# mine\n")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("KRAFT_WORK_ITEM_ID", wid)
+
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["item", "set-attachments", "--spec", "s.md"])
+
+    assert caught.value.code == 1
+    assert "cannot act on its own work item" in capsys.readouterr().err
+    monkeypatch.delenv("KRAFT_WORK_ITEM_ID")
+    cli.main(["view", "show", wid, "--json"])
+    assert json.loads(capsys.readouterr().out)["attachments"] == []
