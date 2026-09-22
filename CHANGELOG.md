@@ -159,5 +159,7 @@ agent, decides whether to skip, abandon, or give more room.
   overshoot it by their combined cost (Kraft-ib2sn).
 - A sandboxed repository with submodule members is refused (Kraft-ju36l).
 - The merge step does not pin the exact head its CI verified (Kraft-vomwx).
+- An auto-review agent approving a chain revision gate is checked against the
+  gate's last recorded view, not a view of its own (Kraft-rndd1).
 - Steering lives in two places for now: task steering in the Library, and
   repository steering files on the Steering page (Kraft-91i6p).
