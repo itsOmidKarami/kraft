@@ -10,12 +10,12 @@ origin: src/kraft/config.py §RepoEntry._intent_dir_inside_repo
 
 ## REQ intent-dir-is-named-to-every-agent
 WHERE a repository declares `intent_dir`, the system SHALL name that directory in every agent launch's context, after the method and before the project standards.
-enforced-by: tests/adapters/test_agent.py::test_the_intent_block_sits_after_the_method_and_before_steering
+enforced-by: tests/adapters/test_agent_intent.py::test_the_intent_block_sits_after_the_method_and_before_steering
 origin: src/kraft/adapters/agent.py §build_context
 
 ## REQ no-intent-dir-names-no-tree
 IF a repository declares no `intent_dir`, THEN the system SHALL NOT add an intent-tree block to an agent launch's context.
-enforced-by: tests/adapters/test_agent.py::test_no_intent_dir_no_intent_block[no-entry], tests/adapters/test_agent.py::test_no_intent_dir_no_intent_block[null-intent-dir]
+enforced-by: tests/adapters/test_agent_intent.py::test_no_intent_dir_no_intent_block[no-entry], tests/adapters/test_agent_intent.py::test_no_intent_dir_no_intent_block[null-intent-dir]
 origin: src/kraft/adapters/agent.py §build_context
 
 ## REQ tree-readme-is-not-a-capability
