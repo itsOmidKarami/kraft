@@ -186,6 +186,40 @@ async def test_child_merge_precedes_workspace_pointer_update(
     assert len(fake.opened) == 1, "the member's merge request only; the bump needed none"
 
 
+class _OvertakenForge(_LandingForge):
+    """Someone else lands a commit on a member's origin right after the
+    item's merge, before the root's turn."""
+
+    async def merge(self, *, repo, branch="", mr):
+        await super().merge(repo=repo, branch=branch, mr=mr)
+        if Path(repo).name.startswith("pkg"):
+            origin = Path(_git_out(repo, "remote", "get-url", "origin"))
+            _git(origin, "commit", "-q", "--allow-empty", "-m", "landed after the item's merge")
+
+
+async def test_the_pointer_bump_moves_only_merged_members_and_to_what_merged(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-n60oh: the root pointer moves only for a member whose merge
+    request merged in this item, and to the revision that merge landed --
+    never to whatever its origin's tip has become, which the item never
+    built. A selected member the item never changed keeps its pointer."""
+    row, worktree, origin = await _publishable(
+        database, run_dirs, tmp_path, pointer="bump", second=True, untouched=("pkg2",)
+    )
+    untouched = _git_out(origin, "rev-parse", "main:repos/pkg2")
+    _git(tmp_path / "pkg2", "commit", "-q", "--allow-empty", "-m", "upstream, never built here")
+    merged = _git_out(worktree / "repos" / "pkg", "rev-parse", "HEAD")
+    fake = _OvertakenForge()
+    await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
+
+    assert await _run(database, run_dirs, row, worktree, fake, monkeypatch, "merge") == "done"
+
+    assert _git_out(tmp_path / "pkg", "rev-parse", "main") != merged, "someone landed after it"
+    assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
+    assert _git_out(origin, "rev-parse", "main:repos/pkg2") == untouched
+
+
 async def test_a_workspace_items_base_branch_is_its_roots_and_members_keep_their_own(
     database, run_dirs, tmp_path, monkeypatch
 ):
@@ -223,32 +257,44 @@ def _base_ref(database, row) -> str | None:
 
 
 @pytest.mark.parametrize("handler", ["ci_poll", "merge"])
+@pytest.mark.parametrize(
+    ("bounce", "expected"),
+    [(True, "base_moved"), (False, "waiting")],
+    ids=["a-declared-restart-re-verifies-it", "undeclared-it-waits-for-the-rebased-heads-ci"],
+)
 async def test_a_members_conflict_is_rebased_onto_its_own_origin(
-    database, run_dirs, tmp_path, monkeypatch, handler
+    database, run_dirs, tmp_path, monkeypatch, handler, bounce, expected
 ):
     """Kraft-puqxq: a member's conflict rebase reads the member's own origin
     and default branch, never the root's, though dispatch hands the forge
     node the root's source repository as `orig_repo`. The item's `base_ref`
     is the root's, so the member's move is reported as one instead of being
-    written there."""
+    written there. Kraft-tx0dz: a node with no base-change restart to
+    re-verify the rebased head waits for that head's own CI instead -- the
+    pipeline here still answers for the head before the rebase."""
     row, worktree, _ = await _publishable(database, run_dirs, tmp_path, pointer="ignore")
     (tmp_path / "pkg" / "moved.txt").write_text("landed meanwhile\n")
     _git(tmp_path / "pkg", "add", "moved.txt")
     _git(tmp_path / "pkg", "commit", "-qm", "the member's main moves")
     moved = _git_out(tmp_path / "pkg", "rev-parse", "main")
-    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    member = worktree / "repos" / "pkg"
+    fake = forge.FakeForge(
+        ci_states=["success"],
+        ci_shas=[_git_out(member, "rev-parse", "HEAD")],
+        mergeable=False,
+        merge_detail="conflict",
+    )
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
     base_ref = _base_ref(database, row)
 
     result = await _run(
         *(database, run_dirs, row, worktree, fake, monkeypatch, handler),
         orig_repo=Path(row["repo"]),
-        has_rebase_bounce=True,
+        has_rebase_bounce=bounce,
     )
 
-    member = worktree / "repos" / "pkg"
     assert _git_out(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
-    assert (result, fake.merged) == ("base_moved", [])
+    assert (result, fake.merged) == (expected, [])
     assert _base_ref(database, row) == base_ref
 
 

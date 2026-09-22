@@ -784,10 +784,11 @@ origin: src/kraft/config.py §load_workspaces -- both ends of every declaration 
 ## REQ workspace-members-are-not-nested
 
 A workspace SHALL NOT declare a member whose mount path is inside another
-member's. Loading `workspaces:` and filing a work item against such a workspace
-SHALL be refused, naming the nested member and the member that encloses it.
-enforced-by: tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[a-member-nested-inside-another], tests/api/test_workspace_intake.py::test_a_workspace_nesting_one_member_inside_another_is_a_422, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id
-origin: src/kraft/templates/environment.py §Workspace -- the root's `git submodule update` cannot reach a submodule inside a submodule, so a nested member failed only when its checkout was assembled (Kraft-z0wzd, option A). Supporting nesting is Kraft-37gnq.
+member's, or is another member's. Loading `workspaces:` and filing a work item
+against such a workspace SHALL be refused, naming the nested member and the
+member that encloses it, or the two members sharing the mount.
+enforced-by: tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[a-member-nested-inside-another], tests/test_config_repos.py::test_a_workspace_that_cannot_assemble_is_refused_at_load[two-members-at-one-mount], tests/api/test_workspace_intake.py::test_a_workspace_nesting_one_member_inside_another_is_a_422, tests/test_config_repos.py::test_a_workspace_is_read_from_repos_yaml_by_repository_id
+origin: src/kraft/templates/environment.py §Workspace -- the root's `git submodule update` cannot reach a submodule inside a submodule, so a nested member failed only when its checkout was assembled (Kraft-z0wzd, option A). Supporting nesting is Kraft-37gnq. Two members at one mount cannot both be checked out there (Kraft-rx4n5).
 
 ## REQ work-item-target-selection-is-immutable
 
@@ -925,6 +926,15 @@ and reviewed again before the chain goes on.
 enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
 origin: templates/chains/default.yaml -- Kraft-bjw6a. `merge_request_feedback` declares `on_base_changed: {restart_from: verification}`, since its CI-conflict path force-rebases. `merge`'s own conflict rebase is not declared: without a declaration it re-checks CI on the rebased head itself, and a restart from there would cross `chain_review`.
 
+## REQ an-undeclared-conflict-rebase-waits-for-the-rebased-heads-ci
+
+When a forge node rebases a merge request's conflict away and declares no
+`on_base_changed` restart to verify the rebased head again, the system SHALL
+neither report that node's check passed nor merge until it has read a settled
+green pipeline for the rebased head itself.
+enforced-by: tests/adapters/forge/test_run_chain.py::test_a_ci_poll_conflict_rebase_is_never_a_green_check[undeclared-it-waits-for-the-rebased-heads-ci], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[undeclared-it-waits-for-the-rebased-heads-ci-ci_poll], tests/templates/test_workspace_publication.py::test_a_members_conflict_is_rebased_onto_its_own_origin[undeclared-it-waits-for-the-rebased-heads-ci-merge]
+origin: src/kraft/adapters/forge/run.py §_run_one -- Kraft-tx0dz. A member's rebase reports its move only to a declared restart (Kraft-puqxq), and `ci_poll` reported a rebased head green on the pipeline of the head before it. The forge's pipeline for the pushed head is the verification: `render_ci` reads a pipeline for another head as pending, and `merge` reads it again before `forge.merge`.
+
 ## REQ base-change-restart-passes-an-approved-gate
 
 A base-change restart after a clean rebase SHALL NOT reopen a gate in its span
@@ -1028,7 +1038,7 @@ enforced-by: tests/adapters/forge/test_waits.py::test_missing_external_approval_
 
 The system SHALL wait for a changed child repository to merge before updating
 a workspace root pointer to that child's revision.
-enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged
+enforced-by: tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[workspace], tests/templates/test_workspace_publication.py::test_child_merge_precedes_workspace_pointer_update[filed-before-workspaces], tests/templates/test_workspace_publication.py::test_root_mr_not_ready_until_child_mrs_have_merged, tests/templates/test_workspace_publication.py::test_the_pointer_bump_moves_only_merged_members_and_to_what_merged
 
 ## REQ root-source-draft-merge-request-may-run-early
 

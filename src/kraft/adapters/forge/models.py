@@ -68,6 +68,9 @@ class MRRef:
     #: forge's record, so it outlives any restart of Kraft's own wait
     #: (Kraft-l98h6): nothing asks it to merge a second time.
     merge_queued: bool = False
+    #: The revision a merged one landed on its target, "" when the forge did
+    #: not say -- what a workspace root's pointer names (Kraft-n60oh).
+    merged_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -262,6 +265,8 @@ class FakeForge:
     #: head drops the queued merge, as a forge drops it for commits nobody
     #: asked it to merge.
     _queued_head: dict[int, str | None] = field(default_factory=dict)
+    #: The head each merge request merged at, by number.
+    _merged_head: dict[int, str | None] = field(default_factory=dict)
 
     @staticmethod
     def _next(script: list):
@@ -392,6 +397,7 @@ class FakeForge:
             self._queued_head[number] = _head(repo)
         else:
             self.merged.append(number)
+            self._merged_head[number] = _head(repo)
 
     def _matches(self, number: int, repo: Path) -> bool:
         """A number opened before `_opened_repo` existed (an older test's
@@ -409,11 +415,13 @@ class FakeForge:
             if self._landing[number]:
                 self._landing[number] -= 1
             else:
-                del self._landing[number], self._queued_head[number]
+                del self._landing[number]
+                self._merged_head[number] = self._queued_head.pop(number)
                 self.merged.append(number)
         return MRRef(
             number=number,
             url=f"http://fake.forge/{number}",
             state="merged" if number in self.merged else "open",
             merge_queued=number in self._landing,
+            merged_sha=self._merged_head.get(number) or "",
         )

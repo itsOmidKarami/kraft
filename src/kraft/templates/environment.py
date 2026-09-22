@@ -154,13 +154,22 @@ class Workspace(BaseModel):
     members: dict[Identifier, WorkspaceMember] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _no_member_inside_another(self) -> Workspace:
+    def _no_member_at_or_inside_another(self) -> Workspace:
         """A member mounted inside another member cannot be assembled: the
         root's `git submodule update` does not reach into a submodule
-        (Kraft-z0wzd, option A; nesting is Kraft-37gnq). Here, so every door
-        that reads `workspaces:` -- load, intake, a Settings write -- refuses it."""
+        (Kraft-z0wzd, option A; nesting is Kraft-37gnq). Nor can two members
+        share one mount: only one checkout fits there (Kraft-rx4n5). Here, so
+        every door that reads `workspaces:` -- load, intake, a Settings write
+        -- refuses it."""
         mounts = {n: PurePosixPath(m.path) for n, m in self.members.items()}
+        seen: dict[PurePosixPath, str] = {}
         for name, path in mounts.items():
+            if path in seen:
+                raise ValueError(
+                    f"member {name!r} at {str(path)!r} is mounted where member "
+                    f"{seen[path]!r} is: two members cannot share one mount"
+                )
+            seen[path] = name
             for outer, outer_path in mounts.items():
                 if outer_path in path.parents:
                     raise ValueError(
