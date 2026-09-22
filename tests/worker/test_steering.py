@@ -48,6 +48,27 @@ def test_a_frozen_snapshot_answers_whatever_the_live_library_says():
     assert steering.for_repository(entry, {}, {"house": "edited since"}) == ()
 
 
+def test_frozen_steering_survives_the_repos_yaml_path_changing():
+    """Kraft-jzdyp: repos.yaml's `path` for a connected repo can be hand-
+    edited while an item is in flight. The frozen map is still keyed by
+    whatever the path was at intake, so a lookup keyed only by the *live*
+    entry (whose `.path` now differs) must not be the only way in -- the
+    item's own repo, as recorded at intake, has to work too."""
+    entry = entry_of({"path": "/new/path", "steering": ["house"]})
+    frozen = {"/old/path": {"house": "filed with"}}
+    assert steering.for_repository(entry, frozen, None, item_repo="/old/path") == ("filed with",)
+
+
+def test_frozen_steering_stops_for_a_human_when_nothing_matches():
+    """Kraft-jzdyp: a multi-repo item whose frozen map has entries but none
+    that match this launch (neither the live entry's path nor the item's own
+    recorded repo) must stop rather than silently run unsteered."""
+    entry = entry_of({"path": "/new/path", "steering": ["house"]})
+    frozen = {"/old/path": {"house": "filed with"}}
+    with pytest.raises(steering.SteeringError, match="no longer matches"):
+        steering.for_repository(entry, frozen, None, item_repo="/other/path")
+
+
 def test_a_snapshot_from_before_the_freeze_reads_the_live_library():
     """An rc item in flight across the upgrade read its steering files at
     each launch; they are library profiles now, so it reads those, and stops
