@@ -50,6 +50,16 @@ test("settings: library shows a component's chains, and a chain links back to it
   await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
 });
 
+test("settings: a library task links to its harness profile, and the profile back to it", async ({ page }) => {
+  await page.goto("/settings/library?c=tasks.implementer");
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible({ timeout: scaledTimeout(15_000) });
+  await page.getByRole("link", { name: "claude", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "claude", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^provider / })).toBeVisible();
+  await page.getByRole("link", { name: "tasks.implementer" }).click();
+  await expect(page.getByRole("heading", { name: "tasks.implementer" })).toBeVisible();
+});
+
 test("settings: policy edit saves", async ({ page }) => {
   await page.goto("/settings/policy");
   const attempts = page.getByLabel(/attempts/).first();
