@@ -101,10 +101,17 @@ def retry_after_cap(
     key: str | None,
     steer,
     *,
+    by_person: bool,
     escalated: bool = False,
     seeded: bool = False,
 ):
     """Clear a breached loop cap so the node can run again (handoff spec §8, 4b).
+
+    Only when `by_person` (`only-a-person-resets-a-cap-counter`, Kraft-s7c04.22):
+    a cap bounds what agents and Kraft do on their own, so a retry an agent
+    asked for (a worker, an escalation turn, an MCP assistant) or Kraft ran
+    itself (the rate-limit relaunch) leaves every counter where it stands.
+    Required, not defaulted, so a new door has to say which it is.
 
     The counter row is deleted rather than zeroed: `bump_counter` snapshots the
     cap and the wall-clock start on first fire, and a retry is a fresh budget,
@@ -147,16 +154,18 @@ def retry_after_cap(
     not this function's -- called before the awaited worktree rebase
     (Kraft-11e0), so this only clears counters and narrates the retry.
     """
-    clear_loop_counters(conn, work_item_id, node_id, key)
+    if by_person:
+        clear_loop_counters(conn, work_item_id, node_id, key)
     # Item-wide, not node-scoped -- a human's `/retry` is the same explicit
     # "give this a fresh budget" for every node's base-change restarts
     # (`walk._restart_for_base_change`) that it already is for every other
     # loop cap here. A restart span never clears these itself: that is what
     # bounds a base that keeps moving.
-    conn.execute(
-        "DELETE FROM retry_counters WHERE work_item_id = ? AND key LIKE ?",
-        (work_item_id, "%.on_base_changed"),
-    )
+    if by_person:
+        conn.execute(
+            "DELETE FROM retry_counters WHERE work_item_id = ? AND key LIKE ?",
+            (work_item_id, "%.on_base_changed"),
+        )
     # A stale pinned pipeline must not survive a manual retry any more than
     # the exhausted ci_infra counter above does (Kraft-ivh1).
     conn.execute("UPDATE work_items SET ci_pipeline_ref = NULL WHERE id = ?", (work_item_id,))
@@ -172,6 +181,14 @@ def retry_after_cap(
             "seeded": seeded,
         },
     )
+
+
+def cap_counts(conn: sqlite3.Connection, work_item_id: str) -> dict[str, int]:
+    """Every counter this item has, key to count."""
+    rows = conn.execute(
+        "SELECT key, count FROM retry_counters WHERE work_item_id = ?", (work_item_id,)
+    ).fetchall()
+    return {r["key"]: r["count"] for r in rows}
 
 
 def read_counter(conn: sqlite3.Connection, work_item_id: str, key: str) -> sqlite3.Row | None:

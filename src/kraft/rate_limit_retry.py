@@ -2,8 +2,9 @@
 
 Always on, unlike `intake.py`'s poller: waiting out a rate limit is not
 optional behaviour a human opts into, it is what the rest of this feature
-promises. Ticks on a fixed interval, clears the counters the way
-`store.retry_after_cap` does, and relaunches through `executor.run` with no
+promises. Ticks on a fixed interval, records the retry through
+`store.retry_after_cap` (which resets no cap counter for a relaunch nobody
+asked for), and relaunches through `executor.run` with no
 position: the walk resumes at the item's own cursor, like every door that
 resumes an item (Kraft-c3dab).
 """
@@ -115,7 +116,10 @@ async def _retry_one(app, row) -> bool:
             logger.info("rate-limit retry: %s is no longer rate_limited, skipping", wid)
             return False
 
-        await st.db.write(lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT))
+        # Kraft's own relaunch, so no cap counter resets (Kraft-s7c04.22).
+        await st.db.write(
+            lambda c: store.retry_after_cap(c, wid, node_id, None, RESUME_PROMPT, by_person=False)
+        )
         # Same as `waits`': over `store.node_index` so a V1 row's `"{}"`
         # `chain_definition` cannot raise, and a node that is not in this item's
         # chain stops rather than silently relaunching it at node zero.

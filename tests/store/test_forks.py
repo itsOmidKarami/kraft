@@ -36,9 +36,11 @@ CHAIN = """
 """
 
 
-async def _fork(database, it, path, **kwargs):
+async def _fork(database, it, path, by_person=True, **kwargs):
     target = ChainPath.parse(store.materialized_chain_of(it.row()), path) if path else None
-    return await database.write(lambda c: store.fork_run(c, it.id, target, **kwargs))
+    return await database.write(
+        lambda c: store.fork_run(c, it.id, target, by_person=by_person, **kwargs)
+    )
 
 
 async def test_retry_creates_a_fork_and_preserves_prior_run_data(item_on, database):
@@ -130,6 +132,21 @@ async def test_a_retry_clears_loop_counters_across_its_span_only(item_on, databa
         lambda c: {r["key"] for r in c.execute("SELECT key FROM retry_counters").fetchall()}
     )
     assert left == {"a.fix_loop", "g1_reject_loop"}
+
+
+async def test_a_retry_no_person_asked_for_clears_no_counter(item_on, database):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): an agent's
+    retry reruns the span on the budget it already spent -- its fix loops, its
+    gates' reject loops and its ci_infra clocks all stand."""
+    it = await item_on(CHAIN, "c", status="needs_human")
+    cap = policy.Cap(3, 3600)
+    keys = {"b.fix_loop", "g2_reject_loop", "ci_infra:c", "c.escalation"}
+    for key in keys:
+        await database.write(lambda c, k=key: store.bump_counter(c, it.id, k, cap))
+
+    await _fork(database, it, "b", by_person=False)
+
+    assert set(database.read(lambda c: store.cap_counts(c, it.id))) == keys
 
 
 async def test_a_rerun_node_completes_again_in_its_fork(item_on, database):

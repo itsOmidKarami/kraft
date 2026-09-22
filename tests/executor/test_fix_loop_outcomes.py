@@ -148,7 +148,9 @@ async def test_a_retried_node_dispatches_its_recovery_again_rather_than_reusing_
 
     assert await _walk_node(it) == "needs_human"
     await it.database.write(lambda c: store.claim_for_run(c, it.id, from_statuses=["needs_human"]))
-    await it.database.write(lambda c: store.retry_after_cap(c, it.id, "build", None, "try again"))
+    await it.database.write(
+        lambda c: store.retry_after_cap(c, it.id, "build", None, "try again", by_person=True)
+    )
     assert await _walk_node(it) == "needs_human"
 
     assert script.calls.count("repair") == 2, script.calls

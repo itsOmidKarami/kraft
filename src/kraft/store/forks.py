@@ -29,7 +29,9 @@ def run_forks(conn: sqlite3.Connection, work_item_id: str) -> list:
     return [RunFork.from_row(r) for r in rows]
 
 
-def fork_run(conn: sqlite3.Connection, work_item_id: str, target, override=None):
+def fork_run(
+    conn: sqlite3.Connection, work_item_id: str, target, override=None, *, by_person: bool
+):
     """Record a retry of `target` (a `ChainPath`, or None to restart the whole
     work item) as a new run fork, and invalidate exactly its downstream span.
 
@@ -43,6 +45,10 @@ def fork_run(conn: sqlite3.Connection, work_item_id: str, target, override=None)
     * every gate from the target on that was approved is reopened, so the
       rerun stops there again (`retry-reopens-invalidated-gates`). A gate
       before the target is never walked again, so its decision stands.
+
+    The fresh counters, fix loops and reject loops alike, only `by_person`
+    (`only-a-person-resets-a-cap-counter`, Kraft-s7c04.22): an agent's retry
+    reruns the span on the budget it already spent.
 
     The item's `run_chain` becomes the fork's copy of the chain, so every
     reader of the row runs what the fork froze.
@@ -76,17 +82,19 @@ def fork_run(conn: sqlite3.Connection, work_item_id: str, target, override=None)
     reopened = []
     for node in fork.chain.chain.nodes[start:]:
         if isinstance(node.node, ExecNode):
-            # `walk._loop_key`'s format; the store must not import the executor.
-            key = f"{node.id}.fix_loop" if node.fix_loop else None
-            clear_loop_counters(conn, work_item_id, node.id, key)
+            if by_person:
+                # `walk._loop_key`'s format; the store must not import the executor.
+                key = f"{node.id}.fix_loop" if node.fix_loop else None
+                clear_loop_counters(conn, work_item_id, node.id, key)
         else:
-            # A reopened gate gets a fresh reject budget, the human's override
-            # of that cap as it always was -- under the key its rejections
-            # counted on.
-            conn.execute(
-                "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
-                (work_item_id, reject_loop_key(node.id)),
-            )
+            if by_person:
+                # A reopened gate gets a fresh reject budget, the human's
+                # override of that cap as it always was -- under the key its
+                # rejections counted on.
+                conn.execute(
+                    "DELETE FROM retry_counters WHERE work_item_id = ? AND key = ?",
+                    (work_item_id, reject_loop_key(node.id)),
+                )
             if _approved(conn, work_item_id, node.id):
                 reopened.append(node.id)
                 events.append(

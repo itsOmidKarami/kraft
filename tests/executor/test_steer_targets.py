@@ -152,7 +152,7 @@ async def test_an_agent_task_that_cannot_resume_restarts_with_its_instruction(
     if why != "no-provider-id":
         _log_init(it, "s0", "cli-front")
     if why == "before-a-retry":
-        await it.database.write(lambda c: store.fork_run(c, it.id, None))
+        await it.database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
 
     await _dispatch(it, "work.main.front", executor.Steer("mind the tests", source="human"))
 

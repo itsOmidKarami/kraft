@@ -229,7 +229,9 @@ def test_the_fix_after_a_steered_retry_still_marks_the_finding_repeat(tmp_path, 
                 lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"])
             )
             await database.write(
-                lambda c: store.retry_after_cap(c, wid, "review", "review.fix_loop", None)
+                lambda c: store.retry_after_cap(
+                    c, wid, "review", "review.fix_loop", None, by_person=True
+                )
             )
             await executor.run(
                 database,

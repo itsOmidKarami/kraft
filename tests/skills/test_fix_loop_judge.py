@@ -510,7 +510,7 @@ async def test_retry_fixes_freely_no_judge_call_on_the_first_post_retry_cycle(
     await database.write(lambda c: store.claim_for_run(c, wid, from_statuses=["needs_human"]))
     await database.write(
         lambda c: store.retry_after_cap(
-            c, wid, "verify", "verify.fix_loop", "steer toward the real cause"
+            c, wid, "verify", "verify.fix_loop", "steer toward the real cause", by_person=True
         )
     )
     second = await executor.run(

@@ -102,6 +102,6 @@ async def test_a_retry_after_a_skip_runs_the_skipped_work_again(item_on, databas
     await database.write(lambda c: store.skip_scope(c, it.id, "after.main.d", None))
     assert database.read(lambda c: store.skipped_paths(c, it.id)) == {"after.main.d"}
 
-    await database.write(lambda c: store.fork_run(c, it.id, None))
+    await database.write(lambda c: store.fork_run(c, it.id, None, by_person=True))
 
     assert database.read(lambda c: store.skipped_paths(c, it.id)) == frozenset()

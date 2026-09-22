@@ -392,6 +392,16 @@ gate reject-loop counter SHALL change because of the resume itself.
 enforced-by: tests/api/test_lifecycle.py::test_resume_does_not_consume_a_retry_attempt
 origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Task 11b fix round 1, Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
 
+## REQ only-a-person-resets-a-cap-counter
+
+WHEN a work item is retried, the system SHALL reset its fix-loop, gate
+reject-loop, CI-infra, stuck-escalation and base-change counters only if a
+person asked for the retry (not a Kraft worker, an MCP assistant, an
+escalation turn or the rate-limit relaunch), and SHALL record the counters it
+reset, with their counts, in a `cap_counters_reset` event.
+enforced-by: tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[person], tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[worker], tests/api/test_lifecycle.py::test_only_a_persons_retry_resets_a_cap_counter[mcp-assistant], tests/executor/test_escalation.py::test_an_escalations_own_retry_resets_no_cap_counter, tests/test_rate_limit_retry.py::test_a_relaunch_resets_no_cap_counter, tests/store/test_forks.py::test_a_retry_no_person_asked_for_clears_no_counter, tests/store/test_counters.py::test_a_retry_no_person_asked_for_clears_no_counter, tests/skills/test_gate_review.py::test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop[agent], tests/skills/test_gate_review.py::test_fixed_verdicts_across_an_agent_retry_still_breach_the_reject_loop[person]
+origin: src/kraft/executor/retry.py -- Kraft-s7c04.22: an agent-initiated retry deleted the gate's reject-loop counter, so a cap meant to bound agents was one they could reset.
+
 ## REQ task-retry-reruns-that-task-and-later-work
 
 Retrying a task SHALL rerun that task, preserve completed sibling tasks in its

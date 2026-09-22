@@ -113,7 +113,9 @@ async def test_clear_loop_counters_with_no_key_still_clears_ci_counters(database
 
 async def test_retry_after_cap_clears_ci_pipeline_ref(database):
     await database.write(lambda c: store.set_ci_pipeline_ref(c, "w1", "abc123:456"))
-    await database.write(lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None))
+    await database.write(
+        lambda c: store.retry_after_cap(c, "w1", "mr_checks", None, None, by_person=True)
+    )
     assert _item(database, "ci_pipeline_ref")[0] is None
 
 
@@ -122,7 +124,9 @@ async def test_retry_after_cap_clears_retry_at(database):
         lambda c: store.mark_rate_limited(c, "w1", "implementation", "2026-09-10T00:00:00Z")
     )
     await database.write(lambda c: store.claim_for_run(c, "w1", from_statuses=["rate_limited"]))
-    await database.write(lambda c: store.retry_after_cap(c, "w1", "implementation", None, "go"))
+    await database.write(
+        lambda c: store.retry_after_cap(c, "w1", "implementation", None, "go", by_person=True)
+    )
     assert tuple(_item(database, "status, retry_at")) == ("active", None)
 
 
@@ -134,8 +138,25 @@ async def test_retry_after_cap_clears_retry_at(database):
 async def test_retry_after_cap_marks_seeded_on_the_event(database, kwargs, seeded):
     steer = "- [important] a.py:1 — missing null check (reviewer)"
     await database.write(
-        lambda c: store.retry_after_cap(c, "w1", "verify", "verify_fix_loop", steer, **kwargs)
+        lambda c: store.retry_after_cap(
+            c, "w1", "verify", "verify_fix_loop", steer, by_person=True, **kwargs
+        )
     )
     ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
     assert ev["type"] == "work_item_retried"
     assert ev["payload"]["seeded"] is seeded
+
+
+async def test_a_retry_no_person_asked_for_clears_no_counter(database):
+    """`only-a-person-resets-a-cap-counter` (Kraft-s7c04.22): the retry is
+    still recorded, and every counter it would have cleared for a person
+    stands."""
+    keys = ("verify.fix_loop", "ci_infra:verify", "verify.escalation", "verify.on_base_changed")
+    for key in keys:
+        await _bump(database, key)
+    await database.write(
+        lambda c: store.retry_after_cap(c, "w1", "verify", "verify.fix_loop", None, by_person=False)
+    )
+    assert [_counter(database, key)["count"] for key in keys] == [1] * 4
+    ev = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+    assert ev["type"] == "work_item_retried"
