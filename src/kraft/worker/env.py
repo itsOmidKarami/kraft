@@ -26,8 +26,9 @@ from kraft.worker.sandbox import FORWARDED_ENV
 #: `transport.base_url`, `transport.http`) -- without them a worker started
 #: by a non-default instance talks to `~/.kraft` on the default port instead.
 #: `KRAFT_DAEMON_PID` and `KRAFT_DAEMON_PORT` are what
-#: `never-signal-processes-you-didnt-start.md` tells a worker to check before
-#: killing anything it finds listening on a port.
+#: `adapters.agent.SAFETY_RULES` -- carried on every agent launch, not a
+#: steering file -- tells a worker to check before killing anything it finds
+#: listening on a port.
 BASELINE = frozenset(
     {
         "PATH",

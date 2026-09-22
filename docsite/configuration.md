@@ -313,6 +313,22 @@ repos:
 
 No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed. The exceptions are `name`, `enabled` and `default_chain_template`, which Kraft writes itself.
 
+#### Steering files
+
+A steering file is one `<name>.md` under `$KRAFT_HOME/templates/steering/`,
+authored by the Kraft operator (edited from the Settings screen or by hand),
+never by the repo it's attached to. `repos.yaml`'s `steering: [name, ...]` and
+a library task's own `steering:` both resolve to files there; every name that
+applies to a launch is read at dispatch time and concatenated into the
+agent's system prompt under a `## Project standards` heading
+(`src/kraft/worker/steering.py`).
+
+This is not a place for target-repo files: Kraft never reads `CLAUDE.md`,
+`AGENTS.md`, or anything else from inside the repo being worked on as a
+source of process context. The product ships no file in `templates/steering/`
+— an empty picker is the default, and every entry an operator sees there is
+one they wrote.
+
 `kraft repo connect` probes a `setup_command` and a test command from the repo's
 markers (a justfile with a `test` recipe proposes `just test` ahead of any
 manifest) and prints the test command with the file it came from; check both
