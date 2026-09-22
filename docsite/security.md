@@ -28,6 +28,13 @@ things worth being deliberate about:
   vars, `KRAFT_*`, the agent's credential var) plus whatever a repo's
   `repos.yaml` entry explicitly declares — not whatever the Kraft daemon's own
   shell happened to have set. See [Configuration](configuration.md#reposyaml-connected-repos).
+- **Settings can change what the daemon runs.** A harness profile's
+  `executable` (Settings → Harnesses) is the program every agent launch on
+  that profile starts, and a repository's `setup_command` (Settings → Repos)
+  runs in every new worktree. Both are editable by anyone who can open
+  Settings, so the Settings password guards command execution on this
+  machine, not only configuration. Keep the bind on loopback or behind the
+  access password, and review these fields after anyone else has had access.
 - **`install.sh` is a shell script fetched and piped from the internet.** It
   is short by design — read it before you run it:
   [`install.sh`](https://github.com/itsOmidKarami/kraft/blob/main/install.sh).
