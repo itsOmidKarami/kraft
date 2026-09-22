@@ -144,7 +144,7 @@ def test_patch_sets_a_node_extra_prompt_and_409s_once_the_node_started(client, r
         ({"effort": "max"}, "'effort'"),
         ({"model": "opus"}, "'model'"),
         ({"escalate_model": "opus"}, "'escalate_model'"),
-        ({"model": "gpt-5", "effort": "high"}, None),
+        ({"model": "gpt-5", "escalate_model": "gpt-5-pro", "effort": "high"}, None),
     ],
     ids=["effort", "model", "escalate_model", "accepted"],
 )
