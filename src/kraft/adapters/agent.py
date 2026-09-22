@@ -684,6 +684,7 @@ async def run_agent_task(
     head_sha: str | None = None,
     thread: int = 1,
     repo_entry: dict | None = None,
+    time_cap=None,
 ) -> str:
     # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
     # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
@@ -794,4 +795,5 @@ async def run_agent_task(
         require_result_file=True,
         repo_entry=repo_entry,
         reader=reader,
+        time_cap=time_cap,
     )

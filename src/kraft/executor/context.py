@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kraft.caps import TIME_CAPPED
+
 #: `_dispatch` returned without launching because a spend cap was already over.
 #: It is not "failed" — the agent never ran, so nothing about it failed — and it
 #: outranks a co-task's failure for exactly that reason.
@@ -91,6 +93,7 @@ SCOPE: dict[str, str] = {
     WAITING: "stop",  # handed back to the scheduler; re-entry resumes, it does not retry
     WAIT_TIMED_OUT: "stop",  # the wait ran out; a person decides, not a fix loop
     INFRA_STOP: "stop",  # forge's own fault; a fix loop cannot fix it
+    TIME_CAPPED: "stop",  # a scope's time ran out; a person decides (Ruling 194)
     BASE_MOVED: "chain",  # the bounce, taken by run_once
     CONFLICT_RESOLVED: "chain",  # the same restart, reopening the span's gates
 }

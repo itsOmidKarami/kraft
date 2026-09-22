@@ -27,6 +27,7 @@ import sqlite3
 import statistics
 from datetime import UTC, datetime, timedelta
 
+from kraft import caps as _caps
 from kraft.store._common import session_wall_ms, wait_timed_out_sessions
 
 RANGES = {"7d": 7, "30d": 30, "90d": 90, "8w": 56, "all": None}
@@ -318,6 +319,7 @@ def compute(
         "rounds": 0,
         "capped_out": 0,
         "wait_timed_out": 0,
+        "time_capped": 0,
         "completed": 0,
         "median_lead_ms": 0,
         "human_wait_pct": 0,
@@ -380,6 +382,8 @@ def compute(
     # A wait that ran out also exits `capped_out`; it is counted on its own,
     # never as a fix loop's cap (Kraft-uwbc8).
     timed_out = wait_timed_out_sessions(conn, ids)
+    # So is a time cap's stop (Ruling 194).
+    time_capped = _caps.time_capped_sessions(conn, ids)
     node_rounds: dict[str, set[tuple[str, int]]] = {}
     item_node_rounds: dict[str, set[tuple[str, int]]] = {}
     node_capped_items: dict[str, set[str]] = {}
@@ -397,6 +401,7 @@ def compute(
                 "rounds": 0,
                 "capped_out": 0,
                 "wait_timed_out": 0,
+                "time_capped": 0,
             },
         )
         tok = (s["tokens_in"] or 0) + (s["tokens_out"] or 0)
@@ -410,9 +415,11 @@ def compute(
         node["tokens"] += tok
         node["cost_usd"] += s["cost_usd"] or 0.0
         waited_out = s["id"] in timed_out
-        capped = s["status"] == "capped_out" and not waited_out
+        cut = s["id"] in time_capped
+        capped = s["status"] == "capped_out" and not (waited_out or cut)
         node["capped_out"] += 1 if capped else 0
         node["wait_timed_out"] += 1 if waited_out else 0
+        node["time_capped"] += 1 if cut else 0
         if capped:
             node_capped_items.setdefault(s["node_id"], set()).add(s["work_item_id"])
         if s["cost_usd"] is None and tok:
@@ -428,6 +435,7 @@ def compute(
         totals["wall_ms"] += wall
         totals["capped_out"] += 1 if capped else 0
         totals["wait_timed_out"] += 1 if waited_out else 0
+        totals["time_capped"] += 1 if cut else 0
 
         rr = by_repo[repo_of[s["work_item_id"]]]
         rr["tokens"] += tok

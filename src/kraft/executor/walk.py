@@ -20,6 +20,7 @@ from kraft.executor.context import (
     CONFLICT_RESOLVED,
     INFRA_STOP,
     RATE_LIMITED,
+    TIME_CAPPED,
     WAIT_TIMED_OUT,
     WAITING,
     LaunchContext,
@@ -388,6 +389,8 @@ async def _sentinel_stop(
         return await _stop_for_wait_timeout(db, work_item_id, node, failed)
     if verdict == INFRA_STOP:
         return await stops.stop_for_infra(db, work_item_id, node)
+    if verdict == TIME_CAPPED:
+        return await stops.stop_for_time_cap(db, work_item_id, node)
     if verdict == BUDGET:
         return await stops.stop_for_budget(db, work_item_id, node, budget)
     return None
