@@ -32,6 +32,7 @@ from kraft.templates.environment import HarnessProfileTable, TemplateEnvironment
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
 from kraft.worker import sandbox
+from kraft.worker import steering as steering_mod
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -569,6 +570,12 @@ async def _repo_checks() -> list[dict]:
     # Read once, not per repo: whether any chain runs a forge task is a fact
     # about the install, and every repo is measured against the same answer.
     auto = _runs_forge_tasks()
+    # Read once too: the live library's steering profiles, name to
+    # instructions, the same shape `api.deps.library_steering` hands
+    # `steering.select`. `None` when the library itself does not load --
+    # `_chains_check` already reports that failure.
+    live = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    profiles = _library_steering(live)
     # Retyped from the wire: the checks below read the entry the loader
     # models, not a dict whose keys each one must spell right. The loader's
     # own unrecognised-key warning stays quiet: doctor fails a row on them.
@@ -633,7 +640,37 @@ async def _repo_checks() -> list[dict]:
             )
         if auto:
             checks.append(_forge_check(repo))
+        if repo.steering and profiles is not None:
+            checks.append(_steering_check(repo, profiles))
     return checks or [_check("repos", True, "none connected")]
+
+
+def _library_steering(live: Path) -> dict[str, str] | None:
+    """The live library's steering profiles, name to instructions, the shape
+    `steering.select` reads; `None` when the library itself does not load --
+    `_chains_check` already reports that failure, and a second copy of it per
+    repo helps nobody."""
+    try:
+        library = TemplateLibrary.from_yaml_dir(live)
+    except TemplateLibraryError:
+        return None
+    return {name: profile.instructions for name, profile in library.steering.items()}
+
+
+def _steering_check(repo: config.RepoEntry, profiles: dict[str, str]) -> dict:
+    """Kraft-v7u1f: a repos.yaml `steering:` name the library does not
+    define. Repo save, intake, and a library save that removes a named
+    profile all already refuse this; doctor had no row for it, so a
+    hand-edited repos.yaml (or a library edited outside Kraft) read healthy
+    until the next intake's 422. Reuses `steering.select`, the same
+    resolution those refusals use, so doctor cannot disagree with them about
+    what counts as missing."""
+    name = f"steering {_label(repo)}"
+    try:
+        steering_mod.select(repo.steering, profiles, where=f"repos.yaml: {repo.path}")
+    except steering_mod.SteeringError as exc:
+        return _check(name, False, str(exc))
+    return _check(name, True, ", ".join(repo.steering))
 
 
 async def _orphan_check() -> dict:

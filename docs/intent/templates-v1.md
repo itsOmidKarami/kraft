@@ -85,7 +85,12 @@ other steering store SHALL exist. The system SHALL refuse a repository save,
 an intake, and a library save that would leave a repository naming a profile
 the library does not define, naming the profile and saying where profiles
 live. A launch SHALL inject the repository's steering before the task's.
-enforced-by: tests/test_config_repos.py::test_steering_names_are_checked_against_the_library_profiles_given, tests/api/test_repos.py::test_add_repo_with_a_missing_steering_name_is_refused, tests/api/test_repository_steering.py::test_intake_refuses_a_repository_naming_a_profile_the_library_lacks, tests/api/test_repository_steering.py::test_a_library_save_removing_a_profile_a_repository_names_is_refused, tests/adapters/test_agent.py::test_steering_is_repo_first_then_task, frontend/src/views/settings/ReposPage.test.tsx::the steering picker offers the library's steering profiles rather than a free-text file name, frontend/src/views/settings/LibraryPage.test.tsx::the old Steering page address lands on the Library where steering is edited now
+`kraft admin doctor` SHALL fail a row per connected repository whose
+`steering:` names a profile the library does not define, naming the repo and
+the missing name, reusing the same resolution the refusals above use --
+so a repos.yaml hand-edited outside those doors, or a library edited outside
+Kraft, does not read healthy until the next intake's refusal.
+enforced-by: tests/test_config_repos.py::test_steering_names_are_checked_against_the_library_profiles_given, tests/api/test_repos.py::test_add_repo_with_a_missing_steering_name_is_refused, tests/api/test_repository_steering.py::test_intake_refuses_a_repository_naming_a_profile_the_library_lacks, tests/api/test_repository_steering.py::test_a_library_save_removing_a_profile_a_repository_names_is_refused, tests/adapters/test_agent.py::test_steering_is_repo_first_then_task, frontend/src/views/settings/ReposPage.test.tsx::the steering picker offers the library's steering profiles rather than a free-text file name, frontend/src/views/settings/LibraryPage.test.tsx::the old Steering page address lands on the Library where steering is edited now, tests/cli/test_doctor.py::test_doctor_fails_a_repo_naming_a_steering_profile_the_library_lacks, tests/cli/test_doctor.py::test_doctor_passes_a_repo_naming_a_steering_profile_the_library_defines
 origin: src/kraft/worker/steering.py -- Kraft-91i6p: 1.0 shipped two steering systems, library profiles frozen at intake and `templates/steering/*.md` files read at each launch; Omid (2026-09-22) kept the library's and removed the files before 1.0, so removing them later would not need another major release.
 
 ## REQ repository-steering-is-frozen-at-intake

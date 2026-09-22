@@ -11,6 +11,11 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   The launch now also checks the repo the item was filed against; if neither
   that nor the repository's current path matches what the item was filed
   with, the item stops for you instead of running unsteered.
+- Fix: `kraft admin doctor` now fails a row for a connected repo whose
+  `steering:` in repos.yaml names a profile the template library does not
+  define, naming the repo and the missing profile. Previously a hand-edited
+  repos.yaml (or a library edited outside Kraft) read healthy until the next
+  work item's intake refused it.
 
 ## 1.0.6
 
