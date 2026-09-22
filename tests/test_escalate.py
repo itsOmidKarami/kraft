@@ -10,14 +10,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import (
-    NEVER_SIGNAL,
-    NEVER_SIGNAL_TEXT,
-    entry_of,
-    v1_chain,
-    v1_resolved,
-    write_harness_profiles,
-)
+from support.harness import entry_of, v1_chain, v1_resolved, write_harness_profiles
+from support.never_signal import NEVER_SIGNAL, NEVER_SIGNAL_TEXT
 
 from kraft import escalate, events, executor, store
 from kraft.db import Database

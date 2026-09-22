@@ -16,8 +16,6 @@ from types import SimpleNamespace
 
 import pytest
 from support.harness import (
-    NEVER_SIGNAL,
-    NEVER_SIGNAL_TEXT,
     entry_of,
     fake_docker_bin,
     fake_harness_home,
@@ -28,6 +26,7 @@ from support.harness import (
     v1_walk,
     write_harness_profiles,
 )
+from support.never_signal import NEVER_SIGNAL, NEVER_SIGNAL_TEXT
 
 from kraft import executor, store
 from kraft.adapters import agent as agent_mod

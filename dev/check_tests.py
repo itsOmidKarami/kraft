@@ -77,9 +77,6 @@ LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/executor/test_gates.py": 903,
     "tests/executor/test_dispatch.py": 898,
     "tests/executor/test_walk.py": 1287,
-    # Kraft-c82sp: NEVER_SIGNAL/NEVER_SIGNAL_TEXT, shared by the three
-    # launch-path tests proving the never-signal rule is opt-in steering now.
-    "tests/support/harness.py": 806,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size
