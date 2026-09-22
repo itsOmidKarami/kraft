@@ -27,10 +27,10 @@
 | src/kraft/api/routes/\_\_init\_\_.py     |        0 |        0 |    100% |           |
 | src/kraft/api/routes/artifacts.py        |       95 |        1 |     99% |       234 |
 | src/kraft/api/routes/auth.py             |       45 |        6 |     87% |     54-61 |
-| src/kraft/api/routes/board.py            |      119 |        1 |     99% |       160 |
+| src/kraft/api/routes/board.py            |      120 |        1 |     99% |       160 |
 | src/kraft/api/routes/gates.py            |      128 |        9 |     93% |109, 112, 120, 288, 310, 343-344, 369-370 |
 | src/kraft/api/routes/harnesses.py        |      142 |        8 |     94% |37-38, 55-56, 73, 271-272, 274 |
-| src/kraft/api/routes/lifecycle.py        |      558 |       30 |     95% |142, 145-146, 151-152, 231, 260, 275, 460, 584-585, 637, 671, 676, 707, 716, 775, 867-868, 972, 1057, 1087-1088, 1151, 1171-1172, 1292-1293, 1332, 1342 |
+| src/kraft/api/routes/lifecycle.py        |      559 |       30 |     95% |142, 145-146, 151-152, 231, 260, 275, 461, 585-586, 638, 672, 677, 708, 717, 776, 868-869, 973, 1058, 1088-1089, 1152, 1172-1173, 1293-1294, 1333, 1343 |
 | src/kraft/api/routes/repos.py            |      168 |        6 |     96% |64-68, 97, 116, 254-255 |
 | src/kraft/api/routes/search.py           |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
 | src/kraft/api/routes/sessions.py         |      133 |        9 |     93% |90, 124, 128, 267-269, 273, 275, 278 |
@@ -92,7 +92,7 @@
 | src/kraft/overrides.py                   |       68 |        4 |     94% |55, 125, 128-129 |
 | src/kraft/paths.py                       |       46 |        0 |    100% |           |
 | src/kraft/policy.py                      |      496 |       18 |     96% |673, 810, 1023-1032, 1112, 1119, 1133, 1137-1141, 1146 |
-| src/kraft/progress.py                    |       83 |        0 |    100% |           |
+| src/kraft/progress.py                    |       99 |        0 |    100% |           |
 | src/kraft/rate\_limit\_retry.py          |       58 |        9 |     84% |155-157, 165-170 |
 | src/kraft/render.py                      |      190 |       15 |     92% |46-47, 76, 83, 344-351, 379, 391, 417 |
 | src/kraft/review.py                      |       45 |        1 |     98% |        73 |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       93 |        8 |     91% |135-136, 147-149, 175-176, 186 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16437** |  **836** | **95%** |           |
+| **TOTAL**                                | **16455** |  **836** | **95%** |           |
 
 
 ## Setup coverage badge
