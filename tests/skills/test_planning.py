@@ -66,3 +66,15 @@ def test_a_plan_under_any_method_is_told_verification_runs_the_suite():
     assert "a verification node after it runs the repository's test suite" in ctx
     assert note < ctx.index("INTERACTIVE-METHOD")
     assert "whole suite" not in _context("work_brief")
+
+
+def test_a_spec_under_any_method_is_told_the_chain_implements_it_headless():
+    """Kraft-35u4m.4: the spec skill is whichever the task names, and a plugin's
+    brainstorming method asks a human one question at a time and then hands
+    off. The contract says the chain carries the spec on, and verifies it."""
+    ctx = _context("spec")
+    note = ctx.index("This spec is carried out by Kraft, not in this session")
+    assert "a verification node runs the repository's test suite" in ctx
+    assert "ask every question at once with needs_context" in ctx
+    assert note < ctx.index("INTERACTIVE-METHOD")
+    assert "carried out by Kraft" not in _context("work_brief")

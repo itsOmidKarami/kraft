@@ -19,4 +19,14 @@ NOTES = {
         "is here to choose how the plan is executed: write it and report your "
         "status."
     ),
+    "spec": (
+        "\n\nThis spec is carried out by Kraft, not in this session: later "
+        "nodes plan it and implement it on this work item's branch, and before "
+        "a merge request opens a verification node runs the repository's test "
+        "suite and a code review. Name the tests the change must add; the "
+        "chain runs them. Whatever method you follow, no human is here to "
+        "answer questions as you go or to hand the spec on to: ask every "
+        "question at once with needs_context, or decide, write the spec and "
+        "report your status."
+    ),
 }
