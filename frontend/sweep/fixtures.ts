@@ -72,7 +72,7 @@ export function repo(path: string, i: number, long = false) {
     forge: i % 2 === 0 ? "gitlab" : "github",
     project: long ? `acme-corporation/platform-engineering/${name}` : `acme/${name}`,
     enabled: i % 5 !== 4,
-    models: i === 1 ? { claude_review: "claude-opus-4-1" } : {},
+    models: i === 1 ? { claude: "claude-opus-4-1" } : {},
     deny_tools: i === 0 ? ["WebFetch", "Bash(rm -rf*)"] : [],
     steering: i === 0 ? ["house-style", "commit-messages"] : [],
     allow_cross_repo: i === 2,

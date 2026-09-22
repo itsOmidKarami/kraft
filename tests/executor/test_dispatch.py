@@ -722,28 +722,26 @@ async def _dispatch_seeded(
 @pytest.mark.parametrize(
     ("node_id", "argv_marks"),
     [
-        # `spec_author` sets no effort, so `codex_default`'s own `effort:
-        # medium` is what reaches the provider's `model_reasoning_effort`.
-        ("spec", ["exec", "--json", "model_reasoning_effort=medium"]),
-        # `write_summary` sets no model, so `claude_review`'s `model: sonnet`.
-        ("work_item_summary", ["-p", "--model", "sonnet"]),
+        # Neither `spec_author` nor `plan_author` sets its own model, so
+        # `claude`'s own `model: sonnet` is what reaches each launch.
+        ("spec", ["-p", "--model", "sonnet"]),
+        ("plan", ["-p", "--model", "sonnet"]),
     ],
-    ids=["codex_default", "claude_review"],
+    ids=["spec", "plan"],
 )
 async def test_the_seeded_library_dispatches_through_its_real_harness_profiles(
     tmp_path, repo, database, run_dirs, monkeypatch, node_id, argv_marks
 ):
-    """The library an operator is seeded with names *profile* ids
-    (`codex_default`, `claude_review`), which `templates/harnesses.yaml`
-    defines. Dispatched unrewritten -- the task's `harness:` untouched, only the
-    profile's `executable:` pointed at a fake -- each must launch its
-    provider's argv with the profile's defaults, not stop at "not available".
-    `seed_v1_library(agent_command=...)` rewrites every id to `fake`, which is
-    why nothing caught that it never could."""
+    """The library an operator is seeded with names one *profile* id, `claude`
+    (R1: every shipped task defaults to it; `codex` ships too). Dispatched
+    unrewritten -- the task's `harness:` untouched, only the profile's
+    `executable:` pointed at a fake -- must launch the real provider's argv
+    with the profile's defaults or a task's own override, not stop at "not
+    available". `seed_v1_library(agent_command=...)` rewrites every id to
+    `fake`, which is why nothing caught that it never could."""
     sessions, argv = await _dispatch_seeded(
         tmp_path, repo, database, run_dirs, monkeypatch, node_id
     )
-
     assert sessions[0]["status"] == "done", Path(sessions[0]["log_path"]).read_text()
     for mark in argv_marks:
         assert mark in argv.split("\n"), argv

@@ -36,7 +36,7 @@ def _with_extras(templates_dir):
     library["nodes"]["lone"] = {"kind": "exec", "tasks": [{"id": "t", "extends": "lone"}]}
     library["tasks"]["lonely"] = {
         "kind": "agent",
-        "harness": "codex_default",
+        "harness": "codex",
         "prompt": "p",
         "skill": "kraft:no-such-method",
     }

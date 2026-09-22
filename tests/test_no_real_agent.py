@@ -62,7 +62,7 @@ def test_the_fixture_gives_escalation_a_fake_agent_so_the_guard_has_nothing_to_c
     """A guard that fires is not a fix.
 
     `escalate.dispatch` launches `escalate.ESCALATION_TASK`, an ordinary agent
-    task on the `claude_review` profile. `seed_v1_library` puts every shipped
+    task on the `claude` profile. `seed_v1_library` puts every shipped
     profile on the overlaid `fake` provider -- the *bundled* `claude`
     declaration with its `command:` swapped, because escalation asks for
     `autocompact`, `permission_mode` and `deny_tools` and `run_agent_task`

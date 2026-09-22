@@ -227,7 +227,7 @@ def session_status(db, session_id: str) -> str | None:
 #: The escalation role, as an ordinary agent task
 #: (`agent-roles-use-ordinary-agent-task-runtime-configuration`): its launch
 #: resolves `harness:` through `adapters.agent.harness_profile` like every other
-#: V1 agent launch, so the runtime is `harnesses.yaml`'s `claude_review` profile
+#: V1 agent launch, so the runtime is `harnesses.yaml`'s `claude` profile
 #: -- its executable and defaults -- and no field special to escalation exists.
 #: A `claude` profile because the turn is a resumable conversation: the thread
 #: id is read off the provider's own `system`/`init` line
@@ -237,7 +237,7 @@ def session_status(db, session_id: str) -> str | None:
 ESCALATION_TASK = AgentTask(
     id="escalation",
     kind=TaskKind.AGENT,
-    harness="claude_review",
+    harness="claude",
     prompt="Help resolve a stopped work item.",
 )
 

@@ -249,7 +249,7 @@ def test_a_registry_beside_the_library_configures_no_task(tmp_path, monkeypatch)
     assert listed == ["default", "quick-task"]
     implement = resolved["chain"]["nodes"][0]["tasks"][0]
     assert implement["kind"] == "agent"
-    assert implement["harness"] == "codex_default"
+    assert implement["harness"] == "claude"
 
 
 def test_with_no_library_loaded_the_library_reads_are_503(tmp_path, monkeypatch):

@@ -146,11 +146,11 @@ archive:
 # defaults:
 #   timeout_minutes: 60
 #   max_attempts: 3
-#   allowed_harnesses: [codex_default, claude_review]
+#   allowed_harnesses: [codex, claude]
 # maxima:
 #   timeout_minutes: 180
 #   total_time_cap_minutes: 10080   # a week: the seeded approval wait's 7d
 #   token_budget: 2000000
 #   budget_usd: 25
 #   allowed_tools: [git, shell, editor]
-#   allowed_harnesses: [codex_default, claude_review]
+#   allowed_harnesses: [codex, claude]

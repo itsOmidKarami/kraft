@@ -6,7 +6,7 @@ names a harness *profile* in its `harness:` field, and `harnesses.yaml` says
 which harness (the profile's `provider`) that profile runs:
 
 ```yaml
-spec_author: { kind: agent, harness: codex_default, prompt: "...", produces: spec }
+spec_author: { kind: agent, harness: codex, prompt: "...", produces: spec }
 ```
 
 Kraft ships three harnesses:

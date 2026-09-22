@@ -31,12 +31,12 @@ offered, but V1 does not depend on one.
 defaults:
   timeout_minutes: 60
   max_attempts: 3
-  allowed_harnesses: [codex_default, claude_review]
+  allowed_harnesses: [codex, claude]
 
 maxima:
   token_budget: 2_000_000
   allowed_tools: [git, shell, pytest]
-  allowed_harnesses: [codex_default, claude_review]
+  allowed_harnesses: [codex, claude]
 ```
 
 Safety restrictions only become tighter as policy is resolved:
@@ -61,7 +61,7 @@ not to a chain.
 ```yaml
 # harnesses.yaml
 harnesses:
-  codex_default:
+  codex:
     provider: codex
     enabled: true
     executable: codex
@@ -69,7 +69,7 @@ harnesses:
       model: gpt-5.6-terra
       effort: medium
 
-  claude_review:
+  claude:
     provider: claude
     enabled: true
     executable: claude
@@ -117,7 +117,7 @@ repos:
         command: just test
     steering: [project-standards]
     policy:
-      allowed_harnesses: [codex_default, claude_review]
+      allowed_harnesses: [codex, claude]
 
   - id: platform
     path: /work/platform
@@ -170,7 +170,7 @@ steering:
 tasks:
   spec_author:
     kind: agent
-    harness: codex_default
+    harness: claude
     prompt: Produce the work item's specification.
     produces: spec
     skill: kraft:spec
@@ -178,14 +178,14 @@ tasks:
 
   plan_author:
     kind: agent
-    harness: codex_default
+    harness: claude
     prompt: Produce an executable implementation plan from the approved spec.
     produces: plan
     skill: kraft:plan
 
   implementer:
     kind: agent
-    harness: codex_default
+    harness: claude
     model: gpt-5.6-terra
     effort: high
     prompt: Implement the approved plan.
@@ -203,28 +203,28 @@ tasks:
 
   code_review:
     kind: agent
-    harness: claude_review
+    harness: claude
     prompt: Review this work item's change for defects its passing tests do not catch.
     skill: kraft:code-review
     inputs: [review_package, carried_findings, previous_review]
 
   repair_verification:
     kind: agent
-    harness: codex_default
+    harness: claude
     model: gpt-5.6-terra
     effort: high
     prompt: Fix the failing tests and the review findings this node's verification reported.
 
   repair_mr_feedback:
     kind: agent
-    harness: codex_default
+    harness: claude
     model: gpt-5.6-terra
     effort: high
     prompt: Resolve the current CI failures and actionable merge-request feedback.
 
   repair_mr_checks:
     kind: agent
-    harness: codex_default
+    harness: claude
     model: gpt-5.6-terra
     effort: high
     prompt: >-
@@ -235,7 +235,7 @@ tasks:
 
   strict_judge:
     kind: agent
-    harness: claude_review
+    harness: claude
     effort: high
     prompt: Decide whether another repair attempt is justified.
     skill: kraft:fix-loop-judge
@@ -275,14 +275,14 @@ tasks:
 
   write_work_brief:
     kind: agent
-    harness: claude_review
+    harness: claude
     prompt: Write the work brief a human reads before approving the draft merge request.
     produces: work_brief
     skill: kraft:work-brief
 
   write_summary:
     kind: agent
-    harness: claude_review
+    harness: claude
     prompt: Write the work-item summary and review brief.
     produces: review_brief
     skill: kraft:review-brief

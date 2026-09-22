@@ -28,11 +28,11 @@ def _st(tmp_path):
 def test_launch_returns_the_matching_repo_entry(tmp_path):
     st = _st(tmp_path)
     (st.templates_dir / "repos.yaml").write_text(
-        "repos:\n  - path: /work/repo\n    models: {claude_review: opus}\n"
+        "repos:\n  - path: /work/repo\n    models: {claude: opus}\n"
         "  - {path: /work/repo/libs/a, id: lib-a}\n  - {path: /work/other}\n"
     )
     ctx = deps.launch(st, "/work/repo")
-    assert ctx.repo_entry["models"] == {"claude_review": "opus"}
+    assert ctx.repo_entry["models"] == {"claude": "opus"}
     # What a task fanned out to a workspace member reads: every entry by id.
     assert {k: v["path"] for k, v in ctx.repositories.items()} == {"lib-a": "/work/repo/libs/a"}
 
@@ -207,7 +207,7 @@ def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
 
     templates = tmp_path / "templates"
     (templates / "chains").mkdir(parents=True)
-    task = {"kind": "agent", "harness": "codex_default", "prompt": "p", "skill": "house"}
+    task = {"kind": "agent", "harness": "codex", "prompt": "p", "skill": "house"}
     (templates / "library.yaml").write_text(yaml.safe_dump({"tasks": {"t": task}}))
     (templates / "chains" / "default.yaml").write_text(
         yaml.safe_dump(

@@ -331,7 +331,7 @@ function RepoDetail({
           id="repo-models"
           className="input mono"
           rows={2}
-          placeholder="claude_review=opus — one harness profile per line; unset inherits the profile's"
+          placeholder="claude=opus — one harness profile per line; unset inherits the profile's"
           value={models ?? modelsText(current.models ?? {})}
           onChange={(e) => {
             setModels(e.target.value);

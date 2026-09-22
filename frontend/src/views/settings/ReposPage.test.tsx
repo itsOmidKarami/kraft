@@ -219,20 +219,20 @@ describe("Settings · repo detail (5b)", () => {
   });
 
   it("models are set per harness profile and round-trip through patchRepo", async () => {
-    const repoC = repo({ path: "/repo-c", name: "repo-c", models: { claude_review: "sonnet" } });
+    const repoC = repo({ path: "/repo-c", name: "repo-c", models: { claude: "sonnet" } });
     vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [repo(), repoC] });
     const patch = vi.spyOn(api, "patchRepo").mockResolvedValue(repoC);
     renderAt("/settings/repos?repo=/repo-c");
 
     const models = await screen.findByLabelText("models");
-    expect(models).toHaveValue("claude_review=sonnet");
+    expect(models).toHaveValue("claude=sonnet");
     await userEvent.clear(models);
-    await userEvent.type(models, "claude_review=opus{enter}codex_default = gpt-5{enter}half");
+    await userEvent.type(models, "claude=opus{enter}codex = gpt-5{enter}half");
     await userEvent.click(await screen.findByRole("button", { name: "Save" }));
 
     expect(patch).toHaveBeenCalledWith(
       "/repo-c",
-      expect.objectContaining({ models: { claude_review: "opus", codex_default: "gpt-5" } }),
+      expect.objectContaining({ models: { claude: "opus", codex: "gpt-5" } }),
     );
   });
 

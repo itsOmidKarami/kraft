@@ -172,13 +172,13 @@ def test_harness_profiles_load_against_their_provider_declarations(tmp_path):
     path = tmp_path / "harnesses.yaml"
     path.write_text(
         "harnesses:\n"
-        "  codex_default:\n"
+        "  codex:\n"
         "    provider: codex\n"
         "    executable: codex\n"
         "    defaults: { effort: medium }\n"
     )
     table = te.HarnessProfileTable.from_yaml(path, harnesses=harnesses)
-    profile = table.profiles["codex_default"]
+    profile = table.profiles["codex"]
     assert (profile.provider, profile.executable) == ("codex", "codex")
     assert profile.defaults == {"effort": "medium"}
     assert profile.is_available()
@@ -188,7 +188,7 @@ def test_a_profile_whose_provider_is_not_its_harness_id_is_refused(tmp_path):
     from kraft import harness
 
     path = tmp_path / "harnesses.yaml"
-    path.write_text("harnesses:\n  claude_review: { provider: not_a_harness }\n")
+    path.write_text("harnesses:\n  claude: { provider: not_a_harness }\n")
     with pytest.raises(te.TemplateEnvironmentError, match="is not an installed harness"):
         te.HarnessProfileTable.from_yaml(path, harnesses=harness.load(None).valid)
 

@@ -19,7 +19,7 @@ export interface Repo {
   forge: string | null;
   project: string | null;
   enabled: boolean;
-  /** Model per harness profile id (Ruling 165), e.g. `{claude_review: "opus"}`. */
+  /** Model per harness profile id (Ruling 165), e.g. `{claude: "opus"}`. */
   models: Record<string, string>;
   deny_tools: string[];
   steering: string[];

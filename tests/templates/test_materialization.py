@@ -72,7 +72,7 @@ def workspace_target() -> WorkItemTarget:
 
 
 def agent_task(**kw) -> dict:
-    return {"kind": "agent", "harness": "codex_default", "prompt": "do it", **kw}
+    return {"kind": "agent", "harness": "codex", "prompt": "do it", **kw}
 
 
 def write(root: Path, library: dict, chains: dict[str, dict]) -> TemplateLibrary:
@@ -152,8 +152,8 @@ def test_a_harness_resolved_chain_launches_no_real_agent_and_no_real_builtin(tmp
     """The seed `v1_library` writes is a neutered one, on an unseeded directory
     too -- without rewriting a single `harness:` id.
 
-    Seeded without an `agent_command`, the profile `codex_default` launches the
-    operator's `codex` and the real `kraft.verify_changed_test_scopes` runs this
+    Seeded without an `agent_command`, the profile `claude` launches the
+    operator's `claude` and the real `kraft.verify_changed_test_scopes` runs this
     suite inside itself. Pinned rather than documented, because ~156 of 5b's
     call sites come through here and would inherit the hazard silently. The
     task keeps the shipped id; the *profile* it names is what is on the fake.
@@ -163,10 +163,8 @@ def test_a_harness_resolved_chain_launches_no_real_agent_and_no_real_builtin(tmp
 
     tasks = [t.task for node in v1_named_chain(tmp_path).nodes for t in node.tasks()]
 
-    assert [t.harness for t in tasks if isinstance(t, AgentTask)] == ["codex_default"]
-    profile = yaml.safe_load((tmp_path / "harnesses.yaml").read_text())["harnesses"][
-        "codex_default"
-    ]
+    assert [t.harness for t in tasks if isinstance(t, AgentTask)] == ["claude"]
+    profile = yaml.safe_load((tmp_path / "harnesses.yaml").read_text())["harnesses"]["claude"]
     assert profile["provider"] == "fake" and "executable" not in profile, profile
     assert [t for t in tasks if isinstance(t, BuiltinTask)] == []
     assert [t.command for t in tasks if isinstance(t, SubprocessTask)] == ["true"]
@@ -614,7 +612,7 @@ def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
     assert api["setup_command"] == "just setup" and api["local_files"] == [".env.test"]
     assert (api["env"], api["env_passthrough"]) == ({"CI": "1"}, ["NPM_TOKEN"])
     assert api["test_scopes"] == [{"paths": ["src/**", "tests/**"], "command": "just test"}]
-    assert api["policy"] == {"allowed_harnesses": ["codex_default", "claude_review"]}
+    assert api["policy"] == {"allowed_harnesses": ["codex", "claude"]}
     assert set(platform["areas"]) == {"python_api", "java_worker"}
     assert platform["areas"]["python_api"]["paths"] == ["services/api/**"]
     assert repos["product_root"]["default_chain_template"] == "default"

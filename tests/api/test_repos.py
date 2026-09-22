@@ -126,7 +126,7 @@ def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_di
         json={
             "path": str(repo),
             "enabled": False,
-            "models": {"claude_review": "anything-at-all"},
+            "models": {"claude": "anything-at-all"},
             "deny_tools": ["WebFetch"],
             "steering": ["house-style"],
         },
@@ -134,13 +134,13 @@ def test_add_repo_round_trips_models_and_steering(tmp_path, client, templates_di
     assert created.status_code == 201, created.text
 
     on_disk = yaml.safe_load((templates_dir / "repos.yaml").read_text())
-    assert on_disk["repos"][0]["models"] == {"claude_review": "anything-at-all"}
+    assert on_disk["repos"][0]["models"] == {"claude": "anything-at-all"}
     assert "default_model" not in on_disk["repos"][0]
     assert on_disk["repos"][0]["deny_tools"] == ["WebFetch"]
     assert on_disk["repos"][0]["steering"] == ["house-style"]
 
     fetched = client.get("/api/repos").json()["repos"][0]
-    assert fetched["models"] == {"claude_review": "anything-at-all"}
+    assert fetched["models"] == {"claude": "anything-at-all"}
     assert fetched["steering"] == ["house-style"]
 
 
@@ -168,7 +168,7 @@ def _disabled(client, repo):
     ("field", "value"),
     [
         ("local_files", [".python-version"]),
-        ("models", {"codex_default": "gpt-5"}),
+        ("models", {"codex": "gpt-5"}),
         ("intent_dir", "docs/intent"),
     ],
     ids=["local-files", "models", "intent-dir"],
@@ -214,7 +214,7 @@ def test_a_refused_patch_writes_nothing(client, repo, templates_dir, field, valu
 def test_repo_request_models_reject_a_non_string_model(model, payload):
     """An API schema must reject a malformed model map before a route touches disk."""
     with pytest.raises(ValidationError):
-        model.model_validate({**payload, "models": {"claude_review": ["opus"]}})
+        model.model_validate({**payload, "models": {"claude": ["opus"]}})
 
 
 def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):

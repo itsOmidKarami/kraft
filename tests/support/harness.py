@@ -238,20 +238,25 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
     if agent_command is None:
         write_harness_profiles(templates_dir, shipped_profiles["harnesses"])
     else:
-        # The library keeps its real `harness:` ids -- `codex_default`,
-        # `claude_review` -- and only the *profiles* they name change: each is
+        # The library keeps its real `harness:` ids -- `codex`,
+        # `claude` -- and only the *profiles* they name change: each is
         # put on the overlaid `fake` provider, which launches `agent_command`,
         # its `executable:` dropped so the provider's own command stands. The
         # shipped `defaults:` stay, so they reach the launch as they would in
-        # production. `fake` and `claude` are profiles too, for the hand-built
-        # chains that name them. Nothing rewrites a task's `harness:` any more:
-        # that rewrite is how the suite ran a library the product never ships
-        # (Task 5e).
+        # production. `fake` is a profile too, for a hand-built chain that
+        # names it directly; a hand-built chain naming the provider directly
+        # as `claude` now gets the very same shipped `claude` entry (R1
+        # renamed the shipped profile id to match its provider), so no
+        # separate override is added for it any more -- one used to exist
+        # here and clobbered the shipped entry's own `defaults:` the moment
+        # the two ids collided. Nothing rewrites a task's `harness:` any
+        # more: that rewrite is how the suite ran a library the product
+        # never ships (Task 5e).
         profiles = {
             id: {k: v for k, v in body.items() if k != "executable"} | {"provider": "fake"}
             for id, body in shipped_profiles["harnesses"].items()
         }
-        profiles |= {"fake": {"provider": "fake"}, "claude": {"provider": "claude"}}
+        profiles |= {"fake": {"provider": "fake"}}
         # And the `kraft.verify_changed_test_scopes` builtin becomes an inert
         # `true`. Not optional: that builtin runs
         # **the connected repo's own `test_command`**, and several tests in this
@@ -294,7 +299,7 @@ def seed_v1_library(templates_dir: Path, *, agent_command: str | None = None) ->
         # `conftest._isolated_kraft_home` empties `HOME` and CI has no API key.
         # `conftest._no_real_agent_binary` refuses it, but a refusal is not a
         # fix -- the fix is that there is nothing left to refuse. (An escalation
-        # turn runs on the `claude_review` profile, `escalate.ESCALATION_TASK`,
+        # turn runs on the `claude` profile, `escalate.ESCALATION_TASK`,
         # which the profiles above already put on `fake`.)
         #
         # The *bundled* declaration with its `command:` swapped, not
@@ -350,7 +355,7 @@ def v1_library(templates_dir: Path, *, agent_command: str = "true"):
     **The seed it writes is always a neutered one.** `seed_v1_library` only
     puts the library's harness profiles on the `fake` provider and neuters the
     `kraft.verify_changed_test_scopes` builtin when it is given an
-    `agent_command`; seeded without one, `codex_default` is the shipped profile
+    `agent_command`; seeded without one, `codex` is the shipped profile
     and the builtin is real, so a test that dispatched it would launch the
     operator's `codex` and run this suite inside itself. Nothing was
     walking such a chain when this defaulted to `None`, but `v1_named_chain`

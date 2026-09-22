@@ -10,14 +10,14 @@
 # The ids below are the ones `library.yaml`'s tasks name in their `harness:`.
 # Seeded once and never overwritten, so edit freely.
 harnesses:
-  codex_default:
+  codex:
     provider: codex
     enabled: true
     executable: codex
     defaults:
       effort: medium
 
-  claude_review:
+  claude:
     provider: claude
     enabled: true
     executable: claude
