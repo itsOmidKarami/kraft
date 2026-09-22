@@ -87,8 +87,9 @@ async def create_work_item(
     if status >= 400:
         raise ValueError(f"kraft {status}: {body.get('detail', body)}")
     result = {"id": body["id"], "status": body.get("status", "paused"), "title": title}
-    if body.get("bead_warning"):
-        result["bead_warning"] = body["bead_warning"]
+    for warning in ("bead_warning", "duplicate_warning"):
+        if body.get(warning):
+            result[warning] = body[warning]
     return result
 
 
@@ -353,6 +354,30 @@ async def set_chain_template(template: str, work_item_id: str | None = None) -> 
     """
     target = await context.resolve_work_item(work_item_id)
     return await transport._patch(f"/work-items/{target}", {"chain_template": template})
+
+
+async def set_attachments(
+    spec: str | None = None,
+    plan: str | None = None,
+    drop: list[str] | None = None,
+    work_item_id: str | None = None,
+) -> dict:
+    """Replace or drop a not-yet-started work item's spec/plan attachment
+    (Kraft-s7c04.28), instead of abandoning it and filing it again. A path is
+    re-copied into Kraft's own storage and resolved the way `create_work_item`
+    resolves one; a kind in `drop` is removed, which puts back the gate it
+    trimmed. A kind not named keeps its copy. 409s once the item has started.
+    `_forbid_self_action`, like the other setters: a worker does not revise the
+    documents it was handed.
+    """
+    changes: dict = {k: v for k, v in (("spec", spec), ("plan", plan)) if v}
+    changes |= dict.fromkeys(drop or [])
+    if not changes:
+        raise ValueError("kraft: set-attachments needs --spec, --plan or --drop")
+    target = context._forbid_self_action(work_item_id)
+    return await transport._patch(
+        f"/work-items/{target}", {"attachments": changes, "cwd": str(Path.cwd())}
+    )
 
 
 async def set_agent_overrides(

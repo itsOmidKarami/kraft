@@ -46,6 +46,13 @@ Attaching a spec or plan trims the node whose gate it satisfies, so the person
 is not asked to re-approve what they just agreed with you, and the implementing
 agent is told to follow the documents rather than guess.
 
+Kraft copies an attached document at intake, so editing your file afterwards
+changes nothing. If the spec or plan changes before the item starts, revise it
+in place with `set_attachments(spec=..., work_item_id=...)` (or `kraft item
+set-attachments`) instead of filing the item again. If `create_work_item`
+answers with a `duplicate_warning`, an open item already has that title or
+implements that bead: tell the user, and don't file a third.
+
 Before attaching a plan, skim it for a full-test-suite step (e.g. "run the
 full test suite" / "run all tests" as a task, not a task's own targeted test).
 The chain's `verify` node already runs the suite after every task with its own

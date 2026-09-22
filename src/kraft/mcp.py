@@ -235,6 +235,20 @@ def build() -> MCPServer:
         return await client.set_chain_template(template, work_item_id)
 
     @server.tool()
+    async def set_attachments(
+        spec: str | None = None,
+        plan: str | None = None,
+        drop: list[str] | None = None,
+        work_item_id: str | None = None,
+    ) -> dict:
+        """Revise a not-yet-started Kraft work item's attached spec or plan
+        instead of filing it again. `spec`/`plan` is a path, re-copied into
+        Kraft's storage; a kind in `drop` ("spec" or "plan") is removed, which
+        puts back the gate it had trimmed. A kind not named keeps its copy.
+        409s once the item has started."""
+        return await client.set_attachments(spec, plan, drop, work_item_id)
+
+    @server.tool()
     async def set_agent_overrides(
         model: str | None = None,
         escalate_model: str | None = None,
