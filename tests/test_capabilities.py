@@ -1,7 +1,11 @@
+from pathlib import Path
+
 import pytest
 
 from kraft import capabilities
 from kraft.capabilities import Capability
+
+ROOT = Path(__file__).resolve().parents[1]
 
 #: The manifest is empty since Template Schema V1 (every earlier entry was
 #: legacy-config instructions), so the mechanism is checked against a stand-in.
@@ -44,3 +48,27 @@ def test_an_absent_stamp_means_everything_is_new(manifest):
 
 def test_an_unparseable_stamp_is_treated_as_oldest_rather_than_raising(manifest):
     assert capabilities.added_since("not-a-version") == list(manifest)
+
+
+def test_the_mr_rebase_entry_gives_the_exact_shipped_yaml():
+    """Kraft-3llig review fix 2: the capability shipped invisibly to every
+    existing install without one -- the `how` an operator pastes in must be
+    the *shipped* YAML, not a paraphrase that drifts from it."""
+    [entry] = [c for c in capabilities.MANIFEST if c.version == "1.0.1" and c.name == "mr_rebase"]
+    library = (ROOT / "templates" / "library.yaml").read_text()
+    chain = (ROOT / "templates" / "chains" / "default.yaml").read_text()
+    assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in library
+    assert "  mr_rebase:\n    kind: builtin\n    ref: kraft.mr_rebase\n" in entry.how
+    steps = (
+        "    steps:\n"
+        "      - id: rebase\n"
+        "        tasks:\n"
+        "          - id: rebase\n"
+        "            extends: mr_rebase\n"
+        "      - id: open\n"
+        "        tasks:\n"
+        "          - id: open\n"
+        "            extends: open_draft_mr\n"
+    )
+    assert steps in chain
+    assert steps.rstrip("\n") in entry.how
