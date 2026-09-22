@@ -823,12 +823,12 @@ async def _dispatch_task(
             policy=task_policy,
         )
     except _agent.HarnessUnavailable as exc:
-        return await config_error_session(
-            db,
-            run_dirs,
-            common,
-            f"{task.path} selects harness {t.harness!r}, which is not available: {exc}\n",
+        why = (
+            f"{task.path}: {exc}"  # its harness is there; its agent profile is not
+            if isinstance(exc, _agent.ProfileUnavailable)
+            else f"{task.path} selects harness {t.harness!r}, which is not available: {exc}"
         )
+        return await config_error_session(db, run_dirs, common, why + "\n")
     except (_skill.SkillError, _steering.SteeringError) as exc:
         # A selected skill the environment cannot load stops for a human and
         # never substitutes a method (`selected-skill-must-be-available`). A

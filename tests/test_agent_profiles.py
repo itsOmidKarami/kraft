@@ -253,7 +253,8 @@ def test_only_the_task_pairing_a_missing_provider_is_refused(tmp_path, monkeypat
     [
         (
             {"harness": "claude", "profile": "gone"},
-            "profile 'gone' is not defined in harnesses.yaml; known are ['deep', 'fast']",
+            "profile 'gone' is not defined in harnesses.yaml; "
+            "known are ['deep', 'fast', 'maxed', 'wrong']",
         ),
         (
             {"harness": "codex", "profile": "fast"},

@@ -144,9 +144,9 @@ def test_extends_expands_a_library_node_into_the_chain(design):
     implement = node.steps[0].tasks[0].task
     assert isinstance(implement, AgentTask)
     # Inherited from the `implementer` task, with the local id kept.
-    assert (implement.id, implement.effort, implement.prompt) == (
+    assert (implement.id, implement.profile, implement.prompt) == (
         "implement",
-        "high",
+        "strong",
         "Implement the approved plan.",
     )
 

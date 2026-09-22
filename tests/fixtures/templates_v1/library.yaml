@@ -32,8 +32,7 @@ tasks:
   implementer:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Implement the approved plan.
     policy:
       # One run's running time. Every successful implementer run on record
@@ -57,22 +56,19 @@ tasks:
   repair_verification:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Fix the failing tests and the review findings this node's verification reported.
 
   repair_mr_feedback:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: Resolve the current CI failures and actionable merge-request feedback.
 
   repair_mr_checks:
     kind: agent
     harness: claude
-    model: sonnet
-    effort: high
+    profile: strong
     prompt: >-
       Repair what fails the merge request's checks from outside the code, such
       as a missing or wrong label. A code failure is the fix loop's, which runs
@@ -82,7 +78,7 @@ tasks:
   strict_judge:
     kind: agent
     harness: claude
-    effort: high
+    profile: strong
     prompt: Decide whether another repair attempt is justified.
     skill: kraft:fix-loop-judge
     inputs: [review_package]
