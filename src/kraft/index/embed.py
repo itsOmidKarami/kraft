@@ -76,9 +76,17 @@ class Embedder:
         """Embed texts. Returns [] for no input without touching the model."""
         if not texts:
             return []
-        if not self.available():
-            raise RuntimeError(self.reason or _MISSING)
-        return [list(map(float, v)) for v in self._load().embed(texts)]
+        # `reason` is the last failure until a success clears it: health
+        # reports it as "installed but broken" (Kraft-pm2rj).
+        try:
+            if not self.available():
+                raise RuntimeError(self.reason or _MISSING)
+            vectors = [list(map(float, v)) for v in self._load().embed(texts)]
+        except Exception as exc:
+            self.reason = str(exc) or type(exc).__name__
+            raise
+        self.reason = None
+        return vectors
 
     async def encode_async(self, texts: list[str]) -> list[list[float]]:
         """Model load and inference are CPU-bound; keep them off the loop."""
@@ -91,7 +99,6 @@ class Embedder:
         search because a model would not load is never the right trade."""
         try:
             return self.encode(texts)
-        except Exception as exc:  # noqa: BLE001 - reported, never raised onward
-            self.reason = str(exc)
+        except Exception as exc:  # noqa: BLE001 - `encode` recorded it in `reason`
             logger.warning("embedding unavailable: %s", exc)
             return None

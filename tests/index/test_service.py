@@ -523,6 +523,17 @@ async def test_health_reports_embeddings(tmp_path, database):
     assert emb["chunks"] > 0
 
 
+async def test_health_reports_a_broken_embedder_that_is_installed(tmp_path, database):
+    """Kraft-pm2rj: `available` is only "fastembed imports"; a model that
+    will not load or encode is the reason, reported alongside it."""
+    stub = _StubEmbedder()
+    repo, ix = _indexed(tmp_path, database, stub)
+    stub.reason = "model download failed"
+    emb = ix.health()["embeddings"]
+    assert emb["available"] is True
+    assert emb["reason"] == "model download failed"
+
+
 async def test_repos_includes_connected_repos_with_no_work_items(tmp_path, database, conn):
     """Kraft-38w: a repo connected through Settings is indexable on first use,
     before any work item exists for it."""

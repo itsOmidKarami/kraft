@@ -765,7 +765,9 @@ class Indexer:
                 "available": available,
                 "model": self._embedder.model_name,
                 "chunks": chunks,
-                "reason": None if available else self._embedder.reason,
+                # Unavailable: why not. Available: the last load/encode
+                # failure, None once one succeeds (Kraft-pm2rj).
+                "reason": self._embedder.reason,
             },
             "errors": list(self._errors),
         }

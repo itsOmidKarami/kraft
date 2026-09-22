@@ -132,6 +132,8 @@ agent, decides whether to skip, abandon, or give more room.
   log's tail.
 - A trigger added to a policy that had none at startup (Settings, or
   `kraft admin reload`) fires without a restart.
+- `kraft admin doctor` fails when the embeddings extra is installed but its
+  model will not load or encode; `/health` reports the last such failure.
 
 ### Removed
 
