@@ -12,7 +12,7 @@ Via a `triggers:` entry in `policy.yaml`:
 ```yaml
 triggers:
   - cron: "0 9 * * 1,2,3,4,5"  # 5-field cron, minute resolution; 9am weekdays
-    repo: /path/to/repo          # connect it first (`kraft repo connect`); an unconnected repo here is not refused today
+    repo: /path/to/repo          # connect it first (`kraft repo connect`); an unconnected repo here is skipped with a logged warning, not filed
     chain: default              # a chain_template id from templates/
     title: "Nightly dependency check"
     description: "Filed by the 9am weekday trigger"  # optional, defaults to ""
@@ -38,8 +38,9 @@ POST /api/triggers
 
 `repo` must already be connected (`kraft repo connect`); a path Kraft has not
 seen is refused with a 422 naming that command. A cron entry in
-`policy.yaml` does not go through this door and is not refused the same way
-today — connect the repo yourself before scheduling one against it.
+`policy.yaml` goes through the same connected-repo check, but there is no
+request to answer: that trigger is skipped and a warning is logged naming
+`kraft repo connect`, and the other triggers due in the same tick still fire.
 
 It needs the same auth as every other mutating route — the session cookie a
 browser holds after logging in, or an MCP bearer token — nothing

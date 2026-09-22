@@ -4,6 +4,15 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.0.5
+
+- **Fix: a `policy.yaml` cron trigger naming an unconnected repo is now
+  skipped, not filed.** `POST /work-items` and `POST /triggers` already
+  refused a repo Kraft has not connected (`kraft repo connect`, Kraft-ta8nv);
+  `triggers.tick` called intake directly and missed that door. It now skips
+  the trigger with a logged warning and still fires the other due triggers in
+  the same tick.
+
 ## 1.0.4
 
 - Fix: `kraft item set-overrides` (and MCP `set_agent_overrides`) now refuses
