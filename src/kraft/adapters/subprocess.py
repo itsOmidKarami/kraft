@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -368,7 +369,7 @@ def _wrap_with_exit_file(cmd: list[str], exit_path: Path) -> list[str]:
     ]
 
 
-def _rate_limit_rejection(log_path: Path, *, reader: str | None) -> dict | None:
+def _rate_limit_rejection(log_path: Path, *, reader: str | None) -> _usage.RateLimitInfo | None:
     """A rate-limit rejection, if this harness's log can express one.
 
     `reader is None` means the harness never declared `rate_limit_signal`, so
@@ -731,7 +732,7 @@ async def run_task(
                 c,
                 work_item_id,
                 "rate_limit_hit",
-                {**rl, **(rate_limit_key or {}), "node_id": node_id},
+                {**asdict(rl), **(rate_limit_key or {}), "node_id": node_id},
             )
         )
     elif post_resolve is not None:

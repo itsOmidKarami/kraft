@@ -336,7 +336,25 @@ def read_envelope(log_path: Path) -> dict | None:
     return envelopes[0] if envelopes else fallback
 
 
-def _rate_limit_claude(log_path: Path) -> dict | None:
+@dataclass(frozen=True)
+class RateLimitInfo:
+    """A rejected launch's rate-limit details, in Kraft's own field names.
+
+    Same three fields `_rate_limit_claude` always returned as a dict --
+    named here so a caller reading `.resets_at_iso` gets a typo caught
+    instead of a silent `None` from a misspelled dict key.
+    """
+
+    #: Whatever the CLI put at `rateLimitType`, verbatim -- untyped external
+    #: JSON, same as `_rate_limit_claude` always passed through unchecked.
+    #: Typing this narrower than `object` would mean coercing a value this
+    #: function has never validated, which changes behaviour.
+    rate_limit_type: object
+    resets_at: int | float
+    resets_at_iso: str
+
+
+def _rate_limit_claude(log_path: Path) -> RateLimitInfo | None:
     """The rejected `rate_limit_info` from a claude stream-json log, or None.
 
     The CLI emits a `rate_limit_event` line on most turns, nearly all of them
@@ -365,11 +383,11 @@ def _rate_limit_claude(log_path: Path) -> dict | None:
         resets_at = info.get("resetsAt")
         if not isinstance(resets_at, int | float):
             continue
-        return {
-            "rate_limit_type": info.get("rateLimitType"),
-            "resets_at": resets_at,
-            "resets_at_iso": datetime.fromtimestamp(resets_at, UTC).isoformat(),
-        }
+        return RateLimitInfo(
+            rate_limit_type=info.get("rateLimitType"),
+            resets_at=resets_at,
+            resets_at_iso=datetime.fromtimestamp(resets_at, UTC).isoformat(),
+        )
     return None
 
 
@@ -514,8 +532,15 @@ class Reader:
 
     name: str
     stream: Callable[[Iterable[str], dict], Usage | None]
+    #: Deliberately still `dict | None`, not a narrower type: `read_envelope`
+    #: hands back either the raw agent envelope (arbitrary external JSON, one
+    #: shape per harness) or `_combine`'s own dict, and its only reader is
+    #: `from_envelope`, which is already written to treat either as an
+    #: untrusted mapping via `.get()`. Typing it narrower would need `Any` for
+    #: the raw-envelope branch or reshaping `_combine` (out of scope here) for
+    #: no caller that reads a key it shouldn't -- Kraft-5d510.14 stopped here.
     envelope: Callable[[Path], dict | None]
-    rate_limit: Callable[[Path], dict | None]
+    rate_limit: Callable[[Path], RateLimitInfo | None]
     #: The CLI's own resumable-session id, off this schema's log -- distinct
     #: from Kraft's own `worker_sessions.id` (Kraft-cvnx1). None for a schema
     #: with no such id to extract.
