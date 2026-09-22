@@ -667,16 +667,13 @@ def fix_loop_cap(
 
 
 def _item_cap(item: _policy.WorkItemPolicy | None, node_id: str) -> dict:
-    """A work item's own `max_attempts`/`timeout_minutes` for `node_id` as a
-    cap override (Kraft-ab1bh). An operator's per-item value, so it wins over
-    the loop's own `max_attempts` the way `node_overrides` does; the item's
-    override was already held to the administrator maxima."""
-    if item is None:
-        return {}
-    attempts = item.value_at(node_id, "max_attempts")
-    minutes = item.value_at(node_id, "timeout_minutes")
-    cap = {"attempts": attempts, "wall_clock_s": minutes * 60 if minutes else None}
-    return {k: v for k, v in cap.items() if v is not None}
+    """A work item's own `max_attempts` for `node_id` as a cap override
+    (Kraft-ab1bh): an operator's per-item value, so it wins over the loop's
+    own `max_attempts` the way `node_overrides` does. Its `timeout_minutes`
+    needs no help: the node's policy carries it, and nothing authored sits
+    above that. Already held to the administrator maxima."""
+    attempts = item.value_at(node_id, "max_attempts") if item is not None else None
+    return {"attempts": attempts} if attempts is not None else {}
 
 
 async def walk_node(

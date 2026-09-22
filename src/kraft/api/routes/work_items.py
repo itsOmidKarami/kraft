@@ -217,13 +217,17 @@ async def create_work_item(body: NewWorkItem, request: Request):
     policy = deps.item_policy_or_422(st, body.repo, target)
     per_repository = deps.repository_policies_or_422(st, target)
     try:
-        chain.materialize(
-            target=target or entry.single_repo_target(body.repo),
-            effective_policy=policy,
-            repository_policies=per_repository,
-            attachment_kinds=attachment_kinds,
-            skip_nodes=frozenset(body.skip_nodes),
-        ).with_item_policy(body.policy)
+        item_policy = (
+            chain.materialize(
+                target=target or entry.single_repo_target(body.repo),
+                effective_policy=policy,
+                repository_policies=per_repository,
+                attachment_kinds=attachment_kinds,
+                skip_nodes=frozenset(body.skip_nodes),
+            )
+            .with_item_policy(body.policy)
+            .item_policy
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     _check_node_overrides(
@@ -264,7 +268,9 @@ async def create_work_item(body: NewWorkItem, request: Request):
             budget_set="budget_usd" in body.model_fields_set,
             budget_usd=body.budget_usd,
             node_overrides=body.node_overrides or None,
-            policy_override=body.policy or None,
+            policy_override=item_policy.model_dump(exclude_none=True, exclude_defaults=True)
+            if item_policy is not None
+            else None,
         )
     except Exception as exc:  # noqa: BLE001 -- executor.intake raises several unrelated types
         # No longer reachable for a bd failure — `executor.intake` degrades
