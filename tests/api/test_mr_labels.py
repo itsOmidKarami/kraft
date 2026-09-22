@@ -127,3 +127,16 @@ def test_set_mr_labels_labels_through_the_items_own_forge(client, repo, monkeypa
 
     assert r.status_code == 200, r.text
     assert fake.labels == ["release::patch"]
+
+
+def test_set_mr_labels_on_a_malformed_repos_yaml_is_a_clean_error(client, repo, templates_dir):
+    """Kraft-nzlzb: a repos.yaml that no longer parses leaves `deps.launch`
+    handing back a poisoned entry whose `.get` raises `ConfigError`. The route
+    must answer with that config problem, not a 500."""
+    wid = _completed_item(client, repo)
+    (templates_dir / "repos.yaml").write_text("repos: [not: {a mapping")
+
+    r = client.post(f"/api/work-items/{wid}/mr-labels", json={"labels": ["x"]})
+
+    assert r.status_code == 422, r.text
+    assert "repos.yaml" in r.json()["detail"]

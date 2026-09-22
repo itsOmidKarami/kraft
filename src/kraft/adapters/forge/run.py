@@ -346,6 +346,8 @@ async def _run_one(
             log, status = await ci.render_ci(
                 ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
             )
+            if status == "abandoned":
+                status = await _stop_for_abandoned_run(db, work_item_id, node_id, log)
             if status == "infra":
                 # `forge.retry_jobs` only *starts* the job again; the pipeline
                 # is not settled the instant it returns. See `ci.retry_infra_
@@ -649,6 +651,8 @@ async def _run_one(
                     status = "ci_pending"
                 elif gate_status == "conflict":
                     status = "conflict"
+                elif gate_status == "abandoned":
+                    status = await _stop_for_abandoned_run(db, work_item_id, node_id, log)
                 elif gate_status != "done":
                     status = "failed"
                 elif ci_status.block_reason == "not_approved":
@@ -740,6 +744,8 @@ async def _run_one(
                 log, status = await ci.render_ci(
                     ci_status, forge=forge, repo=orig_repo, branch=base, head_sha=head_sha
                 )
+                if status == "abandoned":
+                    return log, await _stop_for_abandoned_run(db, work_item_id, node_id, log), None
                 if status == "infra":
                     # Same counter, same key format, as `ci_poll`'s own
                     # `ci_infra:<node_id>` (plan-review finding 3, first half):
@@ -863,6 +869,19 @@ async def _run_one(
             )
             status = "config_error"
     return log, status, findings
+
+
+async def _stop_for_abandoned_run(db, work_item_id: str, node_id: str, log: str) -> str:
+    """A cancelled run nobody followed up (`ci.render_ci`'s "abandoned",
+    Kraft-kbqmk): straight to a person, as for infra-red -- nothing for a fix
+    loop to fix -- and the stop names it (`stops.stop_for_infra`)."""
+    reason = log.rstrip().splitlines()[-1]
+    await db.write(
+        lambda c: events.append(
+            c, work_item_id, "ci_run_abandoned", {"node_id": node_id, "reason": reason}
+        )
+    )
+    return "infra_stop"
 
 
 def _job_finding_message(jobs: tuple[str, ...], job: FailedJob) -> str:

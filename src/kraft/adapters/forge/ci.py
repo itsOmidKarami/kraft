@@ -5,6 +5,7 @@ for it is `kraft.waits`' -- nothing here sleeps.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kraft.adapters.forge.models import MR, CIStatus, Forge
@@ -30,11 +31,24 @@ async def render_ci(
     later). A settled red pipeline is `"infra"` when every failed job is the
     forge's own fault, `"failed"` (code-red) otherwise, and green+confirmed-
     unmergeable is `"conflict"`.
+
+    A pending read standing only on a run cancelled `_CANCEL_GRACE` ago or
+    more is `"abandoned"` (Kraft-kbqmk): a successor to a relabel or a
+    push-superseded run registers within seconds, so one that has not in
+    that long is not coming, and a person decides now rather than at the
+    wait's full timeout. A fresher cancel stays a wait (Kraft-zn8me).
     """
     log = f"pipeline {ci.state}: {ci.url}\n" + "".join(f"  {j}\n" for j in ci.jobs)
     if ci.sha and head_sha and ci.sha != head_sha:
         return log, "waiting"
     if ci.state == "pending":
+        if _abandoned(ci.cancelled_at):
+            log += (
+                f"the run for {(head_sha or ci.sha)[:7] or 'this head'} was cancelled at "
+                f"{ci.cancelled_at} and no new run has started since; nothing about the code "
+                "failed. re-run CI, then retry this item\n"
+            )
+            return log, "abandoned"
         return log, "waiting"
     if ci.state == "success" and ci.mergeable is False:
         if _retried:
@@ -51,6 +65,24 @@ async def render_ci(
     return log, "failed"
 
 
+#: How long a cancelled run may stand as the latest for its head before it
+#: counts as one nobody followed up. Minutes, not seconds: a successor
+#: registers within seconds, and the forge's clock is not this machine's.
+_CANCEL_GRACE = timedelta(minutes=5)
+
+
+def _abandoned(cancelled_at: str) -> bool:
+    """Whether a cancel is `_CANCEL_GRACE` old. A time that will not parse is
+    not old: it waits, and the wait's own timeout still stops it."""
+    try:
+        at = datetime.fromisoformat(cancelled_at)
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        return False
+    return datetime.now(UTC) - at >= _CANCEL_GRACE
+
+
 #: Kraft-h81i, Kraft-s8ul, Kraft-ddxn: a failed job whose own `failure_reason`
 #: names one of these is the forge's own infrastructure, not the branch's
 #: code. `script_failure`, an unrecognised reason, or a red pipeline that
@@ -58,7 +90,7 @@ async def render_ci(
 #:
 #: No `"cancelled"`: a cancelled run never reaches here. Both backends read it
 #: as pending (Kraft-zn8me), because a cancelled run is never a verdict, and a
-#: run a person cancelled with no successor waits out the wait's own timeout.
+#: run a person cancelled with no successor is `render_ci`'s "abandoned".
 #: It is never auto-retried here, which would override that person's decision.
 _INFRA_REASONS = frozenset(
     {
@@ -148,4 +180,9 @@ async def retry_infra_once(
         if branch_only
         else await forge.ci_status(repo=repo, mr=MR(number=0, url=""), branch=branch)
     )
-    return await render_ci(ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha)
+    log, verdict = await render_ci(
+        ci_status, forge=forge, repo=repo, branch=branch, head_sha=head_sha
+    )
+    # This kick just re-started the run, so an old cancel is not one nobody
+    # followed up, and "abandoned" is no verdict any caller of this handles.
+    return log, "waiting" if verdict == "abandoned" else verdict

@@ -208,6 +208,7 @@ async def test_glab_ci_status_falls_back_when_the_pinned_pipeline_is_unreadable(
 
 GLAB_CI_CANCELED = (
     '[{"id":2826926702,"iid":144,"status":"canceled","ref":"kraft/abc",'
+    '"updated_at":"2026-09-18T00:15:33.000Z",'
     '"web_url":"https://gitlab.com/itsOmidKarami/kraft/-/pipelines/2826926702"}]'
 )
 
@@ -222,6 +223,9 @@ async def test_glab_ci_status_never_reads_a_canceled_pipeline_as_a_verdict(cli, 
     status = await forge.GlabCli().ci_status(repo=tmp_path, mr=forge.MR(1, "http://x/1"))
 
     assert (status.state, status.pipeline_ref, status.failed_jobs) == ("pending", "", ())
+    # When it was cancelled, for `render_ci` to tell a successor from none
+    # (Kraft-kbqmk).
+    assert status.cancelled_at == "2026-09-18T00:15:33.000Z"
 
 
 async def test_glab_ci_status_moves_off_a_pinned_pipeline_that_was_canceled(cli, tmp_path):

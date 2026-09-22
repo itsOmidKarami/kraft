@@ -213,29 +213,25 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
-#: Substrings `docker run` itself prints when it never reached the sandboxed
-#: command at all -- the daemon is down, or (same class of infra problem) an
-#: image couldn't be pulled. Matched on wording, not exit code: probed
-#: empirically against a real daemon-down failure (docker-cli 29.7.2,
-#: 2026-09-22, daemon actually stopped) returned plain exit 1, the same code
-#: an ordinary failing command inside the container would -- so the exit
-#: code alone cannot tell the two apart. Lowercased text on both sides.
-_DOCKER_LAUNCH_FAILURE_PHRASES = (
-    "cannot connect to the docker daemon",  # legacy docker-cli wording
-    "failed to connect to the docker api",  # docker-cli 29.x wording
-)
+def _docker_launch_failed(cidfile: Path) -> bool:
+    """True if `docker run` itself never created the container -- the daemon
+    is down, or an image could not be pulled -- so the sandboxed command
+    never ran: an infra problem no agent edit can fix (Kraft-nc9gm).
 
-
-def _docker_launch_failed(log_path: Path) -> bool:
-    """True if `log_path` shows `docker run` itself failing to launch --
-    never the sandboxed command failing -- an infra problem no agent edit
-    can fix (Kraft-nc9gm). Best-effort: a log Kraft cannot read yet reads as
-    "not a docker failure", not a crash."""
+    Read off `--cidfile`, not the log (Kraft-6ltwh): the log holds the
+    sandboxed command's own output too, so a task that prints docker's
+    wording is not docker failing. Nor the exit code: daemon-down is plain 1
+    (docker-cli 29.7.2, probed 2026-09-22), the same code a failing command
+    returns. docker writes the id once the container exists and removes an
+    unwritten cidfile when create fails (probed the same day: daemon
+    unreachable exits 1, a refused create exits 125, and neither leaves the
+    file; a create that succeeds writes it before start). A container docker
+    created but could not start is not caught here; it fails as the task's
+    own, as it did before this check existed."""
     try:
-        text = log_path.read_text().lower()
+        return not cidfile.read_text().strip()
     except OSError:
-        return False
-    return any(phrase in text for phrase in _DOCKER_LAUNCH_FAILURE_PHRASES)
+        return True
 
 
 def _resolve_exit_file(path: Path) -> str | None:
@@ -402,6 +398,8 @@ async def run_task(
     # The task's own exit code, written by the launch wrapper on the way out.
     # A sidecar, never `result_path` itself -- see `_resolve_exit_file`.
     exit_path = result_path.with_suffix(".exit")
+    # docker's own sidecar, written only once it created the container.
+    cidfile = result_path.with_suffix(".cid")
     # Captured before any sandbox wrap reassigns `cmd` below (Kraft-s7c04.35) --
     # this must read as what actually ran, never a docker-wrapped invocation.
     command_ran = shlex.join(cmd)
@@ -429,6 +427,8 @@ async def run_task(
         # that already exists, so create it now (empty) rather than letting
         # docker invent a directory at that path.
         result_path.touch(exist_ok=True)
+        # docker refuses a cidfile that already exists.
+        cidfile.unlink(missing_ok=True)
         cmd = _sandbox.docker_argv(
             cmd,
             cwd,
@@ -437,6 +437,7 @@ async def run_task(
             env={**((repo_entry or {}).get("env") or {}), **(env or {})},
             name=_sandbox.container_name(session_id),
             result_path=result_path,
+            cidfile=cidfile,
         )
     # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
     # pid yet. `pause_work_item`, `chain.skip_node`, and
@@ -598,7 +599,7 @@ async def run_task(
     # FileNotFoundError branch above, one step later and inside the sandboxed
     # path only (Kraft-nc9gm). Checked before every other status adjustment
     # below so it can't be shadowed by require_result_file or post_resolve.
-    if sandbox and status == "failed" and _docker_launch_failed(log_path):
+    if sandbox and status == "failed" and _docker_launch_failed(cidfile):
         status = "config_error"
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell

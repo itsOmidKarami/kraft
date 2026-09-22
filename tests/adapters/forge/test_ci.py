@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from kraft.adapters import forge
@@ -59,3 +61,51 @@ async def test_render_ci_tells_infra_red_from_code_red(tmp_path, reason, expecte
     )
 
     assert verdict == expected
+
+
+def _ago(seconds: int) -> str:
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+
+
+@pytest.mark.parametrize(
+    "cancelled_at, sha, expected",
+    [
+        # Kraft-kbqmk: still the latest run for this head long after it was
+        # cancelled -- nobody is re-running it, so a person decides now rather
+        # than at the wait's full timeout.
+        (_ago(3600), "head", "abandoned"),
+        # Freshly cancelled: a successor for the same head (a relabel, GitLab's
+        # auto-cancel) registers within seconds, so this is still a wait (#116).
+        (_ago(5), "head", "waiting"),
+        # A push superseded it: a run for another head is never a result.
+        (_ago(3600), "old", "waiting"),
+        # A time with no zone cannot be aged against ours: it waits, and the
+        # wait's own timeout still stops it.
+        ("2026-01-01T00:00:00", "head", "waiting"),
+    ],
+    ids=["no-successor-stops", "fresh-cancel-waits", "other-head-waits", "zoneless-time-waits"],
+)
+async def test_render_ci_stops_only_on_a_cancel_nobody_followed_up(
+    tmp_path, cancelled_at, sha, expected
+):
+    ci = forge.CIStatus(state="pending", url="u", sha=sha, cancelled_at=cancelled_at)
+
+    log, verdict = await forge.ci.render_ci(
+        ci, forge=forge.FakeForge(), repo=tmp_path, branch="b", head_sha="head"
+    )
+
+    assert verdict == expected
+    assert ("cancelled" in log) == (expected == "abandoned")
+
+
+async def test_a_re_read_right_after_an_infra_kick_is_never_abandoned(tmp_path):
+    """The kick itself is the follow-up, so an old cancel on the re-read is a
+    wait, never the "abandoned" no caller of `retry_infra_once` handles."""
+    fake = forge.FakeForge(ci_states=["pending"], ci_cancelled_at=[_ago(3600)])
+    first = forge.CIStatus(state="failed", url="u")
+
+    _, verdict = await forge.ci.retry_infra_once(
+        fake, repo=tmp_path, branch="b", head_sha=None, first=first
+    )
+
+    assert verdict == "waiting"
