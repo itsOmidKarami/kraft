@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import subprocess as _subprocess
 from kraft.paths import default_templates_dir
@@ -610,7 +611,8 @@ def _restricted(
     refused rather than run with the bound unenforced."""
     cap = h.capabilities.get("permission_mode")
     asking = cap.under_allowlist if cap is not None else None
-    if cap is not None and asking is None:
+    # No `permission_mode` at all is no asking mode either (Kraft-pdrsi).
+    if asking is None:
         raise LaunchRefused(
             f"harness {harness!r} ({h.path}) cannot hold an agent to a tool list, and this "
             f"launch's policy sets allowed_tools={list(allowed)!r}"
@@ -621,9 +623,9 @@ def _restricted(
             f"permission_mode={mode!r}; under an allowlist harness {harness!r} runs in "
             f"{asking!r}, the mode that asks the permission gate"
         )
-    # Bare built-in names: a scoped rule restricts its tool through the gate,
-    # and an `mcp__` tool is not the restriction flag's to govern.
-    names = tuple(dict.fromkeys(t.split("(", 1)[0] for t in allowed if not t.startswith("mcp__")))
+    # Built-in names only: an `mcp__` tool is not the restriction flag's to
+    # govern. Policy holds tool names, never rules (Kraft-9i6xy).
+    names = tuple(t for t in allowed if not t.startswith("mcp__"))
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
@@ -672,6 +674,11 @@ async def run_agent_task(
     thread: int = 1,
     repo_entry: dict | None = None,
 ) -> str:
+    # A snapshot frozen before Kraft-9i6xy may still carry a rule: it reads
+    # (`policy.FROZEN`), but it never reaches an agent (Kraft-9ct4q).
+    for field, names in (("allowed_tools", allowed_tools or ()), ("deny_tools", deny_tools)):
+        if why := _policy.tool_name_refusal(field, names):
+            raise LaunchRefused(f"this launch's policy {why}")
     hs = harnesses if harnesses is not None else _harness.load(None)
     try:
         h = hs.valid[harness]

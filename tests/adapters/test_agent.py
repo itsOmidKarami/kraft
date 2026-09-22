@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from support.harness import write_harness_profiles
+from support.harness import harness_without, write_harness_profiles
 
 from kraft import skill, store
 from kraft.adapters import agent
@@ -368,11 +368,10 @@ def test_an_option_becomes_its_flag(run, overrides, flag, value):
         (("Read", "Grep"), "Read,Grep"),
         # Allow nothing: no built-in tool exists, and every MCP ask is denied.
         ((), ""),
-        # `--tools` takes bare built-in names and does not govern MCP tools,
-        # which the permission gate answers instead.
-        (("Bash(git *)", "mcp__kraft__report_progress"), "Bash"),
+        # `--tools` does not govern MCP tools; the permission gate answers those.
+        (("Bash", "mcp__kraft__report_progress"), "Bash"),
     ],
-    ids=["listed", "empty", "scoped-rule-and-mcp-tool"],
+    ids=["listed", "empty", "mcp-tool"],
 )
 def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(run, allowed, tools):
     """Kraft-nt6tt: `--allowedTools` only pre-approves, and in `auto` mode the
@@ -402,6 +401,8 @@ def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(ru
         ({"harness": "codex", "command": "codex", "allowed_tools": ()}, "allowed_tools"),
         # A mode that approves asks itself would bypass the gate.
         ({"allowed_tools": ("Read",), "permission_mode": "auto"}, "permission_mode"),
+        # Kraft-pdrsi: it cuts its tools, but has no mode that asks the gate.
+        ({"harnesses": harness_without("permission_mode"), "allowed_tools": ()}, "a tool list"),
     ],
     ids=[
         "unknown-harness",
@@ -409,6 +410,7 @@ def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(ru
         "effort-on-gemini",
         "empty-allowlist-on-codex",
         "allowlist-under-a-self-approving-mode",
+        "restricts-tools-with-no-asking-mode",
     ],
 )
 def test_a_launch_the_harness_cannot_express_is_refused(run, overrides, match):

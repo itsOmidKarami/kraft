@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { scaledTimeout } from "../e2e-timing";
 
 // Extension point for shared Playwright fixtures. Specs import from here so
 // any future fixture wiring lands in one place.
@@ -53,4 +54,28 @@ export async function createItem(page: Page, title: string, template: string): P
   await modal.getByRole("button", { name: /create and start/i }).click();
   await expect(page.locator(".detail h2")).toHaveText(title);
   return new URL(page.url()).pathname.split("/").pop()!;
+}
+
+/** Wait until `id`'s implementation agent is actually running, then pause it.
+ *  A pause that lands between nodes stops no agent task (Kraft-e7pm), and a
+ *  paused item takes a steer only for an agent task its pause stopped (Ruling
+ *  183), so the Steer button would never appear. Every pause/steer spec goes
+ *  through here so the desktop and phone ones cannot drift apart again. */
+export async function pauseRunningAgent(page: Page, id: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`/api/work-items/${id}`);
+        const { worker_sessions = [] } = await res.json();
+        return worker_sessions.some(
+          (s: { node_id: string; status: string }) =>
+            s.node_id === "implementation" && s.status === "running",
+        );
+      },
+      { timeout: scaledTimeout(30_000) },
+    )
+    .toBe(true);
+  const pause = page.getByRole("button", { name: /^Pause$/ });
+  await expect(pause).toBeEnabled({ timeout: scaledTimeout(30_000) });
+  await pause.click();
 }

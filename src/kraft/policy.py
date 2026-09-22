@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -9,6 +10,7 @@ from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -17,6 +19,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     model_validator,
 )
 from pydantic.dataclasses import dataclass as model
@@ -455,6 +458,56 @@ _OPERATIONAL_NUMERIC_FIELDS = ("timeout_minutes", "max_attempts")
 _OPERATIONAL_LIST_FIELDS = ("allowed_harnesses",)
 
 
+#: What the permission gate can match: it compares a tool name exactly
+#: (`sessions.permission_request`), so a list entry is a bare tool (`Bash`) or
+#: one exact MCP tool (`mcp__server__tool`), never a rule.
+_TOOL_NAME = re.compile(r"(?!mcp__)[A-Za-z][\w-]*|mcp__[\w-]+?__[\w.-]+")
+
+
+#: Validation context for reading back what Kraft itself froze (a snapshot, a
+#: fork's override record): a tool list there is not refused, because a
+#: snapshot frozen before the refusal existed must still read (Kraft-9ct4q).
+#: `adapters.agent.run_agent_task` refuses the rule at launch instead.
+FROZEN = {"frozen": True}
+
+
+def tool_name_refusal(field: str, names: Iterable[str]) -> str | None:
+    """Why `names` is not a tool list the permission gate can match, or None
+    (Kraft-9i6xy): a scoped rule (`Bash(git *)`) or a glob (`mcp__x__*`)
+    would never match an ask, and the harness can only restrict a bare tool,
+    so it would bound nothing it claims to."""
+    for name in names:
+        if _TOOL_NAME.fullmatch(name):
+            continue
+        if "(" in name:
+            what = "a permission rule, not a tool name"
+            bare = name.split("(", 1)[0].strip()
+            fix = f"list the bare tool {bare!r}, which allows all of its use"
+        elif name.startswith("mcp__"):
+            what = "not an exact MCP tool name"
+            fix = "list each MCP tool by its exact name, mcp__<server>__<tool>"
+        else:
+            what = "not a tool name"
+            fix = "list each tool by its exact tool name"
+        return (
+            f"{field}: {name!r} is {what}. Kraft's permission gate matches exact "
+            f"tool names, so {fix}"
+        )
+    return None
+
+
+def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
+    if not (info.context or {}).get("frozen") and (
+        why := tool_name_refusal(info.field_name, names)
+    ):
+        raise ValueError(why)
+    return names
+
+
+#: A policy's `allowed_tools`/`deny_tools`: tool names, never rules.
+ToolNames = Annotated[list[StrictStr], AfterValidator(_tool_names)]
+
+
 class PolicyDefaultsInput(BaseModel):
     """`policy.yaml`'s `defaults:` -- inheritable operational starting
     points, no safety meaning of their own."""
@@ -478,7 +531,7 @@ class PolicyMaximaInput(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     token_budget: PositiveInt | None = None
-    allowed_tools: list[StrictStr] | None = None
+    allowed_tools: ToolNames | None = None
     allowed_harnesses: list[StrictStr] | None = None
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
@@ -547,11 +600,11 @@ class TaskPolicyOverride(BaseModel):
 
     allowed_harnesses: list[StrictStr] | None = None
     token_budget: PositiveInt | None = None
-    allowed_tools: list[StrictStr] | None = None
+    allowed_tools: ToolNames | None = None
     #: Tools no task under this scope may use, on top of whatever
     #: `allowed_tools` permits (Ruling 105: the repository's `deny_tools`).
     #: Only ever accumulates down the layers.
-    deny_tools: list[StrictStr] | None = None
+    deny_tools: ToolNames | None = None
     sandbox: SandboxPolicy | None = None
 
 

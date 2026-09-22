@@ -1,4 +1,4 @@
-import { createItem, expect, test } from "./fixtures";
+import { createItem, expect, pauseRunningAgent, test } from "./fixtures";
 import { scaledTimeout } from "../e2e-timing";
 
 /**
@@ -84,10 +84,8 @@ test("a paused item's needs-you state (m07) and its full-screen steer composer (
 }) => {
   // KRAFT_SLOW gives the pause something to catch — same recipe as
   // lifecycle.spec.ts's desktop pause/steer/resume test.
-  await createItem(page, "phone pause KRAFT_SLOW", "quick-task");
-  const pause = page.getByRole("button", { name: /^Pause$/ });
-  await expect(pause).toBeEnabled({ timeout: scaledTimeout(30_000) });
-  await pause.click();
+  const id = await createItem(page, "phone pause KRAFT_SLOW", "quick-task");
+  await pauseRunningAgent(page, id);
   await expect(page.getByRole("button", { name: /^Resume$/ })).toBeVisible({ timeout: scaledTimeout(30_000) });
   await page.screenshot({ path: `${SHOTS}/phone-10-needs-you-paused.png`, fullPage: true });
   expect(await overflowsX(page.locator("body"))).toBe(false);

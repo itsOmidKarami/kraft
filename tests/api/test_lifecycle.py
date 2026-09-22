@@ -241,6 +241,13 @@ def test_a_rebase_conflict_does_not_escalate_when_disarmed(client, repo, monkeyp
     # task downstream to steer, unlike `verify`'s subprocess-only tasks, which
     # `_steer_reachable` refuses on principle.
     _force_node(wid, "implementation", _STOP_STATUS[verb])
+    if verb == "resume":
+        # As `/pause` leaves it: a paused item's steer needs a paused agent
+        # task to reach (Ruling 183).
+        conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
+        conn.execute("UPDATE worker_sessions SET status = 'paused' WHERE work_item_id = ?", (wid,))
+        conn.commit()
+        conn.close()
     client.app.state.policy = dataclasses.replace(
         client.app.state.policy, auto_escalate_stuck=False
     )

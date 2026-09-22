@@ -44,6 +44,13 @@ for arg in "$@"; do
   esac
 done
 
+# The adapter runs the real CLI with `--output-format stream-json --verbose`,
+# which opens with an init line, before any work -- so a session paused
+# mid-run has already named itself. KRAFT_FAKE_CLAUDE_SESSION_ID is the
+# provider session id that line carries, the one `--resume` takes.
+printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]%s}\n' \
+  "${KRAFT_FAKE_CLAUDE_SESSION_ID:+,\"session_id\":\"$KRAFT_FAKE_CLAUDE_SESSION_ID\"}"
+
 if [ "$mode" = "slow" ]; then
   sleep "${KRAFT_FAKE_CLAUDE_DELAY:-10}"
   mode="fix"
@@ -155,13 +162,11 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   mv "$rtmp" "$KRAFT_RESULT_PATH"
 fi
 
-# The adapter runs the real CLI with `--output-format stream-json --verbose`, so
-# the fake streams the same shapes: an init line carrying the model, one
-# assistant line carrying a request_id and per-request usage, then the result
-# envelope last (usage capture and `_envelope_is_error` both read the last
-# line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the first
-# line and the rest, so a test can read the log while the child still runs.
-printf '{"type":"system","subtype":"init","model":"fake-agent","tools":[]}\n'
+# The rest of the stream, in the real CLI's shapes: after the init line above,
+# one assistant line carrying a request_id and per-request usage, then the
+# result envelope last (usage capture and `_envelope_is_error` both read the
+# last line). KRAFT_FAKE_CLAUDE_STREAM_DELAY holds the stream open between the
+# first line and the rest, so a test can read the log while the child still runs.
 sleep "${KRAFT_FAKE_CLAUDE_STREAM_DELAY:-0}"
 printf '{"type":"assistant","request_id":"req_1","message":{"model":"fake-agent","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}}\n'
 printf '{"type":"result","is_error":false,"total_cost_usd":0.035,"modelUsage":{"fake-agent":{"inputTokens":1500,"outputTokens":200}},"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":500}}\n'
