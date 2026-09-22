@@ -925,7 +925,8 @@ async def run_task(
     #: `refresh_worktree_base` fetches from here. None (every test call site
     #: that predates this, and any future one that never exercises the
     #: conflict path) falls back to `repo` -- harmless, since that path is
-    #: the only reader.
+    #: the only reader. A workspace's root; each member reads its own
+    #: checkout's origin instead (Kraft-puqxq).
     orig_repo: Path | None = None,
     branch: str,
     title: str,
