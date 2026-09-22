@@ -187,3 +187,30 @@ def test_no_door_runs_an_ended_items_chain_again(client, repo, verb, door):
     assert f"work item is {status}" in r.json()["detail"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == status
     assert len(client.get(f"/api/work-items/{wid}/events").json()) == before
+
+
+@VERBS
+@pytest.mark.parametrize(
+    "body",
+    [{"chain_template": "quick-task"}, {"node_overrides": {"implementation": {"model": "m"}}}],
+    ids=["chain_template", "node_overrides"],
+)
+def test_an_ended_item_cannot_be_reconfigured(client, repo, verb, body):
+    """Kraft-6vni1: `PATCH` is a door onto the chain too. The item never
+    started, so neither change would be refused for any other reason."""
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "default", "autostart": False},
+    ).json()["id"]
+    assert client.post(f"/api/work-items/{wid}/{verb}", json={"reason": "x"}).status_code == 200
+    before = client.get(f"/api/work-items/{wid}").json()
+
+    r = client.patch(f"/api/work-items/{wid}", json=body)
+
+    assert r.status_code == 409, r.text
+    assert f"work item is {ENDS[verb][0]}" in r.json()["detail"]
+    after = client.get(f"/api/work-items/{wid}").json()
+    assert (after["chain_template"], after["node_overrides"]) == (
+        before["chain_template"],
+        before["node_overrides"],
+    )

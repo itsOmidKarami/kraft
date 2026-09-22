@@ -467,7 +467,8 @@ def _validate_node_overrides(st, row, patch: dict[str, dict]) -> None:
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
-    row = deps._work_item_row(st, wid)  # 404s on an unknown work item, before any 422
+    # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
+    row = deps._live_work_item_row(st, wid)
     fields_set = body.model_fields_set
     if (
         body.title is None
