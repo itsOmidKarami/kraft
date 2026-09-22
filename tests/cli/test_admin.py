@@ -35,7 +35,6 @@ from kraft.templates.models import AgentTask
 #: `parents[1]` (CLAUDE.md: resolve nested-test paths against the filesystem,
 #: never trust the arithmetic).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SHIPPED_TEMPLATES = _REPO_ROOT / "templates"
 
 
 def test_health_returns_the_status_block(app):
@@ -853,9 +852,12 @@ def test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses(
     for name, original in carried.items():
         assert (home / Path(name)).read_bytes() == original, name
 
-    # harnesses.yaml is the bundled V1 one, not the operator's pre-V1 copy.
+    # harnesses.yaml is the bundled V1 one, not the operator's pre-V1 copy: it
+    # has the shipped `profiles:` tiers, not just an absence of the key. Not
+    # an exact set -- a legitimate new tier shipping later must not fail this
+    # pre-V1-swap test on an unrelated line.
     harnesses_data = yaml.safe_load((home / "harnesses.yaml").read_text())
-    assert set(harnesses_data["profiles"]) == {"deep", "strong", "fast"}
+    assert {"deep", "strong", "fast"} <= set(harnesses_data["profiles"])
 
     # The backup holds the old (pre-V1) home whole.
     assert yaml.safe_load((backup / "harnesses.yaml").read_text()) == yaml.safe_load(
