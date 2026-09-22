@@ -105,6 +105,15 @@ describe("RightPane · Log", () => {
     expect(screen.queryByText("offline")).not.toBeInTheDocument();
   });
 
+  it("counts the session's cache tokens in its token figure (Ruling 211)", async () => {
+    const kinds = { tokens_in: 7, tokens_cache_write: 40, tokens_cache_read: 900, tokens_out: 3 };
+    useStore.setState({ sessionsByItem: { w1: [session(kinds)] } } as never);
+    vi.spyOn(api, "getLogLines").mockResolvedValue({ session_id: "s1", status: "done", lines: [line(0)] });
+    render(<Log sessionId="s1" />);
+    await screen.findByText("line 0");
+    expect(document.querySelector(".log-head")?.textContent).toContain("950 tokens");
+  });
+
   it("renders one header row, with the chips in it and no title block above", async () => {
     vi.spyOn(api, "getLogLines").mockResolvedValue({
       session_id: "s1", status: "done", lines: [line(0)],

@@ -68,6 +68,14 @@ describe("applyEvent", () => {
     expect(rows[0].status).toBe("done");
   });
 
+  it("worker_session_exited patches every kind of token in (Ruling 211)", () => {
+    const st = useStore.getState();
+    const kinds = { tokens_in: 7, tokens_cache_write: 40, tokens_cache_read: 900, tokens_out: 3 };
+    st.applyEvent(ev({ seq: 2, type: "worker_session_started", payload: { session_id: "s1", node_id: "verify", hook_point: "on.test.run" } }));
+    st.applyEvent(ev({ seq: 3, type: "worker_session_exited", payload: { session_id: "s1", status: "done", ...kinds } }));
+    expect(useStore.getState().sessionsByItem.w1[0]).toMatchObject(kinds);
+  });
+
   it("worker_session_created makes the row appear before anything runs", () => {
     // A builtin hook never emits worker_session_started, so without this the row
     // only existed after a REST hydrate — and CurrentNodePanel, seeing no session
