@@ -459,7 +459,9 @@ async def test_every_launch_carries_its_policys_grants(item_on, fake_agent, monk
         await _escalate(await item_on(_node(_agent(), policy=grants), "implementation"), auto=False)
     else:
         await _dispatch(await item_on(_node(_agent(), policy=grants)))
-    assert seen["grants"] == ("git-push",)
+    # An escalation turn also holds policy.yaml's escalation_grants.
+    extra = _policy.DEFAULT_ESCALATION_GRANTS if launch == "escalation" else ()
+    assert set(seen["grants"]) == {"git-push", *extra}
 
 
 @pytest.mark.parametrize(
