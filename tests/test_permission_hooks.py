@@ -197,7 +197,8 @@ def _codex(behavior, *, worktree, seen=None, fail_closed=False, **payload):
 def worktree(tmp_path, monkeypatch):
     wt = tmp_path / "wt"
     (wt / "sub").mkdir(parents=True)
-    monkeypatch.setenv(ph.WORKTREE_ENV, str(wt))
+    (tmp_path / "codex-home" / "memories").mkdir(parents=True)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
     return wt
 
 
@@ -232,8 +233,8 @@ def test_codex_no_opinion_is_empty_so_its_reviewer_decides(worktree):
 
 
 @pytest.mark.parametrize("fail_closed", [False, True])
-def test_codex_background_agents_outside_the_worktree_are_not_asked(worktree, fail_closed):
-    """The hook fires for codex's memory agent too (cwd ~/.codex/memories,
+def test_codex_s_own_background_agents_are_not_asked(worktree, fail_closed):
+    """The hook fires for codex's memory agent too (cwd under codex's home,
     bypassPermissions): no opinion, and the gate is never asked -- even
     when the worker's own session is fail-closed."""
     seen = []
@@ -247,9 +248,11 @@ def test_codex_background_agents_outside_the_worktree_are_not_asked(worktree, fa
     assert (out, seen) == (("{}", 0), [])
 
 
-def test_codex_calls_anywhere_inside_the_worktree_are_asked(worktree, tmp_path):
+def test_codex_calls_anywhere_but_codex_s_home_are_asked(worktree, tmp_path):
+    """Outside the worktree too: a worker working from /tmp is still asked."""
     (tmp_path / "link").symlink_to(worktree)
-    for cwd in (worktree / "sub", tmp_path / "link"):
+    (tmp_path / "elsewhere").mkdir()
+    for cwd in (worktree / "sub", tmp_path / "link", tmp_path / "elsewhere"):
         seen = []
         _codex("deny", worktree=cwd, seen=seen)
         assert len(seen) == 1, cwd

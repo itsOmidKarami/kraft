@@ -21,9 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-#: Where the launch put the worker (adapters.hook_install.WORKTREE_ENV).
-WORKTREE_ENV = "KRAFT_WORKTREE"
-
 Answer = Literal["allow", "deny", "no_opinion"]
 
 
@@ -61,15 +58,15 @@ def _cursor_render(answer: Answer, reason: str) -> tuple[str, int]:
 
 def _codex_parse(stdin: str) -> tuple[str, dict, str | None] | None:
     """Claude-shaped, tool names already Kraft's (codex-cli 0.155.0 probe).
-    The hook also fires for codex's own background agents (the memory
-    agent runs in ~/.codex/memories): a call outside the worker's worktree
-    (KRAFT_WORKTREE, set by the launch) is none of Kraft's business."""
+    The hook also fires for codex's own background agents (the memory agent
+    runs in ~/.codex/memories): a call whose cwd is inside codex's home
+    ($CODEX_HOME, else ~/.codex) is none of Kraft's business. Only there --
+    anywhere else, the worktree or not, is asked, so a worker can't step out
+    of policy by working from another directory."""
     call = _cursor_parse(stdin)
-    worktree = os.environ.get(WORKTREE_ENV)
     cwd = json.loads(stdin).get("cwd")
-    if worktree and not (
-        isinstance(cwd, str) and Path(cwd).resolve().is_relative_to(Path(worktree).resolve())
-    ):
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").resolve()
+    if isinstance(cwd, str) and Path(cwd).resolve().is_relative_to(home):
         return None
     return call
 

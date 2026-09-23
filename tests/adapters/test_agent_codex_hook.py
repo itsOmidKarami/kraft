@@ -46,7 +46,6 @@ def test_a_codex_launch_with_deny_tools_carries_its_trusted_hook(run, tmp_path):
     assert hook.startswith("hooks.PreToolUse=") and "permission-hook codex" in hook
     assert state.startswith("hooks.state=") and "trusted_hash=" in state
     assert "Bash" not in cmd
-    assert seen["env"]["KRAFT_WORKTREE"] == str(tmp_path)
     assert FAIL_CLOSED not in seen["env"]
 
 
@@ -66,7 +65,6 @@ def test_a_codex_launch_with_nothing_to_enforce_gets_no_hook(run, tmp_path, monk
     monkeypatch.setenv("FAKE_CODEX_MODE", "exit")  # would refuse, were it asked
     seen = _codex(run, tmp_path, grants=("git-commit",))
     assert _hook_flags(seen["cmd"]) == []
-    assert "KRAFT_WORKTREE" not in seen["env"]
 
 
 def test_a_codex_launch_whose_hook_codex_will_not_trust_is_refused(run, tmp_path, monkeypatch):
