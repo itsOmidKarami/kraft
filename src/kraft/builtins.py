@@ -25,7 +25,13 @@ class RebaseConflict(RuntimeError):
     base. A `RuntimeError` subclass so every existing `except RuntimeError`
     around this call keeps behaving as it did (Kraft-s7c04.23); the type
     exists so the three callers that can now *act* on a conflict can tell
-    one apart from any other git failure without matching on message text."""
+    one apart from any other git failure without matching on message text.
+
+    `paths` are the files git left unmerged, read before the abort."""
+
+    def __init__(self, message: str, paths: tuple[str, ...] = ()):
+        super().__init__(message)
+        self.paths = paths
 
 
 class RebaseTimedOut(RuntimeError):
@@ -866,7 +872,13 @@ async def refresh_worktree_base(
         # the conflicting file's name survives into the raised message and the
         # needs_human reason a human reads.
         detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
-        await _abort_rebase(worktree, RebaseConflict(f"git rebase failed for {worktree}: {detail}"))
+        unmerged = git_read(worktree, "diff", "--name-only", "--diff-filter=U") or ""
+        await _abort_rebase(
+            worktree,
+            RebaseConflict(
+                f"git rebase failed for {worktree}: {detail}", tuple(unmerged.splitlines())
+            ),
+        )
     return head
 
 
@@ -952,9 +964,12 @@ async def mr_rebase(
 
     try:
         moved = await _rebase_members(db, work_item_id, Path(worktree), branch, base, remaining)
-        new_head = await refresh_worktree_base(
-            Path(worktree), Path(repo), branch, base=base, timeout=remaining()
-        )
+        try:
+            new_head = await refresh_worktree_base(
+                Path(worktree), Path(repo), branch, base=base, timeout=remaining()
+            )
+        except RebaseConflict as exc:
+            raise _explain_gitlink_conflict(exc, {rel for rel, _ in moved}, branch, base) from None
     except BaseBranchMissing as exc:
         # Nothing an agent could fix: `config_error` stops the item for a
         # person rather than sending a fix loop round against a missing base.
@@ -1062,6 +1077,24 @@ async def _rebase_members(
         # root left at its old head would fail `assert_clean` for good.
         _commit_paths(root, repoint, "chore: repoint members after pre-MR rebase", base)
     return moved
+
+
+def _explain_gitlink_conflict(
+    exc: RebaseConflict, moved: set[str], branch: str, base: str
+) -> RebaseConflict:
+    """`exc`, with a sentence saying how to resolve it when the only paths the
+    root's rebase left unmerged are pointers `_rebase_members` just moved: the
+    root's base moved the same pointer (Kraft-xvwye). git's own text is kept."""
+    if not exc.paths or not set(exc.paths) <= moved:
+        return exc
+    how = " ".join(
+        f"The base branch {base} also moved member {rel}'s pointer: rebase {branch} in "
+        f"the root onto {base}, take the member's rebased head for {rel} "
+        f"(`git -C {rel} checkout {branch}`, then `git add {rel}`), continue the rebase, "
+        "and retry the item."
+        for rel in exc.paths
+    )
+    return RebaseConflict(f"{exc}\n{how}", exc.paths)
 
 
 async def mr_rebase_forced(worktree: Path, repo: Path, branch: str, base: str) -> str | None:

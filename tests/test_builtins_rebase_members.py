@@ -201,3 +201,45 @@ async def test_a_member_that_runs_past_the_time_cap_stops_before_the_root(
     log = (run_dirs.logs / "s1.log").read_text()
     assert f"git rebase timed out after 1s for {member}" in log
     assert git_read(root, "rev-parse", "HEAD") == root_head
+
+
+def _move_root_pointer(tmp_path, root_source):
+    """The root's own base moves `repos/pkg`'s pointer to a member commit the
+    item's rebased member does not descend from."""
+    pkg = tmp_path / "pkg"
+    _git(pkg, "checkout", "-qb", "side")
+    side = _commit(pkg, "side.txt", "side\n", "a member commit off main")
+    _git(pkg, "checkout", "-q", "main")
+    _git(root_source, "update-index", "--cacheinfo", f"160000,{side},repos/pkg")
+    _git(root_source, "commit", "-qm", "the root's main moves the pointer")
+
+
+async def test_a_root_gitlink_conflict_says_how_to_resolve_it(database, run_dirs, tmp_path):
+    """Kraft-xvwye: the root's base moved the same member pointer the pre-MR
+    repoint commit moves, so the root's rebase conflicts on that gitlink alone.
+    git's text stays; one sentence says what happened and what to do."""
+    row, root, _ = await _workspace(database, run_dirs, tmp_path)
+    _move_member_origin(tmp_path)
+    _move_root_pointer(tmp_path, Path(row["repo"]))
+
+    with pytest.raises(kraft_builtins.RebaseConflict) as raised:
+        await _mr_rebase(database, run_dirs, row, root)
+
+    message = str(raised.value)
+    assert "CONFLICT" in message
+    assert "also moved member repos/pkg's pointer" in message
+    assert f"git -C repos/pkg checkout {store.branch_for(row)}" in message
+
+
+async def test_a_root_file_conflict_gets_no_gitlink_sentence(database, run_dirs, tmp_path):
+    """A moved member alongside a root conflict on its own file is git's
+    conflict alone: the sentence is only for a conflict on the moved pointers."""
+    row, root, _ = await _workspace(database, run_dirs, tmp_path)
+    _commit(root, "root.txt", "ours\n", "root change")
+    _move_member_origin(tmp_path)
+    _commit(Path(row["repo"]), "root.txt", "theirs\n", "the root's main moves")
+
+    with pytest.raises(kraft_builtins.RebaseConflict, match="CONFLICT") as raised:
+        await _mr_rebase(database, run_dirs, row, root)
+
+    assert "also moved member" not in str(raised.value)
