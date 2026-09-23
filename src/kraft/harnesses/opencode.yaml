@@ -25,6 +25,26 @@ id: opencode
 kind: cli
 command: [opencode, run]
 
+# Kraft-4in7z.4: no per-call hook (a plugin's tool.execute.before never loaded
+# in the probe). deny_tools and allowed_tools are written into the launch's
+# own config instead -- `OPENCODE_CONFIG_CONTENT`, read only under
+# `--standalone`, both added only when the policy has something to enforce
+# (permission_rules.py). Keys are opencode.json `permission` keys (2.0.15):
+# `bash` holds the shell tool, `edit` holds edit, write and patch, and
+# `execute` is code mode, which a model reached for after a shell deny.
+permission_rules: opencode
+tool_names:
+  bash: Bash
+  execute: Bash
+  edit: [Edit, Write]
+  read: Read
+  glob: Glob
+  grep: Grep
+  webfetch: WebFetch
+  websearch: WebSearch
+  task: Task
+  skill: Skill
+
 capabilities:
   # `run` has no system-prompt flag: a system prompt lives in an agent
   # defined in opencode.json, which a launch cannot write.
@@ -41,6 +61,8 @@ capabilities:
   resume:          { cli: ["--session", "{value}"] }
   usage:             { source: envelope, reader: opencode-json }
   rate_limit_signal: { reader: opencode-json }
+  deny_tools:        { via: permission_rules }
+  allowed_tools:     { via: permission_rules }
   # `--` so a prompt starting with a dash is not read as a flag. `run` joins
   # its message words and wraps any containing a space in double quotes
   # (run.ts; measured: the stored prompt is `"Reply with ..."`), so the
@@ -48,6 +70,6 @@ capabilities:
   prompt:          { cli: ["--", "{value}"] }
 
 # Absent, deliberately: effort (2.x has no `--variant`; name the variant in
-# the model id, `-m provider/model#high`), deny_tools, allowed_tools, restrict_tools and
-# approval_channel (tool permissions are opencode.json rules, not `run`
-# flags), autocompact (config `compaction`, not a flag).
+# the model id, `-m provider/model#high`), restrict_tools and approval_channel
+# (tool permissions are config rules, not `run` flags; see permission_rules
+# above), autocompact (config `compaction`, not a flag).

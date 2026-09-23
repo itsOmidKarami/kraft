@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
@@ -744,9 +745,11 @@ async def run_agent_task(
         )
         if v
     }
-    # A harness whose hook holds the tool lists needs no restriction flag.
+    # A harness whose hook holds the tool lists needs no restriction flag, nor
+    # does one whose own permission config is written with them.
     hooked = h.permission_hook is not None
-    if allowed_tools is not None and not hooked:
+    ruled = h.permission_rules is not None
+    if allowed_tools is not None and not hooked and not ruled:
         options |= _restricted(h, harness, allowed_tools, permission_mode)
     # Loading the library and `harnesses.yaml` checks that a task's or a
     # profile's own options name capabilities its harness declares -- but
@@ -779,6 +782,23 @@ async def run_agent_task(
         )
     if hooked:
         _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
+    rules_env: dict[str, str] = {}
+    rules_argv: tuple[str, ...] = ()
+    if ruled:
+        if missing := _permission_rules.unmapped(h.tool_names, allowed_tools, deny_tools):
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) has no tool that {missing!r} maps to "
+                f"(its tool_names), so its permission rules cannot hold them as this "
+                f"launch's policy requires; drop them from the policy or use another harness"
+            )
+        rules_env, rules_argv = _permission_rules.render(
+            h.permission_rules,
+            h.tool_names,
+            allowed_tools,
+            tuple(deny_tools),
+            directory=run_dirs.base / "harness-config" / h.id,
+            session_id=session_id,
+        )
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
@@ -789,6 +809,7 @@ async def run_agent_task(
         context=ctx,
         resume=resume_session_id,
         options=options,
+        extra=rules_argv,
     )
     reader = log_reader(h)
     return await _subprocess.run_task(
@@ -813,6 +834,7 @@ async def run_agent_task(
             ),
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
             **_config_dir(run_dirs, h, session_id),
+            **rules_env,
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
         round=round,

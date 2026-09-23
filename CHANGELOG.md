@@ -7,6 +7,12 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- OpenCode workers now honour a task's `deny_tools` and `allowed_tools`:
+  Kraft writes them into that launch's own OpenCode config (run with
+  `--standalone`), and OpenCode enforces them. Denying `Bash` also denies
+  OpenCode's code mode. A policy tool name OpenCode has no tool for refuses
+  the launch. These decisions aren't logged on the timeline, and grants aren't
+  applied (Kraft-4in7z.4).
 - A Codex, Cursor or other non-Claude worker that outlived a Kraft restart
   now has its tokens read with its own harness's log reader instead of
   Claude's, which found none; each session now records its harness, and

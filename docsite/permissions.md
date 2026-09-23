@@ -75,6 +75,34 @@ fail-closed for that session: a Kraft it can't reach, a payload it can't read or
 one, any of those is no opinion, and Cursor's classifier decides as if there
 were no hook.
 
+### OpenCode and Amp: rules written at launch
+
+OpenCode and Amp get no per-call hook. OpenCode's plugin hook never loaded in
+a probe, and Amp's `delegate` rule hangs its file edits. Instead Kraft writes
+the task's `deny_tools` and `allowed_tools` into the CLI's own permission
+config for that one launch, and the CLI enforces them itself. With neither
+set, nothing is written and the launch is exactly as before.
+
+- **OpenCode** gets the rules as a `permission` block in
+  `OPENCODE_CONFIG_CONTENT`, and `opencode run --standalone`, since only a
+  standalone run reads it (the background service keeps its own config). A
+  denied tool is `deny`; an allowlist is `"*": "deny"` followed by `allow`
+  for each listed tool. Denying `Bash` also denies `execute`, OpenCode's code
+  mode, which a model reached for after its shell was refused. The shell
+  itself is denied call by call rather than removed, because OpenCode's free
+  tier refuses any request without it.
+
+A policy tool name no tool on that CLI maps to (`tool_names:` in the harness
+file) refuses the launch, naming the tool: Kraft can't write a rule for it.
+A CLI tool that covers two policy names follows Cursor's rule: OpenCode's
+`edit` also writes files, so it's denied if `Edit` or `Write` is, and
+allowed under an allowlist only if both are listed.
+
+Nothing reaches the gate, so none of this shows up as a `permission_decision`
+on the timeline. **Grants aren't realised on OpenCode or Amp**: a CLI rule
+like `git push *` also matches `git push x; rm -rf y`, which Kraft's grant
+matcher would refuse, so no grant is written.
+
 ## How it decides
 
 The gate answers from the resolved policy of the task the calling session is
@@ -176,8 +204,10 @@ for how the layers combine.
 
 ## Which harnesses reach it
 
-Claude, through its prompt tool, and Cursor, through its hook. Every other
-harness runs in its own classifier mode or its most permissive unattended
-mode — see the table in [Agent harnesses](harnesses.md#how-each-harness-runs-unattended).
+Claude, through its prompt tool, and Cursor, through its hook. OpenCode
+doesn't reach it, but still enforces `deny_tools` and `allowed_tools` through
+[rules written at launch](#opencode-and-amp-rules-written-at-launch): no
+timeline events, and no grants. Every other harness runs in its own
+classifier mode or its most permissive unattended mode — see the table in [Agent harnesses](harnesses.md#how-each-harness-runs-unattended).
 Bringing the rest onto the same gate, one hook per CLI, is tracked under
 epic Kraft-4in7z; no dates promised.

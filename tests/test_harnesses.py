@@ -190,6 +190,17 @@ _HOOK_CAPS = (
             + "  deny_tools: { via: permission_hook, cli: ['--deny', '{csv}'] }\n",
             "must not also carry a 'cli' binding",
         ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _HOOK_CAPS
+            + "  deny_tools: { via: permission_rules }\n",
+            "bound via 'permission_rules', which this harness does not define",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\npermission_rules: nosuch\ncapabilities:\n"
+            + _HOOK_CAPS,
+            "unknown permission_rules 'nosuch'",
+        ),
     ],
 )
 def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect):
@@ -216,6 +227,21 @@ def test_cursor_maps_its_shell_to_bash_and_enforces_tool_lists_via_its_hook():
         options={"deny_tools": ("Bash",), "allowed_tools": ("Read",)},
     )
     assert "Bash" not in argv and "Read" not in argv
+
+
+def test_opencode_enforces_tool_lists_through_its_own_config():
+    """Kraft-4in7z.4: no hook, so its tool lists are rendered into the
+    launch's opencode config, and never reach argv as flags."""
+    opencode = harness.load(None).valid["opencode"]
+    assert opencode.permission_rules == "opencode"
+    assert opencode.tool_names["bash"] == ("Bash",)
+    assert opencode.tool_names["execute"] == ("Bash",)  # code mode, the probe's evasion
+    assert opencode.supports("deny_tools") and opencode.supports("allowed_tools")
+    argv = harness.build_argv(
+        opencode, prompt="p", context="c", options={"deny_tools": ("Bash",)}, extra=("--x",)
+    )
+    assert "Bash" not in argv
+    assert argv[:3] == ["opencode", "run", "--x"]  # before `--` and the prompt
 
 
 #: Harnesses whose CLI already reports its shell tool as `Bash` (codex,
