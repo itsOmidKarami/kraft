@@ -159,6 +159,17 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
     if version < 37:
         drop_lines = (*drop_lines, "tokens_cache_", "-- cache writes and reads, apart")
+    if version < 39:
+        drop_lines = (
+            *drop_lines,
+            "harness        TEXT",
+            "-- the harnesses.yaml harness an agent session ran on",
+            "-- session re-adopted after a restart reads its log",
+            "-- NULL for every non-agent session and every row older",
+            "-- read as claude, the only harness",
+        )
+        # `harness` is the last worker_sessions column: `command` loses its comma.
+        replace = (*replace, ("command        TEXT,", "command        TEXT"))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -437,6 +448,8 @@ ADDED_COLUMNS = [
     (35, "work_items", ("policy_override",), None),
     # NULL: a row written before the split has an unknown one (Ruling 211)
     (36, "worker_sessions", ("tokens_cache_write", "tokens_cache_read"), None),
+    # NULL: an older row is read as claude, the only harness it can have had
+    (38, "worker_sessions", ("harness",), None),
 ]
 
 
