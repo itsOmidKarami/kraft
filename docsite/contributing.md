@@ -40,7 +40,8 @@ there is no `version =` line to bump and no bump commit to forget.
 That removes the loud failure and leaves a quiet one: if nobody ever makes a
 tag, nothing fails — `main` just accumulates untagged commits while the install
 instructions keep serving a release from months ago. So every pull request
-declares what it ships, and merging is what tags.
+declares what it ships, and a maintainer cuts a release from whatever has
+merged since the last one.
 
 Put exactly one of these labels on your pull request:
 
@@ -49,34 +50,51 @@ Put exactly one of these labels on your pull request:
 | `release::major` | a breaking change to the CLI, the API, or on-disk state |
 | `release::minor` | a new capability that does not break an existing one |
 | `release::patch` | a fix to something that already shipped |
-| `release::none` | nothing a user of Kraft receives |
+| `release::none` | no bump of its own: it goes out with the next release |
 
 `release::none` is a first-class answer, and the expected one for documentation,
-comments, CI configuration and test-only changes. It is not an escape hatch — it
-is the declaration that this change ships nothing.
+comments, CI configuration and test-only changes. It does not keep a change out
+of a release (every merged change is in the next one); it only adds no weight
+to the bump and no line to the notes.
 
 Nothing checks that the declared impact matches the diff. The label is a claim by
 its author; review is what tests it.
 
+A pull request that ships something writes its user-facing line in the
+`## Changelog` section of its description. Do not edit `CHANGELOG.md`: the
+release writes it. A pull request that leaves the section empty is listed by
+its title.
+
 **Pull requests from forks are not asked for a label** — only people with write
-access can apply one. A maintainer labels the pull request before merging. An
-unlabelled merge reads as `release::none` and ships nothing.
+access can apply one. A maintainer labels the pull request before merging. One
+merged without a label stops the next release, naming it; label it (labels
+can still be changed after merge) and run the release again.
 
-### What happens on merge
+### Cutting a release
 
-`.github/workflows/release.yml` reads the merged pull request's label, computes
-the next tag, builds the wheel, smoke-tests it, then pushes the tag, creates the
-GitHub Release with the wheel attached, and publishes to PyPI. The tag is created
-locally before the build (setuptools-scm reads the version from it) and pushed
-only after the smoke test passes, so a failed build leaves nothing behind.
+Actions → **release** → **Run workflow** on `main`. Tick **dry run** first to see
+the version and notes on the run's summary page without releasing anything.
+
+`.github/workflows/release.yml` collects every pull request merged since the
+previous `vX.Y.Z` tag and bumps by the largest label among them: two
+`release::minor` and three `release::patch` is a minor release. If all of them
+are `release::none`, there is no version to bump and it releases nothing. The notes are those pull requests'
+`## Changelog` sections, grouped into breaking changes, new features and fixes.
+
+It refuses to run until `test` has passed on the commit being released. Then it
+builds the wheel, smoke-tests it, pushes the tag, creates the GitHub Release
+with the wheel attached, and publishes to PyPI. The tag is created locally
+before the build (setuptools-scm reads the version from it) and pushed only
+after the smoke test passes, so a failed build leaves nothing behind.
 
 ### Plugin manifest versions
 
 `plugins/kraft/.claude-plugin/plugin.json` and `plugins/kraft-lite/.claude-plugin/plugin.json`
 carry their own `version` field, shown in `/plugin list`. You never edit this by
 hand and pull requests never touch it: `release.yml` stamps both files with
-`dev/stamp_plugin_versions.py` right after it tags a release, then opens and
-auto-merges a `release::none` pull request with the result. Doing this on a
+`dev/stamp_plugin_versions.py` right after it tags a release, writes the
+release notes into `CHANGELOG.md`, then opens and auto-merges a
+`release::none` pull request with both. Doing this on a
 release, rather than asking every in-flight pull request to predict its own
 future version, is what a hand-stamped file could never do without conflicting
 with every other open pull request the moment a release lands.

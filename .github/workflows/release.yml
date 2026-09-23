@@ -1,11 +1,12 @@
-# The merge landed. Read the label off the pull request that produced this
-# commit, compute the tag, build the wheel, and publish it.
+# Cut a release by hand: Actions -> release -> Run workflow. Everything merged
+# into main since the previous tag goes out together, bumped by the largest
+# `release::` label among those pull requests (two minors and three patches is
+# a minor), with notes built from each one's `## Changelog` section. Tick
+# "dry run" to see the version and notes without releasing anything.
 #
-# One workflow, not two. The GitLab shape was `auto-tag` pushes a tag -> a tag
-# pipeline builds and releases. That cannot work here: a tag pushed with the
-# default GITHUB_TOKEN deliberately does not trigger other workflows, so the
-# release half would never run. Keeping it in one job also means no stored PAT,
-# which is the credential you least want in a public repository.
+# One job, not a tag-triggered second workflow: a tag pushed with the default
+# GITHUB_TOKEN deliberately does not trigger other workflows, and keeping it in
+# one job means no stored PAT, the credential you least want in a public repo.
 #
 # Order matters. The tag is created locally first (setuptools-scm reads the
 # version from it, so the wheel cannot be built before it exists), and pushed
@@ -13,72 +14,76 @@
 # therefore leaves no tag behind to clean up.
 name: release
 
-# Triggered by test.yml completing, not by the push itself: two workflows both
-# triggered by `push: branches: [main]` run in parallel, which would let a tag
-# get created, a GitHub Release published, and a wheel pushed to PyPI from a
-# commit whose tests are still running -- or already failed. PyPI publishes
-# cannot be undone, so this waits on the actual test result instead.
-#
-# `workflow_run` does not check out the pushing commit by default -- it runs
-# against the default branch tip -- so every step below that needs "the commit
-# this release is about" uses `github.event.workflow_run.head_sha` explicitly,
-# never $GITHUB_SHA (which, under `workflow_run`, is not that commit).
 on:
-  workflow_run:
-    workflows: ["test"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print the version and notes, release nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: write      # create the tag and the release
   id-token: write      # PyPI trusted publishing
-  pull-requests: write # read the merged PR's labels off the commit; open the stamp PR
+  pull-requests: write # read the merged PRs' labels; open the stamp PR
+  actions: read        # check main's test run before releasing from it
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    # The button offers every branch; only main releases.
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          # `git describe` needs the tags, and a shallow clone has none --
-          # every release would compute as the first one.
+          # `git tag --merged` needs the tags and the history, and a shallow
+          # clone has neither -- every release would compute as the first one.
           fetch-depth: 0
 
-      - name: what does this merge ship
+      - name: what does this release ship
         id: impact
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          LABELS=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-            --jq '[.[0].labels // [] | .[].name] | join(",")')
-          # A commit that reached main without a pull request -- a direct push,
-          # the revert button, a cherry-pick -- has no labels to read. That is
-          # `none`, and saying so is what stops it looking like a broken job.
-          if [ -z "$LABELS" ]; then
-            echo "no pull request for $SHA; not releasing"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            exit 0
+          SHA=$(git rev-parse HEAD)
+          # PyPI publishes cannot be undone, so the commit being released must
+          # have passed its tests on main -- not be still running, not failed.
+          TESTS=$(gh run list --workflow test --branch main --event push --commit "$SHA" \
+            --json conclusion --jq '.[0].conclusion // "missing"')
+          if [ "$TESTS" != "success" ]; then
+            echo "::error::test on main at $SHA is '$TESTS', not success; wait for it or fix main"
+            exit 1
           fi
-          # `git describe --abbrev=0` finds the nearest tag by commit graph
-          # distance, prerelease or not -- and a repo can carry more than one
-          # malformed rc tag on the very commit rc1 shipped from (a ruleset can
-          # block deleting the wrong one), so excluding a couple of glob shapes
-          # from `describe` is not enough to keep every prerelease form out.
-          # List every exact `vX.Y.Z` release tag reachable from this commit
-          # instead and take the highest by version order -- `v1.0.0rc1`,
-          # `v1.0.0.rc1` and `v1.0.0-rc.1` all fail the anchored regex and never
-          # enter the running.
+          # Every exact `vX.Y.Z` tag reachable from main, highest by version
+          # order. A repo can carry more than one malformed rc tag on the very
+          # commit rc1 shipped from (a ruleset can block deleting the wrong
+          # one), so `git describe` excluding a couple of glob shapes is not
+          # enough -- `v1.0.0rc1`, `v1.0.0.rc1` and `v1.0.0-rc.1` all fail the
+          # anchored regex and never enter the running.
           PREVIOUS=$(git tag --list --merged "$SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-          # No `|| true`: next_tag exits 0 with no output for release::none, and
-          # non-zero only when it cannot read the previous tag or the labels
-          # contradict each other. Swallowing that would turn a broken tag
-          # history into a silently skipped release.
-          TAG=$(python3 dev/next_tag.py "$PREVIOUS" "$LABELS")
+          RANGE=${PREVIOUS:+$PREVIOUS..}$SHA
+          # The pull request behind each commit since the previous tag. A
+          # commit with none -- a direct push, the revert button -- carries no
+          # declaration and adds nothing to the bump or the notes.
+          for c in $(git rev-list --first-parent "$RANGE"); do
+            gh api "repos/$GITHUB_REPOSITORY/commits/$c/pulls" \
+              --jq '.[0] // empty | {number, title, body, labels: [.labels[].name]}'
+          done | jq -s 'unique_by(.number)' > "$RUNNER_TEMP/prs.json"
+          # No `|| true`: plan_release exits non-zero on an unlabelled PR or a
+          # tag it cannot read, and swallowing that would turn it into a
+          # silently skipped release.
+          TAG=$(python3 dev/plan_release.py plan "$PREVIOUS" "$RUNNER_TEMP/prs.json" "$RUNNER_TEMP/notes.md")
+          {
+            echo "## ${TAG:-No release} (previous: ${PREVIOUS:-none})"
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ -z "$TAG" ]; then
-            echo "release::none; not releasing"
+            echo "nothing since ${PREVIOUS:-the start} ships; not releasing"
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "dry run: would release $TAG"
+            TAG=
           else
             echo "releasing $TAG"
           fi
@@ -140,15 +145,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          # The notes are CHANGELOG.md's `## X.Y.Z` section when it has one:
-          # a release PR squashes many PRs into one commit, so --generate-notes
-          # would list only that one PR. Without a section, fall back to it.
-          awk -v h="## ${TAG#v}" '$0==h{f=1;next} f&&/^## /{exit} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
-          else
-            gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --generate-notes
-          fi
+          gh release create "$TAG" dist/*.whl --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
       - name: publish to PyPI
         if: steps.impact.outputs.tag != ''
@@ -171,16 +168,14 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: kraft
 
-      - name: stamp plugin manifests for this release
-        # Writing plugin.json's version here, not on the PR that triggers a
-        # release, is the whole point: a value only this job ever writes can
-        # never conflict with an in-flight PR, and nothing has to guess ahead
-        # of time what version a merge will produce. `main` requires a pull
+      - name: stamp plugin manifests and CHANGELOG.md for this release
+        # Writing plugin.json's version and the CHANGELOG.md section here, not
+        # on the PRs that make up the release, is the whole point: a value only
+        # this job ever writes can never conflict with an in-flight PR, and no
+        # PR has to guess what version it will ship in. `main` requires a pull
         # request (see the repo's branch ruleset), so this can't just push --
         # it opens a PR and lets required checks auto-merge it. That PR carries
-        # release::none, so its own merge back into main is a no-op for this
-        # same workflow (next_tag.py produces no tag for an unlabelled/none
-        # merge) rather than triggering a second release.
+        # release::none, so it adds nothing to the next release's bump.
         if: steps.impact.outputs.tag != ''
         env:
           TAG: ${{ steps.impact.outputs.tag }}
@@ -189,10 +184,13 @@ jobs:
           VERSION="${TAG#v}"
           BRANCH="stamp-plugin-versions-$VERSION"
           python3 dev/stamp_plugin_versions.py "$VERSION"
+          # After the build, never before: a dirty tree would give the wheel a
+          # setuptools-scm dev version and fail the smoke test.
+          python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             checkout -b "$BRANCH"
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
-            commit -am "chore: stamp plugin manifests for $TAG"
+            commit -am "chore: stamp plugin manifests and changelog for $TAG"
           # actions/checkout persisted GITHUB_TOKEN's own auth header, which
           # takes precedence over any credential embedded in the remote URL --
           # drop it so the push below actually authenticates as the App.
@@ -201,8 +199,8 @@ jobs:
           git config --local --unset-all http.https://github.com/.extraheader || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
-            --title "chore: stamp plugin manifests for $TAG" \
-            --body "Plugin manifest versions, written by the release workflow that just published $TAG." \
+            --title "chore: stamp plugin manifests and changelog for $TAG" \
+            --body "Plugin manifest versions and the CHANGELOG.md section, written by the release workflow that just published $TAG." \
             --label release::none
           gh pr merge "$BRANCH" --auto --squash
 
