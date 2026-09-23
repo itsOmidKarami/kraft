@@ -13,7 +13,7 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py           |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py           |      152 |       14 |     91% |172, 252, 276, 282-292, 314-315, 370, 421 |
-| src/kraft/adapters/forge/git.py          |      104 |        3 |     97% |231-232, 369 |
+| src/kraft/adapters/forge/git.py          |      104 |        4 |     96% |225-232, 369 |
 | src/kraft/adapters/forge/glab.py         |      176 |        9 |     95% |239-240, 327, 359-360, 426, 429, 442, 464 |
 | src/kraft/adapters/forge/models.py       |      156 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py           |      124 |        5 |     96% |74, 197, 249, 315-316 |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16816** |  **849** | **95%** |           |
+| **TOTAL**                                | **16816** |  **850** | **95%** |           |
 
 
 ## Setup coverage badge
