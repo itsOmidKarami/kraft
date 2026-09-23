@@ -31,7 +31,7 @@ NAMES = {"Shell": "Bash"}
 def _asker(behavior, seen=None):
     async def ask(tool, input, tool_use_id=None, **kw):
         if seen is not None:
-            seen.append((tool, input, kw))
+            seen.append((tool, input, tool_use_id, kw))
         return {"behavior": behavior, "message": "because"}
 
     return ask
@@ -47,12 +47,23 @@ def _run(behavior, *, fail_closed=False, seen=None, stdin=CURSOR_SHELL):
 def test_cursor_maps_shell_to_bash_and_asks_in_enforce_mode(fail_closed):
     seen = []
     _run("no_opinion", seen=seen, fail_closed=fail_closed)
-    [(tool, input, kw)] = seen
-    assert (tool, input["command"], kw) == (
+    [(tool, input, tool_use_id, kw)] = seen
+    assert (tool, input["command"], tool_use_id, kw) == (
         "Bash",
         "echo hello",
+        "46765f71",
         {"mode": "enforce", "harness": "cursor", "cli_tool": "Shell", "fail_closed": fail_closed},
     )
+
+
+@pytest.mark.parametrize("use_id", [None, 7, ["x"]])
+def test_cursor_sends_no_tool_use_id_unless_the_payload_has_a_string_one(use_id):
+    # The gate's body types it `str | None`: anything else would be a 422.
+    payload = {**json.loads(CURSOR_SHELL), "tool_use_id": use_id}
+    seen = []
+    _run("no_opinion", seen=seen, stdin=json.dumps(payload))
+    [(_tool, _input, tool_use_id, _kw)] = seen
+    assert tool_use_id is None
 
 
 @pytest.mark.parametrize(

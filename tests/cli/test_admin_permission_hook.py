@@ -1,0 +1,58 @@
+"""The subcommand a CLI's hook runs: stdin in, the CLI's answer out
+(Kraft-4in7z). Run as a real process, the way Cursor runs it."""
+
+import json
+import subprocess
+import sys
+
+import pytest
+
+CURSOR_SHELL = json.dumps({"tool_name": "Shell", "tool_input": {"command": "ls"}})
+
+
+def _hook(tmp_path, *args, stdin=CURSOR_SHELL):
+    # No KRAFT_SESSION_ID: not a worker, so the client answers `unavailable`.
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "KRAFT_HOME": str(tmp_path / "k")}
+    return subprocess.run(
+        [sys.executable, "-m", "kraft", "admin", "permission-hook", *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+@pytest.mark.parametrize(("flags", "expected"), [((), None), (("--fail-closed",), "deny")])
+@pytest.mark.parametrize("stdin", [CURSOR_SHELL, "", "not json"])
+def test_permission_hook_without_kraft_is_no_opinion_or_deny_when_fail_closed(
+    tmp_path, flags, expected, stdin
+):
+    done = _hook(tmp_path, "cursor", *flags, stdin=stdin)
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout).get("permission") == expected
+
+
+def test_an_unknown_harness_is_a_usage_error(tmp_path):
+    done = _hook(tmp_path, "nosuch")
+    assert (done.returncode, done.stdout) == (2, "")
+    assert "invalid choice" in done.stderr
+
+
+def test_the_hook_never_imports_the_server(tmp_path):
+    # It runs before every tool call a worker makes: start-up is on the
+    # agent's critical path, so the FastAPI app stays out of it.
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "KRAFT_HOME": str(tmp_path / "k")}
+    done = subprocess.run(
+        [sys.executable, "-X", "importtime", "-m", "kraft", "admin", "permission-hook", "cursor"],
+        input=CURSOR_SHELL,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    imported = {line.rsplit("|", 1)[-1].strip() for line in done.stderr.splitlines()}
+    assert "kraft.permission_hooks" in imported
+    assert not {m for m in imported if m.split(".")[0] in ("fastapi", "starlette")}
+    assert not {m for m in imported if m.startswith("kraft.api")}

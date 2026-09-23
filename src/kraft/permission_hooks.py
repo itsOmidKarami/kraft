@@ -23,16 +23,18 @@ Answer = Literal["allow", "deny", "no_opinion"]
 
 @dataclass(frozen=True)
 class Translator:
-    parse: Callable[[str], tuple[str, dict]]
+    #: stdin -> (CLI tool name, its input, the CLI's id for this call or None)
+    parse: Callable[[str], tuple[str, dict, str | None]]
     render: Callable[[Answer, str], tuple[str, int]]
 
 
-def _cursor_parse(stdin: str) -> tuple[str, dict]:
+def _cursor_parse(stdin: str) -> tuple[str, dict, str | None]:
     payload = json.loads(stdin)
     tool, input = payload["tool_name"], payload.get("tool_input") or {}
     if not isinstance(tool, str) or not isinstance(input, dict):
         raise ValueError("preToolUse payload without tool_name/tool_input")
-    return tool, input
+    use_id = payload.get("tool_use_id")
+    return tool, input, use_id if isinstance(use_id, str) else None
 
 
 def _cursor_render(answer: Answer, reason: str) -> tuple[str, int]:
@@ -70,7 +72,7 @@ def answer_hook(
     t = TRANSLATORS[harness]
     failed: Answer = "deny" if fail_closed else "no_opinion"
     try:
-        cli_tool, input = t.parse(stdin)
+        cli_tool, input, tool_use_id = t.parse(stdin)
     except Exception as exc:  # noqa: BLE001 -- a hook must answer, whatever it was given
         print(f"kraft permission-hook: unreadable {harness} payload: {exc}", file=sys.stderr)
         return t.render(failed, "Kraft could not read this call")
@@ -83,7 +85,7 @@ def answer_hook(
             ask(
                 tool_names.get(cli_tool, cli_tool),
                 input,
-                None,
+                tool_use_id,
                 mode="enforce",
                 harness=harness,
                 cli_tool=cli_tool,
