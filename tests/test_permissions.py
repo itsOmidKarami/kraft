@@ -10,91 +10,23 @@ what a worker decided it was allowed to do.
 from __future__ import annotations
 
 import asyncio
-import os
-import sqlite3
-from pathlib import Path
 
 import pytest
-from support.harness import (
-    fake_harness_home,
-    fake_templates_dir,
-    v1_chain,
-    write_harness_profiles,
-)
+from support.permissions import PATH as _PATH
+from support.permissions import ask as _ask
+from support.permissions import events_of
+from support.permissions import seed_session as _seed_session
+from support.permissions import templates as _templates
 
 from kraft import client as client_mod
-from kraft import store
 from kraft.adapters import agent as agent_mod
 from kraft.client import transport
-
-#: A real V1 hook point: the canonical path dispatch writes to
-#: `worker_sessions.hook_point` (`executor/dispatch.py`), never a legacy hook.
-_PATH = "implementation.main.work"
-
-
-def _templates(tmp_path, monkeypatch):
-    d = fake_templates_dir(tmp_path, "claude")
-    monkeypatch.setenv("KRAFT_HOME", str(fake_harness_home(tmp_path, ["true"])))
-    write_harness_profiles(d, {"fake": {"provider": "fake"}})
-    return d
 
 
 @pytest.fixture
 def templates_dir(tmp_path, monkeypatch):
     """The `client` fixture's templates: a `fake` harness profile on `true`."""
     return _templates(tmp_path, monkeypatch)
-
-
-def _seed_session(sid="s1", wid="w1", hook_point=_PATH, harness="fake", policy=None):
-    """A V1 work item whose chain has one agent task at `_PATH`, and one
-    pending session on `hook_point`, written straight to the database.
-    `policy` is the node scope's own `policy:`."""
-    chain = v1_chain(
-        [
-            {
-                "id": "implementation",
-                "kind": "exec",
-                **({"policy": policy} if policy is not None else {}),
-                "tasks": [
-                    {"id": "work", "kind": "agent", "harness": harness, "prompt": "Do it."},
-                    {"id": "check", "kind": "subprocess", "command": "true"},
-                ],
-            }
-        ],
-        repo="/r",
-    )
-    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-    conn.row_factory = sqlite3.Row
-    try:
-        store.create_work_item(
-            conn,
-            id=wid,
-            bead_id="B",
-            title="t",
-            repo="/r",
-            chain_template=chain.chain.id,
-            chain_definition="{}",
-            materialized_chain=chain.to_json(),
-        )
-        store.create_session(
-            conn,
-            id=sid,
-            work_item_id=wid,
-            node_id="implementation",
-            hook_point=hook_point,
-            log_path="/tmp/kraft-test.log",
-            result_path="/tmp/kraft-test.json",
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _ask(client, tool_name="Bash", sid="s1", **extra):
-    return client.post(
-        f"/api/worker-sessions/{sid}/permission",
-        json={"tool_name": tool_name, "input": {"command": "ls"}, **extra},
-    )
 
 
 def _resolving_to(monkeypatch, allowed):
@@ -115,11 +47,7 @@ def test_permission_request_allows_when_the_task_declares_no_allowlist(client):
     says so, about the task the session actually is."""
     _seed_session()
     body = _ask(client).json()
-    reasons = [
-        e["payload"]["reason"]
-        for e in client.get("/api/work-items/w1/events").json()
-        if e["type"] == "permission_decision"
-    ]
+    reasons = [e["reason"] for e in events_of(client, "permission_decision")]
     assert body == {"behavior": "allow", "updatedInput": {"command": "ls"}}
     assert reasons == [f"no layer of {_PATH}'s policy sets allowed_tools"]
 
@@ -213,18 +141,17 @@ def test_permission_decision_is_recorded_as_an_event(monkeypatch, client):
     _seed_session()
     _ask(client, "Bash")
     _ask(client, "Read")
-    events = [
-        e
-        for e in client.get("/api/work-items/w1/events").json()
-        if e["type"] == "permission_decision"
-    ]
-    assert [e["payload"]["decision"] for e in events] == ["deny", "allow"]
-    assert events[0]["payload"] == {
+    events = events_of(client, "permission_decision")
+    assert [e["decision"] for e in events] == ["deny", "allow"]
+    assert events[0] == {
         "session_id": "s1",
         "node_id": "implementation",
         "tool": "Bash",
         "decision": "deny",
-        "reason": events[0]["payload"]["reason"],
+        "reason": events[0]["reason"],
+        "harness": None,
+        "cli_tool": None,
+        "grant": None,
     }
 
 
