@@ -680,6 +680,20 @@ READERS: dict[str, Reader] = {
         rate_limit=_rate_limit_codex,
         session_id=_session_id_codex,
     ),
+    # Cursor's `agent -p --output-format stream-json`, from its published docs
+    # (Kraft-bosip; no account to capture a run). Its `system`/`init` line is
+    # claude's shape, so the session id reads the same. Nothing else here is
+    # claude's: no line carries tokens or cost, and `init.model` is a display
+    # name ("Claude 4 Sonnet"), so `from_stream` would write a live row of
+    # zero tokens under a model nobody passed to `--model`. None instead
+    # leaves the row NULL -- not reported, which is the truth.
+    "cursor-stream-json": Reader(
+        name="cursor-stream-json",
+        stream=lambda _lines, _seen: None,
+        envelope=lambda _log_path: None,
+        rate_limit=lambda _log_path: None,
+        session_id=_session_id_claude,
+    ),
 }
 
 

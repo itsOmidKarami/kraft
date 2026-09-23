@@ -9,7 +9,7 @@ from kraft.templates import environment as template_environment
 def test_bundled_harnesses_all_load():
     hs = harness.load(None)
     assert hs.invalid == {}
-    assert sorted(hs.valid) == ["claude", "codex", "gemini"]
+    assert sorted(hs.valid) == ["claude", "codex", "cursor", "gemini"]
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -313,6 +313,25 @@ def test_gemini_folds_context_into_the_prompt():
     assert argv[0] == "gemini"
     assert argv[argv.index("-p") + 1] == "CTX\n\ndo the thing"
     assert "--append-system-prompt" not in argv
+
+
+def test_cursor_argv_forces_edits_and_ends_options_before_the_prompt():
+    """Kraft-bosip. The argv below is what cursor-agent 2026.09.18-9a7762b
+    parsed (reaching its auth check, not "unknown option"). `--force` on every
+    launch, unasked: without it print mode applies no edits. `--` ahead of the
+    prompt, which carries the context: a dash-led prompt is otherwise an
+    unknown option."""
+    argv = _argv("cursor", prompt="-x", options={"model": "gpt-5"}, resume="chat-1")
+    assert argv[:3] == ["agent", "-p", "--trust"]
+    assert "--force" in argv
+    assert argv[argv.index("--model") + 1] == "gpt-5"
+    assert argv[argv.index("--resume") + 1] == "chat-1"
+    assert argv[-2:] == ["--", "CTX\n\n-x"]
+    cursor = harness.load(None).valid["cursor"]
+    assert not cursor.value_ok("permission_mode", "auto")
+    assert cursor.value_ok("model", "claude-opus-4-8[effort=high]")
+    for absent in ("effort", "deny_tools", "restrict_tools", "rate_limit_signal"):
+        assert not cursor.supports(absent), absent
 
 
 def test_monitor_does_not_appear_for_a_harness_without_deny_tools():
