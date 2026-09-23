@@ -50,7 +50,8 @@ jobs:
           # PyPI publishes cannot be undone, so the commit being released must
           # have passed its tests on main -- not be still running, not failed.
           TESTS=$(gh run list --workflow test --branch main --event push --commit "$SHA" \
-            --json conclusion --jq '.[0].conclusion // "missing"')
+            --json status,conclusion \
+            --jq 'if .[0] == null then "missing" elif .[0].status != "completed" then .[0].status else .[0].conclusion end')
           if [ "$TESTS" != "success" ]; then
             echo "::error::test on main at $SHA is '$TESTS', not success; wait for it or fix main"
             exit 1
