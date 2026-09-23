@@ -145,3 +145,46 @@ async def test_a_resumed_session_nets_each_kind_of_token(database, tmp_path):
         ).fetchone()
     )
     assert tuple(row) == (30, 600)
+
+
+async def test_a_resumed_codex_thread_is_netted_by_codex_s_reader(database, tmp_path):
+    """Kraft-wge0e: codex's `turn.completed` usage is the thread's running
+    total, so a session resuming a codex thread records only what it added --
+    read with the session's own harness's reader, whose thread id and totals
+    a claude reader cannot see."""
+
+    async def codex_turn(sid, total_in, total_out, paused=False):
+        log = tmp_path / f"{sid}.log"
+        log.write_text(
+            json.dumps({"type": "thread.started", "thread_id": "thread-1"})
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {"input_tokens": total_in, "output_tokens": total_out},
+                }
+            )
+            + "\n"
+        )
+        await database.write(
+            lambda c: store.create_session(
+                c,
+                id=sid,
+                work_item_id="w1",
+                node_id="implementation",
+                hook_point="escalation",
+                log_path=str(log),
+                result_path=str(tmp_path / f"{sid}.json"),
+            )
+        )
+        if paused:
+            await database.write(lambda c: store.pause_work_item(c, "w1", [sid]))
+        seen = _usage.read(log, tmp_path / f"{sid}.json", "codex-json")
+        await database.write(
+            lambda c: store.session_exited(c, sid, "done", None, seen, reader="codex-json")
+        )
+
+    await codex_turn("a", 100, 10, paused=True)
+    await codex_turn("b", 160, 14)
+
+    assert _spent(database, "b") == (60, 4, None)

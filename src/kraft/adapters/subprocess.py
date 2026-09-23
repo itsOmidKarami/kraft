@@ -679,7 +679,7 @@ async def run_task(
             # both are guarded on the row still being paused.
             await db.write(
                 lambda c: store.record_pause_usage(
-                    c, session_id, _usage.read(log_path, result_path, reader)
+                    c, session_id, _usage.read(log_path, result_path, reader), reader
                 )
             )
     if capped:
@@ -687,7 +687,12 @@ async def run_task(
 
         def _capped(c):
             store.session_exited(
-                c, session_id, "capped_out", None, _usage.read(log_path, result_path, reader)
+                c,
+                session_id,
+                "capped_out",
+                None,
+                _usage.read(log_path, result_path, reader),
+                reader=reader,
             )
             events.append(
                 c,
@@ -752,6 +757,7 @@ async def run_task(
             seen,
             concerns=fields["concerns"],
             question=fields["question"],
+            reader=reader,
         )
     )
     return status

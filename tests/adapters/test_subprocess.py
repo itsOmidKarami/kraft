@@ -621,3 +621,21 @@ async def test_run_task_sandboxed_command_printing_dockers_words_is_its_own_fail
 
     assert (status, row["status"]) == ("failed", "failed")
     assert "Docker daemon" in (run_dirs.logs / "s-says-docker.log").read_text()
+
+
+async def test_run_task_nets_a_resumed_session_with_its_own_reader(run):
+    """Kraft-wge0e: `run_task` hands `session_exited` the reader it read the
+    usage with, so a second session on a codex thread records only what it
+    added to the thread's running total, not the whole thread again."""
+
+    def codex(total_in):
+        lines = [
+            {"type": "thread.started", "thread_id": "thread-1"},
+            {"type": "turn.completed", "usage": {"input_tokens": total_in, "output_tokens": 1}},
+        ]
+        return ["printf", "%s\n", *(json.dumps(line) for line in lines)]
+
+    await run(codex(100), "s-first", reader="codex-json")
+    _, row = await run(codex(160), "s-resumed", reader="codex-json")
+
+    assert row["tokens_in"] == 60

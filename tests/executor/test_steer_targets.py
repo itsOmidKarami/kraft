@@ -5,11 +5,15 @@ when it can (docs/templates-v1-design.md "Operator controls and run forks")."""
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
+from support.harness import write_harness_profiles
 
 from kraft import executor, store
 from kraft.executor import dispatch
+from kraft.paths import default_templates_dir
 
 #: Two agent tasks and a subprocess task running side by side in one step.
 CHAIN = """
@@ -160,3 +164,25 @@ async def test_an_agent_task_that_cannot_resume_restarts_with_its_instruction(
     assert sent["resume_session_id"] is None
     assert "Build the front end." in sent["task_instruction"]
     assert "mind the tests" in sent["task_instruction"]
+
+
+async def test_a_paused_codex_task_resumes_the_thread_its_own_log_names(item_on, launched):
+    """Kraft-wge0e: the provider id is read with the task's harness's reader.
+    A codex log names its thread on `thread.started`, which claude's reader
+    never sees, so the task would restart instead of resuming."""
+    # The live table a launch reads; the seeded `codex` profile is on `fake`.
+    write_harness_profiles(
+        Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir()),
+        {"real-codex": {"provider": "codex"}},
+    )
+    it = await item_on(
+        CHAIN.replace("harness: fake", "harness: real-codex"), "work", status="paused"
+    )
+    await it.session("s0", "work.main.front", "paused")
+    log = it.run_dirs.logs / "s0.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(json.dumps({"type": "thread.started", "thread_id": "thread-front"}))
+
+    await _dispatch(it, "work.main.front", executor.Steer("mind the tests", source="human"))
+
+    assert launched["work.main.front"]["resume_session_id"] == "thread-front"

@@ -212,6 +212,19 @@ To adopt profiles there, copy the `profiles:` section into your
 `model:`/`effort:`. `kraft admin doctor` lists this under what the install is
 missing.
 
+## Escalation turns
+
+An escalation turn, the conversation Kraft opens when a person escalates a
+stopped item or `auto_escalate_stuck` does, runs on the `harnesses.yaml`
+profile policy's `escalation_harness` names: `claude` unless you set it. Set
+it in `policy.yaml`'s `defaults:`, on a repository, chain or node `policy:`,
+or for one item with `kraft item set-policy --policy escalation_harness=codex`.
+`item` follows the harness the item's own latest agent task ran on. The
+thread id the next turn resumes is read with that harness's own log reader,
+and a resumed turn records only what it added to the thread. See
+[`escalation_harness`](configuration.md). A gate's automated review is not
+this: its `auto_review` task names its own `harness:` in the chain.
+
 ## Overriding or adding one
 
 An operator drops a same-named YAML file into `$KRAFT_HOME/templates/harnesses/`

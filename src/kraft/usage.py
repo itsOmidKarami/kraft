@@ -418,13 +418,26 @@ def _cumulative(log_path: Path, cli: str) -> Usage | None:
     return from_envelope(last)
 
 
-def net_of_earlier(own: Usage, log_path: Path, earlier_log: Path, cli: str) -> Usage:
+def net_of_earlier(
+    own: Usage, log_path: Path, earlier_log: Path, cli: str, reader: str = "claude-stream-json"
+) -> Usage:
     """`own`, less what CLI session `cli` had already spent by the end of
     `earlier_log`, a session this one resumed (Kraft-s7c04.62). Both logs'
     envelopes report the session's running totals, so the difference is this
     session's own spend. Unknown earlier spend makes this session's cost
-    unknown too, never the whole running total and never zero."""
-    mine, before = _cumulative(log_path, cli), _cumulative(earlier_log, cli)
+    unknown too, never the whole running total and never zero.
+
+    `reader` names the logs' schema (Kraft-wge0e). Claude's log can hold
+    result envelopes of more than one CLI session, so it is read for `cli`'s;
+    any other harness's envelope is its own running total -- codex's
+    `turn.completed` usage is the thread's."""
+
+    def cumulative(path: Path) -> Usage | None:
+        if reader == "claude-stream-json":
+            return _cumulative(path, cli)
+        return from_envelope(READERS[reader].envelope(path))
+
+    mine, before = cumulative(log_path), cumulative(earlier_log)
     if mine is None:
         return own
     if before is None:

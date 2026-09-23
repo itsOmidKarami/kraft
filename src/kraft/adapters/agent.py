@@ -540,6 +540,22 @@ def _writable_dirs(run_dirs, name: str, cwd) -> str:
     return json.dumps(dirs, ensure_ascii=False)
 
 
+def log_reader(h: _harness.Harness) -> str | None:
+    """The `usage.READERS` schema `h`'s log is read with, or None for a harness
+    that declares none.
+
+    One name serves usage-envelope reading, live progress, rate-limit
+    detection and the resumable session id alike: every shipped harness that
+    declares either gives it the same reader, and `Harness.from_input` requires
+    `structured_log` behind both, so there is one schema to pick from."""
+    usage_cap = h.capabilities["usage"]
+    rate_limit_cap = h.capabilities.get("rate_limit_signal")
+    reader = usage_cap.reader if usage_cap.source == "envelope" else None
+    if reader is None and rate_limit_cap is not None:
+        reader = rate_limit_cap.reader
+    return reader
+
+
 def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip).
@@ -760,15 +776,7 @@ async def run_agent_task(
         resume=resume_session_id,
         options=options,
     )
-    # One name serves usage-envelope reading, live progress and rate-limit
-    # detection alike (usage.READERS): every shipped harness that declares
-    # either gives it the same reader, and `Harness.from_input` requires
-    # `structured_log` behind both, so there is one schema to pick from.
-    usage_cap = h.capabilities["usage"]
-    rate_limit_cap = h.capabilities.get("rate_limit_signal")
-    reader = usage_cap.reader if usage_cap.source == "envelope" else None
-    if reader is None and rate_limit_cap is not None:
-        reader = rate_limit_cap.reader
+    reader = log_reader(h)
     return await _subprocess.run_task(
         db,
         run_dirs,
