@@ -106,6 +106,10 @@ class PermissionAsk(BaseModel):
     #: `tool_names:` mapped it -- recorded on the event, never decided on.
     harness: str | None = None
     cli_tool: str | None = None
+    #: Enforce only: the hook was installed `--fail-closed` (its launch has an
+    #: allowlist), so a policy the route cannot resolve is a logged deny, not
+    #: `unresolved`.
+    fail_closed: bool = False
 
 
 def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:
@@ -174,8 +178,9 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
 
     `enforce` mode (a before-every-call hook, Kraft-4in7z) differs twice:
     unbounded is `no_opinion`, so the CLI's own classifier decides, and an
-    unresolvable policy is `unresolved`, so the hook applies its own
-    `--fail-closed` choice. Neither is a decision, so neither is logged.
+    unresolvable policy is `unresolved` -- unless the hook says it was
+    installed `fail_closed`, when it is a deny like prompt mode's. Neither
+    `no_opinion` nor `unresolved` is a decision, so neither is logged.
 
     Every decision appends an event. That is the whole point -- it is the only
     way the orchestrator ever learns what a worker decided it was allowed to do.
@@ -193,9 +198,9 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     try:
         allowed, denied, grants = _resolved_tools(st, row)
     except Exception as exc:  # noqa: BLE001 -- fail closed on any resolution failure
-        if body.mode == "enforce":
-            # The hook, not the route, knows whether its launch had an
-            # allowlist (`--fail-closed`): report, don't decide, don't log.
+        if body.mode == "enforce" and not body.fail_closed:
+            # A fail-open hook renders this as no opinion: not a decision,
+            # so not logged.
             return {"behavior": "unresolved", "message": f"cannot resolve {task}'s policy: {exc}"}
         decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
     else:

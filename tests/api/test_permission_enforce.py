@@ -72,13 +72,25 @@ def test_enforce_events_name_the_harness_and_its_own_tool_name(client):
 
 
 def test_enforce_reports_an_unresolvable_policy_rather_than_deciding(client):
-    """The hook, not the route, knows whether its launch had an allowlist
-    (`--fail-closed`), so the route reports and logs nothing."""
+    """A fail-open hook renders `unresolved` as no opinion: not a decision,
+    so nothing is logged."""
     seed_session(hook_point="implementation.main.nowhere")
     body = ask(client, mode="enforce").json()
     assert body["behavior"] == "unresolved"
     assert "cannot resolve" in body["message"], body
     assert events_of(client, "permission_decision") == []
+
+
+def test_enforce_fail_closed_denies_an_unresolvable_policy_and_logs_it(client):
+    """A hook installed `--fail-closed` (its launch has an allowlist) gets a
+    deny it can't mistake for no opinion, and the timeline records it."""
+    seed_session(hook_point="implementation.main.nowhere")
+    body = ask(client, mode="enforce", fail_closed=True).json()
+    assert body["behavior"] == "deny"
+    assert "cannot resolve" in body["message"], body
+    [event] = events_of(client, "permission_decision")
+    assert event["decision"] == "deny"
+    assert "cannot resolve" in event["reason"] and "nowhere" in event["reason"], event
 
 
 def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
