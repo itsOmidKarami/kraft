@@ -5,19 +5,16 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
-## 1.2.0
+## 1.1.0
 
 - New harness: OpenCode (`opencode run`), for any provider OpenCode knows,
   including a ChatGPT login and OpenCode's free models (Kraft-nv1f1). Checked
   against opencode 2.0.15 with real Kraft work items on `opencode/big-pickle`
   and `openai/gpt-5.6-luna`. Every launch passes `--auto`, since `run`
   otherwise rejects every permission request. There is no `effort`: name a
-  variant in the model id (`provider/model#high`). Known limit: OpenCode 2.x
-  leaves the last step's usage out of its JSON log, so tokens are
-  undercounted (Kraft-ihoen).
-
-## 1.1.0
-
+  variant in the model id (`provider/model#high`). Usage comes from
+  `opencode session export`, because opencode 2.x's JSON log leaves out the
+  last step's tokens (Kraft-ihoen).
 - Codex workers now work on a default install. Codex's sandbox refused
   writes outside the worktree, so a worker could not write its result file
   under `~/.kraft/run/results` or commit (a linked worktree commits into the

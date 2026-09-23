@@ -11,9 +11,23 @@ reasoning tokens, a rate limit."""
 from __future__ import annotations
 
 import json
+import subprocess
+
+import pytest
 
 from kraft import usage
 from kraft.usage import Usage
+
+#: The real one, taken before tests/conftest.py's guard replaces it.
+REAL_EXPORT = usage._export_opencode
+
+
+@pytest.fixture(autouse=True)
+def _no_export(monkeypatch):
+    """The session export is opencode's own store, not the log under test: a
+    test that wants it says what it returns."""
+    monkeypatch.setattr(usage, "_export_opencode", lambda session_id: None)
+
 
 _SID = "ses_f3458fdd8ffeLKVkq60MrRPGGt"
 
@@ -256,3 +270,48 @@ def test_opencode_reader_sees_a_rate_limit_and_its_retry_after(tmp_path):
     hit = reader.rate_limit(_log(tmp_path, [free]))
     assert hit is not None and hit.resets_at is None and hit.resets_at_iso is None
     assert reader.rate_limit(_log(tmp_path, [_limited(statusCode=500)])) is None
+
+
+#: Captured from opencode 2.0.15 (`opencode session export`, 2026-09-23), the
+#: `info` of a run whose log carried 10 of its 11 `step_finish` events.
+_EXPORT_INFO = {
+    "cost": 0,
+    "tokens": {
+        "input": 32898,
+        "output": 1529,
+        "reasoning": 317,
+        "cache": {"read": 117248, "write": 0},
+    },
+}
+
+
+def test_opencode_reader_prefers_the_session_export_to_the_log(tmp_path, monkeypatch):
+    """Kraft-ihoen: 2.x drops the last step's `step_finish` from the log, so
+    the export's session total wins, asked of the log's own session id."""
+    asked = []
+    total = Usage(tokens_in=32898, tokens_out=1529 + 317, tokens_cache_read=117248, cost_usd=0.0)
+    monkeypatch.setattr(usage, "_export_opencode", lambda sid: asked.append(sid) or total)
+    assert usage.read(_log(tmp_path, _RUN), tmp_path / "none.json", "opencode-json") == total
+    assert asked == [_SID]
+
+
+def test_opencode_reader_falls_back_to_the_log_when_the_export_cannot_answer(tmp_path):
+    u = usage.read(_log(tmp_path, _RUN), tmp_path / "none.json", "opencode-json")
+    assert u.tokens_out == 78 + 3
+
+
+def test_opencode_export_reads_info_as_a_step_and_refuses_what_is_not_one(monkeypatch):
+    def fake(stdout, returncode=0):
+        def run(argv, **kwargs):
+            assert argv == ["opencode", "session", "export", _SID]
+            return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr="")
+
+        return run
+
+    monkeypatch.setattr(subprocess, "run", fake(json.dumps({"info": _EXPORT_INFO})))
+    assert REAL_EXPORT(_SID) == Usage(
+        tokens_in=32898, tokens_out=1529 + 317, tokens_cache_read=117248, cost_usd=0.0
+    )
+    for stdout, rc in (("not json", 0), (json.dumps({"info": _EXPORT_INFO}), 1), ("{}", 0)):
+        monkeypatch.setattr(subprocess, "run", fake(stdout, rc))
+        assert REAL_EXPORT(_SID) is None

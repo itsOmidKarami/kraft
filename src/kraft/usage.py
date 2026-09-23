@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -686,11 +687,52 @@ def _stream_opencode(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | No
     return replace(_sum(seen.values()), cost_usd=None if None in costs else sum(costs))
 
 
-def _envelope_opencode(log_path: Path) -> dict | None:
+def _export_opencode(session_id: str) -> Usage | None:
+    """The session's own total, from `opencode session export <id>`.
+
+    opencode 2.x's `run --format json` never prints the last step's
+    `step_finish` (Kraft-ihoen, measured on 2.0.15: 11 `step_start`, 10
+    `step_finish`), so the log alone undercounts by that step, and a one-step
+    run shows no usage at all. The export's `info.tokens`/`info.cost` are the
+    session's totals in the same shape a step carries. It is keyed by session
+    id alone, so it works after the worktree is gone. None whenever it can't
+    answer -- no binary, a non-zero exit, output that isn't JSON -- and the
+    log's sum stands in.
+    ponytail: runs `opencode` off PATH, not a harness profile's `executable:`;
+    thread the profile's executable through `Reader` if one ever differs."""
     try:
-        u = _stream_opencode(log_path.read_text().splitlines(), {})
+        done = subprocess.run(
+            ["opencode", "session", "export", session_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    try:
+        info = json.loads(done.stdout).get("info") if done.returncode == 0 else None
+    except json.JSONDecodeError, AttributeError:
+        return None
+    if not isinstance(info, dict):
+        return None
+    step = _step_opencode(
+        {
+            "type": "step_finish",
+            "part": {"id": "", "tokens": info.get("tokens"), "cost": info.get("cost")},
+        }
+    )
+    return step[1] if step else None
+
+
+def _envelope_opencode(log_path: Path) -> dict | None:
+    """The session's totals: the export's when it answers, else the sum of
+    the steps the log does carry."""
+    try:
+        logged = _stream_opencode(log_path.read_text().splitlines(), {})
     except OSError:
         return None
+    sid = _session_id_opencode(log_path)
+    u = (_export_opencode(sid) if sid else None) or logged
     if u is None:
         return None
     envelope: dict = {"usage": {k: getattr(u, k) for k in KINDS}}

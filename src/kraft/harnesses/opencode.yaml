@@ -16,9 +16,9 @@
 # this file now targets. 2.x changed three things 1.x had: `--log-level`
 # takes lowercase values only ("ERROR" is refused, exit 1); `--variant` is
 # gone -- a variant is now part of the model id, `provider/model#variant`;
-# and `run --format json` drops the last step's `step_finish` (the session
-# export has it), so usage read off the stream undercounts by that step and
-# a one-step run reports none (Kraft-ihoen).
+# and `run --format json` drops the last step's `step_finish`, so the reader
+# takes the session's totals from `opencode session export` instead, falling
+# back to the log's steps (Kraft-ihoen).
 #
 # `--format json` is read by usage.READERS["opencode-json"].
 id: opencode
