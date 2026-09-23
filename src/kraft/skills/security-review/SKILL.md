@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Use when the verify node asks for a security review of a change that touches authentication, sessions, tokens, secrets, or permission checks. Emits findings the fix loop reads, at severities that decide whether implementation runs again.
+description: "Use when a verification node asks for a security review of a change that touches authentication, sessions, tokens, secrets, or permission checks."
 ---
 
 # Reviewing this work item's diff for security
@@ -32,17 +32,15 @@ Look for, in rough order of what actually bites:
   route to the same resource.
 - **Trust drawn from the wrong place.** A caller's identity taken from a request
   body, a header the client controls, or a work item's own record rather than
-  the session. Kraft's own model has a live example worth pattern-matching
-  against: a worker must not approve its own gate, and that is enforced by
-  `origin`, not by asking the agent.
+  the session, so an actor can vouch for itself by asserting who it is.
 - **Secrets crossing a boundary.** Tokens or password hashes reaching a log, an
   event payload, an error message, an unauthenticated endpoint, or the frontend.
-  `/api/health` is deliberately public — anything added to it is public too.
+  Anything added to a deliberately public endpoint is public too.
 - **Session and cookie semantics.** Expiry, renewal, revocation, `HttpOnly` /
   `SameSite` / `Secure`, and what happens to an in-flight session when the
   password or bind address changes.
 - **A widened perimeter.** A new route outside the authenticated set, a
-  loosened `allowed_hosts`, a bind address moving off loopback, or a CORS or
+  loosened host allowlist, a bind address moving off loopback, or a CORS or
   proxy rule that lets an origin in. A LAN bind without a password is a stop.
 - **Injection into something that executes.** A shell command, a SQL string, a
   path joined from caller input, or a file written outside the worktree.

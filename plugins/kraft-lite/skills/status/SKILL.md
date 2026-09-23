@@ -1,6 +1,6 @@
 ---
 name: status
-description: Use to report where a Kraft Lite chain has got to - which node is live, what is blocking it, how many fix attempts are spent.
+description: "Use when asked where a Kraft Lite chain has got to."
 ---
 
 # Where the chain is
@@ -32,7 +32,7 @@ an unfinished run instant. It has no token or cost figures: Lite runs inside you
 session and cannot see them.
 
 Read-only. Do not advance, close, or approve anything from here - that is what
-`next` and `gate` are for.
+`kraft-lite:next` and `kraft-lite:gate` are for.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.

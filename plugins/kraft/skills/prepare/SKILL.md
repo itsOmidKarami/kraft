@@ -1,14 +1,12 @@
 ---
 name: prepare
-description: Use before starting non-trivial work - defines a spec (with review), optionally
-  a plan (with review) if asked for one, then judges whether the work should happen inline in
-  this session or be handed off to Kraft as a work item.
+description: "Use before starting non-trivial work that needs a spec, or when unsure whether work belongs inline in this session or in Kraft."
 ---
 
 # Preparing work
 
-This is the layer above `handoff`: it defines the work first, then decides where
-it should run. Read `handoff`'s SKILL.md before the handoff step below if you
+This is the layer above `kraft:handoff`: it defines the work first, then decides where
+it should run. **REQUIRED SUB-SKILL:** use `kraft:handoff` at the handoff step below if you
 haven't already.
 
 ## 1. Spec
@@ -26,7 +24,7 @@ Right after the spec, before touching a plan:
   that's already bounded's own terminal state.
 - **Handoff** - the spec came out architectural-classified, or the user already
   said the work is too big for this session, needs gates, or spans sessions.
-  Use `handoff` to file it, attaching the spec. Kraft's own chain plans it -
+  Use `kraft:handoff` to file it, attaching the spec. Kraft's own chain plans it -
   don't write a plan doc just to hand it straight to something that writes its
   own.
 

@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when the verification node asks for a review of the diff this work item has produced so far. Emits findings the fix loop reads, at severities that decide whether a repair runs.
+description: "Use when the verification node asks for a review of the diff this work item has produced so far."
 ---
 
 # Reviewing this work item's diff

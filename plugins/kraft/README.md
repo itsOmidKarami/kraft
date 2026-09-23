@@ -23,4 +23,4 @@ out of the repo.
 
 Published from `plugins/kraft/` in the Kraft repository, alongside
 [kraft-lite](../kraft-lite). The version is Kraft's own release tag, so plugin
-`0.6.0` is the surface `kraft 0.6.0` serves.
+`1.1.0` is the surface `kraft 1.1.0` serves.

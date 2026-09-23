@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Use to connect a new repo to Kraft - runs repo connect, admin init --repo and admin doctor in sequence, then verifies each step actually matches this repo's real setup before calling it done.
+description: "Use when a repo is not yet connected to Kraft, or a newly connected repo has not been verified."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -48,7 +48,7 @@ zero exit code says the command ran, not that what it did was right.
    (they're `managed: false` until touched, so plain `kraft repo list` won't
    show them) and say how many landed. Each is a real, disabled repo of its
    own: it needs its own probed `test_command` checked the same way as the
-   parent's, and its own `enabled: true` (`PATCH /repos`) before any item can
+   parent's, and its own `enabled: true` (set in its `repos.yaml` entry, as with `test_command`) before any item can
    be scoped to it — connecting the parent does not turn any of them on.
 
 2. **Register.** `kraft admin init --repo` - registers Kraft's MCP server and
@@ -70,12 +70,10 @@ zero exit code says the command ran, not that what it did was right.
    echo "$PROBE"
    ```
 
-   Every command below is a separate shell — `$PROBE` will not still be set in
-   it. Read the path the `echo` printed and substitute that literal value
-   (e.g. `/tmp/kraft-onboard-a1b2c3`) everywhere `$PROBE` appears from here on.
-   Re-running `mktemp` for a later command gives you a directory with no
-   worktree in it, not the one you just created — that mismatch is what made
-   the old `$$`-based version of this step fail its own cleanup.
+   Every command below is a separate shell, so `$PROBE` is not set in it.
+   Substitute the literal path the `echo` printed (e.g.
+   `/tmp/kraft-onboard-a1b2c3`) wherever `$PROBE` appears, and never re-run
+   `mktemp`.
 
    First, the repo's own declared preparation — this is what every real
    worktree gets, so a wrong `setup_command` should fail here, once, while
@@ -144,6 +142,6 @@ zero exit code says the command ran, not that what it did was right.
    line rather than declaring onboarding done with a known problem still
    open.
 
-Finish by handing off into the `check` skill for the full drift report
+Finish by handing off into `kraft:check` for the full drift report
 against this install's library and chains — that skill already owns the diff, no need to
 repeat it here.

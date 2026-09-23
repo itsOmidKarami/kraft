@@ -1,6 +1,6 @@
 ---
 name: review-brief
-description: Turn a finished work item into the one page a human reads before approving the merge.
+description: "Use when the final review gate needs a page for the human."
 ---
 
 # The human review brief

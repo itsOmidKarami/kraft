@@ -1,6 +1,6 @@
 ---
 name: next
-description: Use to run the next node of a Kraft Lite chain, and to resume one after a gate, a new session, or a cleared context - reads its whole state from disk, so it is always safe to call.
+description: "Use when continuing a Kraft Lite chain: after start, after a gate answer, or in a new or cleared session."
 ---
 
 # Running the next node
@@ -18,10 +18,10 @@ unfinished chain, show the human the list it printed and ask which - do not pick
 
 You get `node`, `hooks`, `gate`, `attempt`, `cap`, `status` and `note`.
 
-- `status: unstarted` - there is no chain here. Invoke the `start` skill, or say
+- `status: unstarted` - there is no chain here. Invoke `kraft-lite:start`, or say
   so if you were not asked to start one. Do not report this as finished.
 - `status: done` - the chain is finished. Report the summary (below) and stop.
-- `status: blocked` - a gate is waiting. Invoke the `gate` skill. Do not proceed.
+- `status: blocked` - a gate is waiting. Invoke `kraft-lite:gate`. Do not proceed.
 - `note` non-empty - the node was rejected. That note leads this attempt.
 
 ## 2. Run the node's hooks, in order
@@ -48,7 +48,7 @@ stop rather than to run it twice.
 All hooks succeeded:
 
 - `gate` is set - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" gate --name <gate> --chain-id <id>`, then
-  invoke the `gate` skill. Stop.
+  invoke `kraft-lite:gate`. Stop.
 - `gate` is null - `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" close --chain-id <id>`, then run this
   skill again for the next node.
 

@@ -1,6 +1,6 @@
 ---
 name: work-brief
-description: Write the page a human reads at the pre-draft gate, before approving that this work becomes a draft merge request.
+description: "Use when the pre-draft gate needs a page for the human."
 ---
 
 # The work brief

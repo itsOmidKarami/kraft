@@ -1,6 +1,6 @@
 ---
 name: chain-review
-description: Use when a work item's spec and plan have just been approved and Kraft asks whether the rest of its chain still fits the work. Writes a chain_revision change set - usually an empty one - that skips, adds or re-tunes only the nodes that have not run yet, for a person to approve at the revision gate.
+description: "Use when a work item's spec and plan have just been approved and Kraft asks whether the rest of its chain still fits the work."
 ---
 
 # Chain Review
@@ -76,7 +76,7 @@ the person at the gate can find it.
 
 | Evidence in the spec or plan | Reasonable change |
 |---|---|
-| Touches authentication, sessions, tokens, secrets or permission checks | Add a security-review node from the library after verification |
+| Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
 | A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
 | The plan is docs-only, with no executable change | Skip a test node that has nothing to run against, never the review |
 | A risk section names a failure mode the chain never checks, and the library has the check | Add it |

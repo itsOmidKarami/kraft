@@ -1,6 +1,6 @@
 ---
 name: gate-review
-description: Use when Kraft asks whether a work item's gate needs a human. Reads the artifact the gate is about and reports approve, reject, fixed, or undecided — never clearing the gate itself.
+description: "Use when Kraft asks whether a work item's gate needs a human."
 ---
 
 # Gate Review
@@ -29,11 +29,7 @@ that you found nothing wrong with it.
 
 A gate's **id is whatever its chain calls it**, so do not match on names. The
 prompt tells you the gate id and the document it is about; the document's *kind*
-is what tells you which question below is yours. (These used to be keyed on four
-fixed names — `spec_approval`, `plan_approval`, `chain_finalized`,
-`human_review_approval` — which a custom chain never had and which left the
-seeded chain's own draft-merge-request gate undescribed.)
-
+is what tells you which question below is yours.
 - **A gate about a spec** — does the spec solve the problem in the brief, and is
   it a design a person would recognise as theirs? A spec that solves a
   *different* problem, however well, is a reject.
