@@ -1,0 +1,92 @@
+# Cursor's agent CLI (Kraft-bosip). Every flag below checked against
+# `agent --help` of cursor-agent 2026.09.18-9a7762b, and the whole launch --
+# this argv, `config_dir` below, the worker env -- run for real, logged in,
+# on 2026-09-23 from a linked worktree whose main checkout is under $HOME.
+#
+# The stream-json log is read by usage.READERS["cursor-stream-json"],
+# checked against that run's captured lines: tokens off the `result` line,
+# the chat id off `system`/`init`. No cost, no rate-limit event.
+#
+# Login state is in the OS keychain, not the config dir, so it survives
+# `config_dir`. An API-key install needs `env_passthrough: [CURSOR_API_KEY]`
+# in the repo's repos.yaml entry: the worker environment is an allowlist.
+id: cursor
+kind: cli
+# `-p` is print mode, a boolean -- the prompt is a positional. `--trust` skips
+# the workspace-trust prompt "(headless mode only)", and every Kraft worktree
+# is a workspace Cursor has never seen.
+command: [agent, -p, --trust]
+
+capabilities:
+  # No system-prompt or rules flag exists; Cursor reads AGENTS.md and
+  # .cursor/rules from the workspace, which Kraft does not write. So context
+  # rides in the prompt, like gemini.
+  context:         { channel: prompt }
+  structured_log:  { cli: ["--output-format", "stream-json"] }
+  # No `values:` on purpose, as in claude.yaml: Cursor's model list changes
+  # without Kraft (`agent models` lists this account's), and `values:` is a
+  # hard gate at load. A wrong model is caught by the CLI at launch.
+  model:           { cli: ["--model", "{value}"] }
+  # `--auto-review` is Smart Auto: Cursor's server classifier runs the tool
+  # calls it judges safe and refuses the rest -- the counterpart of claude's
+  # `auto` and codex's approve-for-me. Without a mode, print mode only
+  # proposes edits. `force` (`--force`, run everything) stays an override.
+  permission_mode: { cli: ["--{value}"], values: [auto-review, force], always: auto-review }
+  # `--resume [chatId]`, the init line's `session_id`. Chats live in the
+  # config dir, which is why `config_dir` is one per harness, not per launch.
+  resume:          { cli: ["--resume", "{value}"] }
+  usage:           { source: envelope, reader: cursor-stream-json }
+  # `--` ends option parsing (checked: `agent -p -- --x` reaches the auth
+  # check, `agent -p --x` is "unknown option"), so a prompt starting with a
+  # dash stays a prompt. Declared last: it is the positional.
+  prompt:          { cli: ["--", "{value}"] }
+
+# Kraft points CURSOR_CONFIG_DIR at $KRAFT_HOME/run/harness-config/cursor/ and
+# writes this file there before every launch; the user's ~/.cursor is never
+# read or touched. It is exactly what `agent status` writes into an empty
+# CURSOR_CONFIG_DIR (2026.09.18-9a7762b), with one change: `attribution` off.
+# With it on, Cursor adds `--trailer "Co-authored-by: Cursor"` to a commit,
+# and `--auto-review` refused every such commit (3 of 3 in a probe); with it
+# off, commits went through (Kraft-umakq). No permission allow rule is added:
+# `Shell(ls)` is Cursor's own default.
+config_dir:
+  env: CURSOR_CONFIG_DIR
+  files:
+    cli-config.json:
+      version: 1
+      editor: { vimMode: false }
+      display:
+        showLineNumbers: false
+        showThinkingBlocks: false
+        showStatusIndicators: false
+        showStatusLineRunningTime: false
+        mode: zen
+      notifications: true
+      hints: true
+      modelSlashCommands: true
+      steering: true
+      rewind: true
+      hasChangedDefaultModel: false
+      exploreSubagentModel: default
+      permissions: { allow: ["Shell(ls)"], deny: [] }
+      approvalMode: allowlist
+      autoAcceptWebSearch: false
+      sandbox: { mode: disabled, networkAccess: user_config_with_defaults }
+      runEverythingSettingsPromptStreak: 0
+      network: { useHttp1ForAgent: false }
+      attribution: { attributeCommitsToAgent: false, attributePRsToAgent: false }
+
+# Absent, deliberately. A binding naming one of these is rejected at load,
+# naming this file.
+# - effort: no flag. A model id can carry it, `--model 'name[effort=high]'`,
+#   so a profile that needs it spells it in the model value.
+# - deny_tools, allowed_tools, restrict_tools: no per-launch tool flags; the
+#   permission lists live in cli-config.json. With no restrict_tools or
+#   under_allowlist, a launch under a tool allowlist is refused.
+# - approval_channel: no flag hands approvals to an MCP tool (Kraft-4in7z).
+# - autocompact: no flag.
+# - rate_limit_signal: the stream has no rate-limit event, so a limit fails
+#   the launch rather than parking it or switching to a fallback.
+# Unbound though they exist: --sandbox (Cursor's own command sandbox, off in
+# the config above), --approve-mcps (Kraft registers no MCP server with
+# Cursor), --mode plan|ask (read-only modes no Kraft task asks for).

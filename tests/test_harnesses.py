@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from kraft.templates import environment as template_environment
 def test_bundled_harnesses_all_load():
     hs = harness.load(None)
     assert hs.invalid == {}
-    assert sorted(hs.valid) == ["amp", "claude", "codex", "gemini", "opencode"]
+    assert sorted(hs.valid) == ["amp", "claude", "codex", "cursor", "gemini", "opencode"]
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -247,6 +248,39 @@ def test_a_harness_is_built_from_its_input_model():
         )
 
 
+def test_config_dir_files_are_written_as_json_and_must_stay_in_the_dir():
+    """Kraft-bosip. A `config_dir` file is a mapping Kraft writes as JSON into
+    a directory it owns, so a name that climbs out of it is refused at load."""
+    base = {
+        "id": "mini",
+        "kind": "cli",
+        "command": "mini",
+        "capabilities": {
+            "context": {"channel": "prompt"},
+            "usage": {"source": "result_file"},
+            "prompt": {"cli": ["{value}"]},
+        },
+    }
+    h = harness.Harness.from_mapping(
+        {**base, "config_dir": {"env": "MINI_DIR", "files": {"c.json": {"a": False}}}},
+        where="test",
+    )
+    assert h.config_env == "MINI_DIR"
+    assert json.loads(h.config_files["c.json"]) == {"a": False}
+    assert harness.Harness.from_mapping(base, where="test").config_env is None
+    for bad in ("../c.json", "sub/c.json", ".."):
+        with pytest.raises(harness.HarnessError, match="is not a plain name"):
+            harness.Harness.from_mapping(
+                {**base, "config_dir": {"env": "MINI_DIR", "files": {bad: {}}}}, where="test"
+            )
+    with pytest.raises(harness.HarnessError, match="needs an 'env'"):
+        harness.Harness.from_mapping({**base, "config_dir": {"files": {}}}, where="test")
+    with pytest.raises(harness.HarnessError, match="'config_dir' needs an 'env' string"):
+        harness.Harness.from_mapping(
+            {**base, "config_dir": {"env": "X", "files": {"c.json": "text"}}}, where="test"
+        )
+
+
 def test_one_bad_file_does_not_take_the_others_down(tmp_path):
     """The `load_templates` precedent: quarantine by name, keep serving."""
     _write(tmp_path, "good.yaml", _MINIMAL.format(id="good"))
@@ -315,6 +349,29 @@ def test_gemini_folds_context_into_the_prompt():
     assert argv[0] == "gemini"
     assert argv[argv.index("-p") + 1] == "CTX\n\ndo the thing"
     assert "--append-system-prompt" not in argv
+
+
+def test_cursor_argv_runs_auto_review_and_ends_options_before_the_prompt():
+    """Kraft-bosip. The argv below is what cursor-agent 2026.09.18-9a7762b ran,
+    logged in. `--auto-review` (Cursor's classifier) on every launch, unasked:
+    without a mode print mode applies no edits. `force` is the override. `--`
+    ahead of the prompt, which carries the context: a dash-led prompt is
+    otherwise an unknown option."""
+    argv = _argv("cursor", prompt="-x", options={"model": "gpt-5"}, resume="chat-1")
+    assert argv[:3] == ["agent", "-p", "--trust"]
+    assert "--auto-review" in argv
+    assert "--force" not in argv
+    assert argv[argv.index("--model") + 1] == "gpt-5"
+    assert argv[argv.index("--resume") + 1] == "chat-1"
+    assert argv[-2:] == ["--", "CTX\n\n-x"]
+    forced = _argv("cursor", options={"permission_mode": "force"})
+    assert "--force" in forced
+    assert "--auto-review" not in forced
+    cursor = harness.load(None).valid["cursor"]
+    assert not cursor.value_ok("permission_mode", "auto")
+    assert cursor.value_ok("model", "claude-opus-4-8[effort=high]")
+    for absent in ("effort", "deny_tools", "restrict_tools", "rate_limit_signal"):
+        assert not cursor.supports(absent), absent
 
 
 def test_monitor_does_not_appear_for_a_harness_without_deny_tools():

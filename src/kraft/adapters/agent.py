@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
@@ -536,6 +537,27 @@ def _writable_dirs(run_dirs, name: str, cwd) -> str:
     return json.dumps(dirs, ensure_ascii=False)
 
 
+def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str]:
+    """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
+    written, or `{}` for a harness that declares none (Kraft-bosip).
+
+    One directory per harness under $KRAFT_HOME/run, not per launch: the CLI
+    keeps its chats there too, and `resume` must find the chat an earlier
+    launch wrote. The files are rewritten on every launch, so whatever the CLI
+    changed in them never outlives a session; each write is a rename, so two
+    launches at once never read half a file. The user's own config is never
+    read or touched."""
+    if h.config_env is None:
+        return {}
+    directory = run_dirs.base / "harness-config" / h.id
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, text in h.config_files.items():
+        tmp = directory / f".{name}.{session_id}"
+        tmp.write_text(text)
+        os.replace(tmp, directory / name)
+    return {h.config_env: str(directory)}
+
+
 def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
     """`task_instruction`, or its head plus where the whole of it is written.
 
@@ -736,6 +758,7 @@ async def run_agent_task(
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
+            **_config_dir(run_dirs, h, session_id),
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
         round=round,

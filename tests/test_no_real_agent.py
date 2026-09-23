@@ -16,6 +16,7 @@ import pytest
 from support.harness import REAL_AGENT_BINARIES as _REAL_AGENT_BINARIES
 
 import kraft.adapters.subprocess as sp_mod
+from kraft import harness
 
 
 def test_a_real_agent_binary_is_refused_by_name(tmp_path):
@@ -26,6 +27,14 @@ def test_a_real_agent_binary_is_refused_by_name(tmp_path):
     characters."""
     with pytest.raises(AssertionError, match="real agent binary 'claude'"):
         asyncio.run(sp_mod.run_task(None, None, cmd=["claude", "-p", "hello"], cwd=tmp_path))
+
+
+def test_every_bundled_harness_executable_is_guarded():
+    """A harness whose binary the guard does not name launches for real from a
+    unit test. Cursor's is `agent`, not the `cursor-agent` listed first
+    (Kraft-bosip)."""
+    for h in harness.load(None).valid.values():
+        assert h.command[0] in _REAL_AGENT_BINARIES, h.id
 
 
 def test_a_fixture_agent_and_an_ordinary_subprocess_are_untouched(tmp_path):

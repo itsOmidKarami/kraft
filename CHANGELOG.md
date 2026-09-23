@@ -7,6 +7,15 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- New harness: Cursor's agent CLI (`agent -p`), checked with real runs on
+  cursor-agent 2026.09.18-9a7762b (Kraft-bosip). It runs in `--auto-review`,
+  Cursor's classifier mode; `permission_mode: force` overrides it. Every
+  launch points `CURSOR_CONFIG_DIR` at a Kraft-owned directory under
+  `$KRAFT_HOME/run`, rewritten with Cursor's default config and commit
+  attribution off, so a worker's commits carry no `Co-authored-by: Cursor`
+  trailer and the classifier no longer refuses them (Kraft-umakq). Your own
+  `~/.cursor` is untouched. Tokens are read off the log; Cursor reports no cost.
+- Docs: a table of how each harness runs unattended, in the harnesses page.
 - New harness: Amp (`amp -x`), with Amp's mode (`low` to `ultra`) as
   `effort` (Kraft-gvrke). Checked with a real Kraft work item on a logged-in
   amp. Resuming works: every launch passes `--no-archive-after-execute`,

@@ -14,11 +14,12 @@ non-CLI kind. That is why capability and invocation are separate axes here.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import yaml
 from pydantic import BaseModel, BeforeValidator, ConfigDict, StrictStr, ValidationError
@@ -117,6 +118,12 @@ class Harness:
     #: Insertion-ordered: this is argv order (PyYAML preserves it).
     capabilities: dict[str, Capability] = field(default_factory=dict)
     path: Path | None = None
+    #: The env var naming the CLI's config directory, when the harness wants
+    #: one Kraft owns instead of the user's (Kraft-bosip: Cursor's
+    #: `CURSOR_CONFIG_DIR`). None: the CLI reads its own, as ever.
+    config_env: str | None = None
+    #: File name -> text Kraft writes into that directory before every launch.
+    config_files: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -220,6 +227,15 @@ class Harness:
                     "the last declared capability (argv order is declaration order)"
                 )
 
+        config = parsed.config_dir
+        if config is not None:
+            if not config.env:
+                raise HarnessError(f"{where}: 'config_dir' needs an 'env' naming its variable")
+            for name in config.files:
+                # Written under a directory Kraft owns: a name must stay in it.
+                if name in ("", ".", "..") or Path(name).name != name:
+                    raise HarnessError(f"{where}: 'config_dir' file {name!r} is not a plain name")
+
         return cls(
             id=parsed.id,
             kind=kind,
@@ -227,6 +243,11 @@ class Harness:
             command_resume=command_resume,
             capabilities=caps,
             path=path,
+            config_env=config.env if config is not None else None,
+            config_files={
+                name: json.dumps(body, indent=2) + "\n"
+                for name, body in (config.files if config is not None else {}).items()
+            },
         )
 
     def supports(self, name: str) -> bool:
@@ -272,6 +293,16 @@ class CapabilityInput(BaseModel):
     under_allowlist: StrictStr | None = None
 
 
+class ConfigDirInput(BaseModel):
+    """`config_dir:` as written: the variable the CLI reads its config
+    directory from, and each file in it as a mapping Kraft writes as JSON."""
+
+    model_config = ConfigDict(strict=True)
+
+    env: StrictStr = ""
+    files: dict[StrictStr, dict[StrictStr, Any]] = {}
+
+
 class HarnessInput(BaseModel):
     """One harness file as written. Everything is defaulted so that a missing
     key reaches `Harness.from_input`, which refuses it in the same words as a
@@ -284,6 +315,7 @@ class HarnessInput(BaseModel):
     command: Prefix = []
     command_resume: Prefix = []
     capabilities: dict[StrictStr, CapabilityInput] = {}
+    config_dir: ConfigDirInput | None = None
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -311,6 +343,8 @@ def _shape_problem(exc: ValidationError) -> str:
             return f"capability {name!r} must be a mapping"
         case ("capabilities", name, key, *_):
             return f"capability {name!r} {key!r} {_SHAPE.get(key, 'must be a string')}"
+        case ("config_dir", *_):
+            return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
     return "expected a top-level mapping"
 
 

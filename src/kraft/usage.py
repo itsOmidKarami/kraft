@@ -639,6 +639,38 @@ def _rate_limit_codex(log_path: Path) -> RateLimitInfo | None:
     return None
 
 
+def _envelope_cursor(log_path: Path) -> dict | None:
+    """Every `result` line's `usage` in an `agent -p --output-format
+    stream-json` log, summed, in Kraft's own names (Kraft-bosip).
+
+    Measured on cursor-agent 2026.09.18-9a7762b. One `result` line per
+    invocation, carrying that invocation's own tokens: a resumed chat's second
+    run reported 745 input after the first's 18393, so a log re-launched into
+    sums its lines. `inputTokens` is uncached input only: in the same line
+    `cacheReadTokens` was larger than it (50432 against 18393, and 44928
+    against 21576 in an earlier run), which a share of it could never be. No
+    cost, and no model: the stream carries no price, and `init.model` is a
+    display name ("Auto"), not what `--model` takes.
+    """
+    blocks = [
+        o["usage"]
+        for o in _log_objects(log_path)
+        if o.get("type") == "result" and isinstance(o.get("usage"), dict)
+    ]
+    if not blocks:
+        return None
+    u = _sum(
+        Usage(
+            tokens_in=_int(b.get("inputTokens")),
+            tokens_out=_int(b.get("outputTokens")),
+            tokens_cache_read=_int(b.get("cacheReadTokens")),
+            tokens_cache_write=_int(b.get("cacheWriteTokens")),
+        )
+        for b in blocks
+    )
+    return {"usage": {k: getattr(u, k) for k in KINDS}}
+
+
 def _envelope_amp(log_path: Path) -> dict | None:
     """Every `assistant` line's `message.usage` in an `amp -x --stream-json`
     log, summed, in Kraft's own names.
@@ -855,6 +887,18 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_codex,
         rate_limit=_rate_limit_codex,
         session_id=_session_id_codex,
+    ),
+    # Cursor's `agent -p --output-format stream-json` (Kraft-bosip). Its
+    # `system`/`init` line is claude's shape, so the chat id reads the same.
+    # Tokens are only on the closing `result` line, so there is nothing to show
+    # live: `from_stream` would write a row of zero tokens under the display
+    # name `init.model` carries. The envelope reads the `result` lines.
+    "cursor-stream-json": Reader(
+        name="cursor-stream-json",
+        stream=lambda _lines, _seen: None,
+        envelope=_envelope_cursor,
+        rate_limit=lambda _log_path: None,
+        session_id=_session_id_claude,
     ),
     # Amp's `--stream-json` is Claude Code's shape (ampcode.com/docs/cli/
     # streaming-json, Kraft-gvrke): live progress off `assistant` lines and the
