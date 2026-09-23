@@ -152,7 +152,10 @@ Page rules:
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/4.reference/1.cli/` |
 | A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/4.reference/2.configuration/` |
-| A chain template's node fields, or a new default chain | `docsite/content/2.concepts/1.vocabulary.md` |
+| A chain template's node fields | `docsite/content/4.reference/3.chain-nodes.md` |
+| A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
+| Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/4.reference/6.triggers.md` |
+| The permission gate (`src/kraft/harnesses/*.yaml`, `permissions`) | `docsite/content/4.reference/4.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/4.reference/5.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) or a Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.agent-integration.md` |
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/3.remote-access.md`, and `SECURITY.md` if it's security-relevant |
@@ -168,8 +171,7 @@ page you're touching, not just the code.
 
 Specs and implementation plans are not committed. `.engineering/` and
 `docs/superpowers/` are gitignored. `design/` and `docs/consolidated/` are
-gitignored too and live only in the maintainer's private archive — if you see
-them still tracked in the tree, they haven't been scrubbed from history yet.
+gitignored too.
 `docs/intent/` and `docs/templates-v1-design.md` are the exceptions: the
 first states intended behaviour as pinned requirements, the second is the
 templates design draft, and both are maintained with the code.

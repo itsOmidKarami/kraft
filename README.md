@@ -85,7 +85,7 @@ pipeline.
 - [Concepts](https://itsomidkarami.github.io/kraft/concepts/vocabulary): work items, chains, nodes, gates, caps.
 - [CLI reference](https://itsomidkarami.github.io/kraft/reference/cli): every `kraft` verb.
 - [Configuration](https://itsomidkarami.github.io/kraft/reference/configuration): `repos.yaml`, `policy.yaml`, `access.yaml`, and the state directory (`$KRAFT_HOME`).
-- [Agent integration](https://itsomidkarami.github.io/kraft/guides/agent-integration): MCP tools, skills, and Kraft Lite.
+- [Agent integration](https://itsomidkarami.github.io/kraft/guides/agent-integration): MCP tools and skills.
 - [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://itsomidkarami.github.io/kraft/reference/triggers): start a chain from a schedule or an HTTP call.
 - [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](SECURITY.md).

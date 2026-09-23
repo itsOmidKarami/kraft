@@ -122,7 +122,7 @@ variant: ghost
 title: Source
 description: >-
   Kraft is on GitHub, Apache-2.0 licensed. CONTRIBUTING.md covers getting a
-  dev environment running and how releases work.
+  dev environment running. Maintainers: RELEASING.md covers how releases work.
 links:
   - label: itsOmidKarami/kraft
     to: https://github.com/itsOmidKarami/kraft
