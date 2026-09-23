@@ -18,7 +18,9 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   exactly one plain git invocation of that operation, whatever
   `allowed_tools` says; a commit message with `$` or `!`, or anything
   chained, still goes to the classifier. Grants accumulate down the layers,
-  and a work item's own override can drop a grant but never add one.
+  and a work item's own override can drop a grant but never add one. An
+  escalation turn is granted all three by default, so it can rebase and
+  push; `defaults.escalation_grants` in `policy.yaml` narrows that.
 - New `policy.yaml` key `escalation_harness` picks the harness an escalation
   turn runs on (Kraft-wge0e). Unset, it is `claude`, as before. Set it in
   `defaults:`, on a repository, chain or node, or for one item with

@@ -115,6 +115,27 @@ async def test_an_unset_escalation_harness_is_claude(database, run_dirs, launche
 
 
 @pytest.mark.parametrize(
+    ("defaults", "grants"),
+    [
+        (None, ("git-commit", "git-rebase", "git-push")),
+        ({"escalation_grants": ["git-commit"]}, ("git-commit",)),
+        ({"escalation_grants": []}, ()),
+    ],
+    ids=["default", "narrowed", "none"],
+)
+async def test_an_escalation_holds_policy_yaml_s_escalation_grants(
+    database, run_dirs, launched, defaults, grants
+):
+    """Kraft-4in7z: an escalation has to rebase and push, so unless
+    `defaults.escalation_grants` says otherwise its launch holds all three."""
+    await _item(database, run_dirs, defaults)
+
+    await _escalate(database, run_dirs)
+
+    assert launched[0]["grants"] == grants
+
+
+@pytest.mark.parametrize(
     ("defaults", "item_policy"),
     [({"escalation_harness": "cx"}, None), (None, {"escalation_harness": "cx"})],
     ids=["policy-yaml", "item-override"],

@@ -12,7 +12,7 @@ import asyncio
 import json
 
 import pytest
-from support.permissions import ask, events_of, seed_session, templates
+from support.permissions import PATH, ask, events_of, seed_session, templates
 
 from kraft import harness, permission_hooks
 
@@ -108,6 +108,21 @@ def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
         ("allow", "git-push"),
         ("deny", None),
     ]
+
+
+@pytest.mark.parametrize(
+    ("hook_point", "behavior", "grant"),
+    [("escalation", "allow", "git-push"), (PATH, "deny", None)],
+    ids=["escalation", "chain-task"],
+)
+def test_an_escalation_turn_holds_the_default_push_grant(client, hook_point, behavior, grant):
+    """Kraft-4in7z: an escalation turn's plain `git push` passes an allowlist
+    without Bash on `defaults.escalation_grants`, which nothing set; a chain
+    task at the same node gets no such default."""
+    seed_session(hook_point=hook_point, policy={"allowed_tools": ["Read"]})
+    assert ask(client, input=_PUSH).json()["behavior"] == behavior
+    [event] = events_of(client, "permission_decision")
+    assert (event["decision"], event["grant"]) == (behavior, grant)
 
 
 def test_prompt_mode_never_lets_a_grant_lift_a_deny(client):

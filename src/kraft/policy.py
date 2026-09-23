@@ -67,6 +67,9 @@ DEFAULT_ESCALATION_HARNESS = "claude"
 #: An `escalation_harness` value meaning "the harness this item's own work ran
 #: on" (`escalate.item_harness`), not a `harnesses.yaml` profile id.
 FOLLOW_ITEM = "item"
+#: What an escalation turn is granted when `defaults.escalation_grants` is
+#: unset (Kraft-4in7z): it has to be able to rebase the branch and push it.
+DEFAULT_ESCALATION_GRANTS = ("git-commit", "git-rebase", "git-push")
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 
 
@@ -625,6 +628,9 @@ class PolicyDefaultsInput(CapLevels):
     #: (`FOLLOW_ITEM`). Operational: any layer may change it, and the
     #: resolved profile still has to be in `allowed_harnesses` at launch.
     escalation_harness: StrictStr | None = None
+    #: Grants every escalation turn holds on top of its node's own
+    #: (`DEFAULT_ESCALATION_GRANTS` when unset; `[]` grants it nothing extra).
+    escalation_grants: GrantNames | None = None
 
 
 class PolicyMaximaInput(CapLevels):
@@ -1008,6 +1014,8 @@ class InstancePolicy:
     cap_defaults: CapLevels = field(default_factory=CapLevels)
     #: What an escalation turn at this scope runs on (Kraft-wge0e).
     escalation_harness: str = DEFAULT_ESCALATION_HARNESS
+    #: `defaults.escalation_grants`, frozen with the snapshot like the rest.
+    escalation_grants: tuple[str, ...] = DEFAULT_ESCALATION_GRANTS
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -1028,6 +1036,9 @@ class InstancePolicy:
             maxima=m,
             cap_defaults=CapLevels(**{level: getattr(d, level) for level in CAP_LEVELS}),
             escalation_harness=d.escalation_harness or DEFAULT_ESCALATION_HARNESS,
+            escalation_grants=tuple(d.escalation_grants)
+            if d.escalation_grants is not None
+            else DEFAULT_ESCALATION_GRANTS,
         )
 
     def at_level(self, level: str) -> InstancePolicy:

@@ -138,6 +138,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
         if scope is None:
             raise LookupError(f"no node {row['node_id']!r} in its work item's chain")
         agent_task = escalate.ESCALATION_TASK
+        policy = escalate.turn_policy(scope_policy(item, scope))
     else:
         scope = next(
             (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
@@ -146,6 +147,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
         if scope is None or not isinstance(scope.task, AgentTask):
             raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
         agent_task = scope.task
+        policy = scope_policy(item, scope)
     launch = deps.launch(st, item["repo"])
     inv = _agent.resolve_agent_task(
         agent_task,
@@ -158,7 +160,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], t
         # lists reported here are the item's own launch's, never a fanned-out
         # member's.
         item_repo=item["repo"],
-        policy=scope_policy(item, scope),
+        policy=policy,
     )
     return inv.allowed_tools, inv.deny_tools, inv.grants
 

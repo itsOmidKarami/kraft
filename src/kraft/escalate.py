@@ -11,6 +11,7 @@ session standing in the worktree, which is what lets it call
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import uuid
 
@@ -617,4 +618,13 @@ def _node_policy(row) -> _policy.InstancePolicy | None:
     snapshot = store.materialized_chain_of(row)
     nodes = snapshot.chain.nodes if snapshot is not None else ()
     node = next((n for n in nodes if n.id == row["current_node_id"]), None)
-    return executor.scope_policy(row, node) if node is not None else None
+    return turn_policy(executor.scope_policy(row, node)) if node is not None else None
+
+
+def turn_policy(policy: _policy.InstancePolicy) -> _policy.InstancePolicy:
+    """`policy`, a node's, as an escalation turn at that node runs under it:
+    its grants plus `defaults.escalation_grants` (Kraft-4in7z), so the turn
+    can rebase and push the branch it is rescuing."""
+    return dataclasses.replace(
+        policy, grants=tuple(dict.fromkeys((*policy.grants, *policy.escalation_grants)))
+    )

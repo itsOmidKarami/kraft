@@ -103,6 +103,12 @@ only what every repository in it grants. A work item's own override can drop a
 grant but never add one: what a task is granted is authored in the chain or
 the repository, not filed with the item.
 
+An escalation turn holds its node's grants plus `policy.yaml`'s
+`defaults.escalation_grants`, which unset is all three: an escalation has to
+be able to rebase the branch and push it. Set it to a shorter list, or `[]`,
+to grant escalations less. A gate's reviewer gets no such default, and a
+chain task's `git-commit` already comes with its launch.
+
 ## Where decisions show up
 
 Every decision — allow or deny, and why — is appended to the work item's
