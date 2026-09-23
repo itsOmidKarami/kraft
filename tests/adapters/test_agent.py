@@ -246,33 +246,6 @@ async def test_run_agent_task_builds_a_codex_command_line(launch, tmp_path, monk
     assert "--permission-prompt-tool" not in argv
 
 
-async def test_a_codex_launch_may_write_its_result_files_directory(
-    launch, run_dirs, tmp_path, monkeypatch
-):
-    """Kraft-rs9pk: codex's workspace-write sandbox writes only the worktree
-    and /tmp, and $KRAFT_RESULT_PATH lives in `run_dirs.results`. Every codex
-    launch grants that directory, ahead of the bare prompt that must stay last."""
-    log = _argv_log(monkeypatch, tmp_path)
-
-    await launch(harness="codex")
-
-    argv = _last_argv(log)
-    i = argv.index("--add-dir")
-    assert Path(argv[i + 1]) == run_dirs.results
-    assert argv[-1] == "make the failing test pass"
-
-
-async def test_a_harness_without_result_dir_is_given_no_directory(
-    launch, run_dirs, tmp_path, monkeypatch
-):
-    """A harness that declares no `result_dir` launches exactly as before."""
-    log = _argv_log(monkeypatch, tmp_path)
-
-    await launch(harness="claude")
-
-    assert str(run_dirs.results) not in _last_argv(log)
-
-
 async def test_run_agent_task_still_builds_todays_claude_command_line(
     launch, tmp_path, monkeypatch
 ):

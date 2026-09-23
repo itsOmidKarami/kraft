@@ -22,7 +22,7 @@ Kraft ships three harnesses:
 A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `usage`, `rate_limit_signal` — and each harness's own YAML
+`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `result_dir` — and each harness's own YAML
 (`src/kraft/harnesses/*.yaml` in the package) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
 acceptEdits|auto|...` for Claude, `-s read-only|workspace-write|...` for
@@ -33,6 +33,14 @@ Three capabilities are required — `prompt`, `context`, `usage` — since no
 agent dispatch can be built without them. Two are non-invocable —`usage`,
 `rate_limit_signal` — they describe what Kraft reads back out of a session
 (from its structured log or a result file), not an argv it constructs.
+
+One is filled by Kraft, never by a task: `result_dir`, the directory holding
+the launch's `$KRAFT_RESULT_PATH` (`$KRAFT_HOME/run/results`). It's for a CLI
+whose own sandbox would refuse to write outside the worktree. Codex binds it
+to `--add-dir {value}`, because its `workspace-write` sandbox writes only the
+workspace and `/tmp`, and without that flag a codex worker on a default
+install (`~/.kraft`) can't write its result file. A harness that doesn't
+declare `result_dir` gets nothing extra.
 
 Some harnesses declare `values:` on a capability — a closed vocabulary the
 CLI itself would reject (Codex's `effort` is `minimal, low, medium, high`,
@@ -140,7 +148,7 @@ capabilities:
 `prompt`, `context`, and `usage` are required — nothing can dispatch without
 them. Every other capability (`model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `rate_limit_signal`) is optional: omit what the CLI can't
+`autocompact`, `structured_log`, `rate_limit_signal`, `result_dir`) is optional: omit what the CLI can't
 do, and a binding naming it is rejected at load, pointing at this file.
 
 A capability needs a `cli:` argv fragment unless it's `usage`/
