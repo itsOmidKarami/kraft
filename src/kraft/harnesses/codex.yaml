@@ -29,6 +29,11 @@ capabilities:
   model:           { cli: ["-m", "{value}"], values: ['(gpt|o[0-9]|codex).*'] }
   effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high, xhigh] }
   permission_mode: { cli: ["-s", "{value}"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
+  # Kraft-rs9pk: workspace-write lets codex write the workspace and /tmp only,
+  # and $KRAFT_RESULT_PATH lives under $KRAFT_HOME/run/results. Kraft fills
+  # this with that directory on every launch. Probed against codex-cli 0.155.0
+  # on 2026-09-23: without it a write under $HOME is refused.
+  result_dir:      { cli: ["--add-dir", "{value}"] }
   resume:          { via: command_resume }
   usage:             { source: envelope, reader: codex-json }
   rate_limit_signal: { reader: codex-json }

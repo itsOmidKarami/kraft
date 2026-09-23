@@ -706,6 +706,13 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
+    # Kraft's own value, not a task's, so the check above never sees it. The
+    # result file lives under $KRAFT_HOME/run/results, outside the worktree a
+    # sandboxed CLI (codex's workspace-write) may write to (Kraft-rs9pk).
+    if h.supports("result_dir"):
+        options["result_dir"] = str(
+            _subprocess.result_path_for(run_dirs, files or session_id).parent
+        )
     cmd = _harness.build_argv(
         h,
         command=command or None,

@@ -51,6 +51,10 @@ KNOWN = (
     "resume",
     "autocompact",
     "rate_limit_signal",
+    # Kraft fills it, never a task: the directory holding $KRAFT_RESULT_PATH,
+    # for a CLI whose own sandbox would otherwise refuse the write there
+    # (Kraft-rs9pk).
+    "result_dir",
 )
 
 #: Without these three, no agent dispatch can be built at all.
