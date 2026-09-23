@@ -7,6 +7,11 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- New harness: Amp (`amp -x`), with Amp's mode (`low` to `ultra`) as
+  `effort` (Kraft-gvrke). Checked with a real Kraft work item on a logged-in
+  amp. Resuming works: every launch passes `--no-archive-after-execute`,
+  since Amp archives a thread after `-x` and refuses to continue an
+  archived one. Amp reports no cost Kraft can read, so none is recorded.
 - Codex workers now work on a default install. Codex's sandbox refused
   writes outside the worktree, so a worker could not write its result file
   under `~/.kraft/run/results` or commit (a linked worktree commits into the

@@ -447,7 +447,7 @@ def test_amp_argv_folds_context_into_the_execute_prompt():
     """Kraft-gvrke: Amp has no system-prompt flag and picks its own model, so
     context rides in `-x` and effort is `-m` (The Dial); no model flag at all."""
     argv = _argv("amp", options={"effort": "high"})
-    assert argv[0] == "amp"
+    assert argv[:2] == ["amp", "--no-archive-after-execute"]
     assert argv[argv.index("-x") + 1] == "CTX\n\ndo the thing"
     assert "--stream-json" in argv
     assert argv[argv.index("-m") + 1] == "high"
@@ -458,8 +458,10 @@ def test_amp_argv_folds_context_into_the_execute_prompt():
 
 
 def test_amp_resumes_a_thread_with_threads_continue():
+    """`-x` archives a thread unless told not to, and an archived thread
+    refuses `threads continue`: both command lines keep it open."""
     argv = _argv("amp", resume="T-abc")
-    assert argv[:4] == ["amp", "threads", "continue", "T-abc"]
+    assert argv[:5] == ["amp", "threads", "continue", "T-abc", "--no-archive-after-execute"]
     assert argv[argv.index("-x") + 1] == "CTX\n\ndo the thing"
 
 

@@ -16,7 +16,7 @@ Kraft ships four harnesses:
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
-| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Not yet run against a real account. |
+| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. Checked with real Kraft work items on amp 0.0.1790142911. |
 
 ## Capabilities, not flags
 
@@ -75,11 +75,18 @@ to answer an approval prompt anyway).
 
 ### Amp
 
-`amp` needs credentials a headless process can use: an access token
-(`sgamp_...`, from ampcode.com/settings) in `AMP_API_KEY`. A worker's
-environment is an allowlist, so name it in the repo's `env_passthrough`.
-Without it, `amp` doesn't fail fast. It prints a device-login prompt and
-waits about five minutes for a browser before it exits 1.
+`amp` needs credentials a headless process can use. On a machine where you
+ran `amp login`, that's already true: the login lives under your home
+directory, which a worker keeps. Elsewhere, use an access token (`sgamp_...`,
+from ampcode.com/settings) in `AMP_API_KEY`. A worker's environment is an
+allowlist, so name it in the repo's `env_passthrough`. With neither, `amp`
+doesn't fail fast. It prints a device-login prompt and waits about five
+minutes for a browser before it exits 1.
+
+Kraft's token counts for an Amp run are the thread's own, message by message
+(they match `amp threads export`). Amp's bill (`amp threads usage`) can count
+a few more requests that aren't in the thread, and it's the only place Amp
+reports cost, so Kraft records none.
 
 An agent profile can't select `amp`: a profile needs a model for the provider,
 and Amp takes none. A task on `amp` sets `effort:` itself.

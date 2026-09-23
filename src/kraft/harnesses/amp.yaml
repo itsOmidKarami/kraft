@@ -13,14 +13,25 @@
 # login code expired. Run `amp login --oauth` again." on stderr and exits 1,
 # with no JSON on stdout. Headless auth is `AMP_API_KEY` (an `sgamp_` access
 # token), which a worker only gets through the repo's `env_passthrough`.
+#
+# Re-checked with a logged-in amp 0.0.1790142911 (Homebrew) on 2026-09-23 by
+# a real Kraft work item on `-m low`: it completed, and the tokens Kraft
+# recorded equal `amp threads export`'s per-message usage exactly. Amp's own
+# bill (`amp threads usage`) counts two more requests the thread doesn't
+# hold, and its cost is only in that Markdown report, so Kraft records no
+# cost for amp.
 id: amp
 kind: cli
-command: [amp]
+# `--no-archive-after-execute` on both command lines: `-x` archives the thread
+# when it ends, and an archived thread refuses `threads continue` ("This
+# thread is archived and cannot be continued", measured), so without it no
+# amp session could ever be resumed. Measured both placements parse.
+command: [amp, --no-archive-after-execute]
 # `amp threads continue <THREAD_ID> --execute ...` -- the id is a positional
 # of the subcommand, so resume gets its own prefix. It is the `session_id` on
 # the stream's `system`/`init` line (`T-...`), which is also what the SDK
 # passes here (buildCliArgs: `threads continue <id> --execute --stream-json`).
-command_resume: [amp, threads, continue, "{value}"]
+command_resume: [amp, threads, continue, "{value}", --no-archive-after-execute]
 
 capabilities:
   # No flag carries a system prompt or extra context: `-m` swaps Amp's own
