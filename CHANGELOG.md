@@ -7,6 +7,15 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- Kraft's permission gate now answers Codex workers too. When a task's
+  policy has something to enforce, the launch passes Codex a `PreToolUse`
+  hook with `-c` and trusts only that hook, by the hash `codex app-server`
+  reports; `--dangerously-bypass-hook-trust` is never used, and a launch
+  whose hook Codex won't trust is refused. `deny_tools` and `allowed_tools`
+  now work on Codex (`apply_patch` is checked as `Write` and `Edit`), each
+  decision is logged on the timeline, and a resumed thread keeps the hook.
+  Codex's web search never reaches the hook, so policy that must deny
+  `WebSearch` refuses the launch (Kraft-4in7z.3).
 - OpenCode and Amp workers now honour a task's `deny_tools` and
   `allowed_tools`: Kraft writes them into that launch's own config (OpenCode's
   `OPENCODE_CONFIG_CONTENT` with `--standalone`, a per-session Amp

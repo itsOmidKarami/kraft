@@ -104,7 +104,7 @@ archive:
 #                      listed built-ins (--tools) in a mode that asks the
 #                      permission gate about everything else. Unset allows
 #                      every tool; `[]` allows none. A harness that cannot
-#                      enforce a tool list (codex, gemini) refuses to launch
+#                      enforce a tool list (gemini) refuses to launch
 #                      under one.
 #   token_budget       tokens, in and out, the launches inside a scope may
 #                      spend before the next agent task there is refused --

@@ -75,6 +75,36 @@ fail-closed for that session: a Kraft it can't reach, a payload it can't read or
 one, any of those is no opinion, and Cursor's classifier decides as if there
 were no hook.
 
+### Codex: a hook trusted per launch
+
+Codex runs a `PreToolUse` hook before each tool call, in Claude Code's
+shape. When a Codex task's policy has something to enforce (same rule as
+Cursor), the launch adds two `-c` flags, on the resume command line as well:
+`hooks.PreToolUse`, which runs `kraft admin permission-hook codex`, and
+`hooks.state`, which trusts exactly that hook. Codex skips an untrusted hook
+without saying so, and Kraft never passes `--dangerously-bypass-hook-trust`,
+since that also trusts every hook a repo ships. The trusted hash comes from
+`codex app-server`'s `hooks/list`. Kraft lists the hook once to get the hash
+and once more to see Codex trust it, then caches the flags per Codex binary
+(about 0.1 s per listing, measured on codex-cli 0.155.0). If Codex can't
+list it, doesn't trust it or doesn't answer within 15 s, the launch is
+refused. Nothing is written to your `~/.codex` or to the worktree.
+
+The hook also fires for Codex's own background agents (its memory agent
+runs in `~/.codex/memories`). The launch sets `KRAFT_WORKTREE`, and a call
+whose `cwd` is outside it gets no opinion and never reaches the gate.
+
+Codex already calls its shell `Bash`. `apply_patch`, its one tool for
+creating and editing files, is checked as both `Write` and `Edit`. Web search
+runs on OpenAI's side and never reaches the hook, so a Codex launch whose
+policy would have to deny `WebSearch` is refused (`unhooked_tools:` in
+`codex.yaml`). Fail-closed under an allowlist works as it does for Cursor.
+No opinion is `{}`, which leaves the decision to Codex's approve-for-me
+reviewer. A deny blocks the call, and the agent sees
+`Command blocked by PreToolUse hook: Kraft: <reason>`. Checked with a real
+work item on codex-cli 0.155.0: `deny_tools: [Bash]` blocked the shell call
+and logged a `permission_decision` with `harness: codex`.
+
 ### OpenCode and Amp: rules written at launch
 
 OpenCode and Amp get no per-call hook. OpenCode's plugin hook never loaded in
@@ -124,11 +154,11 @@ The gate answers from the resolved policy of the task the calling session is
 running — the same `allowed_tools`, `deny_tools` and `grants` its launch
 resolved, not a separate table. In order:
 
-| The call | Prompt mode (Claude) | Enforce mode (Cursor's hook) |
+| The call | Prompt mode (Claude) | Enforce mode (Cursor's and Codex's hooks) |
 |---|---|---|
 | names a tool in `deny_tools` | deny | deny |
 | is an instance of one of the task's grants | allow | allow |
-| no layer set `allowed_tools` | allow — an unset allowlist bounds nothing | no opinion: Cursor's classifier decides |
+| no layer set `allowed_tools` | allow — an unset allowlist bounds nothing | no opinion: the CLI's own classifier or reviewer decides |
 | `allowed_tools` is set and names the tool | allow | allow |
 | `allowed_tools` is set and doesn't name it (`[]` names nothing) | deny | deny |
 | the policy can't be resolved — the task or its profile is gone | deny: not knowing isn't a grant | deny if the session is fail-closed, else no opinion |
@@ -137,6 +167,7 @@ A deny is a deny on every harness. On Cursor a hook `allow` is *not* final: it
 does not override `--auto-review`, so a call the gate allows can still be
 refused by Cursor's classifier. The gate honours a grant on Cursor, but Cursor
 may still refuse it; a launch-time rule to make it stick is Kraft-4in7z.6.
+On Codex, whether a hook `allow` outranks its reviewer hasn't been checked.
 
 ## Grants
 
@@ -219,7 +250,8 @@ for how the layers combine.
 
 ## Which harnesses reach it
 
-Claude, through its prompt tool, and Cursor, through its hook. OpenCode
+Claude, through its prompt tool, and Cursor and Codex, through their hooks
+(Codex's is trusted per launch, never by bypassing hook trust). OpenCode
 and Amp don't reach it, but still enforce `deny_tools` and `allowed_tools` through
 [rules written at launch](#opencode-and-amp-rules-written-at-launch): no
 timeline events, and no grants. Every other harness runs in its own
