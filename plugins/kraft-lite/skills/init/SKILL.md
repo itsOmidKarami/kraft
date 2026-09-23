@@ -9,8 +9,8 @@ If `.kraft-lite/registry.yaml` already exists, show the human a diff and ask; do
 not overwrite one they have edited.
 
 Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" detect` from the repo root. It prints the
-test command it found and, for each hook, every installed skill that plausibly
-serves it.
+test command (`test_command`) and CI status command (`ci_command`) it found and,
+for each hook, every installed skill that plausibly serves it.
 
 Write `.kraft-lite/registry.yaml` from that output. Fill every hook in. For each
 one, add a comment listing the other candidates detect returned, so the human can
@@ -39,7 +39,11 @@ Rules for filling it in:
 Every `skill` entry gets a `prompt` sibling. A renamed or uninstalled skill then
 degrades to an instruction instead of stopping the chain.
 
-Finish by printing the path and saying it is meant to be edited and committed.
+Verify before you finish: every hook `detect` listed has a key at column zero in
+the file with an indented body under it. `kraft-lite:start` refuses a chain whose
+hooks lack a binding, so a gap surfaces there, but catching it now is cheaper.
+
+Then print the path and say it is meant to be edited and committed.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`
 is two directories above this file - use that path instead of an empty one.

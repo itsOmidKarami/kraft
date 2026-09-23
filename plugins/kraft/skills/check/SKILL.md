@@ -5,7 +5,7 @@ description: "Use when a repo's Kraft config may have drifted from what this Kra
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Checking a repo's Kraft config
@@ -48,9 +48,9 @@ For every agent task in the live library and chains
 (`~/.kraft/templates/library.yaml` and `chains/*.yaml`) whose `skill: X` names
 a skill where `X` contains a `:` - a reference into this agent's own plugin
 system, not a method Kraft ships - check `X` against the skills currently
-available to you (the list your own session already has). `kraft/skill.py` documents, on purpose,
-that the server side cannot answer this; you can, because you are the agent
-that would have to load it. `kraft admin templates show ID --resolved` prints
+available to you (the list your own session already has). The Kraft server
+cannot answer this, by design; you can, because you are the agent that would
+have to load it. `kraft admin templates show ID --resolved` prints
 each task with the `skill:` it inherited, so read that rather than the raw
 files.
 

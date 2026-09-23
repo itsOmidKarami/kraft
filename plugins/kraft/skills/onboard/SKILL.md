@@ -5,7 +5,7 @@ description: "Use when a repo is not yet connected to Kraft, or a newly connecte
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Onboarding a repo
@@ -28,9 +28,9 @@ zero exit code says the command ran, not that what it did was right.
    repo says and say so.
 
    Neither `ensure_repo`/`kraft repo connect` nor any MCP tool takes a
-   `test_command` override — only `PATCH /repos` on the API does, and there
+   `test_command` override — only the HTTP API does, and there
    is no CLI/MCP verb for it. So correct a wrong probe by editing this
-   repo's entry in `repos.yaml` (under Kraft's templates dir) directly,
+   repo's entry in `~/.kraft/templates/repos.yaml` directly,
    setting `test_command` to the right command, and say what you changed —
    the running server reads that file fresh on each request, no restart
    needed.

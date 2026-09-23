@@ -23,6 +23,10 @@ which chain is theirs.
 Carry that id. Every later verb in this chain takes `--chain-id <id>`, and a
 directory holding two unfinished chains refuses to guess between them.
 
+Confirm the chain exists: `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" state --chain-id <id>`
+should report the first node (`spec`, in the packaged chain) as `open`, not
+`unstarted`.
+
 Then invoke `kraft-lite:next`. Starting a chain and stopping before the first node
 leaves the human with a state file and nothing running.
 

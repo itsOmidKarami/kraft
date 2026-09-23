@@ -5,7 +5,7 @@ description: "Use when a Kraft work item is waiting at a review gate and someone
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Reviewing before a gate is answered
