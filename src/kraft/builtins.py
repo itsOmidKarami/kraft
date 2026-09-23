@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NoReturn
 
 from kraft import caps as _caps
 from kraft import events, logs, store
@@ -31,7 +32,8 @@ class RebaseTimedOut(RuntimeError):
     """`refresh_worktree_base` aborted a rebase that ran past its `timeout`
     (Kraft-3llig): a hanging pre-rebase hook or smudge/LFS filter must not
     hold the worker slot forever. The worktree is left clean either way, the
-    same posture as `RebaseConflict`. Only `mr_rebase` passes a `timeout`, so
+    same posture as `RebaseConflict` (unless the abort itself times out too:
+    `_abort_rebase`). Only `mr_rebase` passes a `timeout`, so
     only it can see this; the other three `refresh_worktree_base` callers
     keep today's unbounded behaviour."""
 
@@ -787,7 +789,8 @@ async def refresh_worktree_base(
 
     Raises `RebaseConflict` (a `RuntimeError` subclass), with the rebase
     already aborted (`git rebase --abort`), on a conflict -- the worktree is
-    left clean and consistent either way; what happens next is the caller's
+    left clean and consistent either way (unless the abort itself runs past
+    `REBASE_ABORT_TIMEOUT_S`, which the message then says); what happens next is the caller's
     call (Kraft-s7c04.23 reverses the "not to dispatch an agent into" stance
     this docstring used to take here, by the human's own call at the design
     gate).
@@ -853,28 +856,46 @@ async def refresh_worktree_base(
         # `subprocess.run` already killed the `git rebase` process on the
         # timeout; its abort left mid-operation, the same clean-up a
         # conflict's abort below does.
-        await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(worktree), "rebase", "--abort"],
-            capture_output=True,
-            text=True,
+        await _abort_rebase(
+            worktree, RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}")
         )
-        raise RebaseTimedOut(f"git rebase timed out after {timeout:.0f}s for {worktree}") from None
     if done.returncode != 0:
-        await asyncio.to_thread(
-            subprocess.run,
-            ["git", "-C", str(worktree), "rebase", "--abort"],
-            capture_output=True,
-            text=True,
-        )
         # git prints the "CONFLICT (content): Merge conflict in <file>" line to
         # stdout; stderr only ever carries the generic "could not apply"/"hint:
         # Resolve all conflicts" text. Join both rather than preferring one, so
         # the conflicting file's name survives into the raised message and the
         # needs_human reason a human reads.
         detail = "\n".join(filter(None, [done.stdout.strip(), done.stderr.strip()]))
-        raise RebaseConflict(f"git rebase failed for {worktree}: {detail}")
+        await _abort_rebase(worktree, RebaseConflict(f"git rebase failed for {worktree}: {detail}"))
     return head
+
+
+#: Seconds `git rebase --abort` gets (Kraft-ujep9). Fixed, not the item's time
+#: cap: the abort runs *after* that cap may already have fired, and a hook that
+#: also fires on the abort (`reference-transaction`, say) must not hold the
+#: worker's slot forever in its place.
+REBASE_ABORT_TIMEOUT_S = 30.0
+
+
+async def _abort_rebase(worktree: Path, error: RebaseConflict | RebaseTimedOut) -> NoReturn:
+    """`git rebase --abort` in `worktree`, then raise `error`. An abort that
+    runs past `REBASE_ABORT_TIMEOUT_S` still raises `error`'s own class, so the
+    caller's handling is unchanged, but says the worktree was left mid-rebase:
+    the one case where `refresh_worktree_base` does not leave it clean."""
+    try:
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(worktree), "rebase", "--abort"],
+            capture_output=True,
+            text=True,
+            timeout=REBASE_ABORT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        raise type(error)(
+            f"{error}\n`git rebase --abort` also timed out after "
+            f"{REBASE_ABORT_TIMEOUT_S:.0f}s; {worktree} was left mid-rebase for a human"
+        ) from None
+    raise error
 
 
 async def mr_rebase(

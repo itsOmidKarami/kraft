@@ -504,3 +504,59 @@ async def test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs(
     assert git_read(worktree, "status", "--porcelain") == ""
     assert not (worktree / ".git" / "rebase-merge").exists()
     assert not (worktree / ".git" / "rebase-apply").exists()
+
+
+def _hanging_rebase_hook(repo, tmp_path, phases: str, seconds: float) -> None:
+    """A `reference-transaction` hook that sleeps `seconds`, once per phase
+    named in `phases` ("rebase", "abort"), while a rebase is in progress.
+    Kraft-ujep9: `git rebase --abort` fires it (a `post-checkout` hook does
+    not, on current git), so a hook like this hangs the abort itself. Once per
+    phase, so a regression that drops the abort's timeout still ends."""
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    marker = tmp_path / "hook-hung"
+    hook.write_text(
+        "#!/bin/sh\n"
+        '[ -d "$(git rev-parse --git-dir)/rebase-merge" ] || exit 0\n'
+        'case "$(ps -o args= -p $PPID)" in\n'
+        '  *"rebase --abort"*) phase=abort ;;\n'
+        "  *rebase*) phase=rebase ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n"
+        f'case " {phases} " in *" $phase "*) ;; *) exit 0 ;; esac\n'
+        f'[ -e "{marker}.$phase" ] && exit 0\n'
+        f'touch "{marker}.$phase"\n'
+        f"sleep {seconds}\n"
+    )
+    hook.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("phases", "error", "timeout"),
+    [
+        ("abort", kraft_builtins.RebaseConflict, None),
+        ("rebase abort", kraft_builtins.RebaseTimedOut, 1.0),
+    ],
+    ids=["conflict", "timed_out"],
+)
+async def test_a_hanging_rebase_abort_is_bounded_and_says_so(
+    tmp_path, monkeypatch, database, run_dirs, repo, phases, error, timeout
+):
+    """Kraft-ujep9: the abort after a conflict or a timed-out rebase runs under
+    its own fixed timeout, and past it raises the caller's own error class,
+    saying the worktree was left mid-rebase -- not a slot held forever."""
+    monkeypatch.setattr(kraft_builtins, "REBASE_ABORT_TIMEOUT_S", 1.0)
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    _commit(worktree, "calc.py", "def add(a, b):\n    return a - b - 1\n", "worktree edit")
+    if error is kraft_builtins.RebaseConflict:
+        _commit(repo, "calc.py", "def add(a, b):\n    return a - b - 2\n", "conflicting edit")
+    else:
+        _commit(repo, "moved.txt", "moved on\n", "moved on")
+    _hanging_rebase_hook(repo, tmp_path, phases, seconds=10)
+
+    started = caps.monotonic()
+    with pytest.raises(error, match="--abort` also timed out after 1s.*left mid-rebase"):
+        await kraft_builtins.refresh_worktree_base(
+            worktree, repo, wtree.branch(database), base="main", timeout=timeout
+        )
+    assert caps.monotonic() - started < 8
