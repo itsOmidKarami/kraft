@@ -25,7 +25,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: same call is a real agent turn: network, tokens, tens of seconds. Here, not in
 #: the conftest, so a test can import it without `import conftest`, which is
 #: ambiguous now the repo root has a conftest.py too.
-REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "agent", "cursor-agent"})
+REAL_AGENT_BINARIES = frozenset(
+    {"claude", "codex", "gemini", "opencode", "amp", "agent", "cursor-agent"}
+)
 
 
 def entry_of(fields: dict) -> Any:
@@ -254,8 +256,9 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
     `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
     launching `agent_command` (`seed_v1_library`). The product seed ships no
-    steering file (Kraft-sj86z: the never-signal rule lives in
-    `adapters.agent.SAFETY_RULES` instead), so there is none to copy in."""
+    legacy `steering/*.md` directory to migrate (Kraft-c82sp: the never-signal
+    rule is now the opt-in `never-signal-processes-you-didnt-start` library
+    profile, unselected by default), so there is none to copy in."""
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")

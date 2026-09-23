@@ -1,5 +1,8 @@
 """Shared fixtures for the adapter tests."""
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from kraft.adapters import agent
@@ -22,7 +25,8 @@ def run(monkeypatch):
 
         kwargs = dict(
             db=None,
-            run_dirs=None,
+            # Only `results` is read: a harness declaring `writable_dirs` is handed it.
+            run_dirs=SimpleNamespace(results=Path("/kraft/run/results")),
             session_id="s1",
             work_item_id="w1",
             node_id="implementation",

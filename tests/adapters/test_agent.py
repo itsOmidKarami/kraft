@@ -287,18 +287,15 @@ def test_default_profile_reproduces_todays_command_line(run):
     - no `--resume`/`--autocompact`: only an escalation turn resumes.
     - no steering, artifact or method: the prompt is the bare context and rules.
     """
-    ctx = (
-        agent._CTX.format(
-            title="t",
-            task_instruction="do the thing",
-            repo_path="/repo",
-            work_item_id="w1",
-            node_id="implementation",
-            hook_point="on.implementation.start",
-            session_id="s1",
-            summary_name="s1",
-        )
-        + agent.SAFETY_RULES
+    ctx = agent._CTX.format(
+        title="t",
+        task_instruction="do the thing",
+        repo_path="/repo",
+        work_item_id="w1",
+        node_id="implementation",
+        hook_point="on.implementation.start",
+        session_id="s1",
+        summary_name="s1",
     )
 
     assert run()["cmd"] == [

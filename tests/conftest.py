@@ -112,6 +112,18 @@ def _no_real_agent_binary(request, monkeypatch):
 
     monkeypatch.setattr(sp_mod, "run_task", guarded)
 
+    # Reading opencode's usage asks the real binary for the session export
+    # (Kraft-ihoen); a test reaching it would read this machine's sessions.
+    import kraft.usage as usage_mod
+
+    def no_export(session_id):
+        raise AssertionError(
+            f"{request.node.nodeid} reached the real `opencode session export "
+            f"{session_id}`. Stub `kraft.usage._export_opencode` in the test."
+        )
+
+    monkeypatch.setattr(usage_mod, "_export_opencode", no_export)
+
 
 @pytest.fixture(autouse=True)
 def _forward_fake_agent_env_vars_into_worker_env(monkeypatch):

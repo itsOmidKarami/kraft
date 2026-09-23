@@ -9,7 +9,7 @@ from kraft.templates import environment as template_environment
 def test_bundled_harnesses_all_load():
     hs = harness.load(None)
     assert hs.invalid == {}
-    assert sorted(hs.valid) == ["claude", "codex", "cursor", "gemini"]
+    assert sorted(hs.valid) == ["amp", "claude", "codex", "cursor", "gemini", "opencode"]
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -254,8 +254,8 @@ def test_one_bad_file_does_not_take_the_others_down(tmp_path):
     hs = harness.load(tmp_path / "harnesses")
     assert "good" in hs.valid
     assert "bad" in hs.invalid
-    # The bundled three are still there too.
-    assert {"claude", "codex", "gemini"} <= set(hs.valid)
+    # The bundled ones are still there too.
+    assert {"amp", "claude", "codex", "gemini"} <= set(hs.valid)
 
 
 def test_overlay_wins_and_takes_ownership(tmp_path):
@@ -300,8 +300,10 @@ def test_codex_argv_puts_the_bare_prompt_last():
     assert "-c" in argv
     assert "developer_instructions=CTX" in argv
     assert "model_reasoning_effort=high" in argv
-    # `always: workspace-write`, unasked.
-    assert argv[argv.index("-s") + 1] == "workspace-write"
+    # `always: workspace-write`, unasked, as `--approve-for-me`'s three keys.
+    for key in ("sandbox_mode=workspace-write", "approval_policy=on-request"):
+        assert key in argv
+    assert "approvals_reviewer=auto_review" in argv
 
 
 def test_gemini_folds_context_into_the_prompt():
@@ -458,3 +460,52 @@ def test_codex_reads_usage_and_rate_limits_off_its_json_log():
     assert codex.capabilities["usage"].source == "envelope"
     assert codex.capabilities["usage"].reader == "codex-json"
     assert codex.capabilities["rate_limit_signal"].reader == "codex-json"
+
+
+def test_amp_argv_folds_context_into_the_execute_prompt():
+    """Kraft-gvrke: Amp has no system-prompt flag and picks its own model, so
+    context rides in `-x` and effort is `-m` (The Dial); no model flag at all."""
+    argv = _argv("amp", options={"effort": "high"})
+    assert argv[:2] == ["amp", "--no-archive-after-execute"]
+    assert argv[argv.index("-x") + 1] == "CTX\n\ndo the thing"
+    assert "--stream-json" in argv
+    assert argv[argv.index("-m") + 1] == "high"
+    amp = harness.load(None).valid["amp"]
+    assert not amp.supports("model")
+    assert amp.value_ok("effort", "ultra")
+    assert not amp.value_ok("effort", "xhigh")
+
+
+def test_amp_resumes_a_thread_with_threads_continue():
+    """`-x` archives a thread unless told not to, and an archived thread
+    refuses `threads continue`: both command lines keep it open."""
+    argv = _argv("amp", resume="T-abc")
+    assert argv[:5] == ["amp", "threads", "continue", "T-abc", "--no-archive-after-execute"]
+    assert argv[argv.index("-x") + 1] == "CTX\n\ndo the thing"
+
+
+def test_amp_reads_usage_with_its_own_reader_and_claims_no_rate_limit_signal():
+    amp = harness.load(None).valid["amp"]
+    assert amp.capabilities["usage"].reader == "amp-stream-json"
+    assert not amp.supports("rate_limit_signal")
+
+
+def test_opencode_argv_every_flag_from_run_help():
+    """Kraft-nv1f1: every flag is in `opencode run --help` of 2.0.15. Context
+    has no flag, so it is folded into the prompt; `--auto` is on every launch,
+    or `run` rejects every permission ask; the prompt goes after `--`. 2.x
+    refuses `--log-level ERROR` and has no `--variant`, so effort is absent."""
+    argv = _argv("opencode", options={"model": "opencode/big-pickle"}, resume="ses_1")
+    assert argv[:2] == ["opencode", "run"]
+    assert argv[-2:] == ["--", "CTX\n\ndo the thing"]
+    assert argv[argv.index("--format") + 1] == "json"
+    assert argv[argv.index("-m") + 1] == "opencode/big-pickle"
+    assert argv[argv.index("--log-level") + 1] == "error"
+    assert "--variant" not in argv
+    assert argv[argv.index("--session") + 1] == "ses_1"
+    assert "--auto" in argv
+    opencode = harness.load(None).valid["opencode"]
+    assert opencode.capabilities["usage"].reader == "opencode-json"
+    assert opencode.capabilities["rate_limit_signal"].reader == "opencode-json"
+    assert not opencode.value_ok("permission_mode", "default")
+    assert not opencode.supports("effort")
