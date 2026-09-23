@@ -50,7 +50,7 @@
 | src/kraft/cli/common.py                  |       21 |        0 |    100% |           |
 | src/kraft/cli/item.py                    |      186 |        6 |     97% |30, 116, 124, 172, 176, 192 |
 | src/kraft/cli/repo.py                    |       67 |        4 |     94% |69-70, 82-83 |
-| src/kraft/cli/templates.py               |       67 |        2 |     97% |    72, 83 |
+| src/kraft/cli/templates.py               |       72 |        2 |     97% |   90, 101 |
 | src/kraft/cli/view.py                    |      194 |        8 |     96% |90-94, 176-177, 201, 211, 261-262 |
 | src/kraft/client/\_\_init\_\_.py         |        4 |        0 |    100% |           |
 | src/kraft/client/actions.py              |      148 |       29 |     80% |61, 135, 179, 213, 227-228, 246, 268, 270, 285, 292-296, 301-302, 361-362, 382, 407-423, 452, 467, 489 |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16799** |  **850** | **95%** |           |
+| **TOTAL**                                | **16804** |  **850** | **95%** |           |
 
 
 ## Setup coverage badge
