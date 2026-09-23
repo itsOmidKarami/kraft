@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import pytest
+from support.server import child_env
 
 from kraft import permission_hooks
 from kraft.cli import admin
@@ -17,10 +18,13 @@ CURSOR_SHELL = json.dumps({"tool_name": "Shell", "tool_input": {"command": "ls"}
 
 def _hook(tmp_path, *args, stdin=CURSOR_SHELL, env=None):
     # No KRAFT_SESSION_ID: not a worker, so the client answers `unavailable`.
-    env = {
-        "PATH": "/usr/bin:/bin",
+    # Empty, not absent: child_env starts from this process's environment,
+    # and a hook run from inside a Kraft worker must not inherit its session.
+    overrides = {
         "HOME": str(tmp_path),
         "KRAFT_HOME": str(tmp_path / "k"),
+        "KRAFT_SESSION_ID": "",
+        "KRAFT_PERMISSION_FAIL_CLOSED": "",
         **(env or {}),
     }
     return subprocess.run(
@@ -28,7 +32,7 @@ def _hook(tmp_path, *args, stdin=CURSOR_SHELL, env=None):
         input=stdin,
         capture_output=True,
         text=True,
-        env=env,
+        env=child_env(overrides),
         timeout=30,
     )
 
@@ -58,13 +62,13 @@ def test_an_unknown_harness_is_a_usage_error(tmp_path):
 def test_the_hook_never_imports_the_server(tmp_path):
     # It runs before every tool call a worker makes: start-up is on the
     # agent's critical path, so the FastAPI app stays out of it.
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "KRAFT_HOME": str(tmp_path / "k")}
+    overrides = {"HOME": str(tmp_path), "KRAFT_HOME": str(tmp_path / "k")}
     done = subprocess.run(
         [sys.executable, "-X", "importtime", "-m", "kraft", "admin", "permission-hook", "cursor"],
         input=CURSOR_SHELL,
         capture_output=True,
         text=True,
-        env=env,
+        env=child_env(overrides),
         timeout=30,
     )
     assert done.returncode == 0, done.stderr
