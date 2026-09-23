@@ -41,7 +41,7 @@
 | src/kraft/auth.py                        |       74 |        8 |     89% |44, 48, 50-51, 96-99 |
 | src/kraft/auto\_escalate\_delay.py       |       48 |        8 |     83% |140-148, 181-186 |
 | src/kraft/automated\_review.py           |       12 |        0 |    100% |           |
-| src/kraft/builtins.py                    |      339 |       17 |     95% |92-93, 101, 185, 251, 342-344, 385-386, 400-401, 659, 744-745, 1172-1175 |
+| src/kraft/builtins.py                    |      351 |       17 |     95% |98-99, 107, 191, 257, 348-350, 391-392, 406-407, 665, 750-751, 1205-1208 |
 | src/kraft/cap\_levels.py                 |       59 |        0 |    100% |           |
 | src/kraft/capabilities.py                |       22 |        0 |    100% |           |
 | src/kraft/caps.py                        |      269 |       17 |     94% |291, 317, 328, 340-341, 354, 451, 523, 568-570, 608-613 |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16804** |  **850** | **95%** |           |
+| **TOTAL**                                | **16816** |  **850** | **95%** |           |
 
 
 ## Setup coverage badge
