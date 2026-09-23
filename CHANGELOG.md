@@ -7,6 +7,13 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- New `policy.yaml` key `escalation_harness` picks the harness an escalation
+  turn runs on (Kraft-wge0e). Unset, it is `claude`, as before. Set it in
+  `defaults:`, on a repository, chain or node, or for one item with
+  `kraft item set-policy`; `item` follows the harness the item's own work
+  last ran on. An unknown profile is refused when `policy.yaml` is read. A
+  resumed escalation or paused task now finds its session id with its own
+  harness's reader, and a resumed codex thread records only what it added.
 - Docs: a page on the permission gate — how a worker's ask reaches it, how
   it decides from `allowed_tools`/`deny_tools`, the `permission_decision`
   events it logs, and which harnesses reach it today (Kraft-9r3lv).
