@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +20,8 @@ from kraft.api import api_router, deps, perimeter
 from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
 from kraft.grants import matching
 from kraft.templates.models import AgentTask
+
+logger = logging.getLogger(__name__)
 
 
 def _session_row(st, sid: str):
@@ -200,13 +203,18 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
         raise HTTPException(404, "unknown session")
     task = row["hook_point"]
     grant = None
+    # What the worker is told, when it differs from the logged reason: an
+    # exception's text stays on this side (the log and the timeline).
+    told = None
     try:
         allowed, denied, grants = _resolved_tools(st, row)
     except Exception as exc:  # noqa: BLE001 -- fail closed on any resolution failure
+        logger.warning("permission gate: cannot resolve %s's policy: %s", task, exc)
+        told = f"cannot resolve {task}'s policy"
         if body.mode == "enforce" and not body.fail_closed:
             # A fail-open hook renders this as no opinion: not a decision,
             # so not logged.
-            return {"behavior": "unresolved", "message": f"cannot resolve {task}'s policy: {exc}"}
+            return {"behavior": "unresolved", "message": told}
         decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
         names = (body.tool_name, *body.also)
@@ -246,7 +254,7 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     )
     if decision == "allow":
         return {"behavior": "allow", "updatedInput": body.input}
-    return {"behavior": "deny", "message": reason}
+    return {"behavior": "deny", "message": told or reason}
 
 
 @api_router.websocket("/ws/events")

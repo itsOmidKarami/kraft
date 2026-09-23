@@ -116,8 +116,12 @@ def test_permission_request_denies_a_session_whose_grant_cannot_be_resolved(
     body = _ask(client).json()
     assert body["behavior"] == "deny"
     assert "cannot resolve" in body["message"], body
+    # Why it can't is the operator's to read (the timeline), not the worker's.
+    [event] = events_of(client, "permission_decision")
+    assert "cannot resolve" in event["reason"], event
     if hook_point.endswith(".check"):
-        assert "is no agent task" in body["message"], body
+        assert "is no agent task" in event["reason"], event
+        assert "is no agent task" not in body["message"], body
 
 
 @pytest.mark.parametrize(

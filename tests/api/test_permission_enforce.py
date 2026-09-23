@@ -82,7 +82,7 @@ def test_enforce_reports_an_unresolvable_policy_rather_than_deciding(client):
     seed_session(hook_point="implementation.main.nowhere")
     body = ask(client, mode="enforce").json()
     assert body["behavior"] == "unresolved"
-    assert "cannot resolve" in body["message"], body
+    assert body["message"] == "cannot resolve implementation.main.nowhere's policy", body
     assert events_of(client, "permission_decision") == []
 
 
@@ -96,6 +96,8 @@ def test_enforce_fail_closed_denies_an_unresolvable_policy_and_logs_it(client):
     [event] = events_of(client, "permission_decision")
     assert event["decision"] == "deny"
     assert "cannot resolve" in event["reason"] and "nowhere" in event["reason"], event
+    # The exception's text is logged, never handed to the worker (CodeQL).
+    assert body["message"] == "cannot resolve implementation.main.nowhere's policy", body
 
 
 def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
