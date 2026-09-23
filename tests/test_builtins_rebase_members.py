@@ -8,13 +8,14 @@ Git is real: a root with one real submodule (`workspace_item`), whose own
 source repository stands in as the member's origin."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 from support.harness import _git
 from support.workspace import workspace_item
 
 from kraft import builtins as kraft_builtins
-from kraft import store
+from kraft import caps, store
 from kraft.config import git_read
 from kraft.executor.context import BASE_MOVED
 
@@ -135,3 +136,68 @@ async def test_the_root_commits_no_pointer_it_had_not_committed(database, run_di
     await _mr_rebase(database, run_dirs, row, root)
 
     assert git_read(root, "rev-parse", "HEAD") == before
+
+
+async def test_a_later_members_conflict_keeps_the_earlier_members_repoint(
+    database, run_dirs, tmp_path
+):
+    """Review fix: `repos/pkg` moves, then `repos/pkg2` conflicts. `pkg` has
+    nothing left to rebase on the retry, so the raise must not cost it its
+    repoint -- a root left at its old head fails `assert_clean` for good."""
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    row, _, root = await workspace_item(database, run_dirs, tmp_path, [task], second=True)
+    pkg, pkg2 = root / "repos" / "pkg", root / "repos" / "pkg2"
+    _commit(pkg, "lib.py", "x = 1\n", "member change")
+    _commit(pkg2, "calc.py", "ours\n", "member change")
+    _git(root, "add", "repos/pkg", "repos/pkg2")
+    _git(root, "commit", "-qm", "wip: uncommitted work from t")
+    _move_member_origin(tmp_path)
+    _commit(tmp_path / "pkg2", "calc.py", "theirs\n", "the member's main moves")
+
+    with pytest.raises(kraft_builtins.RebaseConflict, match=r"repos/pkg2"):
+        await _mr_rebase(database, run_dirs, row, root)
+
+    assert _porcelain(root) == ""
+    assert git_read(root, "rev-parse", "HEAD:repos/pkg") == git_read(pkg, "rev-parse", "HEAD")
+
+    # A person resolves `pkg2` and commits its pointer; the retry finds the
+    # root still clean.
+    _git(pkg2, "rebase", "-q", "-X", "theirs", "origin/main")
+    _git(root, "add", "repos/pkg2")
+    _git(root, "commit", "-qm", "resolved pkg2")
+    assert await _mr_rebase(database, run_dirs, row, root) == "done"
+    assert _porcelain(root) == ""
+
+
+async def test_a_member_that_runs_past_the_time_cap_stops_before_the_root(
+    database, run_dirs, tmp_path
+):
+    """A member's timed-out rebase ends the task as the root's would --
+    `capped_out`, `time_capped` -- and the root is never rebased after it."""
+    row, root, member = await _workspace(database, run_dirs, tmp_path)
+    _move_member_origin(tmp_path)
+    _commit(Path(row["repo"]), "root_moved.txt", "root moved\n", "the root's main moves")
+    root_head = git_read(root, "rev-parse", "HEAD")
+    hooks = Path(git_read(member, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
+    hooks.mkdir(parents=True, exist_ok=True)
+    (hooks / "pre-rebase").write_text("#!/bin/sh\nsleep 30\n")
+    (hooks / "pre-rebase").chmod(0o755)
+    hit = caps.Hit(scope="", field="time_cap_minutes", minutes=0, remaining_s=1.0)
+
+    status = await _mr_rebase(
+        database,
+        run_dirs,
+        row,
+        root,
+        time_cap=caps.Deadline(at=caps.monotonic() + 1.0, hit=hit),
+    )
+
+    assert status == caps.TIME_CAPPED
+    session = database.read(
+        lambda c: c.execute("SELECT status FROM worker_sessions WHERE id='s1'").fetchone()
+    )
+    assert session["status"] == "capped_out"
+    # The member's timeout, named -- not the root's own, run out of time after it.
+    log = (run_dirs.logs / "s1.log").read_text()
+    assert f"git rebase timed out after 1s for {member}" in log
+    assert git_read(root, "rev-parse", "HEAD") == root_head

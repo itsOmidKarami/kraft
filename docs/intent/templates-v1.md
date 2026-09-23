@@ -1364,8 +1364,9 @@ system SHALL commit the root's pointer to the rebased member before rebasing
 the root, so the root is left clean. A member's move SHALL NOT be written to
 the item's `base_ref`, SHALL be reported as a base change to a node that
 declares `on_base_changed`, and a member's conflict SHALL stop the item as the
-root's would, naming the member.
-enforced-by: tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[False-done], tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[True-base_moved], tests/test_builtins_rebase_members.py::test_an_unchanged_member_is_not_touched, tests/test_builtins_rebase_members.py::test_a_member_conflict_stops_the_item_naming_the_member, tests/test_builtins_rebase_members.py::test_the_root_commits_no_pointer_it_had_not_committed
+root's would, naming the member, without losing the root pointer commit
+for a member that had already moved.
+enforced-by: tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[False-done], tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[True-base_moved], tests/test_builtins_rebase_members.py::test_an_unchanged_member_is_not_touched, tests/test_builtins_rebase_members.py::test_a_member_conflict_stops_the_item_naming_the_member, tests/test_builtins_rebase_members.py::test_the_root_commits_no_pointer_it_had_not_committed, tests/test_builtins_rebase_members.py::test_a_later_members_conflict_keeps_the_earlier_members_repoint, tests/test_builtins_rebase_members.py::test_a_member_that_runs_past_the_time_cap_stops_before_the_root
 origin: src/kraft/builtins.py §_rebase_members -- Kraft-ei38e. A member's branch is cut from the root's pinned gitlink, and nothing rebased it before its draft opened; only a conflict at `ci_poll`/`merge` ever did (`_rebase_conflict_away`). The root's pointer commit keeps `assert_clean` from refusing the root's own draft over a gitlink left at the member's pre-rebase head. `scope: once` is kept: the builtin walks the members itself, so the library, templates and seeded homes need no change.
 
 ## REQ a-rebase-abort-is-bounded

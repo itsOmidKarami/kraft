@@ -1044,18 +1044,23 @@ async def _rebase_members(
     )
     moved: list[tuple[str, str]] = []
     repoint: list[str] = []
-    for r in rows:
-        sub, rel = Path(r["repo_path"]), r["submodule_path"]
-        sub_base = await base_branch(db, work_item_id, sub, member=True)
-        if await git.commits_ahead(sub, branch, sub_base) == 0:
-            continue
-        old = git_read(sub, "rev-parse", "HEAD")
-        head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
-        if head:
-            moved.append((rel, head))
-            if git_read(root, "rev-parse", f"HEAD:{rel}", expected_failure=True) == old:
-                repoint.append(rel)
-    _commit_paths(root, repoint, "chore: repoint members after pre-MR rebase", base)
+    try:
+        for r in rows:
+            sub, rel = Path(r["repo_path"]), r["submodule_path"]
+            sub_base = await base_branch(db, work_item_id, sub, member=True)
+            if await git.commits_ahead(sub, branch, sub_base) == 0:
+                continue
+            old = git_read(sub, "rev-parse", "HEAD")
+            head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
+            if head:
+                moved.append((rel, head))
+                if git_read(root, "rev-parse", f"HEAD:{rel}", expected_failure=True) == old:
+                    repoint.append(rel)
+    finally:
+        # Even when a later member raises: a member already moved has nothing
+        # left to rebase on the retry, so this is its only repoint, and a
+        # root left at its old head would fail `assert_clean` for good.
+        _commit_paths(root, repoint, "chore: repoint members after pre-MR rebase", base)
     return moved
 
 
