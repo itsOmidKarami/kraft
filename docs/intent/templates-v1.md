@@ -1354,6 +1354,31 @@ unbounded, as before this requirement.
 enforced-by: tests/test_builtins_rebase.py::test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs, tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared]
 origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig review round 1. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`caps.REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
 
+## REQ workspace-members-are-rebased-before-the-draft
+
+WHEN `kraft.mr_rebase` runs for a workspace item, the system SHALL first rebase
+each changed member (one `open_mr` would publish) onto that member's own base
+branch, under the same time cap, and SHALL leave an unchanged member alone.
+WHEN a member moved and the root had committed the member's old head, the
+system SHALL commit the root's pointer to the rebased member before rebasing
+the root, so the root is left clean. A member's move SHALL NOT be written to
+the item's `base_ref`, SHALL be reported as a base change to a node that
+declares `on_base_changed`, and a member's conflict SHALL stop the item as the
+root's would, naming the member, without losing the root pointer commit
+for a member that had already moved.
+enforced-by: tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[False-done], tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[True-base_moved], tests/test_builtins_rebase_members.py::test_an_unchanged_member_is_not_touched, tests/test_builtins_rebase_members.py::test_a_member_conflict_stops_the_item_naming_the_member, tests/test_builtins_rebase_members.py::test_the_root_commits_no_pointer_it_had_not_committed, tests/test_builtins_rebase_members.py::test_a_later_members_conflict_keeps_the_earlier_members_repoint, tests/test_builtins_rebase_members.py::test_a_member_that_runs_past_the_time_cap_stops_before_the_root
+origin: src/kraft/builtins.py §_rebase_members -- Kraft-ei38e. A member's branch is cut from the root's pinned gitlink, and nothing rebased it before its draft opened; only a conflict at `ci_poll`/`merge` ever did (`_rebase_conflict_away`). The root's pointer commit keeps `assert_clean` from refusing the root's own draft over a gitlink left at the member's pre-rebase head. `scope: once` is kept: the builtin walks the members itself, so the library, templates and seeded homes need no change.
+
+## REQ a-rebase-abort-is-bounded
+
+`git rebase --abort`, run after a rebase conflict or a timed-out rebase, SHALL
+be bounded by a short fixed timeout of its own, whatever time cap the caller
+had. Past it, the system SHALL raise the same error the caller would have seen
+(a conflict or a timed-out rebase), saying that the abort also timed out and the
+worktree was left mid-rebase for a human.
+enforced-by: tests/test_builtins_rebase.py::test_a_hanging_rebase_abort_is_bounded_and_says_so[conflict], tests/test_builtins_rebase.py::test_a_hanging_rebase_abort_is_bounded_and_says_so[timed_out]
+origin: src/kraft/builtins.py §_abort_rebase -- Kraft-ujep9. Both aborts in `refresh_worktree_base` ran with no `timeout=`, so a hook that also fires on the abort (`reference-transaction` does; `post-checkout` does not, on current git) held the worker slot forever after the time cap had already fired. A fixed 30s (`REBASE_ABORT_TIMEOUT_S`), not the remaining cap: the cap may already be spent.
+
 ## REQ a-draft-with-no-metadata-opens-with-the-default-body
 
 IF a work item reaches its draft merge request with no merge-request metadata

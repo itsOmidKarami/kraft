@@ -101,10 +101,9 @@ tasks:
   # Kraft-3llig: rebase onto the item's base branch right before the draft MR
   # opens, so it targets where the base actually is rather than wherever it
   # was when the worktree was cut. `scope: once` -- not `each_repository` --
-  # deliberately: `builtins.mr_rebase` has no workspace-member awareness
-  # (unlike `open_draft_mr`'s forge handler, which walks every repository
-  # itself). A workspace member's own pre-MR staleness is not this fix's
-  # scope.
+  # deliberately: `builtins.mr_rebase` walks a workspace's changed members
+  # itself (Kraft-ei38e), each onto its own default branch, then the root,
+  # the same way `open_draft_mr`'s forge handler walks every repository.
   mr_rebase:
     kind: builtin
     ref: kraft.mr_rebase
