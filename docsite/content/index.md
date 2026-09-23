@@ -41,7 +41,7 @@ orientation: horizontal
 ::u-page-section
 ---
 title: A gate stops the chain where a human decides
-description: Approve, reject with a note that re-runs the producing node, or open the full detail view.
+description: Approve, reject with a note that re-runs the node that wrote the document, or open the full detail view.
 orientation: horizontal
 reverse: true
 ---
@@ -51,7 +51,7 @@ reverse: true
 ::u-page-section
 ---
 title: Search, ⌘K
-description: Hybrid full-text and vector search across work items, pending actions, and linked documents.
+description: Full-text search, with optional vector search, across work items, pending actions, and linked documents.
 orientation: horizontal
 ---
 ![The search overlay: a query for "caching" surfacing a pending gate action, the matching work item, and a source-repo attribution](/assets/search.png)
@@ -92,7 +92,7 @@ variant: ghost
 ---
 to: /guide/concepts
 title: Concepts
-description: 'Chain, node, task, gate, cap: the whole vocabulary.'
+description: 'Work item, chain, node, task, gate, cap: the whole vocabulary.'
 variant: ghost
 ---
 ::::
@@ -101,7 +101,7 @@ variant: ghost
 ---
 to: /reference/install
 title: Install
-description: 'uv tool install, Homebrew, or from source.'
+description: 'With uv, the install script, or Homebrew.'
 variant: ghost
 ---
 ::::
@@ -146,7 +146,7 @@ variant: ghost
 ---
 to: /reference/triggers
 title: Inbound triggers
-description: Starting a chain from a cron schedule or a webhook instead of typing into kraft item create.
+description: Starting a chain from a cron schedule or a webhook instead of filing it by hand.
 variant: ghost
 ---
 ::::

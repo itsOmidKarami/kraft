@@ -3,7 +3,7 @@
 What a person deciding on a work item is shown and can rely on, independent of
 the chain template it runs: a gate that stays answerable, the documents an item
 was filed with, and the diff. Carried from the legacy gate spec
-(`docs/intent/gates.md`, retired with the legacy template system in Task 11b),
+(`docs/intent/gates.md`, retired with the legacy template system),
 whose chain-shape requirements now live in `templates-v1.md`; these are the ones
 that never depended on the chain's shape.
 

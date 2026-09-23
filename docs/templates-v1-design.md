@@ -1,7 +1,12 @@
 # Technical design: template schema V1
 
+> **Status:** implemented in `src/kraft/templates/`. This is the original design
+> and is kept for its reasoning. Where it differs from the code or from
+> [`docs/intent/templates-v1.md`](intent/templates-v1.md), the code and the
+> intent document win.
+
 This document gives concrete shapes for the behaviours in
-[`templates-v1.md`](../intent/templates-v1.md). It is deliberately a design
+[`templates-v1.md`](intent/templates-v1.md). It is deliberately a design
 draft, not an implementation plan.
 
 ## Configuration layout
@@ -722,11 +727,11 @@ External waits persist their condition and next observation time, then release
 the worker. A shared due scheduler performs later observations with bounded
 backoff. A wait timeout requires human action rather than becoming a code
 failure. A wait's timeout is its task's own `total_time_cap_minutes`
-(Ruling 196); its `wait:` block holds only the polling bounds.
+(see `src/kraft/caps.py`); its `wait:` block holds only the polling bounds.
 
 Time caps sit on any scope: the work item (instance, repository, chain or the
 item's own override), a node, a step or a task. Each one caps that scope's own
-time, and a child's cap cannot exceed its parent's (Rulings 194, 195).
+time, and a child's cap cannot exceed its parent's.
 `time_cap_minutes` counts running time only; `total_time_cap_minutes` counts
 the wall clock, waits, gates and rate limits included, less a manual pause. A
 gate's `timeout` sits under the total caps around it. Hitting any of them stops

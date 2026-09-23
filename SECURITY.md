@@ -1,37 +1,12 @@
 # Security
 
-## Threat model
-
-Kraft runs on your machine, binds `127.0.0.1` by default, and edits your repos
-through git worktrees using whatever coding agent you've configured. The
-things worth being deliberate about:
-
-- **Loopback by default.** `kraft admin start` refuses to bind a non-loopback
-  address without a password set in `access.yaml`. There is no way to expose
-  the API or UI on a LAN or the internet without opting in.
-- **Host allowlist.** A non-loopback bind also checks incoming requests'
-  `Host` header against `allowed_hosts` in `access.yaml` — a password alone
-  does not authorize an arbitrary hostname. See [README § Remote
-  access](README.md#remote-access) for the supported way to reach the board
-  from a phone or another machine (Tailscale / a named tunnel), not a bare
-  `--host 0.0.0.0`.
-- **An agent cannot start work or approve its own gate.** Everything a coding
-  agent files through the MCP tools or `kraft item create` lands paused; a
-  human clicks Start. A worker session cannot approve, reject, pause, or
-  resume the work item it is itself running — enforced in code, not by
-  convention. See [README § Use it from an agent
-  session](README.md#use-it-from-an-agent-session).
-- **Worker environment is allowlisted, not inherited.** A worker's process
-  environment is built from a fixed allowlist (`PATH`, `HOME`, locale/proxy
-  vars, `KRAFT_*`, the agent's credential var) plus whatever a repo's
-  `repos.yaml` entry explicitly declares — not whatever the Kraft daemon's own
-  shell happened to have set.
-- **`install.sh` is a shell script fetched and piped from the internet.** It
-  is short by design — read it before you run it:
-  [`install.sh`](install.sh).
-
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security vulnerability. Email
 **itsomidkarami@gmail.com** with a description and, if you have one, a
 reproduction. Expect an initial response within a few days.
+
+## Threat model
+
+What Kraft protects against, and what it deliberately does not, is documented in
+the [threat model](https://itsomidkarami.github.io/kraft/project/security).

@@ -89,7 +89,7 @@ edit, seeded from the packaged defaults on first run and never overwritten after
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Conventions & Patterns
 
