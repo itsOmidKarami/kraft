@@ -1369,6 +1369,17 @@ for a member that had already moved.
 enforced-by: tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[False-done], tests/test_builtins_rebase_members.py::test_a_changed_member_is_rebased_and_the_root_repointed_at_it[True-base_moved], tests/test_builtins_rebase_members.py::test_an_unchanged_member_is_not_touched, tests/test_builtins_rebase_members.py::test_a_member_conflict_stops_the_item_naming_the_member, tests/test_builtins_rebase_members.py::test_the_root_commits_no_pointer_it_had_not_committed, tests/test_builtins_rebase_members.py::test_a_later_members_conflict_keeps_the_earlier_members_repoint, tests/test_builtins_rebase_members.py::test_a_member_that_runs_past_the_time_cap_stops_before_the_root
 origin: src/kraft/builtins.py §_rebase_members -- Kraft-ei38e. A member's branch is cut from the root's pinned gitlink, and nothing rebased it before its draft opened; only a conflict at `ci_poll`/`merge` ever did (`_rebase_conflict_away`). The root's pointer commit keeps `assert_clean` from refusing the root's own draft over a gitlink left at the member's pre-rebase head. `scope: once` is kept: the builtin walks the members itself, so the library, templates and seeded homes need no change.
 
+## REQ a-root-gitlink-conflict-is-explained
+
+WHEN the root's pre-MR rebase conflicts only on member pointers that
+`kraft.mr_rebase` just moved (the root's base branch moved the same pointer),
+the system SHALL stop the item with git's own conflict text followed by a
+sentence per pointer naming the member, saying the base branch also moved it,
+and how to resolve it. A root conflict on any other path SHALL carry git's text
+alone.
+enforced-by: tests/test_builtins_rebase_members.py::test_a_root_gitlink_conflict_says_how_to_resolve_it, tests/test_builtins_rebase_members.py::test_a_root_file_conflict_gets_no_gitlink_sentence
+origin: src/kraft/builtins.py §_explain_gitlink_conflict -- Kraft-xvwye. After the member repoint commit (Kraft-ei38e), a root whose base also moved that pointer stopped with git's raw submodule-conflict hint, which never says the member had just been rebased. The unmerged paths are read with `git diff --diff-filter=U` before the abort and ride on `RebaseConflict.paths`.
+
 ## REQ a-rebase-abort-is-bounded
 
 `git rebase --abort`, run after a rebase conflict or a timed-out rebase, SHALL
