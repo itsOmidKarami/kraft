@@ -1,0 +1,72 @@
+# The permission gate
+
+A worker has nobody to answer a permission prompt. Left to the harness's own
+judgment, an unattended agent either stalls on a tool it's unsure about, or
+runs it anyway because nobody was watching. Kraft's permission gate is the
+third option: the worker asks Kraft, Kraft answers from the task's own
+policy, and the answer — allow or deny, and why — lands on the work item's
+timeline. Nobody has to sit and watch a session to know what it was let do.
+
+## How a call reaches the gate
+
+Claude Code's own classifier settles most tool calls itself — a read-only
+shell command, a routine edit. What it won't settle it hands to whatever
+`--permission-prompt-tool` names. Kraft launches Claude with that flag
+pointed at its own MCP tool, `mcp__kraft__permission_request`
+(`approval_channel` in `src/kraft/harnesses/claude.yaml`), so the CLI calls
+into Kraft instead of prompting a human who isn't there.
+
+That MCP tool (`permission_request` in `src/kraft/mcp.py`) forwards the ask
+to `POST /worker-sessions/{sid}/permission` (`permission_request` in
+`src/kraft/api/routes/sessions.py`), carrying the tool name, its arguments
+and the CLI's own id for the call.
+
+Whether the gate is reachable at all, and how much reaches it, follows from
+`permission_mode`. With no `allowed_tools` set, Claude runs in `auto`, and
+"everything else goes to the classifier" — the gate only ever sees what the
+classifier itself declines to settle. Set an `allowed_tools` list on a task
+and Claude switches to `manual`: every call the built-in tool-name allowlist
+doesn't cover reaches the gate, which is what makes the gate worth
+configuring in the first place.
+
+## How it decides
+
+The gate answers from the resolved policy of the task the calling session is
+running — the same `allowed_tools`/`deny_tools` its launch resolved, not a
+separate table:
+
+1. A tool named in `deny_tools` is denied.
+2. Otherwise, if no layer of the policy set `allowed_tools`, everything else
+   is allowed — an unset allowlist bounds nothing.
+3. If an `allowed_tools` list is set, only a tool it names is allowed;
+   everything else is denied.
+4. If the grant can't be resolved at all — the task or its profile is
+   gone — the call is denied. Not knowing isn't a grant: the gate fails
+   closed rather than open.
+
+## Where decisions show up
+
+Every decision — allow or deny, and why — is appended to the work item's
+timeline as a `permission_decision` event, with the tool name, the session
+and node it came from, the decision, and the reason. Watch a live item or
+read one back after the fact with:
+
+```bash
+kraft view events ID --type permission_decision
+```
+
+## Configuring it
+
+The gate enforces whatever `allowed_tools` and `deny_tools` resolve to at
+the task's scope — set them the same way as any other policy field, and they
+narrow or extend what a worker can do without a human standing by. See the
+`allowed_tools` and `deny_tools` rows in [Configuration](configuration.md)
+for how the layers combine.
+
+## Which harnesses reach it
+
+Only Claude routes its unsettled asks to Kraft's gate today. Every other
+harness runs in its own classifier mode or its most permissive unattended
+mode instead — see the table in [Agent harnesses](harnesses.md#how-each-harness-runs-unattended).
+Bringing the rest onto the same gate, one hook per CLI, is tracked under
+epic Kraft-4in7z; no dates promised.
