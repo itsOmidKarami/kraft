@@ -14,6 +14,8 @@ and each node runs tasks through plugin adapters (a headless agent, a
 subprocess, a builtin). Every retry loop is capped, and hitting a cap escalates
 to you with the full trace. Gates halt the chain where a human decides.
 
+New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
+
 Kraft binds loopback by default and edits your repos through git worktrees. How
 it fits together: [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 
