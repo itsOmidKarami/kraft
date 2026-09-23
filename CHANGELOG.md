@@ -5,6 +5,119 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.1.0
+
+### New
+
+- New harness: Cursor's agent CLI (`agent -p`), checked with real runs on
+  cursor-agent 2026.09.18-9a7762b (Kraft-bosip). It runs in `--auto-review`,
+  Cursor's classifier mode; `permission_mode: force` overrides it. Every
+  launch points `CURSOR_CONFIG_DIR` at a Kraft-owned directory under
+  `$KRAFT_HOME/run`, rewritten with Cursor's default config and commit
+  attribution off, so a worker's commits carry no `Co-authored-by: Cursor`
+  trailer and the classifier no longer refuses them (Kraft-umakq). Your own
+  `~/.cursor` is untouched. Tokens are read off the log; Cursor reports no cost. (#192)
+
+- **Behaviour change: the never-signal rule is no longer on every agent launch.** It is now an opt-in steering profile, `never-signal-processes-you-didnt-start`, that a repository names in `repos.yaml` (`steering: [never-signal-processes-you-didnt-start]`). Its text is unchanged. **Existing installs lose it on upgrade until you act.** Templates are never reseeded: an install first set up on 1.0.x has no such profile, and one upgraded from 0.x has it but no repo names it. If any of your repositories run tests that start their own servers, run `kraft admin doctor` after updating: it prints the exact YAML for the library profile (skip that part if your library.yaml already has one) and for the `repos.yaml` line. An item already in flight froze its steering at intake, so it runs without the rule until it is retried or re-filed. (#193)
+
+- Codex workers now work on a default install. Codex's sandbox refused
+  writes outside the worktree, so a worker could not write its result file
+  under `~/.kraft/run/results` or commit (a linked worktree commits into the
+  main checkout's `.git`), and every codex item failed. Kraft now grants
+  both directories on every launch through a new `writable_dirs` capability
+  (Kraft-rs9pk).
+- Codex runs in approve-for-me mode by default: the workspace-write sandbox
+  plus Codex's automatic reviewer for anything outside it, the counterpart of
+  Claude's `auto`. `permission_mode` still overrides it per harness profile or
+  task.
+- Fix: resuming a codex session failed at argument parsing, because
+  `codex exec resume` rejects `-s` after `resume`. Every codex option is now a
+  `-c` config key, which parses on both paths.
+- Fix: a codex usage limit crashed the run instead of parking the item as
+  rate limited. (#194)
+
+- New harness: OpenCode (`opencode run`), for any provider OpenCode knows,
+  including a ChatGPT login and OpenCode's free models (Kraft-nv1f1). Checked
+  against opencode 2.0.15 with real Kraft work items on `opencode/big-pickle`
+  and `openai/gpt-5.6-luna`. Every launch passes `--auto`, since `run`
+  otherwise rejects every permission request. There is no `effort`: name a
+  variant in the model id (`provider/model#high`). Usage comes from
+  `opencode session export`, because opencode 2.x's JSON log leaves out the
+  last step's tokens (Kraft-ihoen). (#195)
+
+- New harness: Amp (`amp -x`), with Amp's mode (`low` to `ultra`) as
+  `effort` (Kraft-gvrke). Checked with a real Kraft work item on a logged-in
+  amp. Resuming works: every launch passes `--no-archive-after-execute`,
+  since Amp archives a thread after `-x` and refuses to continue an
+  archived one. Amp reports no cost Kraft can read, so none is recorded. (#196)
+
+- Kraft's permission gate now answers Codex workers too. When a task's
+  policy has something to enforce, the launch passes Codex a `PreToolUse`
+  hook with `-c` and trusts only that hook, by the hash `codex app-server`
+  reports; `--dangerously-bypass-hook-trust` is never used, and a launch
+  whose hook Codex won't trust is refused. `deny_tools` and `allowed_tools`
+  now work on Codex (`apply_patch` is checked as `Write` and `Edit`), each
+  decision is logged on the timeline, and a resumed thread keeps the hook.
+  Codex's web search never reaches the hook, so policy that must deny
+  `WebSearch` refuses the launch (Kraft-4in7z.3).
+- OpenCode and Amp workers now honour a task's `deny_tools` and
+  `allowed_tools`: Kraft writes them into that launch's own config (OpenCode's
+  `OPENCODE_CONFIG_CONTENT` with `--standalone`, a per-session Amp
+  `--settings-file`), and the CLI enforces them. Denying `Bash` also denies
+  OpenCode's code mode. An allowlisted tool on Amp is allowed outright, past
+  Amp's own built-in asks. A denied tool name the CLI has no tool for refuses
+  the launch; an allowlisted one grants nothing. These decisions aren't logged on the timeline, and grants aren't
+  applied (Kraft-4in7z.4, Kraft-4in7z.2).
+- A Codex, Cursor or other non-Claude worker that outlived a Kraft restart
+  now has its tokens read with its own harness's log reader instead of
+  Claude's, which found none; each session now records its harness, and
+  older sessions keep Claude's reader (Kraft-9elw1).
+- Kraft's permission gate now answers Cursor workers too: a `preToolUse`
+  hook, written into the worktree's `.cursor/hooks.json` (never committed)
+  when the task's policy has something to enforce, applies `deny_tools` and
+  `allowed_tools` (which Cursor launches can now use) and logs each decision
+  on the item's timeline, with the harness and Cursor's own tool name.
+  Everything policy doesn't decide is left to Cursor's classifier, and a hook
+  allow doesn't override it (Kraft-4in7z, Kraft-4in7z.6). New `grants:` in
+  policy (`git-commit`, `git-rebase`, `git-push`) let a task's gate allow
+  exactly one plain git invocation of that operation, even outside
+  `allowed_tools`; a commit message with `$` or `!`, or anything chained,
+  goes to the classifier when there is no allowlist, and is denied under
+  one. A granted push must name a plain remote, and `--delete`, `--mirror`,
+  `--all`, `--prune`, `--repo` and git's `-C` are never granted. A grant is
+  the gate's logged allow: Cursor's classifier can still refuse the call
+  (Kraft-4in7z.6), and a Claude task under an allowlist without `Bash` has no
+  shell tool to make it with (Kraft-4in7z.12). Grants accumulate down the
+  layers, and a work item's own override, or a retry's, can drop a grant but
+  never add one. An
+  escalation turn is granted all three by default, so it can rebase and
+  push; `defaults.escalation_grants` in `policy.yaml` narrows that.
+- New `policy.yaml` key `escalation_harness` picks the harness an escalation
+  turn runs on (Kraft-wge0e). Unset, it is `claude`, as before. Set it in
+  `defaults:`, on a repository, chain or node, or for one item with
+  `kraft item set-policy`; `item` follows the harness the item's own work
+  last ran on. An unknown profile is refused when `policy.yaml` is read. A
+  resumed escalation or paused task now finds its session id with its own
+  harness's reader, and a resumed codex thread records only what it added. (#216)
+
+### Fixes
+
+- Before a workspace item's draft merge requests open, each changed member is
+  now rebased onto its own default branch, and the root's pointer is updated to
+  match. Member drafts no longer open on the stale base they were cut from.
+- The pre-MR rebase's `git rebase --abort` now has its own 30-second limit. A
+  git hook that hangs during the abort stops the item for a human, with a
+  message saying the worktree was left mid-rebase, instead of holding the
+  worker slot forever. (#208)
+
+- `kraft admin templates lint --dir PATH` lints a template directory
+  in-process, with no server and no `$KRAFT_HOME`. It doesn't check an
+  installed skills override or `policy.yaml` ceilings. (#210)
+
+- A workspace item whose root rebase conflicts only because the root's base
+  branch also moved a member's pointer now stops with a sentence naming the
+  member and saying how to resolve it, after git's own conflict text. (#211)
+
 ## 1.0.8
 
 - Fix: a `chain_revision_approval` gate now gets the same board, action-bar
