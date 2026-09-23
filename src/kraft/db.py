@@ -917,7 +917,10 @@ class Database:
 
     async def close(self) -> None:
         await self._queue.put(_STOP)
-        if self._task is not None:
-            await self._task
-        self._writer.close()
-        self._reader.close()
+        try:
+            if self._task is not None:
+                await self._task
+        finally:
+            # the writer task can die on a raising rollback; still release both
+            self._writer.close()
+            self._reader.close()

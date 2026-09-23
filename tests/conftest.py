@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import threading
 from pathlib import Path
 
 import httpx
@@ -245,6 +246,34 @@ def _contain_hardened_git_env():
     for key in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
         del os.environ[key]
     os.environ.update(before)
+
+
+@pytest.fixture(autouse=True)
+def _close_db_connections(monkeypatch):
+    """Close every connection `db._connect` hands out, so a test that opens one
+    and forgets doesn't surface later as a ResourceWarning in an unrelated test.
+    Only the test's own thread: a connection is unusable from any other."""
+    from kraft.index import db as index_db
+
+    opened = []
+    test_thread = threading.get_ident()
+
+    def track(module, name):
+        real = getattr(module, name)
+
+        def tracking(path):
+            conn = real(path)
+            if threading.get_ident() == test_thread:
+                opened.append(conn)
+            return conn
+
+        monkeypatch.setattr(module, name, tracking)
+
+    track(db, "_connect")
+    track(index_db, "connect")
+    yield
+    for conn in opened:
+        conn.close()  # closing twice is a no-op
 
 
 @pytest.fixture(autouse=True)
