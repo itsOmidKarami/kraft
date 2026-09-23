@@ -57,8 +57,8 @@ def launched(monkeypatch):
     return seen
 
 
-async def _item(database, run_dirs, defaults=None, item_policy=None):
-    chain = v1_resolved(_NODES).materialize(
+async def _item(database, run_dirs, defaults=None, item_policy=None, nodes=_NODES):
+    chain = v1_resolved(nodes).materialize(
         target=WorkItemTarget.for_repository("target"),
         effective_policy=InstancePolicy.from_input(
             InstancePolicyInput.model_validate({"defaults": defaults or {}})
@@ -168,3 +168,22 @@ async def test_item_with_no_agent_work_yet_launches_nothing(database, run_dirs, 
         ).fetchall()
     )
     assert "no agent task" in open(log["log_path"]).read()
+
+
+async def test_item_skips_gate_reviews_and_escalation_turns(database, run_dirs, launched):
+    """A gate's reviewer and an escalation turn ran later than the item's own
+    agent task, on other profiles; neither is the item's work, so `item`
+    still follows the task's profile."""
+    gate = {
+        "id": "review",
+        "kind": "gate",
+        "auto_review": {"id": "rev", "kind": "agent", "harness": "cx-backup", "prompt": "Review."},
+    }
+    await _item(database, run_dirs, {"escalation_harness": "item"}, nodes=[*_NODES, gate])
+    await _ran(database, run_dirs, "s1", _WORK)
+    await _ran(database, run_dirs, "s2", "review.auto_review")
+    await _ran(database, run_dirs, "s3", "escalation")
+
+    await _escalate(database, run_dirs)
+
+    assert launched[0]["harness_id"] == "cx"
