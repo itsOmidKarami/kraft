@@ -21,20 +21,21 @@ It used to publish from `itsOmidKarami/kraft-lite`, which is frozen at 0.5.2 and
 receives no more releases. Installing it from there still works; it just stops
 moving.
 
-That is what namespaces the commands as `/kraft-lite:*`. Update with `/plugin
-update kraft-lite`. It needs Python 3.10 or newer and nothing else — no pip
-install, no dependencies. CI tests both ends of that range.
+The plugin name namespaces the commands as `/kraft-lite:*`. Update with
+`/plugin update kraft-lite`. It needs Python 3.10 or newer and nothing else — no
+pip install, no dependencies. CI tests both ends of that range.
 
-Add `--scope project` to either command to keep it to one repo. The version is
-Kraft's own release tag, so plugin `1.1.0` is the surface `kraft 1.1.0`
-serves — see [Contributing](#contributing).
+Add `--scope project` to either command to keep it to one repo. The plugin
+version follows Kraft's release tag. To check the install, run
+`/kraft-lite:status` in a repo: it reports that no chain exists yet.
 
 ## What is fixed and what is not
 
 A chain freezes when it starts: its nodes cannot be reordered, added to or
 removed, and a verb that meets a node missing from the frozen template fails
 rather than guessing. The registry is the opposite - it is re-read on every hook
-dispatch, so rebinding a hook is how a chain already in flight gets corrected.
+dispatch, so rebinding a hook is how a chain already in flight gets corrected. A hook is a named step a
+node runs, such as `on.spec.requested`.
 
 ## What runs each node
 
@@ -45,7 +46,9 @@ caps, and calls whatever you already use. Edit that file freely — it is meant 
 be read, diffed and committed.
 
 The chain itself is `chains/default.json`: ten nodes from spec through plan,
-implementation, verification, and review, with four gates where a human decides.
+implementation, verification, and review, with four gates where a human decides. Two nodes, `verify` and `mr_checks`,
+carry a fix loop capped at three attempts; a node past its cap stops the chain
+and escalates to you.
 
 ## State
 
@@ -53,16 +56,16 @@ implementation, verification, and review, with four gates where a human decides.
 `bd export` format either way, so adopting `bd` later is `bd import`, not a
 migration.
 
-`kraft-lite:status` lists what is in the directory; `kl.py chains` is the verb
+`/kraft-lite:status` lists what is in the directory; `kl.py chains` is the verb
 behind it. `kl.py summary` reports one run back: per-node times split into
-work and waiting at a gate, attempts against their caps, gates answered and
-rejection notes, off records the walk was writing anyway. Three labels ride along
-on those writes to make it possible - when a record was written by the wall clock,
-seconds already spent at a gate, and attempts already spent - because each is
-something a later write would otherwise overwrite. It counts no tokens and no money - Lite runs inside your
-session and never sees them.
+work and waiting at a gate, attempts against their caps, gates answered, and
+rejection notes. To make that possible, every write also records the wall-clock
+time it happened, the seconds already spent waiting at a gate, and the attempts
+already spent, because a later write would otherwise overwrite each one. It
+counts no tokens and no money — Lite runs inside your session and never sees
+them.
 
-A directory can hold several chains. Every verb takes `--chain-id <id>`; with one
+A directory can hold several chains. Every `kl.py` verb that reads or writes a chain takes `--chain-id <id>`; with one
 unfinished chain the flag is optional, and with two or more it is required —
 Lite refuses to guess which run a gate belongs to. Frozen chain templates live in
 `.kraft-lite/chains/<chain-id>.json`, one per run, so two chains can walk
@@ -70,7 +73,7 @@ different templates side by side.
 
 ## What it does not do
 
-Unattended execution, a web board, unattended CI polling, spend caps,
+Unattended execution, a web board, waiting on CI while you are away, spend caps,
 cross-repo search. Lite is the attended case: the chain is in front of you,
 resumable across sessions but not outliving your terminal. Several chains can
 share a directory, but nothing walks one while you are away. Those other things
@@ -79,7 +82,9 @@ piece of software.
 
 ## Tests
 
-    pytest tests -q
+From `plugins/kraft-lite/`, run the suite with your Python test runner
+(`pytest tests -q`). From the Kraft repo root, use `just test
+plugins/kraft-lite/tests`.
 
 ## Contributing
 

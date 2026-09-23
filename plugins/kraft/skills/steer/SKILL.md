@@ -5,7 +5,7 @@ description: "Use when a Kraft work item is heading the wrong way, or its spec o
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Redirecting a work item
@@ -43,7 +43,9 @@ nothing to act on; "the retry in `sync.py` swallows the timeout, let it
 propagate and update the test" does. Say what was wrong about the last
 attempt only when the agent would otherwise repeat it.
 
-Ask the person before pausing: it discards the running attempt.
+Ask the person before pausing: it discards the running attempt. Afterwards,
+check `kraft view show ID` reads active again and `kraft view events ID` shows
+the resume; a steer that never reached a new attempt did nothing.
 
 ## If you are a Kraft worker session
 

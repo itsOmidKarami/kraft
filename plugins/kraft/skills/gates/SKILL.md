@@ -7,7 +7,7 @@ description: Use when a Kraft work item needs a human decision or has gone wrong
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Gates and steering
@@ -38,6 +38,13 @@ and starting it again with new context:
 
 `resume_work_item()` is also how a freshly filed work item is started for the
 first time.
+
+## Confirm it worked
+
+After any of these, call `get_work_item()` and check the status and current
+node moved as expected: an approved gate is no longer pending, a paused item
+reads paused, a resumed one is active again. Report what you see, not what you
+meant to cause.
 
 ## If you are a Kraft worker session
 

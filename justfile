@@ -191,12 +191,12 @@ smoke-models-hook:
 e2e:
     cd frontend && npm run e2e
 
-# `just e2e` assumes a human already started the fixture server (README in
-# frontend/e2e/serve.py) -- not a contract a worker can meet. This builds the
+# `just e2e` assumes a human already started the fixture server (see
+# frontend/e2e/README.md) -- not a contract a worker can meet. This builds the
 # SPA, starts serve.py in the background, waits for it to print its base URL,
 # points Playwright at it, and tears the server down on exit either way.
-# Mirrors .gitlab-ci.yml's frontend-e2e job script; that job is the proof this
-# sequence works, run on every frontend-touching MR.
+# Mirrors the `playwright` job in .github/workflows/test.yml; that job is the
+# proof this sequence works, run on every frontend-touching PR.
 e2e-ci:
     #!/usr/bin/env bash
     set -euo pipefail

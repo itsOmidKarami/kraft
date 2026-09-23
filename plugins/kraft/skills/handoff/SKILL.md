@@ -7,7 +7,7 @@ description: Use when work agreed in this session should be handed to Kraft inst
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
 plugin has been installed without the program it drives: say so and point at
-https://github.com/itsOmidKarami/kraft#install rather than reporting a
+https://itsomidkarami.github.io/kraft/get-started/install rather than reporting a
 connection error.
 
 # Handing work to Kraft
@@ -51,10 +51,16 @@ changes nothing. If the spec or plan changes before the item starts, revise it
 in place with `set_attachments(spec=..., work_item_id=...)` (or `kraft item
 set-attachments`) instead of filing the item again. If `create_work_item`
 answers with a `duplicate_warning`, an open item already has that title or
-implements that bead: tell the user, and don't file a third.
+implements the same bead (an issue in the optional beads tracker): tell the user, and don't file a third.
 
 Before attaching a plan, skim it for a full-test-suite step (e.g. "run the
 full test suite" / "run all tests" as a task, not a task's own targeted test).
 The chain's `verify` node already runs the suite after every task with its own
 fix loop, so a plan step doing the same is redundant. If you see one, mention
 to the user that it's not advised and offer to strip it before attaching.
+
+## Confirm it landed
+
+Run `kraft view list --status=paused` (or `get_work_item()` on the new id) and
+check the item is there with the title you gave and, if you attached documents,
+that `kraft view docs ID` lists them.

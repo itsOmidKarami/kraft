@@ -35,7 +35,11 @@ unfinished chains in the directory the verb refuses to guess. `--note` is
 required. A rejection with no reason strands whoever picks the work
 up next, including you after a compaction.
 
-After an approve or a reject, invoke `kraft-lite:next`: on a reject the node
+Each verb prints the chain's new state. Check it: after `approve` the gated node
+is `closed` and `state` shows the next node; after `reject` the node is `open`
+with your `note` set.
+
+Then invoke `kraft-lite:next`: on a reject the node
 reopens and its note leads the retry.
 
 Never call `approve` because the answer seemed obvious. If the human has not
