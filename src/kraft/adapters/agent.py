@@ -825,4 +825,5 @@ async def run_agent_task(
         time_cap=time_cap,
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
+        harness=harness,
     )

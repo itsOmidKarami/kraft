@@ -477,6 +477,9 @@ async def run_task(
     #: `rate_limit_hit` carries so a later launch can skip that pair until its
     #: reset (`executor.fallback.known_limited`). Only `run_agent_task` sets it.
     rate_limit_key: dict | None = None,
+    #: The `harnesses.yaml` harness this session runs on, recorded on its row
+    #: for `worker.reattach` (Kraft-9elw1). Only `run_agent_task` sets it.
+    harness: str | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -502,6 +505,7 @@ async def run_task(
             head_sha=head_sha,
             thread=thread,
             command=command_ran,
+            harness=harness,
         )
     )
 

@@ -7,6 +7,10 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- A Codex, Cursor or other non-Claude worker that outlived a Kraft restart
+  now has its tokens read with its own harness's log reader instead of
+  Claude's, which found none; each session now records its harness, and
+  older sessions keep Claude's reader (Kraft-9elw1).
 - Kraft's permission gate now answers Cursor workers too: a `preToolUse`
   hook, written into the worktree's `.cursor/hooks.json` (never committed)
   when the task's policy has something to enforce, applies `deny_tools` and

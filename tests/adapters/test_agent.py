@@ -92,7 +92,7 @@ async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, repo, mo
 
     status, row = await launch("s3")
 
-    assert status == "done"
+    assert (status, row["harness"]) == ("done", "claude")  # reattach's reader (Kraft-9elw1)
     assert row["session_summary_ref"] == ".engineering/sessions/s3.md"
     summary = (repo / ".engineering" / "sessions" / "s3.md").read_text()
     for line in (
