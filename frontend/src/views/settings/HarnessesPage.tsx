@@ -59,7 +59,7 @@ const CAPABILITY_HELP: Record<string, string> = {
   autocompact: "When the CLI compacts its context window.",
   usage: "Where Kraft reads the run's token usage from.",
   rate_limit_signal: "How Kraft notices the provider rate-limiting the run.",
-  result_dir: "Lets a sandboxed CLI write the directory holding its result file.",
+  writable_dirs: "Lets a sandboxed CLI write its result file's directory and the repo's git directory.",
 };
 
 /** `{value}`/`{csv}` in a `cli:` fragment, as a reader would write them. */

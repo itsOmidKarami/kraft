@@ -51,10 +51,12 @@ KNOWN = (
     "resume",
     "autocompact",
     "rate_limit_signal",
-    # Kraft fills it, never a task: the directory holding $KRAFT_RESULT_PATH,
-    # for a CLI whose own sandbox would otherwise refuse the write there
-    # (Kraft-rs9pk).
-    "result_dir",
+    # Kraft fills it, never a task: the directories outside the worktree a
+    # worker must write -- the one holding $KRAFT_RESULT_PATH, and the
+    # worktree's git common dir when it has one -- for a CLI whose own sandbox
+    # would otherwise refuse those writes (Kraft-rs9pk). `{value}` is one JSON
+    # array of absolute paths, which is also a TOML inline array.
+    "writable_dirs",
 )
 
 #: Without these three, no agent dispatch can be built at all.

@@ -37,10 +37,13 @@ capabilities:
   # `approval_policy=on-request`, `approvals_reviewer=auto_review`. The mode
   # stays the sandbox; the automatic reviewer rides along with every mode.
   permission_mode: { cli: ["-c", "sandbox_mode={value}", "-c", "approval_policy=on-request", "-c", "approvals_reviewer=auto_review"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
-  # workspace-write writes the worktree and /tmp only, and $KRAFT_RESULT_PATH
-  # lives under $KRAFT_HOME/run/results: without this a write under $HOME is
-  # refused. A TOML literal string, so a backslash in the path is harmless.
-  result_dir:      { cli: ["-c", "sandbox_workspace_write.writable_roots=['{value}']"] }
+  # workspace-write writes the worktree and /tmp only. $KRAFT_RESULT_PATH lives
+  # under $KRAFT_HOME/run/results, and a commit writes the main checkout's
+  # .git: without this both are refused under $HOME. The automatic reviewer
+  # can decline a commit (it did, citing a repo AGENTS.md that asks for
+  # "clear authority"), so Kraft grants these outright. `{value}` is a JSON
+  # array of paths, which TOML reads as an inline array.
+  writable_dirs:   { cli: ["-c", "sandbox_workspace_write.writable_roots={value}"] }
   resume:          { via: command_resume }
   usage:             { source: envelope, reader: codex-json }
   rate_limit_signal: { reader: codex-json }

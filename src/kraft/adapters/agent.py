@@ -18,7 +18,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
     resolve_profile,
     select_profile,
 )
-from kraft.config import RepoEntry
+from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import steering as _steering
@@ -544,6 +544,23 @@ def build_context(
 INSTRUCTION_MAX_BYTES = 24 * 1024
 
 
+def _writable_dirs(run_dirs, name: str, cwd) -> str:
+    """The `writable_dirs` value: a JSON array (also a TOML inline array) of
+    the directories outside the worktree a worker must write (Kraft-rs9pk).
+
+    The result file's directory, under $KRAFT_HOME/run/results. And the
+    worktree's git common dir, where every commit writes -- the main
+    checkout's `.git`, outside a linked worktree -- asked of git rather than
+    guessed, and left out when git has none to give."""
+    dirs = [str(_subprocess.result_path_for(run_dirs, name).parent)]
+    common = git_read(
+        Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    )
+    if common:
+        dirs.append(common)
+    return json.dumps(dirs, ensure_ascii=False)
+
+
 def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
     """`task_instruction`, or its head plus where the whole of it is written.
 
@@ -706,13 +723,9 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
-    # Kraft's own value, not a task's, so the check above never sees it. The
-    # result file lives under $KRAFT_HOME/run/results, outside the worktree a
-    # sandboxed CLI (codex's workspace-write) may write to (Kraft-rs9pk).
-    if h.supports("result_dir"):
-        options["result_dir"] = str(
-            _subprocess.result_path_for(run_dirs, files or session_id).parent
-        )
+    # Kraft's own value, not a task's, so the check above never sees it.
+    if h.supports("writable_dirs"):
+        options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
     cmd = _harness.build_argv(
         h,
         command=command or None,
