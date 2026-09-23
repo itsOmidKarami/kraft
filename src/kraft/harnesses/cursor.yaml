@@ -19,10 +19,18 @@ command: [agent, -p, --trust]
 
 # Kraft-4in7z: Kraft answers Cursor's preToolUse hook (`kraft admin
 # permission-hook cursor`), which is how deny_tools and allowed_tools are
-# enforced -- Cursor has no per-launch tool flags. Its shell tool is `Shell`.
+# enforced -- Cursor has no per-launch tool flags. Tool names seen by the hook
+# (cursor 2026.09.18, probed 2026-09-23): Shell, Read, Write (both creating
+# and editing a file, so it is checked as Write and Edit), Delete, Grep (also
+# glob). Unmapped names reach the gate as they are.
 permission_hook: cursor
 tool_names:
   Shell: Bash
+  Write: [Write, Edit]
+  Delete: Delete
+# A web fetch never reached the hook in the probe; web search was not seen.
+# A launch whose policy would have to deny either is refused.
+unhooked_tools: [WebFetch, WebSearch]
 
 capabilities:
   # No system-prompt or rules flag exists; Cursor reads AGENTS.md and

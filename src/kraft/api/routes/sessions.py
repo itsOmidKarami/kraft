@@ -110,6 +110,9 @@ class PermissionAsk(BaseModel):
     #: allowlist), so a policy the route cannot resolve is a logged deny, not
     #: `unresolved`.
     fail_closed: bool = False
+    #: Kraft tool names this call also is (Cursor's `Write` edits too): denied
+    #: if any is denied, allowed under an allowlist only if all are listed.
+    also: list[str] = []
 
 
 def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:
@@ -206,21 +209,23 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
             return {"behavior": "unresolved", "message": f"cannot resolve {task}'s policy: {exc}"}
         decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
+        names = (body.tool_name, *body.also)
         grant = matching(grants, body.tool_name, body.input)
-        if body.tool_name in denied:
-            decision, reason = "deny", f"{body.tool_name} is in {task}'s deny_tools"
+        if hit := next((n for n in names if n in denied), None):
+            decision, reason = "deny", f"{hit} is in {task}'s deny_tools"
         elif grant is not None:
             decision, reason = "allow", f"{task} holds the {grant} grant"
         elif allowed is None:
             if body.mode == "enforce":
                 return {"behavior": "no_opinion"}
             decision, reason = "allow", f"no layer of {task}'s policy sets allowed_tools"
-        elif body.tool_name in allowed:
-            decision, reason = "allow", f"{body.tool_name} is in {task}'s allowed_tools"
+        elif all(n in allowed for n in names):
+            decision, reason = "allow", f"{'/'.join(names)} is in {task}'s allowed_tools"
         else:
+            missing = next(n for n in names if n not in allowed)
             decision, reason = (
                 "deny",
-                f"{body.tool_name} is not in {task}'s allowed_tools ({', '.join(allowed)})",
+                f"{missing} is not in {task}'s allowed_tools ({', '.join(allowed)})",
             )
     await st.db.write(
         lambda c: events.append(

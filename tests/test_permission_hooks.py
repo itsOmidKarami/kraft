@@ -25,7 +25,7 @@ CURSOR_SHELL = json.dumps(
         "model": "default",
     }
 )
-NAMES = {"Shell": "Bash"}
+NAMES = {"Shell": ("Bash",), "Write": ("Write", "Edit")}
 
 
 def _asker(behavior, seen=None):
@@ -52,8 +52,22 @@ def test_cursor_maps_shell_to_bash_and_asks_in_enforce_mode(fail_closed):
         "Bash",
         "echo hello",
         "46765f71",
-        {"mode": "enforce", "harness": "cursor", "cli_tool": "Shell", "fail_closed": fail_closed},
+        {
+            "also": (),
+            "mode": "enforce",
+            "harness": "cursor",
+            "cli_tool": "Shell",
+            "fail_closed": fail_closed,
+        },
     )
+
+
+def test_a_cli_tool_mapped_to_two_names_asks_as_both():
+    seen = []
+    payload = {**json.loads(CURSOR_SHELL), "tool_name": "Write", "tool_input": {"path": "x"}}
+    _run("no_opinion", seen=seen, stdin=json.dumps(payload))
+    [(tool, _input, _id, kw)] = seen
+    assert (tool, kw["also"], kw["cli_tool"]) == ("Write", ("Edit",), "Write")
 
 
 @pytest.mark.parametrize("use_id", [None, 7, ["x"]])

@@ -153,3 +153,21 @@ def test_cursor_shell_through_its_hook_is_denied_by_deny_tools_bash(client):
     assert (json.loads(out)["permission"], code) == ("deny", 0)
     [event] = events_of(client, "permission_decision")
     assert (event["tool"], event["cli_tool"], event["decision"]) == ("Bash", "Shell", "deny")
+
+
+@pytest.mark.parametrize(
+    ("policy", "behavior"),
+    [
+        ({"deny_tools": ["Edit"]}, "deny"),
+        ({"allowed_tools": ["Write"]}, "deny"),
+        ({"allowed_tools": ["Write", "Edit"]}, "allow"),
+    ],
+    ids=["either-name-denied", "only-one-listed", "both-listed"],
+)
+def test_a_call_that_is_two_tools_needs_both(client, policy, behavior):
+    """Cursor's `Write` also edits (probe 2026-09-23): it reaches the gate as
+    Write plus `also: [Edit]`, denied if either is denied and allowed under an
+    allowlist only when both are listed."""
+    seed_session(policy=policy)
+    body = ask(client, "Write", input={}, mode="enforce", also=["Edit"]).json()
+    assert body["behavior"] == behavior, body

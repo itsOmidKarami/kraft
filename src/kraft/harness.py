@@ -127,8 +127,14 @@ class Harness:
     #: File name -> text Kraft writes into that directory before every launch.
     config_files: dict[str, str] = field(default_factory=dict)
     #: The CLI's own tool name -> Kraft's (Cursor's `Shell` -> `Bash`), so a
-    #: hooked call is checked against policy under the name policy uses.
-    tool_names: dict[str, str] = field(default_factory=dict)
+    #: hooked call is checked against policy under the names policy uses. More
+    #: than one when the CLI's tool does both (Cursor's `Write` also edits):
+    #: denied if any is, allowed under an allowlist only if all are listed.
+    tool_names: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Policy tool names whose calls never reach the hook (Cursor's web
+    #: fetch, probed 2026-09-23), so a launch that would have to deny one is
+    #: refused rather than run with it unenforced.
+    unhooked_tools: tuple[str, ...] = ()
     #: The `permission_hooks.TRANSLATORS` key that answers this CLI's
     #: pre-tool hook, or None when it has none (Kraft-4in7z).
     permission_hook: str | None = None
@@ -284,7 +290,10 @@ class Harness:
                 name: json.dumps(body, indent=2) + "\n"
                 for name, body in (config.files if config is not None else {}).items()
             },
-            tool_names=dict(parsed.tool_names),
+            tool_names={
+                k: (v,) if isinstance(v, str) else tuple(v) for k, v in parsed.tool_names.items()
+            },
+            unhooked_tools=tuple(parsed.unhooked_tools),
             permission_hook=parsed.permission_hook,
         )
 
@@ -354,7 +363,8 @@ class HarnessInput(BaseModel):
     command_resume: Prefix = []
     capabilities: dict[StrictStr, CapabilityInput] = {}
     config_dir: ConfigDirInput | None = None
-    tool_names: dict[StrictStr, StrictStr] = {}
+    tool_names: dict[StrictStr, StrictStr | list[StrictStr]] = {}
+    unhooked_tools: list[StrictStr] = []
     permission_hook: StrictStr | None = None
 
 
@@ -384,7 +394,9 @@ def _shape_problem(exc: ValidationError) -> str:
         case ("capabilities", name, key, *_):
             return f"capability {name!r} {key!r} {_SHAPE.get(key, 'must be a string')}"
         case ("tool_names", *_):
-            return "'tool_names' must map a CLI's tool name to Kraft's, both strings"
+            return "'tool_names' must map a CLI's tool name to Kraft's: a string or a list"
+        case ("unhooked_tools", *_):
+            return "'unhooked_tools' must be a list of strings"
         case ("permission_hook",):
             return "'permission_hook' must be a string"
         case ("config_dir", *_):

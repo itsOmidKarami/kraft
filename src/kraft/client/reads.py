@@ -250,6 +250,7 @@ async def permission_request(
     harness: str | None = None,
     cli_tool: str | None = None,
     fail_closed: bool = False,
+    also: tuple[str, ...] = (),
 ) -> dict:
     """Ask Kraft whether this worker session may use `tool_name` (Kraft-oor).
 
@@ -280,6 +281,7 @@ async def permission_request(
                 "harness": harness,
                 "cli_tool": cli_tool,
                 "fail_closed": fail_closed,
+                "also": list(also),
             },
         )
     except ValueError as exc:  # `_send` raises this for a server that is not there

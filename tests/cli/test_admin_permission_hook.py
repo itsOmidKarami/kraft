@@ -84,4 +84,4 @@ def test_the_hook_passes_its_harness_tool_names(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO(CURSOR_SHELL))
     with pytest.raises(SystemExit):
         admin._cmd_permission_hook(argparse.Namespace(harness="cursor", fail_closed=False))
-    assert seen == [{"Shell": "Bash"}]
+    assert seen[0]["Shell"] == ("Bash",)

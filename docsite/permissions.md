@@ -48,12 +48,28 @@ through one marked line in the repository's `info/exclude`, and a tracked one
 through `skip-worktree` in that worktree's index. A skip-worktree file can make
 a rebase that touches it refuse to run (Kraft-4in7z.10).
 
-The hook maps Cursor's tool names to Kraft's (`Shell` is `Bash`, from
-`tool_names:` in `src/kraft/harnesses/cursor.yaml`) and asks the same route in
-**enforce** mode. It starts in about 0.16 s per tool call. Under an
-`allowed_tools` list the launch sets `KRAFT_PERMISSION_FAIL_CLOSED=1` in that
-worker's environment, and the hook is fail-closed for that session: a Kraft it can't reach, a
-payload it can't read or a policy the gate can't resolve is a deny. Without
+What Cursor's hook sees (cursor 2026.09.18, probed 2026-09-23), under the
+names policy uses (`tool_names:` in `src/kraft/harnesses/cursor.yaml`):
+
+| Cursor's tool | Checked as | |
+|---|---|---|
+| `Shell` | `Bash` | |
+| `Read` | `Read` | |
+| `Write` | `Write` and `Edit` | Cursor creates *and* edits files with it: denied if either is denied, allowed under an allowlist only if both are listed |
+| `Delete` | `Delete` | |
+| `Grep` | `Grep` | also Cursor's glob |
+| web fetch, web search | — | never reach the hook |
+
+A web fetch never reached the hook in the probe, and a web search wasn't seen,
+so Kraft can't deny either on Cursor. A Cursor launch whose policy would have
+to — `WebFetch` or `WebSearch` in `deny_tools`, or an `allowed_tools` list that
+doesn't name both — is refused (`unhooked_tools:` in `cursor.yaml`) rather than
+run with that part of its policy unenforced.
+
+The hook asks the same route in **enforce** mode. It starts in about 0.16 s
+per tool call. Under an `allowed_tools` list the launch sets
+`KRAFT_PERMISSION_FAIL_CLOSED=1` in that worker's environment, and the hook is
+fail-closed for that session: a Kraft it can't reach, a payload it can't read or a policy the gate can't resolve is a deny. Without
 one, any of those is no opinion, and Cursor's classifier decides as if there
 were no hook.
 

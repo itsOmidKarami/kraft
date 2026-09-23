@@ -58,6 +58,8 @@ def _kraft_hooks(cwd):
 
 
 FAIL_CLOSED = "KRAFT_PERMISSION_FAIL_CLOSED"
+#: Cursor's hook never sees these, so an allowlist must list them (Kraft-4in7z).
+WEB = ("WebFetch", "WebSearch")
 
 
 def test_a_cursor_launch_under_a_tool_allowlist_runs_fail_closed(run, tmp_path):
@@ -65,7 +67,7 @@ def test_a_cursor_launch_under_a_tool_allowlist_runs_fail_closed(run, tmp_path):
     list (Kraft-4in7z), so the launch runs, the list is in no flag, and the
     session's env makes the hook deny every call while Kraft cannot be asked."""
     cwd = _repo(tmp_path)
-    seen = _cursor(run, tmp_path, cwd, allowed_tools=("Read",))
+    seen = _cursor(run, tmp_path, cwd, allowed_tools=("Read", *WEB))
     assert "Read" not in seen["cmd"]
     assert seen["env"][FAIL_CLOSED] == "1"
     [entry] = _kraft_hooks(cwd)
@@ -92,7 +94,7 @@ def test_sibling_launches_in_one_worktree_keep_the_hook(run, tmp_path, a_first):
     launches last, A's hook entry is still there, and only A is fail-closed."""
     cwd = _repo(tmp_path)
     launches = {
-        "A": lambda: _cursor(run, tmp_path, cwd, allowed_tools=("Read",)),
+        "A": lambda: _cursor(run, tmp_path, cwd, allowed_tools=("Read", *WEB)),
         "B": lambda: _cursor(run, tmp_path, cwd),
     }
     envs = {k: launches[k]()["env"] for k in (("A", "B") if a_first else ("B", "A"))}
@@ -100,6 +102,26 @@ def test_sibling_launches_in_one_worktree_keep_the_hook(run, tmp_path, a_first):
     assert entry["command"].endswith("permission-hook cursor")
     assert envs["A"][FAIL_CLOSED] == "1"
     assert FAIL_CLOSED not in envs["B"]
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"deny_tools": ("WebFetch",)},
+        {"allowed_tools": ("Read",)},
+        {"allowed_tools": ("Read", "WebFetch")},
+    ],
+    ids=["denies-an-unhooked-tool", "allowlist-without-them", "allowlist-without-one"],
+)
+def test_a_cursor_launch_it_cannot_enforce_is_refused(run, tmp_path, policy):
+    """A web fetch never reaches Cursor's hook (probe, 2026-09-23): policy
+    that would have to deny one must not launch, and writes no hook."""
+    from kraft.adapters.agent import LaunchRefused
+
+    cwd = _repo(tmp_path)
+    with pytest.raises(LaunchRefused, match="WebFetch/WebSearch"):
+        _cursor(run, tmp_path, cwd, **policy)
+    assert _kraft_hooks(cwd) is None
 
 
 def test_a_claude_launch_writes_no_cursor_hook(run, tmp_path):

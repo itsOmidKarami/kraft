@@ -61,7 +61,7 @@ Ask = Callable[..., Awaitable[dict]]
 def answer_hook(
     harness: str,
     stdin: str,
-    tool_names: Mapping[str, str],
+    tool_names: Mapping[str, tuple[str, ...]],
     *,
     fail_closed: bool,
     ask: Ask | None = None,
@@ -81,12 +81,14 @@ def answer_hook(
         from kraft.client import reads
 
         ask = reads.permission_request
+    tool, *also = tool_names.get(cli_tool, (cli_tool,))
     try:
         got = asyncio.run(
             ask(
-                tool_names.get(cli_tool, cli_tool),
+                tool,
                 input,
                 tool_use_id,
+                also=tuple(also),
                 mode="enforce",
                 harness=harness,
                 cli_tool=cli_tool,

@@ -763,6 +763,16 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
+    if blind := [
+        t
+        for t in h.unhooked_tools
+        if t in deny_tools or (allowed_tools is not None and t not in allowed_tools)
+    ]:
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) never sees a {'/'.join(h.unhooked_tools)} call "
+            f"in its hook, so it cannot deny {blind!r} as this launch's policy requires; "
+            f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
+        )
     if hooked:
         _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
     # Kraft's own value, not a task's, so the check above never sees it.

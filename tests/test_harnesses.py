@@ -204,7 +204,9 @@ def test_cursor_maps_its_shell_to_bash_and_enforces_tool_lists_via_its_hook():
     holds deny_tools and allowed_tools, so neither reaches argv, and its
     `Shell` is checked against policy as `Bash`."""
     cursor = harness.load(None).valid["cursor"]
-    assert cursor.tool_names["Shell"] == "Bash"
+    assert cursor.tool_names["Shell"] == ("Bash",)
+    assert cursor.tool_names["Write"] == ("Write", "Edit")  # Cursor's Write also edits
+    assert cursor.unhooked_tools == ("WebFetch", "WebSearch")
     assert cursor.permission_hook == "cursor"
     assert cursor.supports("deny_tools") and cursor.supports("allowed_tools")
     argv = harness.build_argv(
@@ -226,7 +228,7 @@ def test_every_hooked_harness_resolves_its_shell_tool_to_bash():
     assert hooked
     for h in hooked:
         if h.id not in NATIVE_BASH:
-            assert "Bash" in h.tool_names.values(), h.id
+            assert ("Bash",) in h.tool_names.values(), h.id
 
 
 _CAPS = "  context: { channel: prompt }\n  usage: { source: result_file }\n"
