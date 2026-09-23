@@ -1,6 +1,6 @@
 ---
 name: fix-loop-judge
-description: Judge whether a fix loop's next cycle is worth spending, from the trend across the rounds already run.
+description: "Use when a fix loop has run at least one cycle and Kraft asks whether another is worth spending."
 ---
 
 # Judging a fix loop mid-run

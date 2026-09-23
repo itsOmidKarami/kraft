@@ -1,9 +1,14 @@
 ---
 name: start
-description: Use when starting a new piece of work under Kraft Lite - materializes the chain's nodes as state records and runs the first node.
+description: "Use when the human asks to begin new work under Kraft Lite."
 ---
 
 # Starting a chain
+
+If `.kraft-lite/registry.yaml` does not exist, invoke `kraft-lite:init` first. Do
+not invent bindings, and do not start without it: `start` only warns when the
+registry is missing. If `start` exits with "hooks with no registry binding",
+rerun `kraft-lite:init` or edit the registry.
 
     python3 "$CLAUDE_PLUGIN_ROOT/kl.py" start --title "<the work>"
 
@@ -18,10 +23,7 @@ which chain is theirs.
 Carry that id. Every later verb in this chain takes `--chain-id <id>`, and a
 directory holding two unfinished chains refuses to guess between them.
 
-If `.kraft-lite/registry.yaml` does not exist, run the `init` skill first. Do not
-invent bindings.
-
-Then invoke the `next` skill. Starting a chain and stopping before the first node
+Then invoke `kraft-lite:next`. Starting a chain and stopping before the first node
 leaves the human with a state file and nothing running.
 
 `$CLAUDE_PLUGIN_ROOT` is set when this loads as a plugin. If it is unset, `kl.py`

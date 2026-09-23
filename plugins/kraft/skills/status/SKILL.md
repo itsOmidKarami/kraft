@@ -1,8 +1,6 @@
 ---
 name: status
-description: Use when someone needs to know where a Kraft work item has got to, or
-  when a handed-off item should be watched until it finishes - the phase it is in, the
-  node coming next, any gate it is waiting on, and a follow that ends by itself.
+description: "Use when someone asks where a Kraft work item has got to, or wants a handed-off item watched until it finishes."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -15,7 +13,7 @@ connection error.
 ## The phase line
 
 ```bash
-kraft show ID --json | jq -r '
+kraft view show ID --json | jq -r '
   "\(.status): \(.current_node_id) → next \(.next_node_id // "done")" +
   (if .pending_gate then " · gate \(.pending_gate)" else "" end)
 '
@@ -34,7 +32,7 @@ resolves it from the worktree.
 Arm a monitor on:
 
 ```bash
-kraft events ID -f
+kraft view events ID -f
 ```
 
 Do not pass `--type`. `-f` ends itself on `work_item_completed` or

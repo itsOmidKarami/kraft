@@ -1,6 +1,6 @@
 ---
 name: check
-description: Use to see whether a repo's Kraft config has drifted from what this Kraft version ships - a chain missing a node, a chain that no longer resolves, or an agent task naming a plugin skill that isn't installed. Report-only unless the human asks for a fix.
+description: "Use when a repo's Kraft config may have drifted from what this Kraft version ships, or after a Kraft upgrade."
 ---
 
 Kraft's tools come from the `kraft` MCP server. If `kraft` is not on PATH, this
@@ -36,7 +36,7 @@ carry the drift this skill exists to narrate:
   `repos.yaml`. There is no default, so this repo's next work item stops when
   its worktree is built. The row carries a suggestion probed from the repo's
   own markers; check it against what the repo actually needs before writing it
-  in, the same way step 1 of `onboard` checks a probed `test_command`.
+  in, the same way step 1 of `kraft:onboard` checks a probed `test_command`.
 
 Translate each row's compact detail (`c1, c2 missing` style) into one line per
 chain or node, grouped under its own heading, so a human reads "these three
@@ -48,8 +48,7 @@ For every agent task in the live library and chains
 (`~/.kraft/templates/library.yaml` and `chains/*.yaml`) whose `skill: X` names
 a skill where `X` contains a `:` - a reference into this agent's own plugin
 system, not a method Kraft ships - check `X` against the skills currently
-available to you (the list your own session already has, via
-`using-superpowers`'s skill listing). `kraft/skill.py` documents, on purpose,
+available to you (the list your own session already has). `kraft/skill.py` documents, on purpose,
 that the server side cannot answer this; you can, because you are the agent
 that would have to load it. `kraft admin templates show ID --resolved` prints
 each task with the `skill:` it inherited, so read that rather than the raw

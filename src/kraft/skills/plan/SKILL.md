@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Turn an approved spec into an implementation plan of bite-sized, independently testable tasks.
+description: "Use when a work item's spec is approved and the chain needs its implementation plan."
 ---
 
 # Writing a plan, headless

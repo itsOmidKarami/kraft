@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn a work item's brief into a design a human can approve or reject in one read.
+description: "Use when a work item's brief needs a design before planning."
 ---
 
 # Writing a spec, headless

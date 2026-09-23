@@ -1,9 +1,12 @@
 ---
 name: init
-description: Use once per repo before running a Kraft Lite chain - detects the test command and which installed skills can serve each chain hook, then writes a registry the human can edit.
+description: "Use when `.kraft-lite/registry.yaml` is missing or stale in a repo about to run a Kraft Lite chain."
 ---
 
 # Setting up Kraft Lite in this repo
+
+If `.kraft-lite/registry.yaml` already exists, show the human a diff and ask; do
+not overwrite one they have edited.
 
 Run `python3 "$CLAUDE_PLUGIN_ROOT/kl.py" detect` from the repo root. It prints the
 test command it found and, for each hook, every installed skill that plausibly

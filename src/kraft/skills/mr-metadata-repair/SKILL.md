@@ -1,6 +1,6 @@
 ---
 name: mr-metadata-repair
-description: Repair a merge request's own metadata -- a missing or wrong label -- when its pipeline failed on it. Never code, never a failing test.
+description: "Use when a merge request's CI wait failed and the trace names a label."
 ---
 
 # Repairing a merge request's metadata

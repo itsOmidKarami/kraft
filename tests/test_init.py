@@ -154,7 +154,7 @@ def test_the_status_skill_carries_the_phase_line_and_a_bounded_follow(tmp_path):
 
     body = (_plugin_root(tmp_path / ".claude") / "skills" / "status" / "SKILL.md").read_text()
     assert "next_node_id" in body
-    assert "kraft events ID -f" in body
+    assert "kraft view events ID -f" in body
     assert "Do not pass `--type`" in body
 
 

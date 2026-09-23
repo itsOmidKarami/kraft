@@ -26,7 +26,7 @@ update kraft-lite`. It needs Python 3.10 or newer and nothing else — no pip
 install, no dependencies. CI tests both ends of that range.
 
 Add `--scope project` to either command to keep it to one repo. The version is
-Kraft's own release tag, so plugin `0.62.3` is the surface `kraft 0.62.3`
+Kraft's own release tag, so plugin `1.1.0` is the surface `kraft 1.1.0`
 serves — see [Contributing](#contributing).
 
 ## What is fixed and what is not
@@ -70,7 +70,7 @@ different templates side by side.
 
 ## What it does not do
 
-Unattended execution, a web board, CI polling, spend caps,
+Unattended execution, a web board, unattended CI polling, spend caps,
 cross-repo search. Lite is the attended case: the chain is in front of you,
 resumable across sessions but not outliving your terminal. Several chains can
 share a directory, but nothing walks one while you are away. Those other things

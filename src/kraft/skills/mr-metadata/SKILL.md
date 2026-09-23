@@ -1,6 +1,6 @@
 ---
 name: mr-metadata
-description: Turn a finished branch into the merge request a reviewer can act on -- its title, labels, reviewers and the description.
+description: "Use when Kraft is about to open a merge request from a finished branch."
 ---
 
 # Authoring the merge request's metadata
@@ -8,7 +8,7 @@ description: Turn a finished branch into the merge request a reviewer can act on
 Kraft is about to open a merge request from your branch. Everything you write
 here becomes the MR itself: its title, its labels, who it asks to review, and
 the description a reviewer reads before they read anything else. Nobody
-rewrites this after you -- write it for the reviewer, not for Kraft.
+rewrites the title or description after you -- write it for the reviewer, not for Kraft.
 
 ## Read the repo's conventions first, and obey them over anything here
 
