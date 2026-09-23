@@ -1,15 +1,15 @@
 # Intent: template schema v1
 
 Intended behaviour for the V1 template system. This is a deliberate breaking
-change from the legacy hook-and-`gate_after` format. These requirements are
-unpinned until the migration supplies their implementation tests.
+change from the legacy hook-and-`gate_after` format. `enforced-by:` names the
+test that pins each requirement.
 
 ## REQ template-v1-is-not-backward-compatible
 
 The system SHALL accept only the V1 template schema and SHALL NOT preserve
 compatibility with legacy hook bindings or `gate_after` chains.
 enforced-by: tests/api/test_templates_inspection.py::test_a_legacy_gate_after_chain_does_not_resolve, tests/api/test_templates_inspection.py::test_a_legacy_home_starts_degraded_and_names_the_update_command
-origin: src/kraft/templates/library.py §is_pre_v1 -- Task 11a: a legacy chain does not resolve and a pre-V1 home is refused, never converted. Task 11b deleted the legacy loader itself (`registry.yaml`, `load_templates`, the registry routes and the legacy `GET /templates`); `is_pre_v1` is how an old home is still recognised.
+origin: src/kraft/templates/library.py §is_pre_v1 -- a legacy chain does not resolve and a pre-V1 home is refused, never converted. The legacy loader is gone (`registry.yaml`, `load_templates`, the registry routes and the legacy `GET /templates`); `is_pre_v1` is how an old home is still recognised.
 
 ## REQ major-update-replaces-incompatible-template-config
 
@@ -17,7 +17,7 @@ When an update crosses a major version with an incompatible template schema,
 the update SHALL install the new version's template configuration rather than
 continue to use the incompatible configuration.
 enforced-by: tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[flag], tests/test_update.py::test_major_update_requires_acceptance_and_makes_backup[prompt], tests/test_update.py::test_an_update_leaves_a_v1_home_alone, tests/test_update.py::test_a_major_update_keeps_the_policy_values_v1_still_has, tests/test_update.py::test_a_major_update_reports_each_policy_key_it_drops, tests/cli/test_admin_update.py::test_replace_pre_v1_config_carries_machine_config_and_installs_v1_harnesses
-origin: src/kraft/cli/admin.py §replace_pre_v1_config -- "incompatible" is a pre-V1 home (`templates.library.is_pre_v1`: a `registry.yaml` and no `library.yaml`), the one incompatible schema that exists. The machine's own files (`MACHINE_CONFIG`) are carried across; `policy.yaml` starts from the V1 seed and keeps the operator's value for every key V1 still has, printing each dropped key (`policy.CarriedPolicy`, Ruling 172); the rest is the bundled V1 configuration.
+origin: src/kraft/cli/admin.py §replace_pre_v1_config -- "incompatible" is a pre-V1 home (`templates.library.is_pre_v1`: a `registry.yaml` and no `library.yaml`), the one incompatible schema that exists. The machine's own files (`MACHINE_CONFIG`) are carried across; `policy.yaml` starts from the V1 seed and keeps the operator's value for every key V1 still has, printing each dropped key (`policy.CarriedPolicy`); the rest is the bundled V1 configuration.
 
 ## REQ major-update-requires-explicit-acceptance
 
@@ -46,7 +46,7 @@ The template directory SHALL contain one `library.yaml` for reusable tasks,
 steps, nodes, and named steering profiles, and one selectable chain per file
 under `chains/`.
 enforced-by: tests/templates/test_library.py::test_from_yaml_dir_loads_components_and_one_chain_per_file, tests/templates/test_library.py::test_each_chain_file_is_one_selectable_chain, tests/templates/test_library.py::test_two_chain_files_claiming_one_id_is_an_error_naming_both, tests/templates/test_materialization.py::test_the_seed_is_a_library_file_and_one_chain_per_file
-origin: templates/library.yaml -- Task 3's four pins are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. Task 5a added a fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` and it is **removed again**: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
+origin: templates/library.yaml -- The four pins here are the whole sentence ("one `library.yaml`" plus "one selectable chain per file"), and they are left exactly as they were. A fifth entry here for `test_the_seeded_harnesses_yaml_loads_and_covers_the_seeded_library` was removed again: that test verifies harness-profile coverage, which is a different sentence, and a pin claiming more than its test proves is worse than an honest gap. It is pinned where it belongs, under `harness-profile-has-safe-instance-configuration`. This requirement says nothing about `harnesses.yaml`, and should not.
 
 ## REQ registry-is-not-a-task-configuration-source
 
@@ -54,7 +54,7 @@ The system SHALL NOT use `registry.yaml` as a source of agent, subprocess,
 forge, or built-in task configuration; those definitions SHALL live in typed
 templates.
 enforced-by: tests/api/test_templates_inspection.py::test_a_registry_beside_the_library_configures_no_task, tests/templates/test_materialization.py::test_task_configuration_resolves_from_the_library_alone, tests/templates/test_materialization.py::test_the_seed_ships_no_legacy_configuration
-origin: src/kraft/templates/__init__.py -- Task 11b deleted the registry loader, its routes and the seed's `registry.yaml`: a daemon with a `registry.yaml` beside its library neither loads nor reports it, and a fresh home is seeded without one.
+origin: src/kraft/templates/__init__.py -- the registry loader is gone:, its routes and the seed's `registry.yaml`: a daemon with a `registry.yaml` beside its library neither loads nor reports it, and a fresh home is seeded without one.
 
 ## REQ task-kinds-are-discriminated
 
@@ -109,7 +109,7 @@ repository named nothing at intake still gets nothing, whatever `repos.yaml`
 says now, and this SHALL NOT raise merely because some other repository in
 the item is steered. A fanned-out member repository's frozen text is still
 found only by its own live `repos.yaml` path -- a member's path edited
-mid-flight still silently loses its steering (Kraft-ku1um, not yet fixed).
+mid-flight still silently loses its steering (Kraft-ku1um).
 enforced-by: tests/api/test_repository_steering.py::test_repository_steering_is_frozen_into_the_snapshot_at_intake, tests/worker/test_steering.py::test_a_frozen_snapshot_answers_whatever_the_live_library_says, tests/api/test_repository_steering.py::test_a_snapshot_from_before_the_freeze_runs_on_the_live_library, tests/worker/test_steering.py::test_a_snapshot_from_before_the_freeze_reads_the_live_library, tests/worker/test_steering.py::test_frozen_steering_survives_the_repos_yaml_path_changing, tests/worker/test_steering.py::test_an_unsteered_repository_in_a_partly_steered_workspace_gets_nothing_and_does_not_raise, tests/executor/test_policy_enforcement_config_errors.py::test_a_gate_review_whose_steering_cannot_be_resolved_ends_undecided_not_raising, tests/executor/test_policy_enforcement_config_errors.py::test_an_escalation_whose_steering_cannot_be_resolved_stops_as_its_own_session[manual]
 
 ## REQ pre-1-0-steering-files-become-library-profiles
@@ -178,7 +178,7 @@ An agent-runtime provider SHALL own invocation, context delivery, supported
 runtime options, session resumption, skill loading, and normalized task
 results for its runtime.
 enforced-by: tests/executor/test_dispatch.py::test_each_task_kind_reaches_its_own_adapter, tests/executor/test_dispatch.py::test_an_agent_task_contract_precedes_its_skill_and_steering, tests/executor/test_dispatch.py::test_a_typed_agent_task_reports_the_providers_own_normalized_result, tests/adapters/test_agent.py::test_a_typed_agent_task_resolves_through_provider_declared_options
-origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose launch is an ordinary typed `AgentTask` since Task 7a (`escalate.ESCALATION_TASK`) but which resumes its thread by its own session id rather than through any task field; the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
+origin: src/kraft/harness.py §build_argv -- five of the six mechanics are pinned above (invocation, context delivery, runtime options, skill loading, normalized results), each through a typed dispatch. **Session resumption is not**, and cannot be yet: a V1 `AgentTask` has no field that asks for a resumed provider session, so no chain dispatch reaches `build_argv`'s `resume` path. Its only caller is `kraft.escalate.dispatch`, whose launch is an ordinary typed `AgentTask` (`escalate.ESCALATION_TASK`) but which resumes its thread by its own session id rather than through any task field; the provider-side spelling meanwhile is covered by tests/adapters/test_agent.py::test_the_provider_spells_session_resumption_for_an_agent_task, which is harness-level and deliberately not claimed as this requirement's evidence.
 
 ## REQ provider-declares-harness-capabilities
 
@@ -418,7 +418,7 @@ change under review -- the whole branch on its first session, then only what
 changed since its previous session -- and a task that does not declare it
 SHALL NOT be.
 enforced-by: tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[declared], tests/executor/test_agent_inputs.py::test_the_review_package_reaches_only_a_task_that_declares_it[undeclared], tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method, tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer
-origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name (Ruling 47). Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer, and the default chain's in-loop code review (`verification.review.code_review`, Ruling 87) its second.
+origin: src/kraft/templates/models.py §AgentInput -- declared on the task (`inputs: [review_package]`), not keyed on a task's name. Delivered by `executor/dispatch.py` §dispatch_node through `prompts.review_package` and `adapters/agent.py`'s `$KRAFT_REVIEW_PACKAGE`; the seeded fix-loop judge is its first consumer, and the default chain's in-loop code review (`verification.review.code_review`) its second.
 
 ## REQ carried-findings-are-delivered-to-a-reviewing-task
 
@@ -426,14 +426,14 @@ A reviewing agent task SHALL be shown the findings its previous round
 reported, each with its stable identity, so that it can report a reworded
 repeat as the same finding.
 enforced-by: tests/executor/test_agent_inputs.py::test_carried_findings_reach_only_a_task_that_declares_them[declared], tests/executor/test_agent_inputs.py::test_carried_findings_reach_only_a_task_that_declares_them[undeclared], tests/executor/test_agent_inputs.py::test_a_first_review_is_handed_no_history, tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method
-origin: src/kraft/templates/models.py §AgentInput -- Task 11b: declared as `inputs: [carried_findings]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.carried_findings_note` -- the node's last measurement, under the tags `walk` then trusts in `findings.resolve_identity`. The seeded in-loop code review declares it.
+origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [carried_findings]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.carried_findings_note` -- the node's last measurement, under the tags `walk` then trusts in `findings.resolve_identity`. The seeded in-loop code review declares it.
 
 ## REQ continuity-note-is-delivered-to-a-resumed-reviewer
 
 A reviewing agent task on its second or later session SHALL be pointed at its
 own previous session's result and summary.
 enforced-by: tests/executor/test_agent_inputs.py::test_a_resumed_reviewer_is_pointed_at_its_own_last_session[declared], tests/executor/test_agent_inputs.py::test_a_resumed_reviewer_is_pointed_at_its_own_last_session[undeclared], tests/executor/test_agent_inputs.py::test_a_first_review_is_handed_no_history, tests/executor/test_agent_inputs.py::test_the_seeded_code_review_reads_the_review_package_through_its_method
-origin: src/kraft/templates/models.py §AgentInput -- Task 11b: declared as `inputs: [previous_review]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.previous_review_note` from the task's own last completed session (`prompts.last_review_session`). The seeded in-loop code review declares it.
+origin: src/kraft/templates/models.py §AgentInput -- declared as `inputs: [previous_review]` and delivered by `executor/dispatch.py` §dispatch_node through `prompts.previous_review_note` from the task's own last completed session (`prompts.last_review_session`). The seeded in-loop code review declares it.
 
 ## REQ resumed-escalation-preserves-original-runtime
 
@@ -449,7 +449,7 @@ result file and session summary paths every earlier turn of that thread had,
 SHALL start it with no result file left by an earlier turn, and SHALL keep each
 earlier turn's result and summary readable from that turn's own session row.
 enforced-by: tests/test_escalation_thread_files.py::test_a_resumed_turn_that_writes_where_it_remembers_is_done, tests/test_escalation_thread_files.py::test_a_turn_starts_with_no_result_file_from_the_last, tests/test_escalation_thread_files.py::test_each_turns_result_and_summary_stay_readable_from_its_row
-origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b), Ruling 207: a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
+origin: src/kraft/escalate.py §thread_files -- Kraft-s7c04.54 option (b): a prompt note telling a resumed turn its paths were new did not stop a model that trusted its memory (b5afe84c), so the path it remembers is made the right one.
 
 ## REQ an-escalation-turn-hands-a-skip-to-the-person
 
@@ -457,7 +457,7 @@ The system SHALL tell every escalation turn, manual or automatic, that it is
 not allowed to skip or abandon its work item itself, and SHALL give it the
 exact commands that do, for the person to run.
 enforced-by: tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[manual], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[automatic], tests/test_escalate_suggestion.py::test_an_escalation_turn_hands_a_skip_to_the_person[paused]
-origin: src/kraft/escalate.py §_HANDS_OFF -- Ruling 209 (Kraft-s7c04.67): no verb is pre-approved for an escalation agent.
+origin: src/kraft/escalate.py §_HANDS_OFF -- Kraft-s7c04.67: no verb is pre-approved for an escalation agent.
 
 ## REQ builtin-task-references-code-owned-actions
 
@@ -576,7 +576,7 @@ enforced-by: tests/templates/test_library.py::test_extends_cannot_change_the_par
 The system SHALL reject a chain with missing references, invalid overrides,
 duplicate identifiers, or invalid cross-node references before it is used.
 enforced-by: tests/templates/test_models.py::test_a_gate_reject_target_must_name_a_node_in_the_chain, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_later_node, tests/templates/test_models.py::test_a_gate_reject_target_cannot_name_a_gate, tests/templates/test_library.py::test_extends_rejects_an_unknown_parent, tests/templates/test_library.py::test_an_unknown_steering_reference_is_rejected, tests/templates/test_materialization.py::test_lint_reports_a_scope_its_chain_refuses_without_any_instance_ceiling
-origin: docs/templates-v1-design.md "Resolution and execution" -- Phase 1 covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`. Invalid per-scope policy overrides are refused by `ResolvedChain.check_scopes`, which lint and materialization share.
+origin: docs/templates-v1-design.md "Resolution and execution" -- this covers missing references and cross-node reject targets here, including the `base-change-restart-target-is-backward` backward-reference rule applied to `reject_to`; duplicate identifiers are pinned under `resolved-chain-identifiers-are-unique`. Invalid per-scope policy overrides are refused by `ResolvedChain.check_scopes`, which lint and materialization share.
 
 ## REQ template-resolution-preserves-source-context
 
@@ -623,7 +623,7 @@ The system SHALL refuse a steer on a running work item, and on a paused work
 item whose pause stopped no agent task, naming why. A steer SHALL NOT be
 handed to whichever agent runs next in place of the work the pause stopped.
 enforced-by: tests/test_pause_resume.py::test_steer_and_resume_are_refused_while_the_item_is_running, tests/test_pause_resume.py::test_a_pause_that_stopped_no_agent_task_takes_no_steer, tests/api/test_lifecycle.py::test_a_rebase_conflict_does_not_escalate_when_disarmed[resume]
-origin: src/kraft/api/routes/lifecycle.py §paused_steer_refusal -- Ruling 183 (Kraft-5d3sy): steer works only on an item that is not running, and only when the current work is agentic; the paused agent session is resumed when its harness allows it, the steer injected, and the work continues. An item filed paused and never started stopped nothing, so its steer is a note to its first agent.
+origin: src/kraft/api/routes/lifecycle.py §paused_steer_refusal -- Kraft-5d3sy: steer works only on an item that is not running, and only when the current work is agentic; the paused agent session is resumed when its harness allows it, the steer injected, and the work continues. An item filed paused and never started stopped nothing, so its steer is a note to its first agent.
 
 ## REQ pause-is-a-work-item-control
 
@@ -642,7 +642,7 @@ enforced-by: tests/executor/test_entry_paths.py::test_a_walk_given_no_position_s
 Resuming a paused work item SHALL NOT spend a retry attempt: no fix-loop or
 gate reject-loop counter SHALL change because of the resume itself.
 enforced-by: tests/api/test_lifecycle.py::test_resume_does_not_consume_a_retry_attempt
-origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Task 11b fix round 1, Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
+origin: src/kraft/store/work_items.py §resume_work_item -- carried from the retired legacy gate spec (Kraft-bqlld): a human-initiated interruption is not a failure, so resuming leaves `retry_counters` alone.
 
 ## REQ only-a-person-resets-a-cap-counter
 
@@ -700,7 +700,7 @@ An operator MAY change task configuration or policy for a retry when the
 change is valid for that task and within the applicable policy bounds. A retry
 SHALL NOT change the chain's structure, identifiers, order, or task kinds.
 enforced-by: tests/templates/test_retry_override.py::test_a_task_override_narrows_the_task_and_is_written_into_its_scope, tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[widens-the-inherited-allowlist], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[renames-the-task], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[changes-the-task-kind], tests/templates/test_retry_override.py::test_an_override_the_task_or_its_policy_bounds_refuse_names_its_field[adds-structure], tests/templates/test_retry_override.py::test_a_harness_change_is_held_to_the_paths_allowed_harnesses, tests/api/test_retry_paths.py::test_an_override_within_bounds_is_applied_to_the_fork, tests/api/test_retry_paths.py::test_an_override_out_of_bounds_forks_nothing, tests/api/test_retry_paths.py::test_a_retry_the_route_cannot_honour_is_refused_naming_the_field[override-changes-the-kind], tests/api/test_retry_paths.py::test_a_retry_the_route_cannot_honour_is_refused_naming_the_field[override-policy-of-the-wrong-type], tests/templates/test_forks.py::test_a_validated_override_is_the_forks_copy_and_its_record, tests/api/test_retry_paths.py::test_a_deferred_self_retry_carries_the_validated_override, tests/api/test_retry_paths.py::test_a_deferred_self_retry_refuses_an_override_out_of_bounds, tests/executor/test_escalation.py::test_a_self_retry_applies_the_override_it_carried, tests/templates/test_item_policy.py::test_a_retry_is_bounded_by_the_items_own_layer
-origin: src/kraft/templates/retry.py §validate_retry_override -- the validation half (Task 8a). The retry route validates with it before the claim and forks nothing on a refusal, and the fork stores the validator's copy of the chain as its own materialization (Task 8b: `api/routes/lifecycle.py` §_retry_override, `templates/forks.py` §RunFork.from_retry).
+origin: src/kraft/templates/retry.py §validate_retry_override -- the validation half. The retry route validates with it before the claim and forks nothing on a refusal, and the fork stores the validator's copy of the chain as its own materialization (`api/routes/lifecycle.py` §_retry_override, `templates/forks.py` §RunFork.from_retry).
 
 ## REQ task-step-and-node-are-skippable-by-default
 
@@ -804,7 +804,7 @@ or `gate_rejected` event naming the gate. A rejection SHALL carry the
 reviewer's note: one without a note SHALL be refused and SHALL leave the gate
 open, and the note SHALL reach the node the rejection re-enters.
 enforced-by: tests/api/test_gates.py::test_a_gate_approval_is_recorded_naming_its_gate, tests/api/test_gates.py::test_gate_reject_requires_note_and_re_runs_the_producer, tests/test_gates.py::test_reject_records_the_note_and_reopen_flips_the_row, tests/test_planning_chain.py::test_spec_gate_offers_the_document_then_reject_and_approve, tests/test_planning_chain.py::test_a_rejected_plan_rerun_is_framed_as_a_revision, tests/skills/test_gate_review.py::test_verdict_reenters_the_walk_at_the_right_node[reject-0]
-origin: src/kraft/api/routes/gates.py §reject_gate -- carried from the retired legacy gate spec (`docs/intent/gates.md`, deleted in Task 11b; Ruling 139a): its approve, reject-note and note-as-steer requirements describe behaviour V1 kept, in legacy vocabulary.
+origin: src/kraft/api/routes/gates.py §reject_gate -- carried from the retired legacy gate spec (the former `docs/intent/gates.md`, deleted): its approve, reject-note and note-as-steer requirements describe behaviour V1 kept, in legacy vocabulary.
 
 ## REQ gate-rejection-is-bounded-by-its-reject-loop
 
@@ -812,7 +812,7 @@ Each rejection of a gate SHALL count against that gate's own reject loop. At
 the loop's cap the system SHALL stop the work item for a human, naming the
 loop, rather than re-run the rejected work.
 enforced-by: tests/api/test_gates.py::test_gate_reject_is_bounded_by_its_reject_loop, tests/skills/test_gate_review.py::test_repeated_fixed_verdicts_breach_the_reject_loop
-origin: src/kraft/executor/gates.py §reject_loop_key -- carried from the retired legacy gate spec's per-gate-name reject-loop requirements (Task 11b): V1 keys the loop by the gate node's own id, for every gate.
+origin: src/kraft/executor/gates.py §reject_loop_key -- carried from the retired legacy gate spec's per-gate-name reject-loop requirements: V1 keys the loop by the gate node's own id, for every gate.
 
 ## REQ gate-control-does-not-generate-review-work
 
@@ -827,7 +827,7 @@ A gate with the dedicated `chain_finalized` marker SHALL retain Kraft's
 chain-review behaviour; other gate nodes SHALL have ordinary pause and
 approval behaviour.
 enforced-by: tests/executor/test_gates.py::test_the_chain_finalized_marker_not_the_gate_name_selects_chain_review, tests/executor/test_gates.py::test_an_ordinary_gate_has_ordinary_pause_and_approval_behaviour, tests/templates/test_models.py::test_an_attachment_never_trims_the_chain_finalized_gate
-origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in at this gate is **not** part of V1: the parked legacy splice was deleted in Task 11b. Plan-driven revision came back as its own node and gate after the plan (Kraft-oydes, the `chain-revision-*` requirements below), and the final gate revises nothing.
+origin: src/kraft/api/routes/gates.py §apply_approval -- the marker selects the final-review path, and what that path still does in V1 is refuse an approval whose review document was never written (every other gate is answerable with nothing to read). Splicing a reviewer's revised nodes back in at this gate is **not** part of V1: the parked legacy splice was deleted. Plan-driven revision came back as its own node and gate after the plan (Kraft-oydes, the `chain-revision-*` requirements below), and the final gate revises nothing.
 
 ## REQ chain-revision-changes-only-the-unexecuted-tail
 
@@ -835,7 +835,7 @@ WHEN a chain revision is applied, the system SHALL change only nodes after the
 revision's own gate, and SHALL refuse the whole change set if it skips,
 overrides or adds before a node at or before that gate.
 enforced-by: tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[skip-a-run-node], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[skip-its-own-gate], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[override-a-run-node], tests/templates/test_revision.py::test_a_revision_changes_only_the_nodes_after_its_gate[add-before-the-gate], tests/templates/test_revision.py::test_a_change_set_skips_adds_and_overrides_only_what_it_names
-origin: src/kraft/templates/revision.py §revise -- Kraft-oydes, Ruling 208 (DECISIONS 13): a change set, not a spliced tail, because the pre-V1 splice dropped what its reviewer did not re-emit (Kraft-eod0, Kraft-gnn1).
+origin: src/kraft/templates/revision.py §revise -- Kraft-oydes: a change set, not a spliced tail, because the pre-V1 splice dropped what its reviewer did not re-emit (Kraft-eod0, Kraft-gnn1).
 
 ## REQ chain-revision-cannot-skip-a-gate
 
@@ -861,7 +861,7 @@ agent's own review SHALL capture its digest immediately before it dispatches
 its reviewer, and its approval SHALL be checked against that digest rather
 than against whatever a person separately rendered.
 enforced-by: tests/api/test_chain_revision_gate.py::test_an_approval_applies_what_its_approver_saw_not_a_later_render, tests/api/test_chain_revision_gate.py::test_a_revision_approval_that_carries_no_digest_is_refused, tests/executor/test_gates_autoreview.py::test_agent_approval_refuses_an_artifact_edited_after_its_read, tests/executor/test_gates_autoreview.py::test_agent_approval_refuses_even_when_a_person_renders_the_new_version, tests/executor/test_gates_autoreview.py::test_agent_approval_of_an_unedited_artifact_still_applies
-origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, DECISIONS 15; Kraft-ec66w: the digest is the approver's own, echoed from the artifact they read, not the gate's last render. The agent path's own digest is `kraft.executor.gates._chain_revision_seen` (Kraft-rndd1), captured via `LaunchContext.chain_revision_digest` (`revision.artifact_digest` bound to `st.library` in `deps.launch`) and threaded into `apply_approval` as its existing `seen` keyword, which now only falls back to `store.shown_revision` when the caller supplied none.
+origin: src/kraft/api/routes/gates.py §_revise -- Kraft-ze1yj, Kraft-ec66w: the digest is the approver's own, echoed from the artifact they read, not the gate's last render. The agent path's own digest is `kraft.executor.gates._chain_revision_seen` (Kraft-rndd1), captured via `LaunchContext.chain_revision_digest` (`revision.artifact_digest` bound to `st.library` in `deps.launch`) and threaded into `apply_approval` as its existing `seen` keyword, which now only falls back to `store.shown_revision` when the caller supplied none.
 
 ## REQ invalid-chain-revision-never-reaches-the-chain
 
@@ -1092,18 +1092,18 @@ enforced-by: tests/executor/test_base_change.py::test_a_conflict_handler_that_re
 
 The effective task policy SHALL resolve from instance policy through repository,
 chain, node, step, and task policy overrides, from broadest scope to narrowest
-scope, and then through the work item's own override (Ruling 188). The work
+scope, and then through the work item's own override. The work
 item's operational values (timeouts, retry and wait timing, harness selection)
 SHALL apply after the chain's scopes, so they replace what the chain authored
 within the administrator maxima. Its safety values SHALL combine independently
 of order: an allowlist intersects, a deny list unions, and a sandbox, once set,
 cannot change. A work item's safety value SHALL therefore only tighten, and
 SHALL NOT be refused because a narrower scope already narrowed the same field.
-A cap -- a time cap or a budget, each capping its own scope (Rulings 194, 195)
+A cap -- a time cap or a budget, each capping its own scope
 -- SHALL tighten every looser scope under it and SHALL be refused above the cap
 it lands on.
 enforced-by: tests/test_policy.py::test_policy_overrides_compose_and_a_narrower_layer_cannot_widen_a_broader_one, tests/templates/test_policy_scopes.py::test_a_narrower_scope_narrows_what_it_inherits, tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[task], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[task-recovery-sits-in-its-task], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[fix-loop-sits-in-its-node], tests/templates/test_policy_scopes.py::test_each_task_resolves_policy_from_the_scopes_it_sits_in[auto-review-sits-in-its-gate], tests/api/test_repository_policy.py::test_the_repository_layer_folds_in_the_entrys_own_deny_tools_and_sandbox, tests/templates/test_item_policy.py::test_an_item_override_binds_the_scopes_it_addresses_and_touches_nothing_stored, tests/templates/test_item_policy.py::test_an_items_safety_value_only_tightens_whatever_it_lands_on[allowlist-wider-than-a-narrower-task-intersects], tests/templates/test_item_policy.py::test_an_override_past_its_bounds_is_refused_naming_the_field[budget-above-the-ceiling], tests/templates/test_item_policy.py::test_a_retry_may_narrow_a_task_below_the_items_allowlist
-origin: src/kraft/templates/models.py §MaterializedChain.policy_for -- the chain's policy (instance → repository → chain, folded at materialization) with each enclosing node, step and task override applied, then the work item's own override (`policy.WorkItemPolicy.apply_to`, Kraft-ab1bh): item-wide, then each enclosing path's. Ruling 188 settles the order: the spec's instance → repository → work item → chain would let any value the chain authors override the item's, so an operator could not lengthen an authored wait or raise an authored fix-loop cap; applying the item layer last for its operational values keeps that, and meeting its safety values keeps "only tightens" without a refusal that depends on which scope narrowed first.
+origin: src/kraft/templates/models.py §MaterializedChain.policy_for -- the chain's policy (instance → repository → chain, folded at materialization) with each enclosing node, step and task override applied, then the work item's own override (`policy.WorkItemPolicy.apply_to`, Kraft-ab1bh): item-wide, then each enclosing path's. The order is settled: the spec's instance → repository → work item → chain would let any value the chain authors override the item's, so an operator could not lengthen an authored wait or raise an authored fix-loop cap; applying the item layer last for its operational values keeps that, and meeting its safety values keeps "only tightens" without a refusal that depends on which scope narrowed first.
 
 ## REQ policy-has-defaults-and-administrator-maxima
 
@@ -1123,8 +1123,7 @@ The split between a safety ceiling and an operational value is a rule, not the
 membership of these examples. A **safety ceiling** may only tighten, against the
 inherited value: `allowed_tools`. A **budget** (`token_budget`, `budget_usd`) is
 a scope's own cap: it may not exceed its parent scope's or its level's
-administrator maximum, but a level's default is not a parent (Rulings 195,
-198, 211). An **operational value** may
+administrator maximum, but a level's default is not a parent. An **operational value** may
 move in either direction, bounded by an explicitly configured administrator
 maximum rather than by the inherited value: timeouts, retry and wait timing, and
 `allowed_harnesses`. A field absent from `maxima:` is unbounded.
@@ -1142,7 +1141,7 @@ naming both scopes; a work item's own policy override is one of those scopes.
 A launch whose sandbox cannot be resolved SHALL stop as its own `config_error`
 session naming the cause, and launch nothing.
 enforced-by: tests/executor/test_policy_enforcement_config_errors.py::test_a_task_whose_sandbox_cannot_be_resolved_stops_as_its_own_session[subprocess], tests/executor/test_policy_enforcement_config_errors.py::test_a_task_whose_sandbox_cannot_be_resolved_stops_as_its_own_session[builtin], tests/executor/test_policy_enforcement_config_errors.py::test_a_task_whose_sandbox_cannot_be_resolved_stops_as_its_own_session[agent], tests/executor/test_policy_enforcement_config_errors.py::test_a_gate_review_whose_sandbox_cannot_be_resolved_stops_as_its_own_session, tests/executor/test_policy_enforcement_config_errors.py::test_an_escalation_whose_sandbox_cannot_be_resolved_stops_as_its_own_session[manual], tests/executor/test_policy_enforcement.py::test_a_work_items_own_sandbox_wraps_the_whole_item, tests/executor/test_policy_enforcement.py::test_a_work_items_sandbox_that_conflicts_with_the_chains_is_refused, tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[sandbox0-expected0], tests/executor/test_policy_enforcement.py::test_a_sandbox_on_one_task_wraps_every_launch_of_the_item[None-None], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_runs_in_a_sandbox_another_node_set[manual], tests/executor/test_policy_enforcement.py::test_a_gate_reviewer_runs_in_a_sandbox_another_node_set, tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-task], tests/executor/test_policy_enforcement.py::test_two_scopes_asking_for_different_sandboxes_are_refused_at_build[another-node], tests/executor/test_policy_enforcement.py::test_an_item_filed_with_two_sandboxes_stops_rather_than_pick_one, tests/executor/test_setup_in_sandbox.py::test_the_walk_runs_both_setups_in_the_items_sandbox[entry0-expected0], tests/executor/test_setup_in_sandbox.py::test_a_sandboxed_item_without_docker_stops_for_a_human, tests/executor/test_setup_in_sandbox.py::test_test_scopes_and_their_area_setup_launch_in_the_items_sandbox[entry0-expected0]
-origin: src/kraft/executor/dispatch.py §item_sandbox -- Omid's decision (Ruling 189, Kraft-h10e5, Kraft-p8nem): a sandbox is a safety ceiling that only tightens, and once one task has run in it the worktree is the worker's to write, so every later host-side launch would run what it wrote. `item_sandbox` is the one resolution every launch reads; `ResolvedChain.check_scopes` refuses two.
+origin: src/kraft/executor/dispatch.py §item_sandbox -- Omid's decision (Kraft-h10e5, Kraft-p8nem): a sandbox is a safety ceiling that only tightens, and once one task has run in it the worktree is the worker's to write, so every later host-side launch would run what it wrote. `item_sandbox` is the one resolution every launch reads; `ResolvedChain.check_scopes` refuses two.
 
 
 ## REQ host-git-never-runs-worker-planted-code
@@ -1154,7 +1153,7 @@ holds a nested repository Kraft did not create SHALL stop for a human, naming
 its paths, before host git touches it. While a sandboxed session is live, no
 host git SHALL read that worktree.
 enforced-by: tests/worker/test_host_git_trust.py::test_assert_clean_never_runs_a_filter_planted_behind_a_gitlink, tests/worker/test_host_git_trust.py::test_no_host_call_runs_a_program_planted_in_a_nested_repository[filter-clean], tests/worker/test_host_git_trust.py::test_no_host_call_runs_a_program_planted_in_a_nested_repository[filter-process], tests/worker/test_host_git_trust.py::test_no_host_call_runs_a_program_planted_in_a_nested_repository[textconv], tests/worker/test_host_git_trust.py::test_no_host_call_runs_a_program_planted_in_a_nested_repository[diff-command], tests/worker/test_host_git_trust.py::test_no_host_call_runs_a_program_planted_in_a_nested_repository[include-path], tests/worker/test_planted_repos.py::test_the_hardened_environment_pins_every_recursion_setting_and_the_hooks, tests/worker/test_planted_repos.py::test_push_lifts_only_the_hooks_path_and_keeps_every_recursion_pin, tests/worker/test_planted_repos.py::test_the_sweep_leaves_an_undeclared_nested_repository_out, tests/worker/test_planted_repos.py::test_the_sweep_stages_a_declared_mount_and_never_enters_it_on_status, tests/worker/test_planted_repos.py::test_a_planted_repository_stops_a_sandboxed_item_naming_its_path, tests/worker/test_planted_repos.py::test_the_walk_entry_guard_delegates_a_plain_item_to_the_planted_scan, tests/worker/test_planted_repos.py::test_an_unreadable_index_stops_rather_than_reads_as_clean, tests/worker/test_planted_repos.py::test_host_git_waits_only_for_a_live_sandboxed_session[live-and-sandboxed], tests/executor/test_planted_repo_stops.py::test_a_planted_repository_stops_the_next_task_before_it_launches[sandboxed], tests/executor/test_planted_repo_stops.py::test_the_review_package_is_not_read_while_a_sandboxed_co_task_runs[sandboxed], tests/executor/test_planted_repo_stops.py::test_the_straggler_sweep_leaves_a_sandboxed_worktree_alone[sandboxed-live], tests/executor/test_planted_repo_stops.py::test_the_straggler_sweep_leaves_a_sandboxed_worktree_alone[sandboxed-planted], tests/executor/test_planted_repo_stops.py::test_the_diagnosis_bundle_reads_no_status_while_a_sandboxed_session_runs[sandboxed], tests/api/test_diff.py::test_diff_waits_for_a_live_sandboxed_session[sandboxed]
-origin: src/kraft/worker/sandbox.py -- Kraft-dshto, Kraft-nx4id, Kraft-69rwp (Ruling 194 option (a)); review-g1 finding 1.
+origin: src/kraft/worker/sandbox.py -- Kraft-dshto, Kraft-nx4id, Kraft-69rwp.
 ## REQ policy-tool-lists-hold-tool-names
 
 A policy's `allowed_tools` and `deny_tools` SHALL hold only tool names the
@@ -1170,7 +1169,7 @@ origin: src/kraft/policy.py §_tool_names -- Kraft-9i6xy: the gate (`sessions.pe
 Repository policy overrides SHALL only tighten inherited safety ceilings and
 SHALL remain effective for every chain and task that runs in that repository.
 enforced-by: tests/api/test_repository_policy.py::test_a_repository_policy_cannot_relax_the_instance, tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/work-items], tests/api/test_repository_policy.py::test_a_repository_policy_the_instance_refuses_is_a_422_at_intake[/api/triggers], tests/api/test_repository_policy.py::test_every_item_filed_in_a_repository_is_bound_by_its_policy, tests/api/test_repository_policy.py::test_an_unreadable_repos_yaml_refuses_rather_than_drops_the_layer, tests/test_intake_poller.py::test_an_auto_intaken_item_is_bound_by_its_repositorys_policy, tests/test_triggers.py::test_a_triggered_item_is_bound_by_its_repositorys_policy, tests/api/test_repository_policy.py::test_a_workspace_item_binds_each_repository_by_its_own_layer_and_the_checkout_by_all, tests/api/test_repository_policy.py::test_a_member_policy_the_instance_refuses_refuses_the_workspace_item, tests/api/test_repository_policy.py::test_a_filed_workspace_item_freezes_each_repositorys_policy, tests/test_policy.py::test_the_meet_of_repository_layers_is_the_tightest_of_each_field, tests/templates/test_workspace_fanout.py::test_each_repository_binds_its_own_task_and_the_checkout_binds_all, tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[manual], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_launches_under_its_nodes_policy[auto], tests/executor/test_policy_enforcement.py::test_an_escalation_turn_its_nodes_policy_refuses_never_launches[token-budget-spent]
-origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (Ruling 105, `RepoEntry.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
+origin: src/kraft/api/deps.py §item_policy -- the repository layer is the entry's `policy:` block with its own `deny_tools`/`sandbox` folded in (`RepoEntry.repository_override`), layered onto the instance policy by every intake door and frozen into the item's snapshot at materialization.
 
 ## REQ repositories-workspaces-and-areas-are-distinct
 
@@ -1178,7 +1177,7 @@ The system SHALL distinguish an independent repository, a workspace that
 combines repositories, and a path-scoped area within one repository. An area
 SHALL NOT be treated as an independent repository or forge target.
 enforced-by: tests/templates/test_environment.py::test_area_has_no_forge_field_to_declare, tests/templates/test_materialization.py::test_the_design_documents_repos_yaml_is_what_the_daemon_reads, tests/test_config_repos.py::test_load_repos_rejects_an_entry[an-area-naming-a-forge], tests/test_config_repos.py::test_a_top_level_repositories_key_fails_loudly
-origin: src/kraft/config.py -- `repos.yaml` keeps the three in separate sections (the `repos:` list, `workspaces:` beside it naming entries by `id`, `areas:` only inside an entry), read by `load_repos`/`load_workspaces` into the one repository model, `RepoEntry` (Ruling 177), so the distinction holds at the file boundary and not only in the types.
+origin: src/kraft/config.py -- `repos.yaml` keeps the three in separate sections (the `repos:` list, `workspaces:` beside it naming entries by `id`, `areas:` only inside an entry), read by `load_repos`/`load_workspaces` into the one repository model, `RepoEntry`, so the distinction holds at the file boundary and not only in the types.
 
 ## REQ workspace-declares-root-and-members
 
@@ -1305,7 +1304,7 @@ fix loop, and SHALL repair a failing test or a failing review in the
 verification node after it, whose fix loop re-runs the tests and the review
 and SHALL NOT re-run the implementing agent.
 enforced-by: tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[tests-red], tests/executor/test_default_chain.py::test_a_verification_failure_reruns_the_tests_and_review_not_the_implementer[review-red], tests/executor/test_seeded_failure_walk.py::test_a_failing_review_walks_verifications_own_fix_loop_never_the_implementer, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft
-origin: templates/library.yaml -- Ruling 87. `fix-loop-remeasures-the-whole-node` reruns a node from its first step, so on the merged `implementation` node every test failure re-ran the implementer; splitting the node makes a repair re-run only the tests and the review. The walks use the seed's own changed-test-scope `builtin`, which `walk._IN_PROCESS_KINDS` had counted as Kraft's own code: every red test stopped with "reinstall and restart" instead of opening the fix loop.
+origin: templates/library.yaml -- `fix-loop-remeasures-the-whole-node` reruns a node from its first step, so on the merged `implementation` node every test failure re-ran the implementer; splitting the node makes a repair re-run only the tests and the review. The walks use the seed's own changed-test-scope `builtin`, which `walk._IN_PROCESS_KINDS` had counted as Kraft's own code: every red test stopped with "reinstall and restart" instead of opening the fix loop.
 
 ## REQ default-chain-reviews-only-green-tests
 
@@ -1322,7 +1321,7 @@ what was verified, what the review found and what was done about it, what is
 unresolved, and that approving opens a draft merge request and starts CI. It
 SHALL NOT contain the diff.
 enforced-by: tests/executor/test_default_chain.py::test_the_pre_draft_gate_shows_the_work_brief_the_node_before_it_wrote, tests/templates/test_library.py::test_the_design_chain_implements_then_verifies_then_briefs_before_the_draft, tests/skills/test_work_brief.py::test_the_skill_says_what_approving_does, tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[asked], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[changed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[verified], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[reviewed], tests/skills/test_work_brief.py::test_the_skill_asks_for_each_section_the_gate_needs[unresolved], tests/skills/test_work_brief.py::test_the_skill_leaves_out_the_diff_and_the_final_review_brief
-origin: src/kraft/skills/work-brief/SKILL.md -- Ruling 87 (Omid). The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
+origin: src/kraft/skills/work-brief/SKILL.md -- Omid's decision. The artifact kind is `work_brief`, not `work_summary`, because `agent.artifact_path` pluralises naively. The brief is its own execution node, not a last step of `verification`, because a node either wholly produces one kind or declares none (`TemplateLibrary.resolve_chain`).
 
 ## REQ default-chain-describes-the-merge-request-before-opening-it
 
@@ -1330,7 +1329,7 @@ The default chain SHALL write the merge request's title, labels, reviewers and
 description in an execution node before the one that opens the draft, and SHALL
 open the draft with them.
 enforced-by: tests/api/test_default_chain_walk.py::test_approving_every_gate_through_the_api_walks_the_default_chain_to_post_merge_ci, tests/templates/test_library.py::test_resolution_types_every_task_in_the_design_chain
-origin: templates/chains/default.yaml -- Ruling 207. The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
+origin: templates/chains/default.yaml -- The V1 library had no task producing `mr_meta` (the legacy `on.mr.describe` hook went with the old registry), so every draft opened with the work item's title and no labels, and a repo whose CI requires a label failed its first pipeline. `describe_merge_request` is its own node because a node wholly produces one kind or declares none, and `open` produces nothing.
 
 ## REQ default-chain-rebases-before-opening-the-draft
 
@@ -1352,7 +1351,7 @@ stop kind. A caller that passes no time cap (`/retry`, `/resume`, gate
 self-retry, `mr_rebase_forced`'s conflict rebase) SHALL keep running
 unbounded, as before this requirement.
 enforced-by: tests/test_builtins_rebase.py::test_mr_rebase_aborts_and_reports_capped_out_when_the_rebase_hangs, tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[undeclared], tests/executor/test_mr_rebase_dispatch.py::test_a_builtin_mr_rebase_task_dispatches_to_the_rebase_builtin[declared]
-origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig review round 1. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`caps.REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
+origin: src/kraft/builtins.py §refresh_worktree_base, §mr_rebase -- Kraft-3llig. `mr_rebase` had no `time_cap` parameter and `refresh_worktree_base`'s `git rebase` `subprocess.run` had no `timeout=` (only `upstream_head`'s fetch has one, a fixed 60s): a hanging pre-rebase hook or a smudge/LFS filter held the worker slot forever. Reuses `caps.TIME_CAPPED`/`caps.REACHED`, the existing stop `adapters.subprocess.run_task` and `dispatch.time_capped_session` already record a time cap with, rather than inventing a new one.
 
 ## REQ workspace-members-are-rebased-before-the-draft
 
@@ -1396,7 +1395,7 @@ IF a work item reaches its draft merge request with no merge-request metadata
 written, THEN the system SHALL still open the draft, titled after the work
 item, unlabelled, with Kraft's default description.
 enforced-by: tests/api/test_default_chain_walk.py::test_with_no_merge_request_metadata_the_draft_opens_with_the_default_body, tests/adapters/forge/test_run.py::test_open_mr_without_the_artifact_opens_the_default_body
-origin: src/kraft/adapters/forge/mr.py §read_mr_meta -- an MR must still open when the metadata is gone; Ruling 207 kept that for an item that skips the describe node.
+origin: src/kraft/adapters/forge/mr.py §read_mr_meta -- an MR must still open when the metadata is gone; this is kept for an item that skips the describe node.
 
 ## REQ default-chain-retests-a-rebased-head
 
@@ -1423,7 +1422,7 @@ after an explicit conflict handler resolved a rebase conflict SHALL reopen every
 approved gate in its span, whether the conflict arose inside the walk or when
 `/retry` or `/resume` refreshed the worktree.
 enforced-by: tests/executor/test_default_chain.py::test_a_rebase_in_post_draft_feedback_retests_and_rereviews_the_rebased_head, tests/executor/test_base_change.py::test_a_resolved_conflict_reopens_the_approved_gates_in_its_span, tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[retry], tests/executor/test_base_change.py::test_a_conflict_at_the_door_goes_to_the_nodes_handler[resume]
-origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision (Ruling 162): a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
+origin: src/kraft/executor/walk.py §_restart_for_base_change -- Omid's decision: a clean rebase, the forge's forced rebase included, changes nothing a gate saw; a resolved conflict changed code no gate saw, so a human approves again. Distinct from `retry-reopens-invalidated-gates`: a restart is the walk's answer to a moved base, not an operator's retry.
 
 ## REQ optional-pre-draft-gate-keeps-work-local
 
@@ -1442,7 +1441,7 @@ enforced-by: tests/templates/test_publication_chain_order.py::test_the_seeded_de
 
 An external-wait task SHALL allow configuration of its timeout and polling
 intervals, subject to applicable policy limits. Its timeout is its task's own
-`total_time_cap_minutes` (Ruling 196).
+`total_time_cap_minutes`.
 enforced-by: tests/test_waits.py::test_a_wait_resolves_its_bounds_through_the_task_policy[authored], tests/test_waits.py::test_a_wait_resolves_its_bounds_through_the_task_policy[seed-default], tests/test_waits.py::test_a_wait_resolves_its_bounds_through_the_task_policy[default-clamped-to-maximum], tests/test_waits.py::test_a_wait_over_the_administrator_maximum_is_refused_when_the_item_is_filed, tests/adapters/forge/test_run_chain.py::test_the_executor_hands_the_task_s_resolved_wait_to_the_forge, tests/test_waits.py::test_an_items_policy_override_shortens_its_own_wait_and_no_other_items, tests/test_waits.py::test_a_policy_change_rebounds_an_open_wait_from_its_next_observation, tests/templates/test_time_caps.py::test_a_wait_timeout_written_before_ruling_196_reads_as_the_tasks_total_cap
 
 ## REQ external-wait-does-not-hold-an-active-worker
@@ -1475,7 +1474,7 @@ child scope's cap SHALL NOT exceed its parent's among the chain, node, step and
 task: one that does SHALL be refused when the chain loads and when a work item
 is filed, retried or its override set, naming both scopes. A default SHALL be
 a default, not a ceiling: any scope MAY set more, up to its level's
-administrator maximum (Rulings 198, 211; `cap-defaults-and-maxima-are-set-per-
+administrator maximum (`cap-defaults-and-maxima-are-set-per-
 level`). A work item's item-wide cap SHALL be its own, which MAY exceed the
 chain's up to the `work_item` maximum and SHALL meet any scope's own cap; its
 cap on a path SHALL only tighten what the chain or the item already set. A gate's timeout
@@ -1484,7 +1483,7 @@ SHALL stop the running process and stop the work item for human action, naming
 the scope, and SHALL NOT be treated as a code failure: it SHALL spend no
 recovery or fix-loop attempt and SHALL NOT trigger stuck escalation.
 enforced-by: tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[task-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[step-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[node-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[chain-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[item-time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[task-total_time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[node-total_time_cap_minutes], tests/executor/test_time_caps.py::test_each_levels_cap_stops_its_own_scope_and_names_it[item-total_time_cap_minutes], tests/executor/test_time_caps.py::test_a_task_cap_under_a_larger_step_cap_stops_the_task_at_its_own_value, tests/executor/test_time_caps.py::test_a_launch_under_a_spent_cap_is_refused_and_nothing_runs, tests/executor/test_time_caps.py::test_the_kill_reaches_a_sandboxs_container, tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[pause], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[gate], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[wait], tests/executor/test_time_caps.py::test_running_time_leaves_out_paused_wait_gate_and_rate_limited_time[rate_limited], tests/executor/test_time_caps.py::test_the_wall_clock_leaves_out_only_a_manual_pause[pause-95], tests/executor/test_time_caps.py::test_the_wall_clock_leaves_out_only_a_manual_pause[gate-35], tests/executor/test_time_caps.py::test_a_cap_stop_spends_no_attempt_and_is_not_escalated, tests/executor/test_time_caps.py::test_a_parked_item_past_its_total_cap_is_stopped_for_a_human[waiting], tests/executor/test_time_caps.py::test_a_gate_past_its_timeout_stops_naming_the_gate_and_stays_answerable, tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[task-over-step-time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[step-over-node-total_time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_when_the_item_is_filed[node-over-chain-time_cap_minutes], tests/templates/test_time_caps.py::test_a_child_cap_above_its_parents_is_refused_at_load[time_cap_minutes], tests/templates/test_time_caps.py::test_an_items_path_cap_above_the_one_it_lands_on_is_refused[path-over-its-own-total_time_cap_minutes], tests/templates/test_time_caps.py::test_a_scope_may_raise_a_cap_above_the_default_up_to_the_maximum[node-time_cap_minutes], tests/templates/test_time_caps.py::test_a_scope_past_the_maximum_is_refused_even_with_no_parent_cap[total_time_cap_minutes], tests/templates/test_time_caps.py::test_an_item_may_raise_its_own_cap_above_the_chains_up_to_the_maximum[time_cap_minutes], tests/templates/test_time_caps.py::test_a_retry_raising_a_cap_above_its_parents_is_refused_naming_both[time_cap_minutes], tests/templates/test_time_caps.py::test_a_retry_raising_a_cap_above_its_parents_is_refused_naming_both[total_time_cap_minutes], tests/executor/test_time_cap_launches.py::test_each_levels_default_binds_every_scope_of_its_kind_that_set_none, tests/executor/test_time_cap_launches.py::test_raising_the_items_own_cap_unsticks_a_capped_item, tests/executor/test_time_cap_launches.py::test_a_gate_review_launches_under_its_gates_time_cap, tests/executor/test_time_cap_launches.py::test_only_an_automatic_escalation_turn_runs_under_its_nodes_time_cap[auto], tests/executor/test_time_cap_launches.py::test_a_session_adopted_after_a_restart_is_killed_at_its_caps_deadline, tests/executor/test_time_cap_launches.py::test_the_poller_does_not_stop_an_item_that_moved_since_it_measured[status], tests/templates/test_time_caps.py::test_a_gate_timeout_past_its_total_cap_is_refused, tests/api/test_item_policy.py::test_intake_refuses_an_override_naming_the_field[wait-cap-raised], tests/api/test_item_policy.py::test_a_patch_refuses_an_override_naming_the_field_and_keeps_the_old_one[wait-cap-raised]
-origin: src/kraft/caps.py §at_launch -- Rulings 194, 195, 196 and 198 (a default is not a ceiling; an item may raise its own cap). Omid, 2026-09-22: "at any level that it's configured, it applies ... caps can[not] be configured to be more than a parent cap. So if a step has 10 mins, the task inside that step can't set it to 20 mins." The refusal is `ResolvedChain._check_caps` (src/kraft/templates/models.py), run by `check_scopes` at load, intake and PATCH; the ratchet is `InstancePolicy.apply_template_override`, and an item layer meets (`WorkItemPolicy.apply_to`). A wait's timeout became its task's total cap (Ruling 196), so `wait_timeout_minutes` is retired and still read.
+origin: src/kraft/caps.py §at_launch -- (a default is not a ceiling; an item may raise its own cap). Omid, 2026-09-22: "at any level that it's configured, it applies ... caps can[not] be configured to be more than a parent cap. So if a step has 10 mins, the task inside that step can't set it to 20 mins." The refusal is `ResolvedChain._check_caps` (src/kraft/templates/models.py), run by `check_scopes` at load, intake and PATCH; the ratchet is `InstancePolicy.apply_template_override`, and an item layer meets (`WorkItemPolicy.apply_to`). A wait's timeout became its task's total cap, so `wait_timeout_minutes` is retired and still read.
 
 ## REQ a-resumed-cli-session-is-counted-once
 
@@ -1512,19 +1511,19 @@ in `defaults:` or `maxima:` SHALL be refused at load, naming the level form; a
 snapshot frozen with one SHALL still read, as the work item's. Every other
 default and maximum stays flat.
 enforced-by: tests/templates/test_time_caps.py::test_a_flat_cap_is_refused_at_load_naming_its_level[defaults-time_cap_minutes], tests/templates/test_time_caps.py::test_a_flat_cap_is_refused_at_load_naming_its_level[defaults-token_budget], tests/templates/test_time_caps.py::test_a_flat_cap_is_refused_at_load_naming_its_level[maxima-time_cap_minutes], tests/templates/test_time_caps.py::test_a_flat_cap_is_refused_at_load_naming_its_level[maxima-token_budget], tests/templates/test_time_caps.py::test_a_narrower_levels_cap_above_a_broader_ones_is_refused_naming_both[task-over-step-defaults], tests/templates/test_time_caps.py::test_a_narrower_levels_cap_above_a_broader_ones_is_refused_naming_both[task-over-work-item-past-unset-levels-maxima], tests/templates/test_time_caps.py::test_a_levels_default_above_its_maximum_is_refused_naming_both, tests/templates/test_time_caps.py::test_each_scope_runs_under_its_levels_default_where_nothing_set_one[time_cap_minutes], tests/templates/test_time_caps.py::test_each_scope_runs_under_its_levels_default_where_nothing_set_one[budget_usd], tests/templates/test_time_caps.py::test_a_value_the_chain_or_the_item_sets_replaces_every_levels_default_under_it[time_cap_minutes], tests/templates/test_time_caps.py::test_a_value_the_chain_or_the_item_sets_replaces_every_levels_default_under_it[token_budget], tests/templates/test_time_caps.py::test_a_scope_may_exceed_its_levels_default_but_not_its_levels_maximum[total_time_cap_minutes], tests/templates/test_time_caps.py::test_a_scope_may_exceed_its_levels_default_but_not_its_levels_maximum[budget_usd], tests/templates/test_time_caps.py::test_an_items_own_cap_is_bounded_by_the_work_item_maximum_its_paths_by_their_levels[time_cap_minutes], tests/templates/test_time_caps.py::test_a_snapshot_frozen_before_ruling_211_reads_its_flat_maxima_as_the_work_items, tests/executor/test_time_cap_launches.py::test_each_levels_default_binds_every_scope_of_its_kind_that_set_none, tests/executor/test_budget_caps.py::test_each_levels_default_budget_caps_every_scope_of_its_kind, tests/api/test_settings.py::test_a_get_then_put_round_trip_keeps_every_key_and_refreshes_the_ceiling, tests/api/test_settings.py::test_a_save_with_a_flat_cap_is_refused_naming_its_level_and_writes_nothing
-origin: src/kraft/policy.py §InstancePolicy.at_level -- the levels are `CapLevels` (src/kraft/cap_levels.py). Ruling 211 (Omid, 2026-09-22), superseding DECISIONS 12's "a default binds each task's own run". Each scope reads its caps at its level through `MaterializedChain.policy_for` and `work_item_policy`, so `kraft.caps` holds no default rule of its own (it had `_explicit`); the refusals are `ResolvedChain._check_caps`, the check every door runs.
+origin: src/kraft/policy.py §InstancePolicy.at_level -- the levels are `CapLevels` (src/kraft/cap_levels.py). Omid, 2026-09-22: a default no longer binds each task's own run. Each scope reads its caps at its level through `MaterializedChain.policy_for` and `work_item_policy`, so `kraft.caps` holds no default rule of its own (it had `_explicit`); the refusals are `ResolvedChain._check_caps`, the check every door runs.
 
 ## REQ scope-budgets-cap-their-own-spend
 
 A `token_budget` or `budget_usd` MAY be configured on the work item, a node, a
 step or a task, and each SHALL cap the spend of the launches inside that scope
-(Ruling 195), not the whole work item's. A launch SHALL be refused, and the
+not the whole work item's. A launch SHALL be refused, and the
 work item stopped for human action naming the scope, when its own scope or any
 enclosing scope has reached its cap. A child scope's budget SHALL NOT exceed
 its parent's, refused as a time cap is. A level's default budget SHALL cap
 every scope of its kind that nothing set one for, and any scope MAY set more
 up to its level's maximum; a work item's item-wide budget MAY exceed the
-chain's up to the `work_item` maximum (Rulings 198, 211). An
+chain's up to the `work_item` maximum. An
 escalation turn's spend SHALL count as its node's. A `token_budget` SHALL count
 every token a launch spent: uncached input, cache writes, cache reads and
 output, however they are stored (Decision 18). A launch whose cost was never reported
@@ -1532,7 +1531,7 @@ SHALL count as unknown spend, never as free, so a dollar cap over unknown
 spend SHALL stop for human action. The instance `budget.work_item_usd` and
 `budget.daily_usd` SHALL remain the outer ceilings.
 enforced-by: tests/executor/test_budget_caps.py::test_a_token_budget_caps_its_own_scopes_spend[task], tests/executor/test_budget_caps.py::test_a_token_budget_caps_its_own_scopes_spend[step], tests/executor/test_budget_caps.py::test_a_token_budget_caps_its_own_scopes_spend[node], tests/executor/test_budget_caps.py::test_a_token_budget_caps_its_own_scopes_spend[chain], tests/executor/test_budget_caps.py::test_a_token_budget_caps_its_own_scopes_spend[item], tests/executor/test_budget_caps.py::test_a_budget_usd_caps_its_own_scopes_spend[task], tests/executor/test_budget_caps.py::test_a_budget_usd_caps_its_own_scopes_spend[node], tests/executor/test_budget_caps.py::test_a_budget_usd_caps_its_own_scopes_spend[item], tests/executor/test_budget_caps.py::test_an_enclosing_scopes_cap_refuses_a_launch_its_own_would_allow, tests/executor/test_budget_caps.py::test_unknown_spend_is_never_counted_as_free, tests/executor/test_budget_caps.py::test_the_instance_budget_stays_the_outer_ceiling, tests/executor/test_budget_caps.py::test_a_scope_budget_stop_names_its_scope, tests/executor/test_policy_enforcement.py::test_token_budget_refuses_the_next_agent_launch[at], tests/templates/test_time_caps.py::test_a_child_budget_above_its_parents_is_refused_naming_both[token_budget-20-10], tests/templates/test_time_caps.py::test_a_child_budget_above_its_parents_is_refused_naming_both[budget_usd-2.5-1], tests/templates/test_time_caps.py::test_an_item_may_raise_its_own_budget_above_the_chains_up_to_the_maximum[token_budget-20-10], tests/templates/test_time_caps.py::test_a_budget_may_be_raised_above_the_default_up_to_the_maximum[budget_usd-9], tests/executor/test_budget_caps.py::test_an_escalation_turns_spend_counts_toward_its_nodes_budget, tests/executor/test_budget_caps.py::test_each_levels_default_budget_caps_every_scope_of_its_kind, tests/executor/test_budget_caps.py::test_cache_tokens_still_count_against_a_budget[tokens], tests/executor/test_budget_caps.py::test_cache_tokens_still_count_against_a_budget[usd]
-origin: src/kraft/caps.py §budget_breach -- Ruling 195 (Omid, 2026-09-22): `token_budget` compared the whole item's spend at every scope; it now caps the scope that sets it, and `budget_usd` joins it. Unknown cost is Omid's default: "it counts as unknown, never as free, so a USD cap with unknown spend stops for a human rather than silently passing."
+origin: src/kraft/caps.py §budget_breach -- Omid, 2026-09-22: `token_budget` compared the whole item's spend at every scope; it now caps the scope that sets it, and `budget_usd` joins it. Unknown cost is Omid's default: "it counts as unknown, never as free, so a USD cap with unknown spend stops for a human rather than silently passing."
 
 ## REQ external-wait-covers-merge-request-lifecycle
 
@@ -1696,7 +1695,7 @@ A saved chain SHALL be read, saved and resolved under `/templates/chains/{id}`,
 so that no chain id can shadow the library or an inspection route and none is
 reserved. The pre-1.0 flat `/templates/{id}` paths SHALL NOT remain as aliases.
 enforced-by: tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[library], tests/api/test_settings_templates.py::test_a_chain_may_take_the_name_of_a_templates_route[lint], tests/api/test_settings_templates.py::test_the_pre_ruling_204_chain_paths_are_gone
-origin: src/kraft/api/routes/settings.py §get_template -- Ruling 204, before 1.0 so the break happens once.
+origin: src/kraft/api/routes/settings.py §get_template -- before 1.0 so the break happens once.
 
 ## REQ harness-api-lists-and-guards-profiles
 
@@ -1709,7 +1708,7 @@ that would stop an agent task of a chain that resolves now from launching.
 Profiles and providers SHALL each live under their own prefix, so no profile id
 is reserved, and the flat `/harnesses/{id}` paths SHALL NOT remain.
 enforced-by: tests/api/test_harnesses.py::test_a_profile_may_take_the_name_of_a_harnesses_route[providers], tests/api/test_harnesses.py::test_the_flat_profile_paths_are_gone[get-/api/harnesses], tests/api/test_harnesses.py::test_every_profile_is_listed_with_the_library_tasks_and_chains_selecting_it, tests/api/test_harnesses.py::test_providers_are_each_packages_capability_surface, tests/api/test_harnesses.py::test_a_save_the_loader_refuses_is_refused_and_writes_nothing[bad-value], tests/api/test_harnesses.py::test_a_save_that_stops_a_chain_launching_is_refused[disabled], tests/api/test_harnesses.py::test_a_provider_change_the_selecting_task_cannot_run_on_is_refused, tests/api/test_harnesses.py::test_a_chain_already_unlaunchable_does_not_block_an_unrelated_save, tests/api/test_harnesses.py::test_a_profile_save_is_written_and_read_back
-origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.from_mapping` is `from_yaml`'s parse, and `agent.select_profile` is the rule a launch applies. Kraft-archr, Ruling 206.
+origin: src/kraft/api/routes/harnesses.py §put_harness -- `HarnessProfileTable.from_mapping` is `from_yaml`'s parse, and `agent.select_profile` is the rule a launch applies. Kraft-archr.
 
 ## REQ harness-cli-lists-profiles
 

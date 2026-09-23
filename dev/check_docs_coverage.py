@@ -4,8 +4,9 @@ supposed to cover it.
 Mechanical only: it can tell "this CLI command is never mentioned in cli.md"
 but not "this paragraph no longer describes what the command does" -- that
 still needs a human (or an agent) to actually read the page. See
-CONTRIBUTING.md's "User-facing docs" table, which this script's CHECKS list
-mirrors one row at a time.
+CONTRIBUTING.md's "User-facing docs" table, which lists every source and its
+page; CHECKS below covers only the subset with a machine-readable list of
+names.
 
 A generic term (a single common word like "model" or "port") gives a weak
 signal on purpose: it will never be flagged as missing, because it's likely
@@ -13,8 +14,7 @@ to appear in prose regardless of whether that specific field is documented.
 That's a safe failure mode -- a check that cries wolf on generic words gets
 ignored, not fixed. This catches the sharper case: a distinctive name
 (a CLI subcommand pair, a snake_case field or tool name) with zero mentions
-at all, which is what actually went missing when this script was written
-(Kraft docs audit, 2026-09-18).
+at all, which is what most often goes missing.
 
 Run directly: `uv run python dev/check_docs_coverage.py`.
 """
@@ -110,21 +110,31 @@ def harness_capabilities() -> set[str]:
     return set(harness.KNOWN)
 
 
-# (label, extractor, docsite page). Mirrors CONTRIBUTING.md's "User-facing
-# docs" table -- add a row there when you add one here.
+# (label, extractor, docsite page or folder; a folder counts every page in
+# it). A subset of CONTRIBUTING.md's "User-facing docs" table: only sources with a
+# machine-readable list of names.
+_LIBRARY = "4.reference/2.configuration/4.library-and-chains.md"
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
-    ("kraft CLI commands", cli_commands, "2.reference/2.cli.md"),
-    ("MCP tools", mcp_tool_names, "2.reference/6.agent-integration.md"),
-    ("policy.yaml fields", policy_fields, "2.reference/3.configuration.md"),
-    ("access.yaml fields", access_fields, "2.reference/3.configuration.md"),
-    ("library.yaml agent task keys", agent_task_keys, "2.reference/3.configuration.md"),
-    ("library.yaml sections", library_sections, "2.reference/3.configuration.md"),
-    ("harness capabilities", harness_capabilities, "2.reference/5.harnesses.md"),
+    ("kraft CLI commands", cli_commands, "4.reference/1.cli"),
+    ("MCP tools", mcp_tool_names, "3.guides/1.agent-integration.md"),
+    ("policy.yaml fields", policy_fields, "4.reference/2.configuration/3.policy.md"),
+    ("access.yaml fields", access_fields, "4.reference/2.configuration/6.access.md"),
+    (
+        "library.yaml agent task keys",
+        agent_task_keys,
+        _LIBRARY,
+    ),
+    (
+        "library.yaml sections",
+        library_sections,
+        _LIBRARY,
+    ),
+    ("harness capabilities", harness_capabilities, "4.reference/5.harnesses"),
 ]
 
 
 #: A backticked gate-shaped name in the docsite: `spec_approval`, and the
-#: legacy `human_review_approval` this check exists to catch (Kraft-cusz8).
+#: legacy `human_review_approval` this check exists to catch.
 _GATE_NAME = re.compile(r"`([a-z][a-z0-9_]*_approval)`")
 
 
@@ -157,7 +167,9 @@ def main() -> int:
         failed = True
         print(f"docsite/content/{unknown}: names a gate no shipped chain has")
     for label, extractor, page in CHECKS:
-        text = (DOCSITE / page).read_text()
+        target = DOCSITE / page
+        pages = sorted(target.glob("**/*.md")) if target.is_dir() else [target]
+        text = "\n".join(p.read_text() for p in pages)
         missing = sorted(term for term in extractor() if term not in text)
         if missing:
             failed = True

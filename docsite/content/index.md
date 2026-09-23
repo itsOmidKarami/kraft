@@ -8,8 +8,8 @@ headline: '$ uv tool install kraft-sdlc && kraft'
 title: 'Work items become chains. Chains run themselves until a human has to decide.'
 description: 'Runs on your machine and edits your repos through ordinary git worktrees. It only stops to ask when a decision needs a person.'
 links:
-  - label: Read the guide
-    to: /guide/getting-started
+  - label: Run your first work item
+    to: /get-started/first-work-item
     color: primary
   - label: View source
     to: https://github.com/itsOmidKarami/kraft
@@ -41,7 +41,7 @@ orientation: horizontal
 ::u-page-section
 ---
 title: A gate stops the chain where a human decides
-description: Approve, reject with a note that re-runs the producing node, or open the full detail view.
+description: Approve, reject with a note that re-runs the node that wrote the document, or open the full detail view.
 orientation: horizontal
 reverse: true
 ---
@@ -51,7 +51,7 @@ reverse: true
 ::u-page-section
 ---
 title: Search, ⌘K
-description: Hybrid full-text and vector search across work items, pending actions, and linked documents.
+description: Full-text search, with optional vector search, across work items, pending actions, and linked documents.
 orientation: horizontal
 ---
 ![The search overlay: a query for "caching" surfacing a pending gate action, the matching work item, and a source-repo attribution](/assets/search.png)
@@ -81,72 +81,36 @@ class: max-w-2xl
 ---
 ::::u-page-card
 ---
-to: /guide/getting-started
-title: Getting started
-description: Install, connect a repo, run a work item end to end, approve its gate.
+to: /get-started
+title: Get started
+description: Install Kraft and run your first work item.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /guide/concepts
+to: /concepts
 title: Concepts
-description: 'Chain, node, task, gate, cap: the whole vocabulary.'
+description: Vocabulary, caps and budgets, and why Kraft has a permission gate.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /reference/install
-title: Install
-description: 'uv tool install, Homebrew, or from source.'
+to: /guides
+title: Guides
+description: Use Kraft from your agent, run Kraft Lite, reach the board from a phone, add a harness.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /reference/cli
-title: CLI reference
-description: Every kraft verb, grouped by what it does.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/configuration
-title: Configuration
-description: Every field in library.yaml, repos.yaml, policy.yaml, access.yaml.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/agent-integration
-title: Agent integration
-description: Driving Kraft with /kraft:* slash commands from a coding agent instead of the browser.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/remote-access
-title: Remote access
-description: Approving a gate from your phone.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/triggers
-title: Inbound triggers
-description: Starting a chain from a cron schedule or a webhook instead of typing into kraft item create.
+to: /reference
+title: Reference
+description: The CLI, every configuration file, chain nodes, permissions, harnesses, and triggers.
 variant: ghost
 ---
 ::::
@@ -158,7 +122,7 @@ variant: ghost
 title: Source
 description: >-
   Kraft is on GitHub, Apache-2.0 licensed. CONTRIBUTING.md covers getting a
-  dev environment running and how releases work.
+  dev environment running. Maintainers: RELEASING.md covers how releases work.
 links:
   - label: itsOmidKarami/kraft
     to: https://github.com/itsOmidKarami/kraft
@@ -166,7 +130,7 @@ links:
     color: neutral
     variant: outline
   - label: CONTRIBUTING.md
-    to: https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md
+    to: /project/contributing
     target: _blank
     color: neutral
     variant: outline
