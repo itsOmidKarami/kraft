@@ -56,13 +56,8 @@ is what tells you which question below is yours.
 
 ## Reporting
 
-Write your result file with:
-
-- `"verdict"`: `"approve"` | `"reject"` | `"fixed"` | `"undecided"`
-- `"concerns"`: your reasoning. Required for `reject` and `fixed` — for a
-  reject it becomes the steering note for whoever redoes the work, so write it
-  as an instruction. For `undecided` it is what the human reads first.
-
-If you fixed something in the worktree, commit it and report `fixed`. You may
-not approve your own edit: the node re-runs and is measured again, and the next
-review sees a diff it did not write.
+Report your verdict and `concerns` exactly as your task instruction lays out.
+For a `reject`, write `concerns` as an instruction: it becomes the steering note
+for whoever redoes the work. If you fixed something in the worktree, commit it
+and report `fixed`; you may not approve your own edit, because the node re-runs
+and is measured again.

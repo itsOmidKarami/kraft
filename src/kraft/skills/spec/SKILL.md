@@ -22,11 +22,8 @@ about the codebase is worse than no design, because it reads as authoritative.
 
 ## Asking
 
-You cannot ask a question and keep working. If something is genuinely
-undecidable from the repo — a product choice, a tradeoff only the requester
-can settle — stop with status `needs_context` and put **every** open question
-in the one `question` field, numbered. Stopping once per question costs a full
-relaunch each time.
+Stop with `needs_context` only for what the repo cannot settle: a product
+choice, a tradeoff only the requester can make.
 
 Do not stop for anything you can decide yourself. Pick the option a competent
 engineer on this codebase would pick, and say in the spec that you picked it
@@ -56,7 +53,6 @@ that is a `needs_context` stop, not a placeholder.
 
 ## If you are revising
 
-An existing document at your output path means a human read it and asked for
-changes. Their note leads your task instruction. Address it directly: change
-what they objected to, and leave what they did not object to alone. Do not
-rewrite the whole thing to look new.
+A human read the existing document and asked for changes; their note leads your
+task instruction. Change what they objected to and leave the rest alone, rather
+than rewriting the whole thing to look new.

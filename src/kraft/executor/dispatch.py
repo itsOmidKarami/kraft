@@ -1646,8 +1646,13 @@ def collect_findings(
     round: int,
     *,
     steps: tuple[ResolvedStep, ...] | None = None,
+    dropped: dict[str, int] | None = None,
 ):
     """(findings, task paths that reported at least one) for one cycle.
+
+    `dropped`, when given, is filled with `{task path: entries the parser threw
+    away as malformed}`, so a caller can record that a reviewer wrote its
+    findings wrong instead of letting that read as a clean review.
 
     Only the node's own measuring tasks: the fix task is dispatched with
     `round=count` and the next measuring pass runs at that same round, so an
@@ -1715,7 +1720,9 @@ def collect_findings(
         )
         blind_jobs: list[_findings.BlindJob] = []
         for row in rows_to_read:
-            parsed = _findings.parse(row["result_path"])
+            parsed, n_dropped = _findings.parse_counted(row["result_path"])
+            if n_dropped and dropped is not None:
+                dropped[hook] = dropped.get(hook, 0) + n_dropped
             if parsed:
                 reported.add(hook)
                 job = _findings.JobRef(

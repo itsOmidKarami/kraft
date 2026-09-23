@@ -1130,7 +1130,10 @@ async def _walk_node_once(
         # quietly shadow it -- a draft of Kraft-s7c04.3 did, which turned every
         # failing task into a blind failure and put the loop beyond the reach of
         # the stuck detector.
-        found, reported_hooks = dispatch.collect_findings(db, work_item_id, node, round)
+        dropped_findings: dict[str, int] = {}
+        found, reported_hooks = dispatch.collect_findings(
+            db, work_item_id, node, round, dropped=dropped_findings
+        )
         # A `same_as` is only believable for a tag this round's reviewer was
         # actually shown. An invented or stale tag would collapse two distinct
         # defects onto one identity and fire the stuck detector on a fiction
@@ -1173,6 +1176,9 @@ async def _walk_node_once(
                 for f, s in zip(found, as_reported, strict=True)
             ],
             "fingerprints": prints,
+            # Only when the parser threw entries away as malformed: a reviewer
+            # that writes the schema wrong must not read as one that found nothing.
+            **({"dropped": dropped_findings} if dropped_findings else {}),
         }
         await db.write(
             lambda c, payload=measured_payload: events.append(

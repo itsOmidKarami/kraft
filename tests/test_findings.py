@@ -12,6 +12,7 @@ from kraft.findings import (
     from_blind_failure,
     from_payload,
     parse,
+    parse_counted,
     resolve_identity,
 )
 
@@ -84,6 +85,28 @@ def test_parse_drops_bad_entries_individually(tmp_path):
     )
     (f,) = parse(p)
     assert f.message == "keep me"
+
+
+def test_parse_counted_reports_how_many_entries_were_dropped(tmp_path):
+    p = _write(
+        tmp_path,
+        {
+            "findings": [
+                {"severity": "minor", "message": "m"},
+                "not a mapping",
+                {"severity": "critical", "message": "keep me", "source_plugin": "p"},
+            ]
+        },
+    )
+    kept, dropped = parse_counted(p)
+    assert [f.message for f in kept] == ["keep me"]
+    assert dropped == 2
+
+
+def test_parse_counted_counts_nothing_for_an_unusable_file(tmp_path):
+    p = tmp_path / "r.json"
+    p.write_text("not json")
+    assert parse_counted(p) == ([], 0)
 
 
 def test_optional_file_and_line(tmp_path):
