@@ -40,3 +40,9 @@ def test_a_launch_carries_its_tasks_grants(tmp_path, monkeypatch):
     )
     policy = _base().apply_template_override({"grants": ["git-rebase"]})
     assert agent.resolve_agent_task(task, None, None, policy=policy).grants == ("git-rebase",)
+
+
+def test_a_repository_without_grants_empties_the_meet():
+    a = p.TemplatePolicyOverride.model_validate({"grants": ["git-push"]})
+    b = p.TemplatePolicyOverride.model_validate({})
+    assert p.TemplatePolicyOverride.meet([a, b]).grants is None

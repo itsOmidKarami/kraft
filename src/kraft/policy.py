@@ -787,7 +787,11 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             allowed_tools=common("allowed_tools"),
             allowed_harnesses=common("allowed_harnesses"),
             deny_tools=list(dict.fromkeys(deny)) or None,
-            grants=common("grants"),
+            # Unlike an allowlist, an unset grant list grants nothing, so a
+            # repository that names none empties the meet.
+            grants=[g for g in GRANTS if all(g in (o.grants or ()) for o in overrides)] or None
+            if overrides
+            else None,
             sandbox=sandboxes[0] if sandboxes else None,
             **{
                 n: min(values) if (values := present(n)) else None
