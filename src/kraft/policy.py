@@ -556,6 +556,21 @@ def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
 #: A policy's `allowed_tools`/`deny_tools`: tool names, never rules.
 ToolNames = Annotated[list[StrictStr], AfterValidator(_tool_names)]
 
+#: Named operations a task is guaranteed, whatever a harness's own
+#: classifier or sandbox would decide (Kraft-4in7z). Names, never command
+#: patterns: each harness matches a name to its own calls (`kraft.grants`).
+GRANTS: tuple[str, ...] = ("git-commit", "git-rebase", "git-push")
+
+
+def _grant_names(names: list[str]) -> list[str]:
+    unknown = [n for n in names if n not in GRANTS]
+    if unknown:
+        raise ValueError(f"grants: {unknown!r} are not grants; known: {list(GRANTS)}")
+    return list(dict.fromkeys(names))
+
+
+GrantNames = Annotated[list[StrictStr], AfterValidator(_grant_names)]
+
 
 class PolicyDefaultsInput(CapLevels):
     """`policy.yaml`'s `defaults:` -- inheritable operational starting
@@ -709,6 +724,9 @@ class TaskPolicyOverride(BaseModel):
     #: `allowed_tools` permits (Ruling 105: the repository's `deny_tools`).
     #: Only ever accumulates down the layers.
     deny_tools: ToolNames | None = None
+    #: Operations guaranteed to this scope's tasks (Kraft-4in7z). Only ever
+    #: accumulates down the layers, like deny_tools.
+    grants: GrantNames | None = None
     sandbox: SandboxPolicy | None = None
     #: This scope's running time: a task's one run, a step's or node's task
     #: runs since it started, the work item's since it started (`kraft.caps`).
@@ -769,6 +787,7 @@ class TemplatePolicyOverride(TaskPolicyOverride):
             allowed_tools=common("allowed_tools"),
             allowed_harnesses=common("allowed_harnesses"),
             deny_tools=list(dict.fromkeys(deny)) or None,
+            grants=common("grants"),
             sandbox=sandboxes[0] if sandboxes else None,
             **{
                 n: min(values) if (values := present(n)) else None
@@ -919,6 +938,8 @@ class InstancePolicy:
     #: Instance policy sets neither: `maxima:` has no deny list and no sandbox,
     #: so both start empty and only a repository or narrower layer adds them.
     deny_tools: tuple[str, ...] = ()
+    #: Named grants (`GRANTS`); like `deny_tools`, only a layer adds them.
+    grants: tuple[str, ...] = ()
     sandbox: SandboxPolicy | None = None
     time_cap_minutes: int | None = None
     total_time_cap_minutes: int | None = None
@@ -995,6 +1016,8 @@ class InstancePolicy:
 
         if override.deny_tools is not None:
             updates["deny_tools"] = tuple(dict.fromkeys((*self.deny_tools, *override.deny_tools)))
+        if override.grants is not None:
+            updates["grants"] = tuple(dict.fromkeys((*self.grants, *override.grants)))
 
         if override.sandbox is not None:
             if self.sandbox is not None and override.sandbox != self.sandbox:

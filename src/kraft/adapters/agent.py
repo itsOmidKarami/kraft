@@ -160,6 +160,8 @@ class Invocation(NamedTuple):
     #: reading as "every tool" is how a restriction goes missing.
     allowed_tools: tuple[str, ...] | None = None
     permission_mode: str | None = None
+    #: The task's named grants (`kraft.policy.GRANTS`), honoured by the gate.
+    grants: tuple[str, ...] = ()
 
 
 def resolve_invocation(
@@ -359,7 +361,7 @@ def resolve_agent_task(
     )
     if policy is None:
         return inv
-    return inv._replace(allowed_tools=policy.allowed_tools)
+    return inv._replace(allowed_tools=policy.allowed_tools, grants=tuple(policy.grants))
 
 
 def _envelope_is_error(
