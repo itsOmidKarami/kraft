@@ -2,7 +2,9 @@
 # into main since the previous tag goes out together, bumped by the largest
 # `release::` label among those pull requests (two minors and three patches is
 # a minor), with notes built from each one's `## Changelog` section. Tick
-# "dry run" to see the version and notes without releasing anything.
+# "dry run" to see the version and notes without releasing anything. Give a
+# commit to release an earlier point on main than its tip -- say, while the
+# tip's tests are still running.
 #
 # One job, not a tag-triggered second workflow: a tag pushed with the default
 # GITHUB_TOKEN deliberately does not trigger other workflows, and keeping it in
@@ -21,6 +23,10 @@ on:
         description: "Dry run: print the version and notes, release nothing"
         type: boolean
         default: false
+      sha:
+        description: "Commit on main to release (empty: main's tip)"
+        type: string
+        default: ""
 
 permissions:
   contents: write      # create the tag and the release
@@ -45,8 +51,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
+          WANT: ${{ inputs.sha }}
         run: |
+          # Resolved here rather than by actions/checkout's `ref:`, which
+          # takes no short SHA. Later steps build whatever HEAD this leaves,
+          # but the release tooling is main's: an older commit's copy may
+          # predate a fix to it, or not exist at all.
+          cp -R dev "$RUNNER_TEMP/dev"
+          if [ -n "$WANT" ]; then
+            if ! SHA=$(git rev-parse --verify --quiet "$WANT^{commit}"); then
+              echo "::error::'$WANT' is not a commit in this repository"
+              exit 1
+            fi
+            git -c advice.detachedHead=false checkout --quiet --detach "$SHA"
+          fi
           SHA=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not on main; only main releases"
+            exit 1
+          fi
           # PyPI publishes cannot be undone, so the commit being released must
           # have passed its tests on main -- not be still running, not failed.
           TESTS=$(gh run list --workflow test --branch main --event push --commit "$SHA" \
@@ -63,6 +86,13 @@ jobs:
           # enough -- `v1.0.0rc1`, `v1.0.0.rc1` and `v1.0.0-rc.1` all fail the
           # anchored regex and never enter the running.
           PREVIOUS=$(git tag --list --merged "$SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          # A commit behind the newest release would recompute a tag that
+          # already exists, or one numbered below it.
+          LATEST=$(git tag --list | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ "$LATEST" != "$PREVIOUS" ]; then
+            echo "::error::$SHA is behind $LATEST, already released; pick a commit after it"
+            exit 1
+          fi
           RANGE=${PREVIOUS:+$PREVIOUS..}$SHA
           # The pull request behind each commit since the previous tag. A
           # commit with none -- a direct push, the revert button -- carries no
@@ -74,7 +104,7 @@ jobs:
           # No `|| true`: plan_release exits non-zero on an unlabelled PR or a
           # tag it cannot read, and swallowing that would turn it into a
           # silently skipped release.
-          TAG=$(python3 dev/plan_release.py plan "$PREVIOUS" "$RUNNER_TEMP/prs.json" "$RUNNER_TEMP/notes.md")
+          TAG=$(python3 "$RUNNER_TEMP/dev/plan_release.py" plan "$PREVIOUS" "$RUNNER_TEMP/prs.json" "$RUNNER_TEMP/notes.md")
           {
             echo "## ${TAG:-No release} (previous: ${PREVIOUS:-none})"
             echo
@@ -184,12 +214,12 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           BRANCH="stamp-plugin-versions-$VERSION"
+          # Off main's tip, not the released commit, which may be behind it.
+          git checkout --quiet -b "$BRANCH" origin/main
           python3 dev/stamp_plugin_versions.py "$VERSION"
           # After the build, never before: a dirty tree would give the wheel a
           # setuptools-scm dev version and fail the smoke test.
           python3 dev/plan_release.py changelog "$VERSION" "$RUNNER_TEMP/notes.md"
-          git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
-            checkout -b "$BRANCH"
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" \
             commit -am "chore: stamp plugin manifests and changelog for $TAG"
           # actions/checkout persisted GITHUB_TOKEN's own auth header, which
