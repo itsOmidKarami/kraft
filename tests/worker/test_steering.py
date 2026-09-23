@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 import yaml
@@ -7,6 +8,37 @@ from support.harness import entry_of
 from kraft import config
 from kraft.templates.library import TemplateLibrary
 from kraft.worker import steering
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_the_shipped_never_signal_profile_is_byte_identical_to_the_old_safety_rules():
+    """Kraft-c82sp: `SAFETY_RULES` was one code-appended paragraph, its
+    literals joined by spaces with no `\\n` anywhere in the body. `library.yaml`
+    carries the same text now as a `>-` folded scalar rather than a `|`
+    literal block precisely so loading it reproduces that -- a `|` block would
+    insert a `\\n` at every source wrap, and `Steering.block` passes whatever
+    this loads straight into the launched prompt. Pinned against the text
+    written out here rather than a surviving constant, since `SAFETY_RULES`
+    itself is gone."""
+    library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
+    old_safety_rules = (
+        "Never signal a process you did not start. If something is already "
+        "listening on a port you need, it is not a stale leftover to clear -- it "
+        "might be the Kraft daemon serving other work right now. Check "
+        "$KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before "
+        "touching anything you find on a port: if the pid or the port matches, it "
+        "is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill` "
+        "would take down orchestration for every other work item on this install, "
+        "including this one. Ask any server you start yourself for an ephemeral "
+        "port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the "
+        "daemon's. If a task genuinely needs the daemon's own port, that is a "
+        "question for a human, not something to resolve by killing what is "
+        "already there."
+    )
+    assert (
+        library.steering["never-signal-processes-you-didnt-start"].instructions == old_safety_rules
+    )
 
 
 def test_the_budget_measures_the_block_a_launch_injects(tmp_path):
