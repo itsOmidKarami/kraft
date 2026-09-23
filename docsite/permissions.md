@@ -91,12 +91,25 @@ set, nothing is written and the launch is exactly as before.
   mode, which a model reached for after its shell was refused. The shell
   itself is denied call by call rather than removed, because OpenCode's free
   tier refuses any request without it.
+- **Amp** gets a settings file of the launch's own,
+  `$KRAFT_HOME/run/harness-config/amp/<session>.json`, passed with
+  `--settings-file`. For that run it replaces `~/.config/amp/settings.json`,
+  which Kraft never reads or writes; your login lives elsewhere and still
+  works. Its `amp.permissions` rules come before Amp's built-in ones, and the
+  first match wins. A denied tool gets a `reject` rule and everything else is
+  left to Amp's built-ins. Under an allowlist, each listed tool gets an
+  `allow` rule and a final `*` rule rejects the rest. So an allowlisted tool on
+  Amp is allowed outright: Amp's own built-in asks (a `git push`, an
+  `rm -rf`) no longer apply to it. Denying `Bash` rejects `shell_command` and
+  its async and legacy forms. Amp has no read, grep or glob tool of its own
+  (it reads through its shell), so `Read` or `Grep` in a task's policy refuses
+  an Amp launch.
 
 A policy tool name no tool on that CLI maps to (`tool_names:` in the harness
 file) refuses the launch, naming the tool: Kraft can't write a rule for it.
 A CLI tool that covers two policy names follows Cursor's rule: OpenCode's
-`edit` also writes files, so it's denied if `Edit` or `Write` is, and
-allowed under an allowlist only if both are listed.
+`edit` and Amp's `apply_patch` also write files, so each is denied if `Edit`
+or `Write` is, and allowed under an allowlist only if both are listed.
 
 Nothing reaches the gate, so none of this shows up as a `permission_decision`
 on the timeline. **Grants aren't realised on OpenCode or Amp**: a CLI rule
@@ -205,7 +218,7 @@ for how the layers combine.
 ## Which harnesses reach it
 
 Claude, through its prompt tool, and Cursor, through its hook. OpenCode
-doesn't reach it, but still enforces `deny_tools` and `allowed_tools` through
+and Amp don't reach it, but still enforce `deny_tools` and `allowed_tools` through
 [rules written at launch](#opencode-and-amp-rules-written-at-launch): no
 timeline events, and no grants. Every other harness runs in its own
 classifier mode or its most permissive unattended mode — see the table in [Agent harnesses](harnesses.md#how-each-harness-runs-unattended).

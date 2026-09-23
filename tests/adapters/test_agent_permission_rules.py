@@ -41,3 +41,32 @@ def test_an_opencode_launch_runs_under_an_allowlist(run, tmp_path):
 def test_a_policy_name_the_cli_has_no_tool_for_is_refused(run, tmp_path, policy, name):
     with pytest.raises(LaunchRefused, match=rf"'opencode'.*'{name}'"):
         _opencode(run, tmp_path, **policy)
+
+
+def _amp(run, tmp_path, **kw):
+    return run(harness="amp", command="amp", run_dirs=RunDirs(base=tmp_path), **kw)
+
+
+def test_an_amp_launch_gets_its_own_settings_file(run, tmp_path):
+    seen = _amp(run, tmp_path, deny_tools=("Bash",))
+    path = tmp_path / "harness-config" / "amp" / "s1.json"
+    assert seen["cmd"][:4] == ["amp", "--no-archive-after-execute", "--settings-file", str(path)]
+    assert json.loads(path.read_text())["amp.permissions"][0]["action"] == "reject"
+
+
+def test_an_amp_resume_keeps_its_settings_file(run, tmp_path):
+    seen = _amp(run, tmp_path, allowed_tools=("Edit",), resume_session_id="T-1")
+    i = seen["cmd"].index("--settings-file")
+    assert seen["cmd"][:i] == ["amp", "threads", "continue", "T-1", "--no-archive-after-execute"]
+
+
+def test_an_amp_launch_with_nothing_to_enforce_reads_the_users_settings(run, tmp_path):
+    seen = _amp(run, tmp_path)
+    assert "--settings-file" not in seen["cmd"]
+    assert not (tmp_path / "harness-config").exists()
+
+
+def test_an_amp_policy_naming_read_is_refused(run, tmp_path):
+    """Amp reads through its shell; there is no read tool to deny."""
+    with pytest.raises(LaunchRefused, match=r"'amp'.*'Read'"):
+        _amp(run, tmp_path, deny_tools=("Read",))

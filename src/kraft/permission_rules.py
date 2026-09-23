@@ -62,10 +62,32 @@ def _opencode(tool_names, allowed, deny, directory, session_id):
     return {"OPENCODE_CONFIG_CONTENT": json.dumps({"permission": perm})}, ("--standalone",)
 
 
+def _amp(tool_names, allowed, deny, directory, session_id):
+    """A settings file of its own, `--settings-file`, which replaces the
+    user's ~/.config/amp/settings.json for the run (login lives elsewhere).
+    User rules come before Amp's built-ins and the first match wins. Never
+    `delegate`: edit_file hangs under it (probe, 0.0.1790142911)."""
+    rules = []
+    for cli, names in tool_names.items():
+        if _denied(names, allowed, deny):
+            rules.append({"tool": cli, "action": "reject"})
+        elif allowed is not None:
+            # An `allow` outranks Amp's built-in asks for this tool.
+            rules.append({"tool": cli, "action": "allow"})
+    if allowed is not None:
+        rules.append({"tool": "*", "action": "reject"})
+    directory.mkdir(parents=True, exist_ok=True)
+    # ponytail: one file per session, never removed -- a worker can outlive
+    # the Kraft that launched it, and Amp may re-read it. Sweep if they pile up.
+    path = directory / f"{session_id}.json"
+    path.write_text(json.dumps({"amp.permissions": rules}, indent=2) + "\n")
+    return {}, ("--settings-file", str(path))
+
+
 Renderer = Callable[..., tuple[dict[str, str], tuple[str, ...]]]
 
 #: `permission_rules:` in a harness file names one of these.
-RENDERERS: dict[str, Renderer] = {"opencode": _opencode}
+RENDERERS: dict[str, Renderer] = {"opencode": _opencode, "amp": _amp}
 
 
 def render(

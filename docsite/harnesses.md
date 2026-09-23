@@ -18,7 +18,7 @@ Kraft ships six harnesses:
 | `cursor` | `agent -p --trust` | Cursor's agent CLI. Runs in `--auto-review` (Cursor's classifier); `permission_mode: force` overrides it. Every launch gets a Kraft-owned config dir with commit attribution off ([Cursor](#cursor)). No out-of-band context channel (context goes in the prompt), no `effort` (a model id can carry one, such as `'name[effort=high]'`), and no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. `deny_tools` and `allowed_tools` work through a `preToolUse` hook Kraft installs in the worktree, answered by the [permission gate](permissions.md#cursor-a-hook-before-every-call). Tokens and the chat id `resume` takes are read off its `stream-json` log; it reports no cost. An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. Checked with real runs on cursor-agent 2026.09.18-9a7762b. |
 | `opencode` | `opencode run` | No out-of-band context channel (context goes in the prompt), no `restrict_tools`, `approval_channel` or `autocompact`. `deny_tools` and `allowed_tools` are written into the launch's own OpenCode config, with `--standalone`, when the task's policy sets either ([permission gate](permissions.md#opencode-and-amp-rules-written-at-launch)). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: OpenCode 2.x dropped `--variant`, so name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. In 2.x that log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails (Kraft-ihoen). A `task` sub-agent's tokens are not in the log. Checked against opencode 2.0.15. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
-| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. Checked with real Kraft work items on amp 0.0.1790142911. |
+| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. `deny_tools` and `allowed_tools` go into a settings file of the launch's own (`--settings-file`) when the task's policy sets either ([permission gate](permissions.md#opencode-and-amp-rules-written-at-launch)). Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. Checked with real Kraft work items on amp 0.0.1790142911. |
 
 ## Capabilities, not flags
 
@@ -138,12 +138,14 @@ its commits, is granted explicitly and never left to a classifier.
 | codex | approve-for-me (-c keys), plus explicit results and `.git` writable roots | yes | |
 | cursor | `--auto-review`, plus a per-launch config with commit attribution off, and Kraft's `preToolUse` hook when the task's policy has something to enforce | yes | the hook's deny blocks; its allow doesn't outrank the classifier |
 | opencode | `--auto`, plus the task's tool policy as per-launch config rules (`--standalone`) when it has any | none in the CLI | no permission gate: the rules are enforced by OpenCode, and nothing is logged |
-| amp | approves by default | no | |
+| amp | approves by default, plus the task's tool policy as a per-launch settings file when it has any | no | no permission gate: the rules are enforced by Amp, and nothing is logged |
 | gemini | `--approval-mode yolo` | no | |
 
 Claude sends the asks its classifier won't settle to Kraft, and Cursor's hook
-asks Kraft before every call when policy has something to enforce. Routing the
-other harnesses' calls to Kraft the same way is planned (epic Kraft-4in7z). See
+asks Kraft before every call when policy has something to enforce. OpenCode
+and Amp never ask Kraft: their tool lists are written into their own config
+at launch. Routing Codex's and Gemini's calls to Kraft is planned (epic
+Kraft-4in7z). See
 [The permission gate](permissions.md) for how those asks reach Kraft and how
 Kraft decides them.
 
@@ -282,7 +284,7 @@ translator that answers the CLI's hook (only `cursor` exists), and
 `tool_names:` maps the CLI's own tool names to Kraft's (`Shell: Bash`), so a
 call is checked under the name policy uses. Or they can bind `via:
 permission_rules`, for a CLI with no hook: a top-level `permission_rules:`
-names the renderer (`opencode`) that writes the tool lists into the CLI's own
+names the renderer (`opencode`, `amp`) that writes the tool lists into the CLI's own
 permission config at launch, and `tool_names:` maps the other way round too,
 so a policy name no CLI tool maps to refuses the launch.
 

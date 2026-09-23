@@ -33,6 +33,32 @@ command: [amp, --no-archive-after-execute]
 # passes here (buildCliArgs: `threads continue <id> --execute --stream-json`).
 command_resume: [amp, threads, continue, "{value}", --no-archive-after-execute]
 
+# Kraft-4in7z.2: no per-call hook (a `delegate` rule hangs edit_file, probe
+# 0.0.1790142911). deny_tools and allowed_tools are written into a settings
+# file of the launch's own, `--settings-file` (permission_rules.py), only when
+# the policy has something to enforce; it replaces ~/.config/amp/settings.json
+# for that run, and login lives elsewhere. Tool names from `amp tools list`
+# in every mode and `amp permissions list --builtin` (0.0.1790142911): the
+# shell is shell_command (+ its async, legacy, status and kill forms);
+# apply_patch both edits and creates. Amp itself widens a rule for any one
+# shell name to all three (`amp permissions test`); all are listed anyway. Amp has no read, grep or glob tool of
+# its own beyond the legacy `Glob`: it reads through the shell.
+permission_rules: amp
+tool_names:
+  shell_command: Bash
+  async_shell_command: Bash
+  Bash: Bash
+  shell_command_status: Bash
+  shell_command_kill: Bash
+  edit_file: Edit
+  create_file: Write
+  apply_patch: [Edit, Write]
+  Glob: Glob
+  read_web_page: WebFetch
+  web_search: WebSearch
+  Task: Task
+  skill: Skill
+
 capabilities:
   # No flag carries a system prompt or extra context: `-m` swaps Amp's own
   # system prompt, and AGENTS.md is a file in the repo, not an argument.
@@ -50,6 +76,8 @@ capabilities:
   effort:          { cli: ["-m", "{value}"], values: [low, medium, high, ultra] }
   resume:          { via: command_resume }
   usage:           { source: envelope, reader: amp-stream-json }
+  deny_tools:      { via: permission_rules }
+  allowed_tools:   { via: permission_rules }
   prompt:          { cli: ["-x", "{value}"] }
 
 # Absent, deliberately:
@@ -58,9 +86,8 @@ capabilities:
 #   tools" (ampcode.com/docs/tools), so a headless run is never blocked on an
 #   ask. `--dangerously-allow-all` parses (an unknown flag is refused, this one
 #   is not) and the SDK passes it, but it is not in `--help`.
-# - deny_tools, allowed_tools, restrict_tools: only the `amp.tools.disable` /
-#   `amp.tools.enable` settings, no flag, so this harness cannot launch under
-#   a tool allowlist.
+# - restrict_tools: only the `amp.tools.disable` / `amp.tools.enable`
+#   settings, no flag; the permission rules above hold an allowlist instead.
 # - approval_channel: nothing asks, so nothing to route.
 # - autocompact: no flag.
 # - rate_limit_signal: the stream schema has no rate-limit event, and the
