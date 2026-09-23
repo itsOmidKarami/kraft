@@ -7,6 +7,18 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- Kraft's permission gate now answers Cursor workers too: a `preToolUse`
+  hook, written into the worktree's `.cursor/hooks.json` (never committed)
+  when the task's policy has something to enforce, applies `deny_tools` and
+  `allowed_tools` (which Cursor launches can now use) and logs each decision
+  on the item's timeline, with the harness and Cursor's own tool name.
+  Everything policy doesn't decide is left to Cursor's classifier, and a hook
+  allow doesn't override it (Kraft-4in7z, Kraft-4in7z.6). New `grants:` in
+  policy (`git-commit`, `git-rebase`, `git-push`) let a task's gate allow
+  exactly one plain git invocation of that operation, whatever
+  `allowed_tools` says; a commit message with `$` or `!`, or anything
+  chained, still goes to the classifier. Grants accumulate down the layers,
+  and a work item's own override can drop a grant but never add one.
 - Docs: a page on the permission gate — how a worker's ask reaches it, how
   it decides from `allowed_tools`/`deny_tools`, the `permission_decision`
   events it logs, and which harnesses reach it today (Kraft-9r3lv).
