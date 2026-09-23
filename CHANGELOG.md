@@ -15,10 +15,16 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   Everything policy doesn't decide is left to Cursor's classifier, and a hook
   allow doesn't override it (Kraft-4in7z, Kraft-4in7z.6). New `grants:` in
   policy (`git-commit`, `git-rebase`, `git-push`) let a task's gate allow
-  exactly one plain git invocation of that operation, whatever
-  `allowed_tools` says; a commit message with `$` or `!`, or anything
-  chained, still goes to the classifier. Grants accumulate down the layers,
-  and a work item's own override can drop a grant but never add one. An
+  exactly one plain git invocation of that operation, even outside
+  `allowed_tools`; a commit message with `$` or `!`, or anything chained,
+  goes to the classifier when there is no allowlist, and is denied under
+  one. A granted push must name a plain remote, and `--delete`, `--mirror`,
+  `--all`, `--prune`, `--repo` and git's `-C` are never granted. A grant is
+  the gate's logged allow: Cursor's classifier can still refuse the call
+  (Kraft-4in7z.6), and a Claude task under an allowlist without `Bash` has no
+  shell tool to make it with (Kraft-4in7z.12). Grants accumulate down the
+  layers, and a work item's own override, or a retry's, can drop a grant but
+  never add one. An
   escalation turn is granted all three by default, so it can rebase and
   push; `defaults.escalation_grants` in `policy.yaml` narrows that.
 - New `policy.yaml` key `escalation_harness` picks the harness an escalation

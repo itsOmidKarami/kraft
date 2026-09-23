@@ -8,6 +8,12 @@ prefix, an unknown git option, or an option that makes git run a command of
 the caller's choosing -- matches nothing and falls to the classifier. When in
 doubt this refuses: a refusal costs a classifier call, a false match costs
 an arbitrary command.
+
+A grant does not stop git's own hooks: a granted commit or push still runs
+the repository's hooks, including a `core.hooksPath` inside the tree
+(`.husky/`, say) that the agent can edit. And a grant is the gate's allow
+only; whether the CLI runs the call is Kraft-4in7z.6 (Cursor) and
+Kraft-4in7z.12 (Claude).
 """
 
 from __future__ import annotations

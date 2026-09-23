@@ -99,8 +99,10 @@ def test_enforce_fail_closed_denies_an_unresolvable_policy_and_logs_it(client):
 
 
 def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
-    """A Claude task whose allowlist omits Bash still gets its granted push,
-    and only that."""
+    """The gate allows a granted push under an allowlist that omits Bash, and
+    only that. This pins the gate's decision, not a real Claude launch: such a
+    launch has no Bash tool, so the push never reaches the gate
+    (Kraft-4in7z.12)."""
     seed_session(policy={"allowed_tools": ["Read"], "grants": ["git-push"]})
     assert ask(client, input=_PUSH).json() == {"behavior": "allow", "updatedInput": _PUSH}
     assert ask(client, input=_LS).json()["behavior"] == "deny"

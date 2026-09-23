@@ -97,26 +97,48 @@ may still refuse it; a launch-time rule to make it stick is Kraft-4in7z.6.
 
 ## Grants
 
-A grant is a named operation the gate allows a task whatever its
-`allowed_tools` says: `git-commit`, `git-rebase`, `git-push` (on Cursor, subject
-to the classifier caveat above). It is a name,
-never a command pattern. It matches a `Bash` call only when the command is
-exactly one plain git invocation of that subcommand. Refused, so falling
-through to the rest of the table, is any command with:
+A grant is a named operation the gate allows a task even outside its
+`allowed_tools`: `git-commit`, `git-rebase`, `git-push`. It is a name, never a
+command pattern. It matches a `Bash` call only when the command is exactly one
+plain git invocation of that subcommand. Refused, so falling through to the
+rest of the table, is any command with:
 
 - a shell operator, substitution, redirection, subshell, brace or glob
   expansion, backslash, `!` or a newline — so a commit message with `$` or `!`
   in it, a multi-line one, or one written through a heredoc, is not granted
-  (on Cursor with no allowlist, that leaves it to the classifier);
+  (with no allowlist that leaves it to the CLI's classifier; under an
+  allowlist without `Bash` it is denied);
 - an env prefix or anything but `git` as the first word;
-- a git option before the subcommand other than `-C DIR`, `--no-pager`, `-P`,
-  or `-c` setting `user.name` or `user.email`;
+- a git option before the subcommand other than `--no-pager`, `-P`, or `-c`
+  setting `user.name` or `user.email` — not `-C`, which would point git at
+  another repository's config and hooks;
 - an option that runs a command of the caller's choosing: `--exec` and
   `--receive-pack` on push, `--exec`/`-x` and `--strategy`/`-s` on rebase, and
   any abbreviation of those long options.
 
-`git-push` allows `--force`: an escalation that rebased the branch has to
-force-push it.
+A `git-push` is further held to one named remote and the refs it names. Its
+first positional must be a plain remote name (letters, digits, `_`, `.`, `-`,
+not starting with `.`, `_` or `-`), never a URL or path; a refspec after it,
+such as `HEAD:main`, is fine. Refused on push: `--delete`/`-d`, `--mirror`,
+`--all` (and its newer spelling `--branches`), `--prune`, `--repo`, and
+`-o`/`--push-option` (its value would pass for the remote). `--force` stays
+allowed: an escalation that rebased the branch has to force-push it.
+
+A grant does not stop git's own hooks: a commit or push under a grant still
+runs the repository's hooks, including a `core.hooksPath` inside the tree
+(`.husky/`, say), which the agent can edit.
+
+**Where a grant takes effect today.** A grant is the gate's decision — a
+logged allow on the item's timeline. Whether the CLI then runs the call is its
+own business, and on neither harness is that settled yet:
+
+- **Cursor.** A hook `allow` does not override `--auto-review`, so the
+  classifier can still refuse a granted call. A launch-time rule to make it
+  stick is Kraft-4in7z.6.
+- **Claude.** Without an allowlist the gate already allows every tool, so a
+  grant adds nothing. Under an allowlist that leaves out `Bash`, Claude is
+  launched without a `Bash` tool at all (`--tools`), so a granted `git push`
+  never reaches the gate. Making grants real there is Kraft-4in7z.12.
 
 Grants are set like `deny_tools` and accumulate the same way down the layers
 (repository `policy:`, chain, node, step, task). A workspace's meet grants
