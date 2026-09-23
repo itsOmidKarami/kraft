@@ -1,10 +1,12 @@
 # kraft
 
-Seven skills for driving [Kraft](https://github.com/itsOmidKarami/kraft) from an
+Eleven skills for driving [Kraft](https://github.com/itsOmidKarami/kraft) from an
 agent session: connect a repo, spec and file work onto the board, read what is
-running, act on the gates waiting on a person, report where a work item has
-got to, and check a repo's Kraft config for drift
-(`onboard`, `board`, `prepare`, `handoff`, `status`, `gates`, `check`).
+running, act on the gates waiting on a person, review before answering one,
+redirect or recover a work item, report where it has got to, and check the
+repo's config and the server's health
+(`onboard`, `board`, `prepare`, `handoff`, `status`, `gates`, `review`,
+`steer`, `triage`, `check`, `doctor`).
 
 These skills call Kraft's MCP server, so they need the `kraft` program itself:
 `curl -fsSL https://raw.githubusercontent.com/itsOmidKarami/kraft/main/install.sh | sh`.
