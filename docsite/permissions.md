@@ -118,7 +118,7 @@ force-push it.
 
 Grants are set like `deny_tools` and accumulate the same way down the layers
 (repository `policy:`, chain, node, step, task). A workspace's meet grants
-only what every repository in it grants. A work item's own override can drop a
+only what every repository in it grants. A work item's own override, and a retry's, can drop a
 grant but never add one: what a task is granted is authored in the chain or
 the repository, not filed with the item.
 
