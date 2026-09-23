@@ -20,6 +20,10 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        # docsite/package-lock.json is ~800KB: Docus/Nuxt UI's dependency
+        # tree is much bigger than the frontend's. A real lockfile, not a
+        # mistake -- raise the ceiling rather than exclude lockfiles wholesale.
+        args: [--maxkb=1000]
   # Kraft-m2wru: local only -- CI has no claude CLI or credential. Scoped to the
   # files that can put a model the CLI refuses into what ships.
   - repo: local

@@ -46,7 +46,6 @@ dev = [
     # hour of counting progress characters to find one nested test run.
     "pytest-timeout>=2.3",
 ]
-docs = ["mkdocs-material>=9"]
 
 [project.scripts]
 kraft = "kraft.cli:main"

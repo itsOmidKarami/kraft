@@ -1,4 +1,4 @@
-# Builds docsite/ with mkdocs-material on every PR that touches it (a broken
+# Builds docsite/ with Nuxt/Docus on every PR that touches it (a broken
 # build fails the PR, not a merge to main after the fact) and publishes to
 # GitHub Pages on push to main. Separate from test.yml/release.yml: a
 # docs-only change should not wait on the backend/frontend test matrix, and a
@@ -9,12 +9,11 @@ on:
   pull_request:
     paths: &docs_paths
       - "docsite/**"
-      # docsite/assets is a symlink into here; every page's images resolve
-      # through it, so a screenshot-only change must still trigger a rebuild.
+      # docsite/public/assets is a symlink into here; every page's images
+      # resolve through it, so a screenshot-only change must still trigger a
+      # rebuild.
       - ".github/assets/**"
-      - "mkdocs.yml"
-      - "pyproject.toml"
-      - "uv.lock"
+      - "frontend/public/icon.svg"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -33,15 +32,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docsite/package-lock.json
 
       - name: build the site
         run: |
-          uv sync --only-group docs --no-install-project
-          uv run --no-project mkdocs build --strict
+          npm ci
+          npx nuxt generate
+        working-directory: docsite
 
       # Pages setup only makes sense for the thing that's about to deploy --
       # a PR build stops here, checked but not published.
@@ -50,7 +51,7 @@ jobs:
       - if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site
+          path: docsite/.output/public
 
   deploy:
     needs: build

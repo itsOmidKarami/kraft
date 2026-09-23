@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-DOCSITE = ROOT / "docsite"
+DOCSITE = ROOT / "docsite" / "content"
 SRC = ROOT / "src" / "kraft"
 
 
@@ -113,13 +113,13 @@ def harness_capabilities() -> set[str]:
 # (label, extractor, docsite page). Mirrors CONTRIBUTING.md's "User-facing
 # docs" table -- add a row there when you add one here.
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
-    ("kraft CLI commands", cli_commands, "cli.md"),
-    ("MCP tools", mcp_tool_names, "agent-integration.md"),
-    ("policy.yaml fields", policy_fields, "configuration.md"),
-    ("access.yaml fields", access_fields, "configuration.md"),
-    ("library.yaml agent task keys", agent_task_keys, "configuration.md"),
-    ("library.yaml sections", library_sections, "configuration.md"),
-    ("harness capabilities", harness_capabilities, "harnesses.md"),
+    ("kraft CLI commands", cli_commands, "2.reference/2.cli.md"),
+    ("MCP tools", mcp_tool_names, "2.reference/6.agent-integration.md"),
+    ("policy.yaml fields", policy_fields, "2.reference/3.configuration.md"),
+    ("access.yaml fields", access_fields, "2.reference/3.configuration.md"),
+    ("library.yaml agent task keys", agent_task_keys, "2.reference/3.configuration.md"),
+    ("library.yaml sections", library_sections, "2.reference/3.configuration.md"),
+    ("harness capabilities", harness_capabilities, "2.reference/5.harnesses.md"),
 ]
 
 
@@ -143,8 +143,8 @@ def unknown_gates() -> list[str]:
         if isinstance(n.node, GateNode)
     }
     return [
-        f"{page.name}: {name}"
-        for page in sorted(DOCSITE.glob("*.md"))
+        f"{page.relative_to(DOCSITE)}: {name}"
+        for page in sorted(DOCSITE.glob("**/*.md"))
         for name in sorted(set(_GATE_NAME.findall(page.read_text())))
         if name not in gates
     ]
@@ -155,13 +155,13 @@ def main() -> int:
     failed = False
     for unknown in unknown_gates():
         failed = True
-        print(f"docsite/{unknown}: names a gate no shipped chain has")
+        print(f"docsite/content/{unknown}: names a gate no shipped chain has")
     for label, extractor, page in CHECKS:
         text = (DOCSITE / page).read_text()
         missing = sorted(term for term in extractor() if term not in text)
         if missing:
             failed = True
-            print(f"docsite/{page}: missing {label}: {missing}")
+            print(f"docsite/content/{page}: missing {label}: {missing}")
     if not failed:
         print("ok: every checked term has at least one mention in its docs page")
     return 1 if failed else 0
