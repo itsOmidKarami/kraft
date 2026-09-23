@@ -811,7 +811,7 @@ async def test_a_snapshot_without_frozen_steering_stops_for_a_human(
     assert "project-standards" in log and "before steering was frozen" in log, log
 
 
-# -- every agent launch carries Kraft's safety rule ---------------------------------
+# -- the never-signal steering profile reaches a launch only when named -----------
 
 
 def _capture_launches(monkeypatch) -> dict[str, str]:
@@ -829,8 +829,8 @@ def _capture_launches(monkeypatch) -> dict[str, str]:
 async def test_no_seeded_agent_task_carries_the_never_signal_rule_by_default(
     tmp_path, repo, database, run_dirs, monkeypatch
 ):
-    """`every-agent-launch-carries-kraft-safety-rules` (Kraft-c82sp): opt-in
-    steering now, and no seeded task selects it."""
+    """`never-signal-steering-reaches-every-launch-path-when-named`
+    (Kraft-c82sp): opt-in steering now, and no seeded task selects it."""
     from kraft.templates.library import TemplateLibrary
     from kraft.templates.models import AgentTask
 

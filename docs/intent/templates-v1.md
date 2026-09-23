@@ -130,7 +130,7 @@ skill the task selects.
 enforced-by: tests/skills/test_planning.py::test_a_plan_under_any_method_is_told_verification_runs_the_suite, tests/skills/test_planning.py::test_a_spec_under_any_method_is_told_the_chain_implements_it_headless
 origin: src/kraft/adapters/artifact_notes.py -- Kraft-35u4m.3, Kraft-35u4m.4: `spec_author`/`plan_author` may name any plugin's method in `skill:`, and one written for an interactive session plans a full-suite step and waits on a human; the chain context rides in the contract so swapping the method cannot lose it.
 
-## REQ every-agent-launch-carries-kraft-safety-rules
+## REQ never-signal-steering-reaches-every-launch-path-when-named
 
 Every agent launch -- a chain task, a gate auto-review, an escalation turn --
 for a repository that names the `never-signal-processes-you-didnt-start`
