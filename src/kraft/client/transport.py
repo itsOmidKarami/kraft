@@ -118,10 +118,11 @@ async def _patch(path: str, payload: dict) -> dict:
     return body
 
 
-async def _post(path: str, payload: dict | None = None) -> tuple[int, dict]:
+async def _post(path: str, payload: dict | None = None, **kwargs) -> tuple[int, dict]:
     """Status alongside the body: some callers treat a 4xx as a normal outcome
-    (a 409 from POST /repos means the repo is already connected)."""
-    response = await _send("POST", path, json=payload or {})
+    (a 409 from POST /repos means the repo is already connected). `kwargs`
+    reach httpx's request (a caller's own `timeout`)."""
+    response = await _send("POST", path, json=payload or {}, **kwargs)
     try:
         body = response.json()
     except ValueError:

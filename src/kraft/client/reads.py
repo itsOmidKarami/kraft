@@ -241,6 +241,10 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
             ) from exc
 
 
+#: Seconds an enforce-mode ask waits: under Cursor's 10 s hook timeout.
+ENFORCE_TIMEOUT = 5
+
+
 async def permission_request(
     tool_name: str,
     input: dict,
@@ -264,7 +268,8 @@ async def permission_request(
     `deny`: an enforce-mode hook (Kraft-4in7z) decides for itself whether an
     unreachable Kraft is a fail-open (no opinion) or fail-closed (deny) case
     via its own fail-closed setting, which is not this function's call to
-    make.
+    make. An enforce ask gives up after `ENFORCE_TIMEOUT` seconds, inside
+    Cursor's 10 s hook timeout, so the hook answers rather than being killed.
     """
     failure = "unavailable" if mode == "enforce" else "deny"
     sid = os.environ.get("KRAFT_SESSION_ID")
@@ -283,8 +288,11 @@ async def permission_request(
                 "fail_closed": fail_closed,
                 "also": list(also),
             },
+            **({"timeout": ENFORCE_TIMEOUT} if mode == "enforce" else {}),
         )
-    except ValueError as exc:  # `_send` raises this for a server that is not there
+    # `_send` raises ValueError for a server that is not there; httpx's own
+    # errors (a timeout) are the same answer.
+    except (ValueError, httpx.HTTPError) as exc:
         return {"behavior": failure, "message": str(exc)}
     if status >= 400 or not isinstance(body, dict) or "behavior" not in body:
         detail = body.get("detail") if isinstance(body, dict) else body

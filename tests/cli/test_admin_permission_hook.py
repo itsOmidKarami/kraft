@@ -85,3 +85,21 @@ def test_the_hook_passes_its_harness_tool_names(monkeypatch):
     with pytest.raises(SystemExit):
         admin._cmd_permission_hook(argparse.Namespace(harness="cursor", fail_closed=False))
     assert seen[0]["Shell"] == ("Bash",)
+
+
+@pytest.mark.parametrize(("fail_closed", "expected"), [(True, "deny"), (False, None)])
+def test_a_hook_that_breaks_before_asking_still_answers(monkeypatch, capsys, fail_closed, expected):
+    """Loading the harness library raising (or anything else) must not leave
+    Cursor without an answer: deny when fail-closed, `{}` otherwise."""
+    from kraft import harness
+
+    def broken(_):
+        raise RuntimeError("harnesses unreadable")
+
+    monkeypatch.delenv("KRAFT_PERMISSION_FAIL_CLOSED", raising=False)
+    monkeypatch.setattr(harness, "load", broken)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CURSOR_SHELL))
+    with pytest.raises(SystemExit) as done:
+        admin._cmd_permission_hook(argparse.Namespace(harness="cursor", fail_closed=fail_closed))
+    assert done.value.code == 0
+    assert json.loads(capsys.readouterr().out).get("permission") == expected

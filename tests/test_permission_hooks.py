@@ -142,3 +142,24 @@ def test_server_down_mid_run_through_the_real_client(monkeypatch, fail_closed, e
     monkeypatch.setattr(reads.transport, "_post", down)
     out, code = ph.answer_hook("cursor", CURSOR_SHELL, NAMES, fail_closed=fail_closed)
     assert (json.loads(out).get("permission"), code) == (expected, 0)
+
+
+@pytest.mark.parametrize(("mode", "timeout"), [("enforce", 5), ("prompt", None)])
+def test_an_enforce_ask_times_out_inside_cursors_hook_timeout(monkeypatch, mode, timeout):
+    """Cursor kills a hook after 10 s; an enforce ask gives up at 5 s so the
+    hook still answers (deny when fail-closed)."""
+    import asyncio
+
+    import httpx
+
+    monkeypatch.setenv("KRAFT_SESSION_ID", "s1")
+    seen = {}
+
+    async def slow(method, path, **kw):
+        seen.update(kw)
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(reads.transport, "_send", slow)
+    got = asyncio.run(reads.permission_request("Bash", {}, mode=mode))
+    assert seen.get("timeout") == timeout
+    assert got["behavior"] == ("unavailable" if mode == "enforce" else "deny")
