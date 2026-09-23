@@ -80,3 +80,48 @@ def test_every_install_seeded_before_the_rebase_shipped_is_told_about_it(seeded)
     install first seeded by either has a `draft_merge_request` with no rebase
     and must still be told (`added_since` is strictly newer)."""
     assert "mr_rebase" in [c.name for c in capabilities.added_since(seeded)]
+
+
+def test_the_never_signal_steering_entry_gives_the_exact_shipped_yaml():
+    """Kraft-c82sp: SAFETY_RULES left the code and became opt-in steering, so
+    templates are seeded once and never overwritten -- an install first set up
+    on 1.0.x has no `never-signal-processes-you-didnt-start` profile, and one
+    upgraded from 0.x has the migrated profile but no repo naming it, because
+    it used to be automatic. Either way the `how` an operator pastes in must
+    be the *shipped* YAML, not a paraphrase that drifts from it."""
+    [entry] = [
+        c
+        for c in capabilities.MANIFEST
+        if c.version == "1.1.0" and c.name == "never_signal_steering"
+    ]
+    library = (ROOT / "templates" / "library.yaml").read_text()
+    block = (
+        "  never-signal-processes-you-didnt-start:\n"
+        "    instructions: >-\n"
+        "      Never signal a process you did not start. If something is already\n"
+        "      listening on a port you need, it is not a stale leftover to clear -- it\n"
+        "      might be the Kraft daemon serving other work right now. Check\n"
+        "      $KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before\n"
+        "      touching anything you find on a port: if the pid or the port matches, it\n"
+        "      is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill`\n"
+        "      would take down orchestration for every other work item on this install,\n"
+        "      including this one. Ask any server you start yourself for an ephemeral\n"
+        "      port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the\n"
+        "      daemon's. If a task genuinely needs the daemon's own port, that is a\n"
+        "      question for a human, not something to resolve by killing what is\n"
+        "      already there.\n"
+    )
+    assert block in library
+    assert block.rstrip("\n") in entry.how
+    assert "steering: [never-signal-processes-you-didnt-start]" in entry.how
+    # A direct check the operator can answer by looking at their own file --
+    # not "skip this if migrate_files already ran", which asks them to recall
+    # an internal mechanism instead of just reading library.yaml.
+    assert (
+        "if your library.yaml does not already have a "
+        "`never-signal-processes-you-didnt-start` steering profile" in entry.how
+    )
+    # It must say plainly that the rule is no longer automatic, and that a
+    # repo whose tests start servers should name it.
+    assert "no longer" in entry.what and "automatically" in entry.what
+    assert "start servers of their own should name it" in entry.what

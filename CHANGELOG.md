@@ -1,7 +1,8 @@
 # Changelog
 
-Notable changes to Kraft, newest first. The release workflow publishes the
-section for each version as that release's notes. Releases before 1.0.0 are
+Notable changes to Kraft, newest first. The release workflow writes each
+section from the `## Changelog` part of the pull requests it ships; do not
+edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
 ## 1.1.0

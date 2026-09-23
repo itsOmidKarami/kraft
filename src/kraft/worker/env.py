@@ -29,10 +29,10 @@ if TYPE_CHECKING:
 #: find the instance that launched them (`paths.kraft_home`,
 #: `transport.base_url`, `transport.http`) -- without them a worker started
 #: by a non-default instance talks to `~/.kraft` on the default port instead.
-#: `KRAFT_DAEMON_PID` and `KRAFT_DAEMON_PORT` are what
-#: `adapters.agent.SAFETY_RULES` -- carried on every agent launch, not a
-#: steering file -- tells a worker to check before killing anything it finds
-#: listening on a port.
+#: `KRAFT_DAEMON_PID` and `KRAFT_DAEMON_PORT` are what the
+#: `never-signal-processes-you-didnt-start` steering profile (opt-in, via a
+#: repo's `repos.yaml` `steering:`) tells a worker to check before killing
+#: anything it finds listening on a port.
 BASELINE = frozenset(
     {
         "PATH",
