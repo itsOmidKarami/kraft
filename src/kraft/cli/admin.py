@@ -834,8 +834,9 @@ def _cmd_permission_hook(ns: argparse.Namespace) -> None:
 
     h = _harness.load(None).valid.get(ns.harness)
     names = h.tool_names if h is not None else {}
+    fail_closed = ns.fail_closed or os.environ.get("KRAFT_PERMISSION_FAIL_CLOSED") == "1"
     out, code = permission_hooks.answer_hook(
-        ns.harness, sys.stdin.read(), names, fail_closed=ns.fail_closed
+        ns.harness, sys.stdin.read(), names, fail_closed=fail_closed
     )
     sys.stdout.write(out)
     sys.stdout.flush()
@@ -1015,6 +1016,8 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     )
     hook.add_argument("harness", choices=sorted(permission_hooks.TRANSLATORS))
     hook.add_argument(
-        "--fail-closed", action="store_true", help="deny, not no opinion, when Kraft cannot answer"
+        "--fail-closed",
+        action="store_true",
+        help="deny, not no opinion, when Kraft cannot answer (also KRAFT_PERMISSION_FAIL_CLOSED=1)",
     )
     hook.set_defaults(func=_cmd_permission_hook)

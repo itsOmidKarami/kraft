@@ -15,9 +15,14 @@ from kraft.cli import admin
 CURSOR_SHELL = json.dumps({"tool_name": "Shell", "tool_input": {"command": "ls"}})
 
 
-def _hook(tmp_path, *args, stdin=CURSOR_SHELL):
+def _hook(tmp_path, *args, stdin=CURSOR_SHELL, env=None):
     # No KRAFT_SESSION_ID: not a worker, so the client answers `unavailable`.
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "KRAFT_HOME": str(tmp_path / "k")}
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "KRAFT_HOME": str(tmp_path / "k"),
+        **(env or {}),
+    }
     return subprocess.run(
         [sys.executable, "-m", "kraft", "admin", "permission-hook", *args],
         input=stdin,
@@ -36,6 +41,12 @@ def test_permission_hook_without_kraft_is_no_opinion_or_deny_when_fail_closed(
     done = _hook(tmp_path, "cursor", *flags, stdin=stdin)
     assert done.returncode == 0, done.stderr
     assert json.loads(done.stdout).get("permission") == expected
+
+
+def test_the_session_env_makes_the_hook_fail_closed(tmp_path):
+    done = _hook(tmp_path, "cursor", env={"KRAFT_PERMISSION_FAIL_CLOSED": "1"})
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout).get("permission") == "deny"
 
 
 def test_an_unknown_harness_is_a_usage_error(tmp_path):

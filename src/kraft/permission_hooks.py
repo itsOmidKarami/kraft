@@ -5,8 +5,9 @@ One translator per CLI turns its hook payload into `(tool, input)` and
 Kraft's answer back into what that CLI expects. `answer_hook` is the whole
 of what `kraft admin permission-hook` runs, and never raises: the hook sits
 in front of the CLI's own classifier, so a Kraft failure is *no opinion*
-(the classifier decides) -- or *deny*, when the launch installed the hook
-`--fail-closed` because its task holds an allowlist.
+(the classifier decides) -- or *deny*, when the session is fail-closed
+(`--fail-closed` or KRAFT_PERMISSION_FAIL_CLOSED=1, set by a launch whose
+task holds an allowlist).
 """
 
 from __future__ import annotations

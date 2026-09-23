@@ -32,10 +32,14 @@ def needs_hook(allowed_tools, deny_tools, grants) -> bool:
     return allowed_tools is not None or bool(deny_tools) or any(g != "git-commit" for g in grants)
 
 
-def hook_argv(harness_id: str, fail_closed: bool) -> list[str]:
-    return [sys.executable, "-m", "kraft", "admin", "permission-hook", harness_id] + (
-        ["--fail-closed"] if fail_closed else []
-    )
+#: Set in a worker's env when its launch holds an allowlist: the hook reads
+#: it, so fail-closed is per session while the entry itself is the same for
+#: every launch in the worktree (Kraft-4in7z).
+FAIL_CLOSED_ENV = "KRAFT_PERMISSION_FAIL_CLOSED"
+
+
+def hook_argv(harness_id: str) -> list[str]:
+    return [sys.executable, "-m", "kraft", "admin", "permission-hook", harness_id]
 
 
 def command_of(argv: list[str]) -> str:
@@ -46,18 +50,16 @@ def _git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(worktree), *args], capture_output=True, text=True)
 
 
-def install_cursor_hook(worktree: Path, argv: list[str] | None) -> None:
-    """Make Kraft's preToolUse entry `argv`, or remove it when `argv` is None
-    (a worktree launched again under a policy with nothing to enforce).
-    Idempotent: a relaunch replaces Kraft's entry, never adds a second."""
+def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
+    """Make Kraft's preToolUse entry `argv`. Never removed while the worktree
+    lives: sibling launches share it, and one with nothing to enforce gets
+    `no_opinion` from the gate. Idempotent: a relaunch replaces Kraft's
+    entry, never adds a second."""
     path = worktree / _REL
-    if argv is None and not path.exists():
-        return
     data = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
     entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
     entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
-    if argv is not None:
-        entries.append({"command": command_of(argv), "timeout": 10})
+    entries.append({"command": command_of(argv), "timeout": 10})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
     if _git(worktree, "ls-files", "--error-unmatch", _REL).returncode == 0:

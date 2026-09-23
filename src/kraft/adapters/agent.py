@@ -636,17 +636,17 @@ def _install_hook(
     deny: tuple[str, ...],
     grants: tuple[str, ...],
 ) -> None:
-    """Kraft's pre-tool hook in the worktree when there is policy to enforce,
-    fail-closed under an allowlist; otherwise none, and one a previous launch
-    of this worktree left is removed (Kraft-4in7z)."""
-    argv = None
-    if _hook_install.needs_hook(allowed, deny, grants):
-        argv = _hook_install.hook_argv(h.id, fail_closed=allowed is not None)
-        # ponytail: a hook `allow` does not outrank cursor's --auto-review
-        # (Task 1, probe B), so a grant beyond git-commit is enforced only as
-        # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
+    """Kraft's pre-tool hook in the worktree when there is policy to enforce
+    (Kraft-4in7z). The entry is the same for every launch and never removed:
+    fail-closed is per session (`FAIL_CLOSED_ENV`), so a sibling launch in the
+    same worktree cannot loosen or drop another's hook."""
+    if not _hook_install.needs_hook(allowed, deny, grants):
+        return
+    # ponytail: a hook `allow` does not outrank cursor's --auto-review
+    # (Task 1, probe B), so a grant beyond git-commit is enforced only as
+    # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
     if h.permission_hook == "cursor":
-        _hook_install.install_cursor_hook(cwd, argv)
+        _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
 
 
 async def run_agent_task(
@@ -794,6 +794,9 @@ async def run_agent_task(
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
+            **(
+                {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
+            ),
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
             **_config_dir(run_dirs, h, session_id),
         },

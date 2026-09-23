@@ -292,7 +292,7 @@ that asks the approval channel about everything else instead of approving it
 without asking). A harness missing either, `permission_mode` included,
 refuses to launch under an allowlist, and so does a launch whose own
 `permission_mode` differs from that mode. A harness with a `permission_hook`
-needs neither: its hook, installed fail-closed under an allowlist, denies
+needs neither: its hook, fail-closed for a session under an allowlist, denies
 every tool the list doesn't name.
 
 Validate with `kraft admin doctor` — it loads every harness a live binding

@@ -9,6 +9,8 @@ Cursor adds a `Co-authored-by: Cursor` trailer to each commit, and
 import json
 import subprocess
 
+import pytest
+
 from kraft.paths import RunDirs
 
 
@@ -55,32 +57,49 @@ def _kraft_hooks(cwd):
     return json.loads(hooks.read_text())["hooks"]["preToolUse"] if hooks.exists() else None
 
 
-def test_a_cursor_launch_under_a_tool_allowlist_runs_under_a_fail_closed_hook(run, tmp_path):
+FAIL_CLOSED = "KRAFT_PERMISSION_FAIL_CLOSED"
+
+
+def test_a_cursor_launch_under_a_tool_allowlist_runs_fail_closed(run, tmp_path):
     """Cursor has no per-launch tool flags; its preToolUse hook holds the
     list (Kraft-4in7z), so the launch runs, the list is in no flag, and the
-    hook denies every call while Kraft cannot be asked."""
+    session's env makes the hook deny every call while Kraft cannot be asked."""
     cwd = _repo(tmp_path)
     seen = _cursor(run, tmp_path, cwd, allowed_tools=("Read",))
     assert "Read" not in seen["cmd"]
-    [entry] = _kraft_hooks(cwd)
-    assert entry["command"].endswith("permission-hook cursor --fail-closed")
-
-
-def test_a_cursor_launch_with_only_deny_tools_gets_a_fail_open_hook(run, tmp_path):
-    cwd = _repo(tmp_path)
-    _cursor(run, tmp_path, cwd, deny_tools=("Bash",))
+    assert seen["env"][FAIL_CLOSED] == "1"
     [entry] = _kraft_hooks(cwd)
     assert entry["command"].endswith("permission-hook cursor")
 
 
-def test_a_cursor_launch_with_nothing_to_enforce_gets_no_hook(run, tmp_path):
+def test_a_cursor_launch_with_only_deny_tools_is_fail_open(run, tmp_path):
+    cwd = _repo(tmp_path)
+    seen = _cursor(run, tmp_path, cwd, deny_tools=("Bash",))
+    assert FAIL_CLOSED not in seen["env"]
+    [entry] = _kraft_hooks(cwd)
+    assert entry["command"].endswith("permission-hook cursor")
+
+
+def test_a_cursor_launch_with_nothing_to_enforce_writes_no_hook(run, tmp_path):
     cwd = _repo(tmp_path)
     _cursor(run, tmp_path, cwd, grants=("git-commit",))
     assert _kraft_hooks(cwd) is None
-    _cursor(run, tmp_path, cwd, grants=("git-push",))
-    assert len(_kraft_hooks(cwd)) == 1
-    _cursor(run, tmp_path, cwd)  # same worktree, relaunched
-    assert _kraft_hooks(cwd) == []
+
+
+@pytest.mark.parametrize("a_first", [True, False])
+def test_sibling_launches_in_one_worktree_keep_the_hook(run, tmp_path, a_first):
+    """A (allowlist) and B (nothing to enforce) share a worktree: whichever
+    launches last, A's hook entry is still there, and only A is fail-closed."""
+    cwd = _repo(tmp_path)
+    launches = {
+        "A": lambda: _cursor(run, tmp_path, cwd, allowed_tools=("Read",)),
+        "B": lambda: _cursor(run, tmp_path, cwd),
+    }
+    envs = {k: launches[k]()["env"] for k in (("A", "B") if a_first else ("B", "A"))}
+    [entry] = _kraft_hooks(cwd)
+    assert entry["command"].endswith("permission-hook cursor")
+    assert envs["A"][FAIL_CLOSED] == "1"
+    assert FAIL_CLOSED not in envs["B"]
 
 
 def test_a_claude_launch_writes_no_cursor_hook(run, tmp_path):

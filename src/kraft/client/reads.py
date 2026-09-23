@@ -262,7 +262,7 @@ async def permission_request(
     In `enforce` mode a failure is reported as `unavailable` instead of
     `deny`: an enforce-mode hook (Kraft-4in7z) decides for itself whether an
     unreachable Kraft is a fail-open (no opinion) or fail-closed (deny) case
-    via its own `--fail-closed` flag, which is not this function's call to
+    via its own fail-closed setting, which is not this function's call to
     make.
     """
     failure = "unavailable" if mode == "enforce" else "deny"

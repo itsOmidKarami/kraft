@@ -38,7 +38,9 @@ enforce — an `allowed_tools` list, any `deny_tools`, or a grant other than
 `git-commit` — Kraft writes an entry into the worktree's `.cursor/hooks.json`
 running `kraft admin permission-hook cursor` (Cursor reads hooks only from the
 project, not from `CURSOR_CONFIG_DIR`). With nothing to enforce there is no
-hook, and one an earlier launch of the same worktree left is removed. A repo's
+hook. Once written, the entry stays for the worktree's life and is the same
+for every launch, so sibling launches in one worktree never undo each other's;
+a session with nothing to enforce gets no opinion from the gate. A repo's
 own hooks in that file stay; Kraft's entry sits beside them.
 
 The file never reaches a commit: an untracked `.cursor/hooks.json` is kept out
@@ -49,7 +51,8 @@ a rebase that touches it refuse to run (Kraft-4in7z.10).
 The hook maps Cursor's tool names to Kraft's (`Shell` is `Bash`, from
 `tool_names:` in `src/kraft/harnesses/cursor.yaml`) and asks the same route in
 **enforce** mode. It starts in about 0.16 s per tool call. Under an
-`allowed_tools` list it is installed `--fail-closed`: a Kraft it can't reach, a
+`allowed_tools` list the launch sets `KRAFT_PERMISSION_FAIL_CLOSED=1` in that
+worker's environment, and the hook is fail-closed for that session: a Kraft it can't reach, a
 payload it can't read or a policy the gate can't resolve is a deny. Without
 one, any of those is no opinion, and Cursor's classifier decides as if there
 were no hook.
@@ -67,7 +70,7 @@ resolved, not a separate table. In order:
 | no layer set `allowed_tools` | allow — an unset allowlist bounds nothing | no opinion: Cursor's classifier decides |
 | `allowed_tools` is set and names the tool | allow | allow |
 | `allowed_tools` is set and doesn't name it (`[]` names nothing) | deny | deny |
-| the policy can't be resolved — the task or its profile is gone | deny: not knowing isn't a grant | deny if the hook is `--fail-closed`, else no opinion |
+| the policy can't be resolved — the task or its profile is gone | deny: not knowing isn't a grant | deny if the session is fail-closed, else no opinion |
 
 A deny is a deny on every harness. On Cursor a hook `allow` is *not* final: it
 does not override `--auto-review`, so a call the gate allows can still be

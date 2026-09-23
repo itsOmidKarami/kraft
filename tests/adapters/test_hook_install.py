@@ -48,33 +48,20 @@ def test_needs_a_hook_only_when_there_is_policy_to_enforce():
     assert hi.needs_hook(None, (), ("git-push",))
 
 
-def test_hook_argv_is_fail_closed_only_when_asked():
-    assert hi.hook_argv("cursor", fail_closed=True)[-2:] == ["cursor", "--fail-closed"]
-    assert hi.hook_argv("cursor", fail_closed=False)[-1] == "cursor"
+def test_hook_argv_never_carries_fail_closed():
+    # Fail-closed is per session (env), so every launch writes the same entry.
+    assert hi.hook_argv("cursor")[-3:] == ["admin", "permission-hook", "cursor"]
 
 
 def test_installed_once_and_never_seen_by_git(tmp_path):
     main, wt = _worktree(tmp_path)
     hi.install_cursor_hook(wt, ARGV)
-    hi.install_cursor_hook(wt, [*ARGV, "--fail-closed"])  # relaunch, tighter policy
-    assert [h["command"] for h in _pre_tool_use(wt)] == [hi.command_of([*ARGV, "--fail-closed"])]
+    hi.install_cursor_hook(wt, [*ARGV, "--fail-closed"])  # an older Kraft's entry
+    hi.install_cursor_hook(wt, ARGV)  # relaunch
+    assert [h["command"] for h in _pre_tool_use(wt)] == [hi.command_of(ARGV)]
     assert _pre_tool_use(wt)[0]["timeout"] == 10
     assert _git(wt, "status", "--porcelain", "--untracked-files=all") == ""
     assert (main / ".git/info/exclude").read_text().count(".cursor/hooks.json") == 1
-
-
-def test_a_relaunch_with_nothing_to_enforce_drops_kraft_entry(tmp_path):
-    _, wt = _worktree(tmp_path)
-    hi.install_cursor_hook(wt, ARGV)
-    hi.install_cursor_hook(wt, None)
-    assert _pre_tool_use(wt) == []
-
-
-def test_nothing_to_enforce_writes_nothing(tmp_path):
-    main, wt = _worktree(tmp_path)
-    hi.install_cursor_hook(wt, None)
-    assert not (wt / ".cursor").exists()
-    assert ".cursor" not in (main / ".git/info/exclude").read_text()
 
 
 def test_a_tracked_hooks_file_keeps_its_own_hooks_and_is_not_staged(tmp_path):

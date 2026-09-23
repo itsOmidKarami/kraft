@@ -106,7 +106,7 @@ class PermissionAsk(BaseModel):
     #: `tool_names:` mapped it -- recorded on the event, never decided on.
     harness: str | None = None
     cli_tool: str | None = None
-    #: Enforce only: the hook was installed `--fail-closed` (its launch has an
+    #: Enforce only: the hook's session is fail-closed (its launch has an
     #: allowlist), so a policy the route cannot resolve is a logged deny, not
     #: `unresolved`.
     fail_closed: bool = False
@@ -180,8 +180,8 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
 
     `enforce` mode (a before-every-call hook, Kraft-4in7z) differs twice:
     unbounded is `no_opinion`, so the CLI's own classifier decides, and an
-    unresolvable policy is `unresolved` -- unless the hook says it was
-    installed `fail_closed`, when it is a deny like prompt mode's. Neither
+    unresolvable policy is `unresolved` -- unless the hook says its
+    session is `fail_closed`, when it is a deny like prompt mode's. Neither
     `no_opinion` nor `unresolved` is a decision, so neither is logged.
 
     Every decision appends an event. That is the whole point -- it is the only
