@@ -9,12 +9,13 @@ which harness (the profile's `provider`) that profile runs:
 spec_author: { kind: agent, harness: codex, prompt: "...", produces: spec }
 ```
 
-Kraft ships three harnesses:
+Kraft ships four harnesses:
 
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
+| `cursor` | `agent -p --trust` | Cursor's agent CLI. Flags are checked against its `--help`; no authenticated run has been made yet. `--force` is on for every launch (without it, print mode applies no edits), and `permission_mode` accepts no other value. No out-of-band context channel (context goes in the prompt), no `effort` (a model id can carry one, such as `'name[effort=high]'`), and no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. Its `stream-json` log has no tokens or cost, so a Cursor session records neither: they stay empty, never zero. An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 
 ## Capabilities, not flags
@@ -26,8 +27,8 @@ A task's YAML never names a harness's actual CLI flags. It asks for a
 (`src/kraft/harnesses/*.yaml` in the package) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
 acceptEdits|auto|...` for Claude, `-s read-only|workspace-write|...` for
-Codex, `--approval-mode default|yolo|...` for Gemini — one Kraft-side name,
-three different flags.
+Codex, `--approval-mode default|yolo|...` for Gemini, `--force` for Cursor —
+one Kraft-side name, four different flags.
 
 Three capabilities are required — `prompt`, `context`, `usage` — since no
 agent dispatch can be built without them. Two are non-invocable —`usage`,
@@ -277,8 +278,8 @@ when its `profile:` carries one: a gate review launches once and never walks
 either list.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
-rate limit, which today is `claude`. `codex` and `gemini` can be fallback
-targets, and an unavailable one is skipped, but a rate limit on them fails
+rate limit, which today is `claude`. `codex`, `cursor` and `gemini` can be
+fallback targets, and an unavailable one is skipped, but a rate limit on them fails
 the launch as it does without a list.
 
 Every skip or switch is logged:
