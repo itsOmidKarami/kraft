@@ -291,6 +291,7 @@ async def review(
         effort=inv.effort,
         deny_tools=inv.deny_tools,
         allowed_tools=inv.allowed_tools,
+        grants=inv.grants,
         permission_mode=inv.permission_mode,
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,

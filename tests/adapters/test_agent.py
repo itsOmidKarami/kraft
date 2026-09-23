@@ -92,7 +92,7 @@ async def test_agent_writes_session_summary_and_ref_lands_in_db(launch, repo, mo
 
     status, row = await launch("s3")
 
-    assert status == "done"
+    assert (status, row["harness"]) == ("done", "claude")  # reattach's reader (Kraft-9elw1)
     assert row["session_summary_ref"] == ".engineering/sessions/s3.md"
     summary = (repo / ".engineering" / "sessions" / "s3.md").read_text()
     for line in (
@@ -391,11 +391,11 @@ def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(ru
         # folds in a repo's `deny_tools` and an item's overrides afterwards, so
         # these reach a launch without the load-time check and must not be
         # silently dropped.
-        ({"harness": "codex", "command": "codex", "deny_tools": ("Monitor",)}, "deny_tools"),
+        ({"harness": "gemini", "command": "gemini", "deny_tools": ("Monitor",)}, "deny_tools"),
         ({"harness": "gemini", "command": "gemini", "effort": "high"}, "effort"),
         # Kraft-nt6tt: a harness that cannot restrict its tools launches under
         # no allowlist at all -- the empty one included, which spells no flag.
-        ({"harness": "codex", "command": "codex", "allowed_tools": ()}, "allowed_tools"),
+        ({"harness": "gemini", "command": "gemini", "allowed_tools": ()}, "allowed_tools"),
         # A mode that approves asks itself would bypass the gate.
         ({"allowed_tools": ("Read",), "permission_mode": "auto"}, "permission_mode"),
         # Kraft-pdrsi: it cuts its tools, but has no mode that asks the gate.
@@ -403,9 +403,9 @@ def test_under_an_allowlist_claude_has_only_those_tools_and_asks_for_the_rest(ru
     ],
     ids=[
         "unknown-harness",
-        "repo-deny-list-on-codex",
+        "repo-deny-list-on-gemini",
         "effort-on-gemini",
-        "empty-allowlist-on-codex",
+        "empty-allowlist-on-gemini",
         "allowlist-under-a-self-approving-mode",
         "restricts-tools-with-no-asking-mode",
     ],

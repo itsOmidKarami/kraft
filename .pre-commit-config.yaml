@@ -24,3 +24,15 @@ repos:
         # tree is much bigger than the frontend's. A real lockfile, not a
         # mistake -- raise the ceiling rather than exclude lockfiles wholesale.
         args: [--maxkb=1000]
+  # Kraft-m2wru: local only -- CI has no claude CLI or credential. Scoped to the
+  # files that can put a model the CLI refuses into what ships.
+  - repo: local
+    hooks:
+      - id: shipped-models-smoke
+        name: shipped models launch on the real CLI
+        entry: just smoke-models-hook
+        language: system
+        pass_filenames: false
+        # So the SKIPPED line shows when a worker or a credential-less shell commits.
+        verbose: true
+        files: ^(templates/|src/kraft/harnesses/)

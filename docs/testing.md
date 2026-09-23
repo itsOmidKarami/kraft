@@ -24,7 +24,14 @@ something. This is normative for `tests/` and `frontend/src/**/*.test.*`;
   so that skip becomes a failure. Every `e2e` marker must name at least one
   CLI (`pytest_collection_modifyitems` in `tests/conftest.py` raises
   `UsageError` if it doesn't) — `dev/check_tests.py` catches the same defect
-  statically, before collection.
+  statically, before collection. A test naming a real agent (`claude`)
+  also needs `KRAFT_E2E=1`, since it spends tokens, and CI's e2e job has no
+  agent credential, so those skip there. The one that matters,
+  `tests/test_shipped_models.py`, runs locally instead: `just smoke-models`,
+  which the pre-commit hook calls (through `just smoke-models-hook`) when a
+  commit touches `templates/` or `src/kraft/harnesses/`. The hook prints
+  `SKIPPED:` and lets the commit through in a Kraft worker or with no
+  credential set; `just smoke-models` itself still fails without one.
 
 A test that wants to run the same behaviour against both tiers takes one
 parametrized fixture instead of two test bodies. `support.fake_beads` does

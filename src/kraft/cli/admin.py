@@ -22,7 +22,7 @@ import httpx
 import uvicorn
 import yaml
 
-from kraft import client, config, render
+from kraft import client, config, permission_hooks, render
 from kraft.cli import common, templates
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_templates_dir
 from kraft.policy import CarriedPolicy
@@ -826,6 +826,30 @@ def _cmd_mcp(ns: argparse.Namespace) -> None:
     serve_stdio()
 
 
+def _cmd_permission_hook(ns: argparse.Namespace) -> None:
+    """What a harness's pre-tool hook runs, as `sys.executable -m kraft` so it
+    is the daemon's own install. Client side only: no server import, since
+    the CLI waits on this for every tool call (Kraft-4in7z). Always answers:
+    any failure is the translator's deny when fail-closed, no opinion else."""
+    fail_closed = ns.fail_closed or os.environ.get("KRAFT_PERMISSION_FAIL_CLOSED") == "1"
+    try:
+        from kraft import harness as _harness
+
+        h = _harness.load(None).valid.get(ns.harness)
+        names = h.tool_names if h is not None else {}
+        out, code = permission_hooks.answer_hook(
+            ns.harness, sys.stdin.read(), names, fail_closed=fail_closed
+        )
+    except Exception as exc:  # noqa: BLE001 -- a hook must answer, whatever broke
+        print(f"kraft permission-hook: {exc}", file=sys.stderr)
+        out, code = permission_hooks.TRANSLATORS[ns.harness].render(
+            "deny" if fail_closed else "no_opinion", "Kraft's permission hook failed"
+        )
+    sys.stdout.write(out)
+    sys.stdout.flush()
+    sys.exit(code)
+
+
 def _cmd_init(ns: argparse.Namespace) -> None:
     from kraft.init import install
 
@@ -992,3 +1016,15 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
 
     mcp = subs.add_parser("mcp", help="serve the MCP tools over stdio")
     mcp.set_defaults(func=_cmd_mcp)
+
+    hook = subs.add_parser(
+        "permission-hook",
+        help="answer a harness's pre-tool hook from Kraft's permission gate (run by the CLI)",
+    )
+    hook.add_argument("harness", choices=sorted(permission_hooks.TRANSLATORS))
+    hook.add_argument(
+        "--fail-closed",
+        action="store_true",
+        help="deny, not no opinion, when Kraft cannot answer (also KRAFT_PERMISSION_FAIL_CLOSED=1)",
+    )
+    hook.set_defaults(func=_cmd_permission_hook)

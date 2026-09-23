@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
+from kraft.adapters import hook_install as _hook_install
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use `agent.<name>`
     HarnessUnavailable,
@@ -160,6 +163,8 @@ class Invocation(NamedTuple):
     #: reading as "every tool" is how a restriction goes missing.
     allowed_tools: tuple[str, ...] | None = None
     permission_mode: str | None = None
+    #: The task's named grants (`kraft.policy.GRANTS`), honoured by the gate.
+    grants: tuple[str, ...] = ()
 
 
 def resolve_invocation(
@@ -359,7 +364,7 @@ def resolve_agent_task(
     )
     if policy is None:
         return inv
-    return inv._replace(allowed_tools=policy.allowed_tools)
+    return inv._replace(allowed_tools=policy.allowed_tools, grants=tuple(policy.grants))
 
 
 def _envelope_is_error(
@@ -537,6 +542,22 @@ def _writable_dirs(run_dirs, name: str, cwd) -> str:
     return json.dumps(dirs, ensure_ascii=False)
 
 
+def log_reader(h: _harness.Harness) -> str | None:
+    """The `usage.READERS` schema `h`'s log is read with, or None for a harness
+    that declares none.
+
+    One name serves usage-envelope reading, live progress, rate-limit
+    detection and the resumable session id alike: every shipped harness that
+    declares either gives it the same reader, and `Harness.from_input` requires
+    `structured_log` behind both, so there is one schema to pick from."""
+    usage_cap = h.capabilities["usage"]
+    rate_limit_cap = h.capabilities.get("rate_limit_signal")
+    reader = usage_cap.reader if usage_cap.source == "envelope" else None
+    if reader is None and rate_limit_cap is not None:
+        reader = rate_limit_cap.reader
+    return reader
+
+
 def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip).
@@ -610,6 +631,30 @@ def _restricted(
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
+def _install_hook(
+    h: _harness.Harness,
+    cwd: Path,
+    allowed: tuple[str, ...] | None,
+    deny: tuple[str, ...],
+    grants: tuple[str, ...],
+) -> None:
+    """Kraft's pre-tool hook in the worktree when there is policy to enforce
+    (Kraft-4in7z). The entry is the same for every launch and never removed:
+    fail-closed is per session (`FAIL_CLOSED_ENV`), so a sibling launch in the
+    same worktree cannot loosen or drop another's hook."""
+    if not _hook_install.needs_hook(allowed, deny, grants):
+        return
+    # ponytail: a hook `allow` does not outrank cursor's --auto-review
+    # (Task 1, probe B), so a grant beyond git-commit is enforced only as
+    # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
+    if h.permission_hook == "cursor":
+        try:
+            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
+        except _hook_install.HookFileError as exc:
+            # Its policy needs the hook; without it the launch runs unenforced.
+            raise LaunchRefused(str(exc)) from exc
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -630,6 +675,8 @@ async def run_agent_task(
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
     allowed_tools: tuple[str, ...] | None = None,
+    #: The task's named grants; any beyond `git-commit` need the hook (Kraft-4in7z).
+    grants: tuple[str, ...] = (),
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
@@ -699,7 +746,11 @@ async def run_agent_task(
         )
         if v
     }
-    if allowed_tools is not None:
+    # A harness whose hook holds the tool lists needs no restriction flag, nor
+    # does one whose own permission config is written with them.
+    hooked = h.permission_hook is not None
+    ruled = h.permission_rules is not None
+    if allowed_tools is not None and not hooked and not ruled:
         options |= _restricted(h, harness, allowed_tools, permission_mode)
     # Loading the library and `harnesses.yaml` checks that a task's or a
     # profile's own options name capabilities its harness declares -- but
@@ -720,6 +771,48 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
+    if blind := [
+        t
+        for t in h.unhooked_tools
+        if t in deny_tools or (allowed_tools is not None and t not in allowed_tools)
+    ]:
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) never sees a {'/'.join(h.unhooked_tools)} call "
+            f"in its hook, so it cannot deny {blind!r} as this launch's policy requires; "
+            f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
+        )
+    if hooked:
+        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
+    hook_argv: tuple[str, ...] = ()
+    if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
+        exe = shlex.split(command) if command else [h.command[0]]
+        try:
+            hook_argv = await _hook_install.codex_hook_flags(
+                exe, _hook_install.hook_argv(h.id), Path(cwd)
+            )
+        except _hook_install.CodexTrustError as exc:
+            # Never launched unenforced, never with every hook trusted.
+            raise LaunchRefused(
+                f"harness {harness!r} cannot run Kraft's permission hook, which this "
+                f"launch's policy needs: {exc}"
+            ) from exc
+    rules_env: dict[str, str] = {}
+    rules_argv: tuple[str, ...] = ()
+    if ruled:
+        if missing := _permission_rules.unmapped(h.tool_names, allowed_tools, deny_tools):
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) has no tool that {missing!r} maps to "
+                f"(its tool_names), so its permission rules cannot hold them as this "
+                f"launch's policy requires; drop them from the policy or use another harness"
+            )
+        rules_env, rules_argv = _permission_rules.render(
+            h.permission_rules,
+            h.tool_names,
+            allowed_tools,
+            tuple(deny_tools),
+            directory=run_dirs.base / "harness-config" / h.id,
+            session_id=session_id,
+        )
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
@@ -730,16 +823,9 @@ async def run_agent_task(
         context=ctx,
         resume=resume_session_id,
         options=options,
+        extra=(*hook_argv, *rules_argv),
     )
-    # One name serves usage-envelope reading, live progress and rate-limit
-    # detection alike (usage.READERS): every shipped harness that declares
-    # either gives it the same reader, and `Harness.from_input` requires
-    # `structured_log` behind both, so there is one schema to pick from.
-    usage_cap = h.capabilities["usage"]
-    rate_limit_cap = h.capabilities.get("rate_limit_signal")
-    reader = usage_cap.reader if usage_cap.source == "envelope" else None
-    if reader is None and rate_limit_cap is not None:
-        reader = rate_limit_cap.reader
+    reader = log_reader(h)
     return await _subprocess.run_task(
         db,
         run_dirs,
@@ -757,8 +843,12 @@ async def run_agent_task(
         env={
             **({"KRAFT_WORK_ITEM_ID": work_item_id} if identify_as_worker else {}),
             "KRAFT_SESSION_ID": session_id,
+            **(
+                {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
+            ),
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
             **_config_dir(run_dirs, h, session_id),
+            **rules_env,
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
         round=round,
@@ -771,4 +861,5 @@ async def run_agent_task(
         time_cap=time_cap,
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
+        harness=harness,
     )

@@ -241,28 +241,62 @@ async def stream_log(session_id: str, after_line: int = 0) -> AsyncIterator[dict
             ) from exc
 
 
-async def permission_request(tool_name: str, input: dict, tool_use_id: str | None = None) -> dict:
+#: Seconds an enforce-mode ask waits: under Cursor's 10 s hook timeout.
+ENFORCE_TIMEOUT = 5
+
+
+async def permission_request(
+    tool_name: str,
+    input: dict,
+    tool_use_id: str | None = None,
+    *,
+    mode: str = "prompt",
+    harness: str | None = None,
+    cli_tool: str | None = None,
+    fail_closed: bool = False,
+    also: tuple[str, ...] = (),
+) -> dict:
     """Ask Kraft whether this worker session may use `tool_name` (Kraft-oor).
 
-    Fails closed, and returns rather than raises: the caller is an MCP tool the
-    agent CLI is waiting on, and every failure has to come back in the CLI's own
-    contract shape. An unreachable server is a denial -- exactly what an
-    unanswered ask is today, where failing open would make a Kraft outage a
-    permission grant.
+    Fails closed in `prompt` mode, and returns rather than raises: the caller
+    is an MCP tool the agent CLI is waiting on, and every failure has to come
+    back in the CLI's own contract shape. An unreachable server is a denial --
+    exactly what an unanswered ask is today, where failing open would make a
+    Kraft outage a permission grant.
+
+    In `enforce` mode a failure is reported as `unavailable` instead of
+    `deny`: an enforce-mode hook (Kraft-4in7z) decides for itself whether an
+    unreachable Kraft is a fail-open (no opinion) or fail-closed (deny) case
+    via its own fail-closed setting, which is not this function's call to
+    make. An enforce ask gives up after `ENFORCE_TIMEOUT` seconds, inside
+    Cursor's 10 s hook timeout, so the hook answers rather than being killed.
     """
+    failure = "unavailable" if mode == "enforce" else "deny"
     sid = os.environ.get("KRAFT_SESSION_ID")
     if not sid:
-        return {"behavior": "deny", "message": "not a Kraft worker session"}
+        return {"behavior": failure, "message": "not a Kraft worker session"}
     try:
         status, body = await transport._post(
             f"/worker-sessions/{sid}/permission",
-            {"tool_name": tool_name, "input": input, "tool_use_id": tool_use_id},
+            {
+                "tool_name": tool_name,
+                "input": input,
+                "tool_use_id": tool_use_id,
+                "mode": mode,
+                "harness": harness,
+                "cli_tool": cli_tool,
+                "fail_closed": fail_closed,
+                "also": list(also),
+            },
+            **({"timeout": ENFORCE_TIMEOUT} if mode == "enforce" else {}),
         )
-    except ValueError as exc:  # `_send` raises this for a server that is not there
-        return {"behavior": "deny", "message": str(exc)}
+    # `_send` raises ValueError for a server that is not there; httpx's own
+    # errors (a timeout) are the same answer.
+    except (ValueError, httpx.HTTPError) as exc:
+        return {"behavior": failure, "message": str(exc)}
     if status >= 400 or not isinstance(body, dict) or "behavior" not in body:
         detail = body.get("detail") if isinstance(body, dict) else body
-        return {"behavior": "deny", "message": f"kraft {status}: {detail}"}
+        return {"behavior": failure, "message": f"kraft {status}: {detail}"}
     return body
 
 

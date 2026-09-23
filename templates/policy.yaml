@@ -104,7 +104,7 @@ archive:
 #                      listed built-ins (--tools) in a mode that asks the
 #                      permission gate about everything else. Unset allows
 #                      every tool; `[]` allows none. A harness that cannot
-#                      enforce a tool list (codex, gemini) refuses to launch
+#                      enforce a tool list (gemini) refuses to launch
 #                      under one.
 #   token_budget       tokens, in and out, the launches inside a scope may
 #                      spend before the next agent task there is refused --
@@ -120,6 +120,10 @@ archive:
 #                      stops for a human rather than pass its dollar cap.
 #   allowed_harnesses  profiles an agent task may select; checked at intake
 #                      and again at launch.
+#   escalation_harness the harnesses.yaml profile an escalation turn runs on,
+#                      read at the node the item stopped at. Unset is claude;
+#                      `item` follows the profile the item's own latest agent
+#                      task ran on. An unknown profile is refused here.
 #   max_attempts       a node's fix-loop attempts, and timeout_minutes its wall
 #   timeout_minutes    clock -- under the loop's own `max_attempts` and an
 #                      operator's per-item node override, over loops:/default:.
@@ -155,6 +159,7 @@ archive:
 #   timeout_minutes: 60
 #   max_attempts: 3
 #   allowed_harnesses: [codex, claude]
+#   escalation_harness: claude
 #   work_item: { time_cap_minutes: 480, total_time_cap_minutes: 2880, budget_usd: 20 }
 #   nodes:     { time_cap_minutes: 180 }
 #   steps:     { time_cap_minutes: 120 }

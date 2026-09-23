@@ -120,6 +120,11 @@ def validate_retry_override(
         if proposed.deny_tools is not None:
             inherited = (scope.get("policy") or {}).get("deny_tools") or []
             merged["deny_tools"] = list(dict.fromkeys([*inherited, *proposed.deny_tools]))
+        # Grants widen, so a retry may only drop them, never add one -- the
+        # rule `WorkItemPolicy.apply_to` holds an item's own layer to
+        # (Kraft-4in7z.7): what a task is granted is authored.
+        if proposed.grants is not None:
+            merged["grants"] = [g for g in proposed.grants if g in current.grants]
         scope["policy"] = {k: v for k, v in merged.items() if v is not None}
     # The retry is the nearest layer: its route to a model wins whole, as a
     # nearer `extends` layer's does (Kraft-ps1ao).

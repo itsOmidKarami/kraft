@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 from pathlib import Path
+from typing import Literal
 
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, StreamingResponse
@@ -16,7 +18,10 @@ from kraft import logs as logs_mod
 from kraft.adapters import agent as _agent
 from kraft.api import api_router, deps, perimeter
 from kraft.executor.dispatch import ESCALATION_HOOK, scope_policy
+from kraft.grants import matching
 from kraft.templates.models import AgentTask
+
+logger = logging.getLogger(__name__)
 
 
 def _session_row(st, sid: str):
@@ -94,15 +99,27 @@ async def get_log(sid: str, request: Request, format: str | None = None, follow:
 class PermissionAsk(BaseModel):
     """What `--permission-prompt-tool` hands over: the tool the agent wants to
     use, the arguments it wants to use it with, and the CLI's own id for the
-    call."""
+    call. A before-every-call hook (Kraft-4in7z) asks in `enforce` mode."""
 
     tool_name: str
     input: dict = {}
     tool_use_id: str | None = None
+    mode: Literal["prompt", "enforce"] = "prompt"
+    #: Which harness's hook asked, and the tool's own name before
+    #: `tool_names:` mapped it -- recorded on the event, never decided on.
+    harness: str | None = None
+    cli_tool: str | None = None
+    #: Enforce only: the hook's session is fail-closed (its launch has an
+    #: allowlist), so a policy the route cannot resolve is a logged deny, not
+    #: `unresolved`.
+    fail_closed: bool = False
+    #: Kraft tool names this call also is (Cursor's `Write` edits too): denied
+    #: if any is denied, allowed under an allowlist only if all are listed.
+    also: list[str] = []
 
 
-def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
-    """`(allowed_tools, deny_tools)` as this session's own launch resolved
+def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:
+    """`(allowed_tools, deny_tools, grants)` as this session's own launch resolved
     them, or raise naming why they cannot be known.
 
     From the V1 task at the session's canonical path, under the policy it
@@ -127,6 +144,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
         if scope is None:
             raise LookupError(f"no node {row['node_id']!r} in its work item's chain")
         agent_task = escalate.ESCALATION_TASK
+        policy = escalate.turn_policy(scope_policy(item, scope))
     else:
         scope = next(
             (t for n in snapshot.chain.nodes for t in n.tasks() if t.path == row["hook_point"]),
@@ -135,6 +153,7 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
         if scope is None or not isinstance(scope.task, AgentTask):
             raise LookupError(f"{row['hook_point']} is no agent task in its work item's chain")
         agent_task = scope.task
+        policy = scope_policy(item, scope)
     launch = deps.launch(st, item["repo"])
     inv = _agent.resolve_agent_task(
         agent_task,
@@ -147,9 +166,9 @@ def _resolved_tools(st, row) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
         # lists reported here are the item's own launch's, never a fanned-out
         # member's.
         item_repo=item["repo"],
-        policy=scope_policy(item, scope),
+        policy=policy,
     )
-    return inv.allowed_tools, inv.deny_tools
+    return inv.allowed_tools, inv.deny_tools, inv.grants
 
 
 @api_router.post("/worker-sessions/{sid}/permission")
@@ -160,9 +179,16 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     (`_resolved_tools`): a tool in `deny_tools` is denied; otherwise, when no
     layer set `allowed_tools`, every tool is allowed -- an unset
     `maxima.allowed_tools` bounds nothing -- and when one did, only what it
-    lists, so an empty allowlist allows nothing. A grant that cannot be
-    resolved at all -- the task or its profile gone -- is denied: not knowing
-    is not a grant.
+    lists, so an empty allowlist allows nothing. A call that is an instance of
+    one of the task's named grants (`kraft.grants`) is allowed unless denied,
+    whatever the allowlist. A grant that cannot be resolved at all -- the task
+    or its profile gone -- is denied: not knowing is not a grant.
+
+    `enforce` mode (a before-every-call hook, Kraft-4in7z) differs twice:
+    unbounded is `no_opinion`, so the CLI's own classifier decides, and an
+    unresolvable policy is `unresolved` -- unless the hook says its
+    session is `fail_closed`, when it is a deny like prompt mode's. Neither
+    `no_opinion` nor `unresolved` is a decision, so neither is logged.
 
     Every decision appends an event. That is the whole point -- it is the only
     way the orchestrator ever learns what a worker decided it was allowed to do.
@@ -176,21 +202,38 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     if row is None:
         raise HTTPException(404, "unknown session")
     task = row["hook_point"]
+    grant = None
+    # The exception behind an unresolvable policy: for the log and the
+    # timeline only, never the reply the worker reads.
+    detail = None
     try:
-        allowed, denied = _resolved_tools(st, row)
+        allowed, denied, grants = _resolved_tools(st, row)
     except Exception as exc:  # noqa: BLE001 -- fail closed on any resolution failure
-        decision, reason = "deny", f"cannot resolve {task}'s allowed_tools: {exc}"
+        logger.warning("permission gate: cannot resolve %s's policy: %s", task, exc)
+        if body.mode == "enforce" and not body.fail_closed:
+            # A fail-open hook renders this as no opinion: not a decision,
+            # so not logged.
+            return {"behavior": "unresolved", "message": f"cannot resolve {task}'s policy"}
+        decision, reason = "deny", f"cannot resolve {task}'s policy"
+        detail = f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
-        if body.tool_name in denied:
-            decision, reason = "deny", f"{body.tool_name} is in {task}'s deny_tools"
+        names = (body.tool_name, *body.also)
+        grant = matching(grants, body.tool_name, body.input)
+        if hit := next((n for n in names if n in denied), None):
+            decision, reason = "deny", f"{hit} is in {task}'s deny_tools"
+        elif grant is not None:
+            decision, reason = "allow", f"{task} holds the {grant} grant"
         elif allowed is None:
+            if body.mode == "enforce":
+                return {"behavior": "no_opinion"}
             decision, reason = "allow", f"no layer of {task}'s policy sets allowed_tools"
-        elif body.tool_name in allowed:
-            decision, reason = "allow", f"{body.tool_name} is in {task}'s allowed_tools"
+        elif all(n in allowed for n in names):
+            decision, reason = "allow", f"{'/'.join(names)} is in {task}'s allowed_tools"
         else:
+            missing = next(n for n in names if n not in allowed)
             decision, reason = (
                 "deny",
-                f"{body.tool_name} is not in {task}'s allowed_tools ({', '.join(allowed)})",
+                f"{missing} is not in {task}'s allowed_tools ({', '.join(allowed)})",
             )
     await st.db.write(
         lambda c: events.append(
@@ -202,7 +245,10 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
                 "node_id": row["node_id"],
                 "tool": body.tool_name,
                 "decision": decision,
-                "reason": reason,
+                "reason": detail or reason,
+                "harness": body.harness,
+                "cli_tool": body.cli_tool,
+                "grant": grant,
             },
         )
     )

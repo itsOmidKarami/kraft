@@ -5,49 +5,6 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
-## 1.1.0
-
-- Docs: a page on the permission gate — how a worker's ask reaches it, how
-  it decides from `allowed_tools`/`deny_tools`, the `permission_decision`
-  events it logs, and which harnesses reach it today (Kraft-9r3lv).
-- New harness: Cursor's agent CLI (`agent -p`), checked with real runs on
-  cursor-agent 2026.09.18-9a7762b (Kraft-bosip). It runs in `--auto-review`,
-  Cursor's classifier mode; `permission_mode: force` overrides it. Every
-  launch points `CURSOR_CONFIG_DIR` at a Kraft-owned directory under
-  `$KRAFT_HOME/run`, rewritten with Cursor's default config and commit
-  attribution off, so a worker's commits carry no `Co-authored-by: Cursor`
-  trailer and the classifier no longer refuses them (Kraft-umakq). Your own
-  `~/.cursor` is untouched. Tokens are read off the log; Cursor reports no cost.
-- Docs: a table of how each harness runs unattended, in the harnesses page.
-- New harness: Amp (`amp -x`), with Amp's mode (`low` to `ultra`) as
-  `effort` (Kraft-gvrke). Checked with a real Kraft work item on a logged-in
-  amp. Resuming works: every launch passes `--no-archive-after-execute`,
-  since Amp archives a thread after `-x` and refuses to continue an
-  archived one. Amp reports no cost Kraft can read, so none is recorded.
-- New harness: OpenCode (`opencode run`), for any provider OpenCode knows,
-  including a ChatGPT login and OpenCode's free models (Kraft-nv1f1). Checked
-  against opencode 2.0.15 with real Kraft work items on `opencode/big-pickle`
-  and `openai/gpt-5.6-luna`. Every launch passes `--auto`, since `run`
-  otherwise rejects every permission request. There is no `effort`: name a
-  variant in the model id (`provider/model#high`). Usage comes from
-  `opencode session export`, because opencode 2.x's JSON log leaves out the
-  last step's tokens (Kraft-ihoen).
-- Codex workers now work on a default install. Codex's sandbox refused
-  writes outside the worktree, so a worker could not write its result file
-  under `~/.kraft/run/results` or commit (a linked worktree commits into the
-  main checkout's `.git`), and every codex item failed. Kraft now grants
-  both directories on every launch through a new `writable_dirs` capability
-  (Kraft-rs9pk).
-- Codex runs in approve-for-me mode by default: the workspace-write sandbox
-  plus Codex's automatic reviewer for anything outside it, the counterpart of
-  Claude's `auto`. `permission_mode` still overrides it per harness profile or
-  task.
-- Fix: resuming a codex session failed at argument parsing, because
-  `codex exec resume` rejects `-s` after `resume`. Every codex option is now a
-  `-c` config key, which parses on both paths.
-- Fix: a codex usage limit crashed the run instead of parking the item as
-  rate limited.
-
 ## 1.0.8
 
 - Fix: a `chain_revision_approval` gate now gets the same board, action-bar

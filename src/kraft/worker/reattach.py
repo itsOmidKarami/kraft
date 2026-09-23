@@ -10,8 +10,10 @@ from pathlib import Path
 import psutil
 
 from kraft import caps, events, store
+from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
+from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import (
     _kill_group,
     _progress_usage,
@@ -104,8 +106,21 @@ def _identity_mismatch_reason(pid: int | None, pid_start_time) -> str:
     return f"pid {pid} create_time mismatch: stored={pid_start_time!r} observed={observed!r}"
 
 
+def _reader_of(row) -> str | None:
+    """The log schema an adopted session's log is read with, from the harness
+    its row records (Kraft-9elw1): a codex session's usage is codex's, not
+    claude's. None -- a harness that declares no log reading -- parses no log;
+    the result file is still read.
+
+    A row with no harness is older than the column, or not an agent session;
+    either way claude is the only harness it can have run on, so it keeps
+    claude's reader, as does a harness no longer in `harnesses.yaml`."""
+    h = _harness.load(None).valid.get(row["harness"]) if row["harness"] else None
+    return store.sessions.CLAUDE_READER if h is None else _agent.log_reader(h)
+
+
 async def _exit_from_file(
-    db, session_id: str, log_path: Path, result_path: Path, status: str
+    db, session_id: str, log_path: Path, result_path: Path, status: str, reader: str | None
 ) -> None:
     """Record a session exit from what it left on disk, carrying every field
     `adapters.subprocess.run_task` carries — `concerns` and `question` reach the
@@ -118,15 +133,9 @@ async def _exit_from_file(
     (Kraft-k3d) — this and `adapters.subprocess.run_task` both call it rather
     than each enumerating the fields by hand."""
     fields = read_result_fields(result_path)
-    # `worker_sessions` does not record which harness ran a session
-    # (Kraft-cvnx1, filed and blocked on this work), so an adopted session has
-    # no way to name its own reader here. `claude-stream-json` is every
-    # existing install's only harness today; a non-claude session adopted
-    # across a restart still gets the result file `usage.read` always tries
-    # first, and this reader simply finds nothing in a log it cannot parse.
-    seen = _usage.read(log_path, result_path, "claude-stream-json")
-    # The same reader assumption, holding an adopted turn to `run_task`'s rule.
-    status = await fail_abandoned_jobs(db, session_id, log_path, status, "claude-stream-json")
+    seen = _usage.read(log_path, result_path, reader)
+    # The same reader, holding an adopted turn to `run_task`'s rule.
+    status = await fail_abandoned_jobs(db, session_id, log_path, status, reader)
     await db.write(
         lambda c: store.session_exited(
             c,
@@ -136,6 +145,7 @@ async def _exit_from_file(
             seen,
             concerns=fields["concerns"],
             question=fields["question"],
+            reader=reader,
         )
     )
 
@@ -335,6 +345,7 @@ async def _adopt(
     # whatever run_task's own loop last wrote before the restart, for the rest
     # of the session's life (Kraft-jgs6).
     seen_usage: dict[str, _usage.Usage] = {}
+    reader = _reader_of(row)
     log_offset = 0
     next_progress = time.monotonic() + progress_s
     # The cap it was launched under still binds it (Kraft-kx2fs): its scope's
@@ -355,12 +366,7 @@ async def _adopt(
             continue
         next_progress = time.monotonic() + progress_s
         try:
-            # Same reasoning as `_exit_from_file`'s reader choice above: the
-            # adopted session's harness is unrecorded, so this assumes the
-            # only harness in production today.
-            log_offset, live = _progress_usage(
-                log_path, log_offset, seen_usage, "claude-stream-json"
-            )
+            log_offset, live = _progress_usage(log_path, log_offset, seen_usage, reader)
             if live is not None:
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:
@@ -371,6 +377,7 @@ async def _adopt(
         log_path,
         result_path,
         _adopted_status(result_path, is_agent=_is_agent_hook(db, row)),
+        reader,
     )
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
@@ -579,7 +586,9 @@ async def reattach(
         status = _evidenced_status(r["result_path"], is_agent=_is_agent_hook(db, r))
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
-            await _exit_from_file(db, sid, Path(r["log_path"]), Path(r["result_path"]), status)
+            await _exit_from_file(
+                db, sid, Path(r["log_path"]), Path(r["result_path"]), status, _reader_of(r)
+            )
             summary.resolved_from_file.append(sid)
             if r["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
                 # Deferred: starting this task now would let its own

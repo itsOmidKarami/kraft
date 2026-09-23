@@ -1143,6 +1143,7 @@ async def _launch_agent(
             deny_tools=inv.deny_tools,
             effort=inv.effort,
             allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
             permission_mode=inv.permission_mode,
             sandbox=sandbox,
             steering_texts=inv.steering_texts,
@@ -1183,7 +1184,12 @@ def _resumable_session(db, work_item_id: str, node, task, harness) -> tuple[str,
     paused = db.read(lambda c: store.resumable_agent_session(c, work_item_id, node.id, task.path))
     if paused is None:
         return None
-    provider = _usage.READERS["claude-stream-json"].session_id(Path(paused["log_path"]))
+    # The harness's own schema (Kraft-wge0e): a codex thread id is not on a
+    # claude `system`/`init` line.
+    reader = _agent.log_reader(harness)
+    if reader is None:
+        return None
+    provider = _usage.READERS[reader].session_id(Path(paused["log_path"]))
     return (paused["id"], provider) if provider else None
 
 

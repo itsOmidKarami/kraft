@@ -18,6 +18,20 @@
 # reason a turn failed.
 id: codex
 kind: cli
+# Kraft-4in7z.3: Kraft answers codex's PreToolUse hook (`kraft admin
+# permission-hook codex`), installed and trusted per launch with `-c` flags
+# (adapters/hook_install.codex_hook_flags) when the task's policy has
+# something to enforce. Never --dangerously-bypass-hook-trust.
+permission_hook: codex
+# Seen by the hook in a real run (codex-cli 0.155.0, 2026-09-23): `Bash`,
+# already Kraft's name, and `apply_patch`, codex's one tool for creating and
+# editing files. The same run's `exec resume` fired the hook too.
+tool_names:
+  apply_patch: [Write, Edit]
+# Codex's web search runs on OpenAI's side and never reaches the hook; a
+# launch whose policy would have to deny it is refused. Its other tools
+# (view_image, update_plan, MCP calls) were not probed.
+unhooked_tools: [WebSearch]
 command: [codex, exec]
 # `codex exec resume <SESSION_ID> [PROMPT]` -- the id must precede the prompt,
 # which a trailing-flag model cannot express, so resume gets its own prefix.
@@ -45,11 +59,13 @@ capabilities:
   # array of paths, which TOML reads as an inline array.
   writable_dirs:   { cli: ["-c", "sandbox_workspace_write.writable_roots={value}"] }
   resume:          { via: command_resume }
+  # Held by the hook above, not a flag: build_argv emits nothing for them.
+  deny_tools:      { via: permission_hook }
+  allowed_tools:   { via: permission_hook }
   usage:             { source: envelope, reader: codex-json }
   rate_limit_signal: { reader: codex-json }
   # Bare positional -> declared last, or a preceding flag swallows it.
   prompt:          { cli: ["{value}"] }
 
-# Absent, deliberately: deny_tools, allowed_tools, approval_channel,
-# autocompact. A binding naming one of those is rejected
+# Absent, deliberately: approval_channel, autocompact. A binding naming one of those is rejected
 # at load, naming this file.

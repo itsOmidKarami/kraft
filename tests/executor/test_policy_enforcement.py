@@ -437,6 +437,33 @@ async def test_an_escalation_turn_launches_under_its_nodes_policy(
     assert seen["sandbox"] == _SANDBOX
 
 
+@pytest.mark.parametrize("launch", ["node", "escalation", "gate_review"])
+async def test_every_launch_carries_its_policys_grants(item_on, fake_agent, monkeypatch, launch):
+    """A node's, an escalation turn's and a gate reviewer's launch all hand
+    `run_agent_task` their grants: a hooked harness (cursor) installs its
+    permission hook only when a grant beyond git-commit needs it (Kraft-4in7z)."""
+    grants = {"grants": ["git-push"]}
+    seen = _capture(monkeypatch)
+    if launch == "gate_review":
+        it = await item_on(_reviewed_gate(grants), auto_gate=True)
+        await _requested(it)
+        await gate_review.review(
+            it.database,
+            it.run_dirs,
+            work_item_id=it.id,
+            gate="spec_approval",
+            node=it.chain.chain.nodes[1],
+            launch=NO_SETUP,
+        )
+    elif launch == "escalation":
+        await _escalate(await item_on(_node(_agent(), policy=grants), "implementation"), auto=False)
+    else:
+        await _dispatch(await item_on(_node(_agent(), policy=grants)))
+    # An escalation turn also holds policy.yaml's escalation_grants.
+    extra = _policy.DEFAULT_ESCALATION_GRANTS if launch == "escalation" else ()
+    assert set(seen["grants"]) == {"git-push", *extra}
+
+
 @pytest.mark.parametrize(
     ("policy", "spent", "names"),
     [

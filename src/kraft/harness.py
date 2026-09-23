@@ -98,7 +98,10 @@ class Capability:
     #: able to break a log reader in YAML.
     reader: str | None = None
     #: Names a command prefix key that carries this capability's value
-    #: instead of a flag -- `resume: {via: command_resume}`.
+    #: instead of a flag -- `resume: {via: command_resume}` -- or
+    #: `permission_hook`: a tool list the harness's pre-tool hook enforces
+    #: (Kraft-4in7z), never rendered into argv -- or `permission_rules`: one
+    #: written into the CLI's own permission config at launch.
     via: str | None = None
     #: `permission_mode` only: the mode a launch under a tool allowlist runs
     #: in -- one that sends every ask it does not settle itself to the
@@ -124,6 +127,21 @@ class Harness:
     config_env: str | None = None
     #: File name -> text Kraft writes into that directory before every launch.
     config_files: dict[str, str] = field(default_factory=dict)
+    #: The CLI's own tool name -> Kraft's (Cursor's `Shell` -> `Bash`), so a
+    #: hooked call is checked against policy under the names policy uses. More
+    #: than one when the CLI's tool does both (Cursor's `Write` also edits):
+    #: denied if any is, allowed under an allowlist only if all are listed.
+    tool_names: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Policy tool names whose calls never reach the hook (Cursor's web
+    #: fetch, probed 2026-09-23), so a launch that would have to deny one is
+    #: refused rather than run with it unenforced.
+    unhooked_tools: tuple[str, ...] = ()
+    #: The `permission_hooks.TRANSLATORS` key that answers this CLI's
+    #: pre-tool hook, or None when it has none (Kraft-4in7z).
+    permission_hook: str | None = None
+    #: The `permission_rules.RENDERERS` key that writes policy into this CLI's
+    #: own permission config at launch, for a CLI with no hook (Kraft-4in7z.4).
+    permission_rules: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -168,8 +186,27 @@ class Harness:
                     f"{where}: capability {name!r} has no 'cli' binding for kind {kind!r} "
                     f"and is not one of {sorted(NON_INVOCABLE)}"
                 )
-            if cap.via and cap.via != "command_resume":
-                raise HarnessError(f"{where}: capability {name!r} 'via' must be 'command_resume'")
+            if cap.via and cap.argv:
+                raise HarnessError(
+                    f"{where}: capability {name!r} is bound 'via' {cap.via!r}, "
+                    "so it must not also carry a 'cli' binding"
+                )
+            if cap.via in ("permission_hook", "permission_rules"):
+                if name not in ("deny_tools", "allowed_tools"):
+                    raise HarnessError(
+                        f"{where}: capability {name!r} cannot be bound via {cap.via!r}; "
+                        "only deny_tools and allowed_tools can"
+                    )
+                if not getattr(parsed, cap.via):
+                    raise HarnessError(
+                        f"{where}: capability {name!r} is bound via {cap.via!r}, "
+                        "which this harness does not define"
+                    )
+            elif cap.via and cap.via != "command_resume":
+                raise HarnessError(
+                    f"{where}: capability {name!r} 'via' must be 'command_resume', "
+                    "'permission_hook' or 'permission_rules'"
+                )
             if cap.via == "command_resume" and not command_resume:
                 raise HarnessError(
                     f"{where}: capability {name!r} is bound via 'command_resume', "
@@ -227,6 +264,24 @@ class Harness:
                     "the last declared capability (argv order is declaration order)"
                 )
 
+        if parsed.permission_hook is not None:
+            from kraft.permission_hooks import TRANSLATORS
+
+            if parsed.permission_hook not in TRANSLATORS:
+                raise HarnessError(
+                    f"{where}: unknown permission_hook {parsed.permission_hook!r}; "
+                    f"known: {sorted(TRANSLATORS)}"
+                )
+
+        if parsed.permission_rules is not None:
+            from kraft.permission_rules import RENDERERS
+
+            if parsed.permission_rules not in RENDERERS:
+                raise HarnessError(
+                    f"{where}: unknown permission_rules {parsed.permission_rules!r}; "
+                    f"known: {sorted(RENDERERS)}"
+                )
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -248,6 +303,12 @@ class Harness:
                 name: json.dumps(body, indent=2) + "\n"
                 for name, body in (config.files if config is not None else {}).items()
             },
+            tool_names={
+                k: (v,) if isinstance(v, str) else tuple(v) for k, v in parsed.tool_names.items()
+            },
+            unhooked_tools=tuple(parsed.unhooked_tools),
+            permission_hook=parsed.permission_hook,
+            permission_rules=parsed.permission_rules,
         )
 
     def supports(self, name: str) -> bool:
@@ -316,6 +377,10 @@ class HarnessInput(BaseModel):
     command_resume: Prefix = []
     capabilities: dict[StrictStr, CapabilityInput] = {}
     config_dir: ConfigDirInput | None = None
+    tool_names: dict[StrictStr, StrictStr | list[StrictStr]] = {}
+    unhooked_tools: list[StrictStr] = []
+    permission_hook: StrictStr | None = None
+    permission_rules: StrictStr | None = None
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -343,6 +408,12 @@ def _shape_problem(exc: ValidationError) -> str:
             return f"capability {name!r} must be a mapping"
         case ("capabilities", name, key, *_):
             return f"capability {name!r} {key!r} {_SHAPE.get(key, 'must be a string')}"
+        case ("tool_names", *_):
+            return "'tool_names' must map a CLI's tool name to Kraft's: a string or a list"
+        case ("unhooked_tools", *_):
+            return "'unhooked_tools' must be a list of strings"
+        case ("permission_hook" | "permission_rules" as key,):
+            return f"{key!r} must be a string"
         case ("config_dir", *_):
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
     return "expected a top-level mapping"
@@ -433,6 +504,7 @@ def build_argv(
     context: str,
     options: dict[str, str | tuple[str, ...]] | None = None,
     resume: str | None = None,
+    extra: tuple[str, ...] = (),
 ) -> list[str]:
     """One command line for one dispatch.
 
@@ -457,7 +529,9 @@ def build_argv(
     ctx_cap = h.capabilities["context"]
     prompt_value = f"{context}\n\n{prompt}" if ctx_cap.channel == "prompt" else prompt
 
-    argv = list(prefix)
+    # `extra`: flags Kraft adds itself (a launch's permission rules), right
+    # after the prefix so no positional can swallow them.
+    argv = [*prefix, *extra]
     for name, cap in h.capabilities.items():
         if not cap.argv:
             continue  # non-invocable, or carried by `via`

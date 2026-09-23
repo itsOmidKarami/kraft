@@ -193,3 +193,25 @@ def test_a_retry_fork_keeps_the_items_base_branch_and_its_own_policy():
     assert fork.target.base_branch == "release"
     assert fork.item_policy == on_release.item_policy
     assert fork.policy_for(fork.chain.nodes[0]).max_attempts == 2
+
+
+def test_a_retry_can_drop_a_grant_but_never_add_one():
+    """Grants widen what a task may do, so a retry holds to the item layer's
+    rule (Kraft-4in7z): what a task is granted is authored, not filed."""
+    none = validate_retry_override(_chain(), "short", policy={"grants": ["git-push"]})
+    assert none.chain.policy_at("short.main.only").grants == ()
+
+    node = {
+        "id": "n",
+        "kind": "exec",
+        "policy": {"grants": ["git-push", "git-rebase"]},
+        "tasks": [_agent("t")],
+    }
+    granted = ResolvedChain.from_chain(
+        Chain.model_validate({"id": "c", "nodes": [node]})
+    ).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput()),
+    )
+    dropped = validate_retry_override(granted, "n", policy={"grants": ["git-push", "git-commit"]})
+    assert dropped.chain.policy_at("n.main.t").grants == ("git-push",)

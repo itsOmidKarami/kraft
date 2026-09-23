@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -163,7 +163,12 @@ CREATE TABLE worker_sessions (
   -- the exact command a subprocess session ran (Kraft-s7c04.35) -- NULL for
   -- every non-subprocess kind and for every row written before this column
   -- existed
-  command        TEXT
+  command        TEXT,
+  -- the harnesses.yaml harness an agent session ran on (Kraft-9elw1), so a
+  -- session re-adopted after a restart reads its log with its own reader.
+  -- NULL for every non-agent session and every row older than this column:
+  -- read as claude, the only harness those rows can have had
+  harness        TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -772,6 +777,8 @@ FROM worker_sessions""",
     # `rate_limit_hit` of a harness+model across all items
     # (`executor.fallback.known_limited`), which must not scan the whole table.
     37: ["CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"],
+    # The harness an agent session ran on (Kraft-9elw1). NULL on older rows.
+    38: ["ALTER TABLE worker_sessions ADD COLUMN harness TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

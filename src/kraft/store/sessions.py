@@ -32,6 +32,9 @@ def create_session(
     #: (Kraft-s7c04.35). None for every other kind and for a caller that
     #: predates this column.
     command: str | None = None,
+    #: The `harnesses.yaml` harness an agent session runs on (Kraft-9elw1);
+    #: `worker.reattach` resolves an adopted session's log reader from it.
+    harness: str | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -69,10 +72,10 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command, started_at) "
+        "round, head_sha, thread, command, started_at, harness) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -89,6 +92,7 @@ def create_session(
             thread,
             command,
             now,
+            harness,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
@@ -443,7 +447,15 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     )
 
 
-def _own_share(conn: sqlite3.Connection, session_id, usage: Usage | None) -> Usage | None:
+#: The log schema a session's usage was read with when its caller does not
+#: say: every agent session before Kraft-wge0e, and `worker.reattach` for a
+#: row with no `harness` recorded.
+CLAUDE_READER = "claude-stream-json"
+
+
+def _own_share(
+    conn: sqlite3.Connection, session_id, usage: Usage | None, reader: str | None
+) -> Usage | None:
     """`usage` less what an earlier session of this item and task already
     recorded, when this one resumed that one's CLI session (Kraft-s7c04.62,
     `a-resumed-cli-session-is-counted-once`): a paused task's resume and every
@@ -451,14 +463,19 @@ def _own_share(conn: sqlite3.Connection, session_id, usage: Usage | None) -> Usa
     cost and `modelUsage` as running totals over the whole session. The
     earlier session is the latest one on the same task whose log names the
     same CLI session -- not just the latest, since a turn refused before launch
-    can sit between two turns of one thread."""
+    can sit between two turns of one thread.
+
+    `reader` is the schema this session's log was read with (Kraft-wge0e):
+    its CLI session id and its running totals are that harness's, so a codex
+    thread resumed is netted by codex's reader, not claude's. None, a harness
+    with no log schema, has no CLI session to net against."""
     me = conn.execute(
         "SELECT rowid, work_item_id, hook_point, log_path FROM worker_sessions WHERE id = ?",
         (session_id,),
     ).fetchone()
-    if usage is None or me is None or not me["log_path"]:
+    if usage is None or reader is None or me is None or not me["log_path"]:
         return usage
-    session_of = _usage.READERS["claude-stream-json"].session_id
+    session_of = _usage.READERS[reader].session_id
     cli = session_of(Path(me["log_path"]))
     if cli is None:
         return usage
@@ -469,11 +486,18 @@ def _own_share(conn: sqlite3.Connection, session_id, usage: Usage | None) -> Usa
     ).fetchall()
     for row in earlier:
         if session_of(Path(row["log_path"])) == cli:
-            return _usage.net_of_earlier(usage, Path(me["log_path"]), Path(row["log_path"]), cli)
+            return _usage.net_of_earlier(
+                usage, Path(me["log_path"]), Path(row["log_path"]), cli, reader
+            )
     return usage
 
 
-def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None) -> None:
+def record_pause_usage(
+    conn: sqlite3.Connection,
+    session_id,
+    usage: Usage | None,
+    reader: str | None = CLAUDE_READER,
+) -> None:
     """Model, tokens and cost for a session a human interrupted (Kraft-s7c04.18).
 
     `session_exited` returns early on a paused row -- deliberately, so the row
@@ -498,7 +522,7 @@ def record_pause_usage(conn: sqlite3.Connection, session_id, usage: Usage | None
     Guarded on `status = 'paused'` for the reason `session_progress` guards on
     `'running'`: a row that has moved on has settled numbers.
     """
-    usage = _own_share(conn, session_id, usage)
+    usage = _own_share(conn, session_id, usage, reader)
     if usage is None:
         return
     conn.execute(
@@ -517,8 +541,11 @@ def session_exited(
     *,
     concerns: str | None = None,
     question: str | None = None,
+    reader: str | None = CLAUDE_READER,
 ) -> None:
-    """`concerns` (`done_with_concerns`) and `question` (`needs_context`) are
+    """`reader` is the log schema `usage` was read with (`_own_share`).
+
+    `concerns` (`done_with_concerns`) and `question` (`needs_context`) are
     free text with no column of their own (Task 1's migration deliberately adds
     none) — this event is the only place they are recorded, so a human-review
     gate or a needs_context stop can read them back without a per-request file
@@ -540,7 +567,7 @@ def session_exited(
         # `reattach._exit_from_file` for free: it reads the same usage and
         # reaches the same branch.
         if row is not None:
-            record_pause_usage(conn, session_id, usage)
+            record_pause_usage(conn, session_id, usage, reader)
         return
     # COALESCE: a None ref must not erase one an earlier resolution already stored.
     conn.execute(
@@ -556,7 +583,7 @@ def session_exited(
         payload["concerns"] = concerns
     if question:
         payload["question"] = question
-    usage = _own_share(conn, session_id, usage)
+    usage = _own_share(conn, session_id, usage, reader)
     if usage is not None:
         conn.execute(
             f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, wall_ms = ? "

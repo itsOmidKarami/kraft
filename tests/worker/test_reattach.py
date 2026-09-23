@@ -327,6 +327,66 @@ async def test_resolved_from_file_carries_concerns_question_and_usage(item, data
     }
 
 
+#: A real codex thread's first turn and its resumed second (codex-cli 0.155.0,
+#: Kraft-w3kot): usage is the thread's running total, 23 then 28 output tokens.
+_CODEX_FIRST = [
+    '{"type":"thread.started","thread_id":"01a0cb2d-88c2-7631-b8b3-45debaca3bf6"}',
+    '{"type":"turn.completed","usage":{"input_tokens":20458,"cached_input_tokens":12032,'
+    '"cache_write_input_tokens":0,"output_tokens":23,"reasoning_output_tokens":0}}',
+]
+_CODEX_RESUMED = [
+    _CODEX_FIRST[0],
+    '{"type":"turn.completed","usage":{"input_tokens":46200,"cached_input_tokens":18944,'
+    '"cache_write_input_tokens":0,"output_tokens":28,"reasoning_output_tokens":0}}',
+]
+
+
+@pytest.mark.parametrize("path", ["from-file", "adopted"])
+async def test_a_re_adopted_codex_session_reads_and_nets_with_codex_s_reader(
+    item, database, run_dirs, path
+):
+    """Kraft-9elw1: the row's harness picks the reader, so a codex session that
+    outlived a restart reads codex tokens -- claude's reader finds none in this
+    log -- and, resuming an earlier session's thread, records only its own share."""
+    (run_dirs.logs / "s0.log").write_text("\n".join(_CODEX_FIRST) + "\n")
+    await item.session("s0", IMPLEMENT, "paused", running=DEAD, harness="codex")
+    (run_dirs.logs / "s1.log").write_text("\n".join(_CODEX_RESUMED) + "\n")
+    _result(run_dirs, "s1")
+    if path == "from-file":
+        await item.session("s1", IMPLEMENT, running=DEAD, harness="codex")
+        await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+    else:
+        with _sleeper() as (proc, pst):
+            await item.session("s1", IMPLEMENT, running=(proc.pid, pst), harness="codex")
+            _, adopted = await reattach.reattach(database, run_dirs)
+            await adopted["s1"]
+
+    assert _usage(item)[1:] == (46200 - 18944 - (20458 - 12032), 18944 - 12032, 28 - 23, None)
+
+
+@pytest.mark.parametrize(
+    ("harness", "expected"),
+    [
+        (None, ("claude-opus-5", 100, 300, 20, 1.25)),
+        ("retired-harness", ("claude-opus-5", 100, 300, 20, 1.25)),
+        ("gemini", (None, None, None, None, None)),
+    ],
+    ids=["older-row", "unknown-harness", "no-reader"],
+)
+async def test_a_row_s_harness_decides_whether_claude_s_reader_applies(
+    item, database, run_dirs, harness, expected
+):
+    """A row older than the column, or naming a harness no longer loaded, can
+    only have been claude's; a harness that declares no log reader parses none."""
+    (run_dirs.logs / "s1.log").write_text(_ENVELOPE + "\n")
+    _result(run_dirs, "s1")
+    await item.session("s1", IMPLEMENT, running=DEAD, harness=harness)
+
+    await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+
+    assert _usage(item) == expected
+
+
 # --- live pid, adopted --------------------------------------------------------------------
 
 

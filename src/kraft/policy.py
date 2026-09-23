@@ -60,6 +60,16 @@ class PolicyError(ValueError):
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
+#: The harness an escalation turn runs on when no policy layer names one
+#: (Kraft-wge0e): what it always was, so an install that sets nothing changes
+#: nothing.
+DEFAULT_ESCALATION_HARNESS = "claude"
+#: An `escalation_harness` value meaning "the harness this item's own work ran
+#: on" (`escalate.item_harness`), not a `harnesses.yaml` profile id.
+FOLLOW_ITEM = "item"
+#: What an escalation turn is granted when `defaults.escalation_grants` is
+#: unset (Kraft-4in7z): it has to be able to rebase the branch and push it.
+DEFAULT_ESCALATION_GRANTS = ("git-commit", "git-rebase", "git-push")
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 
 
@@ -215,9 +225,38 @@ class PolicyInput(BaseModel):
             raw_mc = 3
         raw["max_concurrent"] = raw_mc
         try:
-            return cls.model_validate(raw)
+            parsed = cls.model_validate(raw)
         except ValidationError as exc:
             raise _field_error(path.name, exc) from exc
+        _check_escalation_harness(parsed.defaults.escalation_harness, path.name)
+        return parsed
+
+
+def _check_escalation_harness(value: str | None, name: str) -> None:
+    """Refuse a `defaults.escalation_harness` that names no `harnesses.yaml`
+    profile, with the ones it could name (Kraft-wge0e): read now, not at the
+    first stuck item. The live table, the one a launch selects from
+    (`adapters.profiles.harness_table`). An item's own override is checked at
+    launch instead, by that same selection."""
+    if value is None or value == FOLLOW_ITEM:
+        return
+    # Late: `adapters.profiles` imports the template models, which import this.
+    from kraft import harness as _harness
+    from kraft.adapters.profiles import HarnessUnavailable, harness_table
+
+    try:
+        table, where = harness_table(_harness.load(None))
+    except HarnessUnavailable as exc:
+        raise PolicyError(
+            f"{name}: 'defaults.escalation_harness' {value!r} cannot be checked: {exc}",
+            field="escalation_harness",
+        ) from exc
+    if value not in table.profiles:
+        raise PolicyError(
+            f"{name}: 'defaults.escalation_harness' {value!r} is not a profile in {where}; "
+            f"known: {sorted(table.profiles)}, or {FOLLOW_ITEM!r}",
+            field="escalation_harness",
+        )
 
 
 @dataclass(frozen=True)
@@ -556,6 +595,21 @@ def _tool_names(names: list[str], info: ValidationInfo) -> list[str]:
 #: A policy's `allowed_tools`/`deny_tools`: tool names, never rules.
 ToolNames = Annotated[list[StrictStr], AfterValidator(_tool_names)]
 
+#: Named operations a task is guaranteed, whatever a harness's own
+#: classifier or sandbox would decide (Kraft-4in7z). Names, never command
+#: patterns: each harness matches a name to its own calls (`kraft.grants`).
+GRANTS: tuple[str, ...] = ("git-commit", "git-rebase", "git-push")
+
+
+def _grant_names(names: list[str]) -> list[str]:
+    unknown = [n for n in names if n not in GRANTS]
+    if unknown:
+        raise ValueError(f"grants: {unknown!r} are not grants; known: {list(GRANTS)}")
+    return list(dict.fromkeys(names))
+
+
+GrantNames = Annotated[list[StrictStr], AfterValidator(_grant_names)]
+
 
 class PolicyDefaultsInput(CapLevels):
     """`policy.yaml`'s `defaults:` -- inheritable operational starting
@@ -570,6 +624,13 @@ class PolicyDefaultsInput(CapLevels):
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
+    #: The `harnesses.yaml` profile an escalation turn runs on, or `"item"`
+    #: (`FOLLOW_ITEM`). Operational: any layer may change it, and the
+    #: resolved profile still has to be in `allowed_harnesses` at launch.
+    escalation_harness: StrictStr | None = None
+    #: Grants every escalation turn holds on top of its node's own
+    #: (`DEFAULT_ESCALATION_GRANTS` when unset; `[]` grants it nothing extra).
+    escalation_grants: GrantNames | None = None
 
 
 class PolicyMaximaInput(CapLevels):
@@ -709,6 +770,9 @@ class TaskPolicyOverride(BaseModel):
     #: `allowed_tools` permits (Ruling 105: the repository's `deny_tools`).
     #: Only ever accumulates down the layers.
     deny_tools: ToolNames | None = None
+    #: Operations guaranteed to this scope's tasks (Kraft-4in7z). Only ever
+    #: accumulates down the layers, like deny_tools.
+    grants: GrantNames | None = None
     sandbox: SandboxPolicy | None = None
     #: This scope's running time: a task's one run, a step's or node's task
     #: runs since it started, the work item's since it started (`kraft.caps`).
@@ -738,6 +802,9 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    #: `PolicyDefaultsInput.escalation_harness`, for this scope: an escalation
+    #: turn runs under the policy of the node its item stopped at.
+    escalation_harness: StrictStr | None = None
 
     @classmethod
     def meet(cls, overrides: Iterable[TaskPolicyOverride]) -> TemplatePolicyOverride:
@@ -764,12 +831,25 @@ class TemplatePolicyOverride(TaskPolicyOverride):
                 f"{[s.model_dump() for s in sandboxes]}, and a task cannot run in all of them",
                 field="sandbox",
             )
+        escalation = list(dict.fromkeys(present("escalation_harness")))
+        if len(escalation) > 1:
+            raise PolicyError(
+                f"'escalation_harness': the repositories set different harnesses "
+                f"{escalation}, and an item escalates on one",
+                field="escalation_harness",
+            )
         deny = [t for tools in present("deny_tools") for t in tools]
         return cls(
             allowed_tools=common("allowed_tools"),
             allowed_harnesses=common("allowed_harnesses"),
             deny_tools=list(dict.fromkeys(deny)) or None,
+            # Unlike an allowlist, an unset grant list grants nothing, so a
+            # repository that names none empties the meet.
+            grants=[g for g in GRANTS if all(g in (o.grants or ()) for o in overrides)] or None
+            if overrides
+            else None,
             sandbox=sandboxes[0] if sandboxes else None,
+            escalation_harness=escalation[0] if escalation else None,
             **{
                 n: min(values) if (values := present(n)) else None
                 for n in (*BUDGET_FIELDS, "timeout_minutes", "max_attempts", *CAP_FIELDS)
@@ -783,7 +863,7 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 #: item's cap tightens every scope under it that set a looser one, and an item
 #: cap above the one it lands on is refused where the item is filed
 #: (`ResolvedChain.check_scopes`), never met.
-_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", *BUDGET_FIELDS, *CAP_FIELDS)
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "grants", *BUDGET_FIELDS, *CAP_FIELDS)
 
 
 class WorkItemPolicy(TemplatePolicyOverride):
@@ -868,6 +948,12 @@ class WorkItemPolicy(TemplatePolicyOverride):
                         if t in layer.allowed_tools
                     ),
                 )
+            # Grants widen, so an item's own layer may only drop them, never
+            # add one (Kraft-4in7z.7): what a task is granted is authored.
+            if layer.grants is not None:
+                policy = dataclasses.replace(
+                    policy, grants=tuple(g for g in policy.grants if g in layer.grants)
+                )
             for name in (*BUDGET_FIELDS, *CAP_FIELDS):
                 value, current = getattr(layer, name), getattr(policy, name)
                 if value is not None:
@@ -919,11 +1005,17 @@ class InstancePolicy:
     #: Instance policy sets neither: `maxima:` has no deny list and no sandbox,
     #: so both start empty and only a repository or narrower layer adds them.
     deny_tools: tuple[str, ...] = ()
+    #: Named grants (`GRANTS`); like `deny_tools`, only a layer adds them.
+    grants: tuple[str, ...] = ()
     sandbox: SandboxPolicy | None = None
     time_cap_minutes: int | None = None
     total_time_cap_minutes: int | None = None
     #: The per-level cap defaults (Ruling 211), for `at_level`.
     cap_defaults: CapLevels = field(default_factory=CapLevels)
+    #: What an escalation turn at this scope runs on (Kraft-wge0e).
+    escalation_harness: str = DEFAULT_ESCALATION_HARNESS
+    #: `defaults.escalation_grants`, frozen with the snapshot like the rest.
+    escalation_grants: tuple[str, ...] = DEFAULT_ESCALATION_GRANTS
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -943,6 +1035,10 @@ class InstancePolicy:
             token_budget=None,
             maxima=m,
             cap_defaults=CapLevels(**{level: getattr(d, level) for level in CAP_LEVELS}),
+            escalation_harness=d.escalation_harness or DEFAULT_ESCALATION_HARNESS,
+            escalation_grants=tuple(d.escalation_grants)
+            if d.escalation_grants is not None
+            else DEFAULT_ESCALATION_GRANTS,
         )
 
     def at_level(self, level: str) -> InstancePolicy:
@@ -993,8 +1089,13 @@ class InstancePolicy:
         )
         updates: dict[str, object] = {}
 
+        if getattr(override, "escalation_harness", None) is not None:
+            updates["escalation_harness"] = override.escalation_harness
+
         if override.deny_tools is not None:
             updates["deny_tools"] = tuple(dict.fromkeys((*self.deny_tools, *override.deny_tools)))
+        if override.grants is not None:
+            updates["grants"] = tuple(dict.fromkeys((*self.grants, *override.grants)))
 
         if override.sandbox is not None:
             if self.sandbox is not None and override.sandbox != self.sandbox:
