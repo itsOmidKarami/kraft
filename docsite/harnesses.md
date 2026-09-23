@@ -9,13 +9,14 @@ which harness (the profile's `provider`) that profile runs:
 spec_author: { kind: agent, harness: codex, prompt: "...", produces: spec }
 ```
 
-Kraft ships three harnesses:
+Kraft ships four harnesses:
 
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
+| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Not yet run against a real account. |
 
 ## Capabilities, not flags
 
@@ -41,6 +42,17 @@ Claude's is `low, medium, high, xhigh, max`) — checked at load time, and
 (Gemini's `permission_mode` is always `yolo`: the disposable worktree is the
 real safety boundary, not the approval mode, and a headless worker has nobody
 to answer an approval prompt anyway).
+
+### Amp
+
+`amp` needs credentials a headless process can use: an access token
+(`sgamp_...`, from ampcode.com/settings) in `AMP_API_KEY`. A worker's
+environment is an allowlist, so name it in the repo's `env_passthrough`.
+Without it, `amp` doesn't fail fast. It prints a device-login prompt and
+waits about five minutes for a browser before it exits 1.
+
+An agent profile can't select `amp`: a profile needs a model for the provider,
+and Amp takes none. A task on `amp` sets `effort:` itself.
 
 ## Agent profiles
 
@@ -277,7 +289,7 @@ when its `profile:` carries one: a gate review launches once and never walks
 either list.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
-rate limit, which today is `claude`. `codex` and `gemini` can be fallback
+rate limit, which today is `claude`. `codex`, `gemini` and `amp` can be fallback
 targets, and an unavailable one is skipped, but a rate limit on them fails
 the launch as it does without a list.
 

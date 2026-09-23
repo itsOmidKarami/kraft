@@ -636,6 +636,30 @@ def _rate_limit_codex(log_path: Path) -> dict | None:
     return None
 
 
+def _envelope_amp(log_path: Path) -> dict | None:
+    """Every `assistant` line's `message.usage` in an `amp -x --stream-json`
+    log, summed, in Kraft's own names.
+
+    Why not `read_envelope`: Amp's `result` line is Claude Code's shape but
+    carries neither `modelUsage` nor `total_cost_usd`, and its `usage` is
+    optional -- absent from every example in ampcode.com/docs/cli/streaming-json
+    -- so that reader finds no envelope and records no tokens at all. The
+    `assistant` lines do carry Anthropic-shaped usage, one line per request in
+    the published examples (Kraft-gvrke). Summing them rather than trusting
+    the result's `usage` also means a log holding several invocations counts
+    each one's own requests once, with no running totals to net out. No cost:
+    Amp's stream reports none.
+    """
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return None
+    u = from_stream(lines, {})
+    if u is None:
+        return None
+    return {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -679,6 +703,17 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_codex,
         rate_limit=_rate_limit_codex,
         session_id=_session_id_codex,
+    ),
+    # Amp's `--stream-json` is Claude Code's shape (ampcode.com/docs/cli/
+    # streaming-json, Kraft-gvrke): live progress off `assistant` lines and the
+    # thread id off `system`/`init` read unchanged. Only the envelope differs.
+    # No rate-limit event is documented, so there is nothing to read one off.
+    "amp-stream-json": Reader(
+        name="amp-stream-json",
+        stream=from_stream,
+        envelope=_envelope_amp,
+        rate_limit=lambda _log_path: None,
+        session_id=_session_id_claude,
     ),
 }
 
