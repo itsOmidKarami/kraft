@@ -12,6 +12,7 @@ an arbitrary command.
 
 from __future__ import annotations
 
+import re
 import shlex
 from collections.abc import Iterable
 
@@ -22,7 +23,8 @@ from collections.abc import Iterable
 #: `#` stays allowed: a comment only drops trailing words, never adds one.
 _SHELL_META = frozenset(";&|<>`$\\({*?[!")
 
-#: git's own options allowed before the subcommand. `-C` takes a directory.
+#: git's own options allowed before the subcommand. Not `-C`: it points git
+#: at another repository, whose own config and hooks would run.
 _GIT_FLAGS = frozenset({"--no-pager", "-P"})
 
 #: Keys `git -c` may set. Most config can run a command (`core.sshCommand`,
@@ -31,13 +33,31 @@ _SAFE_CONFIG = frozenset({"user.name", "user.email"})
 
 #: Per subcommand: long options that make git run a caller-chosen command
 #: (git accepts any unambiguous prefix, so a prefix of these is refused too),
-#: and short-option letters doing the same.
+#: and short-option letters doing the same. A push is also held to the
+#: branch it names: nothing that deletes or pushes every ref (`--delete`,
+#: `--mirror`, `--all`/`--branches`, `--prune`), names the destination by
+#: option (`--repo`), or takes a separate value that would pass for the
+#: remote (`-o`/`--push-option`). `--force` stays allowed.
 _UNSAFE_LONG = {
-    "push": ("receive-pack", "exec"),
+    "push": (
+        "receive-pack",
+        "exec",
+        "delete",
+        "mirror",
+        "all",
+        "branches",
+        "prune",
+        "repo",
+        "push-option",
+    ),
     "rebase": ("exec", "strategy"),
     "commit": (),
 }
-_UNSAFE_SHORT = {"push": "", "rebase": "xs", "commit": ""}
+_UNSAFE_SHORT = {"push": "do", "rebase": "xs", "commit": ""}
+
+#: What a push's first positional must be: a configured remote's name, never
+#: a URL or path (`host:repo`, `/tmp/r`, `ext::cmd`) git would push to instead.
+_REMOTE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
 def _git_subcommand(command: str) -> str | None:
@@ -55,8 +75,6 @@ def _git_subcommand(command: str) -> str | None:
         opt = words[i]
         if opt in _GIT_FLAGS:
             i += 1
-        elif opt == "-C":
-            i += 2
         elif opt == "-c" and i + 1 < len(words):
             key = words[i + 1].split("=", 1)[0].lower()
             if key not in _SAFE_CONFIG:
@@ -73,6 +91,12 @@ def _git_subcommand(command: str) -> str | None:
             if name and any(u.startswith(name) for u in _UNSAFE_LONG[sub]):
                 return None
         elif arg.startswith("-") and set(arg[1:]) & set(_UNSAFE_SHORT[sub]):
+            return None
+    if sub == "push":
+        args = words[i + 1 :]
+        end = args.index("--") if "--" in args else len(args)
+        positional = [a for a in args[:end] if not a.startswith("-")] + args[end + 1 :]
+        if positional and not _REMOTE.fullmatch(positional[0]):
             return None
     return sub
 
