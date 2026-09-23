@@ -444,20 +444,21 @@ def test_codex_reads_usage_and_rate_limits_off_its_json_log():
 
 
 def test_opencode_argv_every_flag_from_run_help():
-    """Kraft-nv1f1: every flag is in `opencode run --help` of 1.18.32. Context
+    """Kraft-nv1f1: every flag is in `opencode run --help` of 2.0.15. Context
     has no flag, so it is folded into the prompt; `--auto` is on every launch,
-    or `run` rejects every permission ask; the prompt goes after `--`."""
-    argv = _argv(
-        "opencode", options={"model": "opencode/big-pickle", "effort": "high"}, resume="ses_1"
-    )
+    or `run` rejects every permission ask; the prompt goes after `--`. 2.x
+    refuses `--log-level ERROR` and has no `--variant`, so effort is absent."""
+    argv = _argv("opencode", options={"model": "opencode/big-pickle"}, resume="ses_1")
     assert argv[:2] == ["opencode", "run"]
     assert argv[-2:] == ["--", "CTX\n\ndo the thing"]
     assert argv[argv.index("--format") + 1] == "json"
     assert argv[argv.index("-m") + 1] == "opencode/big-pickle"
-    assert argv[argv.index("--variant") + 1] == "high"
+    assert argv[argv.index("--log-level") + 1] == "error"
+    assert "--variant" not in argv
     assert argv[argv.index("--session") + 1] == "ses_1"
     assert "--auto" in argv
     opencode = harness.load(None).valid["opencode"]
     assert opencode.capabilities["usage"].reader == "opencode-json"
     assert opencode.capabilities["rate_limit_signal"].reader == "opencode-json"
     assert not opencode.value_ok("permission_mode", "default")
+    assert not opencode.supports("effort")

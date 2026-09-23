@@ -9,8 +9,16 @@
 # `{"type":"error",...,"error":{"name":"UnknownError","data":{"message":
 # "Unexpected server error. Check server logs for details.",...}}}`; the real
 # cause ("Model not found: anthropic/...") is only in opencode's own log,
-# which is why `structured_log` also prints ERROR logs into Kraft's.
+# which is why `structured_log` also prints error logs into Kraft's.
 # A paid provider's run -- its cost, its rate limits -- is unverified.
+#
+# Re-checked against opencode 2.0.15 (Homebrew) on 2026-09-23, the version
+# this file now targets. 2.x changed three things 1.x had: `--log-level`
+# takes lowercase values only ("ERROR" is refused, exit 1); `--variant` is
+# gone -- a variant is now part of the model id, `provider/model#variant`;
+# and `run --format json` drops the last step's `step_finish` (the session
+# export has it), so usage read off the stream undercounts by that step and
+# a one-step run reports none (Kraft-ihoen).
 #
 # `--format json` is read by usage.READERS["opencode-json"].
 id: opencode
@@ -21,13 +29,10 @@ capabilities:
   # `run` has no system-prompt flag: a system prompt lives in an agent
   # defined in opencode.json, which a launch cannot write.
   context:         { channel: prompt }
-  structured_log:  { cli: ["--format", "json", "--print-logs", "--log-level", "ERROR"] }
+  structured_log:  { cli: ["--format", "json", "--print-logs", "--log-level", "error"] }
   # `provider/model`, over any provider OpenCode knows -- no `values:`, for
   # the reason claude.yaml's `model` gives.
   model:           { cli: ["-m", "{value}"] }
-  # A provider-specific variant name. An unknown one is ignored, not refused
-  # (measured: `--variant bogus-effort` ran and exited 0), so no `values:`.
-  effort:          { cli: ["--variant", "{value}"] }
   # Without `--auto`, `run` answers every permission ask with "reject"
   # (run.ts, the `permission.asked` branch) -- the silent denial gemini.yaml
   # describes. `--auto` approves whatever config does not deny.
@@ -42,6 +47,7 @@ capabilities:
   # agent sees the prompt quoted. No way around it with stdin at /dev/null.
   prompt:          { cli: ["--", "{value}"] }
 
-# Absent, deliberately: deny_tools, allowed_tools, restrict_tools and
+# Absent, deliberately: effort (2.x has no `--variant`; name the variant in
+# the model id, `-m provider/model#high`), deny_tools, allowed_tools, restrict_tools and
 # approval_channel (tool permissions are opencode.json rules, not `run`
 # flags), autocompact (config `compaction`, not a flag).
