@@ -46,3 +46,10 @@ def test_a_repository_without_grants_empties_the_meet():
     a = p.TemplatePolicyOverride.model_validate({"grants": ["git-push"]})
     b = p.TemplatePolicyOverride.model_validate({})
     assert p.TemplatePolicyOverride.meet([a, b]).grants is None
+
+
+def test_a_work_item_can_drop_a_grant_but_never_add_one():
+    base = p.InstancePolicy.from_input(p.InstancePolicyInput.model_validate({}))
+    authored = base.apply_template_override({"grants": ["git-commit", "git-push"]})
+    item = p.WorkItemPolicy.model_validate({"grants": ["git-commit", "git-rebase"]})
+    assert item.apply_to(authored, "implementation").grants == ("git-commit",)

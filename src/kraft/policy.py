@@ -806,7 +806,7 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 #: item's cap tightens every scope under it that set a looser one, and an item
 #: cap above the one it lands on is refused where the item is filed
 #: (`ResolvedChain.check_scopes`), never met.
-_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", *BUDGET_FIELDS, *CAP_FIELDS)
+_ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "grants", *BUDGET_FIELDS, *CAP_FIELDS)
 
 
 class WorkItemPolicy(TemplatePolicyOverride):
@@ -890,6 +890,12 @@ class WorkItemPolicy(TemplatePolicyOverride):
                         for t in (allowed if allowed is not None else layer.allowed_tools)
                         if t in layer.allowed_tools
                     ),
+                )
+            # Grants widen, so an item's own layer may only drop them, never
+            # add one (Kraft-4in7z.7): what a task is granted is authored.
+            if layer.grants is not None:
+                policy = dataclasses.replace(
+                    policy, grants=tuple(g for g in policy.grants if g in layer.grants)
                 )
             for name in (*BUDGET_FIELDS, *CAP_FIELDS):
                 value, current = getattr(layer, name), getattr(policy, name)
