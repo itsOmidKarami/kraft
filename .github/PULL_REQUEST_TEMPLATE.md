@@ -2,6 +2,10 @@
 
 
 
+## Changelog
+
+<!-- One user-facing line, e.g. "Fix: ...". Leave empty for release::none. -->
+
 ## Release impact
 
 Exactly one of `release::major` / `release::minor` / `release::patch` / `release::none`.

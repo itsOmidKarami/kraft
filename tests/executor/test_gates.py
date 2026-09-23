@@ -100,14 +100,14 @@ def _no_review(monkeypatch, why):
     monkeypatch.setattr(gates_module.gate_review, "review", _boom)
 
 
-def _launch_review(it, node=None):
+def _launch_review(it, node=None, launch=NO_SETUP):
     return gates_module.gate_review.review(
         it.database,
         it.run_dirs,
         work_item_id=it.id,
         gate="spec_approval",
         node=node or it.chain.chain.nodes[1],
-        launch=NO_SETUP,
+        launch=launch,
     )
 
 
@@ -663,11 +663,11 @@ async def test_auto_review_launches_with_the_method_mode_and_tools_it_resolved(
     assert tuple(seen.get("allowed_tools") or ()) == ("Read", "Grep"), "allowed_tools dropped"
 
 
-async def test_a_gate_auto_review_launch_carries_the_never_signal_rule(
-    item_on, tmp_path, monkeypatch
+@pytest.mark.parametrize("named", [False, True], ids=["unnamed", "named"])
+async def test_a_gate_auto_review_launch_carries_the_rule_only_when_the_repo_names_it(
+    item_on, tmp_path, monkeypatch, named
 ):
-    """`every-agent-launch-carries-kraft-safety-rules`: the gate's reviewer is
-    launched by `gate_review`, not `dispatch_node`, and still gets the rule."""
+    """Launched by `gate_review`, not `dispatch_node`: gets the rule only when the repo names it."""
     it = await item_on(_reviewed(), auto_gate=True)
     fake_harness_home(tmp_path, ["true"])
     launched = {}
@@ -678,10 +678,10 @@ async def test_a_gate_auto_review_launch_carries_the_never_signal_rule(
 
     monkeypatch.setattr(agent_mod._subprocess, "run_task", _spawn)
     await _requested(it)
-
-    await _launch_review(it)
-
-    assert agent_mod.SAFETY_RULES in launched["argv"]
+    text, name = "never signal a process\n", "never-signal-processes-you-didnt-start"
+    entry = entry_of({"steering": [name]} if named else {})
+    await _launch_review(it, launch=LaunchContext(repo_entry=entry, library_steering={name: text}))
+    assert (text in launched["argv"]) == named
 
 
 async def test_a_gate_declaring_no_agent_reviewer_is_left_to_a_human(item_on):

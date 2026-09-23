@@ -23,17 +23,47 @@ Kraft ships four harnesses:
 A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `usage`, `rate_limit_signal` — and each harness's own YAML
+`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `writable_dirs` — and each harness's own YAML
 (`src/kraft/harnesses/*.yaml` in the package) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
-acceptEdits|auto|...` for Claude, `-s read-only|workspace-write|...` for
-Codex, `--approval-mode default|yolo|...` for Gemini — one Kraft-side name,
+acceptEdits|auto|...` for Claude, `-c sandbox_mode=read-only|workspace-write|...`
+for Codex, `--approval-mode default|yolo|...` for Gemini — one Kraft-side name,
 three different flags.
+
+Codex's options are all `-c` config keys, because `codex exec resume` rejects
+`-s`, `--add-dir` and `--approve-for-me` after `resume` and accepts `-c`. Codex
+runs in its "approve for me" mode by default, Claude's `auto` counterpart: the
+sandbox is `workspace-write`, and a sandbox escalation the model asks for goes
+to Codex's automatic reviewer (`approval_policy=on-request`,
+`approvals_reviewer=auto_review`), not to a human. A `permission_mode` of
+`read-only` or `danger-full-access` (a harness profile's `defaults:` or a task)
+changes the sandbox. The reviewer stays on in every mode.
 
 Three capabilities are required — `prompt`, `context`, `usage` — since no
 agent dispatch can be built without them. Two are non-invocable —`usage`,
 `rate_limit_signal` — they describe what Kraft reads back out of a session
 (from its structured log or a result file), not an argv it constructs.
+
+One is filled by Kraft, never by a task: `writable_dirs`, the directories
+outside the worktree that a worker must write. There are two:
+
+- the directory holding the launch's `$KRAFT_RESULT_PATH`
+  (`$KRAFT_HOME/run/results`);
+- the worktree's git common dir, where every commit writes. For a linked
+  worktree that's the main checkout's `.git`. Kraft asks git for it
+  (`git rev-parse --git-common-dir`) and leaves it out when git has none.
+
+`{value}` is one JSON array of absolute paths, such as
+`["/home/me/.kraft/run/results","/home/me/src/app/.git"]`. It's for a CLI whose
+own sandbox would refuse to write outside the worktree. Codex binds it to
+`-c sandbox_workspace_write.writable_roots={value}` (TOML reads the JSON array
+as an inline array). Its `workspace-write` sandbox writes only the workspace
+and `/tmp`, so without the grant a codex worker on a default install
+(`~/.kraft`) can write neither its result file nor a commit. The automatic
+reviewer can't be relied on for either one. It approves only what the model
+asks for, and it has declined a commit because the repo's `AGENTS.md` asked for
+"clear authority" first. So Kraft grants both directories outright. A harness
+that doesn't declare `writable_dirs` gets nothing extra.
 
 Some harnesses declare `values:` on a capability — a closed vocabulary the
 CLI itself would reject (Codex's `effort` is `minimal, low, medium, high`,
@@ -152,7 +182,7 @@ capabilities:
 `prompt`, `context`, and `usage` are required — nothing can dispatch without
 them. Every other capability (`model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `rate_limit_signal`) is optional: omit what the CLI can't
+`autocompact`, `structured_log`, `rate_limit_signal`, `writable_dirs`) is optional: omit what the CLI can't
 do, and a binding naming it is rejected at load, pointing at this file.
 
 A capability needs a `cli:` argv fragment unless it's `usage`/

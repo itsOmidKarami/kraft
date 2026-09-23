@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from support.harness import entry_of, v1_chain, write_harness_profiles
+from support.harness import entry_of, v1_chain, v1_resolved, write_harness_profiles
+from support.never_signal import NEVER_SIGNAL, NEVER_SIGNAL_TEXT
 
 from kraft import escalate, events, executor, store
 from kraft.db import Database
@@ -43,7 +44,7 @@ def escalation_profile(tmp_path, monkeypatch):
     return templates
 
 
-async def _seed_needs_human(database, rd, wid: str) -> None:
+async def _seed_needs_human(database, rd, wid: str, chain=None) -> None:
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -54,7 +55,7 @@ async def _seed_needs_human(database, rd, wid: str) -> None:
             repo=str(rd.base),
             chain_template="quick-task",
             chain_definition="{}",
-            materialized_chain=_CHAIN.to_json(),
+            materialized_chain=(chain or _CHAIN).to_json(),
         )
     )
     await database.write(lambda c: store.enter_node(c, wid, "implementation"))
@@ -636,12 +637,17 @@ async def test_an_escalation_on_an_unavailable_profile_launches_nothing(
     assert "'claude'" in open(session["log_path"]).read()
 
 
-async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, database, run_dirs):
-    """`every-agent-launch-carries-kraft-safety-rules`: an escalation turn is
-    an agent launch outside any chain, with full tools, and still gets the
-    rule. Only the spawn is faked, so the real context builder runs."""
-
+@pytest.mark.parametrize("named", [False, True], ids=["unnamed", "named"])
+async def test_an_escalation_launch_carries_the_rule_only_when_the_repo_names_it(
+    monkeypatch, database, run_dirs, named
+):
+    """An escalation turn is an agent launch outside any chain, with full
+    tools, and resolves repository steering the same as any other launch --
+    the rule only when the repo names `NEVER_SIGNAL`. Only the spawn is
+    faked, so the real context builder runs."""
     from kraft.adapters import agent as agent_mod
+    from kraft.policy import InstancePolicy, InstancePolicyInput
+    from kraft.templates.environment import WorkItemTarget
 
     launched = {}
 
@@ -654,15 +660,33 @@ async def test_an_escalation_launch_carries_the_never_signal_rule(monkeypatch, d
 
     monkeypatch.setattr(agent_mod._subprocess, "run_task", _spawn)
 
-    await _seed_needs_human(database, run_dirs, "w1")
+    nodes = [
+        {
+            "id": "implementation",
+            "kind": "exec",
+            "tasks": [{"id": "work", "kind": "subprocess", "command": "true"}],
+        }
+    ]
+    # Keyed by `str(run_dirs.base)`, not an arbitrary path: `_seed_needs_human`
+    # files the item's `repo` column as `str(rd.base)`, and `escalate.dispatch`
+    # now looks frozen steering up by that recorded `item_repo` (Kraft-jzdyp,
+    # #187), not by the launch's live `repo_entry.path`.
+    chain = v1_resolved(nodes).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate({})),
+        repository_steering={
+            str(run_dirs.base): ({NEVER_SIGNAL: NEVER_SIGNAL_TEXT} if named else {})
+        },
+    )
+    await _seed_needs_human(database, run_dirs, "w1", chain=chain)
     await escalate.dispatch(
         database,
         run_dirs,
         work_item_id="w1",
         message="any update?",
-        launch=executor.LaunchContext(repo_entry=None, skills_dir=None),
+        launch=executor.LaunchContext(repo_entry=entry_of({"path": "/repo"}), skills_dir=None),
     )
-    assert agent_mod.SAFETY_RULES in launched["argv"]
+    assert (NEVER_SIGNAL_TEXT in launched["argv"]) == named
 
 
 @pytest.mark.parametrize("new_thread", [False, True], ids=["resumed", "fresh"])
