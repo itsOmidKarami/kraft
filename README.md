@@ -65,7 +65,7 @@
 | src/kraft/events.py                      |       17 |        0 |    100% |           |
 | src/kraft/executor/\_\_init\_\_.py       |        9 |        0 |    100% |           |
 | src/kraft/executor/context.py            |       54 |        2 |     96% |  215, 246 |
-| src/kraft/executor/dispatch.py           |      642 |       17 |     97% |215, 252, 319, 370, 385, 479, 490, 493, 524-525, 874-875, 1183, 1191, 1834, 2186, 2192 |
+| src/kraft/executor/dispatch.py           |      644 |       17 |     97% |215, 252, 319, 370, 385, 479, 490, 493, 524-525, 874-875, 1183, 1191, 1841, 2193, 2199 |
 | src/kraft/executor/entry.py              |      122 |        1 |     99% |       313 |
 | src/kraft/executor/fallback.py           |       82 |        0 |    100% |           |
 | src/kraft/executor/gates.py              |      306 |       11 |     96% |95, 267, 270, 273, 276, 509, 642, 724, 777-778, 1062 |
@@ -74,8 +74,8 @@
 | src/kraft/executor/resuming.py           |       79 |        1 |     99% |       149 |
 | src/kraft/executor/retry.py              |       25 |        0 |    100% |           |
 | src/kraft/executor/stops.py              |      132 |        1 |     99% |       347 |
-| src/kraft/executor/walk.py               |      514 |       13 |     97% |530, 634, 905, 927, 935, 1008-1023, 1068, 1282, 1443, 1570, 1621, 1667 |
-| src/kraft/findings.py                    |      108 |        0 |    100% |           |
+| src/kraft/executor/walk.py               |      515 |       13 |     97% |530, 634, 905, 927, 935, 1008-1023, 1068, 1288, 1449, 1576, 1627, 1673 |
+| src/kraft/findings.py                    |      111 |        0 |    100% |           |
 | src/kraft/gate\_review.py                |       68 |        4 |     94% |102-105, 110, 184 |
 | src/kraft/grants.py                      |       55 |        0 |    100% |           |
 | src/kraft/harness.py                     |      268 |       17 |     94% |162, 170, 185, 206, 226, 233, 240, 252, 323, 412, 414, 416, 435-436, 473-475 |
@@ -130,7 +130,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **17256** |  **859** | **95%** |           |
+| **TOTAL**                                | **17262** |  **859** | **95%** |           |
 
 
 ## Setup coverage badge
