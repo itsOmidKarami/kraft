@@ -7,7 +7,7 @@
 | src/kraft/\_\_init\_\_.py                |        0 |        0 |    100% |           |
 | src/kraft/\_\_main\_\_.py                |        4 |        4 |      0% |       1-6 |
 | src/kraft/adapters/\_\_init\_\_.py       |        0 |        0 |    100% |           |
-| src/kraft/adapters/agent.py              |      153 |        5 |     97% |342, 396-397, 399, 725 |
+| src/kraft/adapters/agent.py              |      151 |        5 |     97% |321, 375-376, 378, 700 |
 | src/kraft/adapters/artifact\_notes.py    |        1 |        0 |    100% |           |
 | src/kraft/adapters/beads.py              |       62 |       28 |     55% |40-45, 49, 82-88, 122, 125-126, 178-190 |
 | src/kraft/adapters/forge/\_\_init\_\_.py |        8 |        0 |    100% |           |
@@ -126,7 +126,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **16658** |  **847** | **95%** |           |
+| **TOTAL**                                | **16656** |  **847** | **95%** |           |
 
 
 ## Setup coverage badge
