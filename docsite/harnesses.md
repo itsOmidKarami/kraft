@@ -9,12 +9,13 @@ which harness (the profile's `provider`) that profile runs:
 spec_author: { kind: agent, harness: codex, prompt: "...", produces: spec }
 ```
 
-Kraft ships three harnesses:
+Kraft ships four harnesses:
 
 | id | Binary | Notable gaps |
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
+| `opencode` | `opencode run` | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact` (OpenCode keeps tool permissions in `opencode.json`, not flags). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: OpenCode 2.x dropped `--variant`, so name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. In 2.x that log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails (Kraft-ihoen). A `task` sub-agent's tokens are not in the log. Checked against opencode 2.0.15. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 
 ## Capabilities, not flags
@@ -307,9 +308,9 @@ when its `profile:` carries one: a gate review launches once and never walks
 either list.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
-rate limit, which today is `claude`. `codex` and `gemini` can be fallback
-targets, and an unavailable one is skipped, but a rate limit on them fails
-the launch as it does without a list.
+rate limit, which today is `claude`, `codex` and `opencode`. `gemini` can be
+a fallback target, and is skipped when unavailable, but a rate limit on it
+fails the launch as it does without a list.
 
 Every skip or switch is logged:
 
