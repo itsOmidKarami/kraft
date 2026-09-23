@@ -144,7 +144,12 @@ A **task** is one unit of execution, of one of four kinds:
 - **`builtin`** (`src/kraft/builtins.py`) — work Kraft does itself, named by a
   `ref` such as `kraft.verify_changed_test_scopes` or `kraft.mr_rebase` (the
   shipped `default` chain runs the latter as `draft_merge_request`'s first
-  step, rebasing onto the item's base branch before the draft opens).
+  step, rebasing onto the item's base branch before the draft opens; in a
+  workspace it first rebases each changed member onto that member's own
+  default branch, and commits the root's pointer to the rebased member, so
+  every draft opens on its current base. A rebase that hangs is stopped at
+  the task's time cap, and its `git rebase --abort` gets 30 seconds of its
+  own).
 - **`forge`** (`src/kraft/adapters/forge/`) — a merge-request action on GitHub
   or GitLab, named by its `target` (`mr.open_draft`, `mr.ci`, `mr.merge`, …),
   resolved per repo from the `forge` recorded in that repo's `repos.yaml`

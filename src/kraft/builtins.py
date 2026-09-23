@@ -937,14 +937,23 @@ async def mr_rebase(
     When the node declares `on_base_changed` and the rebase moved the base,
     that is reported (`BASE_MOVED`) rather than swallowed, so the node stops
     before its later steps run against a base nobody re-verified.
+
+    A workspace item's changed members are rebased first, onto their own
+    default branches (`_rebase_members`, Kraft-ei38e), then the root, all
+    under the same time cap. A member's conflict, timeout or missing base
+    ends the task exactly as the root's would; its message names the member.
     """
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
     base = await base_branch(db, work_item_id, Path(repo))
-    timeout = max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
+
+    def remaining() -> float | None:
+        return max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
+
     try:
+        moved = await _rebase_members(db, work_item_id, Path(worktree), branch, base, remaining)
         new_head = await refresh_worktree_base(
-            Path(worktree), Path(repo), branch, base=base, timeout=timeout
+            Path(worktree), Path(repo), branch, base=base, timeout=remaining()
         )
     except BaseBranchMissing as exc:
         # Nothing an agent could fix: `config_error` stops the item for a
@@ -989,11 +998,12 @@ async def mr_rebase(
             )
         )
         return _caps.TIME_CAPPED
+    # A member's move is never persisted: `base_ref` is the root's (Kraft-puqxq).
+    log = "".join(f"[{rel}] rebased {branch} onto {head}\n" for rel, head in moved)
     if new_head:
         await db.write(lambda c: store.set_base_ref(c, work_item_id, new_head))
-        log = f"rebased {branch} onto {new_head}\n"
-    else:
-        log = "nothing to rebase\n"
+        log += f"rebased {branch} onto {new_head}\n"
+    log = log or "nothing to rebase\n"
     recorded = await _record_done(
         db,
         run_dirs,
@@ -1006,7 +1016,47 @@ async def mr_rebase(
         head_sha=head_sha,
     )
     # The session is `done` either way -- the rebase itself succeeded.
-    return BASE_MOVED if (new_head and has_rebase_bounce) else recorded
+    return BASE_MOVED if ((new_head or moved) and has_rebase_bounce) else recorded
+
+
+async def _rebase_members(
+    db, work_item_id: str, root: Path, branch: str, base: str, remaining
+) -> list[tuple[str, str]]:
+    """Rebase each changed member of a workspace item onto its own default
+    branch before its draft opens (Kraft-ei38e): a member's branch is cut from
+    the root's pinned gitlink, which can lag the member's origin by any amount.
+    "Changed" is `open_mr`'s own test -- still pending, commits beyond its
+    base -- so a member that gets no merge request is left alone. Returns
+    `(mount path, new base)` per member that moved; none for any other item.
+
+    A moved member leaves the root's committed gitlink at its old head, and
+    `assert_clean` would then refuse the root's own draft. So when the root
+    had committed the member's old head, the pointer update is committed in
+    the root -- one commit, only those mounts -- the same pointer move the
+    straggler sweep already commits after every task. `mr_rebase` rebases the
+    root after this, so its rebase carries that commit."""
+    rows = db.read(
+        lambda c: c.execute(
+            "SELECT * FROM work_item_repos WHERE work_item_id = ? AND role = 'submodule' "
+            "AND merge_state = 'pending' ORDER BY merge_rank",
+            (work_item_id,),
+        ).fetchall()
+    )
+    moved: list[tuple[str, str]] = []
+    repoint: list[str] = []
+    for r in rows:
+        sub, rel = Path(r["repo_path"]), r["submodule_path"]
+        sub_base = await base_branch(db, work_item_id, sub, member=True)
+        if await git.commits_ahead(sub, branch, sub_base) == 0:
+            continue
+        old = git_read(sub, "rev-parse", "HEAD")
+        head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
+        if head:
+            moved.append((rel, head))
+            if git_read(root, "rev-parse", f"HEAD:{rel}", expected_failure=True) == old:
+                repoint.append(rel)
+    _commit_paths(root, repoint, "chore: repoint members after pre-MR rebase", base)
+    return moved
 
 
 async def mr_rebase_forced(worktree: Path, repo: Path, branch: str, base: str) -> str | None:
