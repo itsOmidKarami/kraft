@@ -25,10 +25,12 @@ ToolNames = Mapping[str, tuple[str, ...]]
 def unmapped(
     tool_names: ToolNames, allowed: tuple[str, ...] | None, deny: tuple[str, ...]
 ) -> list[str]:
-    """Policy tool names no CLI tool maps to: rules can't be written for them,
-    so a launch naming one is refused rather than run with it unenforced."""
+    """Denied tool names no CLI tool maps to: a deny rule can't be written for
+    one, so a launch naming it is refused rather than run with it unenforced.
+    An allowlisted name the CLI has no tool for is fine -- it grants nothing,
+    and every tool not listed is denied anyway."""
     known = {k for names in tool_names.values() for k in names}
-    return [t for t in dict.fromkeys((*deny, *(allowed or ()))) if t not in known]
+    return [t for t in dict.fromkeys(deny) if t not in known]
 
 
 def _denied(names: tuple[str, ...], allowed: tuple[str, ...] | None, deny: tuple[str, ...]) -> bool:

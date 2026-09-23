@@ -34,13 +34,16 @@ def test_an_opencode_launch_runs_under_an_allowlist(run, tmp_path):
     assert json.loads(seen["env"][CONFIG])["permission"]["*"] == "deny"
 
 
-@pytest.mark.parametrize(
-    "policy,name",
-    [({"deny_tools": ("Monitor",)}, "Monitor"), ({"allowed_tools": ("Read", "Task2")}, "Task2")],
-)
-def test_a_policy_name_the_cli_has_no_tool_for_is_refused(run, tmp_path, policy, name):
-    with pytest.raises(LaunchRefused, match=rf"'opencode'.*'{name}'"):
-        _opencode(run, tmp_path, **policy)
+def test_a_denied_name_the_cli_has_no_tool_for_is_refused(run, tmp_path):
+    with pytest.raises(LaunchRefused, match=r"'opencode'.*'Monitor'"):
+        _opencode(run, tmp_path, deny_tools=("Monitor",))
+
+
+def test_an_allowlisted_name_the_cli_has_no_tool_for_grants_nothing(run, tmp_path):
+    permission = json.loads(
+        _opencode(run, tmp_path, allowed_tools=("Read", "Task2"))["env"][CONFIG]
+    )["permission"]
+    assert permission["*"] == "deny" and permission["read"] == "allow"
 
 
 def _amp(run, tmp_path, **kw):

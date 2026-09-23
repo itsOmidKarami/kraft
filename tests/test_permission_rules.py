@@ -60,13 +60,12 @@ def test_a_deny_outranks_the_allowlist(tmp_path):
     assert _opencode(("Read",), ("Read",), tmp_path)["read"] == "deny"
 
 
-def test_unmapped_names_are_reported_once_and_mapped_ones_not():
+def test_only_an_unmapped_denied_name_is_reported():
+    """A deny the CLI can't express refuses the launch; an allowlisted name
+    the CLI has no tool for just grants nothing."""
     names = {"bash": ("Bash",), "edit": ("Edit", "Write")}
-    assert pr.unmapped(names, ("Write", "Read", "Read"), ("Bash", "Monitor")) == [
-        "Monitor",
-        "Read",
-    ]
-    assert pr.unmapped(names, None, ()) == []
+    assert pr.unmapped(names, ("Write", "Read"), ("Bash", "Monitor", "Monitor")) == ["Monitor"]
+    assert pr.unmapped(names, ("Read", "TodoWrite"), ()) == []
 
 
 def _amp(allowed, deny, tmp_path):

@@ -12,8 +12,8 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
   `OPENCODE_CONFIG_CONTENT` with `--standalone`, a per-session Amp
   `--settings-file`), and the CLI enforces them. Denying `Bash` also denies
   OpenCode's code mode. An allowlisted tool on Amp is allowed outright, past
-  Amp's own built-in asks. A policy tool name the CLI has no tool for refuses
-  the launch. These decisions aren't logged on the timeline, and grants aren't
+  Amp's own built-in asks. A denied tool name the CLI has no tool for refuses
+  the launch; an allowlisted one grants nothing. These decisions aren't logged on the timeline, and grants aren't
   applied (Kraft-4in7z.4, Kraft-4in7z.2).
 - A Codex, Cursor or other non-Claude worker that outlived a Kraft restart
   now has its tokens read with its own harness's log reader instead of

@@ -102,11 +102,13 @@ set, nothing is written and the launch is exactly as before.
   Amp is allowed outright: Amp's own built-in asks (a `git push`, an
   `rm -rf`) no longer apply to it. Denying `Bash` rejects `shell_command` and
   its async and legacy forms. Amp has no read, grep or glob tool of its own
-  (it reads through its shell), so `Read` or `Grep` in a task's policy refuses
-  an Amp launch.
+  (it reads through its shell), so `Read` or `Grep` in a task's
+  `deny_tools` refuses an Amp launch, and in an allowlist grants nothing.
 
-A policy tool name no tool on that CLI maps to (`tool_names:` in the harness
+A denied tool name no tool on that CLI maps to (`tool_names:` in the harness
 file) refuses the launch, naming the tool: Kraft can't write a rule for it.
+An allowlisted name the CLI has no tool for just grants nothing; every tool
+not listed is denied anyway.
 A CLI tool that covers two policy names follows Cursor's rule: OpenCode's
 `edit` and Amp's `apply_patch` also write files, so each is denied if `Edit`
 or `Write` is, and allowed under an allowlist only if both are listed.
