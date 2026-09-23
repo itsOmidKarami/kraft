@@ -4,6 +4,24 @@ Notable changes to Kraft, newest first. The release workflow publishes the
 section for each version as that release's notes. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.1.0
+
+- Codex workers now work on a default install. Codex's sandbox refused
+  writes outside the worktree, so a worker could not write its result file
+  under `~/.kraft/run/results` or commit (a linked worktree commits into the
+  main checkout's `.git`), and every codex item failed. Kraft now grants
+  both directories on every launch through a new `writable_dirs` capability
+  (Kraft-rs9pk).
+- Codex runs in approve-for-me mode by default: the workspace-write sandbox
+  plus Codex's automatic reviewer for anything outside it, the counterpart of
+  Claude's `auto`. `permission_mode` still overrides it per harness profile or
+  task.
+- Fix: resuming a codex session failed at argument parsing, because
+  `codex exec resume` rejects `-s` after `resume`. Every codex option is now a
+  `-c` config key, which parses on both paths.
+- Fix: a codex usage limit crashed the run instead of parking the item as
+  rate limited.
+
 ## 1.0.8
 
 - Fix: a `chain_revision_approval` gate now gets the same board, action-bar
