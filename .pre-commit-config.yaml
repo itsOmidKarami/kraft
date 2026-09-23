@@ -20,3 +20,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        # docsite/package-lock.json is ~800KB: Docus/Nuxt UI's dependency
+        # tree is much bigger than the frontend's. A real lockfile, not a
+        # mistake -- raise the ceiling rather than exclude lockfiles wholesale.
+        args: [--maxkb=1000]
