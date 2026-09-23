@@ -28,12 +28,19 @@ capabilities:
   structured_log:  { cli: ["--json"] }
   model:           { cli: ["-m", "{value}"], values: ['(gpt|o[0-9]|codex).*'] }
   effort:          { cli: ["-c", "model_reasoning_effort={value}"], values: [minimal, low, medium, high, xhigh] }
-  permission_mode: { cli: ["-s", "{value}"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
-  # Kraft-rs9pk: workspace-write lets codex write the workspace and /tmp only,
-  # and $KRAFT_RESULT_PATH lives under $KRAFT_HOME/run/results. Kraft fills
-  # this with that directory on every launch. Probed against codex-cli 0.155.0
-  # on 2026-09-23: without it a write under $HOME is refused.
-  result_dir:      { cli: ["--add-dir", "{value}"] }
+  # Kraft-rs9pk: every option below is a `-c` config key, because `codex exec
+  # resume` rejects `-s`, `--add-dir` and `--approve-for-me` after `resume`
+  # and accepts `-c`. Keys probed against codex-cli 0.155.0 on 2026-09-23 with
+  # --strict-config, and their effect read off a real run's turn_context.
+  #
+  # `--approve-for-me` is these three keys: `sandbox_mode=workspace-write`,
+  # `approval_policy=on-request`, `approvals_reviewer=auto_review`. The mode
+  # stays the sandbox; the automatic reviewer rides along with every mode.
+  permission_mode: { cli: ["-c", "sandbox_mode={value}", "-c", "approval_policy=on-request", "-c", "approvals_reviewer=auto_review"], values: [read-only, workspace-write, danger-full-access], always: workspace-write }
+  # workspace-write writes the worktree and /tmp only, and $KRAFT_RESULT_PATH
+  # lives under $KRAFT_HOME/run/results: without this a write under $HOME is
+  # refused. A TOML literal string, so a backslash in the path is harmless.
+  result_dir:      { cli: ["-c", "sandbox_workspace_write.writable_roots=['{value}']"] }
   resume:          { via: command_resume }
   usage:             { source: envelope, reader: codex-json }
   rate_limit_signal: { reader: codex-json }

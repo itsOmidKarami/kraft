@@ -25,9 +25,18 @@ A task's YAML never names a harness's actual CLI flags. It asks for a
 `autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `result_dir` — and each harness's own YAML
 (`src/kraft/harnesses/*.yaml` in the package) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
-acceptEdits|auto|...` for Claude, `-s read-only|workspace-write|...` for
-Codex, `--approval-mode default|yolo|...` for Gemini — one Kraft-side name,
+acceptEdits|auto|...` for Claude, `-c sandbox_mode=read-only|workspace-write|...`
+for Codex, `--approval-mode default|yolo|...` for Gemini — one Kraft-side name,
 three different flags.
+
+Codex's options are all `-c` config keys, because `codex exec resume` rejects
+`-s`, `--add-dir` and `--approve-for-me` after `resume` and accepts `-c`. Codex
+runs in its "approve for me" mode by default, Claude's `auto` counterpart: the
+sandbox is `workspace-write`, and a sandbox escalation the model asks for goes
+to Codex's automatic reviewer (`approval_policy=on-request`,
+`approvals_reviewer=auto_review`), not to a human. A `permission_mode` of
+`read-only` or `danger-full-access` (a harness profile's `defaults:` or a task)
+changes the sandbox. The reviewer stays on in every mode.
 
 Three capabilities are required — `prompt`, `context`, `usage` — since no
 agent dispatch can be built without them. Two are non-invocable —`usage`,
@@ -37,10 +46,12 @@ agent dispatch can be built without them. Two are non-invocable —`usage`,
 One is filled by Kraft, never by a task: `result_dir`, the directory holding
 the launch's `$KRAFT_RESULT_PATH` (`$KRAFT_HOME/run/results`). It's for a CLI
 whose own sandbox would refuse to write outside the worktree. Codex binds it
-to `--add-dir {value}`, because its `workspace-write` sandbox writes only the
-workspace and `/tmp`, and without that flag a codex worker on a default
-install (`~/.kraft`) can't write its result file. A harness that doesn't
-declare `result_dir` gets nothing extra.
+to `-c sandbox_workspace_write.writable_roots=['{value}']`, because its
+`workspace-write` sandbox writes only the workspace and `/tmp`, and without it
+a codex worker on a default install (`~/.kraft`) can't write its result file.
+The automatic reviewer could approve that write, but only if the model asks
+for it, so Kraft grants the directory it requires outright. A harness that
+doesn't declare `result_dir` gets nothing extra.
 
 Some harnesses declare `values:` on a capability — a closed vocabulary the
 CLI itself would reject (Codex's `effort` is `minimal, low, medium, high`,
