@@ -15,7 +15,7 @@ Kraft ships six harnesses:
 |---|---|---|
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
-| `cursor` | `agent -p --trust` | Cursor's agent CLI. Flags are checked against its `--help`; no authenticated run has been made yet. `--force` is on for every launch (without it, print mode applies no edits), and `permission_mode` accepts no other value. No out-of-band context channel (context goes in the prompt), no `effort` (a model id can carry one, such as `'name[effort=high]'`), and no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. Its `stream-json` log has no tokens or cost, so a Cursor session records neither: they stay empty, never zero. An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. |
+| `cursor` | `agent -p --trust` | Cursor's agent CLI. Runs in `--auto-review` (Cursor's classifier); `permission_mode: force` overrides it. Every launch gets a Kraft-owned config dir with commit attribution off ([Cursor](#cursor)). No out-of-band context channel (context goes in the prompt), no `effort` (a model id can carry one, such as `'name[effort=high]'`), and no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the chat id `resume` takes are read off its `stream-json` log; it reports no cost. An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. Checked with real runs on cursor-agent 2026.09.18-9a7762b. |
 | `opencode` | `opencode run` | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact` (OpenCode keeps tool permissions in `opencode.json`, not flags). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: OpenCode 2.x dropped `--variant`, so name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. In 2.x that log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails (Kraft-ihoen). A `task` sub-agent's tokens are not in the log. Checked against opencode 2.0.15. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 | `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. Checked with real Kraft work items on amp 0.0.1790142911. |
@@ -92,6 +92,51 @@ reports cost, so Kraft records none.
 
 An agent profile can't select `amp`: a profile needs a model for the provider,
 and Amp takes none. A task on `amp` sets `effort:` itself.
+
+### Cursor
+
+Kraft runs `agent` in `--auto-review`, Cursor's Smart Auto: a server-side
+classifier runs the tool calls it judges safe and refuses the rest. Without a
+mode, print mode only proposes edits and applies none.
+
+Every cursor launch gets `CURSOR_CONFIG_DIR` pointing at
+`$KRAFT_HOME/run/harness-config/cursor/`, a directory Kraft owns. Your own
+`~/.cursor` is never read or changed. Before each launch Kraft writes
+`cli-config.json` there: the file Cursor itself creates in an empty config
+dir, with one change, commit attribution off. With attribution on, Cursor adds
+a `Co-authored-by: Cursor` trailer to every commit the agent makes, and the
+classifier refused those commits. With it off, a worker commits normally. The
+file adds no permission rule. Cursor keeps its chats in the same directory,
+which is why it is one directory per harness rather than one per launch:
+`--resume` has to find the chat an earlier launch wrote.
+
+The login lives in the OS keychain, not the config dir, so a machine where you
+ran `agent login` needs nothing else. With an API key instead, name
+`CURSOR_API_KEY` in the repo's `env_passthrough`.
+
+Tokens come off the log's closing `result` line, one per run: uncached input,
+output and cache reads and writes. Cursor reports no cost, so Kraft records
+none.
+
+## How each harness runs unattended
+
+A worker has nobody to answer a permission prompt. So Kraft runs each CLI in
+its classifier mode where it has one, and otherwise in its most autonomous
+unattended mode. What Kraft itself needs from a worker, its result file and
+its commits, is granted explicitly and never left to a classifier.
+
+| Harness | Mode | Classifier? | Notes |
+|---|---|---|---|
+| claude | `--permission-mode auto`, plus Kraft's MCP permission tool for what the classifier won't settle | yes | |
+| codex | approve-for-me (-c keys), plus explicit results and `.git` writable roots | yes | |
+| cursor | `--auto-review`, plus a per-launch config with commit attribution off | yes | |
+| opencode | `--auto` | none in the CLI | |
+| amp | approves by default | no | |
+| gemini | `--approval-mode yolo` | no | |
+
+Only Claude sends the asks its classifier won't settle to Kraft today.
+Routing every harness's permission asks to Kraft the same way is planned
+(epic Kraft-4in7z).
 
 ## Agent profiles
 
