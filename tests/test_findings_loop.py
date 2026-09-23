@@ -449,6 +449,29 @@ def test_findings_measured_carries_all_findings_but_eligible_fingerprints(tmp_pa
     assert len(first["fingerprints"]) == 1
 
 
+def test_findings_measured_records_entries_the_parser_dropped(tmp_path, monkeypatch):
+    """A reviewer that writes a finding without `source_plugin` loses it in the
+    parser. The measurement must say so, or that review reads as a clean one."""
+    out = _run(
+        tmp_path,
+        monkeypatch,
+        [
+            {
+                "status": "done",
+                "findings": [{"severity": "critical", "message": "no source_plugin"}],
+            },
+        ],
+    )
+    payload = _measured(out)[0]["payload"]
+    assert payload["findings"] == []
+    assert sum(payload["dropped"].values()) == 1
+
+
+def test_findings_measured_has_no_dropped_key_for_a_clean_review(tmp_path, monkeypatch):
+    out = _run(tmp_path, monkeypatch, [{"status": "done", "findings": []}])
+    assert "dropped" not in _measured(out)[0]["payload"]
+
+
 def test_the_fix_prompt_names_findings_and_marks_repeats(tmp_path, monkeypatch):
     """Cycle 1's prompt must mark the finding it already tried and failed to fix.
 

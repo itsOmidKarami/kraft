@@ -15,16 +15,14 @@ else.
 
 ## Asking
 
-Same rule as any hook: if the spec leaves something genuinely undecidable, stop
-with status `needs_context` and put every open question in the one `question`
-field. Anything you can settle by reading the code, settle by reading the code.
+Anything you can settle by reading the code, settle by reading the code. Stop
+with `needs_context` only for what the spec leaves genuinely undecidable.
 
 ## If you are revising
 
-An existing document at your output path means a human read it and asked for
-changes. Their note leads your task instruction. Address it directly: change
-what they objected to, and leave what they did not object to alone. Do not
-rewrite the whole thing to look new.
+A human read the existing document and asked for changes; their note leads your
+task instruction. Change what they objected to and leave the rest alone, rather
+than rewriting the whole thing to look new.
 
 ## What the plan contains
 

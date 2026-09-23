@@ -157,18 +157,30 @@ def _one(raw: object) -> Finding | None:
     )
 
 
-def parse(result_path: str | Path) -> list[Finding]:
-    """Findings from a result file. Never raises; a bad file yields none."""
+def parse_counted(result_path: str | Path) -> tuple[list[Finding], int]:
+    """Findings from a result file, and how many entries were dropped as
+    malformed. Never raises; a bad file yields none and counts none.
+
+    The count exists because `_one` drops a finding missing a required key
+    without a word, and a reviewer that writes the schema wrong then reads as a
+    reviewer that found nothing.
+    """
     try:
         data = json.loads(Path(result_path).read_text())
     except OSError, json.JSONDecodeError, UnicodeDecodeError:
-        return []
+        return [], 0
     if not isinstance(data, dict):
-        return []
+        return [], 0
     raw = data.get("findings")
     if not isinstance(raw, list):
-        return []
-    return [f for f in (_one(r) for r in raw) if f is not None]
+        return [], 0
+    kept = [f for f in (_one(r) for r in raw) if f is not None]
+    return kept, len(raw) - len(kept)
+
+
+def parse(result_path: str | Path) -> list[Finding]:
+    """Findings from a result file. Never raises; a bad file yields none."""
+    return parse_counted(result_path)[0]
 
 
 def from_payload(raw: dict) -> Finding:

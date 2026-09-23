@@ -18,9 +18,7 @@ against the loop's cap. When your task declares the review package,
 branch the first time you are asked, then only what changed since your last
 session. Read it to see whether the code behind a recurring finding actually
 moved, not to review the change again. Do not go looking for the fix agent's
-reasoning -- if what you have is not enough to decide, say so in `concerns`
-and report `continue`; a false stop costs more than one more cycle spent on
-something that turns out fine.
+reasoning; it is not evidence about whether the code moved.
 
 ## What to weigh
 
@@ -42,19 +40,12 @@ something that turns out fine.
 
 ## Reporting your decision
 
-Write `verdict` into your result file, with your reasoning in `concerns`
-(required for every verdict -- it is the only record of why, and for
-`stop_downgrade` it is what a human reads at the review gate later):
+Report the verdict, and the reasoning in `concerns`, exactly as your task
+instruction lays out. `concerns` is required for every verdict: it is the only
+record of why, and for `stop_downgrade` it is what a human reads at the review
+gate later.
 
-- `"verdict": "continue"` -- worth another cycle.
-- `"verdict": "stop_needs_human"` -- the loop is not converging; a person
-  should look rather than pay for another guess.
-- `"verdict": "stop_downgrade"` -- the remaining findings are real but not
-  worth the cost of chasing further; let the chain proceed with them
-  unresolved, for a human to weigh at the review gate.
-
-Prefer `continue` when you are unsure. Stopping early on a loop that would
-have converged in one more cycle is the more expensive mistake in both
-directions -- it either strands the item for a human who then just retries
-it, or lets a real finding through unresolved for a saving that never
-materializes.
+When you are unsure, report `continue`, and say what you could not tell in
+`concerns`. A loop stopped early that would have converged in one more cycle
+either strands the item for a human who then just retries it, or lets a real
+finding through unresolved for a saving that never comes.
