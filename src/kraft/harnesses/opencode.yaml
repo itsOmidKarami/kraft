@@ -1,0 +1,47 @@
+# OpenCode (sst/opencode). Every flag below is in `opencode run --help` of
+# opencode-ai 1.18.32 (npm), checked on 2026-09-23. Source read at tag v1.18.32
+# (commit 545f51d2): packages/opencode/src/cli/cmd/run.ts is the whole of
+# `run`, including the `--format json` event writer.
+#
+# Real runs on 2026-09-23, no account and no API key: with no `-m`, `run`
+# picks `opencode/big-pickle`, a free model that needs neither, and succeeds.
+# A keyed provider with no key (`-m anthropic/...`) exits 1 with one line,
+# `{"type":"error",...,"error":{"name":"UnknownError","data":{"message":
+# "Unexpected server error. Check server logs for details.",...}}}`; the real
+# cause ("Model not found: anthropic/...") is only in opencode's own log,
+# which is why `structured_log` also prints ERROR logs into Kraft's.
+# A paid provider's run -- its cost, its rate limits -- is unverified.
+#
+# `--format json` is read by usage.READERS["opencode-json"].
+id: opencode
+kind: cli
+command: [opencode, run]
+
+capabilities:
+  # `run` has no system-prompt flag: a system prompt lives in an agent
+  # defined in opencode.json, which a launch cannot write.
+  context:         { channel: prompt }
+  structured_log:  { cli: ["--format", "json", "--print-logs", "--log-level", "ERROR"] }
+  # `provider/model`, over any provider OpenCode knows -- no `values:`, for
+  # the reason claude.yaml's `model` gives.
+  model:           { cli: ["-m", "{value}"] }
+  # A provider-specific variant name. An unknown one is ignored, not refused
+  # (measured: `--variant bogus-effort` ran and exited 0), so no `values:`.
+  effort:          { cli: ["--variant", "{value}"] }
+  # Without `--auto`, `run` answers every permission ask with "reject"
+  # (run.ts, the `permission.asked` branch) -- the silent denial gemini.yaml
+  # describes. `--auto` approves whatever config does not deny.
+  permission_mode: { cli: ["--auto"], values: [auto], always: auto }
+  # Takes the `sessionID` every JSON event carries.
+  resume:          { cli: ["--session", "{value}"] }
+  usage:             { source: envelope, reader: opencode-json }
+  rate_limit_signal: { reader: opencode-json }
+  # `--` so a prompt starting with a dash is not read as a flag. `run` joins
+  # its message words and wraps any containing a space in double quotes
+  # (run.ts; measured: the stored prompt is `"Reply with ..."`), so the
+  # agent sees the prompt quoted. No way around it with stdin at /dev/null.
+  prompt:          { cli: ["--", "{value}"] }
+
+# Absent, deliberately: deny_tools, allowed_tools, restrict_tools and
+# approval_channel (tool permissions are opencode.json rules, not `run`
+# flags), autocompact (config `compaction`, not a flag).

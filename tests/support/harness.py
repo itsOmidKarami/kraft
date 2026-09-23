@@ -25,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: same call is a real agent turn: network, tokens, tens of seconds. Here, not in
 #: the conftest, so a test can import it without `import conftest`, which is
 #: ambiguous now the repo root has a conftest.py too.
-REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "amp", "cursor-agent"})
+REAL_AGENT_BINARIES = frozenset({"claude", "codex", "gemini", "opencode", "amp", "cursor-agent"})
 
 
 def entry_of(fields: dict) -> Any:

@@ -636,6 +636,114 @@ def _rate_limit_codex(log_path: Path) -> dict | None:
     return None
 
 
+def _step_opencode(obj: dict) -> tuple[str, Usage] | None:
+    """One `opencode run --format json` `step_finish` event: its part id and
+    that step's own usage.
+
+    Not a running total, whatever an earlier note said: at v1.18.32 each
+    step-finish part is written once, with a fresh id, from the AI SDK's
+    per-request `finish-step` usage, not its `totalUsage`
+    (packages/opencode/src/session/processor.ts, `case "step-finish"`;
+    session/llm/ai-sdk.ts). Measured too: a resumed session's step reported
+    input 240 after a first turn's 6113. So steps are summed, keyed on the
+    part id in case one is ever repeated. `input` is already uncached and
+    `output` already less `reasoning` (session/session.ts `getUsage`), so
+    reasoning is added back into output. `cost` is OpenCode's own figure:
+    tokens times its models.dev price, 0 for a free model.
+    """
+    part = obj.get("part") if obj.get("type") == "step_finish" else None
+    tokens = part.get("tokens") if isinstance(part, dict) else None
+    if not isinstance(tokens, dict):
+        return None
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    cost = part.get("cost")
+    cost = float(cost) if isinstance(cost, int | float) and not isinstance(cost, bool) else None
+    return str(part.get("id")), Usage(
+        tokens_in=_int(tokens.get("input")),
+        tokens_out=_int(tokens.get("output")) + _int(tokens.get("reasoning")),
+        tokens_cache_read=_int(cache.get("read")),
+        tokens_cache_write=_int(cache.get("write")),
+        cost_usd=cost,
+    )
+
+
+def _stream_opencode(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+    """Every step so far, summed, cost included. `seen` maps part id -> usage
+    and is the caller's, kept across calls over a growing log. A step with no
+    cost makes the total's cost unknown, never zero.
+    ponytail: a `task` sub-agent runs in a child session whose events `run`
+    does not print (run.ts skips parts of any other sessionID), so its tokens
+    are missing here; reading them needs the session export, not the log."""
+    for obj in _json_lines(lines):
+        step = _step_opencode(obj)
+        if step is not None:
+            seen[step[0]] = step[1]
+    if not seen:
+        return None
+    costs = [u.cost_usd for u in seen.values()]
+    return replace(_sum(seen.values()), cost_usd=None if None in costs else sum(costs))
+
+
+def _envelope_opencode(log_path: Path) -> dict | None:
+    try:
+        u = _stream_opencode(log_path.read_text().splitlines(), {})
+    except OSError:
+        return None
+    if u is None:
+        return None
+    envelope: dict = {"usage": {k: getattr(u, k) for k in KINDS}}
+    if u.cost_usd is not None:
+        envelope["total_cost_usd"] = u.cost_usd
+    return envelope
+
+
+def _session_id_opencode(log_path: Path) -> str | None:
+    """The `sessionID` `opencode run --session` takes, which every event of
+    `--format json` carries (run.ts `emit`)."""
+    for obj in _log_objects(log_path):
+        sid = obj.get("sessionID")
+        if isinstance(sid, str) and sid:
+            return sid
+    return None
+
+
+#: A limited request, as OpenCode v1.18.32 reports one once it stops retrying
+#: (it retries a 429 itself, up to 5 times, honouring `retry-after`;
+#: session/retry.ts): an `APIError` with `statusCode` 429, its own free-tier
+#: and Go-plan limit bodies, or the rate-limit wording retry.ts matches on.
+_OPENCODE_LIMITED = re.compile(
+    r'"statusCode":\s*429\b|FreeUsageLimitError|GoUsageLimitError'
+    r"|rate.?limit|too many requests|usage limit",
+    re.IGNORECASE,
+)
+
+
+def _rate_limit_opencode(log_path: Path) -> RateLimitInfo | None:
+    """An `error` event whose error says the request was limited, or None.
+
+    The error is OpenCode's `{name, data}` (core/src/util/error.ts); for an
+    `APIError`, `data` carries `statusCode`, `responseHeaders` and
+    `responseBody` (core/src/v1/session.ts). The reset is the event's own
+    `timestamp` plus a numeric `retry-after`, when the response sent one.
+    ponytail: an HTTP-date `retry-after` is read as no reset time.
+    """
+    for obj in _log_objects(log_path):
+        err = obj.get("error") if obj.get("type") == "error" else None
+        if not isinstance(err, dict) or not _OPENCODE_LIMITED.search(json.dumps(err)):
+            continue
+        try:
+            retry_after = float(err["data"]["responseHeaders"]["retry-after"])
+            resets_at = obj["timestamp"] / 1000 + retry_after
+        except KeyError, TypeError, ValueError:
+            resets_at = None
+        return RateLimitInfo(
+            rate_limit_type=err.get("name"),
+            resets_at=resets_at,
+            resets_at_iso=datetime.fromtimestamp(resets_at, UTC).isoformat() if resets_at else None,
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class Reader:
     """A log schema Kraft knows how to parse.
@@ -679,6 +787,13 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_codex,
         rate_limit=_rate_limit_codex,
         session_id=_session_id_codex,
+    ),
+    "opencode-json": Reader(
+        name="opencode-json",
+        stream=_stream_opencode,
+        envelope=_envelope_opencode,
+        rate_limit=_rate_limit_opencode,
+        session_id=_session_id_opencode,
     ),
 }
 
