@@ -136,7 +136,8 @@ its commits, is granted explicitly and never left to a classifier.
 
 Only Claude sends the asks its classifier won't settle to Kraft today.
 Routing every harness's permission asks to Kraft the same way is planned
-(epic Kraft-4in7z).
+(epic Kraft-4in7z). See [The permission gate](permissions.md) for how Claude's
+asks reach Kraft and how Kraft decides them.
 
 ## Agent profiles
 

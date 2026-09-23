@@ -7,6 +7,9 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ## 1.1.0
 
+- Docs: a page on the permission gate — how a worker's ask reaches it, how
+  it decides from `allowed_tools`/`deny_tools`, the `permission_decision`
+  events it logs, and which harnesses reach it today (Kraft-9r3lv).
 - New harness: Cursor's agent CLI (`agent -p`), checked with real runs on
   cursor-agent 2026.09.18-9a7762b (Kraft-bosip). It runs in `--auto-review`,
   Cursor's classifier mode; `permission_mode: force` overrides it. Every
