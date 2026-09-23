@@ -1654,6 +1654,15 @@ non-zero when errors exist. `kraft admin templates show <id> --resolved` SHALL
 print a selected chain's resolved configuration.
 enforced-by: tests/cli/test_admin.py::test_admin_templates_lint_of_a_clean_library_exits_0, tests/cli/test_admin.py::test_admin_templates_lint_prints_each_error_and_exits_1, tests/cli/test_admin.py::test_admin_templates_show_resolved_prints_the_expanded_chain
 
+## REQ template-cli-lint-dir-is-offline
+
+`kraft admin templates lint --dir PATH` SHALL lint the template directory at
+`PATH` in-process, without a network call or reading `$KRAFT_HOME`, and SHALL
+print the same report shape and exit non-zero on any error, same as the
+server-backed form.
+enforced-by: tests/cli/test_admin.py::test_admin_templates_lint_dir_reads_the_shipped_library_with_no_server, tests/cli/test_admin.py::test_admin_templates_lint_dir_of_a_broken_fixture_names_the_error_and_exits_1
+origin: src/kraft/cli/templates.py §_lint_dir_report -- calls `TemplateLibrary.lint_dir` directly, the same call `GET /templates/lint` makes, but with no `skills_dir` (an installed skills overlay is that instance's, not a bare directory's) and no `instance_policy` (that instance's `policy.yaml` ceilings), so a chain that only fails one of those two checks will show clean here where the server route would flag it.
+
 ## REQ template-library-api-lists-its-components
 
 `GET /templates/library` SHALL list every component the loaded `library.yaml`
