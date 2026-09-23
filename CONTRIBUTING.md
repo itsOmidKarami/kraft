@@ -136,28 +136,34 @@ git log --oneline "$old" --not mybranch   # non-empty means something is missing
 
 ## User-facing docs
 
-`docsite/` is the published documentation site (`mkdocs build`, deployed to
-GitHub Pages by `.github/workflows/docs.yml` on every push to `main`) — not
-to be confused with `docs/intent/` below, which nobody but a contributor
-reads. If your change touches any of these, update the matching page in the
-same pull request, not as a follow-up:
+`docsite/` is the published documentation site (a Nuxt/Docus app; `nuxt
+generate`, deployed to GitHub Pages by `.github/workflows/docs.yml` on every
+push to `main`) — not to be confused with `docs/intent/` below, which nobody
+but a contributor reads. Its pages live under `docsite/content/`, one
+Markdown file per page with MDC syntax for the odd embedded component; a
+page's route follows its folder (`content/2.reference/3.configuration.md` is
+served at `/reference/configuration`) and a nested MDC component block needs
+one more `:` per level of nesting (`::` → `:::` → `::::`) or the parser
+closes the wrong block. If your change touches any of these, update the
+matching page in the same pull request, not as a follow-up:
 
 | Source | Docs page |
 |---|---|
-| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/cli.md` |
-| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/configuration.md` |
-| A chain template's node fields, or a new default chain | `docsite/concepts.md` |
-| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/harnesses.md` |
-| An MCP tool (`src/kraft/mcp.py`) | `docsite/agent-integration.md` |
-| `access.yaml` / remote-access behaviour | `docsite/remote-access.md`, and `SECURITY.md` if it's security-relevant |
+| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/2.reference/2.cli.md` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/2.reference/3.configuration.md` |
+| A chain template's node fields, or a new default chain | `docsite/content/1.guide/2.concepts.md` |
+| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/2.reference/5.harnesses.md` |
+| An MCP tool (`src/kraft/mcp.py`) | `docsite/content/2.reference/6.agent-integration.md` |
+| `access.yaml` / remote-access behaviour | `docsite/content/2.reference/7.remote-access.md`, and `SECURITY.md` if it's security-relevant |
 
-Run `uv run --group docs mkdocs build --strict` before you push — it fails
-on a broken internal link or anchor, though not on a page that's merely gone
-stale prose-wise. A stale-but-still-linking page is exactly the kind of gap
-`docs/intent/`'s `enforced-by:` pinning doesn't catch either; there is no
-automated backstop for "this paragraph no longer describes the code," only
-for "this file/anchor no longer exists." Read the page you're touching, not
-just the code.
+Run `npm ci && npx nuxt generate` in `docsite/` before you push — it fails on
+a page that doesn't parse, but unlike the old mkdocs build it does not
+strictly validate every internal link or anchor; a link to a page or heading
+that no longer exists renders instead of failing the build. A
+stale-but-still-linking page is exactly the kind of gap `docs/intent/`'s
+`enforced-by:` pinning doesn't catch either; there is no automated backstop
+for "this paragraph no longer describes the code," only for "this file no
+longer parses." Read the page you're touching, not just the code.
 
 ## Design documents
 

@@ -768,7 +768,13 @@ def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
     docs' example stopped every `codex` task on the shipped chain."""
     import re
 
-    page = (Path(__file__).resolve().parents[1] / "docsite" / "configuration.md").read_text()
+    page = (
+        Path(__file__).resolve().parents[1]
+        / "docsite"
+        / "content"
+        / "2.reference"
+        / "3.configuration.md"
+    ).read_text()
     block = re.search(r"## `policy.yaml`.*?```yaml\n(.*?)```", page, re.DOTALL).group(1)
     path = tmp_path / "policy.yaml"
     path.write_text(block)

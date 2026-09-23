@@ -142,7 +142,7 @@ Kraft's tools, not just the one you ran it from. If `claude` is not on
 guessing. It writes the skill files under `.claude/skills/kraft/` directly,
 with nothing registered in Claude Code's managed state — uninstalling is
 `rm -rf`. Both forms produce the same namespaced commands. See
-[docsite/agent-integration.md](docsite/agent-integration.md) for the full
+[docsite/content/2.reference/6.agent-integration.md](docsite/content/2.reference/6.agent-integration.md) for the full
 breakdown, including Kraft Lite's `/kraft-lite:*` commands.
 
 The tools you'll reach for most, over the same local HTTP API the browser uses:
