@@ -4,6 +4,7 @@ codex-cli 0.155.0 (Kraft-w3kot). Split from test_usage.py for its line budget.""
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 
 from kraft import usage
 from kraft.usage import Usage
@@ -103,7 +104,12 @@ def test_codex_reader_sees_a_usage_limit_in_turn_failed_only(tmp_path):
     ):
         failed = json.dumps({"type": "turn.failed", "error": {"message": message}})
         hit = reader.rate_limit(_codex_log(tmp_path, [*_CODEX_RUN[:2], failed]))
-        assert hit is not None and hit["message"] == message
-        assert hit["resets_at"] is None
+        # A dataclass, not a dict: `run_task` records it with `asdict`.
+        assert asdict(hit) == {
+            "rate_limit_type": None,
+            "resets_at": None,
+            "resets_at_iso": None,
+            "message": message,
+        }
         bare = json.dumps({"type": "error", "message": message})
         assert reader.rate_limit(_codex_log(tmp_path, [*_CODEX_RUN[:2], bare])) is None
