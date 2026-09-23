@@ -26,6 +26,10 @@ _EXCLUDE_NOTE = "# kraft: cursor permission hook (Kraft-4in7z)"
 _OURS = "kraft admin permission-hook"
 
 
+class HookFileError(ValueError):
+    """The worktree's hooks file is not one Kraft can add its entry to."""
+
+
 def needs_hook(allowed_tools, deny_tools, grants) -> bool:
     """Policy the hook would enforce. `git-commit` alone needs none: the
     launch itself lets a worker commit (`writable_dirs`, attribution off)."""
@@ -56,9 +60,15 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     `no_opinion` from the gate. Idempotent: a relaunch replaces Kraft's
     entry, never adds a second."""
     path = worktree / _REL
-    data = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
-    entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
-    entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
+    try:
+        data = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
+        entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
+        entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise HookFileError(
+            f"{path} is not a Cursor hooks file Kraft can add its permission hook to "
+            f"({exc}); fix or remove it"
+        ) from exc
     entries.append({"command": command_of(argv), "timeout": 10})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")

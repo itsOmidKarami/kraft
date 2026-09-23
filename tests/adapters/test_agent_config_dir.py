@@ -124,6 +124,41 @@ def test_a_cursor_launch_it_cannot_enforce_is_refused(run, tmp_path, policy):
     assert _kraft_hooks(cwd) is None
 
 
+def _tracked_hooks(cwd, body):
+    (cwd / ".cursor").mkdir()
+    (cwd / ".cursor/hooks.json").write_text(body)
+    git = ["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "add", ".cursor/hooks.json"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "repo hooks"], check=True)
+
+
+@pytest.mark.parametrize("body", ['{"version": 1, "hooks": {"stop": []}}', "{not json"])
+def test_a_launch_with_nothing_to_enforce_leaves_a_repos_hooks_file_alone(run, tmp_path, body):
+    """No rewrite, no skip-worktree, no exclude line -- and a hooks file Kraft
+    can't read is none of its business when it installs nothing."""
+    cwd = _repo(tmp_path)
+    _tracked_hooks(cwd, body)
+    _cursor(run, tmp_path, cwd)
+    assert (cwd / ".cursor/hooks.json").read_text() == body
+    flags = subprocess.run(
+        ["git", "-C", str(cwd), "ls-files", "-v", ".cursor/hooks.json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert flags.startswith("H ")  # not `S`: skip-worktree was never set
+    assert ".cursor" not in (cwd / ".git/info/exclude").read_text()
+
+
+def test_a_launch_that_needs_the_hook_refuses_a_hooks_file_it_cannot_read(run, tmp_path):
+    from kraft.adapters.agent import LaunchRefused
+
+    cwd = _repo(tmp_path)
+    _tracked_hooks(cwd, "{not json")
+    with pytest.raises(LaunchRefused, match=r"\.cursor/hooks\.json"):
+        _cursor(run, tmp_path, cwd, deny_tools=("Bash",))
+
+
 def test_a_claude_launch_writes_no_cursor_hook(run, tmp_path):
     cwd = _repo(tmp_path)
     run(harness="claude", deny_tools=("Bash",), grants=("git-push",), cwd=str(cwd))

@@ -5,6 +5,8 @@ beside a repo's own hooks, and never committed."""
 import json
 import subprocess
 
+import pytest
+
 from kraft.adapters import hook_install as hi
 
 ARGV = ["/py", "-m", "kraft", "admin", "permission-hook", "cursor"]
@@ -80,3 +82,13 @@ def test_a_tracked_hooks_file_keeps_its_own_hooks_and_is_not_staged(tmp_path):
     assert merged["preToolUse"] == [own, {"command": hi.command_of(ARGV), "timeout": 10}]
     _git(wt, "add", "-A")
     assert _git(wt, "diff", "--cached", "--name-only") == ""
+
+
+def test_a_hooks_file_kraft_cannot_read_is_refused_by_name(tmp_path):
+    _, wt = _worktree(tmp_path)
+    (wt / ".cursor").mkdir()
+    for body in ("{not json", "[]", '{"hooks": {"preToolUse": {"a": 1}}}'):
+        (wt / ".cursor/hooks.json").write_text(body)
+        with pytest.raises(hi.HookFileError, match=r"\.cursor/hooks\.json"):
+            hi.install_cursor_hook(wt, ARGV)
+        assert (wt / ".cursor/hooks.json").read_text() == body

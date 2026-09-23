@@ -646,7 +646,11 @@ def _install_hook(
     # (Task 1, probe B), so a grant beyond git-commit is enforced only as
     # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
     if h.permission_hook == "cursor":
-        _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
+        try:
+            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
+        except _hook_install.HookFileError as exc:
+            # Its policy needs the hook; without it the launch runs unenforced.
+            raise LaunchRefused(str(exc)) from exc
 
 
 async def run_agent_task(

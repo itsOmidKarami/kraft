@@ -41,7 +41,9 @@ project, not from `CURSOR_CONFIG_DIR`). With nothing to enforce there is no
 hook. Once written, the entry stays for the worktree's life and is the same
 for every launch, so sibling launches in one worktree never undo each other's;
 a session with nothing to enforce gets no opinion from the gate. A repo's
-own hooks in that file stay; Kraft's entry sits beside them.
+own hooks in that file stay; Kraft's entry sits beside them. A launch that
+installs nothing leaves the file alone entirely. One that needs the hook and
+finds a `.cursor/hooks.json` it can't read is refused, naming the file.
 
 The file never reaches a commit: an untracked `.cursor/hooks.json` is kept out
 through one marked line in the repository's `info/exclude`, and a tracked one
