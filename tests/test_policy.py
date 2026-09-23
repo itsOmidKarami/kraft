@@ -772,10 +772,11 @@ def test_the_docsite_policy_example_leaves_allowed_tools_unset(tmp_path):
         Path(__file__).resolve().parents[1]
         / "docsite"
         / "content"
-        / "2.reference"
-        / "3.configuration.md"
+        / "4.reference"
+        / "2.configuration"
+        / "3.policy.md"
     ).read_text()
-    block = re.search(r"## `policy.yaml`.*?```yaml\n(.*?)```", page, re.DOTALL).group(1)
+    block = re.search(r"```yaml\n(.*?)```", page, re.DOTALL).group(1)
     path = tmp_path / "policy.yaml"
     path.write_text(block)
     instance = policy.PolicyInput.from_yaml(path).instance_policy()

@@ -135,20 +135,22 @@ generate`, deployed to GitHub Pages by `.github/workflows/docs.yml` on every
 push to `main`) — not to be confused with `docs/intent/` below, which nobody
 but a contributor reads. Its pages live under `docsite/content/`, one
 Markdown file per page with MDC syntax for the odd embedded component; a
-page's route follows its folder (`content/2.reference/3.configuration.md` is
-served at `/reference/configuration`) and a nested MDC component block needs
+page's route follows its folder, minus the number prefixes
+(`content/4.reference/2.configuration/3.policy.md` is served at
+`/reference/configuration/policy`, and a folder's `index.md` is its landing
+page; a folder's `.navigation.yml` sets its sidebar title) and a nested MDC component block needs
 one more `:` per level of nesting (`::` → `:::` → `::::`) or the parser
 closes the wrong block. If your change touches any of these, update the
 matching page in the same pull request, not as a follow-up:
 
 | Source | Docs page |
 |---|---|
-| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/2.reference/2.cli.md` |
-| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/2.reference/3.configuration.md` |
-| A chain template's node fields, or a new default chain | `docsite/content/1.guide/2.concepts.md` |
-| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/2.reference/5.harnesses.md` |
-| An MCP tool (`src/kraft/mcp.py`) or a Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/2.reference/6.agent-integration.md` |
-| `access.yaml` / remote-access behaviour | `docsite/content/2.reference/7.remote-access.md`, and `SECURITY.md` if it's security-relevant |
+| A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/4.reference/1.cli/` |
+| A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/4.reference/2.configuration/` |
+| A chain template's node fields, or a new default chain | `docsite/content/2.concepts/1.vocabulary.md` |
+| A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/4.reference/5.harnesses/` |
+| An MCP tool (`src/kraft/mcp.py`) or a Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.agent-integration.md` |
+| `access.yaml` / remote-access behaviour | `docsite/content/3.guides/3.remote-access.md`, and `SECURITY.md` if it's security-relevant |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but it does not validate every internal link or

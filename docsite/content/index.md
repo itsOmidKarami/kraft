@@ -9,7 +9,7 @@ title: 'Work items become chains. Chains run themselves until a human has to dec
 description: 'Runs on your machine and edits your repos through ordinary git worktrees. It only stops to ask when a decision needs a person.'
 links:
   - label: Read the guide
-    to: /guide/getting-started
+    to: /get-started/first-work-item
     color: primary
   - label: View source
     to: https://github.com/itsOmidKarami/kraft
@@ -81,72 +81,36 @@ class: max-w-2xl
 ---
 ::::u-page-card
 ---
-to: /guide/getting-started
-title: Getting started
-description: Install, connect a repo, run a work item end to end, approve its gate.
+to: /get-started
+title: Get started
+description: Install Kraft and run your first work item.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /guide/concepts
+to: /concepts
 title: Concepts
-description: 'Work item, chain, node, task, gate, cap: the whole vocabulary.'
+description: Vocabulary, caps and budgets, and why Kraft has a permission gate.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /reference/install
-title: Install
-description: 'With uv, the install script, or Homebrew.'
+to: /guides
+title: Guides
+description: Use Kraft from your agent, run Kraft Lite, reach the board from a phone, add a harness.
 variant: ghost
 ---
 ::::
 
 ::::u-page-card
 ---
-to: /reference/cli
-title: CLI reference
-description: Every kraft verb, grouped by what it does.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/configuration
-title: Configuration
-description: Every field in library.yaml, repos.yaml, policy.yaml, access.yaml.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/agent-integration
-title: Agent integration
-description: Driving Kraft with /kraft:* slash commands from a coding agent instead of the browser.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/remote-access
-title: Remote access
-description: Approving a gate from your phone.
-variant: ghost
----
-::::
-
-::::u-page-card
----
-to: /reference/triggers
-title: Inbound triggers
-description: Starting a chain from a cron schedule or a webhook instead of filing it by hand.
+to: /reference
+title: Reference
+description: The CLI, every configuration file, chain nodes, permissions, harnesses, and triggers.
 variant: ghost
 ---
 ::::

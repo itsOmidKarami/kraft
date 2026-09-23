@@ -110,16 +110,25 @@ def harness_capabilities() -> set[str]:
     return set(harness.KNOWN)
 
 
-# (label, extractor, docsite page). Mirrors CONTRIBUTING.md's "User-facing
-# docs" table -- add a row there when you add one here.
+# (label, extractor, docsite page or folder; a folder counts every page in
+# it). Mirrors CONTRIBUTING.md's "User-facing docs" table -- add a row there when you add one here.
+_LIBRARY = "4.reference/2.configuration/4.library-and-chains.md"
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
-    ("kraft CLI commands", cli_commands, "2.reference/2.cli.md"),
-    ("MCP tools", mcp_tool_names, "2.reference/6.agent-integration.md"),
-    ("policy.yaml fields", policy_fields, "2.reference/3.configuration.md"),
-    ("access.yaml fields", access_fields, "2.reference/3.configuration.md"),
-    ("library.yaml agent task keys", agent_task_keys, "2.reference/3.configuration.md"),
-    ("library.yaml sections", library_sections, "2.reference/3.configuration.md"),
-    ("harness capabilities", harness_capabilities, "2.reference/5.harnesses.md"),
+    ("kraft CLI commands", cli_commands, "4.reference/1.cli"),
+    ("MCP tools", mcp_tool_names, "3.guides/1.agent-integration.md"),
+    ("policy.yaml fields", policy_fields, "4.reference/2.configuration/3.policy.md"),
+    ("access.yaml fields", access_fields, "4.reference/2.configuration/6.access.md"),
+    (
+        "library.yaml agent task keys",
+        agent_task_keys,
+        _LIBRARY,
+    ),
+    (
+        "library.yaml sections",
+        library_sections,
+        _LIBRARY,
+    ),
+    ("harness capabilities", harness_capabilities, "4.reference/5.harnesses"),
 ]
 
 
@@ -157,7 +166,9 @@ def main() -> int:
         failed = True
         print(f"docsite/content/{unknown}: names a gate no shipped chain has")
     for label, extractor, page in CHECKS:
-        text = (DOCSITE / page).read_text()
+        target = DOCSITE / page
+        pages = sorted(target.glob("**/*.md")) if target.is_dir() else [target]
+        text = "\n".join(p.read_text() for p in pages)
         missing = sorted(term for term in extractor() if term not in text)
         if missing:
             failed = True
