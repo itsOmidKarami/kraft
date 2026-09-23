@@ -17,6 +17,13 @@ kind: cli
 # is a workspace Cursor has never seen.
 command: [agent, -p, --trust]
 
+# Kraft-4in7z: Kraft answers Cursor's preToolUse hook (`kraft admin
+# permission-hook cursor`), which is how deny_tools and allowed_tools are
+# enforced -- Cursor has no per-launch tool flags. Its shell tool is `Shell`.
+permission_hook: cursor
+tool_names:
+  Shell: Bash
+
 capabilities:
   # No system-prompt or rules flag exists; Cursor reads AGENTS.md and
   # .cursor/rules from the workspace, which Kraft does not write. So context
@@ -35,6 +42,9 @@ capabilities:
   # `--resume [chatId]`, the init line's `session_id`. Chats live in the
   # config dir, which is why `config_dir` is one per harness, not per launch.
   resume:          { cli: ["--resume", "{value}"] }
+  # Held by the hook above, not a flag: build_argv emits nothing for them.
+  deny_tools:      { via: permission_hook }
+  allowed_tools:   { via: permission_hook }
   usage:           { source: envelope, reader: cursor-stream-json }
   # `--` ends option parsing (checked: `agent -p -- --x` reaches the auth
   # check, `agent -p --x` is "unknown option"), so a prompt starting with a
@@ -80,8 +90,8 @@ config_dir:
 # naming this file.
 # - effort: no flag. A model id can carry it, `--model 'name[effort=high]'`,
 #   so a profile that needs it spells it in the model value.
-# - deny_tools, allowed_tools, restrict_tools: no per-launch tool flags; the
-#   permission lists live in cli-config.json. With no restrict_tools or
+# - restrict_tools: no per-launch tool flags; deny_tools and allowed_tools
+#   are held by the permission hook instead. With no restrict_tools or
 #   under_allowlist, a launch under a tool allowlist is refused.
 # - approval_channel: no flag hands approvals to an MCP tool (Kraft-4in7z).
 # - autocompact: no flag.

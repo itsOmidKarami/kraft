@@ -98,7 +98,9 @@ class Capability:
     #: able to break a log reader in YAML.
     reader: str | None = None
     #: Names a command prefix key that carries this capability's value
-    #: instead of a flag -- `resume: {via: command_resume}`.
+    #: instead of a flag -- `resume: {via: command_resume}` -- or
+    #: `permission_hook`: a tool list the harness's pre-tool hook enforces
+    #: (Kraft-4in7z), never rendered into argv.
     via: str | None = None
     #: `permission_mode` only: the mode a launch under a tool allowlist runs
     #: in -- one that sends every ask it does not settle itself to the
@@ -124,6 +126,12 @@ class Harness:
     config_env: str | None = None
     #: File name -> text Kraft writes into that directory before every launch.
     config_files: dict[str, str] = field(default_factory=dict)
+    #: The CLI's own tool name -> Kraft's (Cursor's `Shell` -> `Bash`), so a
+    #: hooked call is checked against policy under the name policy uses.
+    tool_names: dict[str, str] = field(default_factory=dict)
+    #: The `permission_hooks.TRANSLATORS` key that answers this CLI's
+    #: pre-tool hook, or None when it has none (Kraft-4in7z).
+    permission_hook: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -168,8 +176,27 @@ class Harness:
                     f"{where}: capability {name!r} has no 'cli' binding for kind {kind!r} "
                     f"and is not one of {sorted(NON_INVOCABLE)}"
                 )
-            if cap.via and cap.via != "command_resume":
-                raise HarnessError(f"{where}: capability {name!r} 'via' must be 'command_resume'")
+            if cap.via and cap.argv:
+                raise HarnessError(
+                    f"{where}: capability {name!r} is bound 'via' {cap.via!r}, "
+                    "so it must not also carry a 'cli' binding"
+                )
+            if cap.via == "permission_hook":
+                if name not in ("deny_tools", "allowed_tools"):
+                    raise HarnessError(
+                        f"{where}: capability {name!r} cannot be bound via 'permission_hook'; "
+                        "only deny_tools and allowed_tools can"
+                    )
+                if not parsed.permission_hook:
+                    raise HarnessError(
+                        f"{where}: capability {name!r} is bound via 'permission_hook', "
+                        "which this harness does not define"
+                    )
+            elif cap.via and cap.via != "command_resume":
+                raise HarnessError(
+                    f"{where}: capability {name!r} 'via' must be 'command_resume' "
+                    "or 'permission_hook'"
+                )
             if cap.via == "command_resume" and not command_resume:
                 raise HarnessError(
                     f"{where}: capability {name!r} is bound via 'command_resume', "
@@ -227,6 +254,15 @@ class Harness:
                     "the last declared capability (argv order is declaration order)"
                 )
 
+        if parsed.permission_hook is not None:
+            from kraft.permission_hooks import TRANSLATORS
+
+            if parsed.permission_hook not in TRANSLATORS:
+                raise HarnessError(
+                    f"{where}: unknown permission_hook {parsed.permission_hook!r}; "
+                    f"known: {sorted(TRANSLATORS)}"
+                )
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -248,6 +284,8 @@ class Harness:
                 name: json.dumps(body, indent=2) + "\n"
                 for name, body in (config.files if config is not None else {}).items()
             },
+            tool_names=dict(parsed.tool_names),
+            permission_hook=parsed.permission_hook,
         )
 
     def supports(self, name: str) -> bool:
@@ -316,6 +354,8 @@ class HarnessInput(BaseModel):
     command_resume: Prefix = []
     capabilities: dict[StrictStr, CapabilityInput] = {}
     config_dir: ConfigDirInput | None = None
+    tool_names: dict[StrictStr, StrictStr] = {}
+    permission_hook: StrictStr | None = None
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -343,6 +383,10 @@ def _shape_problem(exc: ValidationError) -> str:
             return f"capability {name!r} must be a mapping"
         case ("capabilities", name, key, *_):
             return f"capability {name!r} {key!r} {_SHAPE.get(key, 'must be a string')}"
+        case ("tool_names", *_):
+            return "'tool_names' must map a CLI's tool name to Kraft's, both strings"
+        case ("permission_hook",):
+            return "'permission_hook' must be a string"
         case ("config_dir", *_):
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
     return "expected a top-level mapping"

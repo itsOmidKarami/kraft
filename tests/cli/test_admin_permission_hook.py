@@ -1,11 +1,16 @@
 """The subcommand a CLI's hook runs: stdin in, the CLI's answer out
 (Kraft-4in7z). Run as a real process, the way Cursor runs it."""
 
+import argparse
+import io
 import json
 import subprocess
 import sys
 
 import pytest
+
+from kraft import permission_hooks
+from kraft.cli import admin
 
 CURSOR_SHELL = json.dumps({"tool_name": "Shell", "tool_input": {"command": "ls"}})
 
@@ -56,3 +61,16 @@ def test_the_hook_never_imports_the_server(tmp_path):
     assert "kraft.permission_hooks" in imported
     assert not {m for m in imported if m.split(".")[0] in ("fastapi", "starlette")}
     assert not {m for m in imported if m.startswith("kraft.api")}
+
+
+def test_the_hook_passes_its_harness_tool_names(monkeypatch):
+    """Cursor's `Shell` reaches the gate as `Bash` only if the subcommand
+    hands answer_hook the harness's own `tool_names`."""
+    seen = []
+    monkeypatch.setattr(
+        permission_hooks, "answer_hook", lambda h, s, names, **kw: seen.append(names) or ("{}", 0)
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CURSOR_SHELL))
+    with pytest.raises(SystemExit):
+        admin._cmd_permission_hook(argparse.Namespace(harness="cursor", fail_closed=False))
+    assert seen == [{"Shell": "Bash"}]

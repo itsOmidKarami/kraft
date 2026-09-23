@@ -103,6 +103,14 @@ def test_minimal_harness_is_valid(tmp_path):
     assert "mini" in hs.valid
 
 
+#: A valid capability set whose prompt is not a bare positional, so a
+#: capability may follow it.
+_HOOK_CAPS = (
+    "  context: { channel: prompt }\n  usage: { source: result_file }\n"
+    "  prompt: { cli: ['-p', '{value}'] }\n"
+)
+
+
 @pytest.mark.parametrize(
     "body,expect",
     [
@@ -160,6 +168,28 @@ def test_minimal_harness_is_valid(tmp_path):
             "  resume: { via: command_resume }\n  prompt: { cli: ['-p', '{value}'] }\n",
             "which this harness does not define",
         ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncapabilities:\n"
+            + _HOOK_CAPS
+            + "  deny_tools: { via: permission_hook }\n",
+            "bound via 'permission_hook', which this harness does not define",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\npermission_hook: nosuch\ncapabilities:\n" + _HOOK_CAPS,
+            "unknown permission_hook 'nosuch'",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\npermission_hook: cursor\ncapabilities:\n"
+            + _HOOK_CAPS
+            + "  model: { via: permission_hook }\n",
+            "'model' cannot be bound via 'permission_hook'",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\npermission_hook: cursor\ncapabilities:\n"
+            + _HOOK_CAPS
+            + "  deny_tools: { via: permission_hook, cli: ['--deny', '{csv}'] }\n",
+            "must not also carry a 'cli' binding",
+        ),
     ],
 )
 def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect):
@@ -167,6 +197,36 @@ def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect
     hs = harness.load(tmp_path / "harnesses")
     assert "x" not in hs.valid
     assert expect in hs.invalid["x"]
+
+
+def test_cursor_maps_its_shell_to_bash_and_enforces_tool_lists_via_its_hook():
+    """Kraft-4in7z. Cursor has no per-launch tool flags: its preToolUse hook
+    holds deny_tools and allowed_tools, so neither reaches argv, and its
+    `Shell` is checked against policy as `Bash`."""
+    cursor = harness.load(None).valid["cursor"]
+    assert cursor.tool_names["Shell"] == "Bash"
+    assert cursor.permission_hook == "cursor"
+    assert cursor.supports("deny_tools") and cursor.supports("allowed_tools")
+    argv = harness.build_argv(
+        cursor,
+        prompt="p",
+        context="c",
+        options={"deny_tools": ("Bash",), "allowed_tools": ("Read",)},
+    )
+    assert "Bash" not in argv and "Read" not in argv
+
+
+#: Harnesses whose CLI already reports its shell tool as `Bash` (codex,
+#: probed 2026-09-23) need no mapping; every other hooked one must map it.
+NATIVE_BASH = {"codex"}
+
+
+def test_every_hooked_harness_resolves_its_shell_tool_to_bash():
+    hooked = [h for h in harness.load(None).valid.values() if h.permission_hook]
+    assert hooked
+    for h in hooked:
+        if h.id not in NATIVE_BASH:
+            assert "Bash" in h.tool_names.values(), h.id
 
 
 _CAPS = "  context: { channel: prompt }\n  usage: { source: result_file }\n"
@@ -370,7 +430,7 @@ def test_cursor_argv_runs_auto_review_and_ends_options_before_the_prompt():
     cursor = harness.load(None).valid["cursor"]
     assert not cursor.value_ok("permission_mode", "auto")
     assert cursor.value_ok("model", "claude-opus-4-8[effort=high]")
-    for absent in ("effort", "deny_tools", "restrict_tools", "rate_limit_signal"):
+    for absent in ("effort", "restrict_tools", "rate_limit_signal"):
         assert not cursor.supports(absent), absent
 
 

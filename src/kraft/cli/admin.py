@@ -833,7 +833,7 @@ def _cmd_permission_hook(ns: argparse.Namespace) -> None:
     from kraft import harness as _harness
 
     h = _harness.load(None).valid.get(ns.harness)
-    names = dict(getattr(h, "tool_names", {}) or {}) if h is not None else {}
+    names = h.tool_names if h is not None else {}
     out, code = permission_hooks.answer_hook(
         ns.harness, sys.stdin.read(), names, fail_closed=ns.fail_closed
     )

@@ -8,8 +8,13 @@ not logged. Grants are honoured in both modes; `prompt` (Claude's
 
 from __future__ import annotations
 
+import asyncio
+import json
+
 import pytest
 from support.permissions import ask, events_of, seed_session, templates
+
+from kraft import harness, permission_hooks
 
 _PUSH = {"command": "git push"}
 _LS = {"command": "ls"}
@@ -108,3 +113,28 @@ def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
 def test_prompt_mode_never_lets_a_grant_lift_a_deny(client):
     seed_session(policy={"deny_tools": ["Bash"], "grants": ["git-push"]})
     assert ask(client, input=_PUSH).json()["behavior"] == "deny"
+
+
+def test_cursor_shell_through_its_hook_is_denied_by_deny_tools_bash(client):
+    """Review focus 5 (Kraft-4in7z): Cursor names its shell tool `Shell`. Its
+    hook, with the tool names its bundled harness declares, asks the real
+    gate, which checks it as `Bash` against `deny_tools: [Bash]` -- a deny
+    Cursor receives, not a no opinion its classifier would wave through."""
+    seed_session(policy={"deny_tools": ["Bash"]})
+
+    async def gate(tool, input, tool_use_id=None, **kw):
+        # The TestClient waits on its own portal thread: off this loop's.
+        r = await asyncio.to_thread(ask, client, tool, input=input, tool_use_id=tool_use_id, **kw)
+        return r.json()
+
+    payload = {"tool_name": "Shell", "tool_input": {"command": "ls"}, "tool_use_id": "u1"}
+    out, code = permission_hooks.answer_hook(
+        "cursor",
+        json.dumps(payload),
+        harness.load(None).valid["cursor"].tool_names,
+        fail_closed=False,
+        ask=gate,
+    )
+    assert (json.loads(out)["permission"], code) == ("deny", 0)
+    [event] = events_of(client, "permission_decision")
+    assert (event["tool"], event["cli_tool"], event["decision"]) == ("Bash", "Shell", "deny")
