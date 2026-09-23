@@ -17,6 +17,7 @@ Kraft ships four harnesses:
 | `codex` | `codex exec` | No `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
 | `opencode` | `opencode run` | No out-of-band context channel (context goes in the prompt), no `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel` or `autocompact` (OpenCode keeps tool permissions in `opencode.json`, not flags). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: OpenCode 2.x dropped `--variant`, so name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. In 2.x that log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails (Kraft-ihoen). A `task` sub-agent's tokens are not in the log. Checked against opencode 2.0.15. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
+| `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no tool lists, no `approval_channel`, `autocompact` or `rate_limit_signal`. Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. Checked with real Kraft work items on amp 0.0.1790142911. |
 
 ## Capabilities, not flags
 
@@ -72,6 +73,24 @@ Claude's is `low, medium, high, xhigh, max`) — checked at load time, and
 (Gemini's `permission_mode` is always `yolo`: the disposable worktree is the
 real safety boundary, not the approval mode, and a headless worker has nobody
 to answer an approval prompt anyway).
+
+### Amp
+
+`amp` needs credentials a headless process can use. On a machine where you
+ran `amp login`, that's already true: the login lives under your home
+directory, which a worker keeps. Elsewhere, use an access token (`sgamp_...`,
+from ampcode.com/settings) in `AMP_API_KEY`. A worker's environment is an
+allowlist, so name it in the repo's `env_passthrough`. With neither, `amp`
+doesn't fail fast. It prints a device-login prompt and waits about five
+minutes for a browser before it exits 1.
+
+Kraft's token counts for an Amp run are the thread's own, message by message
+(they match `amp threads export`). Amp's bill (`amp threads usage`) can count
+a few more requests that aren't in the thread, and it's the only place Amp
+reports cost, so Kraft records none.
+
+An agent profile can't select `amp`: a profile needs a model for the provider,
+and Amp takes none. A task on `amp` sets `effort:` itself.
 
 ## Agent profiles
 
@@ -308,9 +327,9 @@ when its `profile:` carries one: a gate review launches once and never walks
 either list.
 
 Only a harness that declares `rate_limit_signal` can trigger a switch on a
-rate limit, which today is `claude`, `codex` and `opencode`. `gemini` can be
-a fallback target, and is skipped when unavailable, but a rate limit on it
-fails the launch as it does without a list.
+rate limit, which today is `claude`, `codex` and `opencode`. `gemini` and `amp`
+can be fallback targets, and are skipped when unavailable, but a rate limit
+on them fails the launch as it does without a list.
 
 Every skip or switch is logged:
 

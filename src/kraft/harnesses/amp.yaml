@@ -1,0 +1,67 @@
+# Amp (ampcode.com). Kraft-gvrke: every flag below is in `amp --help` of
+# @ampcode/cli 0.0.1790121694-g18bb0a (released 2026-09-23), read on
+# 2026-09-23. The npm name the bead gives, @sourcegraph/amp, is now a stub
+# that depends on @ampcode/cli. Nobody here has an Amp account, so no
+# authenticated run has been made: the log reader is written from the
+# published schema (ampcode.com/docs/cli/streaming-json) and the SDK's own
+# types (@ampcode/sdk 0.1.0-20260918210405, dist/types.d.ts).
+#
+# With no credentials, `amp -x ... --stream-json </dev/null` does not fail
+# fast: it prints a device-login prompt as plain text on stdout ("No API key
+# found. Starting login flow...", a URL, "Waiting for confirmation in the
+# browser...") and waits. Measured: 305 s later it prints "Login failed: The
+# login code expired. Run `amp login --oauth` again." on stderr and exits 1,
+# with no JSON on stdout. Headless auth is `AMP_API_KEY` (an `sgamp_` access
+# token), which a worker only gets through the repo's `env_passthrough`.
+#
+# Re-checked with a logged-in amp 0.0.1790142911 (Homebrew) on 2026-09-23 by
+# a real Kraft work item on `-m low`: it completed, and the tokens Kraft
+# recorded equal `amp threads export`'s per-message usage exactly. Amp's own
+# bill (`amp threads usage`) counts two more requests the thread doesn't
+# hold, and its cost is only in that Markdown report, so Kraft records no
+# cost for amp.
+id: amp
+kind: cli
+# `--no-archive-after-execute` on both command lines: `-x` archives the thread
+# when it ends, and an archived thread refuses `threads continue` ("This
+# thread is archived and cannot be continued", measured), so without it no
+# amp session could ever be resumed. Measured both placements parse.
+command: [amp, --no-archive-after-execute]
+# `amp threads continue <THREAD_ID> --execute ...` -- the id is a positional
+# of the subcommand, so resume gets its own prefix. It is the `session_id` on
+# the stream's `system`/`init` line (`T-...`), which is also what the SDK
+# passes here (buildCliArgs: `threads continue <id> --execute --stream-json`).
+command_resume: [amp, threads, continue, "{value}", --no-archive-after-execute]
+
+capabilities:
+  # No flag carries a system prompt or extra context: `-m` swaps Amp's own
+  # system prompt, and AGENTS.md is a file in the repo, not an argument.
+  context:         { channel: prompt }
+  # "Claude Code-compatible stream JSON". Not --stream-json-thinking: that
+  # one extends the schema and "is not compatible with Claude Code".
+  structured_log:  { cli: ["--stream-json"] }
+  # `-m, --mode` is The Dial: "how hard Amp works on a task" -- Amp picks the
+  # model, reasoning effort, system prompt and tools per mode, so it is
+  # Kraft's `effort`, not its `model`. The four built-in modes only; a plugin
+  # mode is an install's own. The docs say a thread keeps the mode of its
+  # first message, so on a resume this flag is at best ignored (unverified).
+  # A `--effort` flag exists (the SDK passes `--effort none..max`) but is not
+  # in `--help`, so it is not bound.
+  effort:          { cli: ["-m", "{value}"], values: [low, medium, high, ultra] }
+  resume:          { via: command_resume }
+  usage:           { source: envelope, reader: amp-stream-json }
+  prompt:          { cli: ["-x", "{value}"] }
+
+# Absent, deliberately:
+# - model: Amp picks the model; `--help` has no --model.
+# - permission_mode: "By default, Amp does not ask for approval before running
+#   tools" (ampcode.com/docs/tools), so a headless run is never blocked on an
+#   ask. `--dangerously-allow-all` parses (an unknown flag is refused, this one
+#   is not) and the SDK passes it, but it is not in `--help`.
+# - deny_tools, allowed_tools, restrict_tools: only the `amp.tools.disable` /
+#   `amp.tools.enable` settings, no flag, so this harness cannot launch under
+#   a tool allowlist.
+# - approval_channel: nothing asks, so nothing to route.
+# - autocompact: no flag.
+# - rate_limit_signal: the stream schema has no rate-limit event, and the
+#   out-of-credits error text is unknown.
