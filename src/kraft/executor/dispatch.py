@@ -1143,6 +1143,7 @@ async def _launch_agent(
             deny_tools=inv.deny_tools,
             effort=inv.effort,
             allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
             permission_mode=inv.permission_mode,
             sandbox=sandbox,
             steering_texts=inv.steering_texts,

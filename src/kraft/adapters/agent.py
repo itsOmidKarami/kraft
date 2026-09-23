@@ -10,6 +10,7 @@ from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
+from kraft.adapters import hook_install as _hook_install
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use `agent.<name>`
     HarnessUnavailable,
@@ -612,6 +613,26 @@ def _restricted(
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
+def _install_hook(
+    h: _harness.Harness,
+    cwd: Path,
+    allowed: tuple[str, ...] | None,
+    deny: tuple[str, ...],
+    grants: tuple[str, ...],
+) -> None:
+    """Kraft's pre-tool hook in the worktree when there is policy to enforce,
+    fail-closed under an allowlist; otherwise none, and one a previous launch
+    of this worktree left is removed (Kraft-4in7z)."""
+    argv = None
+    if _hook_install.needs_hook(allowed, deny, grants):
+        argv = _hook_install.hook_argv(h.id, fail_closed=allowed is not None)
+        # ponytail: a hook `allow` does not outrank cursor's --auto-review
+        # (Task 1, probe B), so a grant beyond git-commit is enforced only as
+        # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
+    if h.permission_hook == "cursor":
+        _hook_install.install_cursor_hook(cwd, argv)
+
+
 async def run_agent_task(
     db,
     run_dirs,
@@ -632,6 +653,8 @@ async def run_agent_task(
     deny_tools: tuple[str, ...] = (),
     effort: str | None = None,
     allowed_tools: tuple[str, ...] | None = None,
+    #: The task's named grants; any beyond `git-commit` need the hook (Kraft-4in7z).
+    grants: tuple[str, ...] = (),
     permission_mode: str | None = None,
     sandbox: dict | None = None,
     steering_texts: tuple[str, ...] = (),
@@ -701,7 +724,9 @@ async def run_agent_task(
         )
         if v
     }
-    if allowed_tools is not None:
+    # A harness whose hook holds the tool lists needs no restriction flag.
+    hooked = h.permission_hook is not None
+    if allowed_tools is not None and not hooked:
         options |= _restricted(h, harness, allowed_tools, permission_mode)
     # Loading the library and `harnesses.yaml` checks that a task's or a
     # profile's own options name capabilities its harness declares -- but
@@ -722,6 +747,8 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
+    if hooked:
+        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)

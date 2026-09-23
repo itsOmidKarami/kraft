@@ -91,8 +91,8 @@ config_dir:
 # - effort: no flag. A model id can carry it, `--model 'name[effort=high]'`,
 #   so a profile that needs it spells it in the model value.
 # - restrict_tools: no per-launch tool flags; deny_tools and allowed_tools
-#   are held by the permission hook instead. With no restrict_tools or
-#   under_allowlist, a launch under a tool allowlist is refused.
+#   are held by the permission hook instead, which Kraft writes into the
+#   worktree's .cursor/hooks.json (adapters/hook_install.py).
 # - approval_channel: no flag hands approvals to an MCP tool (Kraft-4in7z).
 # - autocompact: no flag.
 # - rate_limit_signal: the stream has no rate-limit event, so a limit fails

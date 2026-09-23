@@ -474,6 +474,7 @@ async def dispatch(
             permission_mode=inv.permission_mode,
             deny_tools=inv.deny_tools,
             allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
             steering_texts=inv.steering_texts,
             sandbox=sandbox,
             task_instruction=task_instruction,
