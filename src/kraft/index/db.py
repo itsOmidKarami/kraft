@@ -169,13 +169,15 @@ def _wipe(path: Path) -> None:
 def open_index(path: str | Path) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    conn = None
     try:
         conn = connect(path)
         if _migrate(conn):
             return conn
-        conn.close()
     except sqlite3.DatabaseError:
         logger.warning("index db at %s is not a usable database; rebuilding", path)
+    if conn is not None:
+        conn.close()
     _wipe(path)
     conn = connect(path)
     _create_all(conn)
