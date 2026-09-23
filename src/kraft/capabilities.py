@@ -85,7 +85,7 @@ MANIFEST: tuple[Capability, ...] = (
         ),
     ),
     Capability(
-        version="1.0.99",
+        version="1.1.0",
         name="never_signal_steering",
         what="the never-signal-processes-you-didnt-start rule (never kill a process "
         "you didn't start -- it might be the Kraft daemon) is no longer appended to "

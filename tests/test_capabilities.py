@@ -92,7 +92,7 @@ def test_the_never_signal_steering_entry_gives_the_exact_shipped_yaml():
     [entry] = [
         c
         for c in capabilities.MANIFEST
-        if c.version == "1.0.99" and c.name == "never_signal_steering"
+        if c.version == "1.1.0" and c.name == "never_signal_steering"
     ]
     library = (ROOT / "templates" / "library.yaml").read_text()
     block = (
