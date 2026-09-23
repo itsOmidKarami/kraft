@@ -351,8 +351,13 @@ class RateLimitInfo:
     #: Typing this narrower than `object` would mean coercing a value this
     #: function has never validated, which changes behaviour.
     rate_limit_type: object
-    resets_at: int | float
-    resets_at_iso: str
+    #: None when the CLI names no machine-readable reset time (codex's
+    #: message is human text); `stops` then retries now and `fallback` does
+    #: not treat the pair as known-limited.
+    resets_at: int | float | None
+    resets_at_iso: str | None
+    #: The CLI's own words, for a harness whose limit carries no reset time.
+    message: str | None = None
 
 
 def _rate_limit_claude(log_path: Path) -> RateLimitInfo | None:
@@ -614,7 +619,7 @@ _CODEX_LIMITED = re.compile(
 )
 
 
-def _rate_limit_codex(log_path: Path) -> dict | None:
+def _rate_limit_codex(log_path: Path) -> RateLimitInfo | None:
     """A `turn.failed` whose message says the launch was limited, or None.
 
     Only `turn.failed`, not the bare `error` event: that one also reports
@@ -627,12 +632,9 @@ def _rate_limit_codex(log_path: Path) -> dict | None:
         err = obj.get("error") if obj.get("type") == "turn.failed" else None
         message = err.get("message") if isinstance(err, dict) else None
         if isinstance(message, str) and _CODEX_LIMITED.search(message):
-            return {
-                "rate_limit_type": None,
-                "resets_at": None,
-                "resets_at_iso": None,
-                "message": message[:500],
-            }
+            return RateLimitInfo(
+                rate_limit_type=None, resets_at=None, resets_at_iso=None, message=message[:500]
+            )
     return None
 
 
