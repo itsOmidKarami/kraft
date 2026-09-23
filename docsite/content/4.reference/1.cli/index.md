@@ -8,14 +8,9 @@ running server. Verbs live in four groups: `item` acts, `view` reads, `repo`
 manages repositories and their worktrees, and `admin` runs this machine's
 server. Typing an old flat verb (`kraft list`) prints where it moved.
 
-
-`kraft <group> <verb> --help` is the authoritative list of flags. This page
-covers the ones you are most likely to need.
-
-
-Wherever a command takes a work item ID, you can omit it when you run the
-command from inside that item's worktree.
-
+`kraft <group> <verb> --help` prints the flags for one verb. Each group page
+below lists every flag. Wherever a command takes a work item ID, you can omit it
+when you run the command from inside that item's worktree.
 
 ## In this section
 
@@ -42,13 +37,6 @@ has no end on which to close an array.
 
 ## Shell completion
 
-`kraft` completes verbs with [`argcomplete`](https://github.com/kislyuk/argcomplete).
-For zsh, add this line to `~/.zshrc`:
-
-```zsh
-eval "$(register-python-argcomplete kraft)"
-```
-
-After you open a new shell, `kraft it<TAB>` completes to `kraft item`, and
-`kraft item <TAB>` lists every `item` verb. Completion follows the verb tree
-down. It works in any shell `argcomplete` supports.
+`kraft` completes verbs with [`argcomplete`](https://github.com/kislyuk/argcomplete),
+in any shell `argcomplete` supports. Register it with
+`register-python-argcomplete kraft`.

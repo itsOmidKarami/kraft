@@ -8,7 +8,7 @@ headline: '$ uv tool install kraft-sdlc && kraft'
 title: 'Work items become chains. Chains run themselves until a human has to decide.'
 description: 'Runs on your machine and edits your repos through ordinary git worktrees. It only stops to ask when a decision needs a person.'
 links:
-  - label: Read the guide
+  - label: Run your first work item
     to: /get-started/first-work-item
     color: primary
   - label: View source
@@ -130,7 +130,7 @@ links:
     color: neutral
     variant: outline
   - label: CONTRIBUTING.md
-    to: https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md
+    to: /project/contributing
     target: _blank
     color: neutral
     variant: outline

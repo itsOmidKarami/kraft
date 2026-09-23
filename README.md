@@ -15,7 +15,7 @@ subprocess, a builtin). Every retry loop is capped, and hitting a cap escalates
 to you with the full trace. Gates halt the chain where a human decides.
 
 Kraft binds loopback by default and edits your repos through git worktrees. How
-it fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
+it fits together: [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
 
@@ -91,7 +91,7 @@ pipeline.
 - [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](SECURITY.md).
 
 Kraft Lite (`plugins/kraft-lite/`) runs a chain inside a single agent session
-with no service; see [its README](plugins/kraft-lite/README.md).
+with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
 
 ## Contributing
 

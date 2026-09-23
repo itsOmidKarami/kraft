@@ -19,8 +19,9 @@ cannot be a commit behind the newest release.
 `.github/workflows/release.yml` collects every pull request merged since the
 previous `vX.Y.Z` tag and bumps by the largest label among them: two
 `release::minor` and three `release::patch` is a minor release. If all of them
-are `release::none`, there is no version to bump and it releases nothing. The notes are those pull requests'
-`## Changelog` sections, grouped into breaking changes, new features and fixes.
+are `release::none`, there is no version to bump and it releases nothing. The
+notes are those pull requests' `## Changelog` sections, grouped into breaking
+changes, new features and fixes.
 
 It refuses to run until `test` has passed on the commit being released. Then it
 builds the wheel, smoke-tests it, pushes the tag, creates the GitHub Release
@@ -30,8 +31,8 @@ after the smoke test passes, so a failed build leaves nothing behind.
 
 ## Plugin manifest versions
 
-`plugins/kraft/.claude-plugin/plugin.json` and `plugins/kraft-lite/.claude-plugin/plugin.json`
-carry their own `version` field, shown in `/plugin list`. You never edit this by
+`plugins/kraft/.claude-plugin/plugin.json` and
+`plugins/kraft-lite/.claude-plugin/plugin.json` carry their own `version` field, shown in `/plugin list`. You never edit this by
 hand and pull requests never touch it: `release.yml` stamps both files with
 `dev/stamp_plugin_versions.py` right after it tags a release, writes the
 release notes into `CHANGELOG.md`, then opens and auto-merges a

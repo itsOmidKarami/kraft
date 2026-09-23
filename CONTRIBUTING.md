@@ -36,6 +36,7 @@ dev/seed.py       dev-instance seeder
 fixtures/         fake agent and the PATH shim just dev uses
 docs/intent/      intended behaviour as pinned requirements, each tied to a test
 docsite/          the published documentation site
+docs/             testing guideline, intent tree, templates design draft
 plugins/          the Claude Code plugins: kraft and kraft-lite
 ```
 
@@ -132,16 +133,20 @@ git log --oneline "$old" --not mybranch   # non-empty means something is missing
 
 `docsite/` is the published documentation site (a Nuxt/Docus app; `nuxt
 generate`, deployed to GitHub Pages by `.github/workflows/docs.yml` on every
-push to `main`) — not to be confused with `docs/intent/` below, which nobody
-but a contributor reads. Its pages live under `docsite/content/`, one
-Markdown file per page with MDC syntax for the odd embedded component; a
-page's route follows its folder, minus the number prefixes
-(`content/4.reference/2.configuration/3.policy.md` is served at
-`/reference/configuration/policy`, and a folder's `index.md` is its landing
-page; a folder's `.navigation.yml` sets its sidebar title) and a nested MDC component block needs
-one more `:` per level of nesting (`::` → `:::` → `::::`) or the parser
-closes the wrong block. If your change touches any of these, update the
-matching page in the same pull request, not as a follow-up:
+push to `main`). It is not `docs/intent/` below, which only a contributor
+reads. If your change touches any of the sources below, update the matching
+page in the same pull request, not as a follow-up.
+
+Page rules:
+
+- Pages live under `docsite/content/`, one Markdown file per page, with MDC
+  syntax for the odd embedded component.
+- A page's route follows its folder, minus the number prefixes:
+  `content/4.reference/2.configuration/3.policy.md` is served at
+  `/reference/configuration/policy`. A folder's `index.md` is its landing
+  page, and its `.navigation.yml` sets its sidebar title.
+- A nested MDC component block needs one more `:` per level of nesting
+  (`::` then `:::` then `::::`), or the parser closes the wrong block.
 
 | Source | Docs page |
 |---|---|
@@ -154,12 +159,10 @@ matching page in the same pull request, not as a follow-up:
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but it does not validate every internal link or
-anchor; a link to a page or heading
-that no longer exists renders instead of failing the build. A
-stale-but-still-linking page is exactly the kind of gap `docs/intent/`'s
-`enforced-by:` pinning doesn't catch either; there is no automated backstop
-for "this paragraph no longer describes the code," only for "this file no
-longer parses." Read the page you're touching, not just the code.
+anchor: a link to a page or heading that no longer exists renders instead of
+failing the build. Nothing catches "this paragraph no longer describes the
+code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
+page you're touching, not just the code.
 
 ## Design documents
 
@@ -167,5 +170,6 @@ Specs and implementation plans are not committed. `.engineering/` and
 `docs/superpowers/` are gitignored. `design/` and `docs/consolidated/` are
 gitignored too and live only in the maintainer's private archive — if you see
 them still tracked in the tree, they haven't been scrubbed from history yet.
-`docs/intent/` is the exception: it states intended behaviour as pinned
-requirements and is maintained with the code.
+`docs/intent/` and `docs/templates-v1-design.md` are the exceptions: the
+first states intended behaviour as pinned requirements, the second is the
+templates design draft, and both are maintained with the code.

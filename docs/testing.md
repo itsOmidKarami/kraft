@@ -106,7 +106,7 @@ fixture refuses to answer a `param == "bd"` request against the fake).
   second time a setup recurs.
 
 - **A fixture that depends on another should pull it itself, not rely on
-  argument order.** Wave 3a's `dist` fixture first only worked when listed
+  argument order.** The `dist` fixture first only worked when listed
   before `client` in a test's signature — pytest sets fixtures up in
   argument order, so that was fragile and silently broke when someone
   reordered arguments. The fix: `client` calls
