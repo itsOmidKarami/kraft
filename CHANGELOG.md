@@ -24,8 +24,11 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
     name) but no repository names it, because it used to be automatic. If
     any of your repositories run tests that start servers of their own, run
     `kraft admin doctor` after updating -- it lists the exact YAML to add,
-    both the library profile (skip that part if `migrate_files` already
-    added it) and the `repos.yaml` `steering:` line.
+    both the library profile (skip that part if your library.yaml already
+    has one) and the `repos.yaml` `steering:` line.
+  - An item already in flight when you upgrade froze its steering at intake,
+    so it keeps running without the rule even after you name the profile --
+    only a retry or a re-filed item picks it up.
 
 ## 1.0.8
 

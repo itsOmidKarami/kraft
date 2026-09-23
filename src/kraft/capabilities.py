@@ -93,11 +93,12 @@ MANIFEST: tuple[Capability, ...] = (
         "profile a repository names for itself. A repository whose tests start "
         "servers of their own should name it.",
         how=(
-            "add to library.yaml's `steering:` (skip this part if `migrate_files` "
-            "already carried it over from a pre-1.0 install's "
-            "templates/steering/never-signal-processes-you-didnt-start.md):\n"
+            "if your library.yaml does not already have a "
+            "`never-signal-processes-you-didnt-start` steering profile (an install "
+            "upgraded from 0.x does -- migrate_files already carried it over), add to "
+            "library.yaml's `steering:`:\n"
             "  never-signal-processes-you-didnt-start:\n"
-            "    instructions: |\n"
+            "    instructions: >-\n"
             "      Never signal a process you did not start. If something is already\n"
             "      listening on a port you need, it is not a stale leftover to clear -- it\n"
             "      might be the Kraft daemon serving other work right now. Check\n"

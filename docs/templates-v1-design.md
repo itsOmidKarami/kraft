@@ -219,7 +219,7 @@ steering:
       Keep changes focused. Run the relevant checks before finishing.
 
   never-signal-processes-you-didnt-start:
-    instructions: |
+    instructions: >-
       Never signal a process you did not start. If something is already
       listening on a port you need, it is not a stale leftover to clear -- it
       might be the Kraft daemon serving other work right now. Check
