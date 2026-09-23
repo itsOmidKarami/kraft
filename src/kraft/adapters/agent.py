@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
 from kraft import harness as _harness
+from kraft import permission_hooks as _permission_hooks
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
 from kraft import skill as _skill
@@ -782,6 +784,21 @@ async def run_agent_task(
         )
     if hooked:
         _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
+    hook_env: dict[str, str] = {}
+    hook_argv: tuple[str, ...] = ()
+    if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
+        exe = shlex.split(command) if command else [h.command[0]]
+        try:
+            hook_argv = await _hook_install.codex_hook_flags(
+                exe, _hook_install.hook_argv(h.id), Path(cwd)
+            )
+        except _hook_install.CodexTrustError as exc:
+            # Never launched unenforced, never with every hook trusted.
+            raise LaunchRefused(
+                f"harness {harness!r} cannot run Kraft's permission hook, which this "
+                f"launch's policy needs: {exc}"
+            ) from exc
+        hook_env = {_permission_hooks.WORKTREE_ENV: str(cwd)}
     rules_env: dict[str, str] = {}
     rules_argv: tuple[str, ...] = ()
     if ruled:
@@ -809,7 +826,7 @@ async def run_agent_task(
         context=ctx,
         resume=resume_session_id,
         options=options,
-        extra=rules_argv,
+        extra=(*hook_argv, *rules_argv),
     )
     reader = log_reader(h)
     return await _subprocess.run_task(
@@ -835,6 +852,7 @@ async def run_agent_task(
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
             **_config_dir(run_dirs, h, session_id),
             **rules_env,
+            **hook_env,
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
         round=round,

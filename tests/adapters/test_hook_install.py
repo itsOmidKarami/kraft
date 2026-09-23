@@ -2,8 +2,13 @@
 when there is policy to enforce, once however often the worktree launches,
 beside a repo's own hooks, and never committed."""
 
+import asyncio
+import hashlib
 import json
+import shlex
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -92,3 +97,69 @@ def test_a_hooks_file_kraft_cannot_read_is_refused_by_name(tmp_path):
         with pytest.raises(hi.HookFileError, match=r"\.cursor/hooks\.json"):
             hi.install_cursor_hook(wt, ARGV)
         assert (wt / ".cursor/hooks.json").read_text() == body
+
+
+# -- codex: per-launch -c flags, trusted from `codex app-server` (Kraft-4in7z.3)
+
+FAKE_CODEX = [sys.executable, str(Path(__file__).parents[1] / "support/fake_codex_app_server.py")]
+CODEX_ARGV = ["/py", "-m", "kraft", "admin", "permission-hook", "codex"]
+
+
+@pytest.fixture
+def fake_codex(monkeypatch, tmp_path):
+    monkeypatch.setattr(hi, "_codex_flags", {})
+    log = tmp_path / "spawns.log"
+    monkeypatch.setenv("FAKE_CODEX_LOG", str(log))
+
+    def spawns():
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    return spawns
+
+
+def test_codex_flags_install_kraft_hook_trusted_by_the_hash_codex_lists(fake_codex, tmp_path):
+    flags = asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    digest = "sha256:" + hashlib.sha256(shlex.join(CODEX_ARGV).encode()).hexdigest()
+    assert flags == (
+        "-c",
+        'hooks.PreToolUse=[{hooks=[{type="command",'
+        'command="/py -m kraft admin permission-hook codex",timeout=10}]}]',
+        "-c",
+        'hooks.state={"/<session-flags>/config.toml:pre_tool_use:0:0"='
+        f'{{trusted_hash="{digest}"}}}}',
+    )
+    # Listed once for the hash, once more to see codex trusts it.
+    first, check = fake_codex()
+    assert first == ["app-server", *flags[:2]] and check == ["app-server", *flags]
+
+
+def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
+    for _ in range(3):
+        asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    assert len(fake_codex()) == 2
+    asyncio.run(hi.codex_hook_flags(FAKE_CODEX, [*CODEX_ARGV, "x"], tmp_path))
+    assert len(fake_codex()) == 4
+
+
+@pytest.mark.parametrize(
+    ("mode", "match"),
+    [
+        ("exit", "exited before answering"),
+        ("hang", "no hooks/list within 2s"),
+        ("unlisted", "did not list"),
+        ("distrust", "did not trust"),
+    ],
+)
+def test_codex_that_cannot_trust_the_hook_is_an_error(
+    fake_codex, monkeypatch, tmp_path, mode, match
+):
+    monkeypatch.setenv("FAKE_CODEX_MODE", mode)
+    monkeypatch.setattr(hi, "CODEX_TRUST_TIMEOUT", 2.0)
+    with pytest.raises(hi.CodexTrustError, match=match):
+        asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    assert hi._codex_flags == {}
+
+
+def test_a_codex_that_is_not_installed_is_an_error(fake_codex, tmp_path):
+    with pytest.raises(hi.CodexTrustError, match="no-such-codex"):
+        asyncio.run(hi.codex_hook_flags(["no-such-codex-xyz"], CODEX_ARGV, tmp_path))

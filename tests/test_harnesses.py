@@ -21,9 +21,11 @@ def test_claude_declares_the_leaked_claude_isms():
     assert claude.capabilities["approval_channel"].always == "mcp__kraft__permission_request"
 
 
-def test_codex_declares_no_deny_tools_and_gemini_no_resume():
+def test_codex_holds_tool_lists_in_its_hook_and_gemini_has_no_resume():
     hs = harness.load(None).valid
-    assert not hs["codex"].supports("deny_tools")
+    assert hs["codex"].permission_hook == "codex"
+    assert hs["codex"].capabilities["deny_tools"].via == "permission_hook"
+    assert hs["codex"].tool_names["apply_patch"] == ("Write", "Edit")
     assert not hs["gemini"].supports("resume")
     assert not hs["gemini"].supports("effort")
 
@@ -512,7 +514,7 @@ def test_an_option_a_harness_does_not_support_is_never_emitted():
     """Defence in depth. Task 3 rejects such a binding at load; if one ever
     reaches here it must not become a malformed command line -- the latent
     bug at agent.py:473."""
-    argv = _argv("codex", options={"deny_tools": ("Write",)})
+    argv = _argv("gemini", options={"deny_tools": ("Write",)})
     assert "Write" not in argv
     assert "--disallowed-tools" not in argv
 

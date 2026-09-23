@@ -14,18 +14,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
+
+#: Where the launch put the worker (adapters.hook_install.WORKTREE_ENV).
+WORKTREE_ENV = "KRAFT_WORKTREE"
 
 Answer = Literal["allow", "deny", "no_opinion"]
 
 
 @dataclass(frozen=True)
 class Translator:
-    #: stdin -> (CLI tool name, its input, the CLI's id for this call or None)
-    parse: Callable[[str], tuple[str, dict, str | None]]
+    #: stdin -> (CLI tool name, its input, the CLI's id for this call or
+    #: None), or None for a call that is not the worker's: no opinion, unasked.
+    parse: Callable[[str], tuple[str, dict, str | None] | None]
     render: Callable[[Answer, str], tuple[str, int]]
 
 
@@ -53,7 +59,40 @@ def _cursor_render(answer: Answer, reason: str) -> tuple[str, int]:
     return json.dumps(body), 0
 
 
-TRANSLATORS: dict[str, Translator] = {"cursor": Translator(_cursor_parse, _cursor_render)}
+def _codex_parse(stdin: str) -> tuple[str, dict, str | None] | None:
+    """Claude-shaped, tool names already Kraft's (codex-cli 0.155.0 probe).
+    The hook also fires for codex's own background agents (the memory
+    agent runs in ~/.codex/memories): a call outside the worker's worktree
+    (KRAFT_WORKTREE, set by the launch) is none of Kraft's business."""
+    call = _cursor_parse(stdin)
+    worktree = os.environ.get(WORKTREE_ENV)
+    cwd = json.loads(stdin).get("cwd")
+    if worktree and not (
+        isinstance(cwd, str) and Path(cwd).resolve().is_relative_to(Path(worktree).resolve())
+    ):
+        return None
+    return call
+
+
+def _codex_render(answer: Answer, reason: str) -> tuple[str, int]:
+    # No opinion is `{}`: codex's approve-for-me reviewer decides.
+    if answer == "no_opinion":
+        return "{}", 0
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": answer,
+                "permissionDecisionReason": f"Kraft: {reason}",
+            }
+        }
+    ), 0
+
+
+TRANSLATORS: dict[str, Translator] = {
+    "cursor": Translator(_cursor_parse, _cursor_render),
+    "codex": Translator(_codex_parse, _codex_render),
+}
 
 Ask = Callable[..., Awaitable[dict]]
 
@@ -73,10 +112,13 @@ def answer_hook(
     t = TRANSLATORS[harness]
     failed: Answer = "deny" if fail_closed else "no_opinion"
     try:
-        cli_tool, input, tool_use_id = t.parse(stdin)
+        call = t.parse(stdin)
     except Exception as exc:  # noqa: BLE001 -- a hook must answer, whatever it was given
         print(f"kraft permission-hook: unreadable {harness} payload: {exc}", file=sys.stderr)
         return t.render(failed, "Kraft could not read this call")
+    if call is None:
+        return t.render("no_opinion", "")
+    cli_tool, input, tool_use_id = call
     if ask is None:
         from kraft.client import reads
 

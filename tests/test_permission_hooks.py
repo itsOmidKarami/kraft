@@ -163,3 +163,93 @@ def test_an_enforce_ask_times_out_inside_cursors_hook_timeout(monkeypatch, mode,
     got = asyncio.run(reads.permission_request("Bash", {}, mode=mode))
     assert seen.get("timeout") == timeout
     assert got["behavior"] == ("unavailable" if mode == "enforce" else "deny")
+
+
+# -- codex (Kraft-4in7z.3) -----------------------------------------------------
+
+#: codex-cli 0.155.0's PreToolUse payload, from a real `codex exec` (2026-09-23).
+CODEX_BASH = {
+    "session_id": "01a0ced8-e57d-7150-ba32-5a4af78ed608",
+    "turn_id": "01a0ced8-e652-75a0-9c15-bc2eefafa199",
+    "transcript_path": "/home/u/.codex/sessions/rollout.jsonl",
+    "cwd": "/wt",
+    "hook_event_name": "PreToolUse",
+    "model": "gpt-5.6-terra",
+    "permission_mode": "default",
+    "tool_name": "Bash",
+    "tool_input": {"command": "echo hello"},
+    "tool_use_id": "exec-1d7bc1d4",
+}
+CODEX_NAMES = {"apply_patch": ("Write", "Edit")}
+
+
+def _codex(behavior, *, worktree, seen=None, fail_closed=False, **payload):
+    return ph.answer_hook(
+        "codex",
+        json.dumps({**CODEX_BASH, "cwd": str(worktree), **payload}),
+        CODEX_NAMES,
+        fail_closed=fail_closed,
+        ask=_asker(behavior, seen),
+    )
+
+
+@pytest.fixture
+def worktree(tmp_path, monkeypatch):
+    wt = tmp_path / "wt"
+    (wt / "sub").mkdir(parents=True)
+    monkeypatch.setenv(ph.WORKTREE_ENV, str(wt))
+    return wt
+
+
+def test_codex_asks_with_its_own_tool_names(worktree):
+    seen = []
+    _codex("no_opinion", worktree=worktree, seen=seen)
+    patch = {"command": "*** Begin Patch\n*** Add File: note.txt\n+x\n*** End Patch"}
+    _codex("no_opinion", worktree=worktree, seen=seen, tool_name="apply_patch", tool_input=patch)
+    (bash, bash_input, use_id, kw), (edit, _input, _id, edit_kw) = seen
+    assert (bash, bash_input, use_id) == ("Bash", {"command": "echo hello"}, "exec-1d7bc1d4")
+    assert (kw["harness"], kw["cli_tool"], kw["mode"]) == ("codex", "Bash", "enforce")
+    assert (edit, edit_kw["also"], edit_kw["cli_tool"]) == ("Write", ("Edit",), "apply_patch")
+
+
+@pytest.mark.parametrize(
+    ("behavior", "expected"),
+    [
+        ("deny", {"permissionDecision": "deny", "permissionDecisionReason": "Kraft: because"}),
+        ("allow", {"permissionDecision": "allow", "permissionDecisionReason": "Kraft: because"}),
+    ],
+)
+def test_codex_renders_a_decision_as_claude_shaped_hook_output(worktree, behavior, expected):
+    out, code = _codex(behavior, worktree=worktree)
+    assert (json.loads(out), code) == (
+        {"hookSpecificOutput": {"hookEventName": "PreToolUse", **expected}},
+        0,
+    )
+
+
+def test_codex_no_opinion_is_empty_so_its_reviewer_decides(worktree):
+    assert _codex("no_opinion", worktree=worktree) == ("{}", 0)
+
+
+@pytest.mark.parametrize("fail_closed", [False, True])
+def test_codex_background_agents_outside_the_worktree_are_not_asked(worktree, fail_closed):
+    """The hook fires for codex's memory agent too (cwd ~/.codex/memories,
+    bypassPermissions): no opinion, and the gate is never asked -- even
+    when the worker's own session is fail-closed."""
+    seen = []
+    out = _codex(
+        "deny",
+        worktree=worktree.parent / "codex-home/memories",
+        seen=seen,
+        fail_closed=fail_closed,
+        permission_mode="bypassPermissions",
+    )
+    assert (out, seen) == (("{}", 0), [])
+
+
+def test_codex_calls_anywhere_inside_the_worktree_are_asked(worktree, tmp_path):
+    (tmp_path / "link").symlink_to(worktree)
+    for cwd in (worktree / "sub", tmp_path / "link"):
+        seen = []
+        _codex("deny", worktree=cwd, seen=seen)
+        assert len(seen) == 1, cwd

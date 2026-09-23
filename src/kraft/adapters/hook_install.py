@@ -12,7 +12,9 @@ worktree's index. A repo's own hooks stay; Kraft's entry sits beside them.
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -83,3 +85,107 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     if _EXCLUDE_LINE not in text.splitlines():
         sep = "\n" if text and not text.endswith("\n") else ""
         exclude.write_text(f"{text}{sep}{_EXCLUDE_NOTE}\n{_EXCLUDE_LINE}\n")
+
+
+# -- codex ---------------------------------------------------------------------
+#
+# Codex takes a hook per launch (`-c hooks.PreToolUse=...`) but skips it,
+# silently, until it is trusted. Trust is per launch too: `-c hooks.state=`
+# names the hook's key and hash, both read off `codex app-server`'s
+# `hooks/list`. Never `--dangerously-bypass-hook-trust`: that trusts every
+# hook a repo ships as well (probe, codex-cli 0.155.0, Kraft-4in7z.3).
+
+CODEX_TRUST_TIMEOUT = 15.0
+_codex_flags: dict[tuple, tuple[str, ...]] = {}
+
+
+class CodexTrustError(ValueError):
+    """Codex could not be made to trust Kraft's hook for this launch."""
+
+
+def _toml(s: str) -> str:
+    # A JSON string is a valid TOML basic string.
+    return json.dumps(s)
+
+
+async def _codex_hook(exe: list[str], flags: list[str], cwd: Path, command: str) -> dict:
+    """Kraft's own entry in `codex app-server -c <flags>`'s `hooks/list`."""
+    import asyncio
+
+    proc = await asyncio.create_subprocess_exec(
+        *exe,
+        "app-server",
+        *(a for f in flags for a in ("-c", f)),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=cwd,
+    )
+    msgs = [
+        {
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "kraft", "version": "1"}},
+        },
+        {"method": "initialized"},
+        {"id": 2, "method": "hooks/list", "params": {"cwds": [str(cwd)]}},
+    ]
+    proc.stdin.write("".join(json.dumps(m) + "\n" for m in msgs).encode())
+
+    async def listed() -> dict:
+        while line := await proc.stdout.readline():
+            msg = json.loads(line)
+            if msg.get("id") == 2:
+                if "error" in msg:
+                    raise CodexTrustError(f"hooks/list failed: {msg['error']}")
+                return msg["result"]
+        raise CodexTrustError("codex app-server exited before answering hooks/list")
+
+    try:
+        result = await asyncio.wait_for(listed(), CODEX_TRUST_TIMEOUT)
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
+    for group in result.get("data") or ():
+        for hook in group.get("hooks") or ():
+            if hook.get("source") == "sessionFlags" and hook.get("command") == command:
+                return hook
+    raise CodexTrustError("codex app-server did not list Kraft's preToolUse hook")
+
+
+def _exe_identity(exe: list[str]) -> tuple:
+    # A codex upgrade may hash hooks differently: a new binary is a new key.
+    found = shutil.which(exe[0])
+    real = os.path.realpath(found) if found else exe[0]
+    return (real, os.stat(real).st_mtime_ns if found else None, *exe[1:])
+
+
+async def codex_hook_flags(exe: list[str], argv: list[str], cwd: Path) -> tuple[str, ...]:
+    """The `-c` flags that install Kraft's preToolUse hook in one codex
+    launch, trusted: checked by listing them once more, since an untrusted
+    hook is skipped without a word. Cached per codex binary and command.
+    Raises `CodexTrustError` on anything else -- the caller refuses the
+    launch rather than run it unenforced."""
+    command = command_of(argv)
+    hook = f'hooks.PreToolUse=[{{hooks=[{{type="command",command={_toml(command)},timeout=10}}]}}]'
+    key = (_exe_identity(exe), hook)
+    if key in _codex_flags:
+        return _codex_flags[key]
+    try:
+        found = await _codex_hook(exe, [hook], cwd, command)
+        state = (
+            f"hooks.state={{{_toml(found['key'])}={{trusted_hash={_toml(found['currentHash'])}}}}}"
+        )
+        if (await _codex_hook(exe, [hook, state], cwd, command)).get("trustStatus") != "trusted":
+            raise CodexTrustError("codex did not trust Kraft's hook with the hash it listed")
+    except CodexTrustError:
+        raise
+    except TimeoutError as exc:
+        raise CodexTrustError(
+            f"`{shlex.join(exe)} app-server` gave no hooks/list within {CODEX_TRUST_TIMEOUT:g}s"
+        ) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise CodexTrustError(f"`{shlex.join(exe)} app-server`: {exc!r}") from exc
+    _codex_flags[key] = flags = ("-c", hook, "-c", state)
+    return flags

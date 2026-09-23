@@ -205,7 +205,7 @@ def test_a_new_profile_is_added(client):
     "pid, body, reason",
     [
         ("codex", {"provider": "codex", "defaults": {"effort": "bogus"}}, "not a valid value"),
-        ("codex", {"provider": "codex", "defaults": {"deny_tools": "x"}}, "not a capability"),
+        ("codex", {"provider": "codex", "defaults": {"autocompact": "x"}}, "not a capability"),
         ("codex", {"provider": "nope"}, "not an installed harness"),
         ("codex", {"provider": "codex", "colour": "red"}, "colour"),
         ("codex", {"provider": "codex", "enabled": "yes"}, "enabled"),
