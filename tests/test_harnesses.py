@@ -300,8 +300,10 @@ def test_codex_argv_puts_the_bare_prompt_last():
     assert "-c" in argv
     assert "developer_instructions=CTX" in argv
     assert "model_reasoning_effort=high" in argv
-    # `always: workspace-write`, unasked.
-    assert argv[argv.index("-s") + 1] == "workspace-write"
+    # `always: workspace-write`, unasked, as `--approve-for-me`'s three keys.
+    for key in ("sandbox_mode=workspace-write", "approval_policy=on-request"):
+        assert key in argv
+    assert "approvals_reviewer=auto_review" in argv
 
 
 def test_gemini_folds_context_into_the_prompt():

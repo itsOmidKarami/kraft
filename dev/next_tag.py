@@ -1,8 +1,8 @@
-"""Compute the tag a merge should produce, from the merge request's label.
+"""Compute the next tag from a release impact, and read an impact off labels.
 
-The version comes from the git tag, so "bumping the version" is "making a tag" -
-and a tag nobody makes fails silently forever. Every merge request declares its
-release impact, and merging is what tags.
+The version comes from the git tag, so "bumping the version" is "making a tag".
+Every pull request declares its release impact; `plan_release.py` bumps a
+release by the largest one it ships. This CLI is the per-PR label check.
 
 Usage: python3 dev/next_tag.py <previous-tag-or-empty> <labels>
 Prints the tag to create, or nothing when the impact is `none`.

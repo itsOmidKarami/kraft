@@ -254,8 +254,9 @@ def fake_templates_dir(tmp_path: Path, agent_command: str) -> Path:
     """A throwaway templates dir holding the shipped V1 layout -- `library.yaml`,
     `chains/`, `harnesses.yaml` and `policy.yaml` -- with every agent profile
     launching `agent_command` (`seed_v1_library`). The product seed ships no
-    steering file (Kraft-sj86z: the never-signal rule lives in
-    `adapters.agent.SAFETY_RULES` instead), so there is none to copy in."""
+    legacy `steering/*.md` directory to migrate (Kraft-c82sp: the never-signal
+    rule is now the opt-in `never-signal-processes-you-didnt-start` library
+    profile, unselected by default), so there is none to copy in."""
     d = tmp_path / "templates"
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_REPO_ROOT / "templates" / "policy.yaml", d / "policy.yaml")

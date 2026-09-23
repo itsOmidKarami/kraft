@@ -266,7 +266,7 @@ jobs:
     # Skipped for forks on purpose. Only people with write access can label a
     # pull request, so requiring a label from an outside contributor is a red X
     # they have no way to clear. For a fork, the maintainer labels before
-    # merging; an unlabelled merge reads as `release::none` and ships nothing.
+    # merging; an unlabelled merge stops the next release until it is labelled.
     name: release impact declared
     if: >-
       github.event_name == 'pull_request' &&

@@ -18,7 +18,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
     resolve_profile,
     select_profile,
 )
-from kraft.config import RepoEntry
+from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import steering as _steering
@@ -74,27 +74,6 @@ _CTX = (
     "not reach the merge request. If `git add` refuses one of those paths, "
     "that is git working as intended — do not `git add -f` it or otherwise "
     "force it in."
-)
-
-#: Kraft's own safety rules, part of the contract every agent launch carries
-#: (`every-agent-launch-carries-kraft-safety-rules`). Not steering: nothing a
-#: task, chain, repo or operator writes can select it away. A worker once
-#: SIGKILLed the Kraft daemon it was running under (Kraft-f8u3); the legacy
-#: registry answered with a default steering on every agent hook, and V1 has no
-#: such default (Kraft-5x93b), so the rule lives here instead.
-SAFETY_RULES = (
-    "\n\nNever signal a process you did not start. If something is already "
-    "listening on a port you need, it is not a stale leftover to clear -- it "
-    "might be the Kraft daemon serving other work right now. Check "
-    "$KRAFT_DAEMON_PID and $KRAFT_DAEMON_PORT in your environment before "
-    "touching anything you find on a port: if the pid or the port matches, it "
-    "is the daemon, and `kill`, `pkill`, or piping `lsof` into `xargs kill` "
-    "would take down orchestration for every other work item on this install, "
-    "including this one. Ask any server you start yourself for an ephemeral "
-    "port (bind port 0, or leave KRAFT_PORT unset) rather than reuse the "
-    "daemon's. If a task genuinely needs the daemon's own port, that is a "
-    "question for a human, not something to resolve by killing what is "
-    "already there."
 )
 
 #: Intent-process design §4. Kraft-authored, and its only input is the repo's
@@ -505,10 +484,6 @@ def build_context(
             "read with the git command that header names -- use it when you "
             "need to judge the change as a whole.\n"
         )
-    # Unconditional, and here because every agent launch -- chain dispatch,
-    # gate auto-review, escalation -- builds its context through this function
-    # and `run_agent_task` is `harness.build_argv`'s only caller.
-    ctx += SAFETY_RULES
     if method_text:
         # After the contract, before steering: the agent reads what it must
         # produce, then how to produce it, then the house rules that apply to
@@ -542,6 +517,23 @@ def build_context(
 #: instruction past this is written to a file and the argv carries its head and
 #: the file's path instead (Kraft-rmz4g).
 INSTRUCTION_MAX_BYTES = 24 * 1024
+
+
+def _writable_dirs(run_dirs, name: str, cwd) -> str:
+    """The `writable_dirs` value: a JSON array (also a TOML inline array) of
+    the directories outside the worktree a worker must write (Kraft-rs9pk).
+
+    The result file's directory, under $KRAFT_HOME/run/results. And the
+    worktree's git common dir, where every commit writes -- the main
+    checkout's `.git`, outside a linked worktree -- asked of git rather than
+    guessed, and left out when git has none to give."""
+    dirs = [str(_subprocess.result_path_for(run_dirs, name).parent)]
+    common = git_read(
+        Path(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir", expected_failure=True
+    )
+    if common:
+        dirs.append(common)
+    return json.dumps(dirs, ensure_ascii=False)
 
 
 def _bounded_instruction(run_dirs, session_id: str, task_instruction: str) -> str:
@@ -706,6 +698,9 @@ async def run_agent_task(
                 f"harness {harness!r} ({h.path}) declares no {name!r} capability, "
                 f"but this launch asked for {name}={value!r}"
             )
+    # Kraft's own value, not a task's, so the check above never sees it.
+    if h.supports("writable_dirs"):
+        options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
     cmd = _harness.build_argv(
         h,
         command=command or None,
