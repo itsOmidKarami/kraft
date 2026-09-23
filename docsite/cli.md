@@ -231,6 +231,7 @@ kraft admin reindex [--repo P] # rescan documents into the search index
 kraft admin reload             # reread the template library and policy.yaml, no restart
 kraft admin update [--force] [--restart] [-y] # install the newest release (brew upgrade, if that's how you installed)
 kraft admin templates lint     # check every chain in the installed library; exit 1 on any error
+kraft admin templates lint --dir PATH  # the same check over PATH, in-process: no server, no $KRAFT_HOME
 kraft admin templates show ID  # one chain file as its author wrote it
 kraft admin templates show ID --resolved  # the same chain with its library components expanded
 kraft admin templates library      # every library.yaml component, its kind, and the chains using it

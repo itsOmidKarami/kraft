@@ -12,6 +12,7 @@ import yaml
 
 from kraft import client, render
 from kraft.cli import common
+from kraft.templates.library import TemplateLibrary
 
 
 def _render_lint(report: dict) -> str:
@@ -22,8 +23,25 @@ def _render_lint(report: dict) -> str:
     )
 
 
+def _lint_dir_report(path: str) -> dict:
+    """`--dir`'s in-process answer: `TemplateLibrary.lint_dir` over `path`,
+    never the daemon. No `skills_dir` -- an operator's `~/.kraft/skills`
+    overlay is that instance's, not the checkout's, so this only sees bundled
+    skills. No `instance_policy` either -- that is this run's `policy.yaml`,
+    also instance state, so a chain past that instance's `maxima:` ceiling
+    will not show up here even though the server route would catch it."""
+    report = TemplateLibrary.lint_dir(path)
+    return {
+        "valid": report.valid,
+        "chains": list(report.chains),
+        "issues": [
+            {"file": str(i.file), "chain": i.chain, "message": i.message} for i in report.issues
+        ],
+    }
+
+
 def _cmd_lint(ns: argparse.Namespace) -> None:
-    report = asyncio.run(client.lint_templates())
+    report = _lint_dir_report(ns.dir) if ns.dir else asyncio.run(client.lint_templates())
     common.emit(report, _render_lint, ns.json)
     if not report["valid"]:
         # exit 1 so `kraft admin templates lint && ...` works; the errors are on stdout
@@ -125,6 +143,14 @@ def add(subs, common_parser: argparse.ArgumentParser) -> None:
         "lint",
         parents=[common_parser],
         help="check every chain in the installed library; exit 1 on any error",
+    )
+    lint_p.add_argument(
+        "--dir",
+        metavar="PATH",
+        help="lint a template directory in-process instead of asking the daemon -- "
+        "no network, no $KRAFT_HOME. Skips an installed skills override and this "
+        "instance's policy.yaml ceilings, since neither belongs to a bare directory; "
+        "everything else matches the server route",
     )
     lint_p.set_defaults(func=_cmd_lint)
     show_p = verbs.add_parser("show", parents=[common_parser], help="print one chain template")

@@ -101,6 +101,37 @@ def test_admin_templates_lint_prints_each_error_and_exits_1(app, capsys):
     assert "garbled: " in capsys.readouterr().out
 
 
+def test_admin_templates_lint_dir_reads_the_shipped_library_with_no_server(monkeypatch, capsys):
+    """`--dir` runs `TemplateLibrary.lint_dir` in-process -- no `app` fixture,
+    and the client call raises if it's ever reached, so a passing test proves
+    the network path was never taken."""
+
+    async def broken():
+        raise AssertionError("--dir must not call the server")
+
+    monkeypatch.setattr(client, "lint_templates", broken)
+    shipped = Path(__file__).resolve().parents[2] / "templates"
+    cli.main(["admin", "templates", "lint", "--dir", str(shipped)])
+    assert "no errors" in capsys.readouterr().out
+
+
+def test_admin_templates_lint_dir_of_a_broken_fixture_names_the_error_and_exits_1(
+    monkeypatch, capsys, tmp_path
+):
+    async def broken():
+        raise AssertionError("--dir must not call the server")
+
+    monkeypatch.setattr(client, "lint_templates", broken)
+    chains = tmp_path / "chains"
+    chains.mkdir()
+    (chains / "garbled.yaml").write_text("nodes: [unclosed\n")
+    (tmp_path / "library.yaml").write_text("tasks: {}\n")
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["admin", "templates", "lint", "--dir", str(tmp_path)])
+    assert caught.value.code == 1
+    assert "garbled: " in capsys.readouterr().out
+
+
 def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
     cli.main(["admin", "templates", "show", "default", "--resolved"])
     printed = yaml.safe_load(capsys.readouterr().out)
