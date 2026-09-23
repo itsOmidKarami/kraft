@@ -15,12 +15,13 @@ import shutil
 import uuid
 
 from kraft import caps, events, executor, store
+from kraft import harness as _harness
 from kraft import policy as _policy
 from kraft import usage as _usage
 from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
-from kraft.templates.models import AgentTask, TaskKind
+from kraft.templates.models import AgentTask, GateNode, TaskKind
 from kraft.worker import steering as _steering
 
 _SESSIONS = ".engineering/sessions"
@@ -234,19 +235,57 @@ def session_status(db, session_id: str) -> str | None:
 #: The escalation role, as an ordinary agent task
 #: (`agent-roles-use-ordinary-agent-task-runtime-configuration`): its launch
 #: resolves `harness:` through `adapters.agent.harness_profile` like every other
-#: V1 agent launch, so the runtime is `harnesses.yaml`'s `claude` profile
-#: -- its executable and defaults -- and no field special to escalation exists.
-#: A `claude` profile because the turn is a resumable conversation: the thread
-#: id is read off the provider's own `system`/`init` line
-#: (`usage.READERS["claude-stream-json"].session_id`). A disabled or missing
-#: profile stops the turn as a config error rather than substituting another
-#: (`unavailable-selected-harness-needs-human`).
+#: V1 agent launch, so the runtime is a `harnesses.yaml` profile -- its
+#: executable and defaults -- and no field special to escalation exists.
+#: Which profile is policy's `escalation_harness` (Kraft-wge0e), `claude`
+#: unless a layer says otherwise; this constant's is only the default's. The
+#: turn is a resumable conversation, so the thread id is read off the log with
+#: the provider's own reader (`adapters.agent.log_reader`). A disabled or
+#: missing profile stops the turn as a config error rather than substituting
+#: another (`unavailable-selected-harness-needs-human`).
 ESCALATION_TASK = AgentTask(
     id="escalation",
     kind=TaskKind.AGENT,
-    harness="claude",
+    harness=_policy.DEFAULT_ESCALATION_HARNESS,
     prompt="Help resolve a stopped work item.",
 )
+
+
+def item_harness(db, row) -> str | None:
+    """The `harnesses.yaml` profile `row`'s own work last ran on, for an
+    `escalation_harness: item` (Kraft-wge0e): the latest session of an agent
+    task of an execution node -- a gate's reviewer and an escalation turn are
+    not the item's work -- on the profile that task declares, or the one a
+    fallback switched that session to (`launch_fallback`). None when no agent
+    task of the item has run."""
+    snapshot = store.materialized_chain_of(row)
+    if snapshot is None:
+        return None
+    declared = {
+        t.path: t.task.harness
+        for n in snapshot.chain.nodes
+        if not isinstance(n.node, GateNode)
+        for t in n.tasks()
+        if isinstance(t.task, AgentTask)
+    }
+    wid = row["id"]
+    ran = db.read(
+        lambda c: c.execute(
+            "SELECT id, hook_point FROM worker_sessions WHERE work_item_id = ? ORDER BY rowid DESC",
+            (wid,),
+        ).fetchall()
+    )
+    last = next((r for r in ran if r["hook_point"] in declared), None)
+    if last is None:
+        return None
+    switched = [
+        e["payload"]["to"]["harness"]
+        for e in db.read(lambda c: events.read_after(c, 0, wid))
+        if e["type"] == "launch_fallback"
+        and e["payload"].get("session_id") == last["id"]
+        and e["payload"].get("to")
+    ]
+    return switched[-1] if switched else declared[last["hook_point"]]
 
 
 async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
@@ -388,6 +427,22 @@ async def dispatch(
             + "\n",
         )
 
+    # Which profile the turn runs on is policy too (Kraft-wge0e): the node's
+    # `escalation_harness`, or the item's own harness for `item`.
+    harness_id = policy.escalation_harness
+    if harness_id == _policy.FOLLOW_ITEM:
+        harness_id = item_harness(db, row)
+        if harness_id is None:
+            await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+            return await _refused(
+                db,
+                run_dirs,
+                session_id=session_id,
+                row=row,
+                log=f"escalation_harness is {_policy.FOLLOW_ITEM!r}, and no agent task of "
+                f"work item {work_item_id} has run for it to follow\n",
+            )
+
     # Its own `escalate:` kwarg (left at the `False` default) is the fix loop's
     # unrelated "buy a stronger model" bump -- same word, different feature;
     # not to be confused with this module.
@@ -408,7 +463,7 @@ async def dispatch(
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
     try:
         inv = _agent.resolve_agent_task(
-            ESCALATION_TASK,
+            ESCALATION_TASK.model_copy(update={"harness": harness_id}),
             launch.repo_entry,
             launch.library_steering,
             skills_dir=launch.skills_dir,
@@ -426,8 +481,7 @@ async def dispatch(
             run_dirs,
             session_id=session_id,
             row=row,
-            log=f"escalation selects harness {ESCALATION_TASK.harness!r}, which is not "
-            f"available: {exc}\n",
+            log=f"escalation selects harness {harness_id!r}, which is not available: {exc}\n",
         )
     except _steering.SteeringError as exc:
         # A snapshot stored before repository steering was frozen selecting a
@@ -483,7 +537,7 @@ async def dispatch(
             resume_session_id=resume_session_id,
             autocompact="auto",
             identify_as_worker=False,
-            harness_id=ESCALATION_TASK.harness,
+            harness_id=harness_id,
             repo_entry=launch.repo_entry,
             thread=thread,
             files=files,
@@ -492,8 +546,12 @@ async def dispatch(
     except _agent.LaunchRefused as exc:
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
 
-    cli_session_id = _usage.READERS["claude-stream-json"].session_id(
-        run_dirs.logs / f"{session_id}.log"
+    # The thread's own harness's reader: `inv.harness` is the provider the turn
+    # ran on, the thread's original one when it resumed.
+    provider = _harness.load(None).valid.get(inv.harness)
+    reader = _agent.log_reader(provider) if provider is not None else None
+    cli_session_id = (
+        _usage.READERS[reader].session_id(run_dirs.logs / f"{session_id}.log") if reader else None
     )
     if cli_session_id:
         await db.write(lambda c: store.set_escalation_session(c, work_item_id, cli_session_id))

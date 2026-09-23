@@ -60,6 +60,13 @@ class PolicyError(ValueError):
 
 
 DEFAULT_LOOP_SEVERITIES = frozenset({"critical", "important"})
+#: The harness an escalation turn runs on when no policy layer names one
+#: (Kraft-wge0e): what it always was, so an install that sets nothing changes
+#: nothing.
+DEFAULT_ESCALATION_HARNESS = "claude"
+#: An `escalation_harness` value meaning "the harness this item's own work ran
+#: on" (`escalate.item_harness`), not a `harnesses.yaml` profile id.
+FOLLOW_ITEM = "item"
 DEFAULT_AUTO_ESCALATE_STUCK_CAP = 3
 
 
@@ -215,9 +222,38 @@ class PolicyInput(BaseModel):
             raw_mc = 3
         raw["max_concurrent"] = raw_mc
         try:
-            return cls.model_validate(raw)
+            parsed = cls.model_validate(raw)
         except ValidationError as exc:
             raise _field_error(path.name, exc) from exc
+        _check_escalation_harness(parsed.defaults.escalation_harness, path.name)
+        return parsed
+
+
+def _check_escalation_harness(value: str | None, name: str) -> None:
+    """Refuse a `defaults.escalation_harness` that names no `harnesses.yaml`
+    profile, with the ones it could name (Kraft-wge0e): read now, not at the
+    first stuck item. The live table, the one a launch selects from
+    (`adapters.profiles.harness_table`). An item's own override is checked at
+    launch instead, by that same selection."""
+    if value is None or value == FOLLOW_ITEM:
+        return
+    # Late: `adapters.profiles` imports the template models, which import this.
+    from kraft import harness as _harness
+    from kraft.adapters.profiles import HarnessUnavailable, harness_table
+
+    try:
+        table, where = harness_table(_harness.load(None))
+    except HarnessUnavailable as exc:
+        raise PolicyError(
+            f"{name}: 'defaults.escalation_harness' {value!r} cannot be checked: {exc}",
+            field="escalation_harness",
+        ) from exc
+    if value not in table.profiles:
+        raise PolicyError(
+            f"{name}: 'defaults.escalation_harness' {value!r} is not a profile in {where}; "
+            f"known: {sorted(table.profiles)}, or {FOLLOW_ITEM!r}",
+            field="escalation_harness",
+        )
 
 
 @dataclass(frozen=True)
@@ -570,6 +606,10 @@ class PolicyDefaultsInput(CapLevels):
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
     allowed_harnesses: list[StrictStr] | None = None
+    #: The `harnesses.yaml` profile an escalation turn runs on, or `"item"`
+    #: (`FOLLOW_ITEM`). Operational: any layer may change it, and the
+    #: resolved profile still has to be in `allowed_harnesses` at launch.
+    escalation_harness: StrictStr | None = None
 
 
 class PolicyMaximaInput(CapLevels):
@@ -738,6 +778,9 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 
     timeout_minutes: PositiveInt | None = None
     max_attempts: PositiveInt | None = None
+    #: `PolicyDefaultsInput.escalation_harness`, for this scope: an escalation
+    #: turn runs under the policy of the node its item stopped at.
+    escalation_harness: StrictStr | None = None
 
     @classmethod
     def meet(cls, overrides: Iterable[TaskPolicyOverride]) -> TemplatePolicyOverride:
@@ -764,12 +807,20 @@ class TemplatePolicyOverride(TaskPolicyOverride):
                 f"{[s.model_dump() for s in sandboxes]}, and a task cannot run in all of them",
                 field="sandbox",
             )
+        escalation = list(dict.fromkeys(present("escalation_harness")))
+        if len(escalation) > 1:
+            raise PolicyError(
+                f"'escalation_harness': the repositories set different harnesses "
+                f"{escalation}, and an item escalates on one",
+                field="escalation_harness",
+            )
         deny = [t for tools in present("deny_tools") for t in tools]
         return cls(
             allowed_tools=common("allowed_tools"),
             allowed_harnesses=common("allowed_harnesses"),
             deny_tools=list(dict.fromkeys(deny)) or None,
             sandbox=sandboxes[0] if sandboxes else None,
+            escalation_harness=escalation[0] if escalation else None,
             **{
                 n: min(values) if (values := present(n)) else None
                 for n in (*BUDGET_FIELDS, "timeout_minutes", "max_attempts", *CAP_FIELDS)
@@ -924,6 +975,8 @@ class InstancePolicy:
     total_time_cap_minutes: int | None = None
     #: The per-level cap defaults (Ruling 211), for `at_level`.
     cap_defaults: CapLevels = field(default_factory=CapLevels)
+    #: What an escalation turn at this scope runs on (Kraft-wge0e).
+    escalation_harness: str = DEFAULT_ESCALATION_HARNESS
 
     @classmethod
     def from_input(cls, parsed: InstancePolicyInput) -> InstancePolicy:
@@ -943,6 +996,7 @@ class InstancePolicy:
             token_budget=None,
             maxima=m,
             cap_defaults=CapLevels(**{level: getattr(d, level) for level in CAP_LEVELS}),
+            escalation_harness=d.escalation_harness or DEFAULT_ESCALATION_HARNESS,
         )
 
     def at_level(self, level: str) -> InstancePolicy:
@@ -992,6 +1046,9 @@ class InstancePolicy:
             else TemplatePolicyOverride.model_validate(raw)
         )
         updates: dict[str, object] = {}
+
+        if getattr(override, "escalation_harness", None) is not None:
+            updates["escalation_harness"] = override.escalation_harness
 
         if override.deny_tools is not None:
             updates["deny_tools"] = tuple(dict.fromkeys((*self.deny_tools, *override.deny_tools)))

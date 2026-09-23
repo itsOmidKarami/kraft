@@ -309,7 +309,9 @@ def build() -> MCPServer:
         """Set or clear a Kraft work item's own policy override, for that item
         only -- never its chain template or any other item. `policy` holds
         item-wide fields (`max_attempts`, `timeout_minutes`,
-        `allowed_harnesses`, and the fields that can only tighten: the time
+        `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
+        profile an escalation turn runs on, or "item" for the one the item's
+        own work ran on -- and the fields that can only tighten: the time
         caps `time_cap_minutes` and `total_time_cap_minutes` -- a wait's total
         cap is its timeout -- and `allowed_tools`, `deny_tools`,
         `token_budget`, `budget_usd`, `sandbox`) and `paths`, a map from a canonical path
