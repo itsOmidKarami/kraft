@@ -173,6 +173,20 @@ smoke-models:
     @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }
     KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon
 
+# The pre-commit hook's door to smoke-models: a Kraft worker or a shell with no
+# credential skips it loudly instead of blocking the commit. smoke-models stays strict.
+smoke-models-hook:
+    #!/usr/bin/env bash
+    if [ -n "${KRAFT_WORK_ITEM_ID:-}" ]; then
+        echo "SKIPPED: smoke-models (shipped models on the real CLI): this is a Kraft worker (KRAFT_WORK_ITEM_ID set); run 'just smoke-models' before release" >&2
+        exit 0
+    fi
+    if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        echo "SKIPPED: smoke-models (shipped models on the real CLI): neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set; run 'just smoke-models' with one before release" >&2
+        exit 0
+    fi
+    exec just smoke-models
+
 # Playwright e2e
 e2e:
     cd frontend && npm run e2e
