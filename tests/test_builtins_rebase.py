@@ -122,7 +122,11 @@ async def test_refresh_worktree_base_skips_when_branch_already_pushed(
     _git(worktree, "push", "-q", "-u", "origin", branch)
     before = git_read(worktree, "rev-parse", "HEAD")
 
+    # Origin's main moves on too (Kraft-m4sdz): a move only the local checkout
+    # has is invisible to `upstream_head`, so without the push this took the
+    # "already up to date" exit and never reached the pushed-branch guard.
     _commit(repo, "moved.txt", "moved on\n", "moved on")
+    _git(repo, "push", "-q", "origin", "main")
 
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
     assert result is None
