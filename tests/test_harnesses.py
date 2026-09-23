@@ -9,7 +9,7 @@ from kraft.templates import environment as template_environment
 def test_bundled_harnesses_all_load():
     hs = harness.load(None)
     assert hs.invalid == {}
-    assert sorted(hs.valid) == ["amp", "claude", "codex", "gemini"]
+    assert sorted(hs.valid) == ["amp", "claude", "codex", "gemini", "opencode"]
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -469,3 +469,24 @@ def test_amp_reads_usage_with_its_own_reader_and_claims_no_rate_limit_signal():
     amp = harness.load(None).valid["amp"]
     assert amp.capabilities["usage"].reader == "amp-stream-json"
     assert not amp.supports("rate_limit_signal")
+
+
+def test_opencode_argv_every_flag_from_run_help():
+    """Kraft-nv1f1: every flag is in `opencode run --help` of 2.0.15. Context
+    has no flag, so it is folded into the prompt; `--auto` is on every launch,
+    or `run` rejects every permission ask; the prompt goes after `--`. 2.x
+    refuses `--log-level ERROR` and has no `--variant`, so effort is absent."""
+    argv = _argv("opencode", options={"model": "opencode/big-pickle"}, resume="ses_1")
+    assert argv[:2] == ["opencode", "run"]
+    assert argv[-2:] == ["--", "CTX\n\ndo the thing"]
+    assert argv[argv.index("--format") + 1] == "json"
+    assert argv[argv.index("-m") + 1] == "opencode/big-pickle"
+    assert argv[argv.index("--log-level") + 1] == "error"
+    assert "--variant" not in argv
+    assert argv[argv.index("--session") + 1] == "ses_1"
+    assert "--auto" in argv
+    opencode = harness.load(None).valid["opencode"]
+    assert opencode.capabilities["usage"].reader == "opencode-json"
+    assert opencode.capabilities["rate_limit_signal"].reader == "opencode-json"
+    assert not opencode.value_ok("permission_mode", "default")
+    assert not opencode.supports("effort")
