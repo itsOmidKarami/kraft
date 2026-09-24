@@ -11,6 +11,11 @@ links:
   - label: Get started
     to: /get-started
     color: primary
+  - label: View on GitHub
+    to: https://github.com/itsOmidKarami/kraft
+    variant: outline
+    color: neutral
+    target: _blank
 ui:
   wrapper: text-left items-start
   headline: hero-mono normal-case font-normal tracking-normal justify-start
