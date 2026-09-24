@@ -12,8 +12,14 @@ claude plugin marketplace add itsOmidKarami/kraft
 claude plugin install kraft@kraft
 ```
 
-Then start Kraft (`kraft`), run `/kraft:onboard` in your repo, and follow what
-it asks. To check it worked, run `/kraft:board`.
+Then start Kraft (`kraft`), open a session in your repo, run this, and follow
+what it asks:
+
+```text
+/kraft:onboard
+```
+
+To check it worked, run `/kraft:board`.
 
 Update with `claude plugin update kraft`. Remove with
 `claude plugin uninstall kraft`.
