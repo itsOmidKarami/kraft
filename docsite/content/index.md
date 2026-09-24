@@ -16,10 +16,6 @@ links:
     variant: outline
     color: neutral
     target: _blank
-  - label: Why Kraft
-    to: /get-started/why-kraft
-    variant: link
-    color: neutral
 ui:
   wrapper: text-left items-start
   headline: hero-mono normal-case font-normal tracking-normal justify-start
