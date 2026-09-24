@@ -6,18 +6,31 @@
 [![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
 
-Kraft runs semi-autonomous software work on your machine and stops to ask you
-whenever a decision belongs to a person. It is one FastAPI process plus a React
-SPA: a work item enters as a
-[chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary) of ordered nodes,
-and each node runs tasks through plugin adapters (a headless agent, a
-subprocess, a builtin). Every retry loop is capped, and hitting a cap escalates
-to you with the full trace. Gates halt the chain where a human decides.
+Hand Claude Code (or another coding agent) a spec and walk away. Kraft runs
+the work in its own git worktree, opens the pull request, and only interrupts
+you when a decision is actually yours — for developers tired of babysitting a
+session to the end of a task.
+
+- **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
+  request for your approval; reject with a note and the step that wrote it
+  tries again.
+- **Capped retries, not runaway loops.** Attempts, wall-clock time, and spend
+  are all bounded. Hit a cap and the item stops and hands you the full trace
+  instead of quietly burning tokens.
+- **Isolated git worktrees.** Each work item runs on its own branch in its own
+  worktree, so your checkout stays as you left it and items run in parallel.
+- **Local.** One process on your machine, bound to loopback by default — not a
+  hosted service.
+- **A board you can check from your phone.** Reach it from another device
+  through a tunnel.
 
 New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
 
-Kraft binds loopback by default and edits your repos through git worktrees. How
-it fits together: [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
+Under the hood, a work item runs as a
+[chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary) of ordered
+nodes, each running tasks through plugin adapters (a headless agent, a
+subprocess, a builtin). How it fits together:
+[Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
 
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
 

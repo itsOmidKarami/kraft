@@ -5,8 +5,8 @@ title: Kraft
 ::u-page-hero
 ---
 headline: '$ uv tool install kraft-sdlc && kraft'
-title: 'Work items become chains. Chains run themselves until a human has to decide.'
-description: 'Runs on your machine and edits your repos through ordinary git worktrees. It only stops to ask when a decision needs a person.'
+title: 'Hand your coding agent a spec and walk away. Kraft only interrupts you when a decision is yours.'
+description: 'Each work item runs in its own git worktree, on your machine, until it opens the pull request. Retries and spend are capped, and it stops at gates for your approval.'
 links:
   - label: Get started
     to: /get-started
