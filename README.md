@@ -65,7 +65,8 @@ uv tool install kraft-sdlc
 brew tap itsOmidKarami/kraft && brew install kraft
 ```
 
-To drive Kraft from a Claude Code session, add the plugin marketplace:
+To drive Kraft from Claude Code, install the plugin, then run `/kraft:onboard`
+in your repo and follow what it asks:
 
 ```text
 /plugin marketplace add itsOmidKarami/kraft
