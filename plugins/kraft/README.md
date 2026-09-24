@@ -7,15 +7,22 @@ server, so the `kraft` program must be installed and on your `PATH`. See the
 
 ## Install
 
-```text
-/plugin marketplace add itsOmidKarami/kraft
-/plugin install kraft@kraft
+```bash
+claude plugin marketplace add itsOmidKarami/kraft
+claude plugin install kraft@kraft
 ```
 
-Then start Kraft (`kraft`), run `/kraft:onboard` in your repo, and follow what
-it asks. To check it worked, run `/kraft:board`.
+Then start Kraft (`kraft`), open a session in your repo, run this, and follow
+what it asks:
 
-Update with `/plugin update kraft`. Remove with `/plugin uninstall kraft`.
+```text
+/kraft:onboard
+```
+
+To check it worked, run `/kraft:board`.
+
+Update with `claude plugin update kraft`. Remove with
+`claude plugin uninstall kraft`.
 
 ## The skills
 

@@ -14,16 +14,16 @@ endless. No service, no port, no database process.
 
 Kraft Lite ships in the Kraft marketplace, beside the `kraft` plugin:
 
-    /plugin marketplace add itsOmidKarami/kraft
-    /plugin install kraft-lite@kraft
+    claude plugin marketplace add itsOmidKarami/kraft
+    claude plugin install kraft-lite@kraft
 
 It used to publish from `itsOmidKarami/kraft-lite`, which is frozen at 0.5.2 and
 receives no more releases. Installing it from there still works; it just stops
 moving.
 
 The plugin name namespaces the commands as `/kraft-lite:*`. Update with
-`/plugin update kraft-lite`. It needs Python 3.10 or newer and nothing else — no
-pip install, no dependencies. CI tests both ends of that range.
+`claude plugin update kraft-lite`. It needs Python 3.10 or newer and nothing
+else — no pip install, no dependencies. CI tests both ends of that range.
 
 Add `--scope project` to either command to keep it to one repo. The plugin
 version follows Kraft's release tag. To check the install, run
