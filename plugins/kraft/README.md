@@ -12,12 +12,8 @@ server, so the `kraft` program must be installed and on your `PATH`. See the
 /plugin install kraft@kraft
 ```
 
-The plugin bundles `kraft admin mcp` as an MCP server, so installing it
-registers the tools and the skills together. Run `kraft admin init` only if you
-want plain files instead of a managed plugin, or a `.mcp.json` other tools can
-read from the repo.
-
-To check it worked, start Kraft (`kraft`) and run `/kraft:board`.
+Then start Kraft (`kraft`), run `/kraft:onboard` in your repo, and follow what
+it asks. To check it worked, run `/kraft:board`.
 
 Update with `/plugin update kraft`. Remove with `/plugin uninstall kraft`.
 
