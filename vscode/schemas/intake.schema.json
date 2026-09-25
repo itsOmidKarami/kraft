@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "default": false,
+      "title": "Enabled",
+      "type": "boolean"
+    },
+    "interval_s": {
+      "default": 300,
+      "title": "Interval S",
+      "type": "integer"
+    },
+    "max_concurrent": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrent"
+    },
+    "priority_ceiling": {
+      "default": 2,
+      "title": "Priority Ceiling",
+      "type": "integer"
+    },
+    "repos": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Repos",
+      "type": "array"
+    }
+  },
+  "title": "Kraft intake",
+  "type": "object"
+}

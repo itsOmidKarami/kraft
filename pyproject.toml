@@ -45,6 +45,7 @@ dev = [
     # progress bar, orphan pids and no test name. That cost two CI runs and an
     # hour of counting progress characters to find one nested test run.
     "pytest-timeout>=2.3",
+    "jsonschema>=4",  # test-only: validates the exported config schemas
 ]
 
 [project.scripts]

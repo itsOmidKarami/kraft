@@ -542,3 +542,100 @@ def test_lint_refuses_a_node_whose_tasks_produce_two_different_kinds(tmp_path):
     }
     with pytest.raises(TemplateLibraryError, match="does not agree on what it produces"):
         write(tmp_path, library, chain).resolve_chain("default")
+
+
+# ── issue locations (VS Code extension spec, "Config files") ──
+
+from kraft.templates.library import TemplateIssue  # noqa: E402
+
+
+def _located_library(tmp_path, tasks: dict) -> TemplateLibrary:
+    return TemplateLibrary.from_mappings(
+        {"tasks": tasks}, (), library_path=tmp_path / "library.yaml"
+    )
+
+
+def _issue_for(library: TemplateLibrary, tmp_path, chain: dict) -> TemplateIssue:
+    candidate, _ = library.with_chain(tmp_path / "chains" / "c.yaml", chain)
+    [issue] = candidate.lint()
+    return issue
+
+
+def test_an_unknown_extends_is_located_at_the_extends_key(tmp_path):
+    library = _located_library(tmp_path, {})
+    chain = {
+        "id": "c",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "nope"}]}],
+    }
+    issue = _issue_for(library, tmp_path, chain)
+    assert issue.loc == ("nodes", 0, "tasks", 0, "extends")
+    assert issue.related is None
+
+
+def test_a_schema_error_in_the_chain_itself_is_located_at_the_field(tmp_path):
+    library = _located_library(tmp_path, {})
+    chain = {
+        "id": "c",
+        "nodes": [
+            {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": 7}]}
+        ],
+    }
+    issue = _issue_for(library, tmp_path, chain)
+    assert issue.loc[:5] == ("nodes", 0, "tasks", 0, "command")
+
+
+def test_an_inherited_schema_error_points_related_at_the_library(tmp_path):
+    library = _located_library(tmp_path, {"broken": {"kind": "subprocess", "command": 7}})
+    chain = {
+        "id": "c",
+        "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "broken"}]}],
+    }
+    issue = _issue_for(library, tmp_path, chain)
+    assert issue.loc == ("nodes", 0, "tasks", 0)
+    assert issue.related == (tmp_path / "library.yaml", ("tasks", "broken", "command"))
+
+
+def test_an_unknown_steering_profile_is_located_at_its_task(tmp_path):
+    library = _located_library(tmp_path, {})
+    chain = {
+        "id": "c",
+        "nodes": [
+            {
+                "id": "n",
+                "kind": "exec",
+                "tasks": [
+                    {"id": "t", "kind": "subprocess", "command": "true", "steering": ["ghost"]}
+                ],
+            }
+        ],
+    }
+    issue = _issue_for(library, tmp_path, chain)
+    assert issue.loc == ("nodes", 0, "tasks", 0)
+
+
+def test_a_chain_file_that_does_not_parse_carries_the_parser_mark(tmp_path):
+    (tmp_path / "chains").mkdir()
+    (tmp_path / "library.yaml").write_text("tasks: {}\n")
+    (tmp_path / "chains" / "bad.yaml").write_text("id: bad\nnodes: [unclosed\n")
+    report = TemplateLibrary.lint_dir(tmp_path)
+    [issue] = report.issues
+    assert issue.mark is not None and issue.mark[0] >= 2
+
+
+def test_a_bad_steering_profile_is_located_in_the_library(tmp_path):
+    with pytest.raises(TemplateLibraryError) as raised:
+        TemplateLibrary.from_mappings(
+            {"steering": {"p": {"instructions": 7}}}, (), library_path=tmp_path / "library.yaml"
+        )
+    assert raised.value.loc[:3] == ("steering", "p", "instructions")
+
+
+def test_from_error_copies_location_and_message(tmp_path):
+    exc = TemplateLibraryError("boom", loc=("a",), related=(tmp_path / "l.yaml", ("b",)))
+    issue = TemplateIssue.from_error(tmp_path / "f.yaml", "c", exc)
+    assert (issue.message, issue.loc, issue.related, issue.mark) == (
+        "boom",
+        ("a",),
+        (tmp_path / "l.yaml", ("b",)),
+        None,
+    )

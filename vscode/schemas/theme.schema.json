@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "BoardPrefs": {
+      "additionalProperties": false,
+      "properties": {
+        "group_by": {
+          "default": "status",
+          "enum": [
+            "status",
+            "repo",
+            "template"
+          ],
+          "title": "Group By",
+          "type": "string"
+        },
+        "open_in": {
+          "default": "peek",
+          "enum": [
+            "peek",
+            "full"
+          ],
+          "title": "Open In",
+          "type": "string"
+        },
+        "show_done": {
+          "default": 5,
+          "minimum": 1,
+          "title": "Show Done",
+          "type": "integer"
+        }
+      },
+      "title": "BoardPrefs",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "board": {
+      "$ref": "#/$defs/BoardPrefs",
+      "default": {
+        "group_by": "status",
+        "open_in": "peek",
+        "show_done": 5
+      }
+    },
+    "density": {
+      "default": "compact",
+      "enum": [
+        "compact",
+        "comfortable"
+      ],
+      "title": "Density",
+      "type": "string"
+    },
+    "mode": {
+      "default": "dark",
+      "enum": [
+        "light",
+        "dark",
+        "system"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "palette": {
+      "default": "nocturne",
+      "title": "Palette",
+      "type": "string"
+    }
+  },
+  "title": "Kraft theme",
+  "type": "object"
+}

@@ -1664,6 +1664,14 @@ non-zero when errors exist. `kraft admin templates show <id> --resolved` SHALL
 print a selected chain's resolved configuration.
 enforced-by: tests/cli/test_admin.py::test_admin_templates_lint_of_a_clean_library_exits_0, tests/cli/test_admin.py::test_admin_templates_lint_prints_each_error_and_exits_1, tests/cli/test_admin.py::test_admin_templates_show_resolved_prints_the_expanded_chain
 
+## REQ config-check-is-a-dry-run-of-the-save
+
+`POST /templates/check` SHALL report the issues saving the given text as the
+named config file would refuse it for, each with a 1-based line and column
+against the given text, and SHALL write nothing.
+enforced-by: tests/api/test_check.py::test_issue_positions_are_computed_against_the_buffer, tests/api/test_config_check.py::test_checking_writes_nothing, tests/api/test_check.py::test_the_check_and_the_chain_save_agree
+origin: src/kraft/api/routes/check.py
+
 ## REQ template-cli-lint-dir-is-offline
 
 `kraft admin templates lint --dir PATH` SHALL lint the template directory at

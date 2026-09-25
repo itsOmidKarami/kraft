@@ -219,6 +219,15 @@ e2e-ci:
     test -n "${KRAFT_E2E_BASE:-}" || { cat "$LOG"; exit 1; }
     cd frontend && npm run e2e -- --max-failures=3
 
+# Regenerate the config JSON Schemas under vscode/schemas/
+schemas:
+    uv run python dev/export_config_schemas.py
+
+# vscode/ checks: the committed schemas match the pydantic models. The
+# extension's own typecheck + unit tests join this recipe when it lands.
+test-vscode: schemas
+    git diff --exit-code -- vscode/schemas
+
 # Lint + format check
 lint:
     uv run ruff check .

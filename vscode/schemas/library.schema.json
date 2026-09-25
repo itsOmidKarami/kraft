@@ -1,0 +1,1398 @@
+{
+  "$defs": {
+    "AgentInput": {
+      "description": "What Kraft hands an agent task beyond its prompt, when the task asks for\nit by name. Declared on the task rather than keyed on a task's name or\nrole, which is the indirection V1 deletes (Ruling 47).\n\n* `review_package` -- the change under review written out to a file, its\n  path in `$KRAFT_REVIEW_PACKAGE`: the whole branch since `base_ref`, then\n  from a task's second session on only what changed since its previous\n  one (`review-package-is-delivered-to-a-task-that-declares-it`).\n* `carried_findings` -- the findings the node's last measurement reported,\n  each with its stable tag, so a reworded repeat can be reported as the\n  same finding (`carried-findings-are-delivered-to-a-reviewing-task`).\n* `previous_review` -- the task's own previous completed session's result\n  file and summary, by path\n  (`continuity-note-is-delivered-to-a-resumed-reviewer`).",
+      "enum": [
+        "review_package",
+        "carried_findings",
+        "previous_review"
+      ],
+      "title": "AgentInput",
+      "type": "string"
+    },
+    "AgentTask": {
+      "additionalProperties": false,
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FallbackEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "harness": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Harness",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/AgentInput"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "kind": {
+          "const": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "produces": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Produces"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        },
+        "prompt": {
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/TaskScope",
+          "default": "once"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skill"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "steering": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Steering",
+          "type": "array"
+        }
+      },
+      "title": "AgentTask",
+      "type": "object"
+    },
+    "BaseChangePolicy": {
+      "additionalProperties": false,
+      "description": "`on_base_changed`: what an execution node does when its own work moves\nthe worktree base (`base-change-restarts-a-declared-chain-span`).\n\n`restart_from` names the execution node the chain restarts at -- this one\nor an earlier one, never a later one or a gate (`base-change-restart-\ntarget-is-backward`, checked by `Chain`, which alone can see the order).\n\n`on_conflict` is the only way Kraft attempts to resolve a rebase conflict\n(`rebase-conflict-requires-explicit-handler`): a recovery-shaped handler,\nrun when a task of this node fails on a conflict. Absent, a conflict is an\nordinary task failure.",
+      "properties": {
+        "on_conflict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "restart_from": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Restart From",
+          "type": "string"
+        }
+      },
+      "title": "BaseChangePolicy",
+      "type": "object"
+    },
+    "BuiltinAction": {
+      "description": "What a `kind: builtin` task's `ref` may name\n(`builtin-task-references-code-owned-actions`: Kraft owns this vocabulary,\nso an unsupported reference is rejected by the type). Grows one member per\naction a later phase actually wires up.",
+      "enum": [
+        "kraft.verify_changed_test_scopes",
+        "kraft.mr_rebase"
+      ],
+      "title": "BuiltinAction",
+      "type": "string"
+    },
+    "BuiltinTask": {
+      "additionalProperties": false,
+      "properties": {
+        "execution": {
+          "$ref": "#/$defs/ExecutionMode",
+          "default": "sequential"
+        },
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "builtin",
+          "title": "Kind",
+          "type": "string"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ref": {
+          "$ref": "#/$defs/BuiltinAction"
+        },
+        "scope": {
+          "$ref": "#/$defs/TaskScope",
+          "default": "once"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "steering": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Steering",
+          "type": "array"
+        }
+      },
+      "title": "BuiltinTask",
+      "type": "object"
+    },
+    "ExecNode": {
+      "additionalProperties": false,
+      "description": "An ordered node that runs work. Gate-only fields are absent here, so a\n`gate_after` or a `chain_finalized` on an execution node is a schema error\nrather than a silently ignored key (`gate-is-an-ordered-node`).",
+      "properties": {
+        "escalation": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BuiltinTask"
+                },
+                {
+                  "$ref": "#/$defs/AgentTask"
+                },
+                {
+                  "$ref": "#/$defs/SubprocessTask"
+                },
+                {
+                  "$ref": "#/$defs/ForgeTask"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation"
+        },
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "fix_loop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixLoop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "exec",
+          "title": "Kind",
+          "type": "string"
+        },
+        "on_base_changed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BaseChangePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TemplatePolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Step"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Steps"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/BuiltinTask"
+                  },
+                  {
+                    "$ref": "#/$defs/AgentTask"
+                  },
+                  {
+                    "$ref": "#/$defs/SubprocessTask"
+                  },
+                  {
+                    "$ref": "#/$defs/ForgeTask"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tasks"
+        }
+      },
+      "title": "ExecNode",
+      "type": "object"
+    },
+    "ExecutionMode": {
+      "description": "`changed-test-scope-verification-is-sequential-by-default`.",
+      "enum": [
+        "sequential",
+        "parallel"
+      ],
+      "title": "ExecutionMode",
+      "type": "string"
+    },
+    "FallbackEntry": {
+      "additionalProperties": false,
+      "description": "One entry of a `fallback:` list, on an agent task or an agent profile:\nwhere a launch goes next when the one before it is rate-limited or\nunavailable (`rate-limited-launch-falls-back-to-next-candidate`). An\noptional `harness:` plus one route, the same either-or a task obeys:\n`profile:`, or `model:` and/or `effort:`. Whatever it omits is kept from\nthe task's own launch; the item's and the node's overrides are not\n(`executor.fallback`).",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        }
+      },
+      "title": "FallbackEntry",
+      "type": "object"
+    },
+    "FixLoop": {
+      "additionalProperties": false,
+      "properties": {
+        "judge": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BuiltinTask"
+                },
+                {
+                  "$ref": "#/$defs/AgentTask"
+                },
+                {
+                  "$ref": "#/$defs/SubprocessTask"
+                },
+                {
+                  "$ref": "#/$defs/ForgeTask"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Step"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Steps"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/BuiltinTask"
+                  },
+                  {
+                    "$ref": "#/$defs/AgentTask"
+                  },
+                  {
+                    "$ref": "#/$defs/SubprocessTask"
+                  },
+                  {
+                    "$ref": "#/$defs/ForgeTask"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tasks"
+        }
+      },
+      "title": "FixLoop",
+      "type": "object"
+    },
+    "ForgeAction": {
+      "description": "The merge-request lifecycle points a `kind: forge` task may target\n(docs/templates-v1-design.md library.yaml; `external-wait-covers-merge-\nrequest-lifecycle`).",
+      "enum": [
+        "mr.open_draft",
+        "mr.sync",
+        "mr.ci",
+        "mr.automated_review",
+        "mr.mark_ready",
+        "mr.external_approval",
+        "mr.merge",
+        "mr.post_merge_ci"
+      ],
+      "title": "ForgeAction",
+      "type": "string"
+    },
+    "ForgeTask": {
+      "additionalProperties": false,
+      "properties": {
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "forge",
+          "title": "Kind",
+          "type": "string"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scope": {
+          "$ref": "#/$defs/TaskScope",
+          "default": "once"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "steering": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Steering",
+          "type": "array"
+        },
+        "target": {
+          "$ref": "#/$defs/ForgeAction"
+        },
+        "wait": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaitPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ForgeTask",
+      "type": "object"
+    },
+    "GateNode": {
+      "additionalProperties": false,
+      "description": "A human decision point (`gate-is-an-ordered-node`). It owns every\ngate-specific field and declares no execution shape at all\n(`gate-owns-gate-behaviour`, `gate-control-does-not-generate-review-work`:\nthe artifact it shows is produced by an earlier execution node).",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "auto_review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTask"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "chain_finalized": {
+          "default": false,
+          "title": "Chain Finalized",
+          "type": "boolean"
+        },
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "gate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reject_to": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reject To"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "format": "duration",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        }
+      },
+      "title": "GateNode",
+      "type": "object"
+    },
+    "PollingPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "initial_interval": {
+          "anyOf": [
+            {
+              "format": "duration",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial Interval"
+        },
+        "max_interval": {
+          "anyOf": [
+            {
+              "format": "duration",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Interval"
+        }
+      },
+      "title": "PollingPolicy",
+      "type": "object"
+    },
+    "RecoveryPlan": {
+      "additionalProperties": false,
+      "description": "An `on_failure` handler. No gates and no fix loop by omission; no nested\nhandler by `_refuse_nested_handlers` (`recovery-plan-supports-task-groups-\nor-steps`).",
+      "properties": {
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Step"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Steps"
+        },
+        "tasks": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/BuiltinTask"
+                  },
+                  {
+                    "$ref": "#/$defs/AgentTask"
+                  },
+                  {
+                    "$ref": "#/$defs/SubprocessTask"
+                  },
+                  {
+                    "$ref": "#/$defs/ForgeTask"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tasks"
+        }
+      },
+      "title": "RecoveryPlan",
+      "type": "object"
+    },
+    "SandboxPolicy": {
+      "additionalProperties": false,
+      "description": "Where a task's process runs: `kind: docker` in `image`\n(`kraft.worker.sandbox`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it.",
+      "properties": {
+        "image": {
+          "minLength": 1,
+          "title": "Image",
+          "type": "string"
+        },
+        "kind": {
+          "const": "docker",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "SandboxPolicy",
+      "type": "object"
+    },
+    "SteeringProfile": {
+      "additionalProperties": false,
+      "description": "One `library.yaml` `steering:` entry: composable guidance a task\nselects by name (`agent-task-may-select-one-skill` keeps the *skill* single;\nsteering is where additional guidance goes).",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        }
+      },
+      "required": [
+        "instructions"
+      ],
+      "title": "SteeringProfile",
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "description": "One ordered group whose tasks run concurrently\n(`exec-node-orders-concurrent-task-groups`).",
+      "properties": {
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "tasks": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BuiltinTask"
+              },
+              {
+                "$ref": "#/$defs/AgentTask"
+              },
+              {
+                "$ref": "#/$defs/SubprocessTask"
+              },
+              {
+                "$ref": "#/$defs/ForgeTask"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "title": "Step",
+      "type": "object"
+    },
+    "SubprocessTask": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "extends": {
+          "description": "A library component of the same kind to inherit from; this one's own keys win.",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "subprocess",
+          "title": "Kind",
+          "type": "string"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecoveryPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskPolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scope": {
+          "$ref": "#/$defs/TaskScope",
+          "default": "once"
+        },
+        "skippable": {
+          "default": true,
+          "title": "Skippable",
+          "type": "boolean"
+        },
+        "steering": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "type": "string"
+          },
+          "title": "Steering",
+          "type": "array"
+        }
+      },
+      "title": "SubprocessTask",
+      "type": "object"
+    },
+    "TaskPolicyOverride": {
+      "additionalProperties": false,
+      "description": "The policy fields a task consumes, and so the whole of what a step, a\ntask or a gate may override: every field here is read when a task\nlaunches (`MaterializedChain.policy_for`). A sparse patch onto the policy\nabove it; `policy-override-rules-are-field-specific` is enforced once, in\n`InstancePolicy.apply_template_override`, not reinvented per scope.\n\nNo `max_attempts`/`timeout_minutes`: those bound an execution node's fix\nloop (`TemplatePolicyOverride`), and a scope with no fix loop of its own\nrefuses them at load rather than accept a value nothing reads\n(Kraft-q55aw).",
+      "properties": {
+        "allowed_harnesses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Harnesses"
+        },
+        "allowed_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Tools"
+        },
+        "budget_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "gt": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Usd"
+        },
+        "deny_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deny Tools"
+        },
+        "grants": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grants"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Cap Minutes"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        },
+        "total_time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Time Cap Minutes"
+        }
+      },
+      "title": "TaskPolicyOverride",
+      "type": "object"
+    },
+    "TaskScope": {
+      "description": "`task-may-explicitly-fan-out-by-repository`: fan-out is opt-in, so\n`ONCE` -- the work item's ordinary execution context -- is the default.",
+      "enum": [
+        "once",
+        "each_repository"
+      ],
+      "title": "TaskScope",
+      "type": "string"
+    },
+    "TemplatePolicyOverride": {
+      "additionalProperties": false,
+      "description": "A repository, work-item, chain or execution-node override: a task's\nfields plus the two that bound a node's fix loop (`walk.walk_node`) --\n`max_attempts`, its attempt cap, and `timeout_minutes`, its wall clock.",
+      "properties": {
+        "allowed_harnesses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Harnesses"
+        },
+        "allowed_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Tools"
+        },
+        "budget_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "gt": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Usd"
+        },
+        "deny_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deny Tools"
+        },
+        "escalation_harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Harness"
+        },
+        "grants": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grants"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Cap Minutes"
+        },
+        "timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Minutes"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        },
+        "total_time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Time Cap Minutes"
+        }
+      },
+      "title": "TemplatePolicyOverride",
+      "type": "object"
+    },
+    "WaitPolicy": {
+      "additionalProperties": false,
+      "description": "`external-wait-has-configurable-timeout-and-polling`: a wait's polling.\nIts timeout is its task's own `policy: total_time_cap_minutes` (Ruling\n196); a `timeout:` written here before that is read as one\n(`ForgeTask._retired_wait_timeout`).",
+      "properties": {
+        "polling": {
+          "$ref": "#/$defs/PollingPolicy"
+        }
+      },
+      "title": "WaitPolicy",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "nodes": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExecNode"
+          },
+          {
+            "$ref": "#/$defs/GateNode"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "steering": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SteeringProfile"
+      },
+      "type": "object"
+    },
+    "steps": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Step"
+      },
+      "type": "object"
+    },
+    "tasks": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AgentTask"
+          },
+          {
+            "$ref": "#/$defs/BuiltinTask"
+          },
+          {
+            "$ref": "#/$defs/SubprocessTask"
+          },
+          {
+            "$ref": "#/$defs/ForgeTask"
+          }
+        ]
+      },
+      "type": "object"
+    }
+  },
+  "title": "Kraft template library",
+  "type": "object"
+}

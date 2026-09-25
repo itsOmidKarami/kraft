@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_hosts": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Hosts",
+      "type": "array"
+    },
+    "bind": {
+      "default": "127.0.0.1",
+      "title": "Bind",
+      "type": "string"
+    },
+    "password_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Password Hash"
+    },
+    "port": {
+      "default": 8765,
+      "title": "Port",
+      "type": "integer"
+    },
+    "session_expiry_days": {
+      "default": 7,
+      "title": "Session Expiry Days",
+      "type": "integer"
+    }
+  },
+  "title": "Kraft access",
+  "type": "object"
+}
