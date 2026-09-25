@@ -7,3 +7,6 @@ esbuild.mjs
 vitest.config.ts
 .vscode-test.mjs
 node_modules/**
+.vscode/**
+.gitignore
+contract/**

@@ -26,6 +26,13 @@ item gets a tracked bead, and without it Kraft files work anyway and says so.
 driving the real HTTP API, and `just dev-reset` throws `.dev/` away. A work item
 title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers that item's fake agent.
 
+To run the VS Code extension from source, open the `vscode/` folder in VS Code
+and press F5 (the first run installs its npm dependencies). **Run Extension
+(dev daemon)** opens an Extension Development Host on the seeded repo, talking
+to `just dev`'s daemon (state in `.dev/`, port 8766); **Run Extension
+(installed Kraft)** talks to `~/.kraft`, and acts on your real work items. Both
+rebuild the extension first.
+
 ## Layout
 
 ```text
@@ -46,6 +53,7 @@ plugins/          the Claude Code plugins: kraft and kraft-lite
 just test       # backend tests affected by your change (testmon); --no-testmon for all
 just e2e        # Playwright (see frontend/e2e/README.md)
 just test-ui    # frontend unit tests
+just test-vscode # VS Code extension: schemas current, typecheck, unit tests
 just intent     # check that every enforced-by pin in docs/intent/ still resolves
 just lint       # ruff check + format check
 just fix        # autofix
