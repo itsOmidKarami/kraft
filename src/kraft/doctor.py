@@ -721,7 +721,7 @@ def _version_check() -> dict:
         # every version check, so an air-gapped machine never reaches for the
         # network and a test suite never depends on gitlab.com being up.
         return _check("version", True, f"{here} (skipped: KRAFT_NO_UPDATE_CHECK)", skipped=True)
-    release = update.latest()
+    release = update.latest(channel=update.channel_of(update.installed()))
     if release is None:
         # Not a skip: this ran and failed to get an answer, which on a
         # private project usually means no GITLAB_TOKEN and no authenticated

@@ -407,7 +407,7 @@ def _update_notice() -> None:
         return
     from kraft import update
 
-    release = update.latest()
+    release = update.latest(channel=update.channel_of(update.installed()))
     if update.is_behind(release):
         print(
             f"kraft: {update.installed()} installed, {release.tag} available - kraft admin update"
@@ -917,7 +917,12 @@ def _cmd_update(ns: argparse.Namespace) -> None:
     if is_pre_v1(templates_dir):
         _accept_major_update(templates_dir, ns.yes)
 
-    release = update.latest(force=True)
+    if ns.channel != "stable" and update._is_homebrew_install():
+        raise SystemExit(
+            "kraft admin update: the Homebrew formula only tracks stable releases; "
+            f"install --channel {ns.channel} with `uv tool` instead."
+        )
+    release = update.latest(force=True, channel=ns.channel)
     if release is None:
         print(
             "kraft admin update: could not reach the release feed. Try again, "
@@ -980,8 +985,16 @@ def _add_admin(subs, common: argparse.ArgumentParser) -> None:
     )
     doctor_p.set_defaults(func=_cmd_doctor)
 
+    from kraft.update import CHANNELS
+
     update_p = subs.add_parser("update", help="install the newest released kraft")
     update_p.add_argument("--force", action="store_true", help="install even when already current")
+    update_p.add_argument(
+        "--channel",
+        choices=list(CHANNELS),
+        default="stable",
+        help="stable (default), or a pre-release channel: rc, beta (beta and rc), alpha (any)",
+    )
     update_p.add_argument(
         "-y",
         "--yes",

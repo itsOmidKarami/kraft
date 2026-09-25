@@ -10,6 +10,7 @@ Prints the tag to create, or nothing when the impact is `none`.
 
 from __future__ import annotations
 
+import re
 import sys
 
 PREFIX = "release::"
@@ -61,6 +62,26 @@ def next_tag(previous: str | None, impact: str) -> str | None:
     else:
         patch += 1
     return f"v{major}.{minor}.{patch}"
+
+
+PRE_MARKS = {"alpha": "a", "beta": "b", "rc": "rc"}
+
+
+def pre_tag(base: str, kind: str, existing: list[str]) -> str:
+    """`base` (a stable tag) as the next pre-release of `kind`: v1.3.0 -> v1.3.0rc2.
+
+    N is one past the highest `kind` tag already on `base`, so a rerun numbers
+    on instead of colliding with a tag that exists.
+    """
+    if kind not in PRE_MARKS:
+        raise ValueError(f"unknown pre-release kind {kind!r}; expected one of {tuple(PRE_MARKS)}")
+    mark = PRE_MARKS[kind]
+    taken = [
+        int(m.group(1))
+        for t in existing
+        if (m := re.fullmatch(rf"{re.escape(base)}{mark}(\d+)", t))
+    ]
+    return f"{base}{mark}{max(taken, default=0) + 1}"
 
 
 if __name__ == "__main__":

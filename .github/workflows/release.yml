@@ -10,6 +10,13 @@
 # GITHUB_TOKEN deliberately does not trigger other workflows, and keeping it in
 # one job means no stored PAT, the credential you least want in a public repo.
 #
+# Pick alpha, beta or rc to cut a pre-release of the version the labels plan
+# (v1.3.0rc1, then rc2 ...). It is a GitHub pre-release, so `kraft admin update
+# --channel` can find it and nothing else does. Only an rc goes to PyPI; alpha and
+# beta stay on GitHub. None of them touch homebrew, the stamp PR, or the
+# Marketplace, and the next stable's notes still cover everything since the last
+# stable tag.
+#
 # Order matters. The tag is created locally first (setuptools-scm reads the
 # version from it, so the wheel cannot be built before it exists), and pushed
 # only after the wheel has built and passed its smoke test. A failed build
@@ -23,6 +30,11 @@ on:
         description: "Dry run: print the version and notes, release nothing"
         type: boolean
         default: false
+      pre:
+        description: "Cut a pre-release instead of a stable release"
+        type: choice
+        options: [none, alpha, beta, rc]
+        default: none
       sha:
         description: "Commit on main to release (empty: main's tip)"
         type: string
@@ -56,6 +68,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run }}
           WANT: ${{ inputs.sha }}
+          PRE: ${{ inputs.pre }}
         run: |
           # Resolved here rather than by actions/checkout's `ref:`, which
           # takes no short SHA. Later steps build whatever HEAD this leaves,
@@ -109,6 +122,11 @@ jobs:
           # tag it cannot read, and swallowing that would turn it into a
           # silently skipped release.
           TAG=$(python3 "$RUNNER_TEMP/dev/plan_release.py" plan "$PREVIOUS" "$RUNNER_TEMP/prs.json" "$RUNNER_TEMP/notes.md")
+          if [ -n "$TAG" ] && [ "$PRE" != "none" ]; then
+            TAG=$(git tag --list | python3 "$RUNNER_TEMP/dev/plan_release.py" pre "$TAG" "$PRE")
+          else
+            PRE=none
+          fi
           {
             echo "## ${TAG:-No release} (previous: ${PREVIOUS:-none})"
             echo
@@ -123,6 +141,7 @@ jobs:
             echo "releasing $TAG"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "pre=$PRE" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: steps.impact.outputs.tag != ''
@@ -184,26 +203,28 @@ jobs:
           cd vscode
           npm ci
           npm run build
-          npx vsce package "${TAG#v}" --no-update-package-json --out "../dist/kraft-${TAG#v}.vsix"
+          # vsce wants semver, which has no aN/bN/rcN; a pre-release packs as its base.
+          npx vsce package "$(echo "${TAG#v}" | sed -E 's/(a|b|rc)[0-9]+$//')" --no-update-package-json --out "../dist/kraft-${TAG#v}.vsix"
 
       - name: push the tag and create the release
         if: steps.impact.outputs.tag != ''
         env:
           TAG: ${{ steps.impact.outputs.tag }}
+          PRE: ${{ steps.impact.outputs.pre }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          gh release create "$TAG" dist/*.whl dist/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl dist/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
       - name: publish to PyPI
-        if: steps.impact.outputs.tag != ''
+        if: steps.impact.outputs.tag != '' && contains(fromJSON('["none","rc"]'), steps.impact.outputs.pre)
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
       - name: publish the VS Code extension
         # Only once the maintainer has created the Marketplace publisher and
         # added VSCE_PAT (and, for Open VSX, OVSX_PAT); until then the .vsix
         # is still attached to the GitHub Release.
-        if: steps.impact.outputs.tag != '' && env.VSCE_PAT != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
@@ -219,7 +240,7 @@ jobs:
         # fire. A GitHub App installation token doesn't carry that
         # restriction, is scoped to just this repo (contents + pull-requests),
         # and isn't tied to a personal account the way a PAT would be.
-        if: steps.impact.outputs.tag != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -236,7 +257,7 @@ jobs:
         # request (see the repo's branch ruleset), so this can't just push --
         # it opens a PR and lets required checks auto-merge it. That PR carries
         # release::none, so it adds nothing to the next release's bump.
-        if: steps.impact.outputs.tag != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         env:
           TAG: ${{ steps.impact.outputs.tag }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -268,7 +289,7 @@ jobs:
         # Points the formula at this run's own GitHub Release asset, not the
         # PyPI upload -- that one is already sha256-verified above and, unlike
         # querying PyPI's API, needs no wait for index propagation.
-        if: steps.impact.outputs.tag != ''
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
         env:
           TAG: ${{ steps.impact.outputs.tag }}
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
