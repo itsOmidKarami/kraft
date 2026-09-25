@@ -10,6 +10,7 @@ import { baseUrl, locations, readToken, type Locations } from "./core/connection
 import { Store, wsSocket } from "./core/store";
 import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
+import { registerComments } from "./review/comments";
 import { registerFindings } from "./review/findings";
 import { compatible } from "./core/version";
 
@@ -19,7 +20,7 @@ export interface KraftApi {
   readOnly(): boolean;
   locations: Locations;
   gates: { announcer: Announcer };
-  review: ReturnType<typeof registerDiff>;
+  review: ReturnType<typeof registerDiff> & ReturnType<typeof registerComments>;
 }
 
 function read(path: string): string | undefined {
@@ -59,9 +60,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
 
   registerBoard(context, store, api, () => runDir, () => readOnly);
   context.subscriptions.push(status, { dispose: () => store.stop() });
-  const gates = registerGates(context, store, api, () => readOnly);
-  const review = registerDiff(context, store, api);
-  registerFindings(context, store, review.worktrees, () => runDir);
+  const comments = registerComments(context, store, api, () => readOnly);
+  const gates = registerGates(context, store, api, () => readOnly, comments.confirmApprove);
+  const diff = registerDiff(context, store, api);
+  const review = Object.assign(diff, comments);
+  registerFindings(context, store, diff.worktrees, () => runDir);
   // Details are fetched per event; an item already waiting when VS Code starts needs one fetch.
   const offAll = store.onChange((ids) => {
     if (ids !== "all") return;

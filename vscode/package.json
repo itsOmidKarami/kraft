@@ -134,6 +134,22 @@
         "command": "kraft.reviewChanges",
         "title": "Review Changes",
         "category": "Kraft"
+      },
+      {
+        "command": "kraft.review.addComment",
+        "title": "Add Review Comment",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.review.submit",
+        "title": "Submit Review",
+        "category": "Kraft",
+        "icon": "$(send)"
+      },
+      {
+        "command": "kraft.review.discard",
+        "title": "Discard Review Comments",
+        "category": "Kraft"
       }
     ],
     "menus": {
@@ -209,6 +225,16 @@
           "command": "kraft.reviewChanges",
           "when": "view == kraft.board && viewItem =~ /^item:/",
           "group": "3_open"
+        },
+        {
+          "command": "kraft.review.submit",
+          "when": "view == kraft.board && viewItem =~ /^item:/ && !kraft.readOnly",
+          "group": "4_review"
+        },
+        {
+          "command": "kraft.review.discard",
+          "when": "view == kraft.board && viewItem =~ /^item:/ && !kraft.readOnly",
+          "group": "4_review"
         }
       ],
       "commandPalette": [
@@ -263,6 +289,18 @@
         {
           "command": "kraft.reviewChanges",
           "when": "false"
+        },
+        {
+          "command": "kraft.review.addComment",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.submit",
+          "when": "false"
+        },
+        {
+          "command": "kraft.review.discard",
+          "when": "false"
         }
       ],
       "editor/title": [
@@ -280,6 +318,18 @@
           "command": "kraft.reviewChanges",
           "when": "resourceScheme == kraft-artifact",
           "group": "navigation@3"
+        },
+        {
+          "command": "kraft.review.submit",
+          "when": "resourceScheme =~ /^kraft-(wt|git|artifact)$/ && !kraft.readOnly",
+          "group": "navigation@4"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "kraft.review.addComment",
+          "group": "inline",
+          "when": "commentController == kraft.review"
         }
       ]
     }
