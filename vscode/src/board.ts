@@ -3,9 +3,15 @@ import { deriveState } from "../../frontend/src/deriveState";
 import { runAction } from "./actions";
 import type { Api, WorkItem } from "./core/api";
 import { actionsFor, describe, groupItems, needsYouCount, type Action } from "./core/board";
+import { findingsOf } from "./core/findings";
 import type { Store } from "./core/store";
 
-type Node = { kind: "group"; id: string; label: string; items: WorkItem[] } | { kind: "item"; item: WorkItem } | { kind: "down" };
+type Node =
+  | { kind: "group"; id: string; label: string; items: WorkItem[] }
+  | { kind: "item"; item: WorkItem }
+  | { kind: "findings"; item: WorkItem }
+  | { kind: "finding"; text: string }
+  | { kind: "down" };
 
 const ICONS: Record<string, string> = {
   gate: "pass", paused: "debug-pause", not_started: "circle-outline", running: "sync~spin",
@@ -25,7 +31,14 @@ export class Board implements vscode.TreeDataProvider<Node> {
 
   refresh = () => this.changed.fire();
 
+  private unlocated(item: WorkItem) {
+    const d = this.store.detail(item.id);
+    return d ? findingsOf(d).unlocated : [];
+  }
+
   getChildren(node?: Node): Node[] {
+    if (node?.kind === "item") return this.unlocated(node.item).length ? [{ kind: "findings", item: node.item }] : [];
+    if (node?.kind === "findings") return this.unlocated(node.item).map((f) => ({ kind: "finding", text: `${f.severity}: ${f.message}` }));
     if (node?.kind === "group") return node.items.map((item) => ({ kind: "item", item }));
     if (node) return [];
     if (!this.store.connected && this.store.items().length === 0) return [{ kind: "down" }];
@@ -44,8 +57,14 @@ export class Board implements vscode.TreeDataProvider<Node> {
       t.contextValue = "group";
       return t;
     }
+    if (node.kind === "findings") {
+      const t = new vscode.TreeItem(`Findings (${this.unlocated(node.item).length})`, vscode.TreeItemCollapsibleState.Collapsed);
+      t.iconPath = new vscode.ThemeIcon("warning");
+      return t;
+    }
+    if (node.kind === "finding") return new vscode.TreeItem(node.text);
     const { item } = node;
-    const t = new vscode.TreeItem(item.title);
+    const t = new vscode.TreeItem(item.title, this.unlocated(item).length ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
     t.id = item.id;
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(ICONS[deriveState(item).state] ?? "circle-filled");

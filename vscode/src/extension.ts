@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as vscode from "vscode";
+import { deriveState } from "../../frontend/src/deriveState";
 import { registerBoard } from "./board";
 import { Api } from "./core/api";
 import type { Announcer } from "./core/announcer";
@@ -9,6 +10,7 @@ import { baseUrl, locations, readToken, type Locations } from "./core/connection
 import { Store, wsSocket } from "./core/store";
 import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
+import { registerFindings } from "./review/findings";
 import { compatible } from "./core/version";
 
 export interface KraftApi {
@@ -59,6 +61,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   context.subscriptions.push(status, { dispose: () => store.stop() });
   const gates = registerGates(context, store, api, () => readOnly);
   const review = registerDiff(context, store, api);
+  registerFindings(context, store, review.worktrees, () => runDir);
+  // Details are fetched per event; an item already waiting when VS Code starts needs one fetch.
+  const offAll = store.onChange((ids) => {
+    if (ids !== "all") return;
+    offAll();
+    for (const i of store.items()) if (deriveState(i).needsYou) void store.refresh(i.id).catch(() => {});
+  });
   void store.start();
   return { store, api, readOnly: () => readOnly, locations: loc, gates, review };
 }

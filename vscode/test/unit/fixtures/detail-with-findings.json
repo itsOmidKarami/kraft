@@ -1,0 +1,768 @@
+{
+  "id": "061bab9e73ea4fc3ace579048aa7e512",
+  "bead_id": "TEST-fake1",
+  "title": "findings",
+  "description": null,
+  "repo": "/private/var/folders/16/jlvb4nb546z2w_wkc94j5cqw0000gn/T/pytest-of-omidkarami/pytest-914/test_record0",
+  "chain_template": null,
+  "chain_definition": {
+    "template_id": "default",
+    "nodes": [
+      {
+        "id": "spec",
+        "kind": "exec",
+        "tasks": [
+          "spec.main.author"
+        ],
+        "steps": [
+          [
+            "spec.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "spec"
+      },
+      {
+        "id": "spec_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "spec_approval",
+        "reject_to": "spec",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "spec"
+      },
+      {
+        "id": "plan",
+        "kind": "exec",
+        "tasks": [
+          "plan.main.author"
+        ],
+        "steps": [
+          [
+            "plan.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "plan"
+      },
+      {
+        "id": "plan_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "plan_approval",
+        "reject_to": "plan",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "plan"
+      },
+      {
+        "id": "chain_revision",
+        "kind": "exec",
+        "tasks": [
+          "chain_revision.main.revise"
+        ],
+        "steps": [
+          [
+            "chain_revision.main.revise"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "chain_revision"
+      },
+      {
+        "id": "chain_revision_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "chain_revision_approval",
+        "reject_to": "chain_revision",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "chain_revision"
+      },
+      {
+        "id": "implementation",
+        "kind": "exec",
+        "tasks": [
+          "implementation.main.implement"
+        ],
+        "steps": [
+          [
+            "implementation.main.implement"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "verification",
+        "kind": "exec",
+        "tasks": [
+          "verification.tests.test_changed_scopes",
+          "verification.review.code_review"
+        ],
+        "steps": [
+          [
+            "verification.tests.test_changed_scopes"
+          ],
+          [
+            "verification.review.code_review"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": "verification.fix_loop",
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "work_brief",
+        "kind": "exec",
+        "tasks": [
+          "work_brief.main.author"
+        ],
+        "steps": [
+          [
+            "work_brief.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "work_brief"
+      },
+      {
+        "id": "local_review",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "local_review",
+        "reject_to": "implementation",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "work_brief"
+      },
+      {
+        "id": "describe_merge_request",
+        "kind": "exec",
+        "tasks": [
+          "describe_merge_request.main.author"
+        ],
+        "steps": [
+          [
+            "describe_merge_request.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "mr_meta"
+      },
+      {
+        "id": "draft_merge_request",
+        "kind": "exec",
+        "tasks": [
+          "draft_merge_request.rebase.rebase",
+          "draft_merge_request.open.open"
+        ],
+        "steps": [
+          [
+            "draft_merge_request.rebase.rebase"
+          ],
+          [
+            "draft_merge_request.open.open"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "merge_request_feedback",
+        "kind": "exec",
+        "tasks": [
+          "merge_request_feedback.ci.await_ci",
+          "merge_request_feedback.automated_review.await_review"
+        ],
+        "steps": [
+          [
+            "merge_request_feedback.ci.await_ci"
+          ],
+          [
+            "merge_request_feedback.automated_review.await_review"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": "merge_request_feedback.fix_loop",
+        "auto_escalate": null,
+        "on_failure": [
+          "merge_request_feedback.on_failure.repair.repair_feedback",
+          "merge_request_feedback.on_failure.sync.sync_mr"
+        ],
+        "covered_by": null
+      },
+      {
+        "id": "work_item_summary",
+        "kind": "exec",
+        "tasks": [
+          "work_item_summary.main.author"
+        ],
+        "steps": [
+          [
+            "work_item_summary.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "review_brief"
+      },
+      {
+        "id": "final_review",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "final_review",
+        "reject_to": "implementation",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "mark_ready",
+        "kind": "exec",
+        "tasks": [
+          "mark_ready.main.ready"
+        ],
+        "steps": [
+          [
+            "mark_ready.main.ready"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "external_approval",
+        "kind": "exec",
+        "tasks": [
+          "external_approval.main.await"
+        ],
+        "steps": [
+          [
+            "external_approval.main.await"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "merge",
+        "kind": "exec",
+        "tasks": [
+          "merge.main.merge"
+        ],
+        "steps": [
+          [
+            "merge.main.merge"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "post_merge_ci",
+        "kind": "exec",
+        "tasks": [
+          "post_merge_ci.main.await"
+        ],
+        "steps": [
+          [
+            "post_merge_ci.main.await"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      }
+    ]
+  },
+  "current_node_id": "spec",
+  "status": "active",
+  "pending_steer_context": null,
+  "submodules": null,
+  "root_merge_policy": null,
+  "attachments": [],
+  "base_ref": null,
+  "bead_cwd": "/private/var/folders/16/jlvb4nb546z2w_wkc94j5cqw0000gn/T/pytest-of-omidkarami/pytest-914/test_record0/tracker",
+  "branch": "kraft/findings-061bab9e",
+  "implements_beads": null,
+  "retry_at": null,
+  "escalation_session_id": null,
+  "auto_gate": 1,
+  "agent_overrides": null,
+  "budget_set": 0,
+  "budget_usd": null,
+  "node_overrides": {},
+  "policy_override": null,
+  "archived_at": null,
+  "archived_by": null,
+  "ci_pipeline_ref": null,
+  "current_step": 0,
+  "materialized_chain": "{\"chain\":{\"id\":\"default\",\"nodes\":[{\"tasks\":[{\"id\":\"author\",\"scope\":\"once\",\"steering\":[\"project-standards\"],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Produce the work item's specification.\",\"skill\":\"kraft:spec\",\"produces\":\"spec\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"spec\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"spec_approval\",\"kind\":\"gate\",\"message\":\"Review and approve the specification.\",\"artifact\":\"spec\",\"reject_to\":\"spec\",\"timeout\":null,\"auto_review\":null,\"chain_finalized\":false,\"policy\":null,\"skippable\":true},{\"tasks\":[{\"id\":\"author\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Produce an executable implementation plan from the approved spec.\",\"skill\":\"kraft:plan\",\"produces\":\"plan\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"plan\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"plan_approval\",\"kind\":\"gate\",\"message\":\"Review and approve the implementation plan.\",\"artifact\":\"plan\",\"reject_to\":\"plan\",\"timeout\":null,\"auto_review\":null,\"chain_finalized\":false,\"policy\":null,\"skippable\":true},{\"tasks\":[{\"id\":\"revise\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Decide whether the rest of this chain still fits the approved spec and plan, and propose the smallest change set if it does not.\",\"skill\":\"kraft:chain-review\",\"produces\":\"chain_revision\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"chain_revision\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"chain_revision_approval\",\"kind\":\"gate\",\"message\":\"Review the proposed change to the rest of this chain.\",\"artifact\":\"chain_revision\",\"reject_to\":\"chain_revision\",\"timeout\":null,\"auto_review\":null,\"chain_finalized\":false,\"policy\":null,\"skippable\":true},{\"tasks\":[{\"id\":\"implement\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":{\"allowed_harnesses\":null,\"token_budget\":null,\"budget_usd\":null,\"allowed_tools\":null,\"deny_tools\":null,\"grants\":null,\"sandbox\":null,\"time_cap_minutes\":120,\"total_time_cap_minutes\":null},\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Implement the approved plan.\",\"skill\":null,\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"implementation\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":null,\"steps\":[{\"id\":\"tests\",\"tasks\":[{\"id\":\"test_changed_scopes\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"subprocess\",\"command\":\"true\"}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"review\",\"tasks\":[{\"id\":\"code_review\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Review this work item's change for defects its passing tests do not catch.\",\"skill\":\"kraft:code-review\",\"produces\":null,\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[\"review_package\",\"carried_findings\",\"previous_review\"],\"fallback\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}],\"id\":\"verification\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":{\"tasks\":[{\"id\":\"repair\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Fix the failing tests and the review findings this node's verification reported.\",\"skill\":null,\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"judge\":{\"id\":\"judge\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Decide whether another repair attempt is justified.\",\"skill\":\"kraft:fix-loop-judge\",\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[\"review_package\"],\"fallback\":null},\"max_attempts\":2},\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":[{\"id\":\"author\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Write the work brief a human reads before approving the draft merge request.\",\"skill\":\"kraft:work-brief\",\"produces\":\"work_brief\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"work_brief\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"local_review\",\"kind\":\"gate\",\"message\":\"Approve creating a draft merge request.\",\"artifact\":\"work_brief\",\"reject_to\":\"implementation\",\"timeout\":null,\"auto_review\":null,\"chain_finalized\":false,\"policy\":null,\"skippable\":true},{\"tasks\":[{\"id\":\"author\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Write the merge request's title, labels, reviewers and description, following this repository's own rules for them.\",\"skill\":\"kraft:mr-metadata\",\"produces\":\"mr_meta\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"describe_merge_request\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":null,\"steps\":[{\"id\":\"rebase\",\"tasks\":[{\"id\":\"rebase\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"subprocess\",\"command\":\"true\"}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"open\",\"tasks\":[{\"id\":\"open\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.open_draft\",\"wait\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}],\"id\":\"draft_merge_request\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":null,\"steps\":[{\"id\":\"ci\",\"tasks\":[{\"id\":\"await_ci\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":{\"allowed_harnesses\":null,\"token_budget\":null,\"budget_usd\":null,\"allowed_tools\":null,\"deny_tools\":null,\"grants\":null,\"sandbox\":null,\"time_cap_minutes\":null,\"total_time_cap_minutes\":90},\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.ci\",\"wait\":{\"polling\":{\"initial_interval\":\"30s\",\"max_interval\":\"5m\"}}}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"automated_review\",\"tasks\":[{\"id\":\"await_review\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":{\"allowed_harnesses\":null,\"token_budget\":null,\"budget_usd\":null,\"allowed_tools\":null,\"deny_tools\":null,\"grants\":null,\"sandbox\":null,\"time_cap_minutes\":null,\"total_time_cap_minutes\":30},\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.automated_review\",\"wait\":{\"polling\":{\"initial_interval\":\"30s\",\"max_interval\":\"5m\"}}}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}],\"id\":\"merge_request_feedback\",\"kind\":\"exec\",\"on_failure\":{\"tasks\":null,\"steps\":[{\"id\":\"repair\",\"tasks\":[{\"id\":\"repair_feedback\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Repair what fails the merge request's checks from outside the code, such as a missing or wrong label. A code failure is the fix loop's, which runs after you.\",\"skill\":\"kraft:mr-metadata-repair\",\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"sync\",\"tasks\":[{\"id\":\"sync_mr\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.sync\",\"wait\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}]},\"fix_loop\":{\"tasks\":null,\"steps\":[{\"id\":\"repair\",\"tasks\":[{\"id\":\"repair\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Resolve the current CI failures and actionable merge-request feedback.\",\"skill\":null,\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"sync\",\"tasks\":[{\"id\":\"sync\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.sync\",\"wait\":null}],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}],\"judge\":{\"id\":\"judge\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Decide whether another repair attempt is justified.\",\"skill\":\"kraft:fix-loop-judge\",\"produces\":null,\"profile\":\"strong\",\"model\":null,\"effort\":null,\"inputs\":[\"review_package\"],\"fallback\":null},\"max_attempts\":3},\"escalation\":null,\"on_base_changed\":{\"restart_from\":\"verification\",\"on_conflict\":null},\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":[{\"id\":\"author\",\"scope\":\"once\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"agent\",\"harness\":\"claude\",\"prompt\":\"Write the work-item summary and review brief.\",\"skill\":\"kraft:review-brief\",\"produces\":\"review_brief\",\"profile\":null,\"model\":null,\"effort\":null,\"inputs\":[],\"fallback\":null}],\"steps\":null,\"id\":\"work_item_summary\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"id\":\"final_review\",\"kind\":\"gate\",\"message\":\"Review the complete work item and merge-request summary.\",\"artifact\":\"review_brief\",\"reject_to\":\"implementation\",\"timeout\":null,\"auto_review\":null,\"chain_finalized\":true,\"policy\":null,\"skippable\":true},{\"tasks\":[{\"id\":\"ready\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.mark_ready\",\"wait\":null}],\"steps\":null,\"id\":\"mark_ready\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":[{\"id\":\"await\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":{\"allowed_harnesses\":null,\"token_budget\":null,\"budget_usd\":null,\"allowed_tools\":null,\"deny_tools\":null,\"grants\":null,\"sandbox\":null,\"time_cap_minutes\":null,\"total_time_cap_minutes\":10080},\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.external_approval\",\"wait\":{\"polling\":{\"initial_interval\":\"5m\",\"max_interval\":\"1h\"}}}],\"steps\":null,\"id\":\"external_approval\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":[{\"id\":\"merge\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":null,\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.merge\",\"wait\":null}],\"steps\":null,\"id\":\"merge\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false},{\"tasks\":[{\"id\":\"await\",\"scope\":\"each_repository\",\"steering\":[],\"on_failure\":null,\"policy\":{\"allowed_harnesses\":null,\"token_budget\":null,\"budget_usd\":null,\"allowed_tools\":null,\"deny_tools\":null,\"grants\":null,\"sandbox\":null,\"time_cap_minutes\":null,\"total_time_cap_minutes\":90},\"skippable\":true,\"kind\":\"forge\",\"target\":\"mr.post_merge_ci\",\"wait\":{\"polling\":{\"initial_interval\":\"30s\",\"max_interval\":\"5m\"}}}],\"steps\":null,\"id\":\"post_merge_ci\",\"kind\":\"exec\",\"on_failure\":null,\"fix_loop\":null,\"escalation\":null,\"on_base_changed\":null,\"policy\":null,\"skippable\":true,\"read_only\":false}],\"policy\":null},\"target\":{\"kind\":\"repository\",\"repository\":\"target\",\"workspace\":null,\"root\":null,\"members\":[],\"mounts\":{},\"include_root\":false,\"root_pointer_policy\":\"ignore\",\"base_branch\":null},\"policy\":{\"timeout_minutes\":null,\"max_attempts\":null,\"allowed_harnesses\":null,\"token_budget\":null,\"allowed_tools\":null,\"maxima\":{\"work_item\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"nodes\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"steps\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"tasks\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"allowed_tools\":null,\"allowed_harnesses\":null,\"timeout_minutes\":null,\"max_attempts\":null},\"budget_usd\":null,\"deny_tools\":[],\"grants\":[],\"sandbox\":null,\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"cap_defaults\":{\"work_item\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"nodes\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"steps\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null},\"tasks\":{\"time_cap_minutes\":null,\"total_time_cap_minutes\":null,\"token_budget\":null,\"budget_usd\":null}},\"escalation_harness\":\"claude\",\"escalation_grants\":[\"git-commit\",\"git-rebase\",\"git-push\"]},\"steering\":{\"project-standards\":\"Keep changes focused. Run the relevant checks before finishing.\\n\"},\"repository_steering\":{}}",
+  "run_chain": null,
+  "created_at": "2026-09-25T13:49:40.695063+00:00",
+  "updated_at": "2026-09-25T13:49:40.697917+00:00",
+  "effective_chain": {
+    "template_id": "default",
+    "nodes": [
+      {
+        "id": "spec",
+        "kind": "exec",
+        "tasks": [
+          "spec.main.author"
+        ],
+        "steps": [
+          [
+            "spec.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "spec"
+      },
+      {
+        "id": "spec_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "spec_approval",
+        "reject_to": "spec",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "spec"
+      },
+      {
+        "id": "plan",
+        "kind": "exec",
+        "tasks": [
+          "plan.main.author"
+        ],
+        "steps": [
+          [
+            "plan.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "plan"
+      },
+      {
+        "id": "plan_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "plan_approval",
+        "reject_to": "plan",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "plan"
+      },
+      {
+        "id": "chain_revision",
+        "kind": "exec",
+        "tasks": [
+          "chain_revision.main.revise"
+        ],
+        "steps": [
+          [
+            "chain_revision.main.revise"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "chain_revision"
+      },
+      {
+        "id": "chain_revision_approval",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "chain_revision_approval",
+        "reject_to": "chain_revision",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "chain_revision"
+      },
+      {
+        "id": "implementation",
+        "kind": "exec",
+        "tasks": [
+          "implementation.main.implement"
+        ],
+        "steps": [
+          [
+            "implementation.main.implement"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "verification",
+        "kind": "exec",
+        "tasks": [
+          "verification.tests.test_changed_scopes",
+          "verification.review.code_review"
+        ],
+        "steps": [
+          [
+            "verification.tests.test_changed_scopes"
+          ],
+          [
+            "verification.review.code_review"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": "verification.fix_loop",
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "work_brief",
+        "kind": "exec",
+        "tasks": [
+          "work_brief.main.author"
+        ],
+        "steps": [
+          [
+            "work_brief.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "work_brief"
+      },
+      {
+        "id": "local_review",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "local_review",
+        "reject_to": "implementation",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": "work_brief"
+      },
+      {
+        "id": "describe_merge_request",
+        "kind": "exec",
+        "tasks": [
+          "describe_merge_request.main.author"
+        ],
+        "steps": [
+          [
+            "describe_merge_request.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "mr_meta"
+      },
+      {
+        "id": "draft_merge_request",
+        "kind": "exec",
+        "tasks": [
+          "draft_merge_request.rebase.rebase",
+          "draft_merge_request.open.open"
+        ],
+        "steps": [
+          [
+            "draft_merge_request.rebase.rebase"
+          ],
+          [
+            "draft_merge_request.open.open"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "merge_request_feedback",
+        "kind": "exec",
+        "tasks": [
+          "merge_request_feedback.ci.await_ci",
+          "merge_request_feedback.automated_review.await_review"
+        ],
+        "steps": [
+          [
+            "merge_request_feedback.ci.await_ci"
+          ],
+          [
+            "merge_request_feedback.automated_review.await_review"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": "merge_request_feedback.fix_loop",
+        "auto_escalate": null,
+        "on_failure": [
+          "merge_request_feedback.on_failure.repair.repair_feedback",
+          "merge_request_feedback.on_failure.sync.sync_mr"
+        ],
+        "covered_by": null
+      },
+      {
+        "id": "work_item_summary",
+        "kind": "exec",
+        "tasks": [
+          "work_item_summary.main.author"
+        ],
+        "steps": [
+          [
+            "work_item_summary.main.author"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": "review_brief"
+      },
+      {
+        "id": "final_review",
+        "kind": "gate",
+        "tasks": [],
+        "steps": null,
+        "gate_after": "final_review",
+        "reject_to": "implementation",
+        "fix_loop": null,
+        "auto_escalate": false,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "mark_ready",
+        "kind": "exec",
+        "tasks": [
+          "mark_ready.main.ready"
+        ],
+        "steps": [
+          [
+            "mark_ready.main.ready"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "external_approval",
+        "kind": "exec",
+        "tasks": [
+          "external_approval.main.await"
+        ],
+        "steps": [
+          [
+            "external_approval.main.await"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "merge",
+        "kind": "exec",
+        "tasks": [
+          "merge.main.merge"
+        ],
+        "steps": [
+          [
+            "merge.main.merge"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      },
+      {
+        "id": "post_merge_ci",
+        "kind": "exec",
+        "tasks": [
+          "post_merge_ci.main.await"
+        ],
+        "steps": [
+          [
+            "post_merge_ci.main.await"
+          ]
+        ],
+        "gate_after": null,
+        "reject_to": null,
+        "fix_loop": null,
+        "auto_escalate": null,
+        "on_failure": null,
+        "covered_by": null
+      }
+    ]
+  },
+  "node_overrides_count": 0,
+  "budget_cap": {
+    "cap_usd": 10.0,
+    "source": "policy",
+    "spent_usd": 0.0
+  },
+  "rate_limit": null,
+  "worker_sessions": [],
+  "usage": {
+    "total": {
+      "tokens_in": 0,
+      "tokens_cache_write": 0,
+      "tokens_cache_read": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "wall_ms": 0,
+      "sessions": 0,
+      "capped_out": 0,
+      "wait_timed_out": 0,
+      "time_capped": 0,
+      "rounds": 0,
+      "cost_complete": true,
+      "split_complete": true
+    },
+    "by_node": []
+  },
+  "progress": null,
+  "repos": [],
+  "escalation_threads": [],
+  "worktree_path": "/w/x",
+  "head_sha": null,
+  "pending_gate": null,
+  "gate_artifact": null,
+  "stop_reason": null,
+  "suggested_action": null,
+  "deferred_findings": [
+    {
+      "severity": "minor",
+      "message": "Unused import",
+      "file": "src/calc.py",
+      "line": 1,
+      "source_plugin": "review"
+    },
+    {
+      "severity": "important",
+      "message": "No test for the new branch",
+      "file": null,
+      "line": null,
+      "source_plugin": "review"
+    }
+  ],
+  "judge_stop_note": [
+    {
+      "node_id": "review",
+      "reasoning": "diminishing returns",
+      "findings": [
+        {
+          "severity": "critical",
+          "message": "Off-by-one in add()",
+          "file": "src/calc.py",
+          "line": 2,
+          "source_plugin": "review"
+        }
+      ]
+    }
+  ],
+  "concerns": [],
+  "needs_context_question": null,
+  "mr_ref": null,
+  "steerable": true
+}
