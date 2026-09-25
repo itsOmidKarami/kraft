@@ -193,6 +193,15 @@ jobs:
           cache: npm
           cache-dependency-path: vscode/package-lock.json
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      # The integration tests seed a hermetic daemon with dev/seed.py, which
+      # runs `bd init` and files items through intake's `bd create`.
+      - name: install bd
+        run: |
+          case "$(uname -m)" in aarch64|arm64) BD_ARCH=arm64 ;; *) BD_ARCH=amd64 ;; esac
+          curl -fsSL "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin bd
+          git config --global user.email ci@kraft.invalid
+          git config --global user.name "Kraft CI"
       - run: npm ci
         working-directory: vscode
       - run: npm run typecheck

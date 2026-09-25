@@ -105,7 +105,11 @@ def _git(*args: str) -> str:
 
 
 def _show(rev: str, path: str) -> str | None:
-    done = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, text=True)
+    # Every changed file is read, binaries included (a PNG is not UTF-8); only
+    # test and markdown files are ever parsed, so lossy decoding costs nothing.
+    done = subprocess.run(
+        ["git", "show", f"{rev}:{path}"], capture_output=True, text=True, errors="replace"
+    )
     return done.stdout if done.returncode == 0 else None
 
 
