@@ -8,6 +8,7 @@ import { Api } from "./core/api";
 import type { Announcer } from "./core/announcer";
 import { baseUrl, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
+import { registerSchemas } from "./config/schema";
 import { registerGates } from "./gates";
 import { registerDiff } from "./review/diff";
 import { registerComments } from "./review/comments";
@@ -71,6 +72,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
     offAll();
     for (const i of store.items()) if (deriveState(i).needsYou) void store.refresh(i.id).catch(() => {});
   });
+  void registerSchemas(context, loc.templatesDir);
   void store.start();
   return { store, api, readOnly: () => readOnly, locations: loc, gates, review };
 }
