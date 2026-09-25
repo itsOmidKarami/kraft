@@ -24,6 +24,10 @@ describe("composeNote", () => {
   });
 });
 
+it("marks a base-side comment", () => {
+  expect(composeNote({ comments: [{ file: "f", line: 3, body: "x", side: "base" }] })).toBe("Review comments:\n- f:3 (base) — x");
+});
+
 describe("destinationOf", () => {
   it("rejects at a pending gate", () => {
     expect(destinationOf({ pending_gate: "review", status: "needs_human" } as any)).toEqual({ kind: "reject", gate: "review" });

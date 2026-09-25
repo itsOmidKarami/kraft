@@ -23,6 +23,7 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
   const collection = vscode.languages.createDiagnosticCollection("kraft-config");
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const clean = new Map<string, boolean>(); // latest check result per file
+  const seq = new Map<string, number>(); // newest check per file wins
   let linted = new Set<string>();
   const state: { lastOffer?: "reload" | "restart"; diagnostics(uri: vscode.Uri): readonly vscode.Diagnostic[] } = {
     diagnostics: (uri) => collection.get(uri) ?? [],
@@ -31,12 +32,15 @@ export function registerConfigChecks(context: vscode.ExtensionContext, api: Api,
   const check = async (doc: vscode.TextDocument) => {
     const rel = configFile(doc.uri.fsPath, templatesDir);
     if (!rel) return;
+    const mine = (seq.get(doc.uri.fsPath) ?? 0) + 1;
+    seq.set(doc.uri.fsPath, mine);
     try {
       const { issues } = await api.check(rel, doc.getText());
+      if (seq.get(doc.uri.fsPath) !== mine) return;
       collection.set(doc.uri, fromCheck(issues, doc.uri.fsPath).map(toDiagnostic));
       clean.set(doc.uri.fsPath, issues.length === 0);
     } catch {
-      clean.delete(doc.uri.fsPath); // daemon down: no verdict
+      if (seq.get(doc.uri.fsPath) === mine) clean.delete(doc.uri.fsPath); // daemon down: no verdict
     }
   };
 

@@ -18,7 +18,7 @@ describe("reviewFiles", () => {
 
 describe("review URIs", () => {
   it("round-trip id and path, including nested paths and odd refs", () => {
-    expect(leftUri("K-1", "src/a b.py", "abc123")).toBe("kraft-git:/K-1/src/a b.py?abc123");
+    expect(leftUri("K-1", "src/a b#.py", "abc123")).toBe("kraft-git:/K-1/src/a%20b%23.py?abc123");
     expect(rightUri("K-1", "src/a.py")).toBe("kraft-wt:/K-1/src/a.py");
     expect(parseReviewUri("/K-1/src/a b.py")).toEqual({ id: "K-1", file: "src/a b.py" });
   });

@@ -1,6 +1,6 @@
 import type { WorkItemDetail } from "./api";
 
-export interface DraftComment { file: string; line: number; body: string }
+export interface DraftComment { file: string; line: number; body: string; side?: "base" }
 export interface Draft { comments: DraftComment[]; summary?: string }
 export type Destination = { kind: "reject"; gate: string } | { kind: "resume" } | { kind: "none"; reason: string };
 
@@ -9,7 +9,7 @@ const indent = (body: string) => body.trim().split("\n").join("\n  ");
 export function composeNote(draft: Draft): string {
   const lines = [...draft.comments]
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line)
-    .map((c) => `- ${c.file}:${c.line} — ${indent(c.body)}`);
+    .map((c) => `- ${c.file}:${c.line}${c.side === "base" ? " (base)" : ""} — ${indent(c.body)}`);
   if (draft.summary?.trim()) lines.push(`- (general) — ${indent(draft.summary)}`);
   return ["Review comments:", ...lines].join("\n");
 }

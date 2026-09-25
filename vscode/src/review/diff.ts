@@ -21,8 +21,10 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
       try {
         const { stdout } = await run("git", ["show", `${decodeURIComponent(uri.query)}:${file}`], { cwd, maxBuffer: 32 * 1024 * 1024 });
         return stdout;
-      } catch {
-        return ""; // added in the branch: no base side
+      } catch (e) {
+        // Only "not in the base" means an added file; anything else must surface, not read as an empty side.
+        if (/exists on disk, but not in|does not exist in/.test(String((e as { stderr?: string }).stderr))) return "";
+        throw e;
       }
     },
   };
@@ -33,8 +35,9 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
       if (!root) return "";
       try {
         return await readFile(join(root, file), "utf8");
-      } catch {
-        return ""; // deleted in the branch
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return ""; // deleted in the branch
+        throw e;
       }
     },
   };

@@ -29,7 +29,7 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
     vscode.commands.registerCommand("kraft.review.addComment", (reply: vscode.CommentReply) => {
       const { id, file } = parseReviewUri(reply.thread.uri.path);
       const line = (reply.thread.range?.start.line ?? 0) + 1;
-      addDraft(id, { file, line, body: reply.text });
+      addDraft(id, { file, line, body: reply.text, ...(reply.thread.uri.scheme === "kraft-git" && { side: "base" as const }) });
       reply.thread.comments = [
         ...reply.thread.comments,
         { body: reply.text, mode: vscode.CommentMode.Preview, author: { name: "You (draft)" } },
