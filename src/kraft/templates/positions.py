@@ -9,7 +9,14 @@ on that path that exists, so an error about a field the author never wrote
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import yaml
+
+if TYPE_CHECKING:
+    from kraft.templates.library import TemplateIssue
 
 #: 1-based line and column.
 Position = tuple[int, int]
@@ -58,3 +65,30 @@ def yaml_mark(exc: BaseException) -> Position | None:
             return (mark.line + 1, mark.column + 1)
         current = current.__cause__ or current.__context__
     return None
+
+
+def issue_view(issue: TemplateIssue, buffers: Mapping[Path, str] | None = None) -> dict:
+    """An issue as the API and CLI show it: where it is, 1-based."""
+
+    def text(path: Path) -> str:
+        if buffers is not None and path in buffers:
+            return buffers[path]
+        try:
+            return path.read_text()
+        except OSError:
+            return ""
+
+    line, column = issue.mark or locate(text(issue.file), issue.loc or ())
+    related = None
+    if issue.related is not None:
+        rfile, rloc = issue.related
+        rline, rcolumn = locate(text(rfile), rloc)
+        related = {"file": str(rfile), "line": rline, "column": rcolumn}
+    return {
+        "file": str(issue.file),
+        "chain": issue.chain,
+        "message": issue.message,
+        "line": line,
+        "column": column,
+        "related": related,
+    }

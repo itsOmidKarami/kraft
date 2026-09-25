@@ -17,7 +17,7 @@ from kraft import policy as policy_mod
 from kraft import store
 from kraft.adapters import beads
 from kraft.api import api_router, deps, perimeter
-from kraft.templates import catalogue
+from kraft.templates import catalogue, positions
 from kraft.templates.library import (
     CHAINS_DIR,
     LIBRARY_FILE,
@@ -72,7 +72,7 @@ def _library_view(st, library: TemplateLibrary) -> dict:
     issues = library.lint(getattr(st, "instance_policy", None))
     listed = catalogue.components(library, issues)
     for component in listed:
-        component["issues"] = [_issue_view(i) for i in component["issues"]]
+        component["issues"] = [positions.issue_view(i) for i in component["issues"]]
     try:
         text = path.read_text()
     except OSError as exc:
@@ -158,10 +158,6 @@ def _resolved_view(chain: ResolvedChain) -> dict:
     }
 
 
-def _issue_view(issue: TemplateIssue) -> dict:
-    return {"file": str(issue.file), "chain": issue.chain, "message": issue.message}
-
-
 @api_router.get("/templates/lint")
 async def lint_templates(request: Request):
     """The installed library as it is on disk now, which is what an operator
@@ -177,7 +173,7 @@ async def lint_templates(request: Request):
     return {
         "valid": report.valid,
         "chains": list(report.chains),
-        "issues": [_issue_view(i) for i in report.issues],
+        "issues": [positions.issue_view(i) for i in report.issues],
     }
 
 
@@ -245,14 +241,17 @@ async def resolve_templates(body: ResolveBody, request: Request):
             )
             ids = list(library.chain_ids)
     except TemplateLibraryError as exc:
-        return {"chains": [], "issues": [_issue_view(TemplateIssue(_UNSAVED, None, str(exc)))]}
+        return {
+            "chains": [],
+            "issues": [positions.issue_view(TemplateIssue.from_error(_UNSAVED, None, exc))],
+        }
     chains = []
     for id in ids:
         try:
             chains.append(_resolved_view(library.resolve_chain(id)))
         except TemplateLibraryError as exc:
-            issues.append(TemplateIssue(_UNSAVED, id, str(exc)))
-    return {"chains": chains, "issues": [_issue_view(i) for i in issues]}
+            issues.append(TemplateIssue.from_error(_UNSAVED, id, exc))
+    return {"chains": chains, "issues": [positions.issue_view(i) for i in issues]}
 
 
 #: An authored chain id, the same rule as every other V1 identifier: it names

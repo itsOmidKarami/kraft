@@ -45,6 +45,22 @@ def test_lint_of_the_installed_library_is_clean(client):
     assert {"default", "quick-task"} <= set(body["chains"])
 
 
+def test_lint_issues_carry_line_and_column(client, templates_dir):
+    (templates_dir / "chains" / "dangling.yaml").write_text(
+        "id: dangling\n"
+        "nodes:\n"
+        "  - id: n\n"
+        "    kind: exec\n"
+        "    tasks:\n"
+        "      - id: t\n"
+        "        extends: no_such_task\n"
+    )
+    issues = client.get("/api/templates/lint").json()["issues"]
+    [issue] = [i for i in issues if i["chain"] == "dangling"]
+    assert (issue["line"], issue["column"]) == (7, 9)
+    assert issue["related"] is None
+
+
 def test_lint_reports_all_library_errors_without_writing(client, templates_dir):
     """Every broken chain, each for its own reason -- a parse error, a
     reference that resolves to nothing, a duplicate identifier -- in one

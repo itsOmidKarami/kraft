@@ -12,6 +12,7 @@ import yaml
 
 from kraft import client, render
 from kraft.cli import common
+from kraft.templates import positions
 from kraft.templates.library import TemplateLibrary
 
 
@@ -19,7 +20,8 @@ def _render_lint(report: dict) -> str:
     if report["valid"]:
         return f"{len(report['chains'])} chain(s), no errors"
     return "\n".join(
-        f"{issue['chain'] or issue['file']}: {issue['message']}" for issue in report["issues"]
+        f"{issue['file']}:{issue['line']}:{issue['column']}: {issue['message']}"
+        for issue in report["issues"]
     )
 
 
@@ -34,9 +36,7 @@ def _lint_dir_report(path: str) -> dict:
     return {
         "valid": report.valid,
         "chains": list(report.chains),
-        "issues": [
-            {"file": str(i.file), "chain": i.chain, "message": i.message} for i in report.issues
-        ],
+        "issues": [positions.issue_view(i) for i in report.issues],
     }
 
 

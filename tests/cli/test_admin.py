@@ -98,7 +98,7 @@ def test_admin_templates_lint_prints_each_error_and_exits_1(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "templates", "lint"])
     assert caught.value.code == 1
-    assert "garbled: " in capsys.readouterr().out
+    assert "garbled.yaml:" in capsys.readouterr().out
 
 
 def test_admin_templates_lint_dir_reads_the_shipped_library_with_no_server(monkeypatch, capsys):
@@ -129,7 +129,18 @@ def test_admin_templates_lint_dir_of_a_broken_fixture_names_the_error_and_exits_
     with pytest.raises(SystemExit) as caught:
         cli.main(["admin", "templates", "lint", "--dir", str(tmp_path)])
     assert caught.value.code == 1
-    assert "garbled: " in capsys.readouterr().out
+    assert "garbled.yaml:" in capsys.readouterr().out
+
+
+def test_admin_templates_lint_prints_file_line_and_column(capsys):
+    from kraft.cli import templates
+
+    report = {
+        "valid": False,
+        "chains": [],
+        "issues": [{"file": "/t/chains/c.yaml", "line": 7, "column": 9, "message": "boom"}],
+    }
+    assert templates._render_lint(report) == "/t/chains/c.yaml:7:9: boom"
 
 
 def test_admin_templates_show_resolved_prints_the_expanded_chain(app, capsys):
