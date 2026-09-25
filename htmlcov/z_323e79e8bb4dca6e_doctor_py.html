@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_escalate_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-25 16:42 +0000
+            created at 2026-09-25 22:21 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -803,7 +803,7 @@
     <p class="pln"><span class="n"><a id="t721" href="#t721">721</a></span><span class="t">        <span class="com"># every version check, so an air-gapped machine never reaches for the</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t722" href="#t722">722</a></span><span class="t">        <span class="com"># network and a test suite never depends on gitlab.com being up.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t723" href="#t723">723</a></span><span class="t">        <span class="key">return</span> <span class="nam">_check</span><span class="op">(</span><span class="str">&quot;version&quot;</span><span class="op">,</span> <span class="key">True</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">here</span><span class="op">}</span><span class="fst"> (skipped: KRAFT_NO_UPDATE_CHECK)</span><span class="fst">&quot;</span><span class="op">,</span> <span class="nam">skipped</span><span class="op">=</span><span class="key">True</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t724" href="#t724">724</a></span><span class="t">    <span class="nam">release</span> <span class="op">=</span> <span class="nam">update</span><span class="op">.</span><span class="nam">latest</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t724" href="#t724">724</a></span><span class="t">    <span class="nam">release</span> <span class="op">=</span> <span class="nam">update</span><span class="op">.</span><span class="nam">latest</span><span class="op">(</span><span class="nam">channel</span><span class="op">=</span><span class="nam">update</span><span class="op">.</span><span class="nam">channel_of</span><span class="op">(</span><span class="nam">update</span><span class="op">.</span><span class="nam">installed</span><span class="op">(</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t725" href="#t725">725</a></span><span class="t">    <span class="key">if</span> <span class="nam">release</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t726" href="#t726">726</a></span><span class="t">        <span class="com"># Not a skip: this ran and failed to get an answer, which on a</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t727" href="#t727">727</a></span><span class="t">        <span class="com"># private project usually means no GITLAB_TOKEN and no authenticated</span>&nbsp;</span><span class="r"></span></p>
@@ -822,7 +822,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_escalate_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-25 16:42 +0000
+            created at 2026-09-25 22:21 +0000
         </p>
     </div>
 </footer>
