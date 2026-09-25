@@ -36,3 +36,13 @@ repos:
         # So the SKIPPED line shows when a worker or a credential-less shell commits.
         verbose: true
         files: ^(templates/|src/kraft/harnesses/)
+      # vscode/schemas/ is generated from pydantic models spread across
+      # src/kraft/ (templates/models.py, environment.py, policy.py, config.py,
+      # cap_levels.py, ...); a hand-kept file list would miss the next one.
+      # CI's gate is tests/test_config_schemas.py.
+      - id: config-schemas-current
+        name: vscode/schemas match the pydantic models
+        entry: just schemas-check
+        language: system
+        pass_filenames: false
+        files: ^(src/kraft/|vscode/schemas/)
