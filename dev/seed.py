@@ -10,6 +10,7 @@ fake agent on PATH — see docs/superpowers/specs/2026-09-04-packaging-and-dev-e
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -53,13 +54,20 @@ def build_repo() -> None:
     git("add", "-A")
     git("commit", "-qm", "initial")
     # Intake calls `bd create` in KRAFT_BD_CWD; without a workspace here it would
-    # fall through to whichever beads DB the launch directory belongs to.
-    subprocess.run(
-        ["bd", "init", "--non-interactive", "--prefix", "devseed"],
-        cwd=REPO,
-        check=True,
-        capture_output=True,
-    )
+    # fall through to whichever beads DB the launch directory belongs to. Without
+    # bd at all, intake files no bead and the item runs anyway (executor.entry),
+    # so a seed that needs no beads -- the VS Code integration tests in CI, which
+    # keeps bd out of every job but e2e-cli -- skips it.
+    if shutil.which("bd"):
+        subprocess.run(
+            ["bd", "init", "--non-interactive", "--prefix", "devseed"],
+            cwd=REPO,
+            # Pinned: REPO may sit inside a checkout that tracks its own .beads/,
+            # whose config bd init would otherwise inherit.
+            env={**os.environ, "BEADS_DIR": str(REPO / ".beads")},
+            check=True,
+            capture_output=True,
+        )
     print(f"seed: built {REPO}")
 
 
