@@ -22,9 +22,13 @@ class CheckBody(BaseModel):
 @api_router.post("/templates/check")
 async def check_config(body: CheckBody, request: Request):
     st = request.app.state
-    ctx = config_check.context(st)
+
+    def run():
+        # `context` reads the harness providers from disk: off the loop too.
+        return config_check.check(body.file, body.text, config_check.context(st))
+
     try:
-        issues = await asyncio.to_thread(config_check.check, body.file, body.text, ctx)
+        issues = await asyncio.to_thread(run)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     buffers = {st.templates_dir / body.file: body.text}

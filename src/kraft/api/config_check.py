@@ -27,6 +27,7 @@ from kraft.templates.environment import (
     TemplateEnvironmentError,
 )
 from kraft.templates.library import (
+    CHAINS_DIR,
     LIBRARY_FILE,
     TemplateIssue,
     TemplateLibrary,
@@ -154,14 +155,18 @@ def library_issues(
     path: Path,
     instance_policy: policy_mod.InstancePolicy | None,
     repos: list[config_mod.RepoEntry],
+    skills_dir: Path | None = None,
 ) -> list[TemplateIssue]:
     if why := retired_message(data):
         return [TemplateIssue(path, None, why)]
     try:
         if library is None:
-            # Nothing to diff against: every chain the candidate cannot resolve is new.
+            # No running library to diff against or take chains from: every
+            # chain the candidate cannot resolve is new, read from disk.
             broken_before: set[str | None] = set()
-            candidate = TemplateLibrary.from_mappings(data, (), library_path=path)
+            candidate = TemplateLibrary.from_mappings(
+                data, _chains_on_disk(path.parent), library_path=path, skills_dir=skills_dir
+            )
         else:
             broken_before = {i.chain for i in library.lint(instance_policy)}
             candidate = library.with_library(data, path)
@@ -179,13 +184,27 @@ def library_issues(
     return issues
 
 
+def _chains_on_disk(root: Path) -> list[tuple[Path, dict]]:
+    """Every chain file under `root` that parses to a mapping. One that does
+    not was broken before this edit, so it is not the edit's to report."""
+    chains = []
+    for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
+        try:
+            body = yaml.safe_load(chain_path.read_text())
+        except OSError, yaml.YAMLError:
+            continue
+        if isinstance(body, dict):
+            chains.append((chain_path, body))
+    return chains
+
+
 def _check_library(path, data, ctx):
     # A repos.yaml broken for another reason is not this save's to refuse.
     try:
         repos = config_mod.load_repos(ctx.templates_dir / "repos.yaml")
     except config_mod.ConfigError:
         repos = []
-    return library_issues(ctx.library, data, path, ctx.instance_policy, repos)
+    return library_issues(ctx.library, data, path, ctx.instance_policy, repos, ctx.skills_dir)
 
 
 # ── policy ──

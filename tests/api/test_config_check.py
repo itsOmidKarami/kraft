@@ -116,3 +116,11 @@ def test_checking_writes_nothing(ctx, templates_dir):
         config_check.check(relative, "garbage: [\n", ctx)
         config_check.check(relative, GOOD_CHAIN, ctx)
     assert snapshot(templates_dir) == before
+
+
+def test_a_library_check_without_a_running_library_still_resolves_the_chains(ctx):
+    """A daemon whose library did not load has no chains in memory: the check
+    reads them from disk, so an edit that breaks one is still reported."""
+    ctx = config_check.CheckContext(**{**ctx.__dict__, "library": None})
+    issues = config_check.check("library.yaml", "tasks: {}\n", ctx)
+    assert "default" in {i.chain for i in issues}
