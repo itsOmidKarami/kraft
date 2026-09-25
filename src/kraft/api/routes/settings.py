@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import yaml
 from fastapi import HTTPException, Request
@@ -16,7 +14,8 @@ from kraft import intake as intake_mod
 from kraft import policy as policy_mod
 from kraft import store
 from kraft.adapters import beads
-from kraft.api import api_router, deps, perimeter
+from kraft.api import api_router, config_check, deps, perimeter
+from kraft.api.config_check import IntakeBody
 from kraft.templates import catalogue, positions
 from kraft.templates.library import (
     CHAINS_DIR,
@@ -25,8 +24,7 @@ from kraft.templates.library import (
     TemplateLibrary,
     TemplateLibraryError,
 )
-from kraft.templates.models import ResolvedChain, retired_keys
-from kraft.worker import steering as steering_mod
+from kraft.templates.models import ResolvedChain
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
 #
@@ -112,27 +110,18 @@ async def put_library(body: LibraryText, request: Request):
     library = deps.library_or_503(st)
     path = st.templates_dir / LIBRARY_FILE
     data = _authored_mapping(body.text, "library")
-    try:
-        candidate = library.with_library(data, path)
-    except TemplateLibraryError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    policy = getattr(st, "instance_policy", None)
-    broken_before = {i.chain for i in library.lint(policy)}
-    if issues := [i for i in candidate.lint(policy) if i.chain not in broken_before]:
-        raise HTTPException(422, str(issues[0]))
-    # A repository's `steering:` names library profiles too: removing (or
-    # over-growing) one it names is refused like a chain it would break.
     # A repos.yaml broken for another reason is not this save's to refuse.
-    profiles = {n: p.instructions for n, p in candidate.steering.items()}
     try:
         repos = config_mod.load_repos(deps.repos_path(st))
     except config_mod.ConfigError:
         repos = []
-    for entry in repos:
-        try:
-            steering_mod.select(entry.steering, profiles, where=f"repos.yaml: {entry.path}")
-        except steering_mod.SteeringError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    issues = config_check.library_issues(
+        library, data, path, getattr(st, "instance_policy", None), repos
+    )
+    if issues:
+        # A library-wide issue names no chain, and its message says the rest.
+        first = issues[0]
+        raise HTTPException(422, str(first) if first.chain else first.message)
     config_mod.write_text(path, body.text)
     deps._reload_templates(st)
     return _library_view(st, deps.library_or_503(st))
@@ -268,12 +257,8 @@ def _authored_mapping(text: str, what: str) -> dict:
         raise HTTPException(422, f"not YAML: {exc}") from exc
     if not isinstance(data, dict):
         raise HTTPException(422, f"a {what} file is a mapping")
-    if retired := retired_keys(data):
-        raise HTTPException(
-            422,
-            f"{retired[0]} is retired (Ruling 196): a wait's timeout is its task's own "
-            "policy.total_time_cap_minutes",
-        )
+    if why := config_check.retired_message(data):
+        raise HTTPException(422, why)
     return data
 
 
@@ -312,13 +297,9 @@ async def put_template(tid: str, body: ChainText, request: Request):
         else st.templates_dir / CHAINS_DIR / f"{tid}.yaml"
     )
     chain = _authored_mapping(body.text, "chain")
-    if chain.get("id", tid) != tid:
-        raise HTTPException(422, f"the file declares id {chain['id']!r}, not {tid!r}")
-    try:
-        candidate, _ = library.with_chain(path, {**chain, "id": tid})
-    except TemplateLibraryError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    issues = [i for i in candidate.lint(getattr(st, "instance_policy", None)) if i.chain == tid]
+    issues = config_check.chain_issues(
+        library, path, tid, chain, getattr(st, "instance_policy", None)
+    )
     if issues:
         raise HTTPException(422, issues[0].message)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -426,14 +407,10 @@ async def put_policy(body: PolicyBody, request: Request):
             tasks = maxima.setdefault("tasks", {})
             if isinstance(tasks, dict):
                 tasks.setdefault("total_time_cap_minutes", value)
-    with tempfile.TemporaryDirectory() as tmp:
-        candidate = Path(tmp) / "policy.yaml"
-        candidate.write_text(yaml.safe_dump(data))
-        try:
-            parsed = policy_mod.PolicyInput.from_yaml(candidate)
-            policy_obj = policy_mod.Policy.from_input(parsed, source=candidate)
-        except policy_mod.PolicyError as exc:
-            raise HTTPException(422, str(exc)) from exc
+    try:
+        parsed, policy_obj = config_check.validate_policy(data)
+    except policy_mod.PolicyError as exc:
+        raise HTTPException(422, str(exc)) from exc
     config_mod.write_yaml(st.templates_dir / "policy.yaml", data)
     deps.apply_policy(st, policy_obj, parsed.instance_policy())
     deps.lint_loaded(st)
@@ -451,24 +428,6 @@ async def put_theme(body: config_mod.Theme, request: Request):
     st = request.app.state
     body.save(st.templates_dir / "theme.yaml")
     return body.model_dump()
-
-
-class IntakeBody(BaseModel):
-    """`intake.yaml`, typed. Unlike `policy.yaml` this file is a flat fixed
-    shape, so the bounds live here rather than in a loader that has to accept a
-    hand-edited file it did not write."""
-
-    enabled: bool
-    # The poller floors this at 30s anyway; rejecting it is better than
-    # accepting a number the running instance will not honour.
-    interval_s: int = Field(ge=30)
-    # Moved to `policy.yaml` (`Policy.max_concurrent`); kept optional here for
-    # one release so an old client or a hand-edited file round-trips without
-    # a 422. No longer read back as authoritative anywhere.
-    max_concurrent: int | None = Field(default=None, ge=1)
-    # P0 is the *highest* priority, so the ceiling is "P<n> and below".
-    priority_ceiling: int = Field(ge=0, le=4)
-    repos: list[str] = []
 
 
 @api_router.get("/intake")
@@ -559,10 +518,8 @@ async def put_access(body: AccessBody, request: Request):
         access["allowed_hosts"] = body.allowed_hosts
     if body.password:
         access["password_hash"] = auth_mod.hash_password(body.password)
-    # Binding off-localhost without a password is the configuration that puts an
-    # agent runner on the office wifi. Refuse it rather than allow it quietly.
-    if access["bind"] not in config_mod.LOOPBACK and not access["password_hash"]:
-        raise HTTPException(422, "set a password before binding off localhost")
+    if why := config_check.access_problem(access):
+        raise HTTPException(422, why)
     config_mod.Access.model_validate(access).save(st.templates_dir / "access.yaml")
     st.access = access
     # Only once the new hash is durable: revoking first and then failing to write
@@ -596,9 +553,8 @@ def _notify_view(notify_cfg: dict, last_test: dict | None = None) -> dict:
 
 
 def _checked_url(value: str, field: str) -> str:
-    scheme = urlsplit(value).scheme
-    if scheme not in ("http", "https"):
-        raise HTTPException(422, f"{field} must be an http or https URL")
+    if why := config_check.url_problem(value, field):
+        raise HTTPException(422, why)
     return value
 
 
@@ -636,12 +592,11 @@ async def put_notify(body: NotifyBody, request: Request):
         cfg["base_url"] = _checked_url(body.base_url, "base_url") if body.base_url else None
     if body.events is not None:
         cfg["events"] = body.events
-    # Enabled with nowhere to send is a setting that looks armed and is not.
     # Kept as a belt-and-braces check: the branch above already makes it
     # unreachable for the "clear the URL" path, but not for "enable with no
     # URL ever set" (body.url is None and cfg["url"] was already empty).
-    if cfg["enabled"] and not cfg["url"]:
-        raise HTTPException(422, "set a webhook URL before enabling notifications")
+    if why := config_check.notify_problem(cfg):
+        raise HTTPException(422, why)
     config_mod.Notify.model_validate(cfg).save(path)
     st.notifier.reload()
     return _notify_view(cfg, st.notifier.last_test)
