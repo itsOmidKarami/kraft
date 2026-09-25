@@ -40,6 +40,29 @@ TIMEOUT = 2.0
 DOWNLOAD_TIMEOUT = 120.0
 
 
+#: Pre-release marks in ascending order; a final release outranks all of them.
+_MARKS = ("a", "b", "rc")
+
+#: How far down the stability ladder each channel reaches. `beta` takes betas,
+#: rcs and finals; `alpha` takes everything.
+CHANNELS = {"stable": 3, "rc": 2, "beta": 1, "alpha": 0}
+
+_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?$")
+
+
+def _rank(raw: str) -> tuple[int, ...] | None:
+    """Sort key for a release tag (`v1.3.0`, `v1.3.0rc2`), or None for any other shape.
+
+    Pre-releases sort below their own final, as PEP 440 does. Dev builds and
+    other shapes are not tags anyone publishes, so they are simply not ranked.
+    """
+    m = _VERSION.fullmatch(raw)
+    if not m:
+        return None
+    mark = _MARKS.index(m[4]) if m[4] else len(_MARKS)
+    return (int(m[1]), int(m[2]), int(m[3]), mark, int(m[5] or 0))
+
+
 @dataclass(frozen=True)
 class Release:
     tag: str
@@ -93,23 +116,26 @@ def _fetch(url: str, timeout: float):
     return json.loads(_request(url, timeout))
 
 
-def _parse(payload) -> Release | None:
-    """The newest published release that actually has a wheel attached.
+def _parse(payload, channel: str = "stable") -> Release | None:
+    """The newest published release in `channel` that actually has a wheel attached.
 
     Three things disqualify an entry, and the feed is walked rather than
     indexed at [0] because any of them can be newest: a draft (visible only to
-    people with push access, and never installable), a prerelease, and a
-    release with no wheel — a tag pushed by hand, or a release job that failed
-    after creating one.
+    people with push access, and never installable), a prerelease less stable
+    than `channel` allows, and a release with no wheel — a tag pushed by hand,
+    or a release job that failed after creating one. Of what is left the
+    highest version wins, not the most recently published.
     """
     if not isinstance(payload, list):
         return None
+    best: tuple[tuple[int, ...], Release] | None = None
     for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("draft") or entry.get("prerelease"):
+        if not isinstance(entry, dict) or entry.get("draft"):
             continue
         tag = entry.get("tag_name")
+        rank = _rank(str(tag))
+        if rank is None or rank[3] < CHANNELS[channel]:
+            continue
         assets = entry.get("assets") or []
         wheel = next(
             (
@@ -119,42 +145,49 @@ def _parse(payload) -> Release | None:
             ),
             None,
         )
-        if tag and wheel:
-            return Release(tag=tag, wheel_url=wheel)
-    return None
+        if wheel and (best is None or rank > best[0]):
+            best = (rank, Release(tag=tag, wheel_url=wheel))
+    return best[1] if best else None
 
 
-def _read_cache(now: float) -> Release | None:
+def _read_cache(now: float, channel: str) -> Release | None:
     try:
         blob = json.loads(_cache_path().read_text())
-        if now - float(blob["checked_at"]) >= CACHE_TTL:
+        if blob.get("channel", "stable") != channel or now - float(blob["checked_at"]) >= CACHE_TTL:
             return None
         return Release(tag=blob["tag"], wheel_url=blob["wheel_url"])
     except OSError, ValueError, KeyError, TypeError:
         return None
 
 
-def _write_cache(release: Release, now: float) -> None:
+def _write_cache(release: Release, now: float, channel: str) -> None:
     path = _cache_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"tag": release.tag, "wheel_url": release.wheel_url, "checked_at": now})
+            json.dumps(
+                {
+                    "tag": release.tag,
+                    "wheel_url": release.wheel_url,
+                    "channel": channel,
+                    "checked_at": now,
+                }
+            )
         )
     except OSError:
         # A read-only or full run dir costs a re-check next time, nothing more.
         pass
 
 
-def latest(*, force: bool = False) -> Release | None:
-    """The newest installable release, or `None` if that cannot be established."""
+def latest(*, force: bool = False, channel: str = "stable") -> Release | None:
+    """The newest installable release in `channel`, or `None` if that cannot be established."""
     now = time.time()
     if not force:
-        cached = _read_cache(now)
+        cached = _read_cache(now, channel)
         if cached is not None:
             return cached
     try:
-        release = _parse(_fetch(RELEASES_URL, TIMEOUT))
+        release = _parse(_fetch(RELEASES_URL, TIMEOUT), channel)
     except Exception:  # noqa: BLE001
         # Deliberately bare: httpx raises a dozen types, json another, and a
         # version check is never worth turning a working command into a
@@ -162,20 +195,20 @@ def latest(*, force: bool = False) -> Release | None:
         # distinction that "no update known" does not already cover.
         return None
     if release is not None:
-        _write_cache(release, now)
+        _write_cache(release, now, channel)
     return release
 
 
 def _parts(raw: str) -> tuple[int, ...]:
-    """The leading numeric components of a version, as integers.
+    """Sort key of an installed version or tag; empty when it is not a release.
 
-    ponytail: naive dotted-int compare, not PEP 440. It is right for the shapes
-    that exist here - `0.4.0` from a tag and `0.3.1.dev4+g1a2b3c` from a dev
-    build, where the dev build's base is correctly the *higher* version. Swap in
-    `packaging.version` the day a release carries an rc or a post suffix.
+    A dev build (`0.3.1.dev4+g1a2b3c`) keeps its base's release numbers and
+    ranks as that final, so it is correctly *ahead* of the last release.
     """
-    match = re.match(r"\d+(\.\d+)*", raw.lstrip("v"))
-    return tuple(int(p) for p in match.group(0).split(".")) if match else ()
+    if rank := _rank(raw):
+        return rank
+    base = re.match(r"v?\d+\.\d+\.\d+", raw)
+    return _rank(base[0]) or () if base else ()
 
 
 def is_behind(release: Release | None) -> bool:
@@ -183,6 +216,12 @@ def is_behind(release: Release | None) -> bool:
         return False
     there = _parts(release.tag)
     return bool(there) and _parts(installed()) < there
+
+
+def channel_of(version: str) -> str:
+    """The channel a version was published on: `1.3.0rc1` -> rc, a final -> stable."""
+    m = _VERSION.fullmatch(version)
+    return {"a": "alpha", "b": "beta", "rc": "rc"}.get(m[4] if m else "", "stable")
 
 
 def _is_homebrew_install() -> bool:

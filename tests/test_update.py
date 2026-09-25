@@ -600,3 +600,59 @@ def test_shadowing_kraft_names_another_install_ahead_on_path(
     monkeypatch.setenv("PATH", ":".join(str(tmp_path / e) for e in path_entries) or "/nonexistent")
     expected = str(tmp_path / "other" / "bin" / "kraft") if shadowed else None
     assert update.shadowing_kraft() == expected
+
+
+_FEED = [
+    _release("v1.3.0rc1", prerelease=True),
+    _release("v1.3.0b2", prerelease=True),
+    _release("v1.3.0a1", prerelease=True),
+    _release("v1.2.0"),
+]
+
+
+@pytest.mark.parametrize(
+    ("channel", "want"),
+    [("stable", "v1.2.0"), ("rc", "v1.3.0rc1"), ("beta", "v1.3.0rc1"), ("alpha", "v1.3.0rc1")],
+)
+def test_a_channel_takes_the_newest_at_least_as_stable(channel, want):
+    assert update._parse(_FEED, channel).tag == want
+
+
+def test_beta_and_alpha_channels_skip_what_is_less_stable():
+    feed = [_release("v1.3.0a1", prerelease=True), _release("v1.3.0b1", prerelease=True)]
+    assert update._parse(feed, "rc") is None
+    assert update._parse(feed, "beta").tag == "v1.3.0b1"
+
+
+def test_the_final_outranks_its_own_release_candidate():
+    feed = [_release("v1.3.0rc2", prerelease=True), _release("v1.3.0"), _release("v1.2.0")]
+    assert update._parse(feed, "rc").tag == "v1.3.0"
+
+
+def test_a_cache_written_for_one_channel_is_a_miss_for_another(cache, monkeypatch):
+    monkeypatch.setattr(update, "_fetch", lambda *_: _FEED)
+    assert update.latest(channel="stable").tag == "v1.2.0"
+    assert update.latest(channel="rc").tag == "v1.3.0rc1"
+
+
+@pytest.mark.parametrize(
+    ("here", "there", "behind"),
+    [("1.3.0rc1", "v1.3.0rc2", True), ("1.3.0rc2", "v1.3.0", True), ("1.3.0", "v1.3.0rc2", False)],
+)
+def test_is_behind_orders_pre_releases_below_their_final(monkeypatch, here, there, behind):
+    monkeypatch.setattr(update, "installed", lambda: here)
+    assert update.is_behind(update.Release(tag=there, wheel_url="u")) is behind
+
+
+@pytest.mark.parametrize(
+    ("version", "channel"),
+    [
+        ("1.3.0", "stable"),
+        ("1.3.0rc1", "rc"),
+        ("1.3.0b2", "beta"),
+        ("1.3.0a1", "alpha"),
+        ("0.3.1.dev4+g1a2b3c", "stable"),
+    ],
+)
+def test_channel_of_an_installed_version(version, channel):
+    assert update.channel_of(version) == channel

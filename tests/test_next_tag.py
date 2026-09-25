@@ -97,3 +97,21 @@ def test_one_release_label_among_others_still_reads():
 
 def test_no_release_label_is_none():
     assert impact_from_labels("bug,needs-review") is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "existing", "want"),
+    [
+        ("rc", [], "v1.3.0rc1"),
+        ("rc", ["v1.3.0rc1", "v1.3.0rc2", "v1.3.0b4"], "v1.3.0rc3"),
+        ("beta", ["v1.3.0rc1", "v1.3.0b1"], "v1.3.0b2"),
+        ("alpha", ["v1.2.0a9"], "v1.3.0a1"),
+    ],
+)
+def test_pre_tag_numbers_past_the_highest_of_its_kind(kind, existing, want):
+    assert next_tag_mod.pre_tag("v1.3.0", kind, existing) == want
+
+
+def test_pre_tag_rejects_an_unknown_kind():
+    with pytest.raises(ValueError, match="unknown pre-release kind"):
+        next_tag_mod.pre_tag("v1.3.0", "gamma", [])

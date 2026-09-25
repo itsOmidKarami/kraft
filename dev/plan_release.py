@@ -9,6 +9,8 @@ Usage:
   python3 dev/plan_release.py plan <previous-tag-or-empty> <prs.json> <notes-out>
       Prints the tag to create, or nothing when every PR is `release::none`.
       prs.json is a list of {number, title, body, labels: [name, ...]}.
+  python3 dev/plan_release.py pre <tag> <alpha|beta|rc>  < tag-list
+      Prints <tag> as its next pre-release, numbered past the tags on stdin.
   python3 dev/plan_release.py changelog <version> <notes-file>
       Writes the notes into CHANGELOG.md as the `## <version>` section.
 """
@@ -20,7 +22,7 @@ import re
 import sys
 from pathlib import Path
 
-from next_tag import IMPACTS, PREFIX, impact_from_labels, next_tag
+from next_tag import IMPACTS, PREFIX, impact_from_labels, next_tag, pre_tag
 
 CHANGELOG = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
 
@@ -89,6 +91,8 @@ def main(argv: list[str]) -> None:
         Path(argv[3]).write_text(release_notes(prs))
         if tag:
             print(tag)
+    elif len(argv) == 3 and argv[0] == "pre":
+        print(pre_tag(argv[1], argv[2], sys.stdin.read().split()))
     elif len(argv) == 3 and argv[0] == "changelog":
         write_changelog(argv[1], Path(argv[2]).read_text())
     else:

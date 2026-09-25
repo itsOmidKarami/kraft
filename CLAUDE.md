@@ -71,7 +71,7 @@ kraft admin stop                             # SIGTERM to run/kraft.pid
 kraft admin restart                          # stop, then start again the same way it was running
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
-kraft admin update [--restart] [-y]          # install the newest release; --restart also restarts
+kraft admin update [--restart] [-y] [--channel rc|beta|alpha]  # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
 kraft admin reload                           # reread the template library and policy.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error
