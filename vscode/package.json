@@ -1,7 +1,7 @@
 {
   "name": "kraft",
   "displayName": "Kraft",
-  "description": "Clear what your Kraft agents are waiting on you for — gates, review, config — without leaving the editor.",
+  "description": "Clear what your Kraft agents are waiting on you for \u2014 gates, review, config \u2014 without leaving the editor.",
   "version": "0.0.0",
   "publisher": "kraft-sdlc",
   "license": "SEE LICENSE IN LICENSE",
@@ -67,12 +67,12 @@
       },
       {
         "command": "kraft.resume",
-        "title": "Resume…",
+        "title": "Resume\u2026",
         "category": "Kraft"
       },
       {
         "command": "kraft.retry",
-        "title": "Retry…",
+        "title": "Retry\u2026",
         "category": "Kraft"
       },
       {
@@ -87,7 +87,7 @@
       },
       {
         "command": "kraft.escalate",
-        "title": "Escalate…",
+        "title": "Escalate\u2026",
         "category": "Kraft"
       },
       {
@@ -128,7 +128,7 @@
       },
       {
         "command": "kraft.reject",
-        "title": "Reject…",
+        "title": "Reject\u2026",
         "category": "Kraft"
       },
       {
@@ -363,10 +363,14 @@
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.2.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "mocha": "^11.0.0",
     "ovsx": "^0.10.0",
     "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.1.2"
   }
 }
