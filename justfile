@@ -223,14 +223,10 @@ e2e-ci:
 schemas:
     uv run python dev/export_config_schemas.py
 
-# Regenerate the config schemas and fail if the committed ones differ
-# (also the `config-schemas-current` pre-commit hook)
-schemas-check: schemas
-    git diff --exit-code -- vscode/schemas
-
 # vscode/ checks: the committed schemas match the pydantic models. The
 # extension's own typecheck + unit tests join this recipe when it lands.
-test-vscode: schemas-check
+test-vscode: schemas
+    git diff --exit-code -- vscode/schemas
 
 # Lint + format check
 lint:

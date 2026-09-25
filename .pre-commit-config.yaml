@@ -39,10 +39,12 @@ repos:
       # vscode/schemas/ is generated from pydantic models spread across
       # src/kraft/ (templates/models.py, environment.py, policy.py, config.py,
       # cap_levels.py, ...); a hand-kept file list would miss the next one.
-      # CI's gate is tests/test_config_schemas.py.
+      # Regenerates them; pre-commit fails the commit when that changes a file,
+      # and re-adding the regenerated files is the fix. CI's gate is
+      # tests/test_config_schemas.py.
       - id: config-schemas-current
         name: vscode/schemas match the pydantic models
-        entry: just schemas-check
+        entry: just schemas
         language: system
         pass_filenames: false
         files: ^(src/kraft/|vscode/schemas/)
