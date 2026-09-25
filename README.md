@@ -23,19 +23,21 @@
 | src/kraft/adapters/subprocess.py         |      271 |       10 |     96% |235-236, 250-251, 278, 423-424, 601-602, 752 |
 | src/kraft/analytics.py                   |      252 |        4 |     98% |52-53, 181, 187 |
 | src/kraft/api/\_\_init\_\_.py            |       30 |        0 |    100% |           |
+| src/kraft/api/config\_check.py           |      258 |       26 |     90% |105, 128, 143-144, 161, 194-195, 205-206, 227, 257, 279, 299, 318, 330-331, 348-349, 366, 404-405, 420-421, 423, 429, 431 |
 | src/kraft/api/deps.py                    |      286 |       21 |     93% |83-84, 211-212, 328, 331-333, 386-387, 423-424, 433-434, 567-568, 603, 606, 609, 632-633 |
 | src/kraft/api/perimeter.py               |       70 |        0 |    100% |           |
 | src/kraft/api/routes/\_\_init\_\_.py     |        0 |        0 |    100% |           |
 | src/kraft/api/routes/artifacts.py        |       95 |        1 |     99% |       234 |
 | src/kraft/api/routes/auth.py             |       45 |        6 |     87% |     54-61 |
 | src/kraft/api/routes/board.py            |      120 |        1 |     99% |       160 |
+| src/kraft/api/routes/check.py            |       20 |        0 |    100% |           |
 | src/kraft/api/routes/gates.py            |      128 |        9 |     93% |109, 112, 120, 294, 316, 349-350, 375-376 |
-| src/kraft/api/routes/harnesses.py        |      142 |        8 |     94% |37-38, 55-56, 73, 271-272, 274 |
+| src/kraft/api/routes/harnesses.py        |       86 |        1 |     99% |       204 |
 | src/kraft/api/routes/lifecycle.py        |      559 |       30 |     95% |142, 145-146, 151-152, 231, 260, 275, 461, 585-586, 638, 672, 677, 708, 717, 776, 868-869, 973, 1058, 1088-1089, 1152, 1172-1173, 1293-1294, 1333, 1343 |
 | src/kraft/api/routes/repos.py            |      168 |        6 |     96% |64-68, 97, 116, 254-255 |
 | src/kraft/api/routes/search.py           |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
 | src/kraft/api/routes/sessions.py         |      157 |        9 |     94% |95, 141, 145, 317-319, 323, 325, 328 |
-| src/kraft/api/routes/settings.py         |      380 |       28 |     93% |78-79, 117-118, 129-130, 193-194, 248, 291-292, 320-321, 411-414, 417, 483-486, 489-490, 494-499, 556, 558 |
+| src/kraft/api/routes/settings.py         |      349 |       24 |     93% |76-77, 116-117, 178-179, 233, 275-276, 391-394, 397, 441-444, 447-448, 452-457, 514, 516 |
 | src/kraft/api/routes/work\_items.py      |      290 |       14 |     95% |131, 306-309, 419-420, 583, 600, 617-618, 703-704, 756-757, 762 |
 | src/kraft/api/startup.py                 |      130 |        4 |     97% |79-81, 138-139 |
 | src/kraft/archive.py                     |       29 |        6 |     79% |     52-57 |
@@ -51,7 +53,7 @@
 | src/kraft/cli/common.py                  |       21 |        0 |    100% |           |
 | src/kraft/cli/item.py                    |      186 |        6 |     97% |30, 116, 124, 172, 176, 192 |
 | src/kraft/cli/repo.py                    |       67 |        4 |     94% |69-70, 82-83 |
-| src/kraft/cli/templates.py               |       72 |        2 |     97% |   90, 101 |
+| src/kraft/cli/templates.py               |       73 |        2 |     97% |   90, 101 |
 | src/kraft/cli/view.py                    |      194 |        8 |     96% |90-94, 176-177, 201, 211, 261-262 |
 | src/kraft/client/\_\_init\_\_.py         |        4 |        0 |    100% |           |
 | src/kraft/client/actions.py              |      148 |       29 |     80% |61, 135, 179, 213, 227-228, 246, 268, 270, 285, 292-296, 301-302, 361-362, 382, 407-423, 452, 467, 489 |
@@ -59,6 +61,7 @@
 | src/kraft/client/reads.py                |      155 |       14 |     91% |151, 221-222, 232-239, 297-300, 323, 329, 350 |
 | src/kraft/client/transport.py            |       70 |        8 |     89% |52, 67-68, 114-115, 117, 128-129 |
 | src/kraft/config.py                      |      431 |       15 |     97% |100, 102, 120-122, 246, 445, 448, 547, 722-723, 768-769, 790-791 |
+| src/kraft/config\_schemas.py             |       73 |        7 |     90% |   159-165 |
 | src/kraft/db.py                          |      112 |        0 |    100% |           |
 | src/kraft/doctor.py                      |      350 |       29 |     92% |108, 148-149, 166-167, 177-179, 191, 195-196, 235, 299-300, 334-341, 408-409, 502, 514-515, 558, 597, 605, 655-656, 681, 685-686 |
 | src/kraft/escalate.py                    |      173 |        6 |     97% |161, 264, 379, 509-510, 549 |
@@ -115,8 +118,9 @@
 | src/kraft/templates/catalogue.py         |       25 |        0 |    100% |           |
 | src/kraft/templates/environment.py       |      247 |        2 |     99% |  468, 470 |
 | src/kraft/templates/forks.py             |      100 |        0 |    100% |           |
-| src/kraft/templates/library.py           |      334 |        8 |     98% |160, 162, 174, 181, 268-269, 513, 534 |
+| src/kraft/templates/library.py           |      359 |        5 |     99% |192, 194, 206, 213, 574 |
 | src/kraft/templates/models.py            |      687 |        9 |     99% |97, 100, 482, 572, 659, 1232-1233, 1495, 1706 |
+| src/kraft/templates/positions.py         |       57 |        1 |     98% |        54 |
 | src/kraft/templates/retry.py             |      103 |       11 |     89% |188, 190-196, 198-199, 206 |
 | src/kraft/templates/revision.py          |      250 |        9 |     96% |216, 249, 298, 328, 450, 491-492, 494, 508 |
 | src/kraft/triggers.py                    |       52 |        6 |     88% |61-62, 101-104 |
@@ -130,7 +134,7 @@
 | src/kraft/worker/steering.py             |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py       |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                          |       61 |        0 |    100% |           |
-| **TOTAL**                                | **17262** |  **859** | **95%** |           |
+| **TOTAL**                                | **17609** |  **879** | **95%** |           |
 
 
 ## Setup coverage badge
