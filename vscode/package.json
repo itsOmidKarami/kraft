@@ -114,6 +114,26 @@
         "command": "kraft.startDaemon",
         "title": "Start Kraft",
         "category": "Kraft"
+      },
+      {
+        "command": "kraft.openArtifact",
+        "title": "Open Gate Document",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.approve",
+        "title": "Approve",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.reject",
+        "title": "Reject…",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.reviewChanges",
+        "title": "Review Changes",
+        "category": "Kraft"
       }
     ],
     "menus": {
@@ -125,6 +145,21 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "kraft.openArtifact",
+          "when": "view == kraft.board && viewItem =~ /\\bgate\\b/",
+          "group": "0_gate"
+        },
+        {
+          "command": "kraft.approve",
+          "when": "view == kraft.board && viewItem =~ /\\bgate\\b/ && !kraft.readOnly",
+          "group": "0_gate"
+        },
+        {
+          "command": "kraft.reject",
+          "when": "view == kraft.board && viewItem =~ /\\bgate\\b/ && !kraft.readOnly",
+          "group": "0_gate"
+        },
         {
           "command": "kraft.pause",
           "when": "view == kraft.board && viewItem =~ /\\bpause\\b/ && !kraft.readOnly",
@@ -207,6 +242,39 @@
         {
           "command": "kraft.openInWebUi",
           "when": "false"
+        },
+        {
+          "command": "kraft.openArtifact",
+          "when": "false"
+        },
+        {
+          "command": "kraft.approve",
+          "when": "resourceScheme == kraft-artifact"
+        },
+        {
+          "command": "kraft.reject",
+          "when": "resourceScheme == kraft-artifact"
+        },
+        {
+          "command": "kraft.reviewChanges",
+          "when": "false"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "kraft.approve",
+          "when": "resourceScheme == kraft-artifact && !kraft.readOnly",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kraft.reject",
+          "when": "resourceScheme == kraft-artifact && !kraft.readOnly",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kraft.reviewChanges",
+          "when": "resourceScheme == kraft-artifact",
+          "group": "navigation@3"
         }
       ]
     }

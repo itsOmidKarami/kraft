@@ -49,7 +49,7 @@ export class Board implements vscode.TreeDataProvider<Node> {
     t.id = item.id;
     t.description = describe(item);
     t.iconPath = new vscode.ThemeIcon(ICONS[deriveState(item).state] ?? "circle-filled");
-    t.contextValue = `item:${actionsFor(item).join(",")}`;
+    t.contextValue = `item:${[...(item.pending_gate ? ["gate"] : []), ...actionsFor(item)].join(",")}`;
     t.tooltip = `${item.id} — ${item.status}`;
     return t;
   }

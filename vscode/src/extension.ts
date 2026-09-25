@@ -4,8 +4,10 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { registerBoard } from "./board";
 import { Api } from "./core/api";
+import type { Announcer } from "./core/announcer";
 import { baseUrl, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
+import { registerGates } from "./gates";
 import { compatible } from "./core/version";
 
 export interface KraftApi {
@@ -13,6 +15,7 @@ export interface KraftApi {
   api: Api;
   readOnly(): boolean;
   locations: Locations;
+  gates: { announcer: Announcer };
 }
 
 function read(path: string): string | undefined {
@@ -52,8 +55,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
 
   registerBoard(context, store, api, () => runDir, () => readOnly);
   context.subscriptions.push(status, { dispose: () => store.stop() });
+  const gates = registerGates(context, store, api, () => readOnly);
   void store.start();
-  return { store, api, readOnly: () => readOnly, locations: loc };
+  return { store, api, readOnly: () => readOnly, locations: loc, gates };
 }
 
 export function deactivate() {}
