@@ -27,6 +27,7 @@ from pydantic import ValidationError
 
 from kraft import skill as _skill
 from kraft.policy import InstancePolicy, InstancePolicyInput, PolicyError
+from kraft.templates import positions
 from kraft.templates.models import (
     JUDGE_SEGMENT,
     MAIN_STEP,
@@ -39,6 +40,7 @@ from kraft.templates.models import (
     displaced_route,
     first_error,
 )
+from kraft.templates.positions import Position
 
 LIBRARY_FILE = "library.yaml"
 CHAINS_DIR = "chains"
@@ -63,7 +65,20 @@ _UNION_TAGS = frozenset({*TaskKind, *NodeKind})
 
 
 class TemplateLibraryError(Exception):
-    pass
+    """A library or chain that cannot be used, and -- when the raise site knows
+    it -- where: `loc` is a key path into the file the message names, `related`
+    the `(file, key path)` of a definition inherited from `library.yaml`."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        loc: tuple[object, ...] | None = None,
+        related: tuple[Path, tuple[object, ...]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.loc = loc
+        self.related = related
 
 
 @dataclass(frozen=True)
@@ -75,9 +90,26 @@ class TemplateIssue:
     #: `None` for an issue in `library.yaml` itself, which no one chain owns.
     chain: str | None
     message: str
+    #: Key path into `file`; `None` when the raise site could not say.
+    loc: tuple[object, ...] | None = None
+    #: `(library.yaml, key path)` of an inherited definition the issue is about.
+    related: tuple[Path, tuple[object, ...]] | None = None
+    #: The YAML parser's own position, for a file that does not parse.
+    mark: Position | None = None
 
     def __str__(self) -> str:
         return f"{self.chain or self.file}: {self.message}"
+
+    @classmethod
+    def from_error(cls, file: Path, chain: str | None, exc: BaseException) -> TemplateIssue:
+        return cls(
+            file=file,
+            chain=chain,
+            message=str(exc),
+            loc=getattr(exc, "loc", None),
+            related=getattr(exc, "related", None),
+            mark=positions.yaml_mark(exc),
+        )
 
 
 @dataclass(frozen=True)
@@ -236,7 +268,7 @@ class TemplateLibrary:
             except TemplateLibraryError as exc:
                 if issues is None:
                     raise
-                issues.append(TemplateIssue(chain_path, chain_path.stem, str(exc)))
+                issues.append(TemplateIssue.from_error(chain_path, chain_path.stem, exc))
         return library
 
     @classmethod
@@ -266,7 +298,10 @@ class TemplateLibrary:
             try:
                 steering[name] = SteeringProfile.model_validate(body)
             except ValidationError as exc:
-                raise TemplateLibraryError(f"{source}: {first_error(exc)}") from exc
+                raise TemplateLibraryError(
+                    f"{source}: {first_error(exc)}",
+                    loc=(Namespace.STEERING.value, name, *exc.errors()[0]["loc"]),
+                ) from exc
 
         built = cls(components, {}, steering, skills_dir)
         for chain_path, body in chains:
@@ -358,7 +393,7 @@ class TemplateLibrary:
             library = cls.from_yaml_dir(root, skills_dir=skills_dir, issues=issues)
         except TemplateLibraryError as exc:
             return LintReport(
-                chains=(), issues=(TemplateIssue(root / LIBRARY_FILE, None, str(exc)),)
+                chains=(), issues=(TemplateIssue.from_error(root / LIBRARY_FILE, None, exc),)
             )
         issues += library.lint(instance_policy)
         failed = {issue.chain for issue in issues}
@@ -390,7 +425,7 @@ class TemplateLibrary:
                     else InstancePolicy.from_input(InstancePolicyInput())
                 )
             except (TemplateLibraryError, PolicyError) as exc:
-                issues.append(TemplateIssue(file=raw.source.file, chain=id, message=str(exc)))
+                issues.append(TemplateIssue.from_error(raw.source.file, id, exc))
         return issues
 
     def resolve_chain(self, id: str) -> ResolvedChain:
@@ -407,7 +442,9 @@ class TemplateLibrary:
         try:
             chain = Chain.model_validate(expanded)
         except ValidationError as exc:
-            raise TemplateLibraryError(resolution.explain(exc)) from exc
+            raise TemplateLibraryError(
+                resolution.explain(exc), **resolution.error_location(exc)
+            ) from exc
         resolved = ResolvedChain.from_chain(chain)
         for node in resolved.nodes:
             # A node whose own tasks do not agree on what the node produces
@@ -428,13 +465,15 @@ class TemplateLibrary:
                 raise TemplateLibraryError(
                     f"{resolution.at(node.id)}: node {node.id!r} does not agree on what it "
                     f"produces ({sorted(k or '(none)' for k in produces)}); a node either "
-                    f"wholly produces one kind or declares none"
+                    f"wholly produces one kind or declares none",
+                    **resolution.path_location(node.id),
                 )
             for task in node.tasks():
                 for name in task.task.steering:
                     if name not in self.steering:
                         raise TemplateLibraryError(
-                            f"{resolution.at(task.path)}: selects no steering profile {name!r}"
+                            f"{resolution.at(task.path)}: selects no steering profile {name!r}",
+                            **resolution.path_location(task.path),
                         )
                 # A skill that names no method is refused here, where lint and
                 # intake see it, never discovered by an agent at launch
@@ -447,7 +486,8 @@ class TemplateLibrary:
                     except _skill.SkillError as exc:
                         raise TemplateLibraryError(
                             f"{resolution.at(task.path)}: selects skill {selected!r}, "
-                            f"which resolves to no method: {exc}"
+                            f"which resolves to no method: {exc}",
+                            **resolution.path_location(task.path),
                         ) from exc
         # The text, not the names: `materialize` freezes it into the item's
         # snapshot, so a later edit to `library.yaml` cannot reach a running item.
@@ -651,7 +691,7 @@ class _Resolution:
         self, raw: object, namespace: Namespace, where: str, loc: tuple[object, ...]
     ) -> Mapping[str, object]:
         if not isinstance(raw, Mapping):
-            raise TemplateLibraryError(f"{self._chain.file}: {where}: must be a mapping")
+            raise TemplateLibraryError(f"{self._chain.file}: {where}: must be a mapping", loc=loc)
         return self._merge_chain(raw, namespace, where, loc, seen=())
 
     def _merge_chain(
@@ -673,17 +713,19 @@ class _Resolution:
         if not isinstance(name, str):
             raise TemplateLibraryError(
                 f"{self._chain.file}: {where}: 'extends' names exactly one parent "
-                f"of the same kind, not {name!r}"
+                f"of the same kind, not {name!r}",
+                loc=(*loc, "extends"),
             )
         if name in seen:
             raise TemplateLibraryError(
-                f"{self._chain.file}: {where}: 'extends' cycle: {' -> '.join((*seen, name))}"
+                f"{self._chain.file}: {where}: 'extends' cycle: {' -> '.join((*seen, name))}",
+                loc=(*loc, "extends"),
             )
-        parent = self._parent(namespace, name, where)
+        parent = self._parent(namespace, name, where, loc)
         # The *resolved* parent, so a kind inherited further up the chain still
         # counts as the parent's kind.
         resolved = self._merge_chain(parent.data, namespace, where, loc, seen=(*seen, name))
-        self._reject_kind_change(resolved, child, where, name)
+        self._reject_kind_change(resolved, child, where, name, loc)
         if namespace is Namespace.TASKS:
             displaced = displaced_route(child)
             resolved = {k: v for k, v in resolved.items() if k not in displaced}
@@ -692,7 +734,9 @@ class _Resolution:
         self._inherited.setdefault(loc, parent.source)
         return merged
 
-    def _parent(self, namespace: Namespace, name: str, where: str) -> RawComponent:
+    def _parent(
+        self, namespace: Namespace, name: str, where: str, loc: tuple[object, ...]
+    ) -> RawComponent:
         component = self._library.component(namespace, name)
         if component is not None:
             self._refs.add(f"{namespace.value}.{name}")
@@ -701,21 +745,29 @@ class _Resolution:
         if other is not None:
             raise TemplateLibraryError(
                 f"{self._chain.file}: {where}: extends {name!r}, which is a "
-                f"{other.singular}, not a {namespace.singular}"
+                f"{other.singular}, not a {namespace.singular}",
+                loc=(*loc, "extends"),
             )
         raise TemplateLibraryError(
-            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}"
+            f"{self._chain.file}: {where}: extends no {namespace.singular} named {name!r}",
+            loc=(*loc, "extends"),
         )
 
     def _reject_kind_change(
-        self, parent: Mapping[str, object], child: Mapping[str, object], where: str, name: str
+        self,
+        parent: Mapping[str, object],
+        child: Mapping[str, object],
+        where: str,
+        name: str,
+        loc: tuple[object, ...],
     ) -> None:
         """`extends-cannot-change-kind`."""
         inherited, declared = parent.get("kind"), child.get("kind")
         if inherited is not None and declared is not None and inherited != declared:
             raise TemplateLibraryError(
                 f"{self._chain.file}: {where}: extends {name!r} and cannot change kind "
-                f"{str(inherited)!r} to {str(declared)!r}"
+                f"{str(inherited)!r} to {str(declared)!r}",
+                loc=(*loc, "kind"),
             )
 
     # ── diagnostics ──
@@ -726,6 +778,30 @@ class _Resolution:
         source = self._sources.get(path)
         inherited = f" <- {source}" if source is not None and source != self._chain else ""
         return f"{self._chain.file}: {path}{inherited}"
+
+    def error_location(self, exc: ValidationError) -> dict[str, object]:
+        """`loc`/`related` for a schema failure: the same component `explain`
+        names. Positional union tags are dropped, as in `explain`, which turns
+        pydantic's `loc` into a key path of the authored file."""
+        loc = tuple(part for part in exc.errors()[0]["loc"] if part not in _UNION_TAGS)
+        key = next((k for k in _prefixes(loc) if k in self._located), None)
+        if key is None:
+            return {"loc": loc}
+        return self._at(key, loc[len(key) :])
+
+    def path_location(self, path: str) -> dict[str, object]:
+        """`loc`/`related` for the component at canonical `path`."""
+        key = next((k for k, v in self._located.items() if v.path == path), None)
+        return {} if key is None else self._at(key, ())
+
+    def _at(self, key: tuple[object, ...], rest: tuple[object, ...]) -> dict[str, object]:
+        source = self._located[key].source
+        if source == self._chain:
+            return {"loc": (*key, *rest)}
+        return {
+            "loc": key,
+            "related": (source.file, (source.namespace.value, source.name, *rest)),
+        }
 
     def explain(self, exc: ValidationError) -> str:
         """A schema failure in the author's own terms: the chain file, the
