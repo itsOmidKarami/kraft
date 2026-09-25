@@ -69,10 +69,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   const diff = registerDiff(context, store, api);
   const review = Object.assign(diff, comments);
   registerFindings(context, store, diff.worktrees, () => runDir);
-  // Details are fetched per event; an item already waiting when VS Code starts needs one fetch.
-  const offAll = store.onChange((ids) => {
+  // Details are fetched per event; connect clears them, so every "all" (start and reconnect) refetches for items waiting on a person.
+  store.onChange((ids) => {
     if (ids !== "all") return;
-    offAll();
     for (const i of store.items()) if (deriveState(i).needsYou) void store.refresh(i.id).catch(() => {});
   });
   void registerSchemas(context, loc.templatesDir);
