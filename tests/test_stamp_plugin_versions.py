@@ -69,3 +69,19 @@ def test_the_real_manifests_are_the_default_targets():
     assert any("plugins/kraft-lite/" in n for n in names)
     for path in stamp_mod.MANIFESTS:
         assert path.is_file(), f"{path} does not exist"
+
+
+def test_the_vscode_extension_is_stamped_and_keeps_its_own_shape(tmp_path):
+    """package.json is the extension's manifest: only `version` may change, and
+    the key order (which `vsce` and reviewers read top-down) must survive."""
+    assert stamp_mod._ROOT / "vscode" / "package.json" in stamp_mod.MANIFESTS
+    src = stamp_mod._ROOT / "vscode" / "package.json"
+    copy = tmp_path / "package.json"
+    copy.write_text(src.read_text())
+    stamp("1.2.3", [copy])
+    before, after = json.loads(src.read_text()), json.loads(copy.read_text())
+    assert after["version"] == "1.2.3"
+    assert list(after) == list(before)
+    assert {k: v for k, v in after.items() if k != "version"} == {
+        k: v for k, v in before.items() if k != "version"
+    }

@@ -142,3 +142,17 @@ def test_the_check_fails_a_silent_revert_and_passes_once_it_is_declared(
 
     body.write_text(f"## Summary\nA small change.\n\n{block}")
     assert cr.main(["check_removals.py", base, str(body)]) == 0
+
+
+def test_a_binary_file_in_the_change_does_not_crash_the_check(cr, repo, tmp_path, monkeypatch):
+    """Every changed file is read at both revisions; an added PNG (PR #233's
+    extension icon) is not UTF-8 and must not crash the check."""
+    (repo / "a.md").write_text("# doc\n")
+    base = _commit_all(repo, "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff\xfe")
+    _commit_all(repo, "add an icon")
+    monkeypatch.chdir(repo)
+    body = tmp_path / "body.md"
+    body.write_text("## Summary\nAn icon.\n")
+    assert cr.main(["check_removals.py", base, str(body)]) == 0

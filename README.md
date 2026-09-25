@@ -78,6 +78,9 @@ Then open a Claude Code session in your repo, run this, and follow what it asks:
 /kraft:onboard
 ```
 
+To clear gates and review diffs from VS Code, install the
+[Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode).
+
 Every install path, connecting your agent, and updating with
 `kraft admin update` are in the
 [install guide](https://itsomidkarami.github.io/kraft/get-started/install).

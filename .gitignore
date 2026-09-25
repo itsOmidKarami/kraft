@@ -88,3 +88,4 @@ docs/consolidated/
 # .beads/embeddeddolt/ and syncs over refs/dolt/data to a private remote.
 .beads/interactions.jsonl
 site/
+.kraft-vscode-it-*/
