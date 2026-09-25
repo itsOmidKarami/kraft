@@ -151,6 +151,16 @@
         "command": "kraft.review.discard",
         "title": "Discard Review Comments",
         "category": "Kraft"
+      },
+      {
+        "command": "kraft.lintLibrary",
+        "title": "Lint Template Library",
+        "category": "Kraft"
+      },
+      {
+        "command": "kraft.showResolved",
+        "title": "Show Resolved Chain",
+        "category": "Kraft"
       }
     ],
     "menus": {
