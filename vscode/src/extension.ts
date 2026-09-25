@@ -1,7 +1,59 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as vscode from "vscode";
+import { registerBoard } from "./board";
+import { Api } from "./core/api";
+import { baseUrl, locations, readToken, type Locations } from "./core/connection";
+import { Store, wsSocket } from "./core/store";
+import { compatible } from "./core/version";
 
-export function activate(_context: vscode.ExtensionContext) {
-  return {};
+export interface KraftApi {
+  store: Store;
+  api: Api;
+  readOnly(): boolean;
+  locations: Locations;
+}
+
+function read(path: string): string | undefined {
+  try { return readFileSync(path, "utf8"); } catch { return undefined; }
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<KraftApi> {
+  const loc = locations(process.env, homedir());
+  const setting = vscode.workspace.getConfiguration("kraft").get<string>("url");
+  const api = new Api(baseUrl(setting, process.env, read(join(loc.templatesDir, "access.yaml"))), readToken(loc.runDir));
+  const store = new Store(api, wsSocket);
+  const own = (context.extension.packageJSON as { version: string }).version;
+  let readOnly = false;
+  let runDir = loc.runDir;
+
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  const setStatus = (connected: boolean) => {
+    void vscode.commands.executeCommand("setContext", "kraft.connected", connected);
+    status.text = connected ? `$(check) Kraft${readOnly ? " (read-only)" : ""}` : "$(debug-disconnect) Kraft";
+    status.show();
+  };
+  store.onConnection(async (connected) => {
+    if (connected) {
+      try {
+        const health = await api.health();
+        runDir = health.run_dir;
+        readOnly = !compatible(own, health.version);
+        if (readOnly) void vscode.window.showWarningMessage(`Kraft ${health.version} does not match this extension (${own}); actions are disabled until they match.`);
+      } catch {
+        readOnly = true;
+      }
+      void vscode.commands.executeCommand("setContext", "kraft.readOnly", readOnly);
+    }
+    setStatus(connected);
+  });
+  setStatus(false);
+
+  registerBoard(context, store, api, () => runDir, () => readOnly);
+  context.subscriptions.push(status, { dispose: () => store.stop() });
+  void store.start();
+  return { store, api, readOnly: () => readOnly, locations: loc };
 }
 
 export function deactivate() {}
