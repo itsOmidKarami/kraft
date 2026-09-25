@@ -8,6 +8,10 @@ writes it, and each pull request's `## Changelog` section is its release note.
 Kraft's version is the git tag. `setuptools-scm` derives it at build time, so
 there is no `version =` line to bump.
 
+The job runs in the `release` GitHub environment, whose deployment branches are
+limited to `main`; the PyPI trusted publisher names that environment. Both are
+settings outside the repo: recreate them if the repository is ever moved.
+
 ## Cut a pre-release
 
 Same button, with **pre** set to `alpha`, `beta` or `rc`. It cuts the version

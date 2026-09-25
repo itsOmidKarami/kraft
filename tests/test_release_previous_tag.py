@@ -57,3 +57,7 @@ def test_only_a_stable_release_touches_homebrew_the_stamp_and_the_marketplace():
 
 def test_only_stable_and_rc_publish_to_pypi():
     assert """fromJSON('["none","rc"]')""" in _step("publish to PyPI")
+
+
+def test_the_release_job_runs_in_the_main_only_environment():
+    assert "    environment: release\n" in RELEASE_YML.read_text()

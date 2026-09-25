@@ -51,6 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     # The button offers every branch; only main releases.
     if: github.ref == 'refs/heads/main'
+    # The `if:` above lives in a file a branch can edit; this does not. The
+    # environment only deploys from main (repo settings), and PyPI's trusted
+    # publisher is pinned to it, so a run from any other ref cannot publish.
+    environment: release
     env:
       # Read by the publish step's `if:` -- a step's own `env` is not visible
       # to its `if:`, a job's is. Empty until the maintainer adds the secret.
