@@ -29,14 +29,14 @@ def test_the_committed_schema_is_current(name):
 
 @pytest.mark.parametrize("name", sorted(config_schemas.SCHEMAS))
 def test_every_schema_is_itself_valid(name):
-    jsonschema.Draft202012Validator.check_schema(config_schemas.SCHEMAS[name]())
+    assert jsonschema.Draft202012Validator.check_schema(config_schemas.SCHEMAS[name]()) is None
 
 
 @pytest.mark.parametrize(
     "chain", sorted((TEMPLATES / "chains").glob("*.yaml")), ids=lambda p: p.name
 )
 def test_every_shipped_chain_validates(chain):
-    validator("chain.schema.json").validate(yaml.safe_load(chain.read_text()))
+    assert not list(validator("chain.schema.json").iter_errors(yaml.safe_load(chain.read_text())))
 
 
 @pytest.mark.parametrize(
@@ -50,7 +50,8 @@ def test_every_shipped_chain_validates(chain):
     ],
 )
 def test_every_shipped_config_file_validates(file, schema):
-    validator(schema).validate(yaml.safe_load((TEMPLATES / file).read_text()) or {})
+    data = yaml.safe_load((TEMPLATES / file).read_text()) or {}
+    assert not list(validator(schema).iter_errors(data))
 
 
 def test_a_task_that_only_extends_is_valid_in_authored_form():
@@ -58,7 +59,7 @@ def test_a_task_that_only_extends_is_valid_in_authored_form():
         "id": "c",
         "nodes": [{"id": "n", "kind": "exec", "tasks": [{"id": "t", "extends": "implementer"}]}],
     }
-    validator("chain.schema.json").validate(chain)
+    assert not list(validator("chain.schema.json").iter_errors(chain))
 
 
 def test_a_misspelled_key_is_refused():
