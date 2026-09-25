@@ -1,0 +1,512 @@
+{
+  "$defs": {
+    "AutomatedReview": {
+      "additionalProperties": false,
+      "description": "`automated_review:` on a repository: the one reviewer whose verdict\n`mr.automated_review` waits for, named exactly one way.\n\n* `bot` -- a forge login. The review settles when that login has reviewed\n  the merge request's current head.\n* `check` -- a check or commit status on the head. It settles when that\n  check completes.\n\nAbsent, the repository expects no automated reviewer, and the wait settles\nclean at once (`automated_review_not_configured`). How either is read is the\nforge backend's (`automated-review-implementation-is-not-template-\nconfiguration`): this names *which* reviewer, never how to ask it.",
+      "properties": {
+        "bot": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bot"
+        },
+        "check": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check"
+        }
+      },
+      "title": "AutomatedReview",
+      "type": "object"
+    },
+    "RepoEntry": {
+      "additionalProperties": true,
+      "description": "One `repos.yaml` entry. Strict, so `managed: \"true\"` is rejected as the\nhand-rolled loader rejected it; unknown keys ride along (`extra=\"allow\"`)\nbecause entries carry keys this loader never read (`name`, `enabled`,\n`default_chain_template`, ...) and a re-save must not drop them.",
+      "properties": {
+        "areas": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "default": {},
+          "title": "Areas",
+          "type": "object"
+        },
+        "automated_review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutomatedReview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "default_chain_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Chain Template"
+        },
+        "deny_tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny Tools",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Env",
+          "type": "object"
+        },
+        "env_passthrough": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Env Passthrough",
+          "type": "array"
+        },
+        "forge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forge"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "intent_dir": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intent Dir"
+        },
+        "local_files": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Local Files",
+          "type": "array"
+        },
+        "managed": {
+          "default": true,
+          "title": "Managed",
+          "type": "boolean"
+        },
+        "models": {
+          "default": {},
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "type": "string"
+            }
+          },
+          "title": "Models",
+          "type": "object"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TemplatePolicyOverride"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxPolicy"
+            },
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sandbox"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        },
+        "steering": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Steering",
+          "type": "array"
+        },
+        "test_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Test Command"
+        },
+        "test_scopes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TestScope"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Test Scopes"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "RepoEntry",
+      "type": "object"
+    },
+    "SandboxPolicy": {
+      "additionalProperties": false,
+      "description": "Where a task's process runs: `kind: docker` in `image`\n(`kraft.worker.sandbox`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it.",
+      "properties": {
+        "image": {
+          "minLength": 1,
+          "title": "Image",
+          "type": "string"
+        },
+        "kind": {
+          "const": "docker",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "image"
+      ],
+      "title": "SandboxPolicy",
+      "type": "object"
+    },
+    "TemplatePolicyOverride": {
+      "additionalProperties": false,
+      "description": "A repository, work-item, chain or execution-node override: a task's\nfields plus the two that bound a node's fix loop (`walk.walk_node`) --\n`max_attempts`, its attempt cap, and `timeout_minutes`, its wall clock.",
+      "properties": {
+        "allowed_harnesses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Harnesses"
+        },
+        "allowed_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Tools"
+        },
+        "budget_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "gt": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Usd"
+        },
+        "deny_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deny Tools"
+        },
+        "escalation_harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Harness"
+        },
+        "grants": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grants"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Cap Minutes"
+        },
+        "timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Minutes"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        },
+        "total_time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Time Cap Minutes"
+        }
+      },
+      "title": "TemplatePolicyOverride",
+      "type": "object"
+    },
+    "TestScope": {
+      "additionalProperties": true,
+      "description": "One `test_scopes` entry. Not asserted as a pytest class.",
+      "properties": {
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths",
+        "command"
+      ],
+      "title": "TestScope",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "repos": {
+      "items": {
+        "$ref": "#/$defs/RepoEntry"
+      },
+      "type": "array"
+    }
+  },
+  "title": "Kraft connected repositories",
+  "type": "object"
+}

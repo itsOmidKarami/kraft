@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "AgentProfileInput": {
+      "additionalProperties": false,
+      "description": "One `harnesses.yaml` `profiles:` entry: a named model tier an agent task\nselects with `profile:` (Kraft-ps1ao). `model` is keyed by *provider* id,\nnot harness id, so two harnesses on one provider share one spelling.",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FallbackEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "model": {
+          "minProperties": 1,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "type": "string"
+            }
+          },
+          "title": "Model",
+          "type": "object"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "AgentProfileInput",
+      "type": "object"
+    },
+    "FallbackEntry": {
+      "additionalProperties": false,
+      "description": "One entry of a `fallback:` list, on an agent task or an agent profile:\nwhere a launch goes next when the one before it is rate-limited or\nunavailable (`rate-limited-launch-falls-back-to-next-candidate`). An\noptional `harness:` plus one route, the same either-or a task obeys:\n`profile:`, or `model:` and/or `effort:`. Whatever it omits is kept from\nthe task's own launch; the item's and the node's overrides are not\n(`executor.fallback`).",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Harness"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        }
+      },
+      "title": "FallbackEntry",
+      "type": "object"
+    },
+    "HarnessProfileInput": {
+      "additionalProperties": false,
+      "description": "One `harnesses.yaml` entry: a configured instance of a provider, never\nprovider command syntax or result parsing\n(`harness-profile-has-safe-instance-configuration`).",
+      "properties": {
+        "defaults": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Defaults",
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "executable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executable"
+        },
+        "provider": {
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "HarnessProfileInput",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "harnesses": {
+      "additionalProperties": {
+        "$ref": "#/$defs/HarnessProfileInput"
+      },
+      "type": "object"
+    },
+    "profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AgentProfileInput"
+      },
+      "type": "object"
+    }
+  },
+  "title": "Kraft harness and agent profiles",
+  "type": "object"
+}

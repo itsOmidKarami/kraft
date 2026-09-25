@@ -219,6 +219,10 @@ e2e-ci:
     test -n "${KRAFT_E2E_BASE:-}" || { cat "$LOG"; exit 1; }
     cd frontend && npm run e2e -- --max-failures=3
 
+# Regenerate the config JSON Schemas under vscode/schemas/
+schemas:
+    uv run python dev/export_config_schemas.py
+
 # Lint + format check
 lint:
     uv run ruff check .

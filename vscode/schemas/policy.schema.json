@@ -1,0 +1,488 @@
+{
+  "$defs": {
+    "ArchiveInput": {
+      "properties": {
+        "after_days": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Days"
+        }
+      },
+      "title": "ArchiveInput",
+      "type": "object"
+    },
+    "Budget": {
+      "description": "Spend caps, in dollars. `None` is \"no cap\", never \"zero\".\n\nNot a field on `Cap`: a `Cap` is per-loop and is snapshotted per\n`(work_item_id, key)` row in `retry_counters`, while a budget is per work\nitem and per day and spans every loop in the chain.",
+      "properties": {
+        "daily_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Daily Usd"
+        },
+        "work_item_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "ge": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Work Item Usd"
+        }
+      },
+      "title": "Budget",
+      "type": "object"
+    },
+    "Cap": {
+      "additionalProperties": false,
+      "description": "One loop's bound. Unknown keys are refused: a cap field that binds\nnothing reads as a limit and limits nothing (`escalate_after`, retired with\nthe legacy hook model, was one).",
+      "properties": {
+        "attempts": {
+          "exclusiveMinimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "wall_clock_s": {
+          "exclusiveMinimum": 0,
+          "title": "Wall Clock S",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts",
+        "wall_clock_s"
+      ],
+      "title": "Cap",
+      "type": "object"
+    },
+    "CapValues": {
+      "additionalProperties": false,
+      "description": "One level's caps in `defaults:` or `maxima:` (Ruling 211).",
+      "properties": {
+        "budget_usd": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "gt": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Usd"
+        },
+        "time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Cap Minutes"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        },
+        "total_time_cap_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Time Cap Minutes"
+        }
+      },
+      "title": "CapValues",
+      "type": "object"
+    },
+    "FindingsInput": {
+      "properties": {
+        "loop_severities": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "critical",
+                  "important",
+                  "minor"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loop Severities"
+        }
+      },
+      "title": "FindingsInput",
+      "type": "object"
+    },
+    "PolicyDefaultsInput": {
+      "additionalProperties": false,
+      "description": "`policy.yaml`'s `defaults:` -- inheritable operational starting\npoints, no safety meaning of their own. A cap default is per level\n(Ruling 211): it applies to every scope of its kind that nothing -- the\nchain, a node, step or task, or the item's own override -- set a value\nfor. A default, not a ceiling (Ruling 198): any scope may set more, up to\nits level's maximum.",
+      "properties": {
+        "allowed_harnesses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Harnesses"
+        },
+        "escalation_grants": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Grants"
+        },
+        "escalation_harness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Harness"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "nodes": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "steps": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "tasks": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Minutes"
+        },
+        "work_item": {
+          "$ref": "#/$defs/CapValues"
+        }
+      },
+      "title": "PolicyDefaultsInput",
+      "type": "object"
+    },
+    "PolicyMaximaInput": {
+      "additionalProperties": false,
+      "description": "`policy.yaml`'s `maxima:` -- the administrator ceiling no policy\noverride may exceed, checked when a layer is applied (at load, at\nmaterialization, and on a retry override); the resolved values it bounds\nare what a task launch reads (`MaterializedChain.policy_for`).\n`timeout_minutes`/`max_attempts` here are optional administrator maxima on\nthe operational fields of the same name; the design doc's example omits\nthem because most installs never set one.\n\nA cap's maximum is per level (Ruling 211), and one set on a level bounds\nevery narrower level too (`nearest`). `tasks.total_time_cap_minutes` is\nalso the longest any external wait may wait (Ruling 196: a wait's timeout\nis its task's total cap), so it replaces the retired\n`wait_timeout_minutes`.",
+      "properties": {
+        "allowed_harnesses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Harnesses"
+        },
+        "allowed_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Tools"
+        },
+        "max_attempts": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Attempts"
+        },
+        "nodes": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "steps": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "tasks": {
+          "$ref": "#/$defs/CapValues"
+        },
+        "timeout_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Minutes"
+        },
+        "work_item": {
+          "$ref": "#/$defs/CapValues"
+        }
+      },
+      "title": "PolicyMaximaInput",
+      "type": "object"
+    },
+    "TriggerInput": {
+      "properties": {
+        "chain": {
+          "title": "Chain",
+          "type": "string"
+        },
+        "cron": {
+          "title": "Cron",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "repo": {
+          "title": "Repo",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cron",
+        "repo",
+        "chain",
+        "title"
+      ],
+      "title": "TriggerInput",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Static policy.yaml schema; runtime conversion remains in ``load_policy``.\n\n`extra=\"forbid\"`: a misspelled section (`maximum:` for `maxima:`) is refused\nby name rather than loading cleanly and bounding nothing (Kraft-sz4dh).",
+  "properties": {
+    "archive": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArchiveInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "auto_escalate_delay_s": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Auto Escalate Delay S",
+      "type": "integer"
+    },
+    "auto_escalate_stuck": {
+      "default": true,
+      "title": "Auto Escalate Stuck",
+      "type": "boolean"
+    },
+    "auto_escalate_stuck_cap": {
+      "default": 3,
+      "exclusiveMinimum": 0,
+      "title": "Auto Escalate Stuck Cap",
+      "type": "integer"
+    },
+    "auto_review_attempts": {
+      "default": 1,
+      "exclusiveMinimum": 0,
+      "title": "Auto Review Attempts",
+      "type": "integer"
+    },
+    "budget": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Budget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "default": {
+      "$ref": "#/$defs/Cap"
+    },
+    "defaults": {
+      "$ref": "#/$defs/PolicyDefaultsInput"
+    },
+    "findings": {
+      "$ref": "#/$defs/FindingsInput"
+    },
+    "forge_cli_timeout_s": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        }
+      ],
+      "default": 120,
+      "gt": 0,
+      "title": "Forge Cli Timeout S"
+    },
+    "loops": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Cap"
+      },
+      "title": "Loops",
+      "type": "object"
+    },
+    "max_concurrent": {
+      "default": 3,
+      "exclusiveMinimum": 0,
+      "title": "Max Concurrent",
+      "type": "integer"
+    },
+    "maxima": {
+      "$ref": "#/$defs/PolicyMaximaInput"
+    },
+    "rate_limit_retries": {
+      "default": 5,
+      "exclusiveMinimum": 0,
+      "title": "Rate Limit Retries",
+      "type": "integer"
+    },
+    "triggers": {
+      "items": {
+        "$ref": "#/$defs/TriggerInput"
+      },
+      "title": "Triggers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "default"
+  ],
+  "title": "Kraft policy",
+  "type": "object"
+}
