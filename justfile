@@ -223,10 +223,13 @@ e2e-ci:
 schemas:
     uv run python dev/export_config_schemas.py
 
-# vscode/ checks: the committed schemas match the pydantic models. The
-# extension's own typecheck + unit tests join this recipe when it lands.
+# vscode/ checks: the committed schemas match the pydantic models, and the
+# extension typechecks and passes its unit tests.
 test-vscode: schemas
     git diff --exit-code -- vscode/schemas
+    cd vscode && [ -d node_modules ] || npm ci
+    cd vscode && npm run typecheck
+    cd vscode && npm test
 
 # Lint + format check
 lint:

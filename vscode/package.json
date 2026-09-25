@@ -1,0 +1,45 @@
+{
+  "name": "kraft",
+  "displayName": "Kraft",
+  "description": "Clear what your Kraft agents are waiting on you for — gates, review, config — without leaving the editor.",
+  "version": "0.0.0",
+  "publisher": "kraft-sdlc",
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "media/kraft.png",
+  "repository": { "type": "git", "url": "https://github.com/itsOmidKarami/kraft" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "configuration": {
+      "title": "Kraft",
+      "properties": {
+        "kraft.url": { "type": "string", "default": "", "description": "Kraft daemon URL. Empty: read $KRAFT_HOME/templates/access.yaml." },
+        "kraft.notifications": { "type": "string", "enum": ["all", "gates", "off"], "default": "all", "description": "Which Kraft states raise a notification." }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "vitest run",
+    "test:integration": "npm run build && tsc -p tsconfig.test.json && node test/integration/runner.mjs",
+    "package": "vsce package"
+  },
+  "dependencies": { "ws": "^8.18.0" },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.90.0",
+    "@types/ws": "^8.5.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.25.0",
+    "mocha": "^11.0.0",
+    "ovsx": "^0.10.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
