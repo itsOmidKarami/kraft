@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "kraft: install dependencies",
+      "type": "shell",
+      "command": "[ -d node_modules ] || npm ci",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent" }
+    },
+    {
+      "label": "kraft: build extension",
+      "type": "npm",
+      "script": "build",
+      "path": ".",
+      "dependsOn": "kraft: install dependencies",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent" }
+    }
+  ]
+}

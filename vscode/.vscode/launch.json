@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension (dev daemon)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../.dev/repo"],
+      "env": { "KRAFT_HOME": "${workspaceFolder}/../.dev", "KRAFT_PORT": "8766" },
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "kraft: build extension"
+    },
+    {
+      "name": "Run Extension (installed Kraft)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "kraft: build extension"
+    }
+  ]
+}
