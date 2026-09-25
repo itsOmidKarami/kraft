@@ -8,6 +8,7 @@ import type { Announcer } from "./core/announcer";
 import { baseUrl, locations, readToken, type Locations } from "./core/connection";
 import { Store, wsSocket } from "./core/store";
 import { registerGates } from "./gates";
+import { registerDiff } from "./review/diff";
 import { compatible } from "./core/version";
 
 export interface KraftApi {
@@ -16,6 +17,7 @@ export interface KraftApi {
   readOnly(): boolean;
   locations: Locations;
   gates: { announcer: Announcer };
+  review: ReturnType<typeof registerDiff>;
 }
 
 function read(path: string): string | undefined {
@@ -56,8 +58,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<KraftA
   registerBoard(context, store, api, () => runDir, () => readOnly);
   context.subscriptions.push(status, { dispose: () => store.stop() });
   const gates = registerGates(context, store, api, () => readOnly);
+  const review = registerDiff(context, store, api);
   void store.start();
-  return { store, api, readOnly: () => readOnly, locations: loc, gates };
+  return { store, api, readOnly: () => readOnly, locations: loc, gates, review };
 }
 
 export function deactivate() {}

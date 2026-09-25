@@ -204,6 +204,11 @@
           "command": "kraft.openInWebUi",
           "when": "view == kraft.board && viewItem =~ /^item:/",
           "group": "3_open"
+        },
+        {
+          "command": "kraft.reviewChanges",
+          "when": "view == kraft.board && viewItem =~ /^item:/",
+          "group": "3_open"
         }
       ],
       "commandPalette": [
