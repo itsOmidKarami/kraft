@@ -642,3 +642,17 @@ def test_a_cache_written_for_one_channel_is_a_miss_for_another(cache, monkeypatc
 def test_is_behind_orders_pre_releases_below_their_final(monkeypatch, here, there, behind):
     monkeypatch.setattr(update, "installed", lambda: here)
     assert update.is_behind(update.Release(tag=there, wheel_url="u")) is behind
+
+
+@pytest.mark.parametrize(
+    ("version", "channel"),
+    [
+        ("1.3.0", "stable"),
+        ("1.3.0rc1", "rc"),
+        ("1.3.0b2", "beta"),
+        ("1.3.0a1", "alpha"),
+        ("0.3.1.dev4+g1a2b3c", "stable"),
+    ],
+)
+def test_channel_of_an_installed_version(version, channel):
+    assert update.channel_of(version) == channel

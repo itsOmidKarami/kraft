@@ -36,3 +36,24 @@ def test_previous_tag_pattern_rejects_every_prerelease_form():
     pattern = _previous_tag_pattern()
     for tag in ["v1.0.0rc1", "v1.0.0.rc1", "v1.0.0-rc.1"]:
         assert not re.fullmatch(pattern, tag), f"{tag!r} must not look like a previous release"
+
+
+def _step(name: str) -> str:
+    text = RELEASE_YML.read_text()
+    start = text.index(f"- name: {name}")
+    end = text.find("\n      - ", start + 1)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def test_only_a_stable_release_touches_homebrew_the_stamp_and_the_marketplace():
+    for name in [
+        "bump the homebrew tap",
+        "mint a token to open the stamp PR",
+        "stamp plugin manifests and CHANGELOG.md for this release",
+        "publish the VS Code extension",
+    ]:
+        assert "steps.impact.outputs.pre == 'none'" in _step(name), name
+
+
+def test_only_stable_and_rc_publish_to_pypi():
+    assert """fromJSON('["none","rc"]')""" in _step("publish to PyPI")

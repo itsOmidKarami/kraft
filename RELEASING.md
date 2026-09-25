@@ -8,6 +8,15 @@ writes it, and each pull request's `## Changelog` section is its release note.
 Kraft's version is the git tag. `setuptools-scm` derives it at build time, so
 there is no `version =` line to bump.
 
+## Cut a pre-release
+
+Same button, with **pre** set to `alpha`, `beta` or `rc`. It cuts the version
+the labels plan as `vX.Y.ZaN`, `bN` or `rcN`, numbered past the ones that
+exist. It is a GitHub pre-release: only `rc` also goes to PyPI, and none of
+them touch homebrew, the stamp PR or the Marketplace. Users pick one up with
+`kraft admin update --channel rc|beta|alpha`. The next stable release's notes
+still cover everything since the last stable tag.
+
 ## Cut a release
 
 Actions → **release** → **Run workflow** on `main`. Tick **dry run** first to see
