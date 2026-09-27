@@ -15,6 +15,19 @@ def _pending_gate(st, wid: str) -> str | None:
     return executor.pending_gate(st.db, wid)
 
 
+def _last_review_sha(st, wid: str, gate: str | None) -> str | None:
+    rev = st.db.read(lambda c: store.last_review(c, wid, gate)) if gate else None
+    return rev["head_sha"] if rev else None
+
+
+def _reject_default(row, gate: str | None) -> str | None:
+    if gate is None:
+        return None
+    nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+    idx = executor.gate_node_index(nodes, gate)
+    return nodes[executor.reject_target(nodes, idx, None)].id
+
+
 #: The event types that bound a `work_item_needs_human` stop, newest wins —
 #: the same shape of boundary `_pending_gate` models. A stop needs one because
 #: `store.request_gate` also sets status 'needs_human' while appending no
@@ -381,6 +394,10 @@ async def get_work_item(wid: str, request: Request):
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": pending,
+        # The review flow's compare picker and "runs X again" sentence (spec §2).
+        "attempts": st.db.read(lambda c: store.gate_attempts(c, wid, pending)) if pending else [],
+        "last_review_sha": _last_review_sha(st, wid, pending),
+        "reject_default": _reject_default(row, pending),
         # The document the gate is a decision about — the spec at
         # spec_approval, the plan at plan_approval. The detail screen offers
         # "Review spec" only when this is set.
