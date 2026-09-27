@@ -139,13 +139,19 @@ def _assistant(request_id: str, tokens_in: int, tokens_out: int) -> str:
 
 def test_stream_usage_sums_distinct_requests():
     """The CLI emits several `assistant` lines per API request, with the same
-    usage on each; summing lines rather than requests double-counts."""
+    usage on each; summing lines rather than requests double-counts.
+
+    `tokens_out` is never summed from the live stream (Kraft-wz83s): each
+    `assistant` line's `output_tokens` is only that message's count as of when
+    the line was written, not its final one, so publishing a sum of them would
+    still be the wrong number, just a differently-wrong one. It stays `None`
+    -- unknown -- through every call over a growing log."""
     seen: dict = {}
     first = usage.from_stream([_assistant("req_1", 100, 10), _assistant("req_1", 100, 10)], seen)
-    assert (first.tokens_in, first.tokens_out) == (100, 10)
+    assert (first.tokens_in, first.tokens_out) == (100, None)
     # a later call folds new lines into the same map and returns the total
     second = usage.from_stream([_assistant("req_2", 50, 5)], seen)
-    assert (second.tokens_in, second.tokens_out) == (150, 15)
+    assert (second.tokens_in, second.tokens_out) == (150, None)
     # cost is only ever the agent's own number, and no per-request cost exists
     assert second.cost_usd is None
 
@@ -159,7 +165,7 @@ def test_stream_usage_takes_model_from_the_init_line():
     )
     assert init == Usage(tokens_in=0, tokens_out=0, cost_usd=None, model="claude-opus-5")
     later = usage.from_stream([_assistant("req_1", 7, 3)], seen)
-    assert later == Usage(tokens_in=7, tokens_out=3, cost_usd=None, model="claude-opus-5")
+    assert later == Usage(tokens_in=7, tokens_out=None, cost_usd=None, model="claude-opus-5")
 
 
 def test_stream_usage_ignores_noise_and_reports_nothing_from_nothing():
@@ -365,6 +371,7 @@ async def test_rollup_of_an_item_with_no_sessions_is_empty_not_an_error(database
         "rounds": 0,
         # nothing ran, so nothing is missing
         "cost_complete": True,
+        "cost_estimated": False,
         "split_complete": True,
     }
 
@@ -394,6 +401,44 @@ async def test_a_session_with_tokens_and_no_cost_marks_the_rollup_incomplete(dat
     assert verify["tokens_in"] == 1000  # tokens are still fully counted
     assert env["cost_complete"] is True  # a task with no tokens owes nothing
     assert rollup["total"]["cost_complete"] is False
+
+
+async def test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess(database):
+    """Kraft-wz83s: a running session's `cost_usd` is `session_progress`'s
+    estimate, not a settled figure -- the rollup says so (`cost_estimated`),
+    distinct from `cost_complete`, which is about a *finished* session that
+    never reported at all."""
+    await database.write(
+        lambda c: c.execute(
+            "INSERT INTO work_items (id, title, repo, chain_template, "
+            "chain_definition, status, created_at, updated_at) VALUES "
+            "('w','t','/r','quick-task','{}','active','now','now')"
+        )
+    )
+
+    def _running(c, sid, node):
+        store.create_session(
+            c,
+            id=sid,
+            work_item_id="w",
+            node_id=node,
+            hook_point=f"on.{node}",
+            log_path="l",
+            result_path="r",
+        )
+        store.session_running(c, sid, 1, 1.0)
+        # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens
+        # is a round $2.00.
+        store.session_progress(c, sid, Usage(tokens_in=1_000_000, model="claude-sonnet-5"))
+
+    await database.write(lambda c: _running(c, "live", "verify"))
+    rollup = database.read(lambda c: store.usage_rollup(c, "w"))
+    verify = next(n for n in rollup["by_node"] if n["node"] == "verify")
+
+    assert verify["cost_usd"] == pytest.approx(2.0)
+    assert verify["cost_estimated"] is True
+    assert verify["cost_complete"] is True  # a number was reported, just not a final one
+    assert rollup["total"]["cost_estimated"] is True
 
 
 async def test_rollup_counts_a_paused_session_s_real_span(database):
@@ -635,7 +680,9 @@ def test_a_single_result_reads_its_cumulative_model_usage():
 
 def test_stream_usage_keeps_cache_tokens_apart():
     """The live count splits the way the envelope does, or a running row would
-    read one shape and the finished one another."""
+    read one shape and the finished one another -- except `tokens_out`, which
+    a live read cannot know yet (Kraft-wz83s) and reports as `None` instead of
+    the wrong, start-of-message count `output_tokens` carries mid-stream."""
     line = json.dumps(
         {
             "type": "assistant",
@@ -652,7 +699,12 @@ def test_stream_usage_keeps_cache_tokens_apart():
         }
     )
     u = usage.from_stream([line, line], {})
-    assert (u.tokens_in, u.tokens_cache_write, u.tokens_cache_read, u.tokens_out) == (3, 20, 700, 2)
+    assert (u.tokens_in, u.tokens_cache_write, u.tokens_cache_read, u.tokens_out) == (
+        3,
+        20,
+        700,
+        None,
+    )
 
 
 def test_several_result_envelopes_keep_cache_tokens_apart(tmp_path):

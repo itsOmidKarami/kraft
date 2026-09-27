@@ -4,6 +4,7 @@ import pytest
 
 from kraft import store
 from kraft.store._common import session_wall_ms
+from kraft.usage import Usage
 
 
 async def _spend_fixture_one(database, *, costs: list[float | None]) -> str:
@@ -65,6 +66,48 @@ async def test_null_cost_sessions_count_as_zero(database):
     wid = await _spend_fixture_one(database, costs=[1.0, None, None])
     item_usd, _daily_usd = database.read(lambda c: store.budget_spend(c, wid))
     assert item_usd == 1.0
+
+
+async def test_budget_spend_includes_a_running_sessions_estimate(database):
+    """Kraft-wz83s: a running session's cost is no longer NULL by the time
+    `session_progress` has ticked once on a known model -- it is
+    `estimate_cost`'s guess, and `budget_spend` is a query over `cost_usd`
+    with no notion of "settled" vs "estimated", so the guess counts toward
+    spend the same as a real one would. This is what lets a budget cap see a
+    long session's spend before it exits."""
+    wid = uuid.uuid4().hex
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id=wid,
+            bead_id=None,
+            title="t",
+            repo="/tmp/r",
+            chain_template="quick-task",
+            chain_definition="{}",
+        )
+    )
+    sid = uuid.uuid4().hex
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id=sid,
+            work_item_id=wid,
+            node_id="n",
+            hook_point="on.h0",
+            log_path="/tmp/l",
+            result_path="/tmp/r",
+        )
+    )
+    await database.write(lambda c: store.session_running(c, sid, 1, 1.0))
+    # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
+    # round $2.00.
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await database.write(lambda c: store.session_progress(c, sid, live))
+
+    item_usd, daily_usd = database.read(lambda c: store.budget_spend(c, wid))
+    assert item_usd == pytest.approx(2.0)
+    assert daily_usd == pytest.approx(2.0)
 
 
 async def test_no_sessions_is_zero_not_none(database):

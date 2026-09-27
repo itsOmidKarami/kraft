@@ -41,7 +41,7 @@ function metricsOf(s: WorkerSession): string {
   if (s.tokens_in != null || s.tokens_out != null) {
     parts.push(`${tokens(tokenTotal(s))} tokens`);
   }
-  if (s.cost_usd != null) parts.push(usd(s.cost_usd));
+  if (s.cost_usd != null) parts.push(usd(s.cost_usd, true, s.cost_estimated));
   if (s.wall_ms != null) parts.push(elapsed(s.wall_ms));
   return parts.join(" · ");
 }

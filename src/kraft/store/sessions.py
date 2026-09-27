@@ -428,7 +428,8 @@ def _tokens(usage: Usage) -> tuple[int, ...]:
 
 
 def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
-    """Live token counts and model for a session that is still running (Kraft-54dk).
+    """Live token counts, model and an estimated cost for a session that is
+    still running (Kraft-54dk, Kraft-wz83s).
 
     Deliberately no event. One of these lands every few seconds per running
     worker, and an event fans out to the WebSocket, the indexer and the
@@ -436,14 +437,26 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     not the event stream, so "tokens this node" starts being true the moment
     the row is.
 
-    Cost and wall time stay with `session_exited`, which writes the
-    authoritative final figures and corrects any live drift. `status =
-    'running'` guards the update: a paused or finished session's numbers are
-    settled, and a late progress write must not reopen them.
+    `cost_usd` is `usage.estimate_cost`'s guess from the live tokens known so
+    far (input, cache read, cache write -- never output, which is unknown
+    while a claude session runs), with `cost_estimated` set alongside it so a
+    reader can tell a guess from the agent's own figure. `None` when the
+    model isn't in the rate table, same as a finished session with no
+    reported cost -- never a stale value left over from an earlier tick on a
+    different model.
+
+    Wall time and the settled cost stay with `session_exited` (`_settle_cost`),
+    which writes the agent's own figure when it reported one -- clearing
+    `cost_estimated` -- or a fresh, final-tokens estimate when it did not,
+    correcting any live drift either way. `status = 'running'` guards the
+    update: a paused or finished session's numbers are settled, and a late
+    progress write must not reopen them.
     """
+    estimate = _usage.estimate_cost(usage, usage.model)
     conn.execute(
-        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS} WHERE id = ? AND status = 'running'",
-        (usage.model, *_tokens(usage), session_id),
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+        "cost_estimated = ? WHERE id = ? AND status = 'running'",
+        (usage.model, *_tokens(usage), estimate, int(estimate is not None), session_id),
     )
 
 
@@ -455,15 +468,26 @@ CLAUDE_READER = "claude-stream-json"
 
 def _own_share(
     conn: sqlite3.Connection, session_id, usage: Usage | None, reader: str | None
-) -> Usage | None:
-    """`usage` less what an earlier session of this item and task already
-    recorded, when this one resumed that one's CLI session (Kraft-s7c04.62,
-    `a-resumed-cli-session-is-counted-once`): a paused task's resume and every
-    escalation turn after a thread's first run `--resume`, and the CLI reports
-    cost and `modelUsage` as running totals over the whole session. The
-    earlier session is the latest one on the same task whose log names the
-    same CLI session -- not just the latest, since a turn refused before launch
-    can sit between two turns of one thread.
+) -> tuple[Usage | None, bool]:
+    """`(usage less what an earlier session of this item and task already
+    recorded, netting_failed)`, when this one resumed that one's CLI session
+    (Kraft-s7c04.62, `a-resumed-cli-session-is-counted-once`): a paused task's
+    resume and every escalation turn after a thread's first run `--resume`,
+    and the CLI reports cost and `modelUsage` as running totals over the whole
+    session. The earlier session is the latest one on the same task whose log
+    names the same CLI session -- not just the latest, since a turn refused
+    before launch can sit between two turns of one thread.
+
+    `netting_failed` (Kraft-wz83s) is `True` only when a resumed CLI session
+    was found but the earlier one's own totals could not be read, so `usage`
+    still carries the *cumulative* tokens read off this turn's own log, not
+    this turn's own share (`net_of_earlier`'s own docstring). `_settle_cost`
+    must not price an estimate off those -- they overlap whatever the earlier,
+    already-recorded turn was itself priced or estimated at, and pricing them
+    again would double-count that turn's spend. `False` in every other case:
+    no resumption found (nothing to net, `usage` is this session's own
+    reading, an estimate off it is exactly this session's own), or a resume
+    that netted cleanly.
 
     `reader` is the schema this session's log was read with (Kraft-wge0e):
     its CLI session id and its running totals are that harness's, so a codex
@@ -474,11 +498,11 @@ def _own_share(
         (session_id,),
     ).fetchone()
     if usage is None or reader is None or me is None or not me["log_path"]:
-        return usage
+        return usage, False
     session_of = _usage.READERS[reader].session_id
     cli = session_of(Path(me["log_path"]))
     if cli is None:
-        return usage
+        return usage, False
     earlier = conn.execute(
         "SELECT log_path FROM worker_sessions WHERE work_item_id = ? AND hook_point = ? "
         "AND rowid < ? AND log_path IS NOT NULL ORDER BY rowid DESC",
@@ -489,7 +513,40 @@ def _own_share(
             return _usage.net_of_earlier(
                 usage, Path(me["log_path"]), Path(row["log_path"]), cli, reader
             )
-    return usage
+    return usage, False
+
+
+def _settle_cost(usage: Usage, *, netted_unknown: bool = False) -> tuple[float | None, int]:
+    """`(cost_usd, cost_estimated)` for a session that has stopped running --
+    paused or exited -- given the usage its final read carried (Kraft-wz83s).
+
+    The agent's own figure wins when it reported one: `(usage.cost_usd, 0)`,
+    settled and no longer a guess. When it did not -- a crash, or an
+    interruption before the agent's first response -- the row must not lose
+    the only spend figure Kraft has by falling back to `NULL`: this
+    re-estimates from the session's final tokens instead, `cost_estimated`
+    left set. `include_output=True` here (unlike `session_progress`'s live
+    tick): by now `tokens_out` is the exit envelope's real, final count, not
+    the live stream's unknown one, so there's no reason left to leave it
+    unpriced. Still `None` when the model isn't in the rate table -- a
+    session on a model this snapshot has never priced gets no guess either
+    way, exactly as before.
+
+    `netted_unknown` (Kraft-wz83s, `_own_share`) refuses the estimate
+    outright, `cost_usd` staying `NULL`: a resumed session whose netting
+    against its earlier CLI session failed still carries that CLI session's
+    *cumulative* tokens, not this turn's own share, and pricing those would
+    double-count whatever the earlier, already-recorded turn was itself
+    priced or estimated at -- exactly the case
+    `a-resumed-cli-session-is-counted-once` pins as unknown cost, never a
+    guess wearing the same font as one.
+    """
+    if usage.cost_usd is not None:
+        return usage.cost_usd, 0
+    if netted_unknown:
+        return None, 0
+    estimate = _usage.estimate_cost(usage, usage.model, include_output=True)
+    return estimate, int(estimate is not None)
 
 
 def record_pause_usage(
@@ -514,21 +571,23 @@ def record_pause_usage(
     No `wall_ms`: it is derived from `started_at` and `exited_at` at read time
     (`_common.session_wall_ms`), and the pause already wrote both.
 
-    A None `usage` is a no-op. An agent interrupted before its first response
-    completes has no envelope and nothing to report, and `usage.py` deliberately
-    has no rate table -- NULL is the honest record of that, and `cost_complete`
-    already renders it as a floor rather than a total.
+    A None `usage` is a no-op: there is nothing at all to settle, not even
+    tokens to estimate from. `_settle_cost` handles the case where `usage` is
+    real but carries no reported cost -- an agent interrupted before its
+    first response has no envelope, but a later one that had already spent
+    tokens still gets an estimate rather than a lost figure.
 
     Guarded on `status = 'paused'` for the reason `session_progress` guards on
     `'running'`: a row that has moved on has settled numbers.
     """
-    usage = _own_share(conn, session_id, usage, reader)
+    usage, netted_unknown = _own_share(conn, session_id, usage, reader)
     if usage is None:
         return
+    cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
     conn.execute(
-        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ? "
-        "WHERE id = ? AND status = 'paused'",
-        (usage.model, *_tokens(usage), usage.cost_usd, session_id),
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+        "cost_estimated = ? WHERE id = ? AND status = 'paused'",
+        (usage.model, *_tokens(usage), cost, estimated, session_id),
     )
 
 
@@ -583,17 +642,25 @@ def session_exited(
         payload["concerns"] = concerns
     if question:
         payload["question"] = question
-    usage = _own_share(conn, session_id, usage, reader)
+    usage, netted_unknown = _own_share(conn, session_id, usage, reader)
     if usage is not None:
+        # The exit envelope's own figure settles the row when it reported one
+        # (`_settle_cost`); when it did not, a fresh final-tokens estimate
+        # stands in rather than losing the only spend figure Kraft has to a
+        # NULL (Kraft-wz83s) -- unless netting against a resumed session's
+        # earlier CLI session failed, in which case `usage`'s tokens are that
+        # session's cumulative ones and an estimate off them would double the
+        # earlier turn's own spend (`_settle_cost`'s docstring).
+        cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
         conn.execute(
-            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, wall_ms = ? "
-            "WHERE id = ?",
-            (usage.model, *_tokens(usage), usage.cost_usd, wall_ms, session_id),
+            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+            "cost_estimated = ?, wall_ms = ? WHERE id = ?",
+            (usage.model, *_tokens(usage), cost, estimated, wall_ms, session_id),
         )
         payload |= {
             "model": usage.model,
             **dict(zip(_usage.KINDS, _tokens(usage), strict=True)),
-            "cost_usd": usage.cost_usd,
+            "cost_usd": cost,
         }
     else:
         conn.execute("UPDATE worker_sessions SET wall_ms = ? WHERE id = ?", (wall_ms, session_id))

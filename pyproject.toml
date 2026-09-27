@@ -66,7 +66,7 @@ where = ["src"]
 # Built SPA and default config, copied in by `just install`. Absent from a plain
 # checkout, so a build that skips that recipe ships an API with no UI.
 [tool.setuptools.package-data]
-kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*"]
+kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*", "prices.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins/kraft-lite/tests"]

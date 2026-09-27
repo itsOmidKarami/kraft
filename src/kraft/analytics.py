@@ -318,6 +318,10 @@ def compute(
         # is then a floor, and the view says so rather than showing a total that
         # is quietly too low
         "cost_complete": True,
+        # true when a running session's cost is still `usage.estimate_cost`'s
+        # guess (Kraft-wz83s), not the agent's own figure -- same idea as
+        # `cost_complete`, but the sum is not a floor, it's a live guess.
+        "cost_estimated": False,
         "rounds": 0,
         "capped_out": 0,
         "wait_timed_out": 0,
@@ -362,6 +366,7 @@ def compute(
                 "tokens": 0,
                 "cost_usd": 0.0,
                 "cost_complete": True,
+                "cost_estimated": False,
                 "done": 0,
                 "cycles": 0.0,
             },
@@ -375,8 +380,8 @@ def compute(
     # ── sessions: tokens, cost, wall time, rounds, caps ──────────────────────
     holes = ",".join("?" * len(ids))
     sessions = conn.execute(
-        f"SELECT id, work_item_id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, "
-        f"status, started_at, created_at, exited_at "
+        f"SELECT id, work_item_id, node_id, round, {', '.join(KINDS)}, cost_usd, "
+        f"cost_estimated, wall_ms, status, started_at, created_at, exited_at "
         f"FROM worker_sessions WHERE work_item_id IN ({holes})",
         ids,
     ).fetchall()
@@ -400,6 +405,7 @@ def compute(
                 "tokens": 0,
                 "cost_usd": 0.0,
                 "cost_complete": True,
+                "cost_estimated": False,
                 "rounds": 0,
                 "capped_out": 0,
                 "wait_timed_out": 0,
@@ -428,6 +434,10 @@ def compute(
             node["cost_complete"] = False
             totals["cost_complete"] = False
             by_repo[repo_of[s["work_item_id"]]]["cost_complete"] = False
+        if s["cost_estimated"]:
+            node["cost_estimated"] = True
+            totals["cost_estimated"] = True
+            by_repo[repo_of[s["work_item_id"]]]["cost_estimated"] = True
         node_rounds.setdefault(s["node_id"], set()).add((s["work_item_id"], s["round"] or 0))
         item_node_rounds.setdefault(s["work_item_id"], set()).add((s["node_id"], s["round"] or 0))
 

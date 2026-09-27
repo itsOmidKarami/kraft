@@ -288,9 +288,16 @@ export function tokenSplit(r: TokenKinds): string {
  *
  * `complete: false` marks a sum that is missing an agent's unreported cost —
  * a floor, not a total. Kraft never invents the difference.
+ *
+ * `estimated: true` (Kraft-wz83s) marks a running session's guess, priced
+ * from its live tokens rather than reported by the agent — `~$12 (est.)`
+ * instead of `$12` or `$12+`, since neither of those says "this number will
+ * change". Takes precedence over `complete`: an estimate is never a floor,
+ * it's a guess the exit envelope replaces outright.
  */
-export function usd(n: number, complete = true): string {
+export function usd(n: number, complete = true, estimated = false): string {
   const amount = n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+  if (estimated) return `~${amount} (est.)`;
   return complete ? amount : `${amount}+`;
 }
 

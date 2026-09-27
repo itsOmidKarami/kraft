@@ -110,6 +110,57 @@ async def test_an_unknown_earlier_cost_leaves_the_resumed_cost_unknown(database,
     assert database.read(lambda c: store.usage_rollup(c, "w1"))["total"]["cost_complete"] is False
 
 
+async def test_a_paused_estimate_is_not_doubled_by_a_resumed_reset(database, tmp_path):
+    """Kraft-wz83s review round 2: pausing a running session now leaves an
+    estimate on the row (round 1's `_settle_cost`). Resuming that session must
+    not price the same spend again off the CLI session's *cumulative* tokens
+    when the paused turn's own log carries no envelope to net the resume
+    against -- `net_of_earlier`'s `netting_failed` -- or the item's rollup
+    counts that spend twice: once in the paused row's estimate, again in the
+    resumed row's."""
+    log_a = _log(tmp_path / "a.log", "cli-x")  # init only: no result envelope ever lands
+    await database.write(
+        lambda c: store.create_session(
+            c,
+            id="a",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point="implementation.main.build",
+            log_path=log_a,
+            result_path=str(tmp_path / "a.json"),
+        )
+    )
+    await database.write(lambda c: store.session_running(c, "a", 1, 1.0))
+    # claude-opus-5: $5/M input (prices.json) -- 100,000 input tokens is $0.50.
+    await database.write(
+        lambda c: store.session_progress(
+            c, "a", _usage.Usage(tokens_in=100_000, tokens_out=None, model="claude-opus-5")
+        )
+    )
+    await database.write(lambda c: store.pause_work_item(c, "w1", ["a"]))
+    seen_a = _usage.read(tmp_path / "a.log", tmp_path / "a.json", "claude-stream-json")
+    assert seen_a is None  # no envelope at all -- the live tick's numbers stand
+    await database.write(lambda c: store.session_exited(c, "a", "failed", None, seen_a))
+
+    a_cost, a_estimated = database.read(
+        lambda c: c.execute(
+            "SELECT cost_usd, cost_estimated FROM worker_sessions WHERE id = 'a'"
+        ).fetchone()
+    )
+    assert a_cost == pytest.approx(0.5)
+    assert a_estimated == 1
+
+    # The resume: an envelope carrying the whole CLI session's cumulative
+    # totals, but "a"'s log has nothing for the netting to subtract.
+    await _turn(database, tmp_path, "b", "cli-x", _envelope(30, 3, 150_000, 15, None))
+    assert _spent(database, "b")[2] is None
+
+    total = database.read(lambda c: store.usage_rollup(c, "w1"))["total"]
+    # Only "a"'s estimate counts. Before this fix, "b" priced its cumulative
+    # 150,000 input tokens on top of it: 0.5 + 0.75 = 1.25, not 0.5.
+    assert total["cost_usd"] == pytest.approx(0.5)
+
+
 async def test_a_new_cli_session_is_not_netted_against_an_earlier_one(database, tmp_path):
     """A retry restarts the task in a fresh CLI session: nothing in its
     envelope was recorded before, so nothing comes off."""

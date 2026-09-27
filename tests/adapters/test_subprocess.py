@@ -378,11 +378,15 @@ async def test_running_session_row_carries_tokens_before_exit(
         await asyncio.sleep(0.05)
 
     assert (await task)[0] == "done"
+    # tokens_out stays unknown (None) while the session runs (Kraft-wz83s): the
+    # `assistant` line's `output_tokens` is only that message's count as of
+    # when it was written, not its final one, so `session_progress` never
+    # publishes it live -- only the exit envelope, read once `task` finishes.
     assert live == {
         "status": "running",
         "model": "claude-opus-5",
         "tokens_in": 1000,
-        "tokens_out": 200,
+        "tokens_out": None,
     }
     failed = [r for r in caplog.records if "usage progress tick failed" in r.getMessage()]
     assert [r.exc_info[1].args for r in failed] == ([] if seam is None else [("poison tick",)])

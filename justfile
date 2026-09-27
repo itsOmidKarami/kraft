@@ -145,6 +145,12 @@ test *ARGS:
 intent:
     uv run python -m kraft.intent
 
+# Refresh src/kraft/prices.json from models.dev (Kraft-wz83s). Never fetched at
+# runtime -- this is the only thing that ever hits the network for it. Review the
+# diff before committing: a price change is worth a look, not a rubber stamp.
+refresh-prices:
+    uv run python dev/refresh_prices.py
+
 # Check the test suite against docs/testing.md's mechanical rules: e2e markers
 # name a CLI, no unit test reaches a real bd/claude/gh/glab, the per-file line
 # budget, every test has an expectation.

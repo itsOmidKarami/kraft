@@ -179,6 +179,26 @@ async def test_unknown_spend_is_never_counted_as_free(item_on):
     assert "unknown spend is never counted as free" in stops.budget_reason(breach)
 
 
+async def test_a_running_sessions_estimate_trips_a_usd_cap(item_on):
+    """Kraft-wz83s: `caps.budget_breach` sums `cost_usd` with no notion of
+    "estimated" vs settled -- `session_progress`'s guess for a running
+    session counts toward a dollar cap exactly like a real figure would. This
+    is what lets a budget cap see a long session's spend before it exits,
+    instead of only ever seeing sessions that have already finished."""
+    it = await item_on(_chain("node", {"budget_usd": 1}))
+    sid, *_ = await it.session("s-running", TASK, None, running=(1, 1.0))
+    assert _breach(it) is None
+    # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
+    # round $2.00, comfortably over the $1 cap.
+    live = usage.Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await it.database.write(lambda c: store.session_progress(c, sid, live))
+
+    breach = _breach(it)
+    assert breach is not None
+    assert breach.scope == "usd"
+    assert breach.spent_usd == pytest.approx(2.0)
+
+
 async def test_the_instance_budget_stays_the_outer_ceiling(item_on):
     it = await item_on(_chain("node", {"budget_usd": 50}))
     await _spent(it, "ship.main.go", tokens=10, usd=12.0)
