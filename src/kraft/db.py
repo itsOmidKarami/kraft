@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -237,6 +237,64 @@ CREATE TABLE run_forks (
 );
 
 CREATE INDEX idx_run_forks_item ON run_forks(work_item_id)
+;
+
+CREATE TABLE node_runs (
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  node_id      TEXT NOT NULL,
+  attempt      INTEGER NOT NULL,
+  start_sha    TEXT NOT NULL,
+  end_sha      TEXT,
+  base_sha     TEXT NOT NULL,
+  dirty        INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, node_id, attempt)
+);
+
+CREATE TABLE reviews (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT NOT NULL,
+  outcome      TEXT NOT NULL CHECK (outcome IN ('approve', 'request_changes', 'comment')),
+  summary      TEXT,
+  head_sha     TEXT NOT NULL,
+  base_sha     TEXT NOT NULL,
+  submitted_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_reviews_item ON reviews(work_item_id, gate);
+
+CREATE TABLE review_threads (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT NOT NULL,
+  node_id      TEXT,
+  file_path    TEXT,
+  side         TEXT CHECK (side IN ('old', 'new')),
+  start_line   INTEGER,
+  end_line     INTEGER,
+  anchor_sha   TEXT NOT NULL,
+  label        TEXT CHECK (label IN ('must_fix', 'question', 'nit')),
+  state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'claimed', 'resolved')),
+  resolved_at  TEXT,
+  created_at   TEXT NOT NULL
+);
+
+CREATE INDEX idx_review_threads_item ON review_threads(work_item_id, gate);
+
+CREATE TABLE review_comments (
+  id          TEXT PRIMARY KEY,
+  thread_id   TEXT NOT NULL REFERENCES review_threads(id),
+  review_id   TEXT REFERENCES reviews(id),
+  author      TEXT NOT NULL,
+  attempt     INTEGER,
+  body        TEXT NOT NULL,
+  suggestion  TEXT,
+  claim       TEXT CHECK (claim IN ('fixed', 'answered', 'should_fix')),
+  created_at  TEXT NOT NULL
+);
+
+CREATE INDEX idx_review_comments_thread ON review_comments(thread_id, created_at)
 """
 
 #: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
@@ -779,6 +837,59 @@ FROM worker_sessions""",
     37: ["CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)"],
     # The harness an agent session ran on (Kraft-9elw1). NULL on older rows.
     38: ["ALTER TABLE worker_sessions ADD COLUMN harness TEXT"],
+    # Review flow (docs/superpowers/specs/2026-09-27-review-flow-backend-design.md).
+    39: [
+        """CREATE TABLE node_runs (
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  node_id      TEXT NOT NULL,
+  attempt      INTEGER NOT NULL,
+  start_sha    TEXT NOT NULL,
+  end_sha      TEXT,
+  base_sha     TEXT NOT NULL,
+  dirty        INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (work_item_id, node_id, attempt)
+)""",
+        """CREATE TABLE reviews (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT NOT NULL,
+  outcome      TEXT NOT NULL CHECK (outcome IN ('approve', 'request_changes', 'comment')),
+  summary      TEXT,
+  head_sha     TEXT NOT NULL,
+  base_sha     TEXT NOT NULL,
+  submitted_at TEXT NOT NULL
+)""",
+        "CREATE INDEX idx_reviews_item ON reviews(work_item_id, gate)",
+        """CREATE TABLE review_threads (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT NOT NULL,
+  node_id      TEXT,
+  file_path    TEXT,
+  side         TEXT CHECK (side IN ('old', 'new')),
+  start_line   INTEGER,
+  end_line     INTEGER,
+  anchor_sha   TEXT NOT NULL,
+  label        TEXT CHECK (label IN ('must_fix', 'question', 'nit')),
+  state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'claimed', 'resolved')),
+  resolved_at  TEXT,
+  created_at   TEXT NOT NULL
+)""",
+        "CREATE INDEX idx_review_threads_item ON review_threads(work_item_id, gate)",
+        """CREATE TABLE review_comments (
+  id          TEXT PRIMARY KEY,
+  thread_id   TEXT NOT NULL REFERENCES review_threads(id),
+  review_id   TEXT REFERENCES reviews(id),
+  author      TEXT NOT NULL,
+  attempt     INTEGER,
+  body        TEXT NOT NULL,
+  suggestion  TEXT,
+  claim       TEXT CHECK (claim IN ('fixed', 'answered', 'should_fix')),
+  created_at  TEXT NOT NULL
+)""",
+        "CREATE INDEX idx_review_comments_thread ON review_comments(thread_id, created_at)",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

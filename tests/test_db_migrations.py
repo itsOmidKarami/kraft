@@ -170,6 +170,8 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         )
         # `harness` is the last worker_sessions column: `command` loses its comma.
         replace = (*replace, ("command        TEXT,", "command        TEXT"))
+    if version < 40:
+        skip_stmts = (*skip_stmts, "node_runs", "reviews", "review_threads", "review_comments")
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -672,3 +674,14 @@ def test_migrate_v33_to_v34_renames_stored_task_progress_events(tmp_path):
     types = [r[0] for r in conn.execute("SELECT type FROM events ORDER BY seq")]
     assert types == ["plan_progress", "node_started", "plan_progress"]
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+
+
+def test_migration_39_adds_the_review_tables(tmp_path):
+    """v39 -> v40: the review-flow tables exist on an upgraded database."""
+    path = tmp_path / "k.db"
+    conn = db._connect(path)
+    db.migrate(conn)  # fresh, at SCHEMA_VERSION
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {"node_runs", "reviews", "review_threads", "review_comments"} <= names
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(reviews)")}
+    assert {"head_sha", "base_sha", "outcome", "summary", "gate"} <= cols
