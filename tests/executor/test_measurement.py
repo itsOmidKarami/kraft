@@ -167,7 +167,9 @@ async def test_measure_node_reads_head_once_per_task_not_once_per_node(
 
     await _measure(it)
 
-    assert len(reads) == 2, f"expected one HEAD read per task, got {len(reads)}"
+    # One read per task, plus `node_runs.entered`'s own read pinning the
+    # node run's start_sha before any task dispatches.
+    assert len(reads) == 3, f"expected per-task reads plus one for node entry, got {len(reads)}"
 
 
 async def test_measure_node_reuses_a_done_session_at_the_current_head(item_on, fake_dispatch):

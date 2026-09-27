@@ -579,7 +579,7 @@ async def test_the_worktree_and_the_forge_agree_on_the_branch(
     # what the forge adapter was handed
     assert captured["branch"] == branch
     # and what abandon reclaims
-    assert await lifecycle._remove_worktree(repo, run_dirs.worktrees / wid, branch)
+    assert await lifecycle._remove_worktree(repo, run_dirs.worktrees / wid, branch, wid)
     listed = subprocess.run(
         ["git", "branch", "--list", branch],
         cwd=repo,
