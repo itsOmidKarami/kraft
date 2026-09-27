@@ -400,3 +400,61 @@ def test_an_unreadable_head_refuses_the_review_and_records_nothing(client, gated
     assert r.status_code == 409, r.text
     assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
     assert client.patch(f"/api/threads/{tid}", json={"body": "x"}).status_code == 200
+
+
+def test_a_gateless_comment_is_recorded_with_no_gate(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")  # stays running at implementation
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    _new_thread(client, wid, label="question", anchor_sha="0" * 40)
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+    assert r.status_code == 200, r.text
+    assert r.json()["gate"] is None
+    events = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert "review_submitted" in events
+
+
+def test_approve_needs_a_pending_gate(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "approve"})
+    assert r.status_code == 409
+    assert "no gate is pending" in r.text
+
+
+@_REVIEW
+def test_the_item_review_route_acts_on_the_pending_gate(client, gated):
+    _new_thread(client, gated, label="question")
+    r = client.post(f"/api/work-items/{gated}/review", json={"outcome": "comment"})
+    assert r.status_code == 200 and r.json()["reply_agent"] is True
+
+
+def test_a_gateless_comment_is_refused_when_nothing_ahead_can_read_it(client, repo, monkeypatch):
+    """`gateless-comment-nothing-downstream-reads-is-refused`, at the API: an
+    item forced onto its chain's forge-only tail (past the last gate and the
+    last agent task) has nothing ahead that could ever read a thread.
+
+    `KRAFT_FAKE_CLAUDE=slow` holds the walk at `spec`'s agent task -- long
+    enough that the worktree exists (so `git rev-parse HEAD` in the route
+    resolves) but no gate is ever requested (so `board._pending_gate` reads
+    None on its own, with nothing to race)."""
+    from support.api import _force_node, _poll_node_started, _post_default
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = _post_default(client, repo)
+    _poll_node_started(client, wid, "spec")
+    _force_node(wid, "merge", "needs_human")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+
+    assert r.status_code == 409, r.text
+    assert "nothing ahead in this chain will read these threads" in r.text
+    assert client.get(f"/api/work-items/{wid}").json()["last_review_sha"] is None

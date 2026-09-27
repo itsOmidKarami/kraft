@@ -123,3 +123,14 @@ IF a compare target's commit no longer exists, THEN the system SHALL answer
 with an error, not an empty diff.
 enforced-by: tests/api/test_review.py::test_compare_with_a_vanished_sha_is_an_error_not_empty
 origin: src/kraft/api/routes/artifacts.py
+
+## REQ approve-needs-a-pending-gate
+IF a person approves with no gate pending, THEN the system SHALL refuse it.
+enforced-by: tests/api/test_review.py::test_approve_needs_a_pending_gate
+origin: src/kraft/api/routes/review.py
+
+## REQ gateless-comment-nothing-downstream-reads-is-refused
+IF a person sends review threads with no gate pending and nothing ahead in the
+chain can read them, THEN the system SHALL refuse the review and record nothing.
+enforced-by: tests/api/test_lifecycle.py::test_review_reachable_counts_agents_and_gates_ahead_but_not_behind, tests/api/test_review.py::test_a_gateless_comment_is_recorded_with_no_gate, tests/api/test_review.py::test_a_gateless_comment_is_refused_when_nothing_ahead_can_read_it
+origin: src/kraft/api/routes/lifecycle.py

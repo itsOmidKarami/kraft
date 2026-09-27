@@ -385,6 +385,31 @@ def steer_reachable(row, node_id: str | None = None) -> bool:
     return not reached
 
 
+def review_reachable(row) -> bool:
+    """Whether review threads given now could be read by anything ahead: an
+    agent task (working agents address them, reviewers judge against them)
+    or a gate (it shows them, blocks on a must-fix, bounces or launches the
+    reply agent). `steer_reachable` widened by gates; fails open the same way."""
+    start_id = row["current_node_id"]
+    if start_id is None:
+        return True
+    if store.materialized_chain_of(row) is None:
+        # A legacy row: no V1 walk can run it, so nothing can read a thread --
+        # the same answer `steer_reachable` gives. `executor.chain_of` would
+        # raise LookupError here, and the route would 500 instead of 409.
+        return False
+    nodes = store.effective_nodes(executor.chain_of(row), store.node_overrides_of(row))
+    reached = False
+    for n in nodes:
+        reached = reached or n.id == start_id
+        if reached and (
+            isinstance(n.node, GateNode)
+            or any(isinstance(t.task, AgentTask) for s in n.steps for t in s.tasks)
+        ):
+            return True
+    return not reached
+
+
 def not_paused(row) -> str:
     """The 409 a steer or resume on an item that is not paused gets. A running
     one is told what to do (Ruling 183: a steer never reaches a running item)."""

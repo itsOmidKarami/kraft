@@ -15,7 +15,7 @@ from pydantic import BaseModel, model_validator
 from kraft import config as config_mod
 from kraft import executor, review_reply, store
 from kraft.api import api_router, deps
-from kraft.api.routes import board
+from kraft.api.routes import board, lifecycle
 from kraft.api.routes import gates as gate_routes
 
 
@@ -245,16 +245,15 @@ class ReviewIn(BaseModel):
     node: str | None = None
 
 
-@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
-async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
-    _refuse_agents(request)
-    st = request.app.state
-    row = deps._live_work_item_row(st, wid)
-    nodes = gate_routes.gate_nodes(st, row)
-    gate_routes._gate_or_404(nodes, gate)
-    if board._pending_gate(st, wid) != gate:
-        raise HTTPException(409, f"gate {gate!r} is not pending")
+async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
+    wid = row["id"]
+    nodes = gate_routes.gate_nodes(st, row) if gate is not None else None
     # Every refusal before the review is written: a refused review records nothing.
+    if gate is None and body.outcome == "approve":
+        raise HTTPException(409, "nothing to approve: no gate is pending")
+    if gate is None and body.outcome == "request_changes":
+        # Task 6 replaces this stub with the gateless request-changes path.
+        raise HTTPException(501, "request_changes without a gate lands in Task 6")
     if body.outcome == "approve":
         blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
         if blocking:
@@ -266,12 +265,20 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
             executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+    if gate is None and body.outcome == "comment" and not lifecycle.review_reachable(row):
+        raise HTTPException(
+            409,
+            "nothing ahead in this chain will read these threads; use `kraft item retry --steer`",
+        )
     head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
     if not head:
         # A review's `head_sha` is what `last_review` compares from; never ''.
         raise HTTPException(409, "git could not read this work item's HEAD; nothing was recorded")
-    attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
-    base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+    if gate is not None:
+        attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
+        base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+    else:
+        base = row["base_ref"] or head
     note = None
     if body.outcome == "request_changes":
         threads = st.db.read(lambda c: store.threads_for(c, wid))
@@ -307,6 +314,9 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         await st.db.write(lambda c: store.publish_review(c, rid))
         return result
     await st.db.write(lambda c: store.publish_review(c, rid))
+    if gate is None:
+        # Nothing pending to reply for: no gate, no reply agent to launch.
+        return {"review_id": rid, "outcome": "comment", "gate": None, "reply_agent": False}
     try:
         deps.spawn(
             request.app,
@@ -323,7 +333,29 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         spawned = True
     except deps.AlreadyRunning:
         spawned = False  # an auto-review is still running; the threads wait for the next comment
-    return {"review_id": rid, "outcome": "comment", "reply_agent": spawned}
+    return {"review_id": rid, "outcome": "comment", "gate": gate, "reply_agent": spawned}
+
+
+@api_router.post("/work-items/{wid}/review")
+async def submit_item_review(wid: str, body: ReviewIn, request: Request):
+    """The review submission route that acts on whatever gate is pending, if
+    any -- the item-level door Task 4 adds beside the gate-keyed one below, now
+    that a review or a thread belongs to the item rather than to a gate."""
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    return await _submit(st, request, row, board._pending_gate(st, wid), body)
+
+
+@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
+async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    gate_routes._gate_or_404(gate_routes.gate_nodes(st, row), gate)
+    if board._pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    return await _submit(st, request, row, gate, body)
 
 
 class ReplyIn(BaseModel):
