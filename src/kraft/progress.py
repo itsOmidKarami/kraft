@@ -261,12 +261,22 @@ def is_rework(evs: list[dict], node_id: str) -> bool:
     return first == node_id
 
 
+def rework_run(db, row) -> bool:
+    """`is_rework` for `row`'s implementing node, read off its event timeline.
+    The one check the progress field, the progress route and the implementer's
+    prompt share, so none of them offers a plan the others have dropped."""
+    node_id = chain_implementation_node(row)
+    return node_id is not None and is_rework(
+        db.read(lambda c: events.read_after(c, 0, row["id"])), node_id
+    )
+
+
 def for_item(db, row, worktree: Path) -> ProgressReport | None:
     """The API's `progress`, or None when there is nothing honest to show."""
     node_id = active_implementation_node(row)
     if node_id is None:
         return None
-    if is_rework(db.read(lambda c: events.read_after(c, 0, row["id"])), node_id):
+    if rework_run(db, row):
         return None
     tasks = tasks_for(row, worktree)
     if not tasks:

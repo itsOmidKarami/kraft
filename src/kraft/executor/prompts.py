@@ -384,7 +384,7 @@ _PROGRESS_NOTE = (
 )
 
 
-def progress_note(task: AgentTask, work_item_row, worktree) -> str:
+def progress_note(task: AgentTask, work_item_row, worktree, db=None) -> str:
     """Only for the task doing the work from the brief, and only for a plan with
     `## Task N` headings to count.
 
@@ -395,6 +395,9 @@ def progress_note(task: AgentTask, work_item_row, worktree) -> str:
     (Kraft-s7c04.45).
     """
     if task.skill is not None:
+        return ""
+    if db is not None and _progress.rework_run(db, work_item_row):
+        # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
     tasks = _progress.tasks_for(work_item_row, Path(worktree))
     return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
