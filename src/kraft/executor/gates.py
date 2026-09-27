@@ -221,8 +221,17 @@ async def bounce_on_feedback(
     if policy is None:
         return None
     key = reject_loop_key(node.id)
-    cap = _policy.resolve_cap(policy, key)
     row = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    # The cap check must agree with `apply_rejection`'s own enforcement, which
+    # goes through `bump_counter` and checks against the row's snapshotted cap,
+    # not a fresh `resolve_cap` -- a policy.yaml edited and reloaded between
+    # bounces must not disagree with what the counter row already committed to
+    # (store.bump_counter's docstring; mirrors apply_rejection at line ~174-177).
+    cap = (
+        _policy.Cap(row["cap_attempts"], row["cap_wall_s"])
+        if row
+        else _policy.resolve_cap(policy, key)
+    )
     if (row["count"] if row else 0) + 1 > cap.attempts:
         return None
     note = store.render_note(threads, None)

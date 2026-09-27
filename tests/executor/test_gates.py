@@ -972,6 +972,38 @@ async def test_the_bounce_counts_against_the_reject_cap_and_then_opens(item_on):
     assert executor.pending_gate(it.database, it.id) == "review"
 
 
+async def test_the_bounce_cap_check_uses_the_counters_own_snapshot_not_a_fresh_resolve(item_on):
+    """The gate's reject-loop counter already exists with its own snapshotted
+    cap (bumped once before, under an earlier policy.yaml). A later
+    `kraft admin reload` can hand `bounce_on_feedback` a fresh, stricter cap
+    for the same key -- `store.bump_counter`'s own invariant (its docstring)
+    says a cap is fixed at first fire, so the pre-check must predict against
+    the row's snapshot, not the freshly resolved value, the same way
+    `apply_rejection` already does."""
+    it = await item_on(
+        [_exec("implementation"), {"id": "review", "kind": "gate", "reject_to": "implementation"}]
+    )
+    key = gates_module.reject_loop_key("review")
+    # Seed one prior bounce, snapshotting a generous cap (5 attempts).
+    await it.database.write(
+        lambda c: store.bump_counter(c, it.id, key, _policy.Cap(attempts=5, wall_clock_s=3600))
+    )
+    await _published_thread(it, gate="review", label="must_fix")
+
+    # The live policy has since been edited and reloaded to a much stricter
+    # cap for the same key -- a fresh resolve of it would wrongly predict a
+    # breach the row's own snapshot does not permit.
+    status = await _walk(it, policy=_cap(1))
+
+    rejected = it.events("gate_rejected")
+    assert rejected, (
+        "the row's snapshotted cap (5) still permits this bounce -- a fresh "
+        "resolve of the reloaded policy's cap (1) must not veto it"
+    )
+    assert rejected[-1]["payload"]["by"] == "kraft"
+    assert status in ("awaiting_gate", "needs_human")
+
+
 async def test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent(
     item_on, tmp_path, monkeypatch
 ):
