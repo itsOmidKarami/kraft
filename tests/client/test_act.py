@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd
+from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
 
 from client.test_read import run_with_app
 from kraft import client
@@ -244,3 +244,44 @@ def test_the_board_and_the_item_keep_progress(monkeypatch):
 
     monkeypatch.setattr(client.transport, "_get", fake_get)
     assert asyncio.run(client.get_work_item("w1"))["progress"] == p
+
+
+def test_review_verbs_send_the_payloads_the_thread_api_accepts(wired, tmp_path):
+    """Kraft-q5tj2: `add_review_comment` and `submit_review` turn the CLI's
+    flags into the thread and review API's payloads (a single `--lines`
+    number is a one-line range, `--side` defaults to `new`, `--suggest` spans
+    the thread's lines). The CLI and MCP tests stub these functions, so this
+    is the one place the shape meets the real routes."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        wid = (await client.create_work_item("review me", repo=str(repo)))["id"]
+        # a thread anchors to the worktree's HEAD; this item never started
+        make_repo(Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees", name=wid)
+        opened = await client.add_review_comment(
+            "use a set",
+            work_item_id=wid,
+            file_path="a.py",
+            start_line=3,
+            label="must_fix",
+            suggestion="s = set()",
+        )
+        await client.add_review_comment("and here", thread_id=opened["id"])
+        review = await client.submit_review("comment", work_item_id=wid, summary="one thing")
+        return review, await client.threads(wid)
+
+    review, threads = run_with_app(wired, scenario)
+    [thread] = threads
+    assert (thread["file_path"], thread["side"], thread["start_line"], thread["end_line"]) == (
+        "a.py",
+        "new",
+        3,
+        3,
+    )
+    assert thread["label"] == "must_fix"
+    first, reply = thread["comments"]
+    assert first["suggestion"] == {"start_line": 3, "end_line": 3, "replacement": "s = set()"}
+    assert reply["body"] == "and here"
+    # submitted: both comments are published, by a review with no gate
+    assert not first["draft"] and not reply["draft"]
+    assert (review["outcome"], review["gate"]) == ("comment", None)
