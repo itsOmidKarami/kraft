@@ -54,18 +54,18 @@
             </div>
         </aside>
         <h2>
-            <span class="text">45 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">44<span class="text"> run</span></button>
+            <span class="text">60 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">59<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">1<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
             <a id="prevFileLink" class="nav" href="z_323e79e8bb4dca6e_render_py.html">&#xab; prev</a> &nbsp; &nbsp;
             <a id="indexLink" class="nav" href="index.html">&Hat; index</a> &nbsp; &nbsp;
-            <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_skill_py.html">&#xbb; next</a>
+            <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_review_reply_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-25 22:27 +0000
+            created at 2026-09-27 16:30 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -232,16 +232,46 @@
     <p class="run"><span class="n"><a id="t150" href="#t150">150</a></span><span class="t">    <span class="nam">path</span> <span class="op">=</span> <span class="nam">results_dir</span> <span class="op">/</span> <span class="fst">f&quot;</span><span class="op">{</span><span class="nam">session_id</span><span class="op">}</span><span class="fst">.review.md</span><span class="fst">&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t151" href="#t151">151</a></span><span class="t">    <span class="nam">path</span><span class="op">.</span><span class="nam">write_text</span><span class="op">(</span><span class="nam">render_package</span><span class="op">(</span><span class="nam">change</span><span class="op">,</span> <span class="nam">base</span><span class="op">,</span> <span class="nam">since</span><span class="op">=</span><span class="nam">since</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t152" href="#t152">152</a></span><span class="t">    <span class="key">return</span> <span class="nam">path</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t154" href="#t154">154</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t155" href="#t155">155</a></span><span class="t"><span class="key">def</span> <span class="nam">_is_ancestor</span><span class="op">(</span><span class="nam">worktree</span><span class="op">:</span> <span class="nam">Path</span><span class="op">,</span> <span class="nam">a</span><span class="op">:</span> <span class="nam">str</span><span class="op">,</span> <span class="nam">b</span><span class="op">:</span> <span class="nam">str</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">bool</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t156" href="#t156">156</a></span><span class="t">    <span class="key">return</span> <span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t157" href="#t157">157</a></span><span class="t">        <span class="nam">_config</span><span class="op">.</span><span class="nam">git_read</span><span class="op">(</span><span class="nam">worktree</span><span class="op">,</span> <span class="str">&quot;merge-base&quot;</span><span class="op">,</span> <span class="str">&quot;--is-ancestor&quot;</span><span class="op">,</span> <span class="nam">a</span><span class="op">,</span> <span class="nam">b</span><span class="op">,</span> <span class="nam">expected_failure</span><span class="op">=</span><span class="key">True</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t158" href="#t158">158</a></span><span class="t">        <span class="key">is</span> <span class="key">not</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t159" href="#t159">159</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t160" href="#t160">160</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t161" href="#t161">161</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t162" href="#t162">162</a></span><span class="t"><span class="key">def</span> <span class="nam">touched_by</span><span class="op">(</span><span class="nam">worktree</span><span class="op">:</span> <span class="nam">Path</span><span class="op">,</span> <span class="nam">runs</span><span class="op">,</span> <span class="nam">from_sha</span><span class="op">:</span> <span class="nam">str</span><span class="op">,</span> <span class="nam">to_sha</span><span class="op">:</span> <span class="nam">str</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">dict</span><span class="op">[</span><span class="nam">str</span><span class="op">,</span> <span class="nam">list</span><span class="op">[</span><span class="nam">str</span><span class="op">]</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t163" href="#t163">163</a></span><span class="t">    <span class="str">&quot;&quot;&quot;Which nodes changed each file inside `from_sha..to_sha`.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t164" href="#t164">164</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t165" href="#t165">165</a></span><span class="t"><span class="str">    A run is inside the window when its end is reachable from `to_sha` and not</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t166" href="#t166">166</a></span><span class="t"><span class="str">    from `from_sha`; a run from before a rebase is reachable from neither, and</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t167" href="#t167">167</a></span><span class="t"><span class="str">    drops out.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t168" href="#t168">168</a></span><span class="t"><span class="str">    # ponytail: file-level attribution, 3 git calls per run; per-run hunk diffs</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t169" href="#t169">169</a></span><span class="t"><span class="str">    # if a shared file&#x27;s mixed hunks ever matter.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t170" href="#t170">170</a></span><span class="t"><span class="str">    &quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t171" href="#t171">171</a></span><span class="t">    <span class="nam">out</span><span class="op">:</span> <span class="nam">dict</span><span class="op">[</span><span class="nam">str</span><span class="op">,</span> <span class="nam">list</span><span class="op">[</span><span class="nam">str</span><span class="op">]</span><span class="op">]</span> <span class="op">=</span> <span class="op">{</span><span class="op">}</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t172" href="#t172">172</a></span><span class="t">    <span class="key">for</span> <span class="nam">r</span> <span class="key">in</span> <span class="nam">runs</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t173" href="#t173">173</a></span><span class="t">        <span class="nam">start</span><span class="op">,</span> <span class="nam">end</span> <span class="op">=</span> <span class="nam">r</span><span class="op">[</span><span class="str">&quot;start_sha&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">r</span><span class="op">[</span><span class="str">&quot;end_sha&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t174" href="#t174">174</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">end</span> <span class="key">or</span> <span class="nam">start</span> <span class="op">==</span> <span class="nam">end</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t175" href="#t175">175</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t176" href="#t176">176</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">_is_ancestor</span><span class="op">(</span><span class="nam">worktree</span><span class="op">,</span> <span class="nam">end</span><span class="op">,</span> <span class="nam">to_sha</span><span class="op">)</span> <span class="key">or</span> <span class="nam">_is_ancestor</span><span class="op">(</span><span class="nam">worktree</span><span class="op">,</span> <span class="nam">end</span><span class="op">,</span> <span class="nam">from_sha</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t177" href="#t177">177</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t178" href="#t178">178</a></span><span class="t">        <span class="nam">names</span> <span class="op">=</span> <span class="nam">_config</span><span class="op">.</span><span class="nam">git_read</span><span class="op">(</span><span class="nam">worktree</span><span class="op">,</span> <span class="str">&quot;diff&quot;</span><span class="op">,</span> <span class="str">&quot;--name-only&quot;</span><span class="op">,</span> <span class="nam">start</span><span class="op">,</span> <span class="nam">end</span><span class="op">)</span> <span class="key">or</span> <span class="str">&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t179" href="#t179">179</a></span><span class="t">        <span class="key">for</span> <span class="nam">path</span> <span class="key">in</span> <span class="nam">names</span><span class="op">.</span><span class="nam">splitlines</span><span class="op">(</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t180" href="#t180">180</a></span><span class="t">            <span class="key">if</span> <span class="nam">r</span><span class="op">[</span><span class="str">&quot;node_id&quot;</span><span class="op">]</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">out</span><span class="op">.</span><span class="nam">setdefault</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="op">[</span><span class="op">]</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t181" href="#t181">181</a></span><span class="t">                <span class="nam">out</span><span class="op">[</span><span class="nam">path</span><span class="op">]</span><span class="op">.</span><span class="nam">append</span><span class="op">(</span><span class="nam">r</span><span class="op">[</span><span class="str">&quot;node_id&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t182" href="#t182">182</a></span><span class="t">    <span class="key">return</span> <span class="nam">out</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
         <p>
             <a class="nav" href="z_323e79e8bb4dca6e_render_py.html">&#xab; prev</a> &nbsp; &nbsp;
             <a class="nav" href="index.html">&Hat; index</a> &nbsp; &nbsp;
-            <a class="nav" href="z_323e79e8bb4dca6e_skill_py.html">&#xbb; next</a>
+            <a class="nav" href="z_323e79e8bb4dca6e_review_reply_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-25 22:27 +0000
+            created at 2026-09-27 16:30 +0000
         </p>
     </div>
 </footer>
