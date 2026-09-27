@@ -181,3 +181,67 @@ async def test_a_write_to_the_worktree_is_recorded_not_escalated(
     assert "calc.py" in event["payload"]["files"]
     assert it.status() == "needs_human"
     assert it.events("work_item_needs_human") == []
+
+
+async def test_a_failure_before_the_launch_is_recorded_not_escalated(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-dl5fl 6: resolving the agent's config can fail with more than a
+    `SteeringError`; that must reach `reply_agent_failed` too, not escape the
+    spawned task unrecorded."""
+    _seed(tmp_path, monkeypatch)
+    it = await _item(item_on, run_dirs)
+    await _published_unanswered_thread(it)
+    await it.database.write(lambda c: store.request_gate(c, it.id, GATE, GATE))
+
+    def _bad_config(*a, **kw):
+        raise KeyError("no such profile")
+
+    monkeypatch.setattr(review_reply._agent, "resolve_agent_task", _bad_config)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "failed"
+    assert it.events("work_item_needs_human") == []
+    [event] = it.events("reply_agent_failed")
+    assert "no such profile" in event["payload"]["error"]
+
+
+async def test_the_comment_reviews_summary_reaches_the_reply_agent(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-dl5fl 5: a `comment` review's summary is part of what was asked."""
+    prompts, _argv = _seed(tmp_path, monkeypatch)
+    it = await _item(item_on, run_dirs)
+    await it.database.write(
+        lambda c: store.create_thread(c, wid=it.id, gate=GATE, anchor_sha="deadbeef", body="why?")
+    )
+    await it.database.write(
+        lambda c: store.submit_review(
+            c,
+            wid=it.id,
+            gate=GATE,
+            outcome="comment",
+            summary="Mostly fine; one question.",
+            head_sha="deadbeef",
+            base_sha="deadbeef",
+        )
+    )
+
+    await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert "Mostly fine; one question." in prompts.read_text()

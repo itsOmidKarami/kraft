@@ -326,3 +326,47 @@ def test_a_comment_review_gets_answers_and_leaves_the_gate_pending(client, gated
     assert body["pending_gate"] == "chain_review" and body["status"] == "needs_human"
     sessions = [s for s in body["worker_sessions"] if s["hook_point"] == "chain_review.reply"]
     assert sessions and sessions[0]["node_id"] == "chain_review"
+
+
+@_REVIEW
+def test_drafts_are_submitted_before_the_gate_call_runs(client, gated, monkeypatch):
+    """Kraft-dl5fl 1: the re-run agent can reply the moment the walk starts, so
+    the threads it is told about must already be submitted by then."""
+    from kraft import events, store
+    from kraft.api.routes import review as review_routes
+
+    tid = _new_thread(client, gated, label="question").json()["id"]
+    db = client.app.state.db
+    seen = {}
+
+    async def fake_reject(wid, gate, body, request):
+        seen["draft"] = db.read(lambda c: store.is_draft_thread(c, tid))
+        seen["events"] = [e["type"] for e in db.read(lambda c: events.read_after(c, 0, wid))]
+        return {"id": wid}
+
+    monkeypatch.setattr(review_routes.gate_routes, "reject_gate", fake_reject)
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review",
+        json={"outcome": "request_changes"},
+    )
+    assert r.status_code == 200, r.text
+    assert seen["draft"] is False
+    # published only once the gate call succeeded
+    assert "review_submitted" not in seen["events"]
+    types = [e["type"] for e in client.get(f"/api/work-items/{gated}/events").json()]
+    assert "review_submitted" in types
+
+
+@_REVIEW
+def test_an_unreadable_head_refuses_the_review_and_records_nothing(client, gated, monkeypatch):
+    """Kraft-dl5fl 3: `reviews.head_sha` is never '' -- compare would 500 on it."""
+    from kraft.api.routes import review as review_routes
+
+    tid = _new_thread(client, gated, label="question").json()["id"]
+    monkeypatch.setattr(review_routes.config_mod, "git_read", lambda *a, **k: None)
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"}
+    )
+    assert r.status_code == 409, r.text
+    assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
+    assert client.patch(f"/api/threads/{tid}", json={"body": "x"}).status_code == 200

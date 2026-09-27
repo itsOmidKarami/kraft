@@ -30,13 +30,17 @@ __all__ = [
     "gate_attempts",
     "is_draft_thread",
     "last_review",
+    "next_gate_attempt",
     "node_run_rows",
     "open_must_fix",
     "pin_gate",
     "render_note",
     "set_thread_state",
     "start_run",
+    "publish_review",
+    "record_review",
     "submit_review",
+    "unrecord_review",
     "thread_row",
     "threads_for",
     "unanswered",
@@ -79,12 +83,21 @@ def finish_run(conn, wid, node_id, *, end_sha, dirty) -> int | None:
     return last["attempt"]
 
 
-def pin_gate(conn, wid, gate, *, sha, base_sha, dirty) -> int | None:
+def next_gate_attempt(conn, wid, gate, sha) -> int | None:
+    """The attempt `pin_gate` would write for `sha`, or None when the newest
+    gate row is already at it -- read ahead so the ref can be pinned before the
+    `gate_requested` write ends the walk."""
     last = _newest(conn, wid, gate)
     if last is not None and last["end_sha"] == sha:
         # The same gate re-requested at the same commit (a restart): nothing new to review.
         return None
-    attempt = 1 if last is None else last["attempt"] + 1
+    return 1 if last is None else last["attempt"] + 1
+
+
+def pin_gate(conn, wid, gate, *, sha, base_sha, dirty) -> int | None:
+    attempt = next_gate_attempt(conn, wid, gate, sha)
+    if attempt is None:
+        return None
     conn.execute(
         "INSERT INTO node_runs (work_item_id, node_id, attempt, start_sha, end_sha, base_sha, "
         "dirty, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -286,7 +299,11 @@ def unanswered(conn, wid, gate) -> list[dict]:
     ]
 
 
-def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+def record_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+    """The review row, and every draft comment on this gate stamped with it --
+    no event yet. The submit route calls this *before* the gate call, so a walk
+    the gate call starts never sees its threads as drafts (Kraft-dl5fl), and
+    `unrecord_review` undoes it if that call refuses."""
     rid = _id()
     conn.execute(
         "INSERT INTO reviews (id, work_item_id, gate, outcome, summary, head_sha, base_sha, "
@@ -298,9 +315,41 @@ def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> s
         "AND thread_id IN (SELECT id FROM review_threads WHERE work_item_id = ? AND gate = ?)",
         (rid, YOU, wid, gate),
     )
+    return rid
+
+
+def publish_review(conn, rid: str) -> None:
+    """`review_submitted`, once the review's gate call has taken."""
+    r = conn.execute(
+        "SELECT work_item_id, gate, outcome FROM reviews WHERE id = ?", (rid,)
+    ).fetchone()
     events.append(
-        conn, wid, "review_submitted", {"review_id": rid, "gate": gate, "outcome": outcome}
+        conn,
+        r["work_item_id"],
+        "review_submitted",
+        {"review_id": rid, "gate": r["gate"], "outcome": r["outcome"]},
     )
+
+
+def unrecord_review(conn, rid: str) -> None:
+    """Undo `record_review`: its comments are drafts again and the row is gone."""
+    conn.execute("UPDATE review_comments SET review_id = NULL WHERE review_id = ?", (rid,))
+    conn.execute("DELETE FROM reviews WHERE id = ?", (rid,))
+
+
+def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+    """`record_review` and `publish_review` in one step, for a caller with no
+    gate call in between."""
+    rid = record_review(
+        conn,
+        wid=wid,
+        gate=gate,
+        outcome=outcome,
+        summary=summary,
+        head_sha=head_sha,
+        base_sha=base_sha,
+    )
+    publish_review(conn, rid)
     return rid
 
 

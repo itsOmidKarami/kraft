@@ -23,6 +23,7 @@ and names the git command for the rest, so nothing is hidden -- only unpasted.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -180,3 +181,31 @@ def touched_by(worktree: Path, runs, from_sha: str, to_sha: str) -> dict[str, li
             if r["node_id"] not in out.setdefault(path, []):
                 out[path].append(r["node_id"])
     return out
+
+
+_RENAME = re.compile(r"\{([^{}]*) => ([^{}]*)\}")
+
+
+def new_path(path: str) -> str:
+    """The path a `git diff --numstat` entry ends up at: numstat names a rename
+    `old => new`, or `dir/{old => new}/f` for a shared prefix (Kraft-dl5fl)."""
+    if " => " not in path:
+        return path
+    if "{" in path:
+        return _RENAME.sub(lambda m: m.group(2), path).replace("//", "/")
+    return path.split(" => ", 1)[1]
+
+
+def filter_diff(diff: str, keep: set[str]) -> str:
+    """Only the file sections of `diff` whose old or new path is in `keep`."""
+    chunks = diff.split("\ndiff --git ")
+    chunks = chunks[:1] + ["diff --git " + c for c in chunks[1:]]
+    out = []
+    for c in chunks:
+        header = c.split("\n", 1)[0]
+        if not header.startswith("diff --git a/"):
+            continue
+        old, _, new = header[len("diff --git a/") :].rpartition(" b/")
+        if old in keep or new in keep:
+            out.append(c)
+    return "\n".join(out)

@@ -59,10 +59,31 @@ def _agent_task(nodes, gate: str):
 
 
 async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> str:
-    """A failed launch or git error here leaves threads unanswered rather than
-    escalating: a broken reply agent is not a person's problem
-    (docs/superpowers/specs/2026-09-27-review-flow-backend-design.md §3), so
-    the caller must not wrap this in `deps.guard`."""
+    """A failure anywhere in here -- resolving the agent's config, launching
+    it, reading the worktree -- leaves threads unanswered and records
+    `reply_agent_failed` rather than escalating: a broken reply agent is not a
+    person's problem (docs/superpowers/specs/2026-09-27-review-flow-backend-design.md
+    §3), so the caller must not wrap this in `deps.guard` (Kraft-dl5fl)."""
+    try:
+        return await _run(
+            db, run_dirs, work_item_id=work_item_id, gate=gate, nodes=nodes, launch=launch
+        )
+    except asyncio.CancelledError:
+        raise
+    except AssertionError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
+        error = repr(exc)
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, "reply_agent_failed", {"gate": gate, "error": error}
+            )
+        )
+        return "failed"
+
+
+async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> str:
     threads = db.read(lambda c: store.unanswered(c, work_item_id, gate))
     if not threads:
         return "nothing_to_answer"
@@ -73,6 +94,9 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
     )
     worktree = run_dirs.worktrees / work_item_id
+    # The `comment` review that launched this, whose summary is part of what was asked.
+    review = db.read(lambda c: store.last_review(c, work_item_id, gate))
+    summary = review["summary"] if review else None
     try:
         sandbox = executor.item_sandbox(row, launch)
     except executor.SandboxUnresolved:
@@ -94,50 +118,36 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         )
     except _steering.SteeringError:
         return "no_agent"
-    try:
-        before = read_only.snapshot(db, row, launch, worktree)
-        await _agent.run_agent_task(
-            db,
-            run_dirs,
-            session_id=uuid.uuid4().hex,
-            work_item_id=work_item_id,
-            node_id=gate,
-            hook_point=f"{gate}.reply",
-            command=inv.command,
-            harness=inv.harness,
-            model=inv.model,
-            effort=inv.effort,
-            deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
-            allowed_tools=inv.allowed_tools,
-            grants=inv.grants,
-            permission_mode=inv.permission_mode,
-            method_text=inv.method_text,
-            steering_texts=inv.steering_texts,
-            sandbox=sandbox,
-            task_instruction=_PROMPT.format(
-                title=row["title"], threads=store.render_note(threads, None)
-            ),
-            title=row["title"],
-            repo_path=row["repo"],
-            cwd=worktree,
-            repo_entry=launch.repo_entry,
-            time_cap=time_cap,
-            harness_id=task.task.harness,
-        )
-        files = read_only.changed(db, row, launch, worktree, before)
-    except asyncio.CancelledError:
-        raise
-    except AssertionError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
-        error = repr(exc)
-        await db.write(
-            lambda c: events.append(
-                c, work_item_id, "reply_agent_failed", {"gate": gate, "error": error}
-            )
-        )
-        return "failed"
+    before = read_only.snapshot(db, row, launch, worktree)
+    await _agent.run_agent_task(
+        db,
+        run_dirs,
+        session_id=uuid.uuid4().hex,
+        work_item_id=work_item_id,
+        node_id=gate,
+        hook_point=f"{gate}.reply",
+        command=inv.command,
+        harness=inv.harness,
+        model=inv.model,
+        effort=inv.effort,
+        deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
+        allowed_tools=inv.allowed_tools,
+        grants=inv.grants,
+        permission_mode=inv.permission_mode,
+        method_text=inv.method_text,
+        steering_texts=inv.steering_texts,
+        sandbox=sandbox,
+        task_instruction=_PROMPT.format(
+            title=row["title"], threads=store.render_note(threads, summary)
+        ),
+        title=row["title"],
+        repo_path=row["repo"],
+        cwd=worktree,
+        repo_entry=launch.repo_entry,
+        time_cap=time_cap,
+        harness_id=task.task.harness,
+    )
+    files = read_only.changed(db, row, launch, worktree, before)
     if files:
         await db.write(
             lambda c: events.append(

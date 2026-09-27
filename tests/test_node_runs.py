@@ -49,3 +49,28 @@ async def test_no_worktree_still_writes_the_events(database):
     await node_runs.entered(database, None, "w1", "env_setup")
     await node_runs.completed(database, None, "w1", "env_setup")
     assert database.read(lambda c: store.node_run_rows(c, "w1")) == []
+
+
+async def test_a_hanging_ref_write_is_bounded_and_never_fails_the_walk(
+    database, tmp_path, monkeypatch
+):
+    """Kraft-dl5fl 4: `update-ref` runs off the event loop with a timeout; one
+    that hangs costs the old attempt's ref, never the node's completion."""
+    await mk_item(database)
+    repo = make_repo(tmp_path)
+    seen = {}
+
+    def hang(cmd, **kw):
+        if cmd[:2] == ["git", "update-ref"]:
+            seen["timeout"] = kw.get("timeout")
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout") or 0)
+        return real(cmd, **kw)
+
+    real = subprocess.run
+    monkeypatch.setattr(node_runs.subprocess, "run", hang)
+    await node_runs.entered(database, repo, "w1", "impl")
+    await node_runs.completed(database, repo, "w1", "impl")
+
+    assert seen["timeout"] == 10
+    rows = database.read(lambda c: store.node_run_rows(c, "w1"))
+    assert rows[0]["end_sha"] is not None
