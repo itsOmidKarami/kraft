@@ -466,13 +466,15 @@ def _without_bracket(text: str, header: int, body_start: int, body_end: int) -> 
     return "\n".join(lines[: header - 1] + body + lines[body_end:])
 
 
-def test_there_are_ten_brackets_to_check():
+def test_there_are_eleven_brackets_to_check():
     """So a bracket deleted outright cannot quietly shrink the sweep below. The
-    tenth is `/skip`'s claim for a task or step skip (`_skip_within_node`)."""
-    assert len(_brackets()) == 10
+    tenth is `/skip`'s claim for a task or step skip (`_skip_within_node`); the
+    eleventh is a gate's feedback bounce reopening the item mid-walk
+    (`bounce_on_feedback`, review threads anywhere §1)."""
+    assert len(_brackets()) == 11
 
 
-@pytest.mark.parametrize("index", range(10))
+@pytest.mark.parametrize("index", range(11))
 def test_removing_any_real_bracket_is_caught_and_names_its_file(tmp_path, index):
     """Take bracket `index` off `src/kraft` and the checker must exit 1 with its
     violations in *that file and no other*.

@@ -235,16 +235,32 @@ async def bounce_on_feedback(
     if (row["count"] if row else 0) + 1 > cap.attempts:
         return None
     note = store.render_note(threads, None)
-    target = await apply_rejection(
+    # `apply_rejection` reopens the item (`store.reject_gate(reopen=True)`), a
+    # claim `dev/check_claim_handoff.py` requires bracketed at this call site
+    # (it delegates the bracket to its callers). `handed_off=lambda: True`
+    # because the caller here is `walk.run_once`'s own loop, not a route: this
+    # coroutine *is* the walk, already running under `deps.guard` from the
+    # door that spawned it, and it keeps running (the loop re-enters at the
+    # returned target) rather than returning -- there is no window where the
+    # item reads active with nothing behind it, unlike a route's claim-then-
+    # spawn.
+    async with stops.claimed_or_stopped(
         db,
-        policy,
-        work_item_id=work_item_id,
-        nodes=nodes,
-        gate=node.id,
-        note=note,
-        by="kraft",
-        verdict="review_threads",
-    )
+        work_item_id,
+        node.id,
+        reason="a gate's feedback bounce reopened the item but could not re-enter the walk",
+        handed_off=lambda: True,
+    ):
+        target = await apply_rejection(
+            db,
+            policy,
+            work_item_id=work_item_id,
+            nodes=nodes,
+            gate=node.id,
+            note=note,
+            by="kraft",
+            verdict="review_threads",
+        )
     return None if target is None else (target, note)
 
 

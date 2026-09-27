@@ -627,12 +627,6 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         st.run_dirs,
                         work_item_id=wid,
                         bd_cwd=deps.bd_cwd(),
-                        # No position: the walk resumes at the item's own
-                        # cursor, so work that completed before the pause is
-                        # not rerun (Kraft-c3dab). An item that never started
-                        # stands at the start of its chain. Except when a
-                        # gateless rewind is pending: it names its own target.
-                        start_index=start_index,
                         policy=st.policy,
                         # Addressed to the paused agent tasks when there are
                         # any; otherwise the note the next agent launch takes.
@@ -641,6 +635,12 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         launch=deps.launch(st, row["repo"]),
                         on_approve=deps._on_approve(st),
                         conflict=conflict,
+                        # No position: the walk resumes at the item's own
+                        # cursor, so work that completed before the pause is
+                        # not rerun (Kraft-c3dab). An item that never started
+                        # stands at the start of its chain. Except when a
+                        # gateless rewind is pending: it names its own target.
+                        **({"start_index": start_index} if start_index is not None else {}),
                     ),
                 ),
             )
