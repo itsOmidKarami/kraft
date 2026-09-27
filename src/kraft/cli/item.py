@@ -385,6 +385,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     progress.add_argument("id", nargs="?")
     progress.set_defaults(func=_cmd_progress)
 
+    reply = subs.add_parser(
+        "reply", parents=[common], help="answer a review thread (worker sessions only)"
+    )
+    reply.add_argument("thread", help="the thread id from the review note")
+    reply.add_argument("--body", required=True)
+    reply.add_argument("--claim", choices=["fixed", "answered", "should_fix"])
+    reply.set_defaults(func=_cmd_reply)
+
     escalate = subs.add_parser(
         "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"
     )
