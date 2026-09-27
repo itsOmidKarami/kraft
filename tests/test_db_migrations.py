@@ -696,7 +696,7 @@ def test_migration_39_adds_the_review_tables(tmp_path):
     assert {"head_sha", "base_sha", "outcome", "summary", "gate"} <= cols
 
 
-def test_migration_40_makes_review_gate_nullable_and_keeps_rows(tmp_path):
+def test_migration_41_makes_review_gate_nullable_and_keeps_rows(tmp_path):
     """A mid-run thread has no gate; the rebuild keeps every existing row."""
     from kraft import db as db_mod
 
@@ -718,14 +718,14 @@ def test_migration_40_makes_review_gate_nullable_and_keeps_rows(tmp_path):
     assert conn.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()[0] is None
 
 
-def test_migrate_v40_to_v41_keeps_review_gate_rows(tmp_path):
-    """v40 -> v41: `reviews.gate` and `review_threads.gate` were NOT NULL; the
+def test_migrate_v41_to_v42_keeps_review_gate_rows(tmp_path):
+    """v41 -> v42: `reviews.gate` and `review_threads.gate` were NOT NULL; the
     rebuild drops that constraint but a pre-existing gated row keeps its value."""
     path = tmp_path / "orchestrator.db"
     conn = db._connect(path)
     _build_old_db(
         conn,
-        40,
+        41,
         replace=(("gate         TEXT,", "gate         TEXT NOT NULL,"),),
     )
     schema.insert_item(conn)
