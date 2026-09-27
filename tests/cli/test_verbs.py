@@ -647,6 +647,25 @@ def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn,
     assert "w1" in capsys.readouterr().out
 
 
+def test_review_request_changes_json_is_pure_json_even_with_a_target(app, monkeypatch, capsys):
+    """A gateless request-changes always has a `target` key; `--json` must still
+    print exactly the payload, with no human-readable line ahead of it."""
+
+    async def fake_submit_review(outcome, work_item_id=None, summary=None, node=None):
+        return {
+            "review_id": "r1",
+            "outcome": "request_changes",
+            "gate": None,
+            "target": "plan",
+            "target_reason": "requested",
+            "action": "rerun",
+        }
+
+    monkeypatch.setattr(client, "submit_review", fake_submit_review)
+    cli.main(["item", "review", "w1", "request-changes", "--summary", "s", "--json"])
+    assert json.loads(capsys.readouterr().out)["target"] == "plan"
+
+
 def test_comment_needs_lines_for_a_suggestion(app, capsys):
     with pytest.raises(SystemExit) as caught:
         cli.main(["item", "comment", "--body", "x", "--suggest", "y"])

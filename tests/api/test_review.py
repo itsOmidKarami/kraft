@@ -657,6 +657,51 @@ def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch
 
 
 @_REVIEW
+def test_a_failed_resume_in_the_rerun_branch_does_not_leave_the_item_paused(
+    client, repo, monkeypatch
+):
+    """Task 6 / rerun branch: if `resume_work_item` raises after `pause_work_item`
+    already landed, the item must not be left silently paused with its sessions
+    killed and the review note lost -- the route must undo the pause it caused
+    before the caller sees the same refusal (docstring: a refused action
+    'never actually landed')."""
+    from fastapi import HTTPException
+
+    from kraft.api.routes import review as review_routes
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+
+    real_resume = review_routes.lifecycle.resume_work_item
+    calls = {"n": 0}
+
+    async def _flaky_resume(wid, body, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise HTTPException(409, "max_concurrent slots busy")
+        return await real_resume(wid, body, request)
+
+    monkeypatch.setattr(review_routes.lifecycle, "resume_work_item", _flaky_resume)
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "work_item_summary"},
+    )
+
+    assert r.status_code == 409, r.text
+    assert calls["n"] == 2  # the failed call, then the best-effort undo
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["status"] != "paused"
+    assert body["last_review_sha"] is None
+    assert body["pending_rewind"] is None
+
+
+@_REVIEW
 def test_a_refused_request_changes_records_nothing_and_cancels_the_rewind(
     client, repo, monkeypatch
 ):

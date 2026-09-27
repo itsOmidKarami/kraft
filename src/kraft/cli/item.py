@@ -277,7 +277,7 @@ def _cmd_reopen(ns: argparse.Namespace) -> None:
 def _cmd_review(ns: argparse.Namespace) -> None:
     outcome = "request_changes" if ns.outcome == "request-changes" else ns.outcome
     result = asyncio.run(client.submit_review(outcome, ns.id, ns.summary, ns.node))
-    if "target" in result:
+    if not ns.json and "target" in result:
         print(
             f"request-changes -> {result['target']} ({result['target_reason']}), {result['action']}"
         )

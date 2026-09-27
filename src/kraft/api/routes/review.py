@@ -7,6 +7,7 @@ Human routes refuse a worker session outright: agents speak only through
 
 from __future__ import annotations
 
+import contextlib
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -400,7 +401,15 @@ async def _request_changes_now(st, request, row, body, head, base):
             action = "retried"
         elif row["status"] in ("active", "waiting") and idx == current:
             await lifecycle.pause_work_item(wid, request)
-            await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
+            try:
+                await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
+            except Exception:
+                # The pause already landed; a failed resume must not leave the
+                # item silently stuck paused, so best-effort undo it before the
+                # outer except cancels the rewind and unrecords the review.
+                with contextlib.suppress(Exception):
+                    await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
+                raise
             action = "rerun"
         else:  # paused, or running with an earlier target
             action = "queued"
