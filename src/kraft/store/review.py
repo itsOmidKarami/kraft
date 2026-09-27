@@ -21,6 +21,7 @@ __all__ = [
     "YOU",
     "add_draft_reply",
     "agent_reply",
+    "cancel_rewind",
     "comment_dict",
     "comment_row",
     "create_thread",
@@ -33,9 +34,11 @@ __all__ = [
     "next_gate_attempt",
     "node_run_rows",
     "open_must_fix",
+    "pending_rewind",
     "pin_gate",
     "render_note",
     "render_threads",
+    "request_rewind",
     "set_thread_state",
     "start_run",
     "publish_review",
@@ -388,6 +391,34 @@ def render_threads(threads: list[dict]) -> str:
         lines += [f"  > {r['author']}: {r['body']}" for r in replies]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def request_rewind(conn, wid, *, review_id, target, note) -> None:
+    events.append(
+        conn, wid, "rewind_requested", {"review_id": review_id, "target": target, "note": note}
+    )
+
+
+def cancel_rewind(conn, wid, review_id) -> None:
+    events.append(conn, wid, "rewind_cancelled", {"review_id": review_id})
+
+
+def pending_rewind(conn, wid) -> dict | None:
+    """The newest unspent `rewind_requested`: newest wins, spent by its target's
+    next `node_started`, void once cancelled (review threads anywhere §1)."""
+    evs = events.read_after(conn, 0, wid)
+    last = next(
+        (i for i in range(len(evs) - 1, -1, -1) if evs[i]["type"] == "rewind_requested"), None
+    )
+    if last is None:
+        return None
+    p = evs[last]["payload"]
+    for e in evs[last + 1 :]:
+        if e["type"] == "node_started" and e["payload"].get("node_id") == p["target"]:
+            return None
+        if e["type"] == "rewind_cancelled" and e["payload"].get("review_id") == p["review_id"]:
+            return None
+    return {"seq": evs[last]["seq"], **p}
 
 
 def render_note(threads: list[dict], summary: str | None) -> str:

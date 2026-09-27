@@ -47,6 +47,29 @@ async def test_pin_gate_dedupes_a_rerequest_at_the_same_head(database):
     assert [(a["n"], a["sha"]) for a in attempts] == [(1, "h1"), (2, "h2")]
 
 
+async def test_pending_rewind_newest_wins_and_is_spent_by_the_target_starting(database):
+    """Review Focus 3: a second request replaces the first."""
+    await mk_item(database)
+    await database.write(
+        lambda c: store.request_rewind(c, "w1", review_id="r1", target="impl", note="one")
+    )
+    await database.write(
+        lambda c: store.request_rewind(c, "w1", review_id="r2", target="impl", note="two")
+    )
+    assert database.read(lambda c: store.pending_rewind(c, "w1"))["note"] == "two"
+    await database.write(lambda c: store.enter_node(c, "w1", "impl"))
+    assert database.read(lambda c: store.pending_rewind(c, "w1")) is None
+
+
+async def test_a_cancelled_rewind_is_not_pending(database):
+    await mk_item(database)
+    await database.write(
+        lambda c: store.request_rewind(c, "w1", review_id="r1", target="impl", note="x")
+    )
+    await database.write(lambda c: store.cancel_rewind(c, "w1", "r1"))
+    assert database.read(lambda c: store.pending_rewind(c, "w1")) is None
+
+
 async def _thread(database, **kw):
     args = dict(wid="w1", gate="review", anchor_sha="h1", body="fix it")
     args.update(kw)

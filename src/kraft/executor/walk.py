@@ -1900,6 +1900,21 @@ async def run_once(
             )
             i = target
             continue
+        # Only reached after `node` *completed* -- every stop above already
+        # returned, and the base-change branch already `continue`d -- so a
+        # poller resuming a `waiting` node (`resuming.resume`, which passes no
+        # `start_index` and never reads a rewind) can never jump here
+        # (review threads anywhere §1, Review Focus 2).
+        rewind = db.read(lambda c: store.pending_rewind(c, work_item_id))
+        if rewind is not None:
+            j = next((k for k, n in enumerate(nodes) if n.id == rewind["target"]), None)
+            if j is not None and j <= i:
+                # A person asked for changes at an earlier node while this one
+                # ran: go back now it has completed.
+                await _report_if_undelivered(db, work_item_id, carried)
+                carried = Steer(rewind["note"], source="human")
+                i, step, preserve = j, 0, frozenset()
+                continue
         i += 1
 
     # The whole chain ran to completion without any node's dispatch ever

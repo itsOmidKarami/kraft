@@ -153,3 +153,35 @@ WHEN a dispatch's note already lists a review thread, the system SHALL NOT
 list that thread again with the unanswered threads.
 enforced-by: tests/executor/test_prompts.py::test_answered_resolved_and_already_in_the_note_threads_are_left_out
 origin: src/kraft/executor/prompts.py
+
+## REQ request-changes-target-comes-from-the-threads
+WHEN a person requests changes with no gate pending and names no node, the
+system SHALL re-run the earliest node, at or before the current one, that
+wrote what the threads are about, and SHALL say which node and why.
+enforced-by: tests/test_review.py::test_the_target_is_the_node_that_wrote_the_threads_file, tests/test_review.py::test_whole_change_threads_fall_back_to_the_current_working_node, tests/test_review.py::test_a_file_only_a_subprocess_node_touched_targets_the_earlier_working_node
+origin: src/kraft/review.py
+
+## REQ request-changes-reruns-the-running-target-node
+WHEN a person requests changes and the target is the node that is running,
+the system SHALL stop that node and re-run it with the review as its note.
+enforced-by: tests/api/test_review.py::test_request_changes_on_the_running_node_reruns_it
+origin: src/kraft/api/routes/review.py
+
+## REQ request-changes-for-an-earlier-node-rewinds-when-the-running-node-completes
+WHEN a person requests changes at an earlier node while another runs, the
+system SHALL NOT stop the running node, and SHALL re-run the target when the
+running node completes.
+enforced-by: tests/api/test_review.py::test_request_changes_for_an_earlier_node_does_not_stop_the_running_one, tests/executor/test_walk.py::test_a_pending_rewind_takes_effect_when_the_node_completes, tests/executor/test_walk.py::test_a_ci_wait_resume_does_not_jump_to_a_pending_rewind
+origin: src/kraft/executor/walk.py
+
+## REQ a-pending-rewind-is-honoured-by-the-next-resume-or-retry
+WHILE a requested rewind is pending, the system SHALL start the next person's
+resume, or retry with no path, at its target with its note.
+enforced-by: tests/api/test_review.py::test_a_pending_rewind_is_honoured_by_the_next_resume, tests/api/test_review.py::test_request_changes_on_a_stopped_item_retries_at_the_target
+origin: src/kraft/api/routes/lifecycle.py
+
+## REQ request-changes-never-resumes-a-paused-item
+WHEN a person requests changes on a paused work item, the system SHALL record
+the rewind and SHALL NOT resume the item.
+enforced-by: tests/api/test_review.py::test_request_changes_never_resumes_a_paused_item
+origin: src/kraft/api/routes/review.py

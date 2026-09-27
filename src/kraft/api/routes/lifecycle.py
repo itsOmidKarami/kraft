@@ -483,24 +483,43 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
     # non-empty) — fall back to the same "1" resume already used rather than
     # crash a path that used to degrade gracefully.
     limit = st.policy.max_concurrent if st.policy else 1
+    # A pending gateless rewind (review threads anywhere §1) outranks the
+    # paused node: the walk is about to jump to its target, not resume where
+    # it stopped, so the typed steer's checks run against the target and
+    # nothing paused is being steered.
+    rewind = st.db.read(lambda c: store.pending_rewind(c, wid))
     steer_text = None
     if body.steer and body.steer.strip():
         steer_text = body.steer.strip()
-        if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
-            raise HTTPException(409, why)
-        found = row["current_node_id"] in store.chain_node_ids(row)
-        if found and not steer_reachable(row):
-            raise HTTPException(
-                409,
-                f"node {row['current_node_id']!r} has no agent task downstream to steer; "
-                "this text would be dropped",
-            )
+        if rewind is not None:
+            if not steer_reachable(row, rewind["target"]):
+                raise HTTPException(
+                    409,
+                    f"node {rewind['target']!r} has no agent task downstream to steer; "
+                    "this text would be dropped",
+                )
+        else:
+            if row["status"] == "paused" and (why := paused_steer_refusal(st.db, row)):
+                raise HTTPException(409, why)
+            found = row["current_node_id"] in store.chain_node_ids(row)
+            if found and not steer_reachable(row):
+                raise HTTPException(
+                    409,
+                    f"node {row['current_node_id']!r} has no agent task downstream to steer; "
+                    "this text would be dropped",
+                )
 
     individual = {p: t.strip() for p, t in body.steers.items() if t.strip()}
-    try:
-        steer_to = executor.resume_steer(st.db, row, steer_text, individual)
-    except executor.SteerError as exc:
-        raise HTTPException(422, str(exc)) from None
+    if rewind is not None:
+        # The rewind's target may not be the paused node at all; nothing there
+        # is paused to address individually, and the joined note below is the
+        # whole steer.
+        steer_to = None
+    else:
+        try:
+            steer_to = executor.resume_steer(st.db, row, steer_text, individual)
+        except executor.SteerError as exc:
+            raise HTTPException(422, str(exc)) from None
 
     if deps.task_is_live(request.app, wid):
         # Checked before the claim and the rebase below: a paused/needs_human
@@ -546,6 +565,15 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         if steer_text is not None:
             await st.db.write(lambda c: store.set_steer(c, wid, steer_text))
         steer = await st.db.write(lambda c: store.take_steer(c, wid))
+        start_index = None
+        if rewind is not None:
+            steer = "\n\n".join(filter(None, [rewind["note"], steer]))
+            target_nodes = store.effective_nodes(
+                executor.chain_of(row), store.node_overrides_of(row)
+            )
+            start_index = next(
+                (i for i, n in enumerate(target_nodes) if n.id == rewind["target"]), None
+            )
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
@@ -602,7 +630,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                         # No position: the walk resumes at the item's own
                         # cursor, so work that completed before the pause is
                         # not rerun (Kraft-c3dab). An item that never started
-                        # stands at the start of its chain.
+                        # stands at the start of its chain. Except when a
+                        # gateless rewind is pending: it names its own target.
+                        start_index=start_index,
                         policy=st.policy,
                         # Addressed to the paused agent tasks when there are
                         # any; otherwise the note the next agent launch takes.
@@ -668,6 +698,15 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         # those meant an item that was never stopped got told its steer text
         # was unreachable instead of that it is not stopped.
         raise HTTPException(409, "work item is not stopped")
+    if body.path is None and not body.restart:
+        rewind = st.db.read(lambda c: store.pending_rewind(c, wid))
+        if rewind is not None:
+            body = body.model_copy(
+                update={
+                    "path": rewind["target"],
+                    "steer": "\n\n".join(filter(None, [rewind["note"], body.steer])),
+                }
+            )
     chain = walk.chain_of(row)
     target = _retry_target(chain, row, body)
     override = _retry_override(chain, target, body)
