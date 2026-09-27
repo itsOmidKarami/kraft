@@ -266,3 +266,26 @@ def test_a_plan_without_task_headings_is_a_400_and_no_progress(client, repo):
 
     assert client.post(f"/api/work-items/{wid}/progress", json={"task": 1}).status_code == 400
     assert client.get(f"/api/work-items/{wid}").json()["progress"] is None
+
+
+def test_progress_is_null_on_a_rework_run_after_a_gate_rejection(client, repo):
+    """Kraft-hj2q9: bounced back by a rejection, implementation follows the note,
+    so the plan's task list is not shown -- on the detail or the board."""
+    wid = _paused_item(client, repo)
+    wt = _worktree(wid)
+    _set_base_ref(wid, git_read(wt, "rev-parse", "HEAD"))
+    _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))
+    for n in (1, 2, 3):
+        _git(wt, "commit", "-q", "--allow-empty", "-m", f"feat: Task {n}: done")
+    conn = _db()
+    try:
+        events.append(conn, wid, "node_completed", {"node_id": "implementation"})
+        events.append(conn, wid, "gate_rejected", {"gate": "final_review", "note": "fix"})
+        conn.commit()
+    finally:
+        conn.close()
+    _seed_run(wid, head_sha=git_read(wt, "rev-parse", "HEAD"))  # the bounce
+    _force_node(wid, "implementation", "active")
+
+    assert client.get(f"/api/work-items/{wid}").json()["progress"] is None
+    assert _board_row(client, wid)["progress"] is None

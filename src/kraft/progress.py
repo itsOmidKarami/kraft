@@ -232,10 +232,41 @@ def run_state(conn, work_item_id: str, node_id: str) -> int:
     )
 
 
+def is_rework(evs: list[dict], node_id: str) -> bool:
+    """Whether `node_id`'s current run is rework a gate rejection sent it back
+    for (Kraft-hj2q9): it completed once, a gate was rejected since, and the
+    walk re-entered *here* first. That run follows the rejection note, not the
+    plan. A rejection that re-entered at the plan node or earlier is not
+    rework: the plan may have been rewritten, and this run follows it again.
+    """
+    done = max(
+        (
+            i
+            for i, e in enumerate(evs)
+            if e["type"] == "node_completed" and e["payload"].get("node_id") == node_id
+        ),
+        default=None,
+    )
+    if done is None:
+        return False
+    rejected = max(
+        (i for i in range(done + 1, len(evs)) if evs[i]["type"] == "gate_rejected"), default=None
+    )
+    if rejected is None:
+        return False
+    first = next(
+        (e["payload"].get("node_id") for e in evs[rejected + 1 :] if e["type"] == "node_started"),
+        None,
+    )
+    return first == node_id
+
+
 def for_item(db, row, worktree: Path) -> ProgressReport | None:
     """The API's `progress`, or None when there is nothing honest to show."""
     node_id = active_implementation_node(row)
     if node_id is None:
+        return None
+    if is_rework(db.read(lambda c: events.read_after(c, 0, row["id"])), node_id):
         return None
     tasks = tasks_for(row, worktree)
     if not tasks:

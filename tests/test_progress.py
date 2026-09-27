@@ -227,3 +227,51 @@ def test_read_tasks_prefers_the_plan_attachment(tmp_path):
 
 def test_read_tasks_without_a_plan_file_is_empty(tmp_path):
     assert progress.read_tasks(tmp_path, [], "w1") == []
+
+
+def _ev(type_: str, node_id: str | None = None) -> dict:
+    return {"type": type_, "payload": {"node_id": node_id} if node_id else {"gate": "g"}}
+
+
+def test_a_first_run_is_not_rework():
+    evs = [
+        _ev("node_started", "plan"),
+        _ev("node_completed", "plan"),
+        _ev("node_started", "implementation"),
+    ]
+    assert not progress.is_rework(evs, "implementation")
+
+
+def test_a_rejection_straight_back_to_implementation_is_rework():
+    """Kraft-hj2q9: the re-run works from the rejection note, not the plan."""
+    evs = [
+        _ev("node_started", "implementation"),
+        _ev("node_completed", "implementation"),
+        _ev("node_started", "verify"),
+        _ev("gate_rejected"),
+        _ev("node_started", "implementation"),
+    ]
+    assert progress.is_rework(evs, "implementation")
+
+
+def test_a_rejection_back_to_the_plan_node_follows_the_plan_again():
+    """Re-entered at or before the plan: the plan may be rewritten, and this run follows it."""
+    evs = [
+        _ev("node_started", "implementation"),
+        _ev("node_completed", "implementation"),
+        _ev("gate_rejected"),
+        _ev("node_started", "plan"),
+        _ev("node_completed", "plan"),
+        _ev("node_started", "implementation"),
+    ]
+    assert not progress.is_rework(evs, "implementation")
+
+
+def test_a_re_entry_without_a_rejection_is_not_rework():
+    """A retry or a resume re-enters the node with no rejection: the plan still applies."""
+    evs = [
+        _ev("node_started", "implementation"),
+        _ev("node_completed", "implementation"),
+        _ev("node_started", "implementation"),
+    ]
+    assert not progress.is_rework(evs, "implementation")
