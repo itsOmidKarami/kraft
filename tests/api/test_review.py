@@ -552,6 +552,16 @@ def test_request_changes_on_a_stopped_item_retries_at_the_target(client, repo, m
     assert r.json()["action"] == "retried"
     assert r.json()["target"] == "implementation"
     _poll_node_started_n(client, wid, "implementation", 2)
+    # Straight to the target: `retry_work_item` must itself rewrite a
+    # path-less, non-restart `Retry` to the rewind's target -- not retry the
+    # stopped node ("work_item_summary") first and let the walk's own
+    # completion-honour point redirect it afterwards.
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    resummary_starts = sum(
+        e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+        for e in events
+    )
+    assert resummary_starts == 1
 
 
 @_REVIEW
@@ -578,6 +588,17 @@ def test_a_pending_rewind_is_honoured_by_the_next_resume(client, repo, monkeypat
     r = client.post(f"/api/work-items/{wid}/resume", json={})
     assert r.status_code == 200, r.text
     _poll_node_started_n(client, wid, "implementation", 2)
+    # Straight to the target, not by way of re-running the paused node first
+    # and letting the walk's own completion-honour point catch it afterwards
+    # (that would also produce a second "implementation" start, just later
+    # and by the wrong mechanism -- `resume_work_item` must read the rewind
+    # itself and pass its target as `start_index`).
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    resummary_starts = sum(
+        e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+        for e in events
+    )
+    assert resummary_starts == 1
 
 
 @_REVIEW
