@@ -296,3 +296,43 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
             wid, gate, gate_routes.GateReject(note=note, node=body.node), request
         )
     return {"review_id": rid, "outcome": "comment", "reply_agent": False}
+
+
+class ReplyIn(BaseModel):
+    body: str
+    claim: Literal["fixed", "answered", "should_fix"] | None = None
+
+
+@api_router.post("/threads/{tid}/replies", status_code=201)
+async def agent_reply(tid: str, body: ReplyIn, request: Request):
+    """The one door an agent speaks through. Author and item come from its
+    session, never from the request body."""
+    st = request.app.state
+    sid = request.headers.get("x-kraft-session-id")
+    session = (
+        st.db.read(
+            lambda c: c.execute(
+                "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (sid,)
+            ).fetchone()
+        )
+        if sid
+        else None
+    )
+    if session is None:
+        raise HTTPException(403, "only a Kraft worker session can reply to a thread")
+    row = _thread_or_404(st, tid)
+    if row["work_item_id"] != session["work_item_id"]:
+        raise HTTPException(403, "that thread belongs to another work item")
+    if st.db.read(lambda c: store.is_draft_thread(c, tid)):
+        raise HTTPException(404, f"unknown thread {tid!r}")
+    if not body.body.strip():
+        raise HTTPException(422, "body is empty")
+    wid, gate = row["work_item_id"], row["gate"]
+    n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
+    attempt = n if board._pending_gate(st, wid) == gate else n + 1
+    cid = await st.db.write(
+        lambda c: store.agent_reply(
+            c, tid, author=session["node_id"], body=body.body, claim=body.claim, attempt=attempt
+        )
+    )
+    return st.db.read(lambda c: store.comment_dict(store.comment_row(c, cid)))

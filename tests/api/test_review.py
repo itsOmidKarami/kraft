@@ -235,3 +235,59 @@ def test_request_changes_to_a_bad_node_writes_no_review(client, gated):
 def test_review_on_a_gate_that_is_not_pending_is_409(client, gated):
     r = client.post(f"/api/work-items/{gated}/gates/other/review", json={"outcome": "comment"})
     assert r.status_code in (404, 409)
+
+
+def _session_of(client, wid, node_id):
+    """A worker_sessions id for `node_id` on `wid`, as a real agent would carry."""
+    body = client.get(f"/api/work-items/{wid}").json()
+    return next(s["id"] for s in body["worker_sessions"] if s["node_id"] == node_id)
+
+
+@_REVIEW
+def test_agent_reply_takes_its_author_from_the_session(client, gated):
+    tid = _new_thread(client, gated).json()["id"]
+    client.post(f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"})
+    sid = _session_of(client, gated, "implementation")
+    r = client.post(
+        f"/api/threads/{tid}/replies",
+        json={"body": "done", "claim": "fixed"},
+        headers={"x-kraft-session-id": sid},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["author"] == "implementation" and r.json()["attempt"] == 1
+    [t] = client.get(f"/api/work-items/{gated}/threads").json()
+    assert t["state"] == "claimed"
+
+
+@_REVIEW
+def test_reply_door_refuses_humans_and_other_items(client, gated, repo):
+    tid = _new_thread(client, gated).json()["id"]
+    assert client.post(f"/api/threads/{tid}/replies", json={"body": "x"}).status_code == 403
+    assert (
+        client.post(
+            f"/api/threads/{tid}/replies",
+            json={"body": "x"},
+            headers={"x-kraft-session-id": "no-such"},
+        ).status_code
+        == 403
+    )
+    # a session of another item
+    other = _post(client, repo)
+    _await_gate(client, other, "chain_review")
+    sid = _session_of(client, other, "implementation")
+    assert (
+        client.post(
+            f"/api/threads/{tid}/replies", json={"body": "x"}, headers={"x-kraft-session-id": sid}
+        ).status_code
+        == 403
+    )
+
+
+@_REVIEW
+def test_an_agent_cannot_reply_to_a_draft(client, gated):
+    tid = _new_thread(client, gated).json()["id"]
+    sid = _session_of(client, gated, "implementation")
+    r = client.post(
+        f"/api/threads/{tid}/replies", json={"body": "x"}, headers={"x-kraft-session-id": sid}
+    )
+    assert r.status_code == 404  # a draft is not visible to agents

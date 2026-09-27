@@ -160,6 +160,14 @@ def _cmd_progress(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.report_progress(ns.task, ns.id)), common._render_action, ns.json)
 
 
+def _cmd_reply(ns: argparse.Namespace) -> None:
+    common.emit(
+        asyncio.run(client.reply_to_thread(ns.thread, ns.body, ns.claim)),
+        common._render_action,
+        ns.json,
+    )
+
+
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
