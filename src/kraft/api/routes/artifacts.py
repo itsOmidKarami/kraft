@@ -178,7 +178,10 @@ async def compare_work_item(wid: str, request: Request, nodes: str | None = None
     runs = st.db.read(lambda c: store.node_run_rows(c, wid))
     head = to_sha or config_mod.git_read(worktree, "rev-parse", "HEAD")
     attribution = review.touched_by(worktree, runs, from_sha, head)
-    files = [{**f, "touched_by": attribution.get(f["path"], [])} for f in change.files]
+    files = [
+        {**f, "path": (p := review.new_path(f["path"])), "touched_by": attribution.get(p, [])}
+        for f in change.files
+    ]
     groups: list[dict] = []
     diff = change.diff
     if nodes:
@@ -189,9 +192,7 @@ async def compare_work_item(wid: str, request: Request, nodes: str | None = None
             {"node_id": n, "files": [f["path"] for f in files if n in f["touched_by"]]}
             for n in wanted
         ]
-        chunks = diff.split("\ndiff --git ")
-        chunks = chunks[:1] + ["diff --git " + c for c in chunks[1:]]
-        diff = "\n".join(c for c in chunks if any(c.startswith(f"diff --git a/{p} ") for p in keep))
+        diff = review.filter_diff(diff, keep)
     diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)
     return {
         "from": {"target": frm, "sha": from_sha},

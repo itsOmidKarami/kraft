@@ -274,40 +274,46 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
+    if not head:
+        # A review's `head_sha` is what `last_review` compares from; never ''.
+        raise HTTPException(409, "git could not read this work item's HEAD; nothing was recorded")
     attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
     base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
-
-    async def _record():
-        return await st.db.write(
-            lambda c: store.submit_review(
-                c,
-                wid=wid,
-                gate=gate,
-                outcome=body.outcome,
-                summary=body.summary,
-                head_sha=head or "",
-                base_sha=base or "",
-            )
-        )
-
-    # The gate call is delegated to first: `approve_gate`/`reject_gate` can
-    # still refuse (missing final-review artifact, a stale chain-revision
-    # digest, invalid policy, an already-running walk) after every check
-    # above has passed. The review is only written once that refusal window
-    # has closed, so a refused review really does record nothing.
-    if body.outcome == "approve":
-        result = await gate_routes.approve_gate(wid, gate, request, None)
-        await _record()
-        return result
+    note = None
     if body.outcome == "request_changes":
         threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
         note = store.render_note(threads, body.summary) or "Changes requested."
-        result = await gate_routes.reject_gate(
-            wid, gate, gate_routes.GateReject(note=note, node=body.node), request
+    # Recorded *before* the gate call (Kraft-dl5fl): a reject starts the walk,
+    # and the re-run agent may reply to these threads before this route
+    # returns -- they must not still be drafts. `approve_gate`/`reject_gate`
+    # can still refuse after every check above (missing final-review
+    # artifact, stale chain-revision digest, invalid policy, a running walk),
+    # so a refusal undoes the record: a refused review records nothing.
+    rid = await st.db.write(
+        lambda c: store.record_review(
+            c,
+            wid=wid,
+            gate=gate,
+            outcome=body.outcome,
+            summary=body.summary,
+            head_sha=head,
+            base_sha=base or head,
         )
-        await _record()
+    )
+    if body.outcome != "comment":
+        try:
+            if body.outcome == "approve":
+                result = await gate_routes.approve_gate(wid, gate, request, None)
+            else:
+                result = await gate_routes.reject_gate(
+                    wid, gate, gate_routes.GateReject(note=note, node=body.node), request
+                )
+        except Exception:
+            await st.db.write(lambda c: store.unrecord_review(c, rid))
+            raise
+        await st.db.write(lambda c: store.publish_review(c, rid))
         return result
-    rid = await _record()
+    await st.db.write(lambda c: store.publish_review(c, rid))
     try:
         deps.spawn(
             request.app,

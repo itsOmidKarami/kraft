@@ -206,7 +206,7 @@ def tasks_for(row, worktree: Path) -> list[tuple[str, bool]]:
     return read_tasks(worktree, json.loads(row["attachments"] or "[]"), row["id"])
 
 
-def run_state(conn, work_item_id: str, node_id: str) -> int:
+def run_state(evs: list[dict], node_id: str) -> int:
     """The latest task the implementer reported starting on this node's current
     run -- everything after its latest `node_started`.
 
@@ -215,9 +215,6 @@ def run_state(conn, work_item_id: str, node_id: str) -> int:
     signal is not per-run -- see `for_item` -- because a task committed before
     a bounce is still a task that is done.
     """
-    # ponytail: full event scan per call, for active implementation items only;
-    # index events on (work_item_id, type) if the board gets slow (Kraft-iytv).
-    evs = events.read_after(conn, 0, work_item_id)
     start = max(
         (
             i
@@ -276,12 +273,16 @@ def for_item(db, row, worktree: Path) -> ProgressReport | None:
     node_id = active_implementation_node(row)
     if node_id is None:
         return None
-    if rework_run(db, row):
+    # One read serves both checks (Kraft-dl5fl).
+    # ponytail: full event scan per call, for active implementation items only;
+    # index events on (work_item_id, type) if the board gets slow (Kraft-iytv).
+    evs = db.read(lambda c: events.read_after(c, 0, row["id"]))
+    if is_rework(evs, node_id):
         return None
     tasks = tasks_for(row, worktree)
     if not tasks:
         return None
-    reported = db.read(lambda c: run_state(c, row["id"], node_id))
+    reported = run_state(evs, node_id)
     # The item's branch base, not this run's dispatch HEAD. `base_ref` is set at
     # worktree creation and re-set after every rebase, so this range is exactly
     # the commits this item has made -- across a reject bounce, which is when

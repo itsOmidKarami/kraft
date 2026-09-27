@@ -9,6 +9,7 @@ through a rebase is written after the row commits.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 from pathlib import Path
@@ -36,13 +37,20 @@ def _ref(wid: str, node_id: str, attempt: int) -> str:
 
 
 def pin_ref(worktree: Path, wid: str, node_id: str, attempt: int, sha: str) -> None:
-    """Best-effort: a missing ref costs one old attempt's diff, never the walk."""
-    done = subprocess.run(
-        ["git", "update-ref", _ref(wid, node_id, attempt), sha],
-        cwd=worktree,
-        capture_output=True,
-        text=True,
-    )
+    """Best-effort: a missing ref costs one old attempt's diff, never the walk.
+    Bounded like `config.git_read` (Kraft-dl5fl); the async callers run it off
+    the event loop."""
+    try:
+        done = subprocess.run(
+            ["git", "update-ref", _ref(wid, node_id, attempt), sha],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("could not pin %s: %s", _ref(wid, node_id, attempt), exc)
+        return
     if done.returncode != 0:
         logger.warning("could not pin %s: %s", _ref(wid, node_id, attempt), done.stderr.strip())
 
@@ -85,20 +93,24 @@ async def completed(db, worktree, wid: str, node_id: str) -> None:
 
     attempt = await db.write(write)
     if attempt is not None:
-        pin_ref(wt, wid, node_id, attempt, sha)
+        await asyncio.to_thread(pin_ref, wt, wid, node_id, attempt, sha)
 
 
 async def gate_requested(db, worktree, wid: str, gate: str) -> None:
     wt = _live(worktree)
     sha = head(wt) if wt else None
     dirty = is_dirty(wt) if wt else False
+    # The ref goes first: `gate_requested` ends the walk, and anything still
+    # awaited after it keeps the walk's task live past the point a person can
+    # already see the gate. The walk is this item's only writer, so the attempt
+    # read here is the one `pin_gate` writes.
+    attempt = db.read(lambda c: store.next_gate_attempt(c, wid, gate, sha)) if sha else None
+    if attempt is not None:
+        await asyncio.to_thread(pin_ref, wt, wid, gate, attempt, sha)
 
     def write(c):
         store.request_gate(c, wid, gate, gate)
-        if not sha:
-            return None
-        return store.pin_gate(c, wid, gate, sha=sha, base_sha=_base(c, wid, sha), dirty=dirty)
+        if sha:
+            store.pin_gate(c, wid, gate, sha=sha, base_sha=_base(c, wid, sha), dirty=dirty)
 
-    attempt = await db.write(write)
-    if attempt is not None:
-        pin_ref(wt, wid, gate, attempt, sha)
+    await db.write(write)
