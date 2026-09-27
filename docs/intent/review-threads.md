@@ -185,3 +185,22 @@ WHEN a person requests changes on a paused work item, the system SHALL record
 the rewind and SHALL NOT resume the item.
 enforced-by: tests/api/test_review.py::test_request_changes_never_resumes_a_paused_item
 origin: src/kraft/api/routes/review.py
+
+## REQ gate-bounces-on-an-unanswered-must-fix
+WHEN the walk reaches a gate while a `must_fix` thread is unanswered, the
+system SHALL reject the gate on the person's behalf with the threads as the
+note, instead of opening it.
+enforced-by: tests/executor/test_gates.py::test_a_gate_with_an_unanswered_must_fix_bounces_instead_of_opening, tests/executor/test_gates.py::test_an_earlier_gates_must_fix_still_blocks_a_later_gate
+origin: src/kraft/executor/gates.py
+
+## REQ gate-opens-with-replies-for-unanswered-questions
+WHEN the walk opens a gate while only non-must-fix threads are unanswered, the
+system SHALL launch the reply agent for them as the gate opens.
+enforced-by: tests/executor/test_gates.py::test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent
+origin: src/kraft/executor/walk.py
+
+## REQ human-feedback-bounce-counts-against-the-reject-cap
+IF bouncing a gate on unanswered feedback would breach the gate's reject-loop
+cap, THEN the system SHALL open the gate for the person instead.
+enforced-by: tests/executor/test_gates.py::test_the_bounce_counts_against_the_reject_cap_and_then_opens
+origin: src/kraft/executor/gates.py

@@ -196,6 +196,49 @@ async def apply_rejection(
     return None
 
 
+async def bounce_on_feedback(
+    db, work_item_id: str, nodes: Sequence[ResolvedNode], index: int, policy: _policy.Policy | None
+) -> tuple[int, str] | None:
+    """A gate that already carries a person's unanswered must-fix does not
+    open (review threads anywhere §1): reject it as the reject path does, on
+    their behalf (`by="kraft"`), and re-enter at its own reject target.
+    `None` when `index` is not a gate, is already cleared, carries no
+    unanswered must-fix, or one more bounce would breach the gate's own
+    reject-loop cap -- the gate opens for a person instead of bouncing
+    forever, exactly like a human's or an agent's own exhausted rejection.
+
+    `policy=None` (a caller with nothing to bound the bounce against, or to
+    hand `apply_rejection`) is also a `None` here rather than a crash inside
+    `_policy.resolve_cap`: the gate opens for a person, the same fallback the
+    rest of this module takes when policy failed to load.
+    """
+    node = nodes[index]
+    if not isinstance(node.node, GateNode) or gate_cleared(db, work_item_id, node.id):
+        return None
+    threads = db.read(lambda c: store.unanswered(c, work_item_id))
+    if not any(t["label"] == "must_fix" for t in threads):
+        return None
+    if policy is None:
+        return None
+    key = reject_loop_key(node.id)
+    cap = _policy.resolve_cap(policy, key)
+    row = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    if (row["count"] if row else 0) + 1 > cap.attempts:
+        return None
+    note = store.render_note(threads, None)
+    target = await apply_rejection(
+        db,
+        policy,
+        work_item_id=work_item_id,
+        nodes=nodes,
+        gate=node.id,
+        note=note,
+        by="kraft",
+        verdict="review_threads",
+    )
+    return None if target is None else (target, note)
+
+
 def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     """True iff the most recent gate_* event for the item is gate_approved <gate>.
 

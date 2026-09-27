@@ -1826,8 +1826,36 @@ async def run_once(
         # runs nothing, so it is recognised here rather than after an execution
         # node's own tasks. `maybe_gate` answers False for a gate this item has
         # already cleared, which is what lets a resumed walk pass one.
+        # A gate that already carries a person's unanswered must-fix does not
+        # open (review threads anywhere §1, Review Focus 1): checked ahead of
+        # `maybe_gate` so the gate is never requested at all while it would
+        # bounce. Cheap on every non-gate node: `bounce_on_feedback` returns
+        # `None` on its own first `isinstance` check.
+        bounced = await gates.bounce_on_feedback(db, work_item_id, nodes, i, policy)
+        if bounced is not None:
+            await _report_if_undelivered(db, work_item_id, carried)
+            i, carried = bounced[0], Steer(bounced[1], source="human")
+            step, preserve = 0, frozenset()
+            continue
+
         if await gates.maybe_gate(db, work_item_id, node, run_dirs):
             await _report_if_undelivered(db, work_item_id, carried)
+            # Nothing unanswered is a must-fix at this point, unless the
+            # reject cap stopped the bounce above -- either way, the reply
+            # agent (the one that wrote the code) answers every unanswered
+            # thread the gate opens carrying.
+            if launch is not None and db.read(lambda c: store.unanswered(c, work_item_id)):
+                # local: avoids an import cycle through kraft.executor
+                from kraft import review_reply
+
+                await review_reply.run(
+                    db,
+                    run_dirs,
+                    work_item_id=work_item_id,
+                    gate=node.id,
+                    nodes=nodes,
+                    launch=launch,
+                )
             return "awaiting_gate"
         if isinstance(node.node, GateNode):
             # Cleared: its approval already completed it (`store.approve_gate`),
