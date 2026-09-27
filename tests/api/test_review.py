@@ -197,6 +197,14 @@ def test_worker_agents_cannot_use_human_routes(client, gated):
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            f"/api/work-items/{gated}/review",
+            json={"outcome": "comment"},
+            headers=agent,
+        ).status_code
+        == 403
+    )
 
 
 def test_threads_can_be_filed_without_a_pending_gate(client, repo, monkeypatch):
