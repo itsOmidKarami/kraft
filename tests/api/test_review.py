@@ -657,14 +657,14 @@ def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch
 
 
 @_REVIEW
-def test_a_failed_resume_in_the_rerun_branch_does_not_leave_the_item_paused(
-    client, repo, monkeypatch
-):
-    """Task 6 / rerun branch: if `resume_work_item` raises after `pause_work_item`
-    already landed, the item must not be left silently paused with its sessions
-    killed and the review note lost -- the route must undo the pause it caused
-    before the caller sees the same refusal (docstring: a refused action
-    'never actually landed')."""
+def test_a_resume_that_fails_then_succeeds_on_retry_reports_success(client, repo, monkeypatch):
+    """Task 6 / rerun branch: if the first `resume_work_item` raises after
+    `pause_work_item` already landed but the best-effort retry actually
+    succeeds, the item is genuinely running the rewind -- the route must
+    report that success (200, action 'rerun') rather than re-raising the
+    first call's failure and telling the caller a 409 refusal happened when
+    it didn't (docstring: a refused action 'never actually landed', which
+    cuts both ways -- a landed action must never be reported as refused)."""
     from fastapi import HTTPException
 
     from kraft.api.routes import review as review_routes
@@ -693,10 +693,59 @@ def test_a_failed_resume_in_the_rerun_branch_does_not_leave_the_item_paused(
         json={"outcome": "request_changes", "node": "work_item_summary"},
     )
 
-    assert r.status_code == 409, r.text
-    assert calls["n"] == 2  # the failed call, then the best-effort undo
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "rerun"
+    assert calls["n"] == 2  # the failed call, then the retry that landed
     body = client.get(f"/api/work-items/{wid}").json()
     assert body["status"] != "paused"
+    assert body["last_review_sha"] is not None  # the review was recorded, not undone
+    assert body["pending_rewind"] is None  # spent by the rerun's node_started
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    starts = [
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+    ]
+    assert len(starts) >= 2  # the retry actually reran the node
+
+
+@_REVIEW
+def test_a_resume_that_fails_on_both_tries_in_the_rerun_branch_is_refused(
+    client, repo, monkeypatch
+):
+    """Task 6 / rerun branch, the other half: if the best-effort retry also
+    fails, the original failure must still be reported and nothing must be
+    left behind for a later door to honour -- the rewind and review, unlike
+    the pause (which a resume that keeps failing has no way to undo), never
+    actually landed."""
+    from fastapi import HTTPException
+
+    from kraft.api.routes import review as review_routes
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+
+    calls = {"n": 0}
+
+    async def _always_fails(wid, body, request):
+        calls["n"] += 1
+        raise HTTPException(409, "max_concurrent slots busy")
+
+    monkeypatch.setattr(review_routes.lifecycle, "resume_work_item", _always_fails)
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "work_item_summary"},
+    )
+
+    assert r.status_code == 409, r.text
+    assert calls["n"] == 2  # the failed call, then the failed retry
+    body = client.get(f"/api/work-items/{wid}").json()
     assert body["last_review_sha"] is None
     assert body["pending_rewind"] is None
 
