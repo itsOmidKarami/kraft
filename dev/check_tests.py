@@ -80,7 +80,7 @@ LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     # review threads anywhere: the `after_item` walk hook's docstring.
     "tests/support/harness.py": 808,
     # review threads anywhere: the CLI/MCP surface's own verb tests.
-    "tests/cli/test_verbs.py": 887,
+    "tests/cli/test_verbs.py": 838,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size
