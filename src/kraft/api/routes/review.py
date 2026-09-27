@@ -13,7 +13,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, model_validator
 
 from kraft import config as config_mod
-from kraft import executor, store
+from kraft import executor, review_reply, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
 from kraft.api.routes import gates as gate_routes
@@ -295,7 +295,27 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         return await gate_routes.reject_gate(
             wid, gate, gate_routes.GateReject(note=note, node=body.node), request
         )
-    return {"review_id": rid, "outcome": "comment", "reply_agent": False}
+    try:
+        deps.spawn(
+            request.app,
+            wid,
+            deps.guard(
+                st.db,
+                wid,
+                review_reply.run(
+                    st.db,
+                    st.run_dirs,
+                    work_item_id=wid,
+                    gate=gate,
+                    nodes=nodes,
+                    launch=deps.launch(st, row["repo"]),
+                ),
+            ),
+        )
+        spawned = True
+    except deps.AlreadyRunning:
+        spawned = False  # an auto-review is still running; the threads wait for the next comment
+    return {"review_id": rid, "outcome": "comment", "reply_agent": spawned}
 
 
 class ReplyIn(BaseModel):

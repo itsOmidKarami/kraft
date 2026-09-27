@@ -291,3 +291,16 @@ def test_an_agent_cannot_reply_to_a_draft(client, gated):
         f"/api/threads/{tid}/replies", json={"body": "x"}, headers={"x-kraft-session-id": sid}
     )
     assert r.status_code == 404  # a draft is not visible to agents
+
+
+@_REVIEW
+def test_a_comment_review_gets_answers_and_leaves_the_gate_pending(client, gated):
+    _new_thread(client, gated, label="question", body="why a list?")
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"}
+    )
+    assert r.status_code == 200 and r.json()["reply_agent"] is True
+    body = client.get(f"/api/work-items/{gated}").json()
+    assert body["pending_gate"] == "chain_review" and body["status"] == "needs_human"
+    sessions = [s for s in body["worker_sessions"] if s["hook_point"] == "chain_review.reply"]
+    assert sessions and sessions[0]["node_id"] == "chain_review"
