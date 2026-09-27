@@ -204,6 +204,28 @@ def test_approve_is_refused_while_a_must_fix_is_open_even_a_draft(client, gated)
 
 
 @_REVIEW
+def test_approve_that_the_gate_refuses_writes_no_review(client, gated):
+    """The file's own invariant -- 'a refused review records nothing' -- must
+    hold even when the refusal comes from `approve_gate` itself (here: the
+    final-review gate's missing artifact), not just from `submit_review`'s
+    own must-fix/reject-target checks."""
+    tid = _new_thread(client, gated, label="question").json()["id"]
+    run_dir = Path(client.app.state.run_dirs.base)
+    brief = run_dir / "worktrees" / gated / ".engineering" / "review_briefs" / f"{gated}.md"
+    brief.unlink()
+
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+    )
+    assert r.status_code == 422, r.text
+    body = client.get(f"/api/work-items/{gated}").json()
+    assert body["pending_gate"] == "chain_review"
+    assert body["last_review_sha"] is None
+    # not stamped with a review it never got -- still a draft, still editable
+    assert client.patch(f"/api/threads/{tid}", json={"body": "x"}).status_code == 200
+
+
+@_REVIEW
 def test_request_changes_sends_the_threads_as_the_note(client, gated, tmp_path, monkeypatch):
     prompts = tmp_path / "prompts.log"
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))

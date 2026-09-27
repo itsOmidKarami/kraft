@@ -276,25 +276,38 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
     head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
     attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
     base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
-    rid = await st.db.write(
-        lambda c: store.submit_review(
-            c,
-            wid=wid,
-            gate=gate,
-            outcome=body.outcome,
-            summary=body.summary,
-            head_sha=head or "",
-            base_sha=base or "",
+
+    async def _record():
+        return await st.db.write(
+            lambda c: store.submit_review(
+                c,
+                wid=wid,
+                gate=gate,
+                outcome=body.outcome,
+                summary=body.summary,
+                head_sha=head or "",
+                base_sha=base or "",
+            )
         )
-    )
+
+    # The gate call is delegated to first: `approve_gate`/`reject_gate` can
+    # still refuse (missing final-review artifact, a stale chain-revision
+    # digest, invalid policy, an already-running walk) after every check
+    # above has passed. The review is only written once that refusal window
+    # has closed, so a refused review really does record nothing.
     if body.outcome == "approve":
-        return await gate_routes.approve_gate(wid, gate, request, None)
+        result = await gate_routes.approve_gate(wid, gate, request, None)
+        await _record()
+        return result
     if body.outcome == "request_changes":
         threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
         note = store.render_note(threads, body.summary) or "Changes requested."
-        return await gate_routes.reject_gate(
+        result = await gate_routes.reject_gate(
             wid, gate, gate_routes.GateReject(note=note, node=body.node), request
         )
+        await _record()
+        return result
+    rid = await _record()
     try:
         deps.spawn(
             request.app,
