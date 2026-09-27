@@ -17,7 +17,9 @@ failing is not a person's problem.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid
 
 from kraft import caps, events, executor, store
@@ -25,6 +27,8 @@ from kraft.adapters import agent as _agent
 from kraft.executor import read_only
 from kraft.templates.models import AgentTask
 from kraft.worker import steering as _steering
+
+logger = logging.getLogger(__name__)
 
 DENIED = ("Edit", "NotebookEdit")
 
@@ -55,6 +59,10 @@ def _agent_task(nodes, gate: str):
 
 
 async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> str:
+    """A failed launch or git error here leaves threads unanswered rather than
+    escalating: a broken reply agent is not a person's problem
+    (docs/superpowers/specs/2026-09-27-review-flow-backend-design.md §3), so
+    the caller must not wrap this in `deps.guard`."""
     threads = db.read(lambda c: store.unanswered(c, work_item_id, gate))
     if not threads:
         return "nothing_to_answer"
@@ -86,36 +94,50 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         )
     except _steering.SteeringError:
         return "no_agent"
-    before = read_only.snapshot(db, row, launch, worktree)
-    await _agent.run_agent_task(
-        db,
-        run_dirs,
-        session_id=uuid.uuid4().hex,
-        work_item_id=work_item_id,
-        node_id=gate,
-        hook_point=f"{gate}.reply",
-        command=inv.command,
-        harness=inv.harness,
-        model=inv.model,
-        effort=inv.effort,
-        deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
-        allowed_tools=inv.allowed_tools,
-        grants=inv.grants,
-        permission_mode=inv.permission_mode,
-        method_text=inv.method_text,
-        steering_texts=inv.steering_texts,
-        sandbox=sandbox,
-        task_instruction=_PROMPT.format(
-            title=row["title"], threads=store.render_note(threads, None)
-        ),
-        title=row["title"],
-        repo_path=row["repo"],
-        cwd=worktree,
-        repo_entry=launch.repo_entry,
-        time_cap=time_cap,
-        harness_id=task.task.harness,
-    )
-    files = read_only.changed(db, row, launch, worktree, before)
+    try:
+        before = read_only.snapshot(db, row, launch, worktree)
+        await _agent.run_agent_task(
+            db,
+            run_dirs,
+            session_id=uuid.uuid4().hex,
+            work_item_id=work_item_id,
+            node_id=gate,
+            hook_point=f"{gate}.reply",
+            command=inv.command,
+            harness=inv.harness,
+            model=inv.model,
+            effort=inv.effort,
+            deny_tools=tuple(dict.fromkeys([*inv.deny_tools, *DENIED])),
+            allowed_tools=inv.allowed_tools,
+            grants=inv.grants,
+            permission_mode=inv.permission_mode,
+            method_text=inv.method_text,
+            steering_texts=inv.steering_texts,
+            sandbox=sandbox,
+            task_instruction=_PROMPT.format(
+                title=row["title"], threads=store.render_note(threads, None)
+            ),
+            title=row["title"],
+            repo_path=row["repo"],
+            cwd=worktree,
+            repo_entry=launch.repo_entry,
+            time_cap=time_cap,
+            harness_id=task.task.harness,
+        )
+        files = read_only.changed(db, row, launch, worktree, before)
+    except asyncio.CancelledError:
+        raise
+    except AssertionError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("reply agent failed for %s at gate %s", work_item_id, gate)
+        error = repr(exc)
+        await db.write(
+            lambda c: events.append(
+                c, work_item_id, "reply_agent_failed", {"gate": gate, "error": error}
+            )
+        )
+        return "failed"
     if files:
         await db.write(
             lambda c: events.append(

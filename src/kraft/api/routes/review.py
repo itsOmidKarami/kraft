@@ -312,17 +312,13 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         deps.spawn(
             request.app,
             wid,
-            deps.guard(
+            review_reply.run(
                 st.db,
-                wid,
-                review_reply.run(
-                    st.db,
-                    st.run_dirs,
-                    work_item_id=wid,
-                    gate=gate,
-                    nodes=nodes,
-                    launch=deps.launch(st, row["repo"]),
-                ),
+                st.run_dirs,
+                work_item_id=wid,
+                gate=gate,
+                nodes=nodes,
+                launch=deps.launch(st, row["repo"]),
             ),
         )
         spawned = True

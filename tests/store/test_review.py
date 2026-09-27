@@ -108,6 +108,22 @@ async def test_agent_claim_moves_state_and_reply_without_claim_does_not(database
     assert last["type"] == "thread_updated" and last["payload"]["state"] == "claimed"
 
 
+async def test_agent_claim_does_not_reopen_a_resolved_thread(database):
+    await mk_item(database)
+    tid = await _thread(database)
+    await database.write(lambda c: store.set_thread_state(c, tid, "resolved"))
+    await database.write(
+        lambda c: store.agent_reply(
+            c, tid, author="implementation", body="done", claim="fixed", attempt=1
+        )
+    )
+    assert database.read(lambda c: store.thread_row(c, tid))["state"] == "resolved"
+    [thread] = database.read(lambda c: store.threads_for(c, "w1", "review"))
+    assert thread["comments"][-1]["body"] == "done" and thread["comments"][-1]["claim"] == "fixed"
+    last = database.read(lambda c: events.read_after(c, 0, "w1"))[-1]
+    assert last["type"] == "thread_updated" and last["payload"]["state"] == "resolved"
+
+
 async def test_open_must_fix_counts_drafts_and_skips_resolved(database):
     """Review Focus 4 at the store level."""
     await mk_item(database)
@@ -134,6 +150,34 @@ async def test_unanswered_is_threads_whose_last_word_is_yours(database):
     )
     got = database.read(lambda c: store.unanswered(c, "w1", "review"))
     assert [t["id"] for t in got] == [waiting]
+
+
+async def test_unanswered_includes_a_claimed_thread_after_a_new_human_reply(database):
+    """A thread the reply agent already claimed `should_fix` still needs an
+    answer once the human replies again and submits a fresh comment review."""
+    await mk_item(database)
+    tid = await _thread(database)
+    await database.write(
+        lambda c: store.submit_review(
+            c, wid="w1", gate="review", outcome="comment", summary=None, head_sha="h", base_sha="b"
+        )
+    )
+    await database.write(
+        lambda c: store.agent_reply(
+            c, tid, author="implementation", body="agreed", claim="should_fix", attempt=1
+        )
+    )
+    assert database.read(lambda c: store.thread_row(c, tid))["state"] == "claimed"
+    assert database.read(lambda c: store.unanswered(c, "w1", "review")) == []
+
+    await database.write(lambda c: store.add_draft_reply(c, tid, body="still broken"))
+    await database.write(
+        lambda c: store.submit_review(
+            c, wid="w1", gate="review", outcome="comment", summary=None, head_sha="h2", base_sha="b"
+        )
+    )
+    got = database.read(lambda c: store.unanswered(c, "w1", "review"))
+    assert [t["id"] for t in got] == [tid]
 
 
 def test_render_note_lists_unresolved_threads_with_suggestions_and_replies():

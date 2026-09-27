@@ -227,11 +227,12 @@ def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
         "VALUES (?,?,?,?,?,?,?)",
         (cid, tid, author, attempt, body, claim, _now()),
     )
-    if claim is not None:
+    t = thread_row(conn, tid)
+    if claim is not None and t["state"] == "open":
         set_thread_state(conn, tid, "claimed")
     else:
-        # No state change: report the state the thread is actually in.
-        t = thread_row(conn, tid)
+        # An agent claim never reopens a `claimed` or `resolved` thread: report
+        # the state the thread is actually in instead.
         events.append(
             conn, t["work_item_id"], "thread_updated", {"thread_id": tid, "state": t["state"]}
         )
@@ -281,7 +282,7 @@ def unanswered(conn, wid, gate) -> list[dict]:
     return [
         t
         for t in threads_for(conn, wid, gate)
-        if not t["draft"] and t["state"] == "open" and t["comments"][-1]["author"] == YOU
+        if not t["draft"] and t["state"] != "resolved" and t["comments"][-1]["author"] == YOU
     ]
 
 

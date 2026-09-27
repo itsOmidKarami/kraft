@@ -125,6 +125,41 @@ async def test_nothing_unanswered_launches_nothing(item_on, run_dirs, tmp_path, 
     assert it.sessions(GATE) == []
 
 
+async def test_a_crashing_reply_agent_leaves_the_thread_unanswered_not_escalated(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """PR #236: a reply agent that raises (launch failure, git error) must not
+    reach `deps.guard`'s `mark_needs_human` -- that would pile a second stop
+    reason on top of the pending gate and page a human for an agent's crash,
+    not a person's problem."""
+    _seed(tmp_path, monkeypatch)
+    it = await _item(item_on, run_dirs)
+    await _published_unanswered_thread(it)
+    await it.database.write(lambda c: store.request_gate(c, it.id, GATE, GATE))
+
+    async def _boom(*a, **kw):
+        raise RuntimeError("agent launch failed")
+
+    monkeypatch.setattr(review_reply._agent, "run_agent_task", _boom)
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=LAUNCH,
+    )
+
+    assert status == "failed"
+    assert it.events("work_item_needs_human") == []
+    assert it.status() == "needs_human"
+    assert executor.pending_gate(it.database, it.id) == GATE
+    [event] = it.events("reply_agent_failed")
+    assert event["payload"]["gate"] == GATE
+    assert "agent launch failed" in event["payload"]["error"]
+
+
 async def test_a_write_to_the_worktree_is_recorded_not_escalated(
     item_on, run_dirs, tmp_path, monkeypatch
 ):
