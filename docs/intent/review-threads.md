@@ -204,3 +204,9 @@ IF bouncing a gate on unanswered feedback would breach the gate's reject-loop
 cap, THEN the system SHALL open the gate for the person instead.
 enforced-by: tests/executor/test_gates.py::test_the_bounce_counts_against_the_reject_cap_and_then_opens
 origin: src/kraft/executor/gates.py
+
+## REQ review-cli-verbs-reach-their-routes
+WHEN a person runs a review verb of `kraft` or calls its MCP tool, the system
+SHALL make the same request the API route takes.
+enforced-by: tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[comment-new-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[comment-reply], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[resolve-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[reopen-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[review-request-changes], tests/cli/test_verbs.py::test_comment_needs_lines_for_a_suggestion, tests/cli/test_verbs.py::test_view_threads_renders_a_block_per_thread, tests/cli/test_verbs.py::test_view_compare_forwards_targets_and_stats_the_files, tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[list_threads-threads-args0], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[compare_changes-compare-args1], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[add_review_comment-add_review_comment-args2], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[resolve_thread-resolve_thread-args3], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[reopen_thread-reopen_thread-args4], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[submit_review-submit_review-args5], tests/test_mcp.py::test_submit_review_says_only_a_human_should_decide
+origin: src/kraft/client/actions.py

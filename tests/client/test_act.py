@@ -117,8 +117,10 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
         lambda wid: client.pause(work_item_id=wid),
         lambda wid: client.resume(work_item_id=wid),
         lambda wid: client.skip(work_item_id=wid),
+        lambda wid: client.submit_review("comment", work_item_id=wid),
+        lambda wid: client.add_review_comment("hi", work_item_id=wid),
     ],
-    ids=["approve", "reject", "pause", "resume", "skip"],
+    ids=["approve", "reject", "pause", "resume", "skip", "submit_review", "add_review_comment"],
 )
 def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, monkeypatch, call):
     """The guard has to be wired into all four, not just the one that was

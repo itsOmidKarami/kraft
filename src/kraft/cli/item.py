@@ -228,6 +228,62 @@ def _cmd_set_node_override(ns: argparse.Namespace) -> None:
     )
 
 
+#: `--lines A-B`: `A` alone is `A-A`.
+def _lines(raw: str) -> tuple[int, int]:
+    a, sep, b = raw.partition("-")
+    try:
+        start = int(a)
+        end = int(b) if sep else start
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--lines takes A or A-B, not {raw!r}") from None
+    return start, end
+
+
+#: The CLI spells a label with a dash; the API takes it with an underscore.
+_LABELS = {"must-fix": "must_fix", "question": "question", "nit": "nit"}
+
+
+def _cmd_comment(ns: argparse.Namespace) -> None:
+    if ns.suggest is not None and ns.lines is None:
+        ns._parser.error("--suggest needs --lines")
+    start, end = ns.lines if ns.lines else (None, None)
+    common.emit(
+        asyncio.run(
+            client.add_review_comment(
+                ns.body,
+                work_item_id=ns.id,
+                thread_id=ns.reply,
+                file_path=ns.file_path,
+                start_line=start,
+                end_line=end,
+                side=ns.side,
+                label=_LABELS[ns.label] if ns.label else None,
+                suggestion=ns.suggest,
+            )
+        ),
+        common._render_action,
+        ns.json,
+    )
+
+
+def _cmd_resolve(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.resolve_thread(ns.thread)), common._render_action, ns.json)
+
+
+def _cmd_reopen(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.reopen_thread(ns.thread)), common._render_action, ns.json)
+
+
+def _cmd_review(ns: argparse.Namespace) -> None:
+    outcome = "request_changes" if ns.outcome == "request-changes" else ns.outcome
+    result = asyncio.run(client.submit_review(outcome, ns.id, ns.summary, ns.node))
+    if "target" in result:
+        print(
+            f"request-changes -> {result['target']} ({result['target_reason']}), {result['action']}"
+        )
+    common.emit(result, common._render_action, ns.json)
+
+
 def _cmd_set_policy(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(
@@ -392,6 +448,36 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     reply.add_argument("--body", required=True)
     reply.add_argument("--claim", choices=["fixed", "answered", "should_fix"])
     reply.set_defaults(func=_cmd_reply)
+
+    comment = subs.add_parser(
+        "comment", parents=[common], help="a draft review comment, or a reply with --reply"
+    )
+    comment.add_argument("id", nargs="?")
+    comment.add_argument("--body", required=True)
+    comment.add_argument("--reply", metavar="THREAD", help="reply to this thread instead")
+    comment.add_argument("--file", dest="file_path", help="the file this comment is about")
+    comment.add_argument("--lines", type=_lines, metavar="A[-B]", help="a line range in --file")
+    comment.add_argument("--side", choices=["old", "new"], help="default: new")
+    comment.add_argument("--label", choices=["must-fix", "question", "nit"])
+    comment.add_argument("--suggest", metavar="TEXT", help="a suggested replacement for --lines")
+    comment.set_defaults(func=_cmd_comment, _parser=comment)
+
+    resolve = subs.add_parser("resolve", parents=[common], help="mark a review thread resolved")
+    resolve.add_argument("thread")
+    resolve.set_defaults(func=_cmd_resolve)
+
+    reopen = subs.add_parser("reopen", parents=[common], help="reopen a resolved review thread")
+    reopen.add_argument("thread")
+    reopen.set_defaults(func=_cmd_reopen)
+
+    review = subs.add_parser("review", parents=[common], help="send your drafted review comments")
+    review.add_argument("id", nargs="?")
+    review.add_argument("outcome", choices=["comment", "approve", "request-changes"])
+    review.add_argument("--summary")
+    review.add_argument(
+        "--node", help="where request-changes re-runs; default: derived from threads"
+    )
+    review.set_defaults(func=_cmd_review)
 
     escalate = subs.add_parser(
         "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"

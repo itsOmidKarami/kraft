@@ -550,6 +550,57 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
             "reply_to_thread",
             {"thread_id": "t1", "body": "hi", "claim": "fixed"},
         ),
+        (
+            [
+                "item",
+                "comment",
+                "7",
+                "--body",
+                "hi",
+                "--file",
+                "a.py",
+                "--lines",
+                "3-4",
+                "--label",
+                "must-fix",
+                "--suggest",
+                "x",
+            ],  # fmt: skip
+            "add_review_comment",
+            {
+                "body": "hi",
+                "work_item_id": "7",
+                "thread_id": None,
+                "file_path": "a.py",
+                "start_line": 3,
+                "end_line": 4,
+                "side": None,
+                "label": "must_fix",
+                "suggestion": "x",
+            },
+        ),
+        (
+            ["item", "comment", "--reply", "T1", "--body", "hi"],
+            "add_review_comment",
+            {
+                "body": "hi",
+                "work_item_id": None,
+                "thread_id": "T1",
+                "file_path": None,
+                "start_line": None,
+                "end_line": None,
+                "side": None,
+                "label": None,
+                "suggestion": None,
+            },
+        ),
+        (["item", "resolve", "T1"], "resolve_thread", {"thread_id": "T1"}),
+        (["item", "reopen", "T1"], "reopen_thread", {"thread_id": "T1"}),
+        (
+            ["item", "review", "7", "request-changes", "--summary", "s"],
+            "submit_review",
+            {"outcome": "request_changes", "work_item_id": "7", "summary": "s", "node": None},
+        ),
     ],
     ids=[
         "retry-steer",
@@ -565,6 +616,11 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         "escalate-new-thread",
         "progress-task",
         "reply-thread",
+        "comment-new-thread",
+        "comment-reply",
+        "resolve-thread",
+        "reopen-thread",
+        "review-request-changes",
     ],
 )
 def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
@@ -589,6 +645,55 @@ def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn,
     cli.main(argv)
     assert seen == expected
     assert "w1" in capsys.readouterr().out
+
+
+def test_comment_needs_lines_for_a_suggestion(app, capsys):
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["item", "comment", "--body", "x", "--suggest", "y"])
+    assert caught.value.code == 2
+    assert "--suggest needs --lines" in capsys.readouterr().err
+
+
+def test_view_threads_renders_a_block_per_thread(app, monkeypatch, capsys):
+    async def fake_threads(work_item_id=None, open_only=False):
+        return [
+            {
+                "id": "t1",
+                "file_path": "a.py",
+                "start_line": 3,
+                "end_line": 4,
+                "label": "must_fix",
+                "state": "open",
+                "draft": False,
+                "comments": [{"author": "you", "body": "fix this", "draft": False}],
+            }
+        ]
+
+    monkeypatch.setattr(client, "threads", fake_threads)
+    cli.main(["view", "threads", "w1"])
+    out = capsys.readouterr().out
+    assert "t1" in out and "a.py:3-4" in out and "fix this" in out
+
+
+def test_view_compare_forwards_targets_and_stats_the_files(app, monkeypatch, capsys):
+    async def fake_compare(work_item_id=None, from_="base", to="latest", nodes=None):
+        assert (work_item_id, from_, to, nodes) == ("w1", "attempt:1", "latest", None)
+        return {
+            "from": {"target": "attempt:1"},
+            "to": {"target": "latest"},
+            "rebased": False,
+            "files": [
+                {"path": "a.py", "insertions": 3, "deletions": 1, "touched_by": ["implementation"]}
+            ],
+            "diff": "",
+            "untracked": [],
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(client, "compare", fake_compare)
+    cli.main(["view", "compare", "w1", "--from", "attempt:1", "--to", "latest", "--stat"])
+    out = capsys.readouterr().out
+    assert "attempt:1 -> latest" in out and "a.py" in out and "implementation" in out
 
 
 def test_reject_passes_the_node_through(app, monkeypatch, capsys):

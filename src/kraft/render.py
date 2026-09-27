@@ -306,6 +306,52 @@ def diff_body(payload: dict) -> str:
     return "\n".join([*out, *_diff_trailer(payload)])
 
 
+def threads(items: list) -> str:
+    """One block per thread: id, where, label/state/draft, then each comment."""
+    if not items:
+        return "no review threads"
+    out = []
+    for t in items:
+        where = t["file_path"] or "(whole change)"
+        if t["start_line"] is not None:
+            where += f":{t['start_line']}-{t['end_line']}"
+        tags = " ".join(filter(None, [t["label"], t["state"], "draft" if t["draft"] else None]))
+        out.append(f"{t['id']}  {where}  [{tags}]")
+        for c in t["comments"]:
+            mark = " (draft)" if c["draft"] else ""
+            out.append(f"  {c['author']}{mark}: {c['body']}")
+    return "\n".join(out)
+
+
+def _compare_head(payload: dict) -> str:
+    head = f"{payload['from']['target']} -> {payload['to']['target']}"
+    if payload.get("rebased"):
+        head += "  (rebased: includes the target branch's changes)"
+    return head
+
+
+def compare_stat(payload: dict) -> str:
+    """ "How big is this" for a compare, alongside `diff_stat`'s answer for a
+    plain diff — `touched_by` is the one thing a compare's stat has that a
+    diff's does not."""
+    rows = [
+        f"{f['path']} | +{f['insertions']} -{f['deletions']}  ({', '.join(f['touched_by']) or '-'})"
+        for f in payload["files"]
+    ]
+    if not rows:
+        return _compare_head(payload) + "\nno changes"
+    return "\n".join([_compare_head(payload), *rows])
+
+
+def compare_body(payload: dict) -> str:
+    """The unified diff between two review targets, coloured like `diff_body`."""
+    out = [_compare_head(payload), *_colour_diff(payload.get("diff", ""))]
+    if not payload.get("diff"):
+        out.append("(no changes)")
+    out += _diff_trailer(payload)
+    return "\n".join(out)
+
+
 def artifact_body(payload: dict) -> str:
     """A gate's spec/plan document, with the same truncation notice the diff
     renderer gives — `kraft view artifact` is the one surface where a reviewer
