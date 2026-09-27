@@ -1491,8 +1491,8 @@ WHEN a session resumes an earlier session's agent CLI session (a paused task
 resumed, or a later turn of an escalation thread), the system SHALL record for
 it only the tokens and cost it added to that CLI session's running totals,
 and SHALL record its cost as unknown when the earlier session's is unknown.
-enforced-by: tests/store/test_resumed_usage.py::test_a_resumed_session_records_only_what_it_spent_itself, tests/store/test_resumed_usage.py::test_a_resumed_escalation_turn_skips_a_refused_turn_between, tests/store/test_resumed_usage.py::test_an_unknown_earlier_cost_leaves_the_resumed_cost_unknown, tests/store/test_resumed_usage.py::test_a_new_cli_session_is_not_netted_against_an_earlier_one, tests/store/test_resumed_usage.py::test_a_resumed_session_nets_each_kind_of_token
-origin: src/kraft/store/sessions.py §_own_share -- Kraft-s7c04.62: the CLI's cost and modelUsage are cumulative per session id, so a resumed row repeated what the paused row already recorded and usage_rollup counted it twice.
+enforced-by: tests/store/test_resumed_usage.py::test_a_resumed_session_records_only_what_it_spent_itself, tests/store/test_resumed_usage.py::test_a_resumed_escalation_turn_skips_a_refused_turn_between, tests/store/test_resumed_usage.py::test_an_unknown_earlier_cost_leaves_the_resumed_cost_unknown, tests/store/test_resumed_usage.py::test_a_new_cli_session_is_not_netted_against_an_earlier_one, tests/store/test_resumed_usage.py::test_a_resumed_session_nets_each_kind_of_token, tests/store/test_resumed_usage.py::test_a_paused_estimate_is_not_doubled_by_a_resumed_reset
+origin: src/kraft/store/sessions.py §_own_share -- Kraft-s7c04.62: the CLI's cost and modelUsage are cumulative per session id, so a resumed row repeated what the paused row already recorded and usage_rollup counted it twice. Kraft-wz83s review round 2: `_settle_cost`'s costless-exit estimate (round 1) must not price this same cumulative-tokens case either, or a paused turn's own estimate is doubled by the resumed turn's.
 
 ## REQ cap-defaults-and-maxima-are-set-per-level
 

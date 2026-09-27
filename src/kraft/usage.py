@@ -541,12 +541,27 @@ def _cumulative(log_path: Path, cli: str) -> Usage | None:
 
 def net_of_earlier(
     own: Usage, log_path: Path, earlier_log: Path, cli: str, reader: str = "claude-stream-json"
-) -> Usage:
-    """`own`, less what CLI session `cli` had already spent by the end of
-    `earlier_log`, a session this one resumed (Kraft-s7c04.62). Both logs'
-    envelopes report the session's running totals, so the difference is this
-    session's own spend. Unknown earlier spend makes this session's cost
-    unknown too, never the whole running total and never zero.
+) -> tuple[Usage, bool]:
+    """`(own less what CLI session cli had already spent by the end of
+    earlier_log, netting_failed)` -- `earlier_log` is a session this one
+    resumed (Kraft-s7c04.62). Both logs' envelopes report the session's
+    running totals, so the difference is this session's own spend. Unknown
+    earlier spend makes this session's cost unknown too, never the whole
+    running total and never zero.
+
+    `netting_failed` is `True` exactly when `earlier_log` has no known
+    running totals to net against: the returned `Usage` then still carries
+    `own`'s tokens as read -- the CLI session's *cumulative* totals, not this
+    turn's own share, since there is nothing to subtract them from -- and its
+    caller (`store.sessions._settle_cost`, Kraft-wz83s) must not price an
+    unestimated cost off them, or a paused-then-resumed turn's spend is
+    counted twice: once in the paused row's own estimate, again in the
+    resumed row's estimate off the same cumulative tokens. `False` means
+    either a clean net (tokens and cost both this turn's own share) or that
+    there was nothing to net in the first place (`mine is None` -- this
+    session's own log carries no cumulative reading of its own, so `own` is
+    returned exactly as its caller already read it, which callers handle
+    exactly like a fresh, unresumed session).
 
     `reader` names the logs' schema (Kraft-wge0e). Claude's log can hold
     result envelopes of more than one CLI session, so it is read for `cli`'s;
@@ -560,18 +575,21 @@ def net_of_earlier(
 
     mine, before = cumulative(log_path), cumulative(earlier_log)
     if mine is None:
-        return own
+        return own, False
     if before is None:
-        return replace(own, cost_usd=None)
+        return replace(own, cost_usd=None), True
     cost = (
         None
         if mine.cost_usd is None or before.cost_usd is None
         else max(mine.cost_usd - before.cost_usd, 0.0)
     )
-    return Usage(
-        **{k: max(getattr(mine, k) - getattr(before, k), 0) for k in KINDS},
-        cost_usd=cost,
-        model=own.model,
+    return (
+        Usage(
+            **{k: max(getattr(mine, k) - getattr(before, k), 0) for k in KINDS},
+            cost_usd=cost,
+            model=own.model,
+        ),
+        False,
     )
 
 
