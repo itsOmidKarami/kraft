@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from support.api import _await_gate, _review_early
+from support.api import _await_gate, _poll_node_started, _review_early
 
 _REVIEW = pytest.mark.api_client(edit_templates=_review_early)
 
@@ -126,7 +126,6 @@ def _new_thread(client, wid, **kw):
 
 
 @_REVIEW
-@pytest.mark.xfail(strict=True, reason="review route lands in Task 7")
 def test_thread_lifecycle_draft_edit_then_locked_after_submit(client, gated):
     r = _new_thread(client, gated)
     assert r.status_code == 201, r.text
@@ -160,7 +159,6 @@ def test_bad_ranges_and_suggestions_are_refused_and_write_nothing(client, gated)
 
 
 @_REVIEW
-@pytest.mark.xfail(strict=True, reason="review route lands in Task 7")
 def test_worker_agents_cannot_use_human_routes(client, gated):
     """Review Focus 3."""
     agent = {"x-kraft-session-id": "s1"}
@@ -186,3 +184,54 @@ def test_threads_need_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
     assert _new_thread(client, wid).status_code == 409
+
+
+@_REVIEW
+def test_approve_is_refused_while_a_must_fix_is_open_even_a_draft(client, gated):
+    """Review Focus 4, at every human door."""
+    tid = _new_thread(client, gated).json()["id"]  # a draft must_fix
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+    )
+    assert r.status_code == 409 and tid in r.text
+    assert client.post(f"/api/work-items/{gated}/gates/chain_review/approve").status_code == 409
+    client.post(f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"})
+    client.post(f"/api/threads/{tid}/resolve")
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "approve"}
+    )
+    assert r.status_code == 200, r.text
+
+
+@_REVIEW
+def test_request_changes_sends_the_threads_as_the_note(client, gated, tmp_path, monkeypatch):
+    prompts = tmp_path / "prompts.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
+    tid = _new_thread(client, gated, body="evict LRU").json()["id"]
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review",
+        json={"outcome": "request_changes", "summary": "Bound the cache."},
+    )
+    assert r.status_code == 200, r.text
+    _poll_node_started(client, gated, "implementation")
+    _await_gate(client, gated, "chain_review")
+    log = prompts.read_text()
+    assert "Bound the cache." in log and f"[{tid}]" in log and "evict LRU" in log
+    body = client.get(f"/api/work-items/{gated}").json()
+    assert body["last_review_sha"] is not None
+
+
+@_REVIEW
+def test_request_changes_to_a_bad_node_writes_no_review(client, gated):
+    r = client.post(
+        f"/api/work-items/{gated}/gates/chain_review/review",
+        json={"outcome": "request_changes", "node": "nowhere"},
+    )
+    assert r.status_code == 400
+    assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
+
+
+@_REVIEW
+def test_review_on_a_gate_that_is_not_pending_is_409(client, gated):
+    r = client.post(f"/api/work-items/{gated}/gates/other/review", json={"outcome": "comment"})
+    assert r.status_code in (404, 409)

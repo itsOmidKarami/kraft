@@ -13,9 +13,10 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, model_validator
 
 from kraft import config as config_mod
-from kraft import store
+from kraft import executor, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
+from kraft.api.routes import gates as gate_routes
 
 
 class Suggestion(BaseModel):
@@ -243,3 +244,55 @@ async def resolve_thread(tid: str, request: Request):
 @api_router.post("/threads/{tid}/reopen")
 async def reopen_thread(tid: str, request: Request):
     return await _set_state(tid, request, "open")
+
+
+class ReviewIn(BaseModel):
+    outcome: Literal["approve", "request_changes", "comment"]
+    summary: str | None = None
+    node: str | None = None
+
+
+@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
+async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    nodes = gate_routes.gate_nodes(st, row)
+    gate_routes._gate_or_404(nodes, gate)
+    if board._pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    # Every refusal before the review is written: a refused review records nothing.
+    if body.outcome == "approve":
+        blocking = st.db.read(lambda c: store.open_must_fix(c, wid, gate))
+        if blocking:
+            raise HTTPException(
+                409, f"must-fix review threads are not resolved: {', '.join(blocking)}"
+            )
+    if body.outcome == "request_changes":
+        try:
+            executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
+    attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
+    base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+    rid = await st.db.write(
+        lambda c: store.submit_review(
+            c,
+            wid=wid,
+            gate=gate,
+            outcome=body.outcome,
+            summary=body.summary,
+            head_sha=head or "",
+            base_sha=base or "",
+        )
+    )
+    if body.outcome == "approve":
+        return await gate_routes.approve_gate(wid, gate, request, None)
+    if body.outcome == "request_changes":
+        threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
+        note = store.render_note(threads, body.summary) or "Changes requested."
+        return await gate_routes.reject_gate(
+            wid, gate, gate_routes.GateReject(note=note, node=body.node), request
+        )
+    return {"review_id": rid, "outcome": "comment", "reply_agent": False}
