@@ -69,6 +69,25 @@ def test_abandon_drops_the_items_refs(client, gated, repo):
 
 
 @_REVIEW
+def test_archive_drops_the_items_refs(client, gated, repo):
+    """Abandon has its own test; archive reclaims through the same
+    `_remove_worktree` and must drop the attempt refs too. Abandon first (only an
+    ended item can be archived), plant a ref after it, then archive."""
+    assert client.post(f"/api/work-items/{gated}/abandon").status_code == 200
+    subprocess.run(
+        ["git", "update-ref", f"refs/kraft/{gated}/manual/1", "HEAD"], cwd=repo, check=True
+    )
+    assert client.post(f"/api/work-items/{gated}/archive").status_code == 200
+    refs = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname)", f"refs/kraft/{gated}/"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert refs.strip() == ""
+
+
+@_REVIEW
 def test_compare_base_to_latest_matches_the_whole_change(client, gated):
     r = client.get(f"/api/work-items/{gated}/compare", params={"from": "base", "to": "latest"})
     assert r.status_code == 200, r.text
