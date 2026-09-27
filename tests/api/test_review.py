@@ -110,3 +110,79 @@ def test_item_detail_carries_attempts_and_reject_default(client, gated):
     assert [a["n"] for a in body["attempts"]] == [1]
     assert body["reject_default"] == "implementation"
     assert body["last_review_sha"] is None
+
+
+def _new_thread(client, wid, **kw):
+    body = {
+        "body": "use a set",
+        "file_path": "a.py",
+        "side": "new",
+        "start_line": 3,
+        "end_line": 4,
+        "label": "must_fix",
+    }
+    body.update(kw)
+    return client.post(f"/api/work-items/{wid}/threads", json=body)
+
+
+@_REVIEW
+@pytest.mark.xfail(strict=True, reason="review route lands in Task 7")
+def test_thread_lifecycle_draft_edit_then_locked_after_submit(client, gated):
+    r = _new_thread(client, gated)
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    assert client.patch(f"/api/threads/{tid}", json={"body": "use a frozenset"}).status_code == 200
+    client.post(f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"})
+    assert client.patch(f"/api/threads/{tid}", json={"body": "x"}).status_code == 409
+    assert client.delete(f"/api/threads/{tid}").status_code == 409
+    assert client.post(f"/api/threads/{tid}/resolve").status_code == 200
+    assert client.post(f"/api/threads/{tid}/reopen").status_code == 200
+
+
+@_REVIEW
+def test_bad_ranges_and_suggestions_are_refused_and_write_nothing(client, gated):
+    """Review Focus 2."""
+    cases = [
+        {"start_line": 5, "end_line": 4},
+        {"side": None},  # lines without a side
+        {
+            "start_line": None,
+            "end_line": None,
+            "side": None,
+            "suggestion": {"start_line": 1, "end_line": 1, "replacement": "x"},
+        },
+        {"suggestion": {"start_line": 2, "end_line": 3, "replacement": "x"}},  # outside 3-4
+        {"label": "blocker"},
+    ]
+    for kw in cases:
+        assert _new_thread(client, gated, **kw).status_code == 422, kw
+    assert client.get(f"/api/work-items/{gated}/threads").json() == []
+
+
+@_REVIEW
+@pytest.mark.xfail(strict=True, reason="review route lands in Task 7")
+def test_worker_agents_cannot_use_human_routes(client, gated):
+    """Review Focus 3."""
+    agent = {"x-kraft-session-id": "s1"}
+    assert (
+        client.post(
+            f"/api/work-items/{gated}/threads", json={"body": "x"}, headers=agent
+        ).status_code
+        == 403
+    )
+    tid = _new_thread(client, gated).json()["id"]
+    assert client.post(f"/api/threads/{tid}/resolve", headers=agent).status_code == 403
+    assert (
+        client.post(
+            f"/api/work-items/{gated}/gates/chain_review/review",
+            json={"outcome": "comment"},
+            headers=agent,
+        ).status_code
+        == 403
+    )
+
+
+def test_threads_need_a_pending_gate(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+    assert _new_thread(client, wid).status_code == 409
