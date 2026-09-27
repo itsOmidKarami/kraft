@@ -388,8 +388,11 @@ async def agent_reply(tid: str, body: ReplyIn, request: Request):
     if not body.body.strip():
         raise HTTPException(422, "body is empty")
     wid, gate = row["work_item_id"], row["gate"]
-    n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
-    attempt = n if board._pending_gate(st, wid) == gate else n + 1
+    if gate is None:
+        attempt = None
+    else:
+        n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
+        attempt = n if board._pending_gate(st, wid) == gate else n + 1
     cid = await st.db.write(
         lambda c: store.agent_reply(
             c, tid, author=session["node_id"], body=body.body, claim=body.claim, attempt=attempt

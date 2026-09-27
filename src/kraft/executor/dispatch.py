@@ -825,6 +825,7 @@ async def _dispatch_task(
             + (prompts.METHOD_NOTE if method_is_own else "")
             + prompts.scope_note(t, launch.repo_entry if launch else None)
             + prompts.progress_note(t, work_item_row, worktree, db)
+            + prompts.review_threads_note(t, work_item_row, db, note)
         )
     ) + prompts.BEAD_NOTE
     # The findings that never entered the fix loop, for the brief the human

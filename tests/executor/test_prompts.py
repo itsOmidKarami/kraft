@@ -4,7 +4,9 @@ That `dispatch_node` puts them in the prompt, in order, is test_dispatch's."""
 
 import pytest
 from support.harness import _git, entry_of, v1_named_chain
+from support.store_fixtures import mk_item
 
+from kraft import store
 from kraft.config import git_read
 from kraft.executor import prompts
 from kraft.findings import Finding, JobRef
@@ -16,6 +18,10 @@ def _task(skill: str | None = None) -> AgentTask:
     return AgentTask.model_validate(
         {"id": "t", "kind": "agent", "harness": "claude", "prompt": "p", "skill": skill}
     )
+
+
+WORKER = _task()
+REVIEWER = _task("kraft:code-review")
 
 
 def test_attachment_note_lists_each_document_and_keeps_the_imperative_for_the_implementer():
@@ -222,3 +228,56 @@ def test_rebase_drift_note_truncates_a_long_diff(repo):
 
     assert len(note) < prompts._REBASE_NOTE_MAX + 500  # template text plus the capped body
     assert "(truncated)" in note
+
+
+# -- review_threads_note (review threads anywhere §1) -----------------------------
+
+
+async def _published(database, **kw):
+    args = dict(wid="w1", gate=None, anchor_sha="h", body="evict LRU", label="must_fix")
+    args.update(kw)
+    tid = await database.write(lambda c: store.create_thread(c, **args))
+    await database.write(
+        lambda c: store.submit_review(
+            c, wid="w1", gate=None, outcome="comment", summary=None, head_sha="h", base_sha="h"
+        )
+    )
+    return tid
+
+
+async def test_a_working_agent_is_told_to_address_and_reply(database):
+    await mk_item(database)
+    tid = await _published(database)
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
+
+    text = prompts.review_threads_note(WORKER, row, database, None)
+
+    assert f"[{tid}]" in text and "evict LRU" in text
+    assert "kraft item reply" in text
+
+
+async def test_a_reviewer_judges_against_the_threads_and_does_not_reply(database):
+    await mk_item(database)
+    tid = await _published(database)
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
+
+    text = prompts.review_threads_note(REVIEWER, row, database, None)
+
+    assert f"[{tid}]" in text and "finding" in text
+    assert "kraft item reply" not in text
+
+
+async def test_answered_resolved_and_already_in_the_note_threads_are_left_out(database):
+    await mk_item(database)
+    answered = await _published(database, body="a")
+    resolved = await _published(database, body="b")
+    in_note = await _published(database, body="c")
+    await database.write(
+        lambda c: store.agent_reply(
+            c, answered, author="implementation", body="done", claim="fixed", attempt=None
+        )
+    )
+    await database.write(lambda c: store.set_thread_state(c, resolved, "resolved"))
+    row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
+
+    assert prompts.review_threads_note(WORKER, row, database, f"[{in_note}] a.py") == ""

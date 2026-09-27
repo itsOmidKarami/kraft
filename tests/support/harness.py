@@ -731,9 +731,15 @@ async def v1_walk(
     run_dirs=None,
     start_index: int = 0,
     start_step: int = 0,
+    after_item=None,
     **item_kwargs,
 ):
     """File `chain` as one work item and walk it once.
+
+    `after_item`, if given, is awaited with `database` right after the item
+    is created and before the walk runs -- a hook for a caller that needs to
+    seed state (e.g. a review thread) against the item's row before dispatch
+    reads it.
 
     Returns `(status, events, sessions, row)` -- the readbacks nearly every
     assertion about a walk needs, as plain dicts, with the database already
@@ -749,6 +755,8 @@ async def v1_walk(
     database = await _db.Database.open(rd.db)
     try:
         await v1_item(database, chain, repo=repo, wid=wid, title=title, **item_kwargs)
+        if after_item is not None:
+            await after_item(database)
         status = await executor.run_once(
             database,
             rd,

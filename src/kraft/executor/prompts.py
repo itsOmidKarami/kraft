@@ -6,6 +6,7 @@ from pathlib import Path
 from kraft import findings as _findings
 from kraft import progress as _progress
 from kraft import review as _review
+from kraft import store as _store
 from kraft.adapters import agent as _agent
 from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
@@ -401,6 +402,35 @@ def progress_note(task: AgentTask, work_item_row, worktree, db=None) -> str:
         return ""
     tasks = _progress.tasks_for(work_item_row, Path(worktree))
     return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
+
+
+#: The item's unanswered review threads, framed by role: a working agent
+#: (`task.skill is None`) is told to address and reply to each; a reviewer is
+#: told to judge the change against them and never reply itself -- that is
+#: the implementing agent's job, and a reviewer replying would blur who is
+#: answering whom (review threads anywhere §1).
+_THREADS_FOR_WORKER = (
+    "\n\nA person reviewing this work left these threads. Address each one, then "
+    'answer it: `kraft item reply <thread-id> --claim fixed --body "..."` when you '
+    "changed the code, `--claim answered` when you are replying without a change.\n\n"
+)
+_THREADS_FOR_REVIEWER = (
+    "\n\nA person reviewing this work left these threads. Check whether the change "
+    "addresses each one. Report an unaddressed `must_fix` thread as a finding. Do not "
+    "reply to the threads; that is the implementing agent's job.\n\n"
+)
+
+
+def review_threads_note(task: AgentTask, work_item_row, db, note: str | None) -> str:
+    """The item's unanswered review threads, for every agent launch, framed by
+    role (review threads anywhere §1). A thread the note already lists -- the
+    rejection note on a rework run -- is left out, so none appears twice."""
+    threads = db.read(lambda c: _store.unanswered(c, work_item_row["id"]))
+    threads = [t for t in threads if f"[{t['id']}]" not in (note or "")]
+    body = _store.render_threads(threads)
+    if not body:
+        return ""
+    return (_THREADS_FOR_WORKER if task.skill is None else _THREADS_FOR_REVIEWER) + body
 
 
 #: What verify will run, shown to the node that can still act on it. 49c0cefd

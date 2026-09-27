@@ -425,6 +425,29 @@ def test_a_gateless_comment_is_recorded_with_no_gate(client, repo, monkeypatch):
     assert "review_submitted" in events
 
 
+def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkeypatch):
+    """`gate_attempts` counts a gate's own attempt refs (review threads
+    anywhere §1: threads and reviews may now carry no gate at all). A reply
+    on a thread with no gate has nothing to count an attempt against."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    tid = _new_thread(client, wid, anchor_sha="0" * 40).json()["id"]
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+    assert r.status_code == 200, r.text
+    sid = _session_of(client, wid, "spec")
+    reply = client.post(
+        f"/api/threads/{tid}/replies",
+        json={"body": "done", "claim": "fixed"},
+        headers={"x-kraft-session-id": sid},
+    )
+    assert reply.status_code == 201, reply.text
+    assert reply.json()["attempt"] is None
+
+
 def test_approve_needs_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")

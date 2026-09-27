@@ -134,3 +134,22 @@ IF a person sends review threads with no gate pending and nothing ahead in the
 chain can read them, THEN the system SHALL refuse the review and record nothing.
 enforced-by: tests/api/test_lifecycle.py::test_review_reachable_counts_agents_and_gates_ahead_but_not_behind, tests/api/test_review.py::test_a_gateless_comment_is_recorded_with_no_gate, tests/api/test_review.py::test_a_gateless_comment_is_refused_when_nothing_ahead_can_read_it
 origin: src/kraft/api/routes/lifecycle.py
+
+## REQ working-agent-dispatch-carries-unanswered-threads
+WHEN an agent task with no skill is dispatched, the system SHALL include every
+unanswered review thread on its item, with the instruction to reply to each.
+enforced-by: tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply, tests/executor/test_dispatch.py::test_the_implementer_prompt_carries_a_mid_run_thread
+origin: src/kraft/executor/prompts.py
+
+## REQ reviewer-dispatch-judges-against-unanswered-threads
+WHEN an agent task with a skill is dispatched, the system SHALL include every
+unanswered review thread on its item as something to judge the change
+against, and SHALL NOT tell it to reply.
+enforced-by: tests/executor/test_prompts.py::test_a_reviewer_judges_against_the_threads_and_does_not_reply
+origin: src/kraft/executor/prompts.py
+
+## REQ a-thread-in-the-rejection-note-is-not-listed-twice
+WHEN a dispatch's note already lists a review thread, the system SHALL NOT
+list that thread again with the unanswered threads.
+enforced-by: tests/executor/test_prompts.py::test_answered_resolved_and_already_in_the_note_threads_are_left_out
+origin: src/kraft/executor/prompts.py
