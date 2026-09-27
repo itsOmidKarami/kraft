@@ -569,7 +569,8 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
 )
 def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
     """Each argument lands on the client function's own parameter, as the real
-    function would bind it (defaults included), and the reply names the item."""
+    function would bind it (defaults included), and the reply names the item.
+    The review-thread verbs' own cases are tests/cli/test_review_threads.py's."""
     real = getattr(client, fn)
     seen = {}
 

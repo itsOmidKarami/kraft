@@ -57,6 +57,12 @@ kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
+kraft view threads [ID] [--open]              # review threads, drafts marked
+kraft view compare [ID] --from T --to T [--nodes a,b] [--stat|--name-only]  # T: base|attempt:N|last_review|latest
+kraft item comment [ID] --body "..." [--file P --lines A-B [--side old|new]] [--label must-fix|question|nit] [--suggest "..."]
+kraft item comment --reply THREAD --body "..."
+kraft item resolve THREAD / kraft item reopen THREAD
+kraft item review [ID] comment|approve|request-changes [--summary "..."] [--node N]
 kraft view search "query"
 kraft view logs [ID] [-f] [-n N]            # a worker session's log; --json is NDJSON
 kraft view events [ID] [--after N] [--type T]

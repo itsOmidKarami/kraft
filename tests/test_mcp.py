@@ -5,6 +5,7 @@ transport dependency (the lesson from tests/test_ws.py)."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import subprocess
 import sys
@@ -47,6 +48,12 @@ def test_the_tools_are_registered():
         "set_agent_overrides",
         "set_node_overrides",
         "set_work_item_policy",
+        "list_threads",
+        "compare_changes",
+        "add_review_comment",
+        "resolve_thread",
+        "reopen_thread",
+        "submit_review",
         "permission_request",
     }
 
@@ -256,3 +263,42 @@ def test_approve_gate_forwards_the_digest_the_artifact_carried(monkeypatch):
     monkeypatch.setattr(mcp.client, "approve_gate", fake)
     asyncio.run(mcp.build().call_tool("approve_gate", {"work_item_id": "w1", "digest": "d1"}))
     assert seen["kwargs"].get("digest") == "d1"
+
+
+def test_submit_review_says_only_a_human_should_decide():
+    """The same warning `approve_gate`'s docstring carries."""
+    tool = next(t for t in _tools() if t.name == "submit_review")
+    assert "only a human should decide" in tool.description.lower()
+
+
+@pytest.mark.parametrize(
+    "tool, client_fn, args",
+    [
+        ("list_threads", "threads", {"work_item_id": "w1", "open_only": True}),
+        ("compare_changes", "compare", {"work_item_id": "w1", "from_": "base", "to": "latest"}),
+        (
+            "add_review_comment",
+            "add_review_comment",
+            {"body": "hi", "work_item_id": "w1", "file_path": "a.py", "label": "must_fix"},
+        ),
+        ("resolve_thread", "resolve_thread", {"thread_id": "t1"}),
+        ("reopen_thread", "reopen_thread", {"thread_id": "t1"}),
+        ("submit_review", "submit_review", {"outcome": "comment", "work_item_id": "w1"}),
+    ],
+)
+def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, client_fn, args):
+    """Not just that some client function fired: the tool forwards `args` to
+    it (each tool is a thin positional-argument relay, so a swapped or
+    dropped parameter must show up in the real function's own bound names)."""
+    real = getattr(client, client_fn)
+    seen = {}
+    result = [] if tool == "list_threads" else {"id": "w1"}
+
+    async def fake(*fn_args, **fn_kwargs):
+        bound = inspect.signature(real).bind(*fn_args, **fn_kwargs)
+        seen.update(bound.arguments)
+        return result
+
+    monkeypatch.setattr(mcp.client, client_fn, fake)
+    asyncio.run(mcp.build().call_tool(tool, args))
+    assert seen and all(seen.get(k) == v for k, v in args.items())

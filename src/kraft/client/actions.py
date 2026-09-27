@@ -498,6 +498,68 @@ async def set_work_item_policy(
     return await transport._patch(f"/work-items/{target}", {"policy": {} if clear else policy})
 
 
+async def add_review_comment(
+    body: str,
+    work_item_id: str | None = None,
+    thread_id: str | None = None,
+    file_path: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    side: str | None = None,
+    label: str | None = None,
+    suggestion: str | None = None,
+) -> dict:
+    """A draft review comment: a new thread, or a reply when `thread_id` is given.
+    Drafts go out with the next `submit_review`.
+
+    A reply needs no client-side self-action guard: the server already refuses
+    a worker session on `POST /threads/{id}/comments` with 403, and a human
+    replying to their own item's thread is not a gate decision.
+    """
+    if thread_id:
+        payload = {"body": body}
+        return await transport._act(f"/threads/{thread_id}/comments", payload)
+    target = context._forbid_self_action(work_item_id)
+    payload: dict = {"body": body, "file_path": file_path, "label": label}
+    if start_line is not None:
+        end = end_line or start_line
+        payload.update(side=side or "new", start_line=start_line, end_line=end)
+        if suggestion is not None:
+            payload["suggestion"] = {
+                "start_line": start_line,
+                "end_line": end,
+                "replacement": suggestion,
+            }
+    return await transport._act(
+        f"/work-items/{target}/threads", {k: v for k, v in payload.items() if v is not None}
+    )
+
+
+async def resolve_thread(thread_id: str) -> dict:
+    """Mark a review thread resolved."""
+    return await transport._act(f"/threads/{thread_id}/resolve")
+
+
+async def reopen_thread(thread_id: str) -> dict:
+    """Reopen a resolved review thread."""
+    return await transport._act(f"/threads/{thread_id}/reopen")
+
+
+async def submit_review(
+    outcome: str,
+    work_item_id: str | None = None,
+    summary: str | None = None,
+    node: str | None = None,
+) -> dict:
+    """Send your drafts with an outcome: comment, request_changes, or approve
+    (approve needs a pending gate). Only a person should decide this."""
+    target = context._forbid_self_action(work_item_id)
+    payload = {"outcome": outcome, "summary": summary, "node": node}
+    return await transport._act(
+        f"/work-items/{target}/review", {k: v for k, v in payload.items() if v is not None}
+    )
+
+
 async def reload_templates() -> dict:
     """Reread the template library from disk into the running server, no
     restart."""

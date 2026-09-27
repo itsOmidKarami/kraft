@@ -694,3 +694,51 @@ def test_migration_39_adds_the_review_tables(tmp_path):
     assert {"node_runs", "reviews", "review_threads", "review_comments"} <= names
     cols = {r[1] for r in conn.execute("PRAGMA table_info(reviews)")}
     assert {"head_sha", "base_sha", "outcome", "summary", "gate"} <= cols
+
+
+def test_migration_41_makes_review_gate_nullable_and_keeps_rows(tmp_path):
+    """A mid-run thread has no gate; the rebuild keeps every existing row."""
+    from kraft import db as db_mod
+
+    conn = db_mod._connect(tmp_path / "k.db")
+    db_mod.migrate(conn)
+    conn.execute(
+        "INSERT INTO work_items (id, title, repo, chain_definition, status, created_at, "
+        "updated_at) VALUES ('w1', 't', '/r', '{}', 'active', 'now', 'now')"
+    )
+    conn.execute(
+        "INSERT INTO review_threads (id, work_item_id, gate, anchor_sha, created_at) "
+        "VALUES ('t1', 'w1', NULL, 'abc', 'now')"
+    )
+    conn.execute(
+        "INSERT INTO reviews (id, work_item_id, gate, outcome, head_sha, base_sha, submitted_at) "
+        "VALUES ('r1', 'w1', NULL, 'comment', 'abc', 'abc', 'now')"
+    )
+    conn.commit()
+    assert conn.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()[0] is None
+
+
+def test_migrate_v41_to_v42_keeps_review_gate_rows(tmp_path):
+    """v41 -> v42: `reviews.gate` and `review_threads.gate` were NOT NULL; the
+    rebuild drops that constraint but a pre-existing gated row keeps its value."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(
+        conn,
+        41,
+        replace=(("gate         TEXT,", "gate         TEXT NOT NULL,"),),
+    )
+    schema.insert_item(conn)
+    schema.insert_session(conn)
+    conn.execute(
+        "INSERT INTO review_threads (id, work_item_id, gate, anchor_sha, created_at) "
+        "VALUES ('t1', 'w1', 'g', 'abc', 'now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn2 = db._connect(path)
+    db.migrate(conn2)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    row = conn2.execute("SELECT gate FROM review_threads WHERE id='t1'").fetchone()
+    assert row["gate"] == "g"

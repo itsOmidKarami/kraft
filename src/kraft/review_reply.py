@@ -84,7 +84,7 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
 
 
 async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> str:
-    threads = db.read(lambda c: store.unanswered(c, work_item_id, gate))
+    threads = db.read(lambda c: store.unanswered(c, work_item_id))
     if not threads:
         return "nothing_to_answer"
     task = _agent_task(nodes, gate)
@@ -95,7 +95,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
     )
     worktree = run_dirs.worktrees / work_item_id
     # The `comment` review that launched this, whose summary is part of what was asked.
-    review = db.read(lambda c: store.last_review(c, work_item_id, gate))
+    review = db.read(lambda c: store.last_review(c, work_item_id))
     summary = review["summary"] if review else None
     try:
         sandbox = executor.item_sandbox(row, launch)

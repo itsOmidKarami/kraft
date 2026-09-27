@@ -731,13 +731,11 @@ async def v1_walk(
     run_dirs=None,
     start_index: int = 0,
     start_step: int = 0,
+    after_item=None,
     **item_kwargs,
 ):
-    """File `chain` as one work item and walk it once.
-
-    Returns `(status, events, sessions, row)` -- the readbacks nearly every
-    assertion about a walk needs, as plain dicts, with the database already
-    closed. A caller that needs more reads the run directory itself.
+    """File `chain` as one work item and walk it once, `after_item` (if given) awaited
+    with `database` first. Returns `(status, events, sessions, row)`, database closed.
     """
     from kraft import db as _db
     from kraft import events as _events
@@ -749,6 +747,8 @@ async def v1_walk(
     database = await _db.Database.open(rd.db)
     try:
         await v1_item(database, chain, repo=repo, wid=wid, title=title, **item_kwargs)
+        if after_item is not None:
+            await after_item(database)
         status = await executor.run_once(
             database,
             rd,

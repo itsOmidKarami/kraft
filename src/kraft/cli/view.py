@@ -249,6 +249,28 @@ def _cmd_diff(ns: argparse.Namespace) -> None:
     render.page(text, force_plain=ns.no_pager)
 
 
+def _cmd_threads(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.threads(ns.id, ns.open_only))
+    common.emit(payload, render.threads, ns.json)
+
+
+def _cmd_compare(ns: argparse.Namespace) -> None:
+    payload = asyncio.run(client.compare(ns.id, ns.from_, ns.to, ns.nodes))
+    if ns.json:
+        common.emit(payload, str, True)
+        return
+    if ns.name_only:
+        paths = list(
+            dict.fromkeys(
+                [f["path"] for f in payload.get("files", [])] + list(payload.get("untracked", []))
+            )
+        )
+        print("\n".join(paths))
+        return
+    text = render.compare_stat(payload) if ns.stat else render.compare_body(payload)
+    render.page(text, force_plain=ns.no_pager)
+
+
 def _cmd_docs(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.documents(ns.id)), _render_docs, ns.json)
 
@@ -327,6 +349,25 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     diff.add_argument("--name-only", action="store_true", help="changed and untracked paths")
     diff.add_argument("--no-pager", action="store_true")
     diff.set_defaults(func=_cmd_diff)
+
+    threads = subs.add_parser("threads", parents=[common], help="review threads on a work item")
+    threads.add_argument("id", nargs="?")
+    threads.add_argument(
+        "--open", dest="open_only", action="store_true", help="only unresolved threads"
+    )
+    threads.set_defaults(func=_cmd_threads)
+
+    compare = subs.add_parser("compare", parents=[common], help="diff two review targets")
+    compare.add_argument("id", nargs="?")
+    compare.add_argument(
+        "--from", dest="from_", default="base", help="base|attempt:N|last_review|latest"
+    )
+    compare.add_argument("--to", default="latest", help="base|attempt:N|last_review|latest")
+    compare.add_argument("--nodes", help="comma-separated node ids: only files they touched")
+    compare.add_argument("--stat", action="store_true", help="per-file counts only")
+    compare.add_argument("--name-only", action="store_true", help="changed and untracked paths")
+    compare.add_argument("--no-pager", action="store_true")
+    compare.set_defaults(func=_cmd_compare)
 
     docs = subs.add_parser("docs", parents=[common], help="documents linked to a work item")
     docs.add_argument("id", nargs="?")

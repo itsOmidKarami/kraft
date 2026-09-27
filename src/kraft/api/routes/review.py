@@ -15,7 +15,7 @@ from pydantic import BaseModel, model_validator
 from kraft import config as config_mod
 from kraft import executor, review_reply, store
 from kraft.api import api_router, deps
-from kraft.api.routes import board
+from kraft.api.routes import board, lifecycle
 from kraft.api.routes import gates as gate_routes
 
 
@@ -77,13 +77,6 @@ def _refuse_agents(request: Request) -> None:
         raise HTTPException(403, "worker agents reply through POST /threads/{id}/replies")
 
 
-def _pending_or_409(st, wid: str) -> str:
-    gate = board._pending_gate(st, wid)
-    if gate is None:
-        raise HTTPException(409, "review threads need a pending gate")
-    return gate
-
-
 def _thread_or_404(st, tid: str):
     row = st.db.read(lambda c: store.thread_row(c, tid))
     if row is None:
@@ -107,7 +100,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     _refuse_agents(request)
     st = request.app.state
     deps._live_work_item_row(st, wid)
-    gate = _pending_or_409(st, wid)
+    gate = board._pending_gate(st, wid)
     anchor = body.anchor_sha or config_mod.git_read(
         st.run_dirs.worktrees / wid, "rev-parse", "HEAD"
     )
@@ -172,7 +165,7 @@ async def add_comment(tid: str, body: CommentIn, request: Request):
     _refuse_agents(request)
     st = request.app.state
     row = _thread_or_404(st, tid)
-    _pending_or_409(st, row["work_item_id"])
+    deps._live_work_item_row(st, row["work_item_id"])
     try:
         _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
     except ValueError as exc:
@@ -252,36 +245,42 @@ class ReviewIn(BaseModel):
     node: str | None = None
 
 
-@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
-async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
-    _refuse_agents(request)
-    st = request.app.state
-    row = deps._live_work_item_row(st, wid)
-    nodes = gate_routes.gate_nodes(st, row)
-    gate_routes._gate_or_404(nodes, gate)
-    if board._pending_gate(st, wid) != gate:
-        raise HTTPException(409, f"gate {gate!r} is not pending")
+async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
+    wid = row["id"]
+    nodes = gate_routes.gate_nodes(st, row) if gate is not None else None
     # Every refusal before the review is written: a refused review records nothing.
+    if gate is None and body.outcome == "approve":
+        raise HTTPException(409, "nothing to approve: no gate is pending")
     if body.outcome == "approve":
-        blocking = st.db.read(lambda c: store.open_must_fix(c, wid, gate))
+        blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
         if blocking:
             raise HTTPException(
                 409, f"must-fix review threads are not resolved: {', '.join(blocking)}"
             )
-    if body.outcome == "request_changes":
+    if gate is not None and body.outcome == "request_changes":
         try:
             executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+    if gate is None and body.outcome == "comment" and not lifecycle.review_reachable(row):
+        raise HTTPException(
+            409,
+            "nothing ahead in this chain will read these threads; use `kraft item retry --steer`",
+        )
     head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
     if not head:
         # A review's `head_sha` is what `last_review` compares from; never ''.
         raise HTTPException(409, "git could not read this work item's HEAD; nothing was recorded")
-    attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
-    base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+    if gate is not None:
+        attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
+        base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+    else:
+        base = row["base_ref"] or head
+    if gate is None and body.outcome == "request_changes":
+        return await _request_changes_now(st, request, row, body, head, base)
     note = None
     if body.outcome == "request_changes":
-        threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
+        threads = st.db.read(lambda c: store.threads_for(c, wid))
         note = store.render_note(threads, body.summary) or "Changes requested."
     # Recorded *before* the gate call (Kraft-dl5fl): a reject starts the walk,
     # and the re-run agent may reply to these threads before this route
@@ -314,6 +313,9 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         await st.db.write(lambda c: store.publish_review(c, rid))
         return result
     await st.db.write(lambda c: store.publish_review(c, rid))
+    if gate is None:
+        # Nothing pending to reply for: no gate, no reply agent to launch.
+        return {"review_id": rid, "outcome": "comment", "gate": None, "reply_agent": False}
     try:
         deps.spawn(
             request.app,
@@ -330,7 +332,122 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         spawned = True
     except deps.AlreadyRunning:
         spawned = False  # an auto-review is still running; the threads wait for the next comment
-    return {"review_id": rid, "outcome": "comment", "reply_agent": spawned}
+    return {"review_id": rid, "outcome": "comment", "gate": gate, "reply_agent": spawned}
+
+
+async def _request_changes_now(st, request, row, body, head, base):
+    """A `request_changes` with no gate pending (review threads anywhere §1):
+    record the review and a rewind at the right node, then act on the item's
+    current status without ever making the review wait on a gate that isn't
+    there. `action` in the response is one of:
+
+    - `"retried"`: the item was stopped (`needs_human`) with nothing else to
+      claim it, so this retries it at the target right now.
+    - `"rerun"`: the target is the node that is currently running -- pause and
+      resume it immediately, carrying the note.
+    - `"queued"`: the item is paused, or running an earlier target than the
+      one this review names -- the rewind sits recorded and is honoured by
+      the next `/resume`, `/retry`, or the running node's own completion
+      (`walk.run_once`), never by stopping work in flight.
+
+    Any exception from the retry/pause/resume calls below means the action
+    itself was refused (Review Focus 4: e.g. a 409 because a walk is already
+    running) -- the rewind is cancelled and the review unrecorded so nothing
+    later honours a request that never actually landed, and the exception
+    propagates so the caller sees the same refusal.
+    """
+    from kraft import review as review_mod
+    from kraft.api.routes import lifecycle
+
+    wid = row["id"]
+    nodes = gate_routes.gate_nodes(st, row)
+    current = next(i for i, n in enumerate(nodes) if n.id == row["current_node_id"])
+    threads = st.db.read(lambda c: store.threads_for(c, wid))
+    if body.node:
+        idx = next((i for i, n in enumerate(nodes) if n.id == body.node), None)
+        if idx is None or idx > current:
+            raise HTTPException(
+                400, f"cannot request changes at {body.node!r}: not at or before the current node"
+            )
+        why = "requested"
+    else:
+        runs = st.db.read(lambda c: store.node_run_rows(c, wid))
+        try:
+            idx, why = review_mod.changes_target(
+                st.run_dirs.worktrees / wid, nodes, current, threads, runs
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    target = nodes[idx].id
+    note = store.render_note(threads, body.summary) or "Changes requested."
+    rid = await st.db.write(
+        lambda c: store.record_review(
+            c,
+            wid=wid,
+            gate=None,
+            outcome="request_changes",
+            summary=body.summary,
+            head_sha=head,
+            base_sha=base or head,
+        )
+    )
+    await st.db.write(
+        lambda c: store.request_rewind(c, wid, review_id=rid, target=target, note=note)
+    )
+    try:
+        if row["status"] == "needs_human":
+            await lifecycle.retry_work_item(wid, lifecycle.Retry(), request)
+            action = "retried"
+        elif row["status"] in ("active", "waiting") and idx == current:
+            await lifecycle.pause_work_item(wid, request)
+            try:
+                await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
+            except Exception:
+                # The pause already landed; a failed resume must not leave the
+                # item silently stuck paused, so retry once before concluding
+                # the action failed. Only if the retry itself also fails does
+                # this propagate to the outer handler that cancels the rewind
+                # -- a retry that succeeds means the rewind is genuinely
+                # running, so it must not be reported as refused.
+                await lifecycle.resume_work_item(wid, lifecycle.Resume(), request)
+            action = "rerun"
+        else:  # paused, or running with an earlier target
+            action = "queued"
+    except Exception:
+        await st.db.write(lambda c: store.cancel_rewind(c, wid, rid))
+        await st.db.write(lambda c: store.unrecord_review(c, rid))
+        raise
+    await st.db.write(lambda c: store.publish_review(c, rid))
+    return {
+        "review_id": rid,
+        "outcome": "request_changes",
+        "gate": None,
+        "target": target,
+        "target_reason": why,
+        "action": action,
+    }
+
+
+@api_router.post("/work-items/{wid}/review")
+async def submit_item_review(wid: str, body: ReviewIn, request: Request):
+    """The review submission route that acts on whatever gate is pending, if
+    any -- the item-level door Task 4 adds beside the gate-keyed one below, now
+    that a review or a thread belongs to the item rather than to a gate."""
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    return await _submit(st, request, row, board._pending_gate(st, wid), body)
+
+
+@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
+async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    gate_routes._gate_or_404(gate_routes.gate_nodes(st, row), gate)
+    if board._pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    return await _submit(st, request, row, gate, body)
 
 
 class ReplyIn(BaseModel):
@@ -363,8 +480,11 @@ async def agent_reply(tid: str, body: ReplyIn, request: Request):
     if not body.body.strip():
         raise HTTPException(422, "body is empty")
     wid, gate = row["work_item_id"], row["gate"]
-    n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
-    attempt = n if board._pending_gate(st, wid) == gate else n + 1
+    if gate is None:
+        attempt = None
+    else:
+        n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
+        attempt = n if board._pending_gate(st, wid) == gate else n + 1
     cid = await st.db.write(
         lambda c: store.agent_reply(
             c, tid, author=session["node_id"], body=body.body, claim=body.claim, attempt=attempt

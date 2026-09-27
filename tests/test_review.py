@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import subprocess
+import types
 
 from support.harness import make_repo
 
 from kraft import review
+from kraft.templates.models import AgentTask, SubprocessTask, TaskKind
 
 
 def _git(cwd, *args):
@@ -46,6 +48,78 @@ def test_numstat_rename_forms_resolve_to_the_new_path():
     assert review.new_path("old.py => new.py") == "new.py"
     assert review.new_path("src/{ => sub}/x.py") == "src/sub/x.py"
     assert review.new_path("plain.py") == "plain.py"
+
+
+def _node(node_id, tasks):
+    return types.SimpleNamespace(
+        id=node_id, node=None, steps=[types.SimpleNamespace(tasks=[_t(t) for t in tasks])]
+    )
+
+
+def _t(task):
+    return types.SimpleNamespace(task=task)
+
+
+#: implementation: an agent task, no skill (a "working" node); verify: a
+#: subprocess task plus a skilled agent task (not "working" -- `_working`
+#: only counts an unskilled agent task); check_ci: a subprocess task alone.
+NODES = [
+    _node(
+        "implementation",
+        [AgentTask(id="implement", kind=TaskKind.AGENT, harness="claude", prompt="do it")],
+    ),
+    _node(
+        "verify",
+        [
+            SubprocessTask(id="run_tests", kind=TaskKind.SUBPROCESS, command="pytest"),
+            AgentTask(
+                id="review_it",
+                kind=TaskKind.AGENT,
+                harness="claude",
+                prompt="review",
+                skill="team:review",
+            ),
+        ],
+    ),
+    _node("check_ci", [SubprocessTask(id="wait_ci", kind=TaskKind.SUBPROCESS, command="ci wait")]),
+]
+
+
+def thread_on(file_path):
+    return {"file_path": file_path}
+
+
+def test_the_target_is_the_node_that_wrote_the_threads_file(tmp_path):
+    # current = check_ci (index 2); a thread on the file implementation wrote
+    repo = make_repo(tmp_path)
+    c0 = _git(repo, "rev-parse", "HEAD")
+    c1 = _commit(repo, {"a.py": "1\n"})
+    runs = [{"node_id": "implementation", "start_sha": c0, "end_sha": c1}]
+    idx, why = review.changes_target(repo, NODES, 2, [thread_on("a.py")], runs)
+    assert NODES[idx].id == "implementation" and "a.py" in why
+
+
+def test_whole_change_threads_fall_back_to_the_current_working_node(tmp_path):
+    repo = make_repo(tmp_path)
+    idx, why = review.changes_target(repo, NODES, 0, [thread_on(None)], [])
+    assert NODES[idx].id == "implementation" and why == "current node"
+
+
+def test_a_file_only_a_subprocess_node_touched_targets_the_earlier_working_node(tmp_path):
+    """A run of `check_ci` changed b.py; the nearest earlier *working* node
+    (an agent task with no skill) is `implementation`, not `check_ci` itself
+    (a subprocess task alone is never "working") nor `verify` (a subprocess
+    task plus a skilled agent task -- still not "working")."""
+    repo = make_repo(tmp_path)
+    c0 = _git(repo, "rev-parse", "HEAD")
+    c1 = _commit(repo, {"a.py": "1\n"})
+    c2 = _commit(repo, {"b.py": "1\n"})
+    runs = [
+        {"node_id": "implementation", "start_sha": c0, "end_sha": c1},
+        {"node_id": "check_ci", "start_sha": c1, "end_sha": c2},
+    ]
+    idx, why = review.changes_target(repo, NODES, 2, [thread_on("b.py")], runs)
+    assert NODES[idx].id == "implementation" and "b.py" in why
 
 
 def test_a_renamed_file_survives_the_diff_filter(tmp_path):

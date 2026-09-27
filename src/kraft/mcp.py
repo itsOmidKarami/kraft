@@ -331,6 +331,70 @@ def build() -> MCPServer:
         return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)
 
     @server.tool()
+    async def list_threads(work_item_id: str | None = None, open_only: bool = False) -> list[dict]:
+        """Review threads on a Kraft work item, drafts included, oldest first.
+        `open_only` drops resolved threads."""
+        return await client.threads(work_item_id, open_only)
+
+    @server.tool()
+    async def compare_changes(
+        work_item_id: str | None = None,
+        from_: str = "base",
+        to: str = "latest",
+        nodes: str | None = None,
+    ) -> dict:
+        """Diff two review targets of a Kraft work item: base, attempt:N (needs a
+        pending gate), last_review, or latest (the working tree). `nodes` limits
+        the diff to files those node ids touched, comma-separated."""
+        return await client.compare(work_item_id, from_, to, nodes)
+
+    @server.tool()
+    async def add_review_comment(
+        body: str,
+        work_item_id: str | None = None,
+        thread_id: str | None = None,
+        file_path: str | None = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        side: str | None = None,
+        label: str | None = None,
+        suggestion: str | None = None,
+    ) -> dict:
+        """Leave a draft review comment on a Kraft work item: a new thread, or a
+        reply when `thread_id` is given. Drafts reach no agent until
+        submit_review sends them. `label` is must_fix, question or nit; a line
+        range needs `file_path`, `start_line`, `end_line` and `side` (old or
+        new, default new)."""
+        return await client.add_review_comment(
+            body, work_item_id, thread_id, file_path, start_line, end_line, side, label, suggestion
+        )
+
+    @server.tool()
+    async def resolve_thread(thread_id: str) -> dict:
+        """Mark a Kraft review thread resolved."""
+        return await client.resolve_thread(thread_id)
+
+    @server.tool()
+    async def reopen_thread(thread_id: str) -> dict:
+        """Reopen a resolved Kraft review thread."""
+        return await client.reopen_thread(thread_id)
+
+    @server.tool()
+    async def submit_review(
+        outcome: str,
+        work_item_id: str | None = None,
+        summary: str | None = None,
+        node: str | None = None,
+    ) -> dict:
+        """Send your drafted review comments on a Kraft work item, with an
+        outcome: "comment" (queues them for the next agent; never interrupts),
+        "request_changes" (redoes work now, at a pending gate or not), or
+        "approve" (needs a pending gate). `node` overrides where
+        request_changes re-runs; left out, it is derived from the threads.
+        Only a human should decide this — ask first."""
+        return await client.submit_review(outcome, work_item_id, summary, node)
+
+    @server.tool()
     async def permission_request(
         tool_name: str, input: dict, tool_use_id: str | None = None
     ) -> dict:

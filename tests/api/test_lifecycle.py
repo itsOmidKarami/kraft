@@ -690,3 +690,66 @@ def test_resume_does_not_consume_a_retry_attempt(client, repo, monkeypatch):
     assert handed == [wid]
     assert _counter(wid, "verification.fix_loop") == 2
     assert _counter(wid, "spec_approval_reject_loop") == 1
+
+
+async def test_review_reachable_counts_agents_and_gates_ahead_but_not_behind(item_on, repo):
+    """`gateless-comment-nothing-downstream-reads-is-refused`'s unit half.
+    `review_reachable` is `steer_reachable` widened by gates: a gate ahead of
+    the current node reads threads too (it shows them, blocks on a must-fix,
+    or launches the reply agent), even where no agent task follows."""
+    from support.harness import v1_chain
+
+    from kraft.api.routes import lifecycle
+
+    # current node check_ci, nothing but subprocess nodes after it -> False
+    subprocess_only = v1_chain(
+        [
+            {
+                "id": "check_ci",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {
+                "id": "merge",
+                "kind": "exec",
+                "tasks": [{"id": "go", "kind": "forge", "target": "mr.merge"}],
+            },
+        ],
+        repo=repo,
+    )
+    it = await item_on(subprocess_only, "check_ci", wid="w1")
+    assert lifecycle.review_reachable(it.row()) is False
+
+    # current node implementation (an agent task) -> True
+    agent_ahead = v1_chain(
+        [
+            {
+                "id": "implementation",
+                "kind": "exec",
+                "tasks": [{"id": "build", "kind": "agent", "harness": "fake", "prompt": "build"}],
+            },
+            {
+                "id": "check_ci",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+        ],
+        repo=repo,
+    )
+    it = await item_on(agent_ahead, "implementation", wid="w2")
+    assert lifecycle.review_reachable(it.row()) is True
+
+    # a gate after check_ci -> True
+    gate_ahead = v1_chain(
+        [
+            {
+                "id": "check_ci",
+                "kind": "exec",
+                "tasks": [{"id": "run", "kind": "subprocess", "command": "true"}],
+            },
+            {"id": "hold", "kind": "gate"},
+        ],
+        repo=repo,
+    )
+    it = await item_on(gate_ahead, "check_ci", wid="w3")
+    assert lifecycle.review_reachable(it.row()) is True

@@ -331,6 +331,26 @@ async def stream_events(after_seq: int = 0) -> AsyncIterator[dict]:
         ) from exc
 
 
+async def threads(work_item_id: str | None = None, open_only: bool = False) -> list:
+    """Review threads on a work item, drafts included, oldest first."""
+    wid = await context.resolve_work_item(work_item_id)
+    out = await transport._get(f"/work-items/{wid}/threads")
+    return [t for t in out if t["state"] != "resolved"] if open_only else out
+
+
+async def compare(
+    work_item_id: str | None = None,
+    from_: str = "base",
+    to: str = "latest",
+    nodes: str | None = None,
+) -> dict:
+    """Any two review targets diffed: base | attempt:N | last_review | latest."""
+    wid = await context.resolve_work_item(work_item_id)
+    return await transport._get(
+        f"/work-items/{wid}/compare", **{"from": from_, "to": to, "nodes": nodes}
+    )
+
+
 async def diff(work_item_id: str | None = None) -> dict:
     """What the agent changed, against the item's `base_ref`.
 

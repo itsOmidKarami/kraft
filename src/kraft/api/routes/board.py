@@ -15,8 +15,8 @@ def _pending_gate(st, wid: str) -> str | None:
     return executor.pending_gate(st.db, wid)
 
 
-def _last_review_sha(st, wid: str, gate: str | None) -> str | None:
-    rev = st.db.read(lambda c: store.last_review(c, wid, gate)) if gate else None
+def _last_review_sha(st, wid: str) -> str | None:
+    rev = st.db.read(lambda c: store.last_review(c, wid))
     return rev["head_sha"] if rev else None
 
 
@@ -394,9 +394,13 @@ async def get_work_item(wid: str, request: Request):
         # "the node has a gate_after and its sessions are done" cannot see a
         # rejection, and offers Approve on a gate the API will 409 (Kraft).
         "pending_gate": pending,
+        # A gateless `request_changes` waiting to be honoured at its target
+        # node -- by the running node's own completion, the next `/resume`,
+        # or the next `/retry` with no path (review threads anywhere §1).
+        "pending_rewind": st.db.read(lambda c: store.pending_rewind(c, wid)),
         # The review flow's compare picker and "runs X again" sentence (spec §2).
         "attempts": st.db.read(lambda c: store.gate_attempts(c, wid, pending)) if pending else [],
-        "last_review_sha": _last_review_sha(st, wid, pending),
+        "last_review_sha": _last_review_sha(st, wid),
         "reject_default": _reject_default(row, pending),
         # The document the gate is a decision about — the spec at
         # spec_approval, the plan at plan_approval. The detail screen offers

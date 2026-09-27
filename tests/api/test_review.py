@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
-from support.api import _await_gate, _poll_node_started, _review_early
+from support.api import _await_gate, _poll_node_started, _review_early, _set_status
 
 _REVIEW = pytest.mark.api_client(edit_templates=_review_early)
 
@@ -59,6 +60,25 @@ def test_reaching_a_gate_pins_the_node_and_the_gate(client, gated):
 @_REVIEW
 def test_abandon_drops_the_items_refs(client, gated, repo):
     assert client.post(f"/api/work-items/{gated}/abandon").status_code == 200
+    refs = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname)", f"refs/kraft/{gated}/"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert refs.strip() == ""
+
+
+@_REVIEW
+def test_archive_drops_the_items_refs(client, gated, repo):
+    """Abandon has its own test; archive reclaims through the same
+    `_remove_worktree` and must drop the attempt refs too. Abandon first (only an
+    ended item can be archived), plant a ref after it, then archive."""
+    assert client.post(f"/api/work-items/{gated}/abandon").status_code == 200
+    subprocess.run(
+        ["git", "update-ref", f"refs/kraft/{gated}/manual/1", "HEAD"], cwd=repo, check=True
+    )
+    assert client.post(f"/api/work-items/{gated}/archive").status_code == 200
     refs = subprocess.run(
         ["git", "for-each-ref", "--format=%(refname)", f"refs/kraft/{gated}/"],
         cwd=repo,
@@ -178,12 +198,31 @@ def test_worker_agents_cannot_use_human_routes(client, gated):
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            f"/api/work-items/{gated}/review",
+            json={"outcome": "comment"},
+            headers=agent,
+        ).status_code
+        == 403
+    )
 
 
-def test_threads_need_a_pending_gate(client, repo, monkeypatch):
+def test_threads_can_be_filed_without_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
-    assert _new_thread(client, wid).status_code == 409
+    r = _new_thread(client, wid, label="question", anchor_sha="0" * 40)
+    assert r.status_code == 201, r.text
+    assert r.json()["gate"] is None
+
+
+def test_threads_are_refused_on_a_finished_item(client, repo, monkeypatch):
+    from support.api import _set_status
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+    _set_status(wid, "completed")
+    assert _new_thread(client, wid, anchor_sha="0" * 40).status_code == 409
 
 
 @_REVIEW
@@ -370,3 +409,384 @@ def test_an_unreadable_head_refuses_the_review_and_records_nothing(client, gated
     assert r.status_code == 409, r.text
     assert client.get(f"/api/work-items/{gated}").json()["last_review_sha"] is None
     assert client.patch(f"/api/threads/{tid}", json={"body": "x"}).status_code == 200
+
+
+def test_a_gateless_comment_is_recorded_with_no_gate(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")  # stays running at implementation
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    _new_thread(client, wid, label="question", anchor_sha="0" * 40)
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+    assert r.status_code == 200, r.text
+    assert r.json()["gate"] is None
+    events = [e["type"] for e in client.get(f"/api/work-items/{wid}/events").json()]
+    assert "review_submitted" in events
+
+
+def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkeypatch):
+    """`gate_attempts` counts a gate's own attempt refs (review threads
+    anywhere §1: threads and reviews may now carry no gate at all). A reply
+    on a thread with no gate has nothing to count an attempt against."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    tid = _new_thread(client, wid, anchor_sha="0" * 40).json()["id"]
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+    assert r.status_code == 200, r.text
+    sid = _session_of(client, wid, "spec")
+    reply = client.post(
+        f"/api/threads/{tid}/replies",
+        json={"body": "done", "claim": "fixed"},
+        headers={"x-kraft-session-id": sid},
+    )
+    assert reply.status_code == 201, reply.text
+    assert reply.json()["attempt"] is None
+
+
+def test_approve_needs_a_pending_gate(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
+        "id"
+    ]
+    _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "approve"})
+    assert r.status_code == 409
+    assert "no gate is pending" in r.text
+
+
+@_REVIEW
+def test_the_item_review_route_acts_on_the_pending_gate(client, gated):
+    _new_thread(client, gated, label="question")
+    r = client.post(f"/api/work-items/{gated}/review", json={"outcome": "comment"})
+    assert r.status_code == 200 and r.json()["reply_agent"] is True
+
+
+def test_a_gateless_comment_is_refused_when_nothing_ahead_can_read_it(client, repo, monkeypatch):
+    """`gateless-comment-nothing-downstream-reads-is-refused`, at the API: an
+    item forced onto its chain's forge-only tail (past the last gate and the
+    last agent task) has nothing ahead that could ever read a thread.
+
+    `KRAFT_FAKE_CLAUDE=slow` holds the walk at `spec`'s agent task -- long
+    enough that the worktree exists (so `git rev-parse HEAD` in the route
+    resolves) but no gate is ever requested (so `board._pending_gate` reads
+    None on its own, with nothing to race)."""
+    from support.api import _force_node, _poll_node_started, _post_default
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = _post_default(client, repo)
+    _poll_node_started(client, wid, "spec")
+    _force_node(wid, "merge", "needs_human")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
+
+    assert r.status_code == 409, r.text
+    assert "nothing ahead in this chain will read these threads" in r.text
+    assert client.get(f"/api/work-items/{wid}").json()["last_review_sha"] is None
+
+
+# --- Task 6: request_changes without a gate ---------------------------------
+
+
+def _target_thread(client, wid, node_id):
+    """A thread that names its node directly, with no line range (a `body.node`-
+    free `changes_target` lookup needs nothing else)."""
+    return client.post(
+        f"/api/work-items/{wid}/threads",
+        json={"body": "fix this", "node_id": node_id},
+    )
+
+
+def _poll_node_started_n(client, wid, node_id, n, timeout=30):
+    """Like `_poll_node_started`, but for the n-th `node_started` of `node_id`
+    -- a rewind's target has already started once for real before the test
+    forces the item elsewhere, so "it started" alone would pass immediately."""
+    deadline = time.monotonic() + timeout
+    seen = []
+    while time.monotonic() < deadline:
+        seen = client.get(f"/api/work-items/{wid}/events").json()
+        count = sum(
+            e["type"] == "node_started" and e["payload"]["node_id"] == node_id for e in seen
+        )
+        if count >= n:
+            return seen
+        time.sleep(0.02)
+    raise AssertionError(f"{node_id} node_started x{n} not seen; got {[e['type'] for e in seen]}")
+
+
+def _paused_before_the_gate(client, repo, monkeypatch, delay="5"):
+    """A `review-early` item paused at `work_item_summary` -- `implementation`
+    has already run for real -- well before `chain_review` is ever requested,
+    so `board._pending_gate` reads None: exactly the gateless case Task 6
+    covers. A *real* pause (not a forced status): `deps.task_is_live` must
+    read False by the time this returns, or the retry/resume calls below
+    would 409 on a walk "already running" against their own target."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", delay)
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+    r = client.post(f"/api/work-items/{wid}/pause")
+    assert r.status_code == 200, r.text
+    return wid
+
+
+@_REVIEW
+def test_request_changes_on_a_stopped_item_retries_at_the_target(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    _set_status(wid, "needs_human")  # a stop with no gate; nothing else claims it
+    _target_thread(client, wid, "implementation")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "retried"
+    assert r.json()["target"] == "implementation"
+    _poll_node_started_n(client, wid, "implementation", 2)
+    # Straight to the target: `retry_work_item` must itself rewrite a
+    # path-less, non-restart `Retry` to the rewind's target -- not retry the
+    # stopped node ("work_item_summary") first and let the walk's own
+    # completion-honour point redirect it afterwards.
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    resummary_starts = sum(
+        e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+        for e in events
+    )
+    assert resummary_starts == 1
+
+
+@_REVIEW
+def test_request_changes_never_resumes_a_paused_item(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    _target_thread(client, wid, "implementation")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "queued"
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["status"] == "paused"
+    assert body["pending_rewind"]["target"] == "implementation"
+
+
+@_REVIEW
+def test_a_pending_rewind_is_honoured_by_the_next_resume(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    _target_thread(client, wid, "implementation")
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+    assert r.status_code == 200, r.text
+
+    r = client.post(f"/api/work-items/{wid}/resume", json={})
+    assert r.status_code == 200, r.text
+    _poll_node_started_n(client, wid, "implementation", 2)
+    # Straight to the target, not by way of re-running the paused node first
+    # and letting the walk's own completion-honour point catch it afterwards
+    # (that would also produce a second "implementation" start, just later
+    # and by the wrong mechanism -- `resume_work_item` must read the rewind
+    # itself and pass its target as `start_index`).
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    resummary_starts = sum(
+        e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+        for e in events
+    )
+    assert resummary_starts == 1
+
+
+@_REVIEW
+def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
+    client, repo, monkeypatch
+):
+    """Review Focus 1/2 at the API: a request_changes at an earlier node while
+    a later one is running must not touch the running node at all -- it is
+    only recorded as a pending rewind, honoured when that node completes
+    (`walk.run_once`), never by pausing what is in flight."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")  # implementation already ran
+    _target_thread(client, wid, "implementation")
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "queued"
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    assert not any(e["type"] == "worker_session_paused" for e in events)
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["pending_rewind"]["target"] == "implementation"
+
+
+@_REVIEW
+def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch):
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "work_item_summary"},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "rerun"
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    types = [e["type"] for e in events]
+    paused_at = next(i for i, t in enumerate(types) if t == "worker_session_paused")
+    starts = [
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+    ]
+    assert len(starts) >= 2 and paused_at < starts[1]
+
+
+@_REVIEW
+def test_a_resume_that_fails_then_succeeds_on_retry_reports_success(client, repo, monkeypatch):
+    """Task 6 / rerun branch: if the first `resume_work_item` raises after
+    `pause_work_item` already landed but the best-effort retry actually
+    succeeds, the item is genuinely running the rewind -- the route must
+    report that success (200, action 'rerun') rather than re-raising the
+    first call's failure and telling the caller a 409 refusal happened when
+    it didn't (docstring: a refused action 'never actually landed', which
+    cuts both ways -- a landed action must never be reported as refused)."""
+    from fastapi import HTTPException
+
+    from kraft.api.routes import review as review_routes
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+
+    real_resume = review_routes.lifecycle.resume_work_item
+    calls = {"n": 0}
+
+    async def _flaky_resume(wid, body, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise HTTPException(409, "max_concurrent slots busy")
+        return await real_resume(wid, body, request)
+
+    monkeypatch.setattr(review_routes.lifecycle, "resume_work_item", _flaky_resume)
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "work_item_summary"},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["action"] == "rerun"
+    assert calls["n"] == 2  # the failed call, then the retry that landed
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["status"] != "paused"
+    assert body["last_review_sha"] is not None  # the review was recorded, not undone
+    assert body["pending_rewind"] is None  # spent by the rerun's node_started
+    events = client.get(f"/api/work-items/{wid}/events").json()
+    starts = [
+        i
+        for i, e in enumerate(events)
+        if e["type"] == "node_started" and e["payload"]["node_id"] == "work_item_summary"
+    ]
+    assert len(starts) >= 2  # the retry actually reran the node
+
+
+@_REVIEW
+def test_a_resume_that_fails_on_both_tries_in_the_rerun_branch_is_refused(
+    client, repo, monkeypatch
+):
+    """Task 6 / rerun branch, the other half: if the best-effort retry also
+    fails, the original failure must still be reported and nothing must be
+    left behind for a later door to honour -- the rewind and review, unlike
+    the pause (which a resume that keeps failing has no way to undo), never
+    actually landed."""
+    from fastapi import HTTPException
+
+    from kraft.api.routes import review as review_routes
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
+    ).json()["id"]
+    _poll_node_started(client, wid, "work_item_summary")
+
+    calls = {"n": 0}
+
+    async def _always_fails(wid, body, request):
+        calls["n"] += 1
+        raise HTTPException(409, "max_concurrent slots busy")
+
+    monkeypatch.setattr(review_routes.lifecycle, "resume_work_item", _always_fails)
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "work_item_summary"},
+    )
+
+    assert r.status_code == 409, r.text
+    assert calls["n"] == 2  # the failed call, then the failed retry
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["last_review_sha"] is None
+    assert body["pending_rewind"] is None
+
+
+@_REVIEW
+def test_a_refused_request_changes_records_nothing_and_cancels_the_rewind(
+    client, repo, monkeypatch
+):
+    """Review Focus 4: the retry this route calls into 409s (a walk already
+    running, say) -- nothing must be left behind for a later door to honour."""
+    from fastapi import HTTPException
+
+    from kraft import store
+    from kraft.api.routes import review as review_routes
+
+    async def _boom(wid, body, request):
+        raise HTTPException(409, "a walk is already running for this work item")
+
+    monkeypatch.setattr(review_routes.lifecycle, "retry_work_item", _boom)
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+    _set_status(wid, "needs_human")
+    tid = _target_thread(client, wid, "implementation").json()["id"]
+
+    r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "request_changes"})
+
+    assert r.status_code == 409, r.text
+    body = client.get(f"/api/work-items/{wid}").json()
+    assert body["last_review_sha"] is None
+    assert body["pending_rewind"] is None
+    db = client.app.state.db
+    assert client.portal.call(db.read, lambda c: store.is_draft_thread(c, tid)) is True
+
+
+@_REVIEW
+def test_request_changes_to_a_later_node_is_400(client, repo, monkeypatch):
+    wid = _paused_before_the_gate(client, repo, monkeypatch)
+
+    r = client.post(
+        f"/api/work-items/{wid}/review",
+        json={"outcome": "request_changes", "node": "chain_review"},
+    )
+
+    assert r.status_code == 400, r.text
+    assert client.get(f"/api/work-items/{wid}").json()["last_review_sha"] is None

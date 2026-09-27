@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -259,7 +259,7 @@ CREATE TABLE node_runs (
 CREATE TABLE reviews (
   id           TEXT PRIMARY KEY,
   work_item_id TEXT NOT NULL REFERENCES work_items(id),
-  gate         TEXT NOT NULL,
+  gate         TEXT,
   outcome      TEXT NOT NULL CHECK (outcome IN ('approve', 'request_changes', 'comment')),
   summary      TEXT,
   head_sha     TEXT NOT NULL,
@@ -272,7 +272,7 @@ CREATE INDEX idx_reviews_item ON reviews(work_item_id, gate);
 CREATE TABLE review_threads (
   id           TEXT PRIMARY KEY,
   work_item_id TEXT NOT NULL REFERENCES work_items(id),
-  gate         TEXT NOT NULL,
+  gate         TEXT,
   node_id      TEXT,
   file_path    TEXT,
   side         TEXT CHECK (side IN ('old', 'new')),
@@ -900,6 +900,46 @@ FROM worker_sessions""",
     # whether that number is the guess or the agent's own figure. Default 0:
     # every existing row's `cost_usd`, if any, is already the real one.
     40: ["ALTER TABLE worker_sessions ADD COLUMN cost_estimated INTEGER NOT NULL DEFAULT 0"],
+    # Review threads anywhere: a thread or review filed mid-run has no gate
+    # (docs/superpowers/specs/2026-09-27-review-threads-anywhere-design.md).
+    41: [
+        """CREATE TABLE reviews_new (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT,
+  outcome      TEXT NOT NULL CHECK (outcome IN ('approve', 'request_changes', 'comment')),
+  summary      TEXT,
+  head_sha     TEXT NOT NULL,
+  base_sha     TEXT NOT NULL,
+  submitted_at TEXT NOT NULL
+)""",
+        "INSERT INTO reviews_new SELECT id, work_item_id, gate, outcome, summary, head_sha, "
+        "base_sha, submitted_at FROM reviews",
+        "DROP TABLE reviews",
+        "ALTER TABLE reviews_new RENAME TO reviews",
+        "CREATE INDEX idx_reviews_item ON reviews(work_item_id, gate)",
+        """CREATE TABLE review_threads_new (
+  id           TEXT PRIMARY KEY,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id),
+  gate         TEXT,
+  node_id      TEXT,
+  file_path    TEXT,
+  side         TEXT CHECK (side IN ('old', 'new')),
+  start_line   INTEGER,
+  end_line     INTEGER,
+  anchor_sha   TEXT NOT NULL,
+  label        TEXT CHECK (label IN ('must_fix', 'question', 'nit')),
+  state        TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'claimed', 'resolved')),
+  resolved_at  TEXT,
+  created_at   TEXT NOT NULL
+)""",
+        "INSERT INTO review_threads_new SELECT id, work_item_id, gate, node_id, file_path, "
+        "side, start_line, end_line, anchor_sha, label, state, resolved_at, created_at "
+        "FROM review_threads",
+        "DROP TABLE review_threads",
+        "ALTER TABLE review_threads_new RENAME TO review_threads",
+        "CREATE INDEX idx_review_threads_item ON review_threads(work_item_id, gate)",
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

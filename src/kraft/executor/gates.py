@@ -196,6 +196,74 @@ async def apply_rejection(
     return None
 
 
+async def bounce_on_feedback(
+    db, work_item_id: str, nodes: Sequence[ResolvedNode], index: int, policy: _policy.Policy | None
+) -> tuple[int, str] | None:
+    """A gate that already carries a person's unanswered must-fix does not
+    open (review threads anywhere §1): reject it as the reject path does, on
+    their behalf (`by="kraft"`), and re-enter at its own reject target.
+    `None` when `index` is not a gate, is already cleared, carries no
+    unanswered must-fix, or one more bounce would breach the gate's own
+    reject-loop cap -- the gate opens for a person instead of bouncing
+    forever, exactly like a human's or an agent's own exhausted rejection.
+
+    `policy=None` (a caller with nothing to bound the bounce against, or to
+    hand `apply_rejection`) is also a `None` here rather than a crash inside
+    `_policy.resolve_cap`: the gate opens for a person, the same fallback the
+    rest of this module takes when policy failed to load.
+    """
+    node = nodes[index]
+    if not isinstance(node.node, GateNode) or gate_cleared(db, work_item_id, node.id):
+        return None
+    threads = db.read(lambda c: store.unanswered(c, work_item_id))
+    if not any(t["label"] == "must_fix" for t in threads):
+        return None
+    if policy is None:
+        return None
+    key = reject_loop_key(node.id)
+    row = db.read(lambda c: store.read_counter(c, work_item_id, key))
+    # The cap check must agree with `apply_rejection`'s own enforcement, which
+    # goes through `bump_counter` and checks against the row's snapshotted cap,
+    # not a fresh `resolve_cap` -- a policy.yaml edited and reloaded between
+    # bounces must not disagree with what the counter row already committed to
+    # (store.bump_counter's docstring; mirrors apply_rejection at line ~174-177).
+    cap = (
+        _policy.Cap(row["cap_attempts"], row["cap_wall_s"])
+        if row
+        else _policy.resolve_cap(policy, key)
+    )
+    if (row["count"] if row else 0) + 1 > cap.attempts:
+        return None
+    note = store.render_note(threads, None)
+    # `apply_rejection` reopens the item (`store.reject_gate(reopen=True)`), a
+    # claim `dev/check_claim_handoff.py` requires bracketed at this call site
+    # (it delegates the bracket to its callers). `handed_off=lambda: True`
+    # because the caller here is `walk.run_once`'s own loop, not a route: this
+    # coroutine *is* the walk, already running under `deps.guard` from the
+    # door that spawned it, and it keeps running (the loop re-enters at the
+    # returned target) rather than returning -- there is no window where the
+    # item reads active with nothing behind it, unlike a route's claim-then-
+    # spawn.
+    async with stops.claimed_or_stopped(
+        db,
+        work_item_id,
+        node.id,
+        reason="a gate's feedback bounce reopened the item but could not re-enter the walk",
+        handed_off=lambda: True,
+    ):
+        target = await apply_rejection(
+            db,
+            policy,
+            work_item_id=work_item_id,
+            nodes=nodes,
+            gate=node.id,
+            note=note,
+            by="kraft",
+            verdict="review_threads",
+        )
+    return None if target is None else (target, note)
+
+
 def gate_cleared(db, work_item_id: str, gate: str) -> bool:
     """True iff the most recent gate_* event for the item is gate_approved <gate>.
 
@@ -368,9 +436,7 @@ async def review_gates(
             )
             return status_of(db, work_item_id)
 
-        if verdict == "approve" and db.read(
-            lambda c, gate=gate: store.open_must_fix(c, work_item_id, gate)
-        ):
+        if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
 

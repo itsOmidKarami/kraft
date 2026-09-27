@@ -136,7 +136,7 @@ def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None,
         base = attempts[-1]["base_sha"] if attempts else row["base_ref"]
         return None, base
     if target == "last_review":
-        rev = st.db.read(lambda c: store.last_review(c, wid, gate)) if gate else None
+        rev = st.db.read(lambda c: store.last_review(c, wid))
         if rev is None:
             raise HTTPException(404, "no review has been submitted for this gate")
         return rev["head_sha"], rev["base_sha"]

@@ -196,6 +196,55 @@ def new_path(path: str) -> str:
     return path.split(" => ", 1)[1]
 
 
+def last_toucher(worktree: Path, runs, path: str) -> str | None:
+    """The node whose run most recently changed `path` (runs oldest first)."""
+    for r in reversed(list(runs)):
+        start, end = r["start_sha"], r["end_sha"]
+        if not end or start == end:
+            continue
+        names = _config.git_read(worktree, "diff", "--name-only", start, end) or ""
+        if path in names.splitlines():
+            return r["node_id"]
+    return None
+
+
+def _working(n) -> bool:
+    from kraft.templates.models import AgentTask
+
+    return any(
+        isinstance(t.task, AgentTask) and t.task.skill is None
+        for s in getattr(n, "steps", ())
+        for t in s.tasks
+    )
+
+
+def changes_target(worktree: Path, nodes, current: int, threads, runs) -> tuple[int, str]:
+    """Where a gateless `request_changes` re-runs (review threads anywhere §1):
+    the earliest node, at or before `current`, that wrote what the threads are
+    about; else the current working node. Raises ValueError when no working
+    node exists at or before `current`."""
+    index = {n.id: i for i, n in enumerate(nodes)}
+    hits = []
+    for t in threads:
+        nid = t.get("node_id") or (
+            last_toucher(worktree, runs, t["file_path"]) if t.get("file_path") else None
+        )
+        if nid in index and index[nid] <= current:
+            hits.append((index[nid], t.get("file_path") or nid))
+    if hits:
+        i, what = min(hits)
+        while i >= 0 and not _working(nodes[i]):
+            i -= 1
+        if i >= 0:
+            return i, f"threads on {what}"
+    i = current
+    while i >= 0 and not _working(nodes[i]):
+        i -= 1
+    if i < 0:
+        raise ValueError("no node at or before the current one runs a working agent")
+    return i, "current node"
+
+
 def filter_diff(diff: str, keep: set[str]) -> str:
     """Only the file sections of `diff` whose old or new path is in `keep`."""
     chunks = diff.split("\ndiff --git ")
