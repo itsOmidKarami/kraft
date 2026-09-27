@@ -157,6 +157,31 @@ describe("ItemCard (W11 · A)", () => {
     expect(document.querySelector(".item-card-stats")?.textContent).toBe("1 task · 95.4k tokens · $5.01");
   });
 
+  it("shows a running session's guessed spend as an estimate, not a floor (Kraft-wz83s)", () => {
+    renderCard(
+      item({
+        usage: {
+          total: {
+            tokens_in: 90_000,
+            tokens_out: 5_400,
+            cost_usd: 5.01,
+            cost_complete: true,
+            cost_estimated: true,
+            wall_ms: 0,
+            sessions: 1,
+            rounds: 1,
+            capped_out: 0,
+          },
+          by_node: [],
+        },
+      }),
+      [session()],
+    );
+    expect(document.querySelector(".item-card-stats")?.textContent).toBe(
+      "1 task · 95.4k tokens · ~$5.01 (est.)",
+    );
+  });
+
   it("counts the item's cache tokens in its total and names each kind on hover", () => {
     const kinds = { tokens_in: 1_200, tokens_cache_write: 3_000, tokens_cache_read: 80_000, tokens_out: 11_000 };
     const u = { cost_usd: 5.01, cost_complete: true, split_complete: true, wall_ms: 0, sessions: 1, rounds: 1, capped_out: 0 };

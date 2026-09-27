@@ -11,22 +11,30 @@ task produce them:
 * a ``usage`` block in the result file any adapter may write at
   ``$KRAFT_RESULT_PATH``.
 
-**Cost is only ever the agent's own number.** Kraft used to carry a per-model
-rate table and multiply tokens by it when an agent reported no cost. That is
-gone: the agent knows what it was billed and Kraft does not, so a computed
-figure would be a guess wearing the same font as a fact — and every consumer
-of these numbers is someone deciding whether a run was worth it. A session with
-tokens and no reported cost stores ``cost_usd = NULL``, and the rollups say so
-rather than counting it as zero.
+**A finished session's cost is only ever the agent's own number.** Kraft used
+to carry a per-model rate table and multiply tokens by it when an agent
+reported no cost at exit. That is still refused: the agent knows what it was
+billed and Kraft does not, so a computed figure standing in for a finished
+session's true cost would be a guess wearing the same font as a fact. A
+finished session with tokens and no reported cost stores ``cost_usd = NULL``
+forever, and the rollups say so rather than counting it as zero.
 
-Tokens are different: they are measured, they are reported by everything that
-has any, and they are what a rate table would have been applied to anyway. If
-per-model pricing is ever wanted, it belongs in one place over the stored
-token counts, not smeared across every session row at write time.
+**A running session is a different question.** Its own true cost does not
+exist yet -- the agent has not been billed -- so there is nothing for Kraft to
+defer to. `estimate_cost` prices its live tokens (input, cache read, cache
+write; not output, which is unknown live -- see `Usage.tokens_out`) against
+`prices.json`, a packaged per-model rate table snapshotted from models.dev.
+`worker_sessions.cost_estimated` marks a row carrying this guess; the exit
+envelope overwrites it with the real figure and clears the flag the moment
+the session ends, so an estimate never survives as if it were final. A model
+missing from the table gets no estimate (`None`), exactly as a finished
+session with no reported cost gets no total.
 """
 
 from __future__ import annotations
 
+import functools
+import importlib.resources
 import json
 import re
 import subprocess
@@ -42,7 +50,13 @@ class Usage:
     #: and are kept apart so a run's cache share is visible (Ruling 211);
     #: `total` is what every budget counts (Decision 18).
     tokens_in: int = 0
-    tokens_out: int = 0
+    #: None means "not knowable yet", not zero. A claude stream-json assistant
+    #: line carries `output_tokens` as of the *start* of that message, not its
+    #: final count (measured: a finished session's live fold gave 64, its
+    #: result envelope 7701), so `from_stream` reports this as unknown rather
+    #: than publish a number that is off by two orders of magnitude while the
+    #: session is still running. `session_exited`'s envelope fills it in.
+    tokens_out: int | None = 0
     #: None means "this agent did not report a cost", never "it was free".
     cost_usd: float | None = None
     model: str | None = None
@@ -51,7 +65,12 @@ class Usage:
 
     @property
     def total(self) -> int:
-        return self.tokens_in + self.tokens_cache_write + self.tokens_cache_read + self.tokens_out
+        return (
+            self.tokens_in
+            + self.tokens_cache_write
+            + self.tokens_cache_read
+            + (self.tokens_out or 0)
+        )
 
 
 #: The token columns a `worker_sessions` row carries, in `Usage`'s names.
@@ -67,17 +86,67 @@ def spent(row) -> int:
     return sum(row[k] or 0 for k in KINDS)
 
 
+@functools.lru_cache(maxsize=1)
+def _prices() -> dict:
+    """The packaged rate table (`prices.json`), read once per process.
+
+    Never fetched at runtime: a live network call inside a hot progress-tick
+    path is both slow and one more way for an estimate to fail, and this
+    number only ever backs a live guess a real cost replaces at exit. Refresh
+    the file itself with `just refresh-prices` (`dev/refresh_prices.py`)
+    instead. A packaging error (the file went missing from the wheel) means
+    no model prices, not a crash: every session then estimates as `None`,
+    same as a model this snapshot never learned about.
+    """
+    try:
+        text = importlib.resources.files("kraft").joinpath("prices.json").read_text()
+        return json.loads(text).get("models", {})
+    except OSError, json.JSONDecodeError:
+        return {}
+
+
+def estimate_cost(usage: Usage, model: str | None) -> float | None:
+    """A running session's cost so far, estimated from its known-live tokens.
+
+    Only input, cache read and cache write are priced: output tokens are
+    unknown while a claude session runs (`Usage.tokens_out`), so pricing them
+    would fold the same wrong number `from_stream` now refuses to publish
+    straight into a dollar figure. The estimate is therefore always a floor on
+    the session's eventual cost, same shape as `cost_complete` elsewhere in
+    this module. `None` when `model` is not in `prices.json` -- a session on a
+    model this snapshot has never priced gets no guess, not a wrong one.
+    """
+    rates = _prices().get(model or "")
+    if not isinstance(rates, dict):
+        return None
+    per_million = (
+        usage.tokens_in * rates.get("input", 0)
+        + usage.tokens_cache_read * rates.get("cache_read", 0)
+        + usage.tokens_cache_write * rates.get("cache_write", 0)
+    )
+    return per_million / 1_000_000
+
+
 def _int(v: object) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) else 0
 
 
-def _from_usage_block(block: object, model: object) -> Usage | None:
-    """One ``usage`` mapping, in either the agent's or Kraft's own field names."""
+def _from_usage_block(block: object, model: object, *, live: bool = False) -> Usage | None:
+    """One ``usage`` mapping, in either the agent's or Kraft's own field names.
+
+    `live=True` is `from_stream`'s case: this block is a claude stream-json
+    `assistant` line's `usage`, whose `output_tokens` is only the count as of
+    the start of that message, not the message's final count. Reporting it
+    would publish a wrong number as if it were real (module docstring on
+    `from_stream`), so `tokens_out` is forced unknown (`None`) instead. A
+    finished envelope's `usage` block (the default, `live=False`) is the
+    turn's actual final count and is read as reported.
+    """
     if not isinstance(block, dict):
         return None
     u = Usage(
         tokens_in=_int(block.get("input_tokens", block.get("tokens_in"))),
-        tokens_out=_int(block.get("output_tokens", block.get("tokens_out"))),
+        tokens_out=None if live else _int(block.get("output_tokens", block.get("tokens_out"))),
         model=model if isinstance(model, str) else None,
         # Cache writes and reads are input tokens that were billed; leaving
         # them out would under-report a long agent run by most of its input.
@@ -194,22 +263,44 @@ def from_envelope(envelope: object) -> Usage | None:
 _INIT_KEY = "\x00init"
 
 
-def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
+def from_stream(lines: Iterable[str], seen: dict[str, Usage], *, live: bool = True) -> Usage | None:
     """Fold new stream-json lines into `seen` and return the running total.
 
     `seen` maps `request_id` -> that request's usage and is owned by the
     caller, which is what makes repeated calls over a growing log correct: the
     CLI emits several `assistant` lines per API request, with identical usage
     on each (measured: two lines, one request), so summing lines rather than
-    requests double-counts. The envelope's own totals are themselves the sum
-    over requests, so this converges on the number `session_exited` writes.
+    requests double-counts. `tokens_in`, `tokens_cache_read` and
+    `tokens_cache_write` converge on the number `session_exited` writes this
+    way.
+
+    `tokens_out` deliberately does not, while `live=True` (the default -- this
+    is a session still running): each claude `assistant` line's
+    `output_tokens` is that message's count as of when the line was written,
+    not its final count (measured on a finished session: this fold gave out=64
+    over the run, the result envelope said 7701 -- cache read/write matched
+    exactly). An earlier version of this docstring claimed output tokens
+    converged too; they do not, and publishing the partial count as if it were
+    real is the bug this fixes: `_from_usage_block(..., live=True)` forces
+    `tokens_out` to `None` per line, and `None` taints the fold (`_sum`). The
+    result's `tokens_out` is therefore `None` while a session runs; only
+    `session_exited`'s envelope ever sets it.
+
+    `live=False` is `_envelope_amp`'s case: Amp's stream is this same
+    claude-shaped `assistant` line, but Amp's `result` line carries no `usage`
+    at all, so these lines are Amp's *only* record of a finished session's
+    tokens, not just its live progress -- forcing `tokens_out` unknown there
+    would make it permanently unrecoverable rather than merely delayed. Amp's
+    own accuracy mid-message is unmeasured; nothing here claims it is exact,
+    only that Amp has no better number to fall back on the way claude does.
 
     Returns None only when nothing has been seen at all, so a caller can tell
     "no usage yet" from "zero tokens so far, model known".
 
-    No cost: no per-request cost is reported, and cost is only ever the agent's
-    own number (module docstring). A live row keeps `cost_usd` NULL until the
-    envelope lands.
+    No cost from tokens: no per-request cost is reported, and cost is only
+    ever the agent's own number (module docstring). `session_progress` prices
+    an *estimate* from these live tokens itself (`estimate_cost`); this
+    function's own `cost_usd` stays `None`.
     """
     for raw in lines:
         line = raw.strip()
@@ -228,7 +319,7 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
         message = obj.get("message")
         if not isinstance(message, dict):
             continue
-        u = _from_usage_block(message.get("usage"), message.get("model"))
+        u = _from_usage_block(message.get("usage"), message.get("model"), live=live)
         if u is None:
             continue
         request_id = obj.get("request_id")
@@ -252,9 +343,18 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage]) -> Usage | None:
 
 
 def _sum(usages: Iterable[Usage]) -> Usage:
-    """Each kind of token summed; no cost and no model, which do not add."""
+    """Each kind of token summed; no cost and no model, which do not add.
+
+    `tokens_out` sums to `None`, not 0, the moment any contributor's is `None`
+    -- one live (unknown) reading taints the whole total, the same way an
+    unknown `cost_usd` does elsewhere in this module. Every other kind is
+    always an int (never `None`), so summing them plainly is unchanged.
+    """
     usages = list(usages)
-    return Usage(**{k: sum(getattr(u, k) for u in usages) for k in KINDS})
+    values = {k: [getattr(u, k) for u in usages] for k in KINDS}
+    return Usage(
+        **{k: (None if any(v is None for v in vs) else sum(vs)) for k, vs in values.items()}
+    )
 
 
 def _combine(envelopes: list[dict]) -> dict:
@@ -697,12 +797,17 @@ def _envelope_amp(log_path: Path) -> dict | None:
     the result's `usage` also means a log holding several invocations counts
     each one's own requests once, with no running totals to net out. No cost:
     Amp's stream reports none.
+
+    `live=False`: these lines are Amp's only record of a finished session's
+    tokens (Kraft-wz83s), unlike claude's, whose exit envelope always backs
+    live progress up. Claude's start-of-message undercount is unmeasured here;
+    treated as the session's real count for lack of a better one.
     """
     try:
         lines = log_path.read_text().splitlines()
     except OSError:
         return None
-    u = from_stream(lines, {})
+    u = from_stream(lines, {}, live=False)
     if u is None:
         return None
     return {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
@@ -919,7 +1024,11 @@ READERS: dict[str, Reader] = {
     # No rate-limit event is documented, so there is nothing to read one off.
     "amp-stream-json": Reader(
         name="amp-stream-json",
-        stream=from_stream,
+        # `live=False`, unlike claude's own entry below: Amp has no exit
+        # envelope to correct a live undercount with (`_envelope_amp`'s own
+        # docstring), so its live tick reports the same number its envelope
+        # would -- accurate or not, that question is out of scope here.
+        stream=functools.partial(from_stream, live=False),
         envelope=_envelope_amp,
         rate_limit=lambda _log_path: None,
         session_id=_session_id_claude,

@@ -485,7 +485,10 @@ async def test_an_adopted_session_carries_live_tokens_before_it_exits(
         await task
 
     assert live is not None, "tokens_in never appeared on the row before the child exited"
-    assert live[:4] == ("claude-opus-5", 1000, 0, 200)
+    # tokens_out is unknown (None) while the session runs (Kraft-wz83s): the
+    # `assistant` line's `output_tokens` is that message's count as of when it
+    # was written, not its final one, so it is never published live.
+    assert live[:4] == ("claude-opus-5", 1000, 0, None)
     failed = [r for r in caplog.records if "usage progress tick failed" in r.getMessage()]
     assert [r.exc_info[1].args for r in failed] == ([] if seam is None else [("poison tick",)])
 

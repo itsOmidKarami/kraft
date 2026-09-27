@@ -428,7 +428,8 @@ def _tokens(usage: Usage) -> tuple[int, ...]:
 
 
 def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
-    """Live token counts and model for a session that is still running (Kraft-54dk).
+    """Live token counts, model and an estimated cost for a session that is
+    still running (Kraft-54dk, Kraft-wz83s).
 
     Deliberately no event. One of these lands every few seconds per running
     worker, and an event fans out to the WebSocket, the indexer and the
@@ -436,14 +437,25 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     not the event stream, so "tokens this node" starts being true the moment
     the row is.
 
-    Cost and wall time stay with `session_exited`, which writes the
-    authoritative final figures and corrects any live drift. `status =
-    'running'` guards the update: a paused or finished session's numbers are
-    settled, and a late progress write must not reopen them.
+    `cost_usd` is `usage.estimate_cost`'s guess from the live tokens known so
+    far (input, cache read, cache write -- never output, which is unknown
+    while a claude session runs), with `cost_estimated` set alongside it so a
+    reader can tell a guess from the agent's own figure. `None` when the
+    model isn't in the rate table, same as a finished session with no
+    reported cost -- never a stale value left over from an earlier tick on a
+    different model.
+
+    Wall time and the *real* cost stay with `session_exited`, which writes
+    the authoritative final figures, clears `cost_estimated`, and corrects
+    any live drift. `status = 'running'` guards the update: a paused or
+    finished session's numbers are settled, and a late progress write must
+    not reopen them.
     """
+    estimate = _usage.estimate_cost(usage, usage.model)
     conn.execute(
-        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS} WHERE id = ? AND status = 'running'",
-        (usage.model, *_tokens(usage), session_id),
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+        "cost_estimated = ? WHERE id = ? AND status = 'running'",
+        (usage.model, *_tokens(usage), estimate, int(estimate is not None), session_id),
     )
 
 
@@ -525,9 +537,11 @@ def record_pause_usage(
     usage = _own_share(conn, session_id, usage, reader)
     if usage is None:
         return
+    # The agent's own figure (or NULL, honestly, when it reported none) --
+    # never left marked as still-estimated once a real read has landed.
     conn.execute(
-        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ? "
-        "WHERE id = ? AND status = 'paused'",
+        f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+        "cost_estimated = 0 WHERE id = ? AND status = 'paused'",
         (usage.model, *_tokens(usage), usage.cost_usd, session_id),
     )
 
@@ -585,9 +599,12 @@ def session_exited(
         payload["question"] = question
     usage = _own_share(conn, session_id, usage, reader)
     if usage is not None:
+        # The exit envelope is the real figure -- or NULL, honestly, when the
+        # agent reported none -- so any estimate `session_progress` left
+        # standing is cleared here regardless of which way `cost_usd` lands.
         conn.execute(
-            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, wall_ms = ? "
-            "WHERE id = ?",
+            f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
+            "cost_estimated = 0, wall_ms = ? WHERE id = ?",
             (usage.model, *_tokens(usage), usage.cost_usd, wall_ms, session_id),
         )
         payload |= {

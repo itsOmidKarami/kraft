@@ -624,3 +624,77 @@ async def test_every_usage_writer_stores_the_cache_kinds_apart(database, writer)
     if writer == "exit":
         payload = _last_event(database)["payload"]
         assert [payload[k] for k in kinds.split(", ")] == [7, 40, 900, 3]
+
+
+async def test_session_progress_estimates_cost_for_a_known_model(database):
+    """Kraft-wz83s: while a session runs, `session_progress` prices its known
+    live tokens (input, cache read, cache write -- never output, unknown
+    live) against the packaged rate table and marks the row as carrying a
+    guess."""
+    await _running_review(database)
+    # claude-sonnet-5: $2/M input (prices.json) -- 1,000,000 input tokens is a
+    # round $2.00, easy to check without floating-point noise.
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await database.write(lambda c: store.session_progress(c, "s1", live))
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] == pytest.approx(2.0)
+    assert row["cost_estimated"] == 1
+
+
+async def test_session_progress_estimates_nothing_for_an_unknown_model(database):
+    """A model missing from `prices.json` gets no guess, not a wrong one --
+    the same shape as a finished session with no reported cost."""
+    await _running_review(database)
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="some-model-nobody-priced")
+    await database.write(lambda c: store.session_progress(c, "s1", live))
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] is None
+    assert row["cost_estimated"] == 0
+
+
+async def test_exit_replaces_the_estimate_with_the_real_cost_and_clears_the_flag(database):
+    """The estimate is a floor a real number always replaces at exit, never a
+    figure that stands once the session is done."""
+    await _running_review(database)
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await database.write(lambda c: store.session_progress(c, "s1", live))
+    assert _row(database, "s1", "cost_estimated")["cost_estimated"] == 1
+
+    await _exit(database, "s1", "done", None, Usage(1_000_000, 500, 3.33, "claude-sonnet-5"))
+
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] == pytest.approx(3.33)
+    assert row["cost_estimated"] == 0
+
+
+async def test_exit_with_no_reported_cost_does_not_leave_the_estimate_standing(database):
+    """An agent that reports no cost at exit must not leave the running guess
+    looking like a settled figure -- `cost_usd` goes back to the honest NULL a
+    finished session with no reported cost always gets."""
+    await _running_review(database)
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await database.write(lambda c: store.session_progress(c, "s1", live))
+    assert _row(database, "s1", "cost_usd")["cost_usd"] == pytest.approx(2.0)
+
+    await _exit(database, "s1", "done", None, Usage(1_000_000, 500, None, "claude-sonnet-5"))
+
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] is None
+    assert row["cost_estimated"] == 0
+
+
+async def test_pause_also_clears_a_running_estimate(database):
+    """`record_pause_usage` is the other writer of a settled cost
+    (Kraft-s7c04.18) and must clear the flag the same way `session_exited`
+    does."""
+    await _running_review(database)
+    live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
+    await database.write(lambda c: store.session_progress(c, "s1", live))
+    await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+
+    await database.write(
+        lambda c: store.record_pause_usage(c, "s1", Usage(1_000_000, 500, 3.33, "claude-sonnet-5"))
+    )
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] == pytest.approx(3.33)
+    assert row["cost_estimated"] == 0

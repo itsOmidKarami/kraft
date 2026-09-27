@@ -68,7 +68,10 @@ def _usage_text(u: dict) -> str:
     ]
     if u.get("cost_usd"):
         cost = f"${u['cost_usd']:.2f}"
-        parts.append(cost if u.get("cost_complete", True) else f"at least {cost}")
+        if u.get("cost_estimated"):
+            parts.append(f"~{cost} (est.)")
+        else:
+            parts.append(cost if u.get("cost_complete", True) else f"at least {cost}")
     return " · ".join(parts)
 
 

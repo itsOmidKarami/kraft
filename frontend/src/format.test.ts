@@ -116,6 +116,14 @@ describe("tokens / usd", () => {
     // an incomplete sum is a floor, and says so
     expect(usd(2.415, false)).toBe("$2.42+");
   });
+
+  it("marks an estimated cost distinctly, taking precedence over incomplete", () => {
+    // Kraft-wz83s: a running session's guess reads "~$2.42 (est.)", never
+    // "$2.42+" -- an estimate isn't a floor, it's a number the exit envelope
+    // replaces outright.
+    expect(usd(2.415, true, true)).toBe("~$2.42 (est.)");
+    expect(usd(2.415, false, true)).toBe("~$2.42 (est.)");
+  });
 });
 
 describe("tokenTotal / tokenSplit (Ruling 211)", () => {

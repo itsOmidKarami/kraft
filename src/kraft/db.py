@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 40
+SCHEMA_VERSION = 41
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -168,7 +168,12 @@ CREATE TABLE worker_sessions (
   -- session re-adopted after a restart reads its log with its own reader.
   -- NULL for every non-agent session and every row older than this column:
   -- read as claude, the only harness those rows can have had
-  harness        TEXT
+  harness        TEXT,
+  -- 1 while `cost_usd` is `session_progress`'s guess (`usage.estimate_cost`)
+  -- from live tokens, not the agent's own figure -- 0 once the exit envelope
+  -- (or a paused session's) lands, whether or not it carries a cost. Default
+  -- 0 so a historical row, which never carried an estimate, reads as exact.
+  cost_estimated INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -890,6 +895,11 @@ FROM worker_sessions""",
 )""",
         "CREATE INDEX idx_review_comments_thread ON review_comments(thread_id, created_at)",
     ],
+    # A running session's estimated spend (Kraft-wz83s): `usage.estimate_cost`
+    # writes a guess into `cost_usd` while a session runs, so the flag says
+    # whether that number is the guess or the agent's own figure. Default 0:
+    # every existing row's `cost_usd`, if any, is already the real one.
+    40: ["ALTER TABLE worker_sessions ADD COLUMN cost_estimated INTEGER NOT NULL DEFAULT 0"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

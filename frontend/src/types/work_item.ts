@@ -259,6 +259,11 @@ export interface WorkerSession {
   tokens_cache_write?: number | null;
   tokens_cache_read?: number | null;
   cost_usd: number | null;
+  /** True while `cost_usd` is a running guess from live tokens (Kraft-wz83s),
+   *  not the agent's own figure; false once it's settled at exit or was
+   *  never estimated. Optional so fixture/test literals that predate it
+   *  keep typechecking. */
+  cost_estimated?: boolean;
   wall_ms: number | null;
   model: string | null;
   /** The worktree HEAD this session was dispatched against (Kraft-lu2); null
@@ -288,6 +293,9 @@ export interface UsageRollup {
   cost_usd: number;
   /** False when a session spent tokens but reported no cost — the sum is a floor. */
   cost_complete: boolean;
+  /** True when any session folded in is still running on an estimated cost
+   *  (Kraft-wz83s) rather than a settled figure. */
+  cost_estimated?: boolean;
   wall_ms: number;
   sessions: number;
   rounds: number;

@@ -172,6 +172,13 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         replace = (*replace, ("command        TEXT,", "command        TEXT"))
     if version < 40:
         skip_stmts = (*skip_stmts, "node_runs", "reviews", "review_threads", "review_comments")
+    if version < 41:
+        drop_lines = (*drop_lines, "cost_estimated")
+        # Harmless when `harness` was already dropped (version < 39): the line
+        # is gone by then and this pattern matches nothing. Between 39 and 41
+        # `harness` is worker_sessions' last surviving column once
+        # `cost_estimated` is dropped, so its own trailing comma must go too.
+        replace = (*replace, ("harness        TEXT,", "harness        TEXT"))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -452,6 +459,8 @@ ADDED_COLUMNS = [
     (36, "worker_sessions", ("tokens_cache_write", "tokens_cache_read"), None),
     # NULL: an older row is read as claude, the only harness it can have had
     (38, "worker_sessions", ("harness",), None),
+    # 0: a row written before estimates existed never carried a guess (Kraft-wz83s)
+    (40, "worker_sessions", ("cost_estimated",), 0),
 ]
 
 

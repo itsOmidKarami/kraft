@@ -156,7 +156,7 @@ export function Log({
       const total = tokenTotal(session);
       meta.push(
         session.cost_usd != null
-          ? `${tokens(total)} tokens · ${usd(session.cost_usd)}`
+          ? `${tokens(total)} tokens · ${usd(session.cost_usd, true, session.cost_estimated)}`
           : `${tokens(total)} tokens`,
       );
     }

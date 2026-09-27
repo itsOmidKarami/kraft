@@ -114,7 +114,9 @@ function stats(item: WorkItem, taskCount: number): { text: string; title: string
   if (u) {
     parts.push(`${tokens(sum(u.total))} tokens`);
     detail = tokenSplit(u.total);
-    if (u.total.cost_usd > 0) parts.push(usd(u.total.cost_usd, u.total.cost_complete));
+    if (u.total.cost_usd > 0) {
+      parts.push(usd(u.total.cost_usd, u.total.cost_complete, u.total.cost_estimated));
+    }
     const node = u.by_node.find((n) => n.node === item.current_node_id);
     if (node) detail += ` · ${tokens(sum(node))} tokens this node`;
   }

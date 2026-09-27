@@ -22,6 +22,11 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     total. Treating a missing cost as zero would quietly under-report the bill,
     which is the one thing a cost figure must not do.
 
+    `cost_estimated` is true when any session folded into the sum is still
+    running on `usage.estimate_cost`'s guess (Kraft-wz83s) rather than the
+    agent's own figure -- so `cost_usd` here is itself an estimate, and a
+    reader should say so ("~$12 (est.)") rather than show it as settled.
+
     `wall_ms` is derived when the column is NULL (`_common.session_wall_ms`) --
     unlike cost, time is knowable for a session that never reported, because
     the row carries the same two stamps `session_exited` would have used.
@@ -32,8 +37,8 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     uncached input plus that older unsplit input, and says so.
     """
     rows = conn.execute(
-        f"SELECT id, node_id, round, {', '.join(KINDS)}, cost_usd, wall_ms, status, "
-        "started_at, created_at, exited_at "
+        f"SELECT id, node_id, round, {', '.join(KINDS)}, cost_usd, cost_estimated, wall_ms, "
+        "status, started_at, created_at, exited_at "
         "FROM worker_sessions WHERE work_item_id = ?",
         (work_item_id,),
     ).fetchall()
@@ -56,6 +61,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
                 "wait_timed_out": 0,
                 "time_capped": 0,
                 "cost_complete": True,
+                "cost_estimated": False,
                 "split_complete": True,
             },
         )
@@ -65,6 +71,8 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
         # a session that spent tokens but reported no cost makes the sum a floor
         if r["cost_usd"] is None and spent(r):
             node["cost_complete"] = False
+        if r["cost_estimated"]:
+            node["cost_estimated"] = True
         if r["tokens_cache_read"] is None and spent(r):
             node["split_complete"] = False
         # Not `r["wall_ms"] or 0`: only `session_exited` writes that column, so
@@ -100,6 +108,7 @@ def usage_rollup(conn: sqlite3.Connection, work_item_id: str) -> dict:
     # summing would read as "this item retried nine times" for nine clean nodes.
     total["rounds"] = max((n["rounds"] for n in nodes), default=0)
     total["cost_complete"] = all(n["cost_complete"] for n in nodes)
+    total["cost_estimated"] = any(n["cost_estimated"] for n in nodes)
     total["split_complete"] = all(n["split_complete"] for n in nodes)
     return {"total": total, "by_node": sorted(nodes, key=lambda n: n["node"])}
 
