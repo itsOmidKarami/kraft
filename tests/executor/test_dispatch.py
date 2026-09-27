@@ -224,38 +224,6 @@ async def test_the_implementer_is_told_which_commands_gate_its_paths(item_on, fa
         assert cmd not in other_prompt
 
 
-async def test_the_implementer_prompt_carries_a_mid_run_thread(tmp_path, repo, fake_agent):
-    """review threads anywhere §1: every agent dispatch carries the item's
-    unanswered review threads, not only a rejection's own note. Seeds a
-    published thread against the item's id right after it is filed, before
-    the walk's implementer dispatch reads it."""
-    seeded = {}
-
-    async def seed(database):
-        seeded["tid"] = await database.write(
-            lambda c: store.create_thread(
-                c, wid="w1", gate=None, anchor_sha="h", body="evict LRU", label="must_fix"
-            )
-        )
-        await database.write(
-            lambda c: store.submit_review(
-                c,
-                wid="w1",
-                gate=None,
-                outcome="comment",
-                summary=None,
-                head_sha="h",
-                base_sha="h",
-            )
-        )
-
-    status, *_ = await _walk(tmp_path, repo, fake_agent.quick_task, after_item=seed)
-
-    assert status == "completed"
-    [prompt] = fake_agent.prompts()
-    assert f"[{seeded['tid']}]" in prompt
-
-
 async def test_dispatch_carries_the_notes_authorship_into_the_prompt(
     item_on, fake_agent, monkeypatch
 ):

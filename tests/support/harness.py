@@ -734,16 +734,8 @@ async def v1_walk(
     after_item=None,
     **item_kwargs,
 ):
-    """File `chain` as one work item and walk it once.
-
-    `after_item`, if given, is awaited with `database` right after the item
-    is created and before the walk runs -- a hook for a caller that needs to
-    seed state (e.g. a review thread) against the item's row before dispatch
-    reads it.
-
-    Returns `(status, events, sessions, row)` -- the readbacks nearly every
-    assertion about a walk needs, as plain dicts, with the database already
-    closed. A caller that needs more reads the run directory itself.
+    """File `chain` as one work item and walk it once, `after_item` (if given) awaited
+    with `database` first. Returns `(status, events, sessions, row)`, database closed.
     """
     from kraft import db as _db
     from kraft import events as _events

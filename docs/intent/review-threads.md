@@ -138,7 +138,7 @@ origin: src/kraft/api/routes/lifecycle.py
 ## REQ working-agent-dispatch-carries-unanswered-threads
 WHEN an agent task with no skill is dispatched, the system SHALL include every
 unanswered review thread on its item, with the instruction to reply to each.
-enforced-by: tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply, tests/executor/test_dispatch.py::test_the_implementer_prompt_carries_a_mid_run_thread
+enforced-by: tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply, tests/executor/test_dispatch_review_threads.py::test_the_implementer_prompt_carries_a_mid_run_thread
 origin: src/kraft/executor/prompts.py
 
 ## REQ reviewer-dispatch-judges-against-unanswered-threads
@@ -171,7 +171,7 @@ origin: src/kraft/api/routes/review.py
 WHEN a person requests changes at an earlier node while another runs, the
 system SHALL NOT stop the running node, and SHALL re-run the target when the
 running node completes.
-enforced-by: tests/api/test_review.py::test_request_changes_for_an_earlier_node_does_not_stop_the_running_one, tests/executor/test_walk.py::test_a_pending_rewind_takes_effect_when_the_node_completes, tests/executor/test_walk.py::test_a_ci_wait_resume_does_not_jump_to_a_pending_rewind
+enforced-by: tests/api/test_review.py::test_request_changes_for_an_earlier_node_does_not_stop_the_running_one, tests/executor/test_walk_rewind.py::test_a_pending_rewind_takes_effect_when_the_node_completes, tests/executor/test_walk_rewind.py::test_a_ci_wait_resume_does_not_jump_to_a_pending_rewind
 origin: src/kraft/executor/walk.py
 
 ## REQ a-pending-rewind-is-honoured-by-the-next-resume-or-retry
@@ -190,23 +190,23 @@ origin: src/kraft/api/routes/review.py
 WHEN the walk reaches a gate while a `must_fix` thread is unanswered, the
 system SHALL reject the gate on the person's behalf with the threads as the
 note, instead of opening it.
-enforced-by: tests/executor/test_gates.py::test_a_gate_with_an_unanswered_must_fix_bounces_instead_of_opening, tests/executor/test_gates.py::test_an_earlier_gates_must_fix_still_blocks_a_later_gate
+enforced-by: tests/executor/test_gates_feedback.py::test_a_gate_with_an_unanswered_must_fix_bounces_instead_of_opening, tests/executor/test_gates_feedback.py::test_an_earlier_gates_must_fix_still_blocks_a_later_gate
 origin: src/kraft/executor/gates.py
 
 ## REQ gate-opens-with-replies-for-unanswered-questions
 WHEN the walk opens a gate while only non-must-fix threads are unanswered, the
 system SHALL launch the reply agent for them as the gate opens.
-enforced-by: tests/executor/test_gates.py::test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent
+enforced-by: tests/executor/test_gates_feedback.py::test_a_gate_with_only_unanswered_questions_opens_with_the_reply_agent
 origin: src/kraft/executor/walk.py
 
 ## REQ human-feedback-bounce-counts-against-the-reject-cap
 IF bouncing a gate on unanswered feedback would breach the gate's reject-loop
 cap, THEN the system SHALL open the gate for the person instead.
-enforced-by: tests/executor/test_gates.py::test_the_bounce_counts_against_the_reject_cap_and_then_opens
+enforced-by: tests/executor/test_gates_feedback.py::test_the_bounce_counts_against_the_reject_cap_and_then_opens
 origin: src/kraft/executor/gates.py
 
 ## REQ review-cli-verbs-reach-their-routes
 WHEN a person runs a review verb of `kraft` or calls its MCP tool, the system
 SHALL make the same request the API route takes.
-enforced-by: tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[comment-new-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[comment-reply], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[resolve-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[reopen-thread], tests/cli/test_verbs.py::test_a_verb_passes_its_arguments_through[review-request-changes], tests/cli/test_review_threads.py::test_comment_needs_lines_for_a_suggestion, tests/cli/test_review_threads.py::test_view_threads_renders_a_block_per_thread, tests/cli/test_review_threads.py::test_view_compare_forwards_targets_and_stats_the_files, tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[list_threads-threads-args0], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[compare_changes-compare-args1], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[add_review_comment-add_review_comment-args2], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[resolve_thread-resolve_thread-args3], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[reopen_thread-reopen_thread-args4], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[submit_review-submit_review-args5], tests/test_mcp.py::test_submit_review_says_only_a_human_should_decide
+enforced-by: tests/cli/test_review_threads.py::test_a_review_verb_passes_its_arguments_through[comment-new-thread], tests/cli/test_review_threads.py::test_a_review_verb_passes_its_arguments_through[comment-reply], tests/cli/test_review_threads.py::test_a_review_verb_passes_its_arguments_through[resolve-thread], tests/cli/test_review_threads.py::test_a_review_verb_passes_its_arguments_through[reopen-thread], tests/cli/test_review_threads.py::test_a_review_verb_passes_its_arguments_through[review-request-changes], tests/cli/test_review_threads.py::test_comment_needs_lines_for_a_suggestion, tests/cli/test_review_threads.py::test_view_threads_renders_a_block_per_thread, tests/cli/test_review_threads.py::test_view_compare_forwards_targets_and_stats_the_files, tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[list_threads-threads-args0], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[compare_changes-compare-args1], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[add_review_comment-add_review_comment-args2], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[resolve_thread-resolve_thread-args3], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[reopen_thread-reopen_thread-args4], tests/test_mcp.py::test_each_review_tool_delegates_to_its_client_function[submit_review-submit_review-args5], tests/test_mcp.py::test_submit_review_says_only_a_human_should_decide
 origin: src/kraft/client/actions.py

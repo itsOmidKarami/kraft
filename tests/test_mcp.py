@@ -5,6 +5,7 @@ transport dependency (the lesson from tests/test_ws.py)."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import subprocess
 import sys
@@ -286,13 +287,18 @@ def test_submit_review_says_only_a_human_should_decide():
     ],
 )
 def test_each_review_tool_delegates_to_its_client_function(monkeypatch, tool, client_fn, args):
+    """Not just that some client function fired: the tool forwards `args` to
+    it (each tool is a thin positional-argument relay, so a swapped or
+    dropped parameter must show up in the real function's own bound names)."""
+    real = getattr(client, client_fn)
     seen = {}
     result = [] if tool == "list_threads" else {"id": "w1"}
 
     async def fake(*fn_args, **fn_kwargs):
-        seen["args"], seen["kwargs"] = fn_args, fn_kwargs
+        bound = inspect.signature(real).bind(*fn_args, **fn_kwargs)
+        seen.update(bound.arguments)
         return result
 
     monkeypatch.setattr(mcp.client, client_fn, fake)
     asyncio.run(mcp.build().call_tool(tool, args))
-    assert seen  # the client function under this name was actually called
+    assert seen and all(seen.get(k) == v for k, v in args.items())

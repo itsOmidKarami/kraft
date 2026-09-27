@@ -550,57 +550,6 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
             "reply_to_thread",
             {"thread_id": "t1", "body": "hi", "claim": "fixed"},
         ),
-        (
-            [
-                "item",
-                "comment",
-                "7",
-                "--body",
-                "hi",
-                "--file",
-                "a.py",
-                "--lines",
-                "3-4",
-                "--label",
-                "must-fix",
-                "--suggest",
-                "x",
-            ],  # fmt: skip
-            "add_review_comment",
-            {
-                "body": "hi",
-                "work_item_id": "7",
-                "thread_id": None,
-                "file_path": "a.py",
-                "start_line": 3,
-                "end_line": 4,
-                "side": None,
-                "label": "must_fix",
-                "suggestion": "x",
-            },
-        ),
-        (
-            ["item", "comment", "--reply", "T1", "--body", "hi"],
-            "add_review_comment",
-            {
-                "body": "hi",
-                "work_item_id": None,
-                "thread_id": "T1",
-                "file_path": None,
-                "start_line": None,
-                "end_line": None,
-                "side": None,
-                "label": None,
-                "suggestion": None,
-            },
-        ),
-        (["item", "resolve", "T1"], "resolve_thread", {"thread_id": "T1"}),
-        (["item", "reopen", "T1"], "reopen_thread", {"thread_id": "T1"}),
-        (
-            ["item", "review", "7", "request-changes", "--summary", "s"],
-            "submit_review",
-            {"outcome": "request_changes", "work_item_id": "7", "summary": "s", "node": None},
-        ),
     ],
     ids=[
         "retry-steer",
@@ -616,16 +565,12 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         "escalate-new-thread",
         "progress-task",
         "reply-thread",
-        "comment-new-thread",
-        "comment-reply",
-        "resolve-thread",
-        "reopen-thread",
-        "review-request-changes",
     ],
 )
 def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
     """Each argument lands on the client function's own parameter, as the real
-    function would bind it (defaults included), and the reply names the item."""
+    function would bind it (defaults included), and the reply names the item.
+    The review-thread verbs' own cases are tests/cli/test_review_threads.py's."""
     real = getattr(client, fn)
     seen = {}
 

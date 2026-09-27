@@ -6,11 +6,99 @@ dispatch table and rendering.
 
 from __future__ import annotations
 
+import inspect
 import json
 
 import pytest
 
 from kraft import cli, client
+
+
+@pytest.mark.parametrize(
+    "argv, fn, expected",
+    [
+        (
+            [
+                "item",
+                "comment",
+                "7",
+                "--body",
+                "hi",
+                "--file",
+                "a.py",
+                "--lines",
+                "3-4",
+                "--label",
+                "must-fix",
+                "--suggest",
+                "x",
+            ],  # fmt: skip
+            "add_review_comment",
+            {
+                "body": "hi",
+                "work_item_id": "7",
+                "thread_id": None,
+                "file_path": "a.py",
+                "start_line": 3,
+                "end_line": 4,
+                "side": None,
+                "label": "must_fix",
+                "suggestion": "x",
+            },
+        ),
+        (
+            ["item", "comment", "--reply", "T1", "--body", "hi"],
+            "add_review_comment",
+            {
+                "body": "hi",
+                "work_item_id": None,
+                "thread_id": "T1",
+                "file_path": None,
+                "start_line": None,
+                "end_line": None,
+                "side": None,
+                "label": None,
+                "suggestion": None,
+            },
+        ),
+        (["item", "resolve", "T1"], "resolve_thread", {"thread_id": "T1"}),
+        (["item", "reopen", "T1"], "reopen_thread", {"thread_id": "T1"}),
+        (
+            ["item", "review", "7", "request-changes", "--summary", "s"],
+            "submit_review",
+            {"outcome": "request_changes", "work_item_id": "7", "summary": "s", "node": None},
+        ),
+    ],
+    ids=[
+        "comment-new-thread",
+        "comment-reply",
+        "resolve-thread",
+        "reopen-thread",
+        "review-request-changes",
+    ],
+)
+def test_a_review_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):
+    """Same table as test_verbs.py's test_a_verb_passes_its_arguments_through,
+    split out here for the review-thread verbs only."""
+    real = getattr(client, fn)
+    seen = {}
+
+    async def fake(*args, **kwargs):
+        bound = inspect.signature(real).bind(*args, **kwargs)
+        bound.apply_defaults()
+        seen.update(bound.arguments)
+        return {
+            "id": "w1",
+            "node_id": "n",
+            "steer": None,
+            "status": "active",
+            "progress": {"current": 2, "total": 3, "title": "serve"},
+        }
+
+    monkeypatch.setattr(client, fn, fake)
+    cli.main(argv)
+    assert seen == expected
+    assert "w1" in capsys.readouterr().out
 
 
 def test_review_request_changes_json_is_pure_json_even_with_a_target(app, monkeypatch, capsys):

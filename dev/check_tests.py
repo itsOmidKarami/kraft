@@ -74,13 +74,9 @@ LINE_BUDGET = 800
 #: held to LINE_BUDGET from the day it's added.
 LINE_BUDGET_ALLOWLIST: dict[str, int] = {
     "tests/adapters/test_agent.py": 856,
-    "tests/executor/test_gates.py": 1107,
-    "tests/executor/test_dispatch.py": 928,
-    "tests/executor/test_walk.py": 1410,
-    # review threads anywhere: the `after_item` walk hook's docstring.
-    "tests/support/harness.py": 808,
-    # review threads anywhere: the CLI/MCP surface's own verb tests.
-    "tests/cli/test_verbs.py": 838,
+    "tests/executor/test_gates.py": 903,
+    "tests/executor/test_dispatch.py": 898,
+    "tests/executor/test_walk.py": 1287,
 }
 
 #: How far an allowlisted ceiling may sit above the file's real current size
