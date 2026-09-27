@@ -7,16 +7,41 @@ sections of this module.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import uuid
 
+from kraft import events
 from kraft.store import _now as _now  # test seam for wall-clock checks
 
 __all__ = [
+    "CLAIMS",
+    "LABELS",
+    "OUTCOMES",
+    "YOU",
+    "add_draft_reply",
+    "agent_reply",
+    "comment_dict",
+    "comment_row",
+    "create_thread",
+    "delete_draft_comment",
+    "delete_draft_thread",
     "finish_run",
     "gate_attempts",
+    "is_draft_thread",
+    "last_review",
     "node_run_rows",
+    "open_must_fix",
     "pin_gate",
+    "render_note",
+    "set_thread_state",
     "start_run",
+    "submit_review",
+    "thread_row",
+    "threads_for",
+    "unanswered",
+    "update_draft_comment",
+    "update_draft_thread",
 ]
 
 
@@ -84,3 +109,232 @@ def gate_attempts(conn, wid, gate) -> list[dict]:
         {"n": r["attempt"], "sha": r["end_sha"], "base_sha": r["base_sha"], "at": r["created_at"]}
         for r in rows
     ]
+
+
+YOU = "you"
+LABELS = frozenset({"must_fix", "question", "nit"})
+CLAIMS = frozenset({"fixed", "answered", "should_fix"})
+OUTCOMES = frozenset({"approve", "request_changes", "comment"})
+_KEEP = object()
+
+
+def _id() -> str:
+    return uuid.uuid4().hex
+
+
+def create_thread(
+    conn,
+    *,
+    wid,
+    gate,
+    anchor_sha,
+    body,
+    node_id=None,
+    file_path=None,
+    side=None,
+    start_line=None,
+    end_line=None,
+    label=None,
+    suggestion=None,
+) -> str:
+    tid = _id()
+    now = _now()
+    conn.execute(
+        "INSERT INTO review_threads (id, work_item_id, gate, node_id, file_path, side, "
+        "start_line, end_line, anchor_sha, label, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (tid, wid, gate, node_id, file_path, side, start_line, end_line, anchor_sha, label, now),
+    )
+    conn.execute(
+        "INSERT INTO review_comments (id, thread_id, author, body, suggestion, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (_id(), tid, YOU, body, json.dumps(suggestion) if suggestion else None, now),
+    )
+    return tid
+
+
+def thread_row(conn, tid):
+    return conn.execute("SELECT * FROM review_threads WHERE id = ?", (tid,)).fetchone()
+
+
+def comment_row(conn, cid):
+    return conn.execute("SELECT * FROM review_comments WHERE id = ?", (cid,)).fetchone()
+
+
+def _first_comment(conn, tid):
+    return conn.execute(
+        "SELECT * FROM review_comments WHERE thread_id = ? ORDER BY created_at, rowid LIMIT 1",
+        (tid,),
+    ).fetchone()
+
+
+def is_draft_thread(conn, tid) -> bool:
+    first = _first_comment(conn, tid)
+    return first is not None and first["author"] == YOU and first["review_id"] is None
+
+
+def update_draft_thread(conn, tid, *, label=_KEEP, body=None, suggestion=_KEEP) -> None:
+    if label is not _KEEP:
+        conn.execute("UPDATE review_threads SET label = ? WHERE id = ?", (label, tid))
+    first = _first_comment(conn, tid)
+    if body is not None:
+        conn.execute("UPDATE review_comments SET body = ? WHERE id = ?", (body, first["id"]))
+    if suggestion is not _KEEP:
+        conn.execute(
+            "UPDATE review_comments SET suggestion = ? WHERE id = ?",
+            (json.dumps(suggestion) if suggestion else None, first["id"]),
+        )
+
+
+def delete_draft_thread(conn, tid) -> None:
+    conn.execute("DELETE FROM review_comments WHERE thread_id = ?", (tid,))
+    conn.execute("DELETE FROM review_threads WHERE id = ?", (tid,))
+
+
+def add_draft_reply(conn, tid, *, body, suggestion=None) -> str:
+    cid = _id()
+    conn.execute(
+        "INSERT INTO review_comments (id, thread_id, author, body, suggestion, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (cid, tid, YOU, body, json.dumps(suggestion) if suggestion else None, _now()),
+    )
+    return cid
+
+
+def update_draft_comment(conn, cid, *, body, suggestion) -> None:
+    conn.execute(
+        "UPDATE review_comments SET body = ?, suggestion = ? WHERE id = ?",
+        (body, json.dumps(suggestion) if suggestion else None, cid),
+    )
+
+
+def delete_draft_comment(conn, cid) -> None:
+    conn.execute("DELETE FROM review_comments WHERE id = ?", (cid,))
+
+
+def set_thread_state(conn, tid, state: str) -> None:
+    conn.execute(
+        "UPDATE review_threads SET state = ?, resolved_at = ? WHERE id = ?",
+        (state, _now() if state == "resolved" else None, tid),
+    )
+    wid = thread_row(conn, tid)["work_item_id"]
+    events.append(conn, wid, "thread_updated", {"thread_id": tid, "state": state})
+
+
+def agent_reply(conn, tid, *, author, body, claim, attempt) -> str:
+    cid = _id()
+    conn.execute(
+        "INSERT INTO review_comments (id, thread_id, author, attempt, body, claim, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (cid, tid, author, attempt, body, claim, _now()),
+    )
+    if claim is not None:
+        set_thread_state(conn, tid, "claimed")
+    else:
+        # No state change: report the state the thread is actually in.
+        t = thread_row(conn, tid)
+        events.append(
+            conn, t["work_item_id"], "thread_updated", {"thread_id": tid, "state": t["state"]}
+        )
+    return cid
+
+
+def comment_dict(r) -> dict:
+    d = {k: r[k] for k in r.keys()}
+    d["suggestion"] = json.loads(r["suggestion"]) if r["suggestion"] else None
+    d["draft"] = r["author"] == YOU and r["review_id"] is None
+    return d
+
+
+def threads_for(conn, wid, gate=None) -> list[dict]:
+    q = "SELECT * FROM review_threads WHERE work_item_id = ?"
+    args: tuple = (wid,)
+    if gate is not None:
+        q, args = q + " AND gate = ?", (wid, gate)
+    out = []
+    for t in conn.execute(q + " ORDER BY created_at, rowid", args).fetchall():
+        comments = [
+            comment_dict(r)
+            for r in conn.execute(
+                "SELECT * FROM review_comments WHERE thread_id = ? ORDER BY created_at, rowid",
+                (t["id"],),
+            ).fetchall()
+        ]
+        d = {k: t[k] for k in t.keys()}
+        d["comments"] = comments
+        d["draft"] = bool(comments) and comments[0]["draft"]
+        out.append(d)
+    return out
+
+
+def open_must_fix(conn, wid, gate) -> list[str]:
+    return [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM review_threads WHERE work_item_id = ? AND gate = ? "
+            "AND label = 'must_fix' AND state != 'resolved' ORDER BY created_at, rowid",
+            (wid, gate),
+        ).fetchall()
+    ]
+
+
+def unanswered(conn, wid, gate) -> list[dict]:
+    return [
+        t
+        for t in threads_for(conn, wid, gate)
+        if not t["draft"] and t["state"] == "open" and t["comments"][-1]["author"] == YOU
+    ]
+
+
+def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+    rid = _id()
+    conn.execute(
+        "INSERT INTO reviews (id, work_item_id, gate, outcome, summary, head_sha, base_sha, "
+        "submitted_at) VALUES (?,?,?,?,?,?,?,?)",
+        (rid, wid, gate, outcome, summary, head_sha, base_sha, _now()),
+    )
+    conn.execute(
+        "UPDATE review_comments SET review_id = ? WHERE review_id IS NULL AND author = ? "
+        "AND thread_id IN (SELECT id FROM review_threads WHERE work_item_id = ? AND gate = ?)",
+        (rid, YOU, wid, gate),
+    )
+    events.append(
+        conn, wid, "review_submitted", {"review_id": rid, "gate": gate, "outcome": outcome}
+    )
+    return rid
+
+
+def last_review(conn, wid, gate):
+    return conn.execute(
+        "SELECT * FROM reviews WHERE work_item_id = ? AND gate = ? "
+        "ORDER BY submitted_at DESC, rowid DESC LIMIT 1",
+        (wid, gate),
+    ).fetchone()
+
+
+_NOTE_HEAD = (
+    "Review threads to address (reply to each with "
+    '`kraft item reply <thread-id> --claim fixed|answered --body "..."`):'
+)
+
+
+def render_note(threads: list[dict], summary: str | None) -> str:
+    parts = [summary.strip()] if summary and summary.strip() else []
+    live = [t for t in threads if t["state"] != "resolved"]
+    if live:
+        parts.append(_NOTE_HEAD)
+    for t in live:
+        where = "(whole change)"
+        if t["file_path"]:
+            where = t["file_path"]
+            if t["start_line"] is not None:
+                where += f":{t['start_line']}-{t['end_line']}"
+        head = f"[{t['id']}] {where}" + (f" ({t['label']})" if t["label"] else "")
+        first, *replies = t["comments"]
+        lines = [head, first["body"]]
+        s = first.get("suggestion")
+        if s:
+            lines.append(f"Suggested replacement for lines {s['start_line']}-{s['end_line']}:")
+            lines += ["    " + ln for ln in s["replacement"].splitlines()]
+        lines += [f"  > {r['author']}: {r['body']}" for r in replies]
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
