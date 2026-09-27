@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kraft import builtins as _builtins
-from kraft import escalate, events, gate_review, store
+from kraft import escalate, events, gate_review, node_runs, store
 from kraft import policy as _policy
 from kraft.adapters import agent as _agent
 from kraft.executor import stops
@@ -237,7 +237,9 @@ async def maybe_gate(db, work_item_id: str, node: ResolvedNode, run_dirs=None) -
         if why is not None:
             await db.write(lambda c: store.pass_unchanged_revision(c, work_item_id, node.id, why))
             return False
-    await db.write(lambda c: store.request_gate(c, work_item_id, node.id, node.id))
+    await node_runs.gate_requested(
+        db, run_dirs.worktrees / work_item_id if run_dirs else None, work_item_id, node.id
+    )
     return True
 
 

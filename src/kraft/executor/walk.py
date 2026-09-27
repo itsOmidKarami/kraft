@@ -5,7 +5,7 @@ from pathlib import Path
 
 from kraft import builtins as _builtins
 from kraft import config as _config
-from kraft import events, store
+from kraft import events, node_runs, store
 from kraft import findings as _findings
 from kraft import policy as _policy
 from kraft.adapters import beads
@@ -928,7 +928,7 @@ async def _walk_node_once(
                 if repaired:
                     reason += " (after on_failure)"
                 return _Stuck(reason)
-        await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
+        await node_runs.completed(db, Path(worktree) if worktree else None, work_item_id, node.id)
         return "ok"
 
     if policy is None:
@@ -1067,7 +1067,9 @@ async def _walk_node_once(
             if r_verdict == BASE_MOVED:
                 return await _moved_base(db, work_item_id, node)
             if r_verdict == "ok":
-                await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
+                await node_runs.completed(
+                    db, Path(worktree) if worktree else None, work_item_id, node.id
+                )
                 return "ok"
             # Only "failed" reaches here, and that fall-through is deliberate:
             # the repair ran, didn't resolve things, and the ordinary paid fix
@@ -1192,7 +1194,9 @@ async def _walk_node_once(
         enters_loop = bool(eligible) or bool(blind_failures)
 
         if not enters_loop:
-            await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
+            await node_runs.completed(
+                db, Path(worktree) if worktree else None, work_item_id, node.id
+            )
             return "ok"
 
         # Checked before bump_counter, not after: the counter is bumped to
@@ -1307,7 +1311,9 @@ async def _walk_node_once(
             # on the blind subset. Only a task with no failure at all can be
             # treated as clean here.
             if verdict == "stop_downgrade" and not failed:
-                await db.write(lambda c: store.complete_node(c, work_item_id, node.id))
+                await node_runs.completed(
+                    db, Path(worktree) if worktree else None, work_item_id, node.id
+                )
                 return "ok"
 
         # bump_counter returns the cap snapshotted on the row (spec §2.C: written
@@ -1781,7 +1787,7 @@ async def run_once(
     except (RuntimeError, _config.ConfigError) as exc:
         failing_node = nodes[start_index].id
         reason = str(exc)
-        await db.write(lambda c: store.enter_node(c, work_item_id, failing_node))
+        await node_runs.entered(db, run_dirs.worktrees / work_item_id, work_item_id, failing_node)
         await db.write(lambda c: store.mark_needs_human(c, work_item_id, failing_node, reason))
         return "needs_human"
     if report is not None:
