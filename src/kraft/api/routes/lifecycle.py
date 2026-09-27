@@ -14,7 +14,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from kraft import builtins as builtins_mod
-from kraft import escalate, events, executor, store
+from kraft import escalate, events, executor, node_runs, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
@@ -186,7 +186,7 @@ async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[
     return ids
 
 
-async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
+async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) -> bool:
     """Reclaim the worktree and its branch.
 
     Takes the branch rather than the work item id: the name is stored on the
@@ -210,6 +210,8 @@ async def _remove_worktree(repo: Path, worktree: Path, branch: str) -> bool:
         if done.returncode != 0:
             logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
+    # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
+    await asyncio.to_thread(node_runs.drop_refs, repo, wid)
     return ok
 
 
@@ -234,7 +236,7 @@ async def abandon_work_item(wid: str, request: Request):
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
-    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row))
+    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
@@ -258,7 +260,7 @@ async def _archive_one(app, row, by: str) -> bool:
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
-    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row))
+    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
     return removed
 

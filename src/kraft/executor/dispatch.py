@@ -16,7 +16,7 @@ from pathlib import Path
 from kraft import builtins as _builtins
 from kraft import caps as _caps
 from kraft import config as _config
-from kraft import events, store
+from kraft import events, node_runs, store
 from kraft import findings as _findings
 from kraft import harness as _harness
 from kraft import overrides as _overrides
@@ -1238,7 +1238,7 @@ async def measure_node(
     # the resume cursor a later measuring pass reads back.
     own = steps is None
     if own:
-        await db.write(lambda c: store.enter_node(c, work_item_id, node.id))
+        await node_runs.entered(db, Path(worktree) if worktree else None, work_item_id, node.id)
 
     # Kraft-37myi: read per dispatch, not once per node. The old single read
     # above this loop carried the comment "the worktree's HEAD does not move

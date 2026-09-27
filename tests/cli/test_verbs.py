@@ -545,6 +545,11 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
             {"message": "please look at this", "work_item_id": "w1", "new_thread": True},
         ),
         (["item", "progress", "2", "w1"], "report_progress", {"task": 2, "work_item_id": "w1"}),
+        (
+            ["item", "reply", "t1", "--body", "hi", "--claim", "fixed"],
+            "reply_to_thread",
+            {"thread_id": "t1", "body": "hi", "claim": "fixed"},
+        ),
     ],
     ids=[
         "retry-steer",
@@ -559,6 +564,7 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         "escalate-message",
         "escalate-new-thread",
         "progress-task",
+        "reply-thread",
     ],
 )
 def test_a_verb_passes_its_arguments_through(app, monkeypatch, capsys, argv, fn, expected):

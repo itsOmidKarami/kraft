@@ -4,6 +4,7 @@ import logging
 
 from fastapi import HTTPException, Request
 
+from kraft import config as config_mod
 from kraft import events, review, store
 from kraft.api import api_router, deps
 from kraft.api.routes import board
@@ -122,6 +123,86 @@ async def get_work_item_diff(wid: str, request: Request):
         # returned it, to the same authenticated caller.
         "diff_max_bytes": DIFF_MAX_BYTES,
         "worktree_path": str(worktree),
+    }
+
+
+def _resolve_target(st, row, gate: str | None, target: str) -> tuple[str | None, str]:
+    """`(sha, base_sha)` for a compare target; sha None is the working tree."""
+    wid = row["id"]
+    attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate)) if gate else []
+    if target == "base":
+        return row["base_ref"], row["base_ref"]
+    if target == "latest":
+        base = attempts[-1]["base_sha"] if attempts else row["base_ref"]
+        return None, base
+    if target == "last_review":
+        rev = st.db.read(lambda c: store.last_review(c, wid, gate)) if gate else None
+        if rev is None:
+            raise HTTPException(404, "no review has been submitted for this gate")
+        return rev["head_sha"], rev["base_sha"]
+    if target.startswith("attempt:") and target[8:].isdigit():
+        n = int(target[8:])
+        hit = next((a for a in attempts if a["n"] == n), None)
+        if hit is None:
+            raise HTTPException(404, f"no attempt {n} for this gate")
+        return hit["sha"], hit["base_sha"]
+    raise HTTPException(400, f"unknown compare target {target!r}")
+
+
+@api_router.get("/work-items/{wid}/compare")
+async def compare_work_item(wid: str, request: Request, nodes: str | None = None):
+    """Any two review targets of the pending gate, diffed (spec §2)."""
+    st = request.app.state
+    row = deps._work_item_row(st, wid)
+    q = request.query_params
+    frm, to = q.get("from", "base"), q.get("to", "latest")
+    if frm == "latest":
+        raise HTTPException(400, "`from` cannot be the working tree")
+    if not row["base_ref"]:
+        raise HTTPException(409, "this work item has no base commit to compare against")
+    worktree = st.run_dirs.worktrees / wid
+    if not worktree.is_dir():
+        raise HTTPException(404, "this work item has no worktree yet")
+    try:
+        stops.refuse_live_sandboxed_session(
+            st.db, row, deps.launch(st, row["repo"]), what="the diff"
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    gate = board._pending_gate(st, wid)
+    from_sha, from_base = _resolve_target(st, row, gate, frm)
+    to_sha, to_base = _resolve_target(st, row, gate, to)
+    change = review.read_change(worktree, from_sha, head=to_sha)
+    if change is None:
+        raise HTTPException(500, "git could not diff these two targets")
+    runs = st.db.read(lambda c: store.node_run_rows(c, wid))
+    head = to_sha or config_mod.git_read(worktree, "rev-parse", "HEAD")
+    attribution = review.touched_by(worktree, runs, from_sha, head)
+    files = [{**f, "touched_by": attribution.get(f["path"], [])} for f in change.files]
+    groups: list[dict] = []
+    diff = change.diff
+    if nodes:
+        wanted = [n for n in nodes.split(",") if n]
+        keep = {f["path"] for f in files if set(f["touched_by"]) & set(wanted)}
+        files = [f for f in files if f["path"] in keep]
+        groups = [
+            {"node_id": n, "files": [f["path"] for f in files if n in f["touched_by"]]}
+            for n in wanted
+        ]
+        chunks = diff.split("\ndiff --git ")
+        chunks = chunks[:1] + ["diff --git " + c for c in chunks[1:]]
+        diff = "\n".join(c for c in chunks if any(c.startswith(f"diff --git a/{p} ") for p in keep))
+    diff, truncated = _truncate_at_file_boundary(diff, DIFF_MAX_BYTES)
+    return {
+        "from": {"target": frm, "sha": from_sha},
+        "to": {"target": to, "sha": to_sha},
+        "rebased": from_base != to_base,
+        "files": files,
+        "groups": groups,
+        "diff": diff,
+        "untracked": change.untracked,
+        "truncated": truncated,
+        "diff_max_bytes": DIFF_MAX_BYTES,
     }
 
 

@@ -161,6 +161,13 @@ def build() -> MCPServer:
         return await client.report_progress(task, work_item_id)
 
     @server.tool()
+    async def reply_to_thread(thread_id: str, body: str, claim: str | None = None) -> dict:
+        """Answer a review thread while working a Kraft work item. `claim` is
+        `fixed` (you changed the code), `answered` (a reply, no change) or
+        `should_fix` (you agree it needs a change you were not asked to make)."""
+        return await client.reply_to_thread(thread_id, body, claim)
+
+    @server.tool()
     async def resume_work_item(
         steer: str | None = None,
         work_item_id: str | None = None,

@@ -34,6 +34,7 @@ def test_the_tools_are_registered():
         "reject_gate",
         "pause_work_item",
         "report_progress",
+        "reply_to_thread",
         "resume_work_item",
         "retry_work_item",
         "skip_work_item",

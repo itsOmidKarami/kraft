@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from kraft import node_runs, store
 from kraft import policy as _policy
-from kraft import store
 from kraft.executor import gates, walk
 from kraft.executor.context import _ADVANCING, LaunchContext, OnApprove
 from kraft.templates.models import ExecNode, ResolvedNode
 
 
 async def reconcile_current_node(
-    db, work_item_id: str, node: ResolvedNode, adopted: dict
+    db,
+    work_item_id: str,
+    node: ResolvedNode,
+    adopted: dict,
+    worktree: Path | None = None,
 ) -> str | None:
     """Settle what a crash left running on the current node, and read its
     outcome when the sessions alone can answer it.
@@ -49,7 +55,7 @@ async def reconcile_current_node(
     measured = [t.path for step in node.steps for t in step.tasks]
     final = db.read(lambda c: store.latest_session_per_task(c, work_item_id, node_id, measured))
     if len(final) == len(measured) and all(r["status"] in _ADVANCING for r in final):
-        await db.write(lambda c: store.complete_node(c, work_item_id, node_id))
+        await node_runs.completed(db, worktree, work_item_id, node_id)
         return "ok"
     if len(final) < len(measured) and all(r["status"] in _ADVANCING for r in final):
         # A crash between two of the step's tasks starting: the ones with no
@@ -153,7 +159,9 @@ async def resume_once(
     current = next((i for i, n in enumerate(nodes) if n.id == row["current_node_id"]), None)
     start_index = None
     if current is not None:
-        settled = await reconcile_current_node(db, work_item_id, nodes[current], adopted)
+        settled = await reconcile_current_node(
+            db, work_item_id, nodes[current], adopted, worktree=run_dirs.worktrees / work_item_id
+        )
         if settled == "needs_human":
             return "needs_human"
         if settled == "ok":

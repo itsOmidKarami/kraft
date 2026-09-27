@@ -1,0 +1,367 @@
+"""Review threads and reviews on a pending gate
+(docs/superpowers/specs/2026-09-27-review-flow-backend-design.md §3).
+
+Human routes refuse a worker session outright: agents speak only through
+`POST /threads/{tid}/replies`, where the author comes from their session.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import HTTPException, Request
+from pydantic import BaseModel, model_validator
+
+from kraft import config as config_mod
+from kraft import executor, review_reply, store
+from kraft.api import api_router, deps
+from kraft.api.routes import board
+from kraft.api.routes import gates as gate_routes
+
+
+class Suggestion(BaseModel):
+    start_line: int
+    end_line: int
+    replacement: str
+
+
+class ThreadIn(BaseModel):
+    body: str
+    node_id: str | None = None
+    file_path: str | None = None
+    side: Literal["old", "new"] | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    label: Literal["must_fix", "question", "nit"] | None = None
+    suggestion: Suggestion | None = None
+    anchor_sha: str | None = None
+
+    @model_validator(mode="after")
+    def _ranges(self):
+        lines = (self.side, self.start_line, self.end_line)
+        if any(v is not None for v in lines) and not all(v is not None for v in lines):
+            raise ValueError("side, start_line and end_line are all set or all omitted")
+        if self.start_line is not None:
+            if self.file_path is None:
+                raise ValueError("a line range needs a file_path")
+            if not 1 <= self.start_line <= self.end_line:
+                raise ValueError("start_line must be >= 1 and <= end_line")
+        _check_suggestion(self.suggestion, self.start_line, self.end_line)
+        if not self.body.strip():
+            raise ValueError("body is empty")
+        return self
+
+
+def _check_suggestion(s: Suggestion | None, start: int | None, end: int | None) -> None:
+    if s is None:
+        return
+    if start is None:
+        raise ValueError("a suggestion needs a thread with a line range")
+    if not (start <= s.start_line <= s.end_line <= end):
+        raise ValueError(f"the suggestion's lines must sit inside {start}-{end}")
+
+
+class ThreadPatch(BaseModel):
+    body: str | None = None
+    label: Literal["must_fix", "question", "nit"] | None = None
+    suggestion: Suggestion | None = None
+
+
+class CommentIn(BaseModel):
+    body: str
+    suggestion: Suggestion | None = None
+
+
+def _refuse_agents(request: Request) -> None:
+    if request.headers.get("x-kraft-session-id"):
+        raise HTTPException(403, "worker agents reply through POST /threads/{id}/replies")
+
+
+def _pending_or_409(st, wid: str) -> str:
+    gate = board._pending_gate(st, wid)
+    if gate is None:
+        raise HTTPException(409, "review threads need a pending gate")
+    return gate
+
+
+def _thread_or_404(st, tid: str):
+    row = st.db.read(lambda c: store.thread_row(c, tid))
+    if row is None:
+        raise HTTPException(404, f"unknown thread {tid!r}")
+    return row
+
+
+def _one(st, wid: str, tid: str) -> dict:
+    return next(t for t in st.db.read(lambda c: store.threads_for(c, wid)) if t["id"] == tid)
+
+
+@api_router.get("/work-items/{wid}/threads")
+async def list_threads(wid: str, request: Request):
+    st = request.app.state
+    deps._work_item_row(st, wid)
+    return st.db.read(lambda c: store.threads_for(c, wid))
+
+
+@api_router.post("/work-items/{wid}/threads", status_code=201)
+async def create_thread(wid: str, body: ThreadIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    deps._live_work_item_row(st, wid)
+    gate = _pending_or_409(st, wid)
+    anchor = body.anchor_sha or config_mod.git_read(
+        st.run_dirs.worktrees / wid, "rev-parse", "HEAD"
+    )
+    if not anchor:
+        raise HTTPException(409, "this work item has no commit to anchor a thread to")
+    tid = await st.db.write(
+        lambda c: store.create_thread(
+            c,
+            wid=wid,
+            gate=gate,
+            anchor_sha=anchor,
+            body=body.body,
+            node_id=body.node_id,
+            file_path=body.file_path,
+            side=body.side,
+            start_line=body.start_line,
+            end_line=body.end_line,
+            label=body.label,
+            suggestion=body.suggestion.model_dump() if body.suggestion else None,
+        )
+    )
+    return _one(st, wid, tid)
+
+
+def _draft_thread_or_409(st, tid):
+    row = _thread_or_404(st, tid)
+    if not st.db.read(lambda c: store.is_draft_thread(c, tid)):
+        raise HTTPException(409, "this thread has been submitted; reply to it instead")
+    return row
+
+
+@api_router.patch("/threads/{tid}")
+async def patch_thread(tid: str, body: ThreadPatch, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = _draft_thread_or_409(st, tid)
+    fields = body.model_fields_set
+    if "suggestion" in fields:
+        try:
+            _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    kw = {}
+    if "label" in fields:
+        kw["label"] = body.label
+    if "suggestion" in fields:
+        kw["suggestion"] = body.suggestion.model_dump() if body.suggestion else None
+    await st.db.write(lambda c: store.update_draft_thread(c, tid, body=body.body, **kw))
+    return _one(st, row["work_item_id"], tid)
+
+
+@api_router.delete("/threads/{tid}", status_code=204)
+async def delete_thread(tid: str, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    _draft_thread_or_409(st, tid)
+    await st.db.write(lambda c: store.delete_draft_thread(c, tid))
+
+
+@api_router.post("/threads/{tid}/comments", status_code=201)
+async def add_comment(tid: str, body: CommentIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = _thread_or_404(st, tid)
+    _pending_or_409(st, row["work_item_id"])
+    try:
+        _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    cid = await st.db.write(
+        lambda c: store.add_draft_reply(
+            c,
+            tid,
+            body=body.body,
+            suggestion=body.suggestion.model_dump() if body.suggestion else None,
+        )
+    )
+    return st.db.read(lambda c: store.comment_dict(store.comment_row(c, cid)))
+
+
+def _draft_comment_or_409(st, cid):
+    row = st.db.read(lambda c: store.comment_row(c, cid))
+    if row is None:
+        raise HTTPException(404, f"unknown comment {cid!r}")
+    if row["author"] != store.YOU or row["review_id"] is not None:
+        raise HTTPException(409, "only an unsubmitted comment of yours can change")
+    return row
+
+
+@api_router.patch("/comments/{cid}")
+async def patch_comment(cid: str, body: CommentIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = _draft_comment_or_409(st, cid)
+    t = _thread_or_404(st, row["thread_id"])
+    try:
+        _check_suggestion(body.suggestion, t["start_line"], t["end_line"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await st.db.write(
+        lambda c: store.update_draft_comment(
+            c,
+            cid,
+            body=body.body,
+            suggestion=body.suggestion.model_dump() if body.suggestion else None,
+        )
+    )
+    return st.db.read(lambda c: store.comment_dict(store.comment_row(c, cid)))
+
+
+@api_router.delete("/comments/{cid}", status_code=204)
+async def delete_comment(cid: str, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    _draft_comment_or_409(st, cid)
+    await st.db.write(lambda c: store.delete_draft_comment(c, cid))
+
+
+async def _set_state(tid: str, request: Request, state: str):
+    _refuse_agents(request)
+    st = request.app.state
+    row = _thread_or_404(st, tid)
+    if st.db.read(lambda c: store.is_draft_thread(c, tid)):
+        raise HTTPException(409, "a draft thread has nothing to resolve yet")
+    await st.db.write(lambda c: store.set_thread_state(c, tid, state))
+    return _one(st, row["work_item_id"], tid)
+
+
+@api_router.post("/threads/{tid}/resolve")
+async def resolve_thread(tid: str, request: Request):
+    return await _set_state(tid, request, "resolved")
+
+
+@api_router.post("/threads/{tid}/reopen")
+async def reopen_thread(tid: str, request: Request):
+    return await _set_state(tid, request, "open")
+
+
+class ReviewIn(BaseModel):
+    outcome: Literal["approve", "request_changes", "comment"]
+    summary: str | None = None
+    node: str | None = None
+
+
+@api_router.post("/work-items/{wid}/gates/{gate:path}/review")
+async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
+    _refuse_agents(request)
+    st = request.app.state
+    row = deps._live_work_item_row(st, wid)
+    nodes = gate_routes.gate_nodes(st, row)
+    gate_routes._gate_or_404(nodes, gate)
+    if board._pending_gate(st, wid) != gate:
+        raise HTTPException(409, f"gate {gate!r} is not pending")
+    # Every refusal before the review is written: a refused review records nothing.
+    if body.outcome == "approve":
+        blocking = st.db.read(lambda c: store.open_must_fix(c, wid, gate))
+        if blocking:
+            raise HTTPException(
+                409, f"must-fix review threads are not resolved: {', '.join(blocking)}"
+            )
+    if body.outcome == "request_changes":
+        try:
+            executor.reject_target(nodes, executor.gate_node_index(nodes, gate), body.node)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    head = config_mod.git_read(st.run_dirs.worktrees / wid, "rev-parse", "HEAD")
+    attempts = st.db.read(lambda c: store.gate_attempts(c, wid, gate))
+    base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
+
+    async def _record():
+        return await st.db.write(
+            lambda c: store.submit_review(
+                c,
+                wid=wid,
+                gate=gate,
+                outcome=body.outcome,
+                summary=body.summary,
+                head_sha=head or "",
+                base_sha=base or "",
+            )
+        )
+
+    # The gate call is delegated to first: `approve_gate`/`reject_gate` can
+    # still refuse (missing final-review artifact, a stale chain-revision
+    # digest, invalid policy, an already-running walk) after every check
+    # above has passed. The review is only written once that refusal window
+    # has closed, so a refused review really does record nothing.
+    if body.outcome == "approve":
+        result = await gate_routes.approve_gate(wid, gate, request, None)
+        await _record()
+        return result
+    if body.outcome == "request_changes":
+        threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
+        note = store.render_note(threads, body.summary) or "Changes requested."
+        result = await gate_routes.reject_gate(
+            wid, gate, gate_routes.GateReject(note=note, node=body.node), request
+        )
+        await _record()
+        return result
+    rid = await _record()
+    try:
+        deps.spawn(
+            request.app,
+            wid,
+            review_reply.run(
+                st.db,
+                st.run_dirs,
+                work_item_id=wid,
+                gate=gate,
+                nodes=nodes,
+                launch=deps.launch(st, row["repo"]),
+            ),
+        )
+        spawned = True
+    except deps.AlreadyRunning:
+        spawned = False  # an auto-review is still running; the threads wait for the next comment
+    return {"review_id": rid, "outcome": "comment", "reply_agent": spawned}
+
+
+class ReplyIn(BaseModel):
+    body: str
+    claim: Literal["fixed", "answered", "should_fix"] | None = None
+
+
+@api_router.post("/threads/{tid}/replies", status_code=201)
+async def agent_reply(tid: str, body: ReplyIn, request: Request):
+    """The one door an agent speaks through. Author and item come from its
+    session, never from the request body."""
+    st = request.app.state
+    sid = request.headers.get("x-kraft-session-id")
+    session = (
+        st.db.read(
+            lambda c: c.execute(
+                "SELECT work_item_id, node_id FROM worker_sessions WHERE id = ?", (sid,)
+            ).fetchone()
+        )
+        if sid
+        else None
+    )
+    if session is None:
+        raise HTTPException(403, "only a Kraft worker session can reply to a thread")
+    row = _thread_or_404(st, tid)
+    if row["work_item_id"] != session["work_item_id"]:
+        raise HTTPException(403, "that thread belongs to another work item")
+    if st.db.read(lambda c: store.is_draft_thread(c, tid)):
+        raise HTTPException(404, f"unknown thread {tid!r}")
+    if not body.body.strip():
+        raise HTTPException(422, "body is empty")
+    wid, gate = row["work_item_id"], row["gate"]
+    n = len(st.db.read(lambda c: store.gate_attempts(c, wid, gate)))
+    attempt = n if board._pending_gate(st, wid) == gate else n + 1
+    cid = await st.db.write(
+        lambda c: store.agent_reply(
+            c, tid, author=session["node_id"], body=body.body, claim=body.claim, attempt=attempt
+        )
+    )
+    return st.db.read(lambda c: store.comment_dict(store.comment_row(c, cid)))

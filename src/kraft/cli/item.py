@@ -160,6 +160,14 @@ def _cmd_progress(ns: argparse.Namespace) -> None:
     common.emit(asyncio.run(client.report_progress(ns.task, ns.id)), common._render_action, ns.json)
 
 
+def _cmd_reply(ns: argparse.Namespace) -> None:
+    common.emit(
+        asyncio.run(client.reply_to_thread(ns.thread, ns.body, ns.claim)),
+        common._render_action,
+        ns.json,
+    )
+
+
 def _cmd_escalate(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.escalate(ns.message, ns.id, new_thread=ns.new_thread)),
@@ -376,6 +384,14 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     progress.add_argument("task", type=int, help="the N of the plan's '## Task N' heading")
     progress.add_argument("id", nargs="?")
     progress.set_defaults(func=_cmd_progress)
+
+    reply = subs.add_parser(
+        "reply", parents=[common], help="answer a review thread (worker sessions only)"
+    )
+    reply.add_argument("thread", help="the thread id from the review note")
+    reply.add_argument("--body", required=True)
+    reply.add_argument("--claim", choices=["fixed", "answered", "should_fix"])
+    reply.set_defaults(func=_cmd_reply)
 
     escalate = subs.add_parser(
         "escalate", parents=[common], help="ask an agent to help resolve a needs_human stop"

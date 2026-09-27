@@ -12,45 +12,17 @@ from pathlib import Path
 import httpx
 import pytest
 from support.api import (
+    _REVIEW_EARLY,
     _approve_gate,
     _await_gate,
     _poll_events,
     _poll_node_started,
     _post_default,
+    _review_early,
     _wait_for_status,
 )
 
 _FAKE_REVIEWER = Path(__file__).resolve().parents[1] / "support" / "fake_reviewer.py"
-
-
-#: The shipped `default` chain reaches its `chain_finalized` gate only after the
-#: draft merge request's automated-review wait, which has no handler until Task
-#: 9. This is the shortest V1 chain that reaches one for real: the summary
-#: author writes the review brief the gate is about.
-_REVIEW_EARLY = """\
-id: review-early
-nodes:
-  - id: implementation
-    kind: exec
-    tasks:
-      - id: implement
-        extends: implementer
-  - id: work_item_summary
-    kind: exec
-    tasks:
-      - id: author
-        extends: write_summary
-  - id: chain_review
-    kind: gate
-    chain_finalized: true
-    artifact: review_brief
-    reject_to: implementation
-"""
-
-
-def _review_early(tdir):
-    """`review-early`: a chain that reaches a final-review gate."""
-    (tdir / "chains" / "review-early.yaml").write_text(_REVIEW_EARLY)
 
 
 def _review_then_more(tdir):

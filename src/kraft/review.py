@@ -150,3 +150,33 @@ def write_package(
     path = results_dir / f"{session_id}.review.md"
     path.write_text(render_package(change, base, since=since))
     return path
+
+
+def _is_ancestor(worktree: Path, a: str, b: str) -> bool:
+    return (
+        _config.git_read(worktree, "merge-base", "--is-ancestor", a, b, expected_failure=True)
+        is not None
+    )
+
+
+def touched_by(worktree: Path, runs, from_sha: str, to_sha: str) -> dict[str, list[str]]:
+    """Which nodes changed each file inside `from_sha..to_sha`.
+
+    A run is inside the window when its end is reachable from `to_sha` and not
+    from `from_sha`; a run from before a rebase is reachable from neither, and
+    drops out.
+    # ponytail: file-level attribution, 3 git calls per run; per-run hunk diffs
+    # if a shared file's mixed hunks ever matter.
+    """
+    out: dict[str, list[str]] = {}
+    for r in runs:
+        start, end = r["start_sha"], r["end_sha"]
+        if not end or start == end:
+            continue
+        if not _is_ancestor(worktree, end, to_sha) or _is_ancestor(worktree, end, from_sha):
+            continue
+        names = _config.git_read(worktree, "diff", "--name-only", start, end) or ""
+        for path in names.splitlines():
+            if r["node_id"] not in out.setdefault(path, []):
+                out[path].append(r["node_id"])
+    return out

@@ -312,6 +312,14 @@ async def report_progress(task: int, work_item_id: str | None = None) -> dict:
     return await transport._act(f"/work-items/{target}/progress", {"task": task})
 
 
+async def reply_to_thread(thread_id: str, body: str, claim: str | None = None) -> dict:
+    """Answer a review thread as the worker this session is. Replies only:
+    resolving is the reviewer's, and the server takes the author from the
+    session, not from anything passed here."""
+    payload = {"body": body, **({"claim": claim} if claim else {})}
+    return await transport._act(f"/threads/{thread_id}/replies", payload)
+
+
 async def escalate(message: str, work_item_id: str | None = None, new_thread: bool = False) -> dict:
     """Send `message` into a work item's escalation thread, starting one if
     none exists yet. Only a `needs_human` or `paused` item has this door —

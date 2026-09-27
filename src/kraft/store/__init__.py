@@ -8,5 +8,6 @@ from kraft.store.counters import *  # noqa: F403
 from kraft.store.forks import *  # noqa: F403
 from kraft.store.gates import *  # noqa: F403
 from kraft.store.repos import *  # noqa: F403
+from kraft.store.review import *  # noqa: F403
 from kraft.store.sessions import *  # noqa: F403
 from kraft.store.work_items import *  # noqa: F403

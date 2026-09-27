@@ -323,3 +323,40 @@ async def test_auto_review_refuses_a_profiles_own_fallback_list(item_on, tmp_pat
     )
     assert verdict == "undecided"
     assert "deep" in note
+
+
+# -- Review flow: must-fix outranks an agent's approve --------------------
+
+
+async def test_a_published_must_fix_thread_downgrades_an_approve_to_undecided(
+    item_on, tmp_path, monkeypatch
+):
+    """An agent's `approve` verdict must not clear a gate a person has left an
+    unresolved must-fix thread on (review flow §3)."""
+    from kraft import store
+
+    it = await item_on(_revision_chain(tmp_path, PROPOSAL, auto_review=REVIEWER), auto_gate=True)
+    launch = REVISION_LAUNCH
+    fake_harness_home(tmp_path, ["true"])
+    _approving_agent(it, monkeypatch)
+
+    status = await _walk(it, launch)
+    assert status == "awaiting_gate"
+
+    await it.database.write(
+        lambda c: store.create_thread(
+            c, wid=it.id, gate=GATE, anchor_sha="h", body="x", label="must_fix"
+        )
+    )
+    await it.database.write(
+        lambda c: store.submit_review(
+            c, wid=it.id, gate=GATE, outcome="comment", summary=None, head_sha="h", base_sha="h"
+        )
+    )
+
+    await _review_and_approve(it, launch)
+
+    assert it.status() == "needs_human"
+    assert it.events("chain_revised") == []
+    [skipped] = it.events("gate_auto_review_skipped")
+    assert skipped["payload"]["reason"] == "undecided"
