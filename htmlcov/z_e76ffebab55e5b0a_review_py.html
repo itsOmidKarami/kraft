@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Coverage for src/kraft/api/routes/review.py: 83%</title>
+    <title>Coverage for src/kraft/api/routes/review.py: 86%</title>
     <link rel="icon" sizes="32x32" href="favicon_32_cb_c827f16f.png">
     <link rel="stylesheet" href="style_cb_4667309f.css" type="text/css">
     <script src="coverage_html_cb_15cffcd0.js" defer></script>
@@ -12,7 +12,7 @@
     <div class="content">
         <h1>
             <span class="text">Coverage for </span><b>src<span class="sep">/</span>kraft<span class="sep">/</span>api<span class="sep">/</span>routes<span class="sep">/</span>review.py</b>:
-            <span class="pc_cov">83%</span>
+            <span class="pc_cov">86%</span>
         </h1>
         <aside id="help_panel_wrapper">
             <input id="help_panel_state" type="checkbox">
@@ -55,8 +55,8 @@
         </aside>
         <h2>
             <span class="text">288 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">240<span class="text"> run</span></button>
-            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">48<span class="text"> missing</span></button>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">248<span class="text"> run</span></button>
+            <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">40<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
         <p class="text">
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_search_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 23:01 +0000
+            created at 2026-09-27 23:10 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -244,23 +244,23 @@
     <p class="pln"><span class="n"><a id="t162" href="#t162">162</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t163" href="#t163">163</a></span><span class="t"><span class="op">@</span><span class="nam">api_router</span><span class="op">.</span><span class="nam">post</span><span class="op">(</span><span class="str">&quot;/threads/{tid}/comments&quot;</span><span class="op">,</span> <span class="nam">status_code</span><span class="op">=</span><span class="num">201</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t164" href="#t164">164</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">add_comment</span><span class="op">(</span><span class="nam">tid</span><span class="op">:</span> <span class="nam">str</span><span class="op">,</span> <span class="nam">body</span><span class="op">:</span> <span class="nam">CommentIn</span><span class="op">,</span> <span class="nam">request</span><span class="op">:</span> <span class="nam">Request</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t165" href="#t165">165</a></span><span class="t">    <span class="nam">_refuse_agents</span><span class="op">(</span><span class="nam">request</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t166" href="#t166">166</a></span><span class="t">    <span class="nam">st</span> <span class="op">=</span> <span class="nam">request</span><span class="op">.</span><span class="nam">app</span><span class="op">.</span><span class="nam">state</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t167" href="#t167">167</a></span><span class="t">    <span class="nam">row</span> <span class="op">=</span> <span class="nam">_thread_or_404</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">tid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t168" href="#t168">168</a></span><span class="t">    <span class="nam">deps</span><span class="op">.</span><span class="nam">_live_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;work_item_id&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t169" href="#t169">169</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t170" href="#t170">170</a></span><span class="t">        <span class="nam">_check_suggestion</span><span class="op">(</span><span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;start_line&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;end_line&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t165" href="#t165">165</a></span><span class="t">    <span class="nam">_refuse_agents</span><span class="op">(</span><span class="nam">request</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t166" href="#t166">166</a></span><span class="t">    <span class="nam">st</span> <span class="op">=</span> <span class="nam">request</span><span class="op">.</span><span class="nam">app</span><span class="op">.</span><span class="nam">state</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t167" href="#t167">167</a></span><span class="t">    <span class="nam">row</span> <span class="op">=</span> <span class="nam">_thread_or_404</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">tid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t168" href="#t168">168</a></span><span class="t">    <span class="nam">deps</span><span class="op">.</span><span class="nam">_live_work_item_row</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;work_item_id&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t169" href="#t169">169</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t170" href="#t170">170</a></span><span class="t">        <span class="nam">_check_suggestion</span><span class="op">(</span><span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;start_line&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;end_line&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t171" href="#t171">171</a></span><span class="t">    <span class="key">except</span> <span class="nam">ValueError</span> <span class="key">as</span> <span class="nam">exc</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t172" href="#t172">172</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">422</span><span class="op">,</span> <span class="nam">str</span><span class="op">(</span><span class="nam">exc</span><span class="op">)</span><span class="op">)</span> <span class="key">from</span> <span class="nam">exc</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t173" href="#t173">173</a></span><span class="t">    <span class="nam">cid</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t174" href="#t174">174</a></span><span class="t">        <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">add_draft_reply</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t175" href="#t175">175</a></span><span class="t">            <span class="nam">c</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t176" href="#t176">176</a></span><span class="t">            <span class="nam">tid</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t177" href="#t177">177</a></span><span class="t">            <span class="nam">body</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">body</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t178" href="#t178">178</a></span><span class="t">            <span class="nam">suggestion</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span><span class="op">.</span><span class="nam">model_dump</span><span class="op">(</span><span class="op">)</span> <span class="key">if</span> <span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span> <span class="key">else</span> <span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t179" href="#t179">179</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis mis2 show_mis"><span class="n"><a id="t180" href="#t180">180</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t181" href="#t181">181</a></span><span class="t">    <span class="key">return</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">comment_dict</span><span class="op">(</span><span class="nam">store</span><span class="op">.</span><span class="nam">comment_row</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">cid</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t173" href="#t173">173</a></span><span class="t">    <span class="nam">cid</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">write</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t174" href="#t174">174</a></span><span class="t">        <span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">add_draft_reply</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t175" href="#t175">175</a></span><span class="t">            <span class="nam">c</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t176" href="#t176">176</a></span><span class="t">            <span class="nam">tid</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t177" href="#t177">177</a></span><span class="t">            <span class="nam">body</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">body</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t178" href="#t178">178</a></span><span class="t">            <span class="nam">suggestion</span><span class="op">=</span><span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span><span class="op">.</span><span class="nam">model_dump</span><span class="op">(</span><span class="op">)</span> <span class="key">if</span> <span class="nam">body</span><span class="op">.</span><span class="nam">suggestion</span> <span class="key">else</span> <span class="key">None</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t179" href="#t179">179</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run run2"><span class="n"><a id="t180" href="#t180">180</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t181" href="#t181">181</a></span><span class="t">    <span class="key">return</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">comment_dict</span><span class="op">(</span><span class="nam">store</span><span class="op">.</span><span class="nam">comment_row</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">cid</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t182" href="#t182">182</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t183" href="#t183">183</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t184" href="#t184">184</a></span><span class="t"><span class="key">def</span> <span class="nam">_draft_comment_or_409</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">cid</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -582,7 +582,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_search_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 23:01 +0000
+            created at 2026-09-27 23:10 +0000
         </p>
     </div>
 </footer>
