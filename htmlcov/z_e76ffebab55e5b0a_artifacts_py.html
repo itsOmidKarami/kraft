@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_auth_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 20:01 +0000
+            created at 2026-09-27 23:01 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -218,7 +218,7 @@
     <p class="run"><span class="n"><a id="t136" href="#t136">136</a></span><span class="t">        <span class="nam">base</span> <span class="op">=</span> <span class="nam">attempts</span><span class="op">[</span><span class="op">-</span><span class="num">1</span><span class="op">]</span><span class="op">[</span><span class="str">&quot;base_sha&quot;</span><span class="op">]</span> <span class="key">if</span> <span class="nam">attempts</span> <span class="key">else</span> <span class="nam">row</span><span class="op">[</span><span class="str">&quot;base_ref&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t137" href="#t137">137</a></span><span class="t">        <span class="key">return</span> <span class="key">None</span><span class="op">,</span> <span class="nam">base</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t138" href="#t138">138</a></span><span class="t">    <span class="key">if</span> <span class="nam">target</span> <span class="op">==</span> <span class="str">&quot;last_review&quot;</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t139" href="#t139">139</a></span><span class="t">        <span class="nam">rev</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">last_review</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">,</span> <span class="nam">gate</span><span class="op">)</span><span class="op">)</span> <span class="key">if</span> <span class="nam">gate</span> <span class="key">else</span> <span class="key">None</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t139" href="#t139">139</a></span><span class="t">        <span class="nam">rev</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">last_review</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t140" href="#t140">140</a></span><span class="t">        <span class="key">if</span> <span class="nam">rev</span> <span class="key">is</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t141" href="#t141">141</a></span><span class="t">            <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">404</span><span class="op">,</span> <span class="str">&quot;no review has been submitted for this gate&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t142" href="#t142">142</a></span><span class="t">        <span class="key">return</span> <span class="nam">rev</span><span class="op">[</span><span class="str">&quot;head_sha&quot;</span><span class="op">]</span><span class="op">,</span> <span class="nam">rev</span><span class="op">[</span><span class="str">&quot;base_sha&quot;</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
@@ -412,7 +412,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_auth_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 20:01 +0000
+            created at 2026-09-27 23:01 +0000
         </p>
     </div>
 </footer>

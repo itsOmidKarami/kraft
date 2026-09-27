@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 20:01 +0000
+            created at 2026-09-27 23:01 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -279,7 +279,7 @@
     <p class="run"><span class="n"><a id="t197" href="#t197">197</a></span><span class="t">    <span class="nam">_gate_or_404</span><span class="op">(</span><span class="nam">gate_nodes</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">row</span><span class="op">)</span><span class="op">,</span> <span class="nam">gate</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t198" href="#t198">198</a></span><span class="t">    <span class="key">if</span> <span class="nam">board</span><span class="op">.</span><span class="nam">_pending_gate</span><span class="op">(</span><span class="nam">st</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span> <span class="op">!=</span> <span class="nam">gate</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t199" href="#t199">199</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">gate </span><span class="op">{</span><span class="nam">gate</span><span class="op">!</span><span class="nam">r</span><span class="op">}</span><span class="fst"> is not pending</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t200" href="#t200">200</a></span><span class="t">    <span class="nam">blocking</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">open_must_fix</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">,</span> <span class="nam">gate</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t200" href="#t200">200</a></span><span class="t">    <span class="nam">blocking</span> <span class="op">=</span> <span class="nam">st</span><span class="op">.</span><span class="nam">db</span><span class="op">.</span><span class="nam">read</span><span class="op">(</span><span class="key">lambda</span> <span class="nam">c</span><span class="op">:</span> <span class="nam">store</span><span class="op">.</span><span class="nam">open_must_fix</span><span class="op">(</span><span class="nam">c</span><span class="op">,</span> <span class="nam">wid</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t201" href="#t201">201</a></span><span class="t">    <span class="key">if</span> <span class="nam">blocking</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t202" href="#t202">202</a></span><span class="t">        <span class="key">raise</span> <span class="nam">HTTPException</span><span class="op">(</span><span class="num">409</span><span class="op">,</span> <span class="fst">f&quot;</span><span class="fst">must-fix review threads are not resolved: </span><span class="op">{</span><span class="str">&#x27;, &#x27;</span><span class="op">.</span><span class="nam">join</span><span class="op">(</span><span class="nam">blocking</span><span class="op">)</span><span class="op">}</span><span class="fst">&quot;</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t203" href="#t203">203</a></span><span class="t">    <span class="com"># A pending gate&#x27;s status is already needs_human (never active), so the</span>&nbsp;</span><span class="r"></span></p>
@@ -469,7 +469,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_harnesses_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-27 20:01 +0000
+            created at 2026-09-27 23:01 +0000
         </p>
     </div>
 </footer>
