@@ -445,11 +445,12 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     reported cost -- never a stale value left over from an earlier tick on a
     different model.
 
-    Wall time and the *real* cost stay with `session_exited`, which writes
-    the authoritative final figures, clears `cost_estimated`, and corrects
-    any live drift. `status = 'running'` guards the update: a paused or
-    finished session's numbers are settled, and a late progress write must
-    not reopen them.
+    Wall time and the settled cost stay with `session_exited` (`_settle_cost`),
+    which writes the agent's own figure when it reported one -- clearing
+    `cost_estimated` -- or a fresh, final-tokens estimate when it did not,
+    correcting any live drift either way. `status = 'running'` guards the
+    update: a paused or finished session's numbers are settled, and a late
+    progress write must not reopen them.
     """
     estimate = _usage.estimate_cost(usage, usage.model)
     conn.execute(
@@ -504,6 +505,28 @@ def _own_share(
     return usage
 
 
+def _settle_cost(usage: Usage) -> tuple[float | None, int]:
+    """`(cost_usd, cost_estimated)` for a session that has stopped running --
+    paused or exited -- given the usage its final read carried (Kraft-wz83s).
+
+    The agent's own figure wins when it reported one: `(usage.cost_usd, 0)`,
+    settled and no longer a guess. When it did not -- a crash, or an
+    interruption before the agent's first response -- the row must not lose
+    the only spend figure Kraft has by falling back to `NULL`: this
+    re-estimates from the session's final tokens instead, `cost_estimated`
+    left set. `include_output=True` here (unlike `session_progress`'s live
+    tick): by now `tokens_out` is the exit envelope's real, final count, not
+    the live stream's unknown one, so there's no reason left to leave it
+    unpriced. Still `None` when the model isn't in the rate table -- a
+    session on a model this snapshot has never priced gets no guess either
+    way, exactly as before.
+    """
+    if usage.cost_usd is not None:
+        return usage.cost_usd, 0
+    estimate = _usage.estimate_cost(usage, usage.model, include_output=True)
+    return estimate, int(estimate is not None)
+
+
 def record_pause_usage(
     conn: sqlite3.Connection,
     session_id,
@@ -526,10 +549,11 @@ def record_pause_usage(
     No `wall_ms`: it is derived from `started_at` and `exited_at` at read time
     (`_common.session_wall_ms`), and the pause already wrote both.
 
-    A None `usage` is a no-op. An agent interrupted before its first response
-    completes has no envelope and nothing to report, and `usage.py` deliberately
-    has no rate table -- NULL is the honest record of that, and `cost_complete`
-    already renders it as a floor rather than a total.
+    A None `usage` is a no-op: there is nothing at all to settle, not even
+    tokens to estimate from. `_settle_cost` handles the case where `usage` is
+    real but carries no reported cost -- an agent interrupted before its
+    first response has no envelope, but a later one that had already spent
+    tokens still gets an estimate rather than a lost figure.
 
     Guarded on `status = 'paused'` for the reason `session_progress` guards on
     `'running'`: a row that has moved on has settled numbers.
@@ -537,12 +561,11 @@ def record_pause_usage(
     usage = _own_share(conn, session_id, usage, reader)
     if usage is None:
         return
-    # The agent's own figure (or NULL, honestly, when it reported none) --
-    # never left marked as still-estimated once a real read has landed.
+    cost, estimated = _settle_cost(usage)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-        "cost_estimated = 0 WHERE id = ? AND status = 'paused'",
-        (usage.model, *_tokens(usage), usage.cost_usd, session_id),
+        "cost_estimated = ? WHERE id = ? AND status = 'paused'",
+        (usage.model, *_tokens(usage), cost, estimated, session_id),
     )
 
 
@@ -599,18 +622,20 @@ def session_exited(
         payload["question"] = question
     usage = _own_share(conn, session_id, usage, reader)
     if usage is not None:
-        # The exit envelope is the real figure -- or NULL, honestly, when the
-        # agent reported none -- so any estimate `session_progress` left
-        # standing is cleared here regardless of which way `cost_usd` lands.
+        # The exit envelope's own figure settles the row when it reported one
+        # (`_settle_cost`); when it did not, a fresh final-tokens estimate
+        # stands in rather than losing the only spend figure Kraft has to a
+        # NULL (Kraft-wz83s) -- `cost_estimated` says which happened.
+        cost, estimated = _settle_cost(usage)
         conn.execute(
             f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
-            "cost_estimated = 0, wall_ms = ? WHERE id = ?",
-            (usage.model, *_tokens(usage), usage.cost_usd, wall_ms, session_id),
+            "cost_estimated = ?, wall_ms = ? WHERE id = ?",
+            (usage.model, *_tokens(usage), cost, estimated, wall_ms, session_id),
         )
         payload |= {
             "model": usage.model,
             **dict(zip(_usage.KINDS, _tokens(usage), strict=True)),
-            "cost_usd": usage.cost_usd,
+            "cost_usd": cost,
         }
     else:
         conn.execute("UPDATE worker_sessions SET wall_ms = ? WHERE id = ?", (wall_ms, session_id))

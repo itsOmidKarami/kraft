@@ -667,10 +667,13 @@ async def test_exit_replaces_the_estimate_with_the_real_cost_and_clears_the_flag
     assert row["cost_estimated"] == 0
 
 
-async def test_exit_with_no_reported_cost_does_not_leave_the_estimate_standing(database):
-    """An agent that reports no cost at exit must not leave the running guess
-    looking like a settled figure -- `cost_usd` goes back to the honest NULL a
-    finished session with no reported cost always gets."""
+async def test_exit_with_no_reported_cost_keeps_an_estimate_from_final_tokens(database):
+    """An agent that crashes or reports no cost at exit must not lose the only
+    spend figure Kraft has: `cost_usd` becomes a fresh estimate off the
+    session's final tokens (output included, since it's known by now) rather
+    than the NULL a session with no tokens at all would get -- and
+    `cost_estimated` stays set, since this is still a guess, not the agent's
+    own number."""
     await _running_review(database)
     live = Usage(tokens_in=1_000_000, tokens_out=None, model="claude-sonnet-5")
     await database.write(lambda c: store.session_progress(c, "s1", live))
@@ -678,6 +681,21 @@ async def test_exit_with_no_reported_cost_does_not_leave_the_estimate_standing(d
 
     await _exit(database, "s1", "done", None, Usage(1_000_000, 500, None, "claude-sonnet-5"))
 
+    # claude-sonnet-5: $2/M input + $10/M output -- 1,000,000 input and 500
+    # output is 2.0 + 0.005 = 2.005.
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] == pytest.approx(2.005)
+    assert row["cost_estimated"] == 1
+
+
+async def test_exit_with_no_reported_cost_and_no_priced_model_stays_null(database):
+    """A model the rate table has never priced still gets no guess at all --
+    same shape as before this fix, just narrower: unpriceable, not merely
+    unreported."""
+    await _running_review(database)
+    await _exit(
+        database, "s1", "done", None, Usage(1_000_000, 500, None, "some-model-nobody-priced")
+    )
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] is None
     assert row["cost_estimated"] == 0
@@ -698,3 +716,20 @@ async def test_pause_also_clears_a_running_estimate(database):
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] == pytest.approx(3.33)
     assert row["cost_estimated"] == 0
+
+
+async def test_pause_with_no_reported_cost_keeps_an_estimate_from_final_tokens(database):
+    """A human interrupting a session that had already spent tokens must not
+    lose that spend to a NULL just because the read at pause time carried no
+    cost -- same rule as the exit path (Kraft-wz83s)."""
+    await _running_review(database)
+    await database.write(lambda c: store.pause_work_item(c, "w1", ["s1"]))
+
+    await database.write(
+        lambda c: store.record_pause_usage(c, "s1", Usage(1_000_000, 500, None, "claude-sonnet-5"))
+    )
+    # claude-sonnet-5: $2/M input + $10/M output -- 1,000,000 input and 500
+    # output is 2.0 + 0.005 = 2.005.
+    row = _row(database, "s1", "cost_usd, cost_estimated")
+    assert row["cost_usd"] == pytest.approx(2.005)
+    assert row["cost_estimated"] == 1

@@ -14,10 +14,15 @@ WHILE a session is running, the system SHALL price its known live tokens (input,
 enforced-by: tests/store/test_sessions.py::test_session_progress_estimates_cost_for_a_known_model, tests/store/test_sessions.py::test_session_progress_estimates_nothing_for_an_unknown_model, tests/test_usage_pricing.py::test_estimate_cost_prices_live_tokens_for_a_known_model, tests/test_usage_pricing.py::test_estimate_cost_is_none_for_an_unpriced_model
 origin: src/kraft/usage.py §estimate_cost, src/kraft/store/sessions.py §session_progress (Kraft-wz83s)
 
+## REQ cache-write-is-priced-at-the-one-hour-tier
+The system SHALL price a claude session's cache-write tokens at Anthropic's 1-hour cache-creation rate (2x the model's input rate), not models.dev's own 5-minute figure, so `estimate_cost` reproduces a real session's own reported `total_cost_usd`.
+enforced-by: tests/test_usage_pricing.py::test_estimate_cost_reproduces_a_real_sessions_bill
+origin: dev/refresh_prices.py §CACHE_WRITE_MULTIPLE (Kraft-wz83s)
+
 ## REQ exit-replaces-the-estimate-and-never-leaves-it-standing
-WHEN a session exits or is paused, the system SHALL overwrite any estimated `cost_usd` with the agent's own reported figure (or `NULL` when the agent reported none) and SHALL clear `cost_estimated`, so an estimate never survives as if it were the session's final cost.
-enforced-by: tests/store/test_sessions.py::test_exit_replaces_the_estimate_with_the_real_cost_and_clears_the_flag, tests/store/test_sessions.py::test_exit_with_no_reported_cost_does_not_leave_the_estimate_standing, tests/store/test_sessions.py::test_pause_also_clears_a_running_estimate
-origin: src/kraft/store/sessions.py §session_exited, §record_pause_usage (Kraft-wz83s)
+WHEN a session exits or is paused and the read carries a reported cost, the system SHALL overwrite `cost_usd` with that figure and SHALL clear `cost_estimated`. IF the read carries no reported cost, THEN the system SHALL keep or refresh `cost_usd` as an estimate from the session's final tokens (output included) rather than discard it to `NULL`, and SHALL leave `cost_estimated` set, unless the session's model is not in the rate table, in which case `cost_usd` stays `NULL`.
+enforced-by: tests/store/test_sessions.py::test_exit_replaces_the_estimate_with_the_real_cost_and_clears_the_flag, tests/store/test_sessions.py::test_exit_with_no_reported_cost_keeps_an_estimate_from_final_tokens, tests/store/test_sessions.py::test_exit_with_no_reported_cost_and_no_priced_model_stays_null, tests/store/test_sessions.py::test_pause_also_clears_a_running_estimate, tests/store/test_sessions.py::test_pause_with_no_reported_cost_keeps_an_estimate_from_final_tokens, tests/test_usage_pricing.py::test_a_finished_priced_session_with_no_reported_cost_is_complete_but_estimated
+origin: src/kraft/store/sessions.py §session_exited, §record_pause_usage, §_settle_cost (Kraft-wz83s)
 
 ## REQ budget-counts-a-running-sessions-estimated-spend
 WHILE a work item has a running session with an estimated cost, the system SHALL include that estimate in `budget_spend` and in `caps.budget_breach`, so a dollar cap can stop a launch before the session that would breach it has exited.

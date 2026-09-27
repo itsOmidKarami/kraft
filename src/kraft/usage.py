@@ -24,11 +24,16 @@ exist yet -- the agent has not been billed -- so there is nothing for Kraft to
 defer to. `estimate_cost` prices its live tokens (input, cache read, cache
 write; not output, which is unknown live -- see `Usage.tokens_out`) against
 `prices.json`, a packaged per-model rate table snapshotted from models.dev.
-`worker_sessions.cost_estimated` marks a row carrying this guess; the exit
-envelope overwrites it with the real figure and clears the flag the moment
-the session ends, so an estimate never survives as if it were final. A model
-missing from the table gets no estimate (`None`), exactly as a finished
-session with no reported cost gets no total.
+`worker_sessions.cost_estimated` marks a row carrying this guess. The exit or
+pause envelope overwrites it with the agent's own figure and clears the flag
+the moment the session settles -- *when that envelope reports a cost*. When it
+does not (a crash, or an interruption before the agent's first response), the
+row keeps an estimate rather than losing the only spend figure Kraft has:
+`_settle_cost` (`store.sessions`) re-estimates from the session's final tokens
+(output included now, since it's known) and leaves `cost_estimated` set. A
+model missing from the table still gets no estimate at all (`None`), exactly
+as a finished session with no reported cost and no priceable model gets no
+total.
 """
 
 from __future__ import annotations
@@ -105,16 +110,30 @@ def _prices() -> dict:
         return {}
 
 
-def estimate_cost(usage: Usage, model: str | None) -> float | None:
-    """A running session's cost so far, estimated from its known-live tokens.
+def estimate_cost(usage: Usage, model: str | None, *, include_output: bool = False) -> float | None:
+    """A session's cost, estimated from its tokens against `prices.json`.
 
-    Only input, cache read and cache write are priced: output tokens are
-    unknown while a claude session runs (`Usage.tokens_out`), so pricing them
-    would fold the same wrong number `from_stream` now refuses to publish
-    straight into a dollar figure. The estimate is therefore always a floor on
-    the session's eventual cost, same shape as `cost_complete` elsewhere in
-    this module. `None` when `model` is not in `prices.json` -- a session on a
+    Input, cache read and cache write are always priced. `include_output`
+    defaults False -- the live case (`session_progress`): output tokens are
+    unknown while a claude session runs (`Usage.tokens_out` is `None`), so
+    pricing them would fold the same wrong number `from_stream` now refuses to
+    publish straight into a dollar figure, and the estimate is a floor on the
+    session's eventual cost, same shape as `cost_complete` elsewhere in this
+    module. `None` when `model` is not in `prices.json` -- a session on a
     model this snapshot has never priced gets no guess, not a wrong one.
+
+    `include_output=True` is the settled case (`session_exited`,
+    `record_pause_usage`, via `_settle_cost`): by then `tokens_out` is the
+    exit envelope's real, final count, not the live stream's unknown one, so
+    there is no reason left to leave it unpriced -- doing so would still
+    under-report a crashed or interrupted session's only spend figure by
+    whatever it had generated.
+
+    `prices.json`'s `cache_write` is the 1-hour cache-creation rate (2x
+    input), not models.dev's own 5-minute figure (1.25x input) -- Claude Code
+    writes 1-hour entries. `dev/refresh_prices.py` derives it rather than
+    trusting models.dev's `cache_write`; see `CACHE_WRITE_MULTIPLE` there for
+    the proof against a real session's `total_cost_usd`.
     """
     rates = _prices().get(model or "")
     if not isinstance(rates, dict):
@@ -124,6 +143,8 @@ def estimate_cost(usage: Usage, model: str | None) -> float | None:
         + usage.tokens_cache_read * rates.get("cache_read", 0)
         + usage.tokens_cache_write * rates.get("cache_write", 0)
     )
+    if include_output:
+        per_million += (usage.tokens_out or 0) * rates.get("output", 0)
     return per_million / 1_000_000
 
 
