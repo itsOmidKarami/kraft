@@ -335,6 +335,11 @@ async def report_progress(wid: str, body: Progress, request: Request):
                 "hold an agent task with no `skill:`), so it has no plan progress",
             )
         raise HTTPException(409, "work item is not running its implementation node")
+    if progress_mod.rework_run(st.db, row):
+        # Kraft-hj2q9: no event, so no client rebuilds a task bar from one.
+        raise HTTPException(
+            409, "this run is rework after a gate rejection: it follows the note, not the plan"
+        )
     worktree = st.run_dirs.worktrees / wid
     tasks = progress_mod.tasks_for(row, worktree)
     if not tasks:

@@ -441,6 +441,37 @@ def test_rejecting_the_final_gate_re_enters_at_implementation(client, repo, tmp_
     assert "the retry path is untested" in prompts.read_text()
 
 
+@_REVIEW
+def test_a_rework_run_is_not_told_to_report_plan_progress(client, repo, tmp_path, monkeypatch):
+    """Kraft-hj2q9: bounced back by a rejection, implementation works from the
+    note, so its prompt drops the plan-progress instruction the first run had."""
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    prompts = tmp_path / "prompts.log"
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE_PROMPT_LOG", str(prompts))
+    plan = repo / "plan.md"
+    plan.write_text("# p\n\n## Task 1 — parse\n\n## Task 2 — serve\n")
+    wid = client.post(
+        "/api/work-items",
+        json={
+            "title": "make the failing test pass",
+            "repo": str(repo),
+            "chain_template": "review-early",
+            "attachments": [{"kind": "plan", "path": str(plan)}],
+        },
+    ).json()["id"]
+    _await_gate(client, wid, "chain_review")
+    r = client.post(
+        f"/api/work-items/{wid}/gates/chain_review/reject", json={"note": "rework this"}
+    )
+    assert r.status_code == 200, r.text
+    _poll_events(client, wid, "gate_requested", count=2)
+
+    implementer = [p for p in prompts.read_text().split("\0") if "make the failing test pass" in p]
+    first, rework = implementer[0], next(p for p in implementer if "rework this" in p)
+    assert "`kraft item progress K`" in first
+    assert "kraft item progress" not in rework
+
+
 def test_reject_refuses_a_node_after_its_gate(client, repo, monkeypatch):
     """A rejection is backward motion. Naming a later node would let the human
     skip every node between the gate and the target."""
