@@ -199,10 +199,21 @@ def test_worker_agents_cannot_use_human_routes(client, gated):
     )
 
 
-def test_threads_need_a_pending_gate(client, repo, monkeypatch):
+def test_threads_can_be_filed_without_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
-    assert _new_thread(client, wid).status_code == 409
+    r = _new_thread(client, wid, label="question", anchor_sha="0" * 40)
+    assert r.status_code == 201, r.text
+    assert r.json()["gate"] is None
+
+
+def test_threads_are_refused_on_a_finished_item(client, repo, monkeypatch):
+    from support.api import _set_status
+
+    monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
+    wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+    _set_status(wid, "completed")
+    assert _new_thread(client, wid, anchor_sha="0" * 40).status_code == 409
 
 
 @_REVIEW

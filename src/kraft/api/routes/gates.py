@@ -197,7 +197,7 @@ async def approve_gate(wid: str, gate: str, request: Request, body: GateApprove 
     _gate_or_404(gate_nodes(st, row), gate)
     if board._pending_gate(st, wid) != gate:
         raise HTTPException(409, f"gate {gate!r} is not pending")
-    blocking = st.db.read(lambda c: store.open_must_fix(c, wid, gate))
+    blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
     if blocking:
         raise HTTPException(409, f"must-fix review threads are not resolved: {', '.join(blocking)}")
     # A pending gate's status is already needs_human (never active), so the

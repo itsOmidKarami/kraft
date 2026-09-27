@@ -77,13 +77,6 @@ def _refuse_agents(request: Request) -> None:
         raise HTTPException(403, "worker agents reply through POST /threads/{id}/replies")
 
 
-def _pending_or_409(st, wid: str) -> str:
-    gate = board._pending_gate(st, wid)
-    if gate is None:
-        raise HTTPException(409, "review threads need a pending gate")
-    return gate
-
-
 def _thread_or_404(st, tid: str):
     row = st.db.read(lambda c: store.thread_row(c, tid))
     if row is None:
@@ -107,7 +100,7 @@ async def create_thread(wid: str, body: ThreadIn, request: Request):
     _refuse_agents(request)
     st = request.app.state
     deps._live_work_item_row(st, wid)
-    gate = _pending_or_409(st, wid)
+    gate = board._pending_gate(st, wid)
     anchor = body.anchor_sha or config_mod.git_read(
         st.run_dirs.worktrees / wid, "rev-parse", "HEAD"
     )
@@ -172,7 +165,7 @@ async def add_comment(tid: str, body: CommentIn, request: Request):
     _refuse_agents(request)
     st = request.app.state
     row = _thread_or_404(st, tid)
-    _pending_or_409(st, row["work_item_id"])
+    deps._live_work_item_row(st, row["work_item_id"])
     try:
         _check_suggestion(body.suggestion, row["start_line"], row["end_line"])
     except ValueError as exc:
@@ -263,7 +256,7 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
         raise HTTPException(409, f"gate {gate!r} is not pending")
     # Every refusal before the review is written: a refused review records nothing.
     if body.outcome == "approve":
-        blocking = st.db.read(lambda c: store.open_must_fix(c, wid, gate))
+        blocking = st.db.read(lambda c: store.open_must_fix(c, wid))
         if blocking:
             raise HTTPException(
                 409, f"must-fix review threads are not resolved: {', '.join(blocking)}"
@@ -281,7 +274,7 @@ async def submit_review(wid: str, gate: str, body: ReviewIn, request: Request):
     base = attempts[-1]["base_sha"] if attempts else (row["base_ref"] or head)
     note = None
     if body.outcome == "request_changes":
-        threads = st.db.read(lambda c: store.threads_for(c, wid, gate))
+        threads = st.db.read(lambda c: store.threads_for(c, wid))
         note = store.render_note(threads, body.summary) or "Changes requested."
     # Recorded *before* the gate call (Kraft-dl5fl): a reject starts the walk,
     # and the re-run agent may reply to these threads before this route

@@ -35,6 +35,7 @@ __all__ = [
     "open_must_fix",
     "pin_gate",
     "render_note",
+    "render_threads",
     "set_thread_state",
     "start_run",
     "publish_review",
@@ -280,26 +281,26 @@ def threads_for(conn, wid, gate=None) -> list[dict]:
     return out
 
 
-def open_must_fix(conn, wid, gate) -> list[str]:
+def open_must_fix(conn, wid) -> list[str]:
     return [
         r["id"]
         for r in conn.execute(
-            "SELECT id FROM review_threads WHERE work_item_id = ? AND gate = ? "
+            "SELECT id FROM review_threads WHERE work_item_id = ? "
             "AND label = 'must_fix' AND state != 'resolved' ORDER BY created_at, rowid",
-            (wid, gate),
+            (wid,),
         ).fetchall()
     ]
 
 
-def unanswered(conn, wid, gate) -> list[dict]:
+def unanswered(conn, wid) -> list[dict]:
     return [
         t
-        for t in threads_for(conn, wid, gate)
+        for t in threads_for(conn, wid)
         if not t["draft"] and t["state"] != "resolved" and t["comments"][-1]["author"] == YOU
     ]
 
 
-def record_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+def record_review(conn, *, wid, gate: str | None, outcome, summary, head_sha, base_sha) -> str:
     """The review row, and every draft comment on this gate stamped with it --
     no event yet. The submit route calls this *before* the gate call, so a walk
     the gate call starts never sees its threads as drafts (Kraft-dl5fl), and
@@ -312,8 +313,8 @@ def record_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> s
     )
     conn.execute(
         "UPDATE review_comments SET review_id = ? WHERE review_id IS NULL AND author = ? "
-        "AND thread_id IN (SELECT id FROM review_threads WHERE work_item_id = ? AND gate = ?)",
-        (rid, YOU, wid, gate),
+        "AND thread_id IN (SELECT id FROM review_threads WHERE work_item_id = ?)",
+        (rid, YOU, wid),
     )
     return rid
 
@@ -337,7 +338,7 @@ def unrecord_review(conn, rid: str) -> None:
     conn.execute("DELETE FROM reviews WHERE id = ?", (rid,))
 
 
-def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> str:
+def submit_review(conn, *, wid, gate: str | None, outcome, summary, head_sha, base_sha) -> str:
     """`record_review` and `publish_review` in one step, for a caller with no
     gate call in between."""
     rid = record_review(
@@ -353,11 +354,11 @@ def submit_review(conn, *, wid, gate, outcome, summary, head_sha, base_sha) -> s
     return rid
 
 
-def last_review(conn, wid, gate):
+def last_review(conn, wid):
     return conn.execute(
-        "SELECT * FROM reviews WHERE work_item_id = ? AND gate = ? "
-        "ORDER BY submitted_at DESC, rowid DESC LIMIT 1",
-        (wid, gate),
+        "SELECT * FROM reviews WHERE work_item_id = ? ORDER BY submitted_at DESC, rowid DESC "
+        "LIMIT 1",
+        (wid,),
     ).fetchone()
 
 
@@ -367,12 +368,11 @@ _NOTE_HEAD = (
 )
 
 
-def render_note(threads: list[dict], summary: str | None) -> str:
-    parts = [summary.strip()] if summary and summary.strip() else []
-    live = [t for t in threads if t["state"] != "resolved"]
-    if live:
-        parts.append(_NOTE_HEAD)
-    for t in live:
+def render_threads(threads: list[dict]) -> str:
+    blocks = []
+    for t in threads:
+        if t["state"] == "resolved":
+            continue
         where = "(whole change)"
         if t["file_path"]:
             where = t["file_path"]
@@ -386,5 +386,13 @@ def render_note(threads: list[dict], summary: str | None) -> str:
             lines.append(f"Suggested replacement for lines {s['start_line']}-{s['end_line']}:")
             lines += ["    " + ln for ln in s["replacement"].splitlines()]
         lines += [f"  > {r['author']}: {r['body']}" for r in replies]
-        parts.append("\n".join(lines))
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def render_note(threads: list[dict], summary: str | None) -> str:
+    parts = [summary.strip()] if summary and summary.strip() else []
+    body = render_threads(threads)
+    if body:
+        parts += [_NOTE_HEAD, body]
     return "\n\n".join(parts)

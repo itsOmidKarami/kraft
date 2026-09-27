@@ -30,8 +30,26 @@ origin: src/kraft/api/routes/review.py
 ## REQ unresolved-must-fix-blocks-every-approval
 WHILE a `must_fix` thread is not resolved, the system SHALL refuse every
 approval of a gate, by a person or by an agent.
-enforced-by: tests/api/test_review.py::test_approve_is_refused_while_a_must_fix_is_open_even_a_draft, tests/executor/test_gates_autoreview.py::test_a_published_must_fix_thread_downgrades_an_approve_to_undecided
+enforced-by: tests/api/test_review.py::test_approve_is_refused_while_a_must_fix_is_open_even_a_draft, tests/executor/test_gates_autoreview.py::test_a_published_must_fix_thread_downgrades_an_approve_to_undecided, tests/store/test_review.py::test_a_must_fix_filed_at_any_gate_or_none_blocks
 origin: src/kraft/api/routes/gates.py
+
+## REQ threads-can-be-filed-without-a-pending-gate
+WHEN a person files a review thread on a work item with no pending gate, the
+system SHALL accept it and record that it was filed with no gate.
+enforced-by: tests/api/test_review.py::test_threads_can_be_filed_without_a_pending_gate
+origin: src/kraft/api/routes/review.py
+
+## REQ threads-refused-on-a-finished-item
+IF a person files a review thread on a completed or abandoned work item, THEN
+the system SHALL refuse it.
+enforced-by: tests/api/test_review.py::test_threads_are_refused_on_a_finished_item
+origin: src/kraft/api/routes/review.py
+
+## REQ must-fix-blocks-approval-wherever-it-was-filed
+WHILE a `must_fix` thread on a work item is not resolved, the system SHALL
+refuse approving any of that item's gates, wherever the thread was filed.
+enforced-by: tests/store/test_review.py::test_a_must_fix_filed_at_any_gate_or_none_blocks
+origin: src/kraft/store/review.py
 
 ## REQ request-changes-sends-open-threads-as-the-note
 WHEN a person requests changes, the system SHALL send every unresolved

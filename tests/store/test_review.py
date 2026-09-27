@@ -71,17 +71,18 @@ async def test_a_new_thread_is_a_draft_until_submitted(database):
     assert "review_submitted" in types
 
 
-async def test_submit_stamps_only_this_gates_drafts(database):
+async def test_submit_stamps_every_draft_on_the_item(database):
+    """Threads belong to the item: one submission publishes every draft of yours."""
     await mk_item(database)
     here = await _thread(database)
-    other = await _thread(database, gate="spec_approval")
+    mid_run = await _thread(database, gate=None)
     await database.write(
         lambda c: store.submit_review(
             c, wid="w1", gate="review", outcome="comment", summary=None, head_sha="h", base_sha="b"
         )
     )
     assert not database.read(lambda c: store.is_draft_thread(c, here))
-    assert database.read(lambda c: store.is_draft_thread(c, other))
+    assert not database.read(lambda c: store.is_draft_thread(c, mid_run))
 
 
 async def test_agent_claim_moves_state_and_reply_without_claim_does_not(database):
@@ -131,7 +132,14 @@ async def test_open_must_fix_counts_drafts_and_skips_resolved(database):
     done = await _thread(database, label="must_fix")
     await _thread(database, label="nit")
     await database.write(lambda c: store.set_thread_state(c, done, "resolved"))
-    assert database.read(lambda c: store.open_must_fix(c, "w1", "review")) == [draft]
+    assert database.read(lambda c: store.open_must_fix(c, "w1")) == [draft]
+
+
+async def test_a_must_fix_filed_at_any_gate_or_none_blocks(database):
+    await mk_item(database)
+    elsewhere = await _thread(database, gate="spec_approval", label="must_fix")
+    mid_run = await _thread(database, gate=None, label="must_fix")
+    assert database.read(lambda c: store.open_must_fix(c, "w1")) == [elsewhere, mid_run]
 
 
 async def test_unanswered_is_threads_whose_last_word_is_yours(database):
@@ -148,7 +156,7 @@ async def test_unanswered_is_threads_whose_last_word_is_yours(database):
             c, answered, author="implementation", body="ok", claim="answered", attempt=1
         )
     )
-    got = database.read(lambda c: store.unanswered(c, "w1", "review"))
+    got = database.read(lambda c: store.unanswered(c, "w1"))
     assert [t["id"] for t in got] == [waiting]
 
 
@@ -168,7 +176,7 @@ async def test_unanswered_includes_a_claimed_thread_after_a_new_human_reply(data
         )
     )
     assert database.read(lambda c: store.thread_row(c, tid))["state"] == "claimed"
-    assert database.read(lambda c: store.unanswered(c, "w1", "review")) == []
+    assert database.read(lambda c: store.unanswered(c, "w1")) == []
 
     await database.write(lambda c: store.add_draft_reply(c, tid, body="still broken"))
     await database.write(
@@ -176,7 +184,7 @@ async def test_unanswered_includes_a_claimed_thread_after_a_new_human_reply(data
             c, wid="w1", gate="review", outcome="comment", summary=None, head_sha="h2", base_sha="b"
         )
     )
-    got = database.read(lambda c: store.unanswered(c, "w1", "review"))
+    got = database.read(lambda c: store.unanswered(c, "w1"))
     assert [t["id"] for t in got] == [tid]
 
 

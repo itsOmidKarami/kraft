@@ -368,9 +368,7 @@ async def review_gates(
             )
             return status_of(db, work_item_id)
 
-        if verdict == "approve" and db.read(
-            lambda c, gate=gate: store.open_must_fix(c, work_item_id, gate)
-        ):
+        if verdict == "approve" and db.read(lambda c: store.open_must_fix(c, work_item_id)):
             # A person's must-fix outranks an agent's approval (review flow §3).
             verdict = "undecided"
 
