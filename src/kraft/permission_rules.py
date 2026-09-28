@@ -107,3 +107,11 @@ def render(
     if allowed is None and not deny:
         return {}, ()
     return RENDERERS[renderer](tool_names, allowed, deny, directory, session_id)
+
+
+def files_in(argv: tuple[str, ...], directory: Path) -> tuple[str, ...]:
+    """The files a renderer wrote under `directory` that `argv` names: what a
+    sandboxed launch must mount read-only, or its CLI silently falls back to
+    its own built-in rules (amp does, for a settings file it cannot find)."""
+    root = directory.resolve()
+    return tuple(a for a in argv if Path(a).is_file() and Path(a).resolve().is_relative_to(root))

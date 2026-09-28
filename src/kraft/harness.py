@@ -142,6 +142,12 @@ class Harness:
     #: The `permission_rules.RENDERERS` key that writes policy into this CLI's
     #: own permission config at launch, for a CLI with no hook (Kraft-4in7z.4).
     permission_rules: str | None = None
+    #: The `permission_mode` value a launch gets when Kraft's own sandbox is
+    #: the boundary and the launch chose no mode of its own: a CLI whose inner
+    #: sandbox cannot run inside a container (codex's bubblewrap cannot create
+    #: a namespace under Docker's default seccomp profile, so every shell
+    #: command it runs fails) is told to leave isolation to the container.
+    container_permission_mode: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -282,6 +288,15 @@ class Harness:
                     f"known: {sorted(RENDERERS)}"
                 )
 
+        mode = parsed.container_permission_mode
+        if mode is not None:
+            cap = caps.get("permission_mode")
+            if cap is None or (cap.values and not any(re.fullmatch(v, mode) for v in cap.values)):
+                raise HarnessError(
+                    f"{where}: container_permission_mode {mode!r} is not a value its "
+                    "'permission_mode' capability accepts"
+                )
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -309,6 +324,7 @@ class Harness:
             unhooked_tools=tuple(parsed.unhooked_tools),
             permission_hook=parsed.permission_hook,
             permission_rules=parsed.permission_rules,
+            container_permission_mode=parsed.container_permission_mode,
         )
 
     def supports(self, name: str) -> bool:
@@ -381,6 +397,7 @@ class HarnessInput(BaseModel):
     unhooked_tools: list[StrictStr] = []
     permission_hook: StrictStr | None = None
     permission_rules: StrictStr | None = None
+    container_permission_mode: StrictStr | None = None
 
 
 #: What each capability key's shape is, in the words an operator reads.

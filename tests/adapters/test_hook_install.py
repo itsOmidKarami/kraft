@@ -67,6 +67,8 @@ def test_installed_once_and_never_seen_by_git(tmp_path):
     hi.install_cursor_hook(wt, ARGV)  # relaunch
     assert [h["command"] for h in _pre_tool_use(wt)] == [hi.command_of(ARGV)]
     assert _pre_tool_use(wt)[0]["timeout"] == 10
+    # Cursor allows the call when a hook crashes or times out, unless told not to.
+    assert _pre_tool_use(wt)[0]["failClosed"] is True
     assert _git(wt, "status", "--porcelain", "--untracked-files=all") == ""
     assert (main / ".git/info/exclude").read_text().count(".cursor/hooks.json") == 1
 
@@ -84,7 +86,10 @@ def test_a_tracked_hooks_file_keeps_its_own_hooks_and_is_not_staged(tmp_path):
     hi.install_cursor_hook(wt, ARGV)
     merged = json.loads((wt / ".cursor/hooks.json").read_text())["hooks"]
     assert merged["stop"] == [{"command": "x"}]
-    assert merged["preToolUse"] == [own, {"command": hi.command_of(ARGV), "timeout": 10}]
+    assert merged["preToolUse"] == [
+        own,
+        {"command": hi.command_of(ARGV), "timeout": 10, "failClosed": True},
+    ]
     _git(wt, "add", "-A")
     assert _git(wt, "diff", "--cached", "--name-only") == ""
 
