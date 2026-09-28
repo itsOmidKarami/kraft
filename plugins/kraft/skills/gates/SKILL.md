@@ -27,6 +27,31 @@ a decision a human makes. Read them the diff or the plan, get an answer, then ac
 on it. Approving a gate because it seemed obvious is how the gate stops meaning
 anything.
 
+## Review threads
+
+Feedback about specific lines belongs in review threads, not in one long reject
+note. Threads work at any point in an item's life, gate or no gate:
+
+- `add_review_comment(body=..., file_path=..., start_line=..., label="must_fix")`
+  files a draft thread; `thread_id=...` makes it a reply instead. `label` is
+  `must_fix`, `question` or `nit`; `suggestion` proposes replacement text for
+  the thread's lines. Nothing is sent until the review is submitted.
+- `submit_review(outcome=...)` sends every draft on the item:
+  - `comment` queues them for the next agent that runs, without stopping
+    anything. At a pending gate it also launches an agent to answer them.
+  - `request_changes` redoes work: at a gate it rejects the gate with the
+    threads as the note. With no gate it picks the node the threads are about
+    and re-runs it now if that node is the one running or the item is stopped;
+    an earlier node waits until the running one finishes, and a paused item
+    until it is resumed. The response's `target` and `action` say which.
+  - `approve` needs a pending gate, and is refused while any `must_fix` thread
+    is unresolved.
+- `list_threads()` shows what is open and what the agents replied;
+  `resolve_thread()` and `reopen_thread()` settle a thread once a reply holds up
+  or does not.
+
+`submit_review` is a gate-level decision like `approve_gate`: ask first.
+
 ## Steering
 
 There is no channel into a running agent, so redirecting work means stopping it
