@@ -603,16 +603,91 @@ async def teardown(session_id: str) -> None:
     this one was sandboxed is how a path gets missed. Errors (already gone,
     docker not installed) are not this function's to raise: a container that
     is already down is the success case.
+
+    Bounded: a wedged daemon answers `docker rm` never, and this is awaited on
+    every session's way out and for every row at startup. A container that
+    outlives a timed-out call is `sweep_orphans`'s at the next start.
     """
+    await _docker("rm", "-f", container_name(session_id))
+
+
+#: How long any one best-effort `docker` call Kraft makes on its own account
+#: (teardown, the orphan sweep, the image check) may take.
+DOCKER_CALL_TIMEOUT_S = 30.0
+
+
+async def _docker(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+    """Run `docker args...`; `(returncode, stdout)`, or None when docker is
+    missing or did not answer in time (its client is then killed)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "docker",
-            "rm",
-            "-f",
-            container_name(session_id),
-            stdout=subprocess.DEVNULL,
+            *args,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        await proc.wait()
     except OSError:
-        pass
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout or DOCKER_CALL_TIMEOUT_S)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None
+    return proc.returncode, out.decode(errors="replace")
+
+
+async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
+    """`docker rm -f` every container this Kraft home started that no live
+    session owns, returning their names: a teardown that failed or timed out
+    (the daemon was briefly down) leaves one writing a worktree forever, and
+    only a scan finds it. Listed by `home_label`, never by name, so another
+    Kraft's containers on the same daemon are left alone."""
+    listed = await _docker(
+        "ps", "-a", "--filter", f"label={home_label()}", "--format", "{{.Names}}"
+    )
+    if listed is None or listed[0] != 0:
+        return []
+    keep = set(keep)
+    orphans = [n for n in listed[1].split() if n not in keep]
+    for name in orphans:
+        await _docker("rm", "-f", name)
+    return orphans
+
+
+#: `(image, executable)` pairs an image was seen to hold. Only a hit is
+#: remembered: an operator who fixes the image need not restart Kraft.
+_HAS_EXECUTABLE: set[tuple[str, str]] = set()
+
+
+async def missing_executable(image: str, executable: str) -> bool:
+    """True only when `image` demonstrably lacks `executable`. A launch then
+    stops as `config_error` naming both, instead of exiting 127 inside a
+    container that exists -- which reads as the agent failing and opens a fix
+    loop no agent can win. Anything inconclusive (no daemon, no `sh` in the
+    image, a pull that failed) is False: the launch goes ahead and fails, or
+    not, as it always did."""
+    if (image, executable) in _HAS_EXECUTABLE:
+        return False
+    probed = await _docker(
+        "run",
+        "--rm",
+        "--label",
+        home_label(),
+        "--entrypoint=",
+        image,
+        "sh",
+        "-c",
+        'command -v "$0" >/dev/null && echo yes || echo no',
+        executable,
+        timeout=300,
+    )
+    if probed is None:
+        return False
+    code, out = probed
+    if code != 0:
+        return False
+    if out.strip() == "yes":
+        _HAS_EXECUTABLE.add((image, executable))
+        return False
+    return out.strip() == "no"

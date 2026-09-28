@@ -204,6 +204,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     rather than skip-one'd. `--cidfile=PATH` gets a fake container id, as
     docker writes one once it has created the container.
 
+    `docker ps` prints `$FAKE_DOCKER_PS` (a file of container names), when set.
     Also answers `docker rm -f NAME` -- the container teardown
     `sandbox.teardown` issues once a sandboxed session's client side is down
     -- by appending `NAME` to `$FAKE_DOCKER_RM_LOG` when that env var is set,
@@ -221,6 +222,10 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         '# "the real command ran because nothing wrapped it at all" -- the two\n'
         "# look identical from the marker file the real command itself writes.\n"
         'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
+        'if [ "$1" = "ps" ]; then\n'
+        '  [ -n "${FAKE_DOCKER_PS:-}" ] && cat "$FAKE_DOCKER_PS"\n'
+        "  exit 0\n"
+        "fi\n"
         'if [ "$1" = "rm" ]; then\n'
         "  shift\n"
         '  for arg in "$@"; do\n'
@@ -236,7 +241,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'for arg in "$@"; do\n'
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
-        "    --rm|--init|--security-opt=*|--cap-drop=*) continue ;;\n"
+        "    --rm|--init|--entrypoint=*|--security-opt=*|--cap-drop=*) continue ;;\n"
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
         "    *)\n"

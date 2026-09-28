@@ -673,6 +673,20 @@ async def test_a_session_found_dead_publishes_its_sandboxed_branch(
     assert head.strip() == work
 
 
+async def test_reattach_removes_a_container_no_session_owns(
+    database, run_dirs, docker_rm, tmp_path, monkeypatch
+):
+    """A teardown that failed before the restart leaves a container writing
+    its worktree, with no row left to name it."""
+    listed = tmp_path / "ps"
+    listed.write_text("kraft-gone\n")
+    monkeypatch.setenv("FAKE_DOCKER_PS", str(listed))
+
+    await reattach.reattach(database, run_dirs)
+
+    assert docker_rm.read_text().split() == ["kraft-gone"]
+
+
 # --- what an adopted session's exit reads as ---------------------------------------------
 
 

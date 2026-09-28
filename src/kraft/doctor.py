@@ -538,6 +538,20 @@ def _runs_forge_tasks() -> bool:
     )
 
 
+async def _docker_check(repo: config.RepoEntry, image: str) -> dict:
+    """A sandboxed repository's work items stop for a human without a daemon
+    to run them in, and its first launch pulls an image inside that
+    session's time cap: both are better learned here."""
+    name = f"sandbox {_label(repo)}"
+    daemon = await sandbox._docker("version", "--format", "{{.Server.Version}}")
+    if daemon is None or daemon[0] != 0:
+        return _check(name, False, "docker is not installed or its daemon is not reachable")
+    pulled = await sandbox._docker("image", "inspect", "--format", "{{.Id}}", image)
+    if pulled is None or pulled[0] != 0:
+        return _check(name, False, f"image {image!r} is not pulled -- run: docker pull {image}")
+    return _check(name, True, f"docker {daemon[1].strip()}, image {image}")
+
+
 def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
@@ -638,6 +652,8 @@ async def _repo_checks() -> list[dict]:
                     ),
                 )
             )
+        elif (policy := repo.effective_sandbox) is not None:
+            checks.append(await _docker_check(repo, policy.image))
         if auto:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:

@@ -1,8 +1,10 @@
+import asyncio
 import os
 import subprocess
 from pathlib import Path
 
-from support.harness import make_repo
+import pytest
+from support.harness import fake_docker_bin, make_repo
 
 from kraft.worker import sandbox
 from kraft.worker.refstore import RefStore
@@ -419,3 +421,46 @@ def test_git_identity_comes_from_the_repository_when_the_daemon_has_none(
         "GIT_COMMITTER_NAME": "Op",
         "GIT_COMMITTER_EMAIL": "op@x",
     }
+
+
+@pytest.fixture
+def fake_docker(tmp_path, monkeypatch):
+    """The fake `docker` first on PATH; returns the file `docker rm` logs to."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}{os.pathsep}{os.environ['PATH']}")
+    log = tmp_path / "rm-log"
+    monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(log))
+    return log
+
+
+async def test_sweep_removes_only_containers_no_live_session_owns(
+    fake_docker, tmp_path, monkeypatch
+):
+    listed = tmp_path / "ps"
+    listed.write_text("kraft-live\nkraft-orphan\n")
+    monkeypatch.setenv("FAKE_DOCKER_PS", str(listed))
+    assert await sandbox.sweep_orphans(keep={"kraft-live"}) == ["kraft-orphan"]
+    assert fake_docker.read_text().split() == ["kraft-orphan"]
+
+
+async def test_teardown_gives_up_on_a_daemon_that_never_answers(tmp_path, monkeypatch):
+    """A wedged daemon hung `docker rm -f` forever, and teardown is awaited on
+    every session's way out and for every row at startup."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text("#!/bin/sh\nexec sleep 30\n")
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(sandbox, "DOCKER_CALL_TIMEOUT_S", 0.2)
+    await asyncio.wait_for(sandbox.teardown("s1"), 5)
+
+
+@pytest.mark.parametrize(
+    "executable, missing", [("sh", False), ("kraft-no-such-cli", True)], ids=["present", "absent"]
+)
+async def test_an_image_without_the_command_is_told_apart(fake_docker, executable, missing):
+    assert await sandbox.missing_executable("img", executable) is missing
+
+
+async def test_an_inconclusive_image_check_never_blocks_a_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))  # no docker at all
+    assert await sandbox.missing_executable("img", "kraft-no-such-cli") is False

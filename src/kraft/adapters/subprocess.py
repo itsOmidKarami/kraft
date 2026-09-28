@@ -561,6 +561,14 @@ async def run_task(
             log_path.write_text(f"kraft: could not prepare the sandbox's ref store: {exc}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
+        if await _sandbox.missing_executable(sandbox["image"], cmd[0]):
+            log_path.write_text(
+                f"kraft: image {sandbox['image']!r} has no {cmd[0]!r} on its PATH, so this "
+                "sandboxed task cannot start; install it in the image (see the sandbox "
+                "section of the repos.yaml reference)\n"
+            )
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
         home = run_dirs.base / "sandbox-home" / work_item_id
         home.mkdir(parents=True, exist_ok=True)
         cmd = _sandbox.docker_argv(

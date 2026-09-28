@@ -654,4 +654,10 @@ async def reattach(
             )
         )
 
+    # A container whose teardown failed or timed out before this start is
+    # still writing its worktree, and no row names it any more.
+    if orphans := await _sandbox.sweep_orphans(
+        keep={_sandbox.container_name(sid) for sid in adopted_tasks}
+    ):
+        logger.warning("removed containers no live session owns: %s", ", ".join(orphans))
     return summary, adopted_tasks

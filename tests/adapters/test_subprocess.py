@@ -575,6 +575,15 @@ async def test_run_task_publishes_the_branch_a_sandboxed_session_committed(
     assert head.strip() == work
 
 
+async def test_an_image_without_the_command_stops_as_config_error(run, docker):
+    """Exit 127 from a container that exists read as the agent failing, and
+    opened a fix loop no agent can win by editing source."""
+    status, row = await run(["kraft-no-such-cli"], "s-noexe", sandbox=DOCKER)
+
+    assert (status, row["status"]) == ("config_error", "config_error")
+    assert "has no 'kraft-no-such-cli'" in Path(row["log_path"]).read_text()
+
+
 async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
     run, docker, monkeypatch, tmp_path
 ):

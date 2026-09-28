@@ -709,3 +709,35 @@ def test_the_chains_row_passes_when_every_chain_resolves(tmp_path, monkeypatch):
     _live(tmp_path, monkeypatch, {"a": "claude"}, ["a"])
     row = _by_name(doctor._config_checks(), "chains")
     assert row["ok"] is True and "1 chain" in row["detail"]
+
+
+@pytest.mark.parametrize(
+    "script, ok, detail",
+    [
+        ('[ "$1" = version ] && echo 29.3.1; exit 0', True, "docker 29.3.1, image img"),
+        ('[ "$1" = version ] && echo 29.3.1 && exit 0; exit 1', False, "docker pull img"),
+        ("exit 1", False, "daemon is not reachable"),
+    ],
+    ids=["ready", "image-not-pulled", "no-daemon"],
+)
+def test_doctor_checks_a_sandboxed_repos_docker_and_image(
+    app, tmp_path, monkeypatch, script, ok, detail
+):
+    """A sandboxed item stops for a human without a daemon, and its first
+    launch pulls the image inside its own time cap: both belong in doctor."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(f"#!/bin/sh\n{script}\n")
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    repos_yaml = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(repos_yaml.read_text())
+    data["repos"][0]["sandbox"] = {"kind": "docker", "image": "img"}
+    repos_yaml.write_text(yaml.safe_dump(data))
+
+    rows = [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("sandbox ")]
+
+    assert [r["ok"] for r in rows] == [ok]
+    assert detail in rows[0]["detail"]
