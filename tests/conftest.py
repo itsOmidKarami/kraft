@@ -286,6 +286,16 @@ def _no_remembered_images(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _rootful_docker(monkeypatch):
+    """Every test launches as rootful docker on a host without SELinux, the
+    machine the argv tests describe, instead of whatever `docker info` on
+    this machine says. A test of the detection itself sets its own."""
+    from kraft.worker.backends import docker
+
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kraft_home(tmp_path, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 

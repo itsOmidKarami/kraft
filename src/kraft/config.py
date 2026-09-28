@@ -898,6 +898,25 @@ class Access(_Model):
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
+# ── sandbox ──────────────────────────────────────────────────────────────────
+
+
+#: `templates/sandbox.yaml`: how this machine runs sandboxed tasks, as opposed
+#: to `sandbox:` in repos.yaml or a policy, which says whether a task is
+#: sandboxed and in what. Not bundled and not seeded: a missing file is all
+#: defaults, which suit a machine with docker and no SELinux.
+class SandboxHost(_Model):
+    FILE = "sandbox.yaml"
+
+    #: The container CLI. Unset: docker if it is on PATH, else podman.
+    cli: Literal["docker", "podman"] | None = None
+    #: What to do on a host where SELinux enforces, which denies every bind
+    #: mount a container did not relabel. `auto` stops the task and says so:
+    #: both answers change something outside Kraft, so neither is picked for
+    #: the operator.
+    selinux: Literal["auto", "relabel", "disable"] = "auto"
+
+
 # ── notify ───────────────────────────────────────────────────────────────────
 
 

@@ -7,6 +7,7 @@ describe("configFile", () => {
   it.each([
     [`${T}/policy.yaml`, "policy.yaml"],
     [`${T}/notify.yaml`, "notify.yaml"],
+    [`${T}/sandbox.yaml`, "sandbox.yaml"],
     [`${T}/chains/default.yaml`, "chains/default.yaml"],
     [`${T}/chains/Bad Name.yaml`, undefined],
     [`${T}/chains/nested/x.yaml`, undefined],

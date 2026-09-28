@@ -35,6 +35,7 @@ template format (V1). Kraft refuses a home that still holds them until you run
 | `harnesses.yaml` | Harness profiles and agent profiles. | [Harnesses file](/reference/configuration/harnesses-file) |
 | `access.yaml` | Bind address, password, remote access. | [Access](/reference/configuration/access) |
 | `intake.yaml` | Autonomous pickup of issues. | [Intake](/reference/configuration/intake) |
+| `sandbox.yaml` | Which container CLI runs sandboxed tasks, and SELinux. | [Sandbox host](/reference/configuration/sandbox) |
 | `notify.yaml`, `theme.yaml` | Notification webhook and UI appearance. | [Settings-only files](#settings-only-files) |
 
 ## Settings-only files
