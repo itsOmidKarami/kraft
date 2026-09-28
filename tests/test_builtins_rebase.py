@@ -98,14 +98,18 @@ def test_refresh_worktree_base_returns_none_when_no_worktree(tmp_path, repo):
     assert result is None
 
 
-async def test_refresh_worktree_base_returns_none_when_already_up_to_date(database, run_dirs, repo):
+async def test_refresh_worktree_base_returns_head_when_already_up_to_date(database, run_dirs, repo):
+    """Kraft-jypzx: "already contains the upstream head" is not "nothing to
+    report" -- the caller stores the return as `base_ref`, so a stale value
+    (a human rebased the branch by hand, outside Kraft) must still advance."""
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
     branch = wtree.branch(database)
+    upstream_head = git_read(repo, "rev-parse", "HEAD")
     # no origin remote exists here at all -- the already-pushed probe's
     # failure must be swallowed (expected_failure), not raised
     result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
-    assert result is None
+    assert result == upstream_head
 
 
 async def test_refresh_worktree_base_skips_when_branch_already_pushed(
@@ -148,6 +152,28 @@ async def test_refresh_worktree_base_rebases_and_returns_new_head(database, run_
     assert (worktree / "worktree_work.txt").is_file()
     assert (worktree / "moved.txt").is_file()
     assert git_read(worktree, "merge-base", "--is-ancestor", new_head, "HEAD") == ""
+
+
+async def test_refresh_worktree_base_advances_stale_base_ref_after_a_hand_rebase(
+    database, run_dirs, repo
+):
+    """Kraft-jypzx: an operator rebases the branch onto the new upstream head
+    by hand (outside Kraft) to resolve something, then retries. The worktree's
+    branch already contains that head, so there is nothing left to rebase --
+    but `base_ref` must still catch up, or Kraft keeps diffing against the
+    commit the branch forked from, not the one it is actually built on."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+
+    new_head = _commit(repo, "moved.txt", "moved on\n", "moved on")
+    # Stand in for the hand-rebase: the worktree's branch is fast-forwarded
+    # onto the new upstream head directly, without going through
+    # `refresh_worktree_base` -- so `base_ref` in the DB is left stale.
+    _git(worktree, "rebase", new_head)
+
+    result = await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+    assert result == new_head
 
 
 def _repo_with_origin(tmp_path):
