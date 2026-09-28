@@ -158,3 +158,13 @@ def test_what_sync_item_trusts_is_never_inside_the_store(repo, worktree, tmp_pat
     meta = store.shadow.parent / f"{store.shadow.name}.json"
     assert meta.is_file()
     assert not meta.is_relative_to(store.shadow)
+
+
+def test_a_session_reusing_a_live_store_still_records_its_owner(repo, worktree, tmp_path):
+    """A store first built by a sandboxed setup command has no owner; the
+    session that reuses it must record one, or a restart cannot publish it."""
+    store = refstore.prepare(tmp_path / "run", worktree, BRANCH, reuse=True)
+    meta = store.shadow.parent / f"{store.shadow.name}.json"
+    assert not meta.exists()
+    refstore.prepare(tmp_path / "run", worktree, BRANCH, reuse=True, work_item_id="w1")
+    assert '"work_item_id": "w1"' in meta.read_text()

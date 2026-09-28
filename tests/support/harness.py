@@ -232,7 +232,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'for arg in "$@"; do\n'
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
-        "    --rm|--init|--entrypoint=*|--security-opt=*|--cap-drop=*) continue ;;\n"
+        "    --rm|--init|--entrypoint=*|--network=*|--security-opt=*|--cap-drop=*) continue ;;\n"
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
         "    *)\n"

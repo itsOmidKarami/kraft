@@ -204,13 +204,12 @@ def prepare(
         )
     store = RefStore(shadow_dir(base, worktree_gitdir), common, worktree_gitdir, branch)
     with _locked(store.shadow):
-        if store.shadow.exists():
-            if reuse:
-                return store
-            if problem := _publish(store):
-                logger.warning("%s", problem)
-            shutil.rmtree(store.shadow)
-        _build(store)
+        if not (reuse and store.shadow.exists()):
+            if store.shadow.exists():
+                if problem := _publish(store):
+                    logger.warning("%s", problem)
+                shutil.rmtree(store.shadow)
+            _build(store)
         if work_item_id is not None:
             _meta_path(store.shadow).write_text(
                 json.dumps(

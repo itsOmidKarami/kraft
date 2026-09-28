@@ -676,6 +676,8 @@ async def missing_executable(image: str, executable: str) -> bool:
         "--rm",
         "--label",
         home_label(),
+        "--network=none",
+        "--cap-drop=ALL",
         "--entrypoint=",
         image,
         "sh",
