@@ -54,8 +54,8 @@
             </div>
         </aside>
         <h2>
-            <span class="text">37 statements &nbsp;</span>
-            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">37<span class="text"> run</span></button>
+            <span class="text">40 statements &nbsp;</span>
+            <button type="button" class="run button_toggle_run" value="run" data-shortcut="r" title="Toggle lines run">40<span class="text"> run</span></button>
             <button type="button" class="mis show_mis button_toggle_mis" value="mis" data-shortcut="m" title="Toggle lines missing">0<span class="text"> missing</span></button>
             <button type="button" class="exc show_exc button_toggle_exc" value="exc" data-shortcut="x" title="Toggle lines excluded">0<span class="text"> excluded</span></button>
         </h2>
@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_policy_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-28 10:59 +0000
+            created at 2026-09-28 19:04 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -189,6 +189,14 @@
     <p class="run"><span class="n"><a id="t107" href="#t107">107</a></span><span class="t">    <span class="key">if</span> <span class="nam">allowed</span> <span class="key">is</span> <span class="key">None</span> <span class="key">and</span> <span class="key">not</span> <span class="nam">deny</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t108" href="#t108">108</a></span><span class="t">        <span class="key">return</span> <span class="op">{</span><span class="op">}</span><span class="op">,</span> <span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t109" href="#t109">109</a></span><span class="t">    <span class="key">return</span> <span class="nam">RENDERERS</span><span class="op">[</span><span class="nam">renderer</span><span class="op">]</span><span class="op">(</span><span class="nam">tool_names</span><span class="op">,</span> <span class="nam">allowed</span><span class="op">,</span> <span class="nam">deny</span><span class="op">,</span> <span class="nam">directory</span><span class="op">,</span> <span class="nam">session_id</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t110" href="#t110">110</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t111" href="#t111">111</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t112" href="#t112">112</a></span><span class="t"><span class="key">def</span> <span class="nam">files_in</span><span class="op">(</span><span class="nam">argv</span><span class="op">:</span> <span class="nam">tuple</span><span class="op">[</span><span class="nam">str</span><span class="op">,</span> <span class="op">...</span><span class="op">]</span><span class="op">,</span> <span class="nam">directory</span><span class="op">:</span> <span class="nam">Path</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">tuple</span><span class="op">[</span><span class="nam">str</span><span class="op">,</span> <span class="op">...</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t113" href="#t113">113</a></span><span class="t">    <span class="str">&quot;&quot;&quot;The files a renderer wrote under `directory` that `argv` names: what a</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t114" href="#t114">114</a></span><span class="t"><span class="str">    sandboxed launch must mount read-only, or its CLI silently falls back to</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t115" href="#t115">115</a></span><span class="t"><span class="str">    its own built-in rules (amp does, for a settings file it cannot find).&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">    <span class="nam">root</span> <span class="op">=</span> <span class="nam">directory</span><span class="op">.</span><span class="nam">resolve</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">    <span class="key">return</span> <span class="nam">tuple</span><span class="op">(</span><span class="nam">a</span> <span class="key">for</span> <span class="nam">a</span> <span class="key">in</span> <span class="nam">argv</span> <span class="key">if</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">a</span><span class="op">)</span><span class="op">.</span><span class="nam">is_file</span><span class="op">(</span><span class="op">)</span> <span class="key">and</span> <span class="nam">Path</span><span class="op">(</span><span class="nam">a</span><span class="op">)</span><span class="op">.</span><span class="nam">resolve</span><span class="op">(</span><span class="op">)</span><span class="op">.</span><span class="nam">is_relative_to</span><span class="op">(</span><span class="nam">root</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -198,7 +206,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_policy_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-28 10:59 +0000
+            created at 2026-09-28 19:04 +0000
         </p>
     </div>
 </footer>
