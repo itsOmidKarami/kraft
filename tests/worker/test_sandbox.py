@@ -5,6 +5,7 @@ from pathlib import Path
 from support.harness import make_repo
 
 from kraft.worker import sandbox
+from kraft.worker.refstore import RefStore
 
 
 def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
@@ -13,7 +14,7 @@ def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
         cmd, "/work/item-1", {"kind": "docker", "image": "kraft-worker:py"}, "/run/results"
     )
     assert argv[:3] == ["docker", "run", "--rm"]
-    assert argv[3:5] == ["-u", f"{os.getuid()}:{os.getgid()}"]
+    assert argv[argv.index("-u") + 1] == f"{os.getuid()}:{os.getgid()}"
     # A setuid-root binary in the operator's image (su, mount, sudo) would
     # otherwise let the worker regain root and defeat the -u uid:gid above.
     assert "--security-opt=no-new-privileges" in argv
@@ -44,17 +45,66 @@ def _worktree(tmp_path):
     return repo, worktree, gitdir
 
 
-def test_docker_argv_mounts_the_repo_gitdir_read_only(tmp_path):
+def test_docker_argv_mounts_the_repo_gitdir_read_only_without_a_ref_store(tmp_path):
+    """Without a ref store the worker gets no writable ref anywhere in the
+    operator's repository: a commit fails rather than move a shared ref."""
     repo, worktree, gitdir = _worktree(tmp_path)
     argv = sandbox.docker_argv(
         ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
     )
     git = repo / ".git"
     assert f"{git}:{git}:ro" in argv
-    # Read-write only where a commit from a linked worktree actually writes.
     for name in ("objects", "refs", "logs"):
-        assert f"{git / name}:{git / name}" in argv
+        assert f"{git / name}:{git / name}" not in argv
     assert f"{gitdir}:{gitdir}" in argv
+
+
+def test_docker_argv_mounts_the_ref_store_over_the_repo_gitdir(tmp_path):
+    """The worker's refs land in the store; only objects and LFS content,
+    which are data, reach the real gitdir read-write."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    git = repo / ".git"
+    (git / "HEAD").write_text("ref: refs/heads/main\n")
+    (git / "lfs").mkdir()
+    store = RefStore(tmp_path / "store", git, gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git", "status"],
+        worktree,
+        {"kind": "docker", "image": "x"},
+        "/run/results",
+        refstore=store,
+    )
+    assert f"{store.shadow}:{git}" in argv
+    assert f"{git / 'objects'}:{git / 'objects'}" in argv
+    assert f"{git / 'lfs'}:{git / 'lfs'}" in argv
+    assert f"{git / 'config'}:{git / 'config'}:ro" in argv
+    assert f"{git / 'HEAD'}:{git / 'HEAD'}:ro" in argv
+    rw_sources = [
+        Path(argv[i + 1].split(":")[0])
+        for i, a in enumerate(argv)
+        if a == "-v" and not argv[i + 1].endswith(":ro")
+    ]
+    assert git not in rw_sources
+    assert not [p for p in rw_sources if p.is_relative_to(git / "refs")]
+
+
+def test_docker_argv_mounts_every_alternate_object_dir_read_only(tmp_path):
+    """A `clone --shared` repository borrows objects from outside every other
+    mount; without its own mount the container reads `bad object HEAD`."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    borrowed = tmp_path / "upstream" / "objects"
+    borrowed.mkdir(parents=True)
+    (repo / ".git" / "objects" / "info").mkdir()
+    (repo / ".git" / "objects" / "info" / "alternates").write_text(f"{borrowed}\n")
+    store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git", "log"],
+        worktree,
+        {"kind": "docker", "image": "x"},
+        "/run/results",
+        refstore=store,
+    )
+    assert f"{borrowed}:{borrowed}:ro" in argv
 
 
 def test_docker_argv_leaves_every_host_code_execution_path_read_only(tmp_path):
@@ -120,15 +170,6 @@ def test_docker_argv_shadows_config_worktree_read_only(tmp_path):
     worktree_config = gitdir / "config.worktree"
     assert worktree_config.is_file()
     assert f"{worktree_config}:{worktree_config}:ro" in argv
-
-
-def test_docker_argv_creates_the_reflog_dir_a_commit_needs(tmp_path):
-    """`logs/` does not exist in a fresh clone and git makes it on the first
-    ref update -- which it cannot do under a read-only mount."""
-    repo, worktree, _ = _worktree(tmp_path)
-    assert not (repo / ".git" / "logs").exists()
-    sandbox.docker_argv(["git", "commit"], worktree, {"kind": "docker", "image": "x"}, "/run/res")
-    assert (repo / ".git" / "logs").is_dir()
 
 
 def test_docker_argv_mounts_only_this_session_s_result_file_read_write(tmp_path):
@@ -296,3 +337,85 @@ def test_hardened_env_still_lets_git_diff_run(tmp_path):
         env=env,
     )
     assert out.stdout.split() == ["f.txt"]
+
+
+def test_docker_argv_mounts_a_symlinked_worktree_at_its_real_path(tmp_path):
+    """git records a worktree's real path in its `gitdir` backlink; mounted
+    only at a symlinked path, the worktree looks gone to `git worktree prune`
+    inside the container, which then deletes its admin directory."""
+    _, worktree, gitdir = _worktree(tmp_path)
+    (gitdir / "gitdir").write_text(f"{worktree}/.git\n")
+    link = tmp_path / "link"
+    link.symlink_to(worktree)
+    argv = sandbox.docker_argv(["git", "status"], link, {"kind": "docker", "image": "x"}, None)
+    assert f"{worktree}:{worktree}" in argv
+    assert argv[argv.index("-w") + 1] == str(worktree)
+    backlink = gitdir / "gitdir"
+    assert f"{backlink}:{backlink}:ro" in argv
+
+
+def test_docker_argv_gives_the_worker_a_home_of_its_own(tmp_path):
+    """A uid with no passwd entry in the image gets HOME=/, where no agent CLI
+    can write its state; codex and gemini then refuse to start at all."""
+    home = tmp_path / "home"
+    argv = sandbox.docker_argv(["claude"], "/w", {"kind": "docker", "image": "x"}, None, home=home)
+    assert f"{home}:{home}" in argv
+    assert argv[argv.index(f"HOME={home}") - 1] == "-e"
+
+
+def test_docker_argv_forwards_passthrough_names_bare():
+    """A repo's `env_passthrough` is how a worker gets a credential; forwarded
+    by name, its value never lands on the argv (`ps`, `docker inspect`)."""
+    argv = sandbox.docker_argv(
+        ["codex"], "/w", {"kind": "docker", "image": "x"}, None, passthrough=["OPENAI_API_KEY"]
+    )
+    assert argv[argv.index("OPENAI_API_KEY") - 1] == "-e"
+    assert not [a for a in argv if a.startswith("OPENAI_API_KEY=")]
+
+
+def test_docker_argv_pins_hooks_off_for_git_in_the_container():
+    """A hook manager's hook points at a host interpreter, so it fails every
+    commit in the container; and a hook is the worker's code anyway."""
+    argv = sandbox.docker_argv(["git"], "/w", {"kind": "docker", "image": "x"}, None)
+    env = dict(a.split("=", 1) for a in argv if a.startswith("GIT_CONFIG_"))
+    pinned = {
+        env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+        for i in range(int(env["GIT_CONFIG_COUNT"]))
+    }
+    assert pinned["core.hooksPath"] == os.devnull
+
+
+def test_docker_argv_mounts_extra_paths_at_the_same_path(tmp_path):
+    argv = sandbox.docker_argv(
+        ["amp"],
+        "/w",
+        {"kind": "docker", "image": "x"},
+        None,
+        ro_paths=["/k/rules.json"],
+        rw_paths=["/k/config"],
+    )
+    assert "/k/rules.json:/k/rules.json:ro" in argv
+    assert "/k/config:/k/config" in argv
+
+
+def test_git_identity_comes_from_the_repository_when_the_daemon_has_none(
+    repo, tmp_path, monkeypatch
+):
+    for name in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    subprocess.run(["git", "config", "user.name", "Op"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "op@x"], cwd=repo, check=True)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "b", str(wt)], cwd=repo, check=True)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
+    assert sandbox.git_identity(wt) == {
+        "GIT_AUTHOR_NAME": "Daemon",
+        "GIT_AUTHOR_EMAIL": "op@x",
+        "GIT_COMMITTER_NAME": "Op",
+        "GIT_COMMITTER_EMAIL": "op@x",
+    }

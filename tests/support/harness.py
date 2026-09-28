@@ -197,9 +197,9 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     CMD...` back to `CMD...` and execs it — proves the wrap shape a real
     sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/`--name`
     each consume exactly one following argument in what `sandbox.docker_argv`
-    emits, so skipping flag+value pairs generically finds the image (the
+    emits (and `--label`), so skipping flag+value pairs generically finds the image (the
     first survivor) and the real command (everything after it), regardless
-    of exact flag count or order. `--security-opt=...`/`--cap-drop=...` carry
+    of exact flag count or order. `--init` stands alone; `--security-opt=...`/`--cap-drop=...` carry
     their value in the same token (`=`-joined), so they are dropped outright
     rather than skip-one'd. `--cidfile=PATH` gets a fake container id, as
     docker writes one once it has created the container.
@@ -236,9 +236,9 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'for arg in "$@"; do\n'
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
-        "    --rm|--security-opt=*|--cap-drop=*) continue ;;\n"
+        "    --rm|--init|--security-opt=*|--cap-drop=*) continue ;;\n"
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
-        "    -u|-v|-w|-e|--name) skip=1; continue ;;\n"
+        "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
         "    *)\n"
         '      if [ -z "$image" ]; then image="$arg"; else cmd+=("$arg"); fi\n'
         "      ;;\n"

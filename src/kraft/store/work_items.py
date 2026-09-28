@@ -40,6 +40,12 @@ def branch_for(row) -> str:
     return row["branch"] or f"kraft/{row['id']}"
 
 
+def branch_of(conn: sqlite3.Connection, work_item_id: str) -> str | None:
+    """`branch_for` by id, or None when there is no such row."""
+    row = conn.execute("SELECT id, branch FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    return branch_for(row) if row is not None else None
+
+
 def create_work_item(
     conn: sqlite3.Connection,
     *,

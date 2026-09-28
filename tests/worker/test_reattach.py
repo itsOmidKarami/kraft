@@ -17,7 +17,7 @@ import pytest
 from support.harness import fails_once, fake_docker_bin
 
 from kraft import events, store
-from kraft.worker import reattach
+from kraft.worker import reattach, refstore
 
 #: An agent node, then a subprocess node: the two kinds `_adopted_status`
 #: tells apart.
@@ -645,6 +645,32 @@ async def test_an_adopted_session_kills_its_container_when_it_ends(
         await adopted["s1"]
 
     assert docker_rm.read_text().split() == ["kraft-s1"]
+
+
+async def test_a_session_found_dead_publishes_its_sandboxed_branch(
+    item, database, run_dirs, docker_rm, repo, tmp_path
+):
+    """`run_task` syncs the ref store when a session ends; a session a
+    restart orphaned ends with no `run_task` left, so reattach publishes what
+    it committed before the chain reads the branch again."""
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "kraft/w1", str(wt)], cwd=repo, check=True
+    )
+    store_ = refstore.prepare(run_dirs.base, wt, "kraft/w1", reuse=False, work_item_id="w1")
+    tree = subprocess.check_output(["git", "rev-parse", "main^{tree}"], cwd=repo, text=True).strip()
+    work = subprocess.check_output(
+        ["git", "commit-tree", tree, "-p", "main", "-m", "w"], cwd=repo, text=True
+    ).strip()
+    (store_.shadow / "refs" / "heads" / "kraft").mkdir(parents=True, exist_ok=True)
+    (store_.shadow / "refs" / "heads" / "kraft" / "w1").write_text(work + "\n")
+    _result(run_dirs, "s1")
+    await item.session("s1", IMPLEMENT, running=DEAD)
+
+    await reattach.reattach(database, run_dirs)
+
+    head = subprocess.check_output(["git", "rev-parse", "kraft/w1"], cwd=repo, text=True)
+    assert head.strip() == work
 
 
 # --- what an adopted session's exit reads as ---------------------------------------------

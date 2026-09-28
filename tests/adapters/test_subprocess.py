@@ -19,6 +19,7 @@ from support.harness import entry_of, fails_once, fake_docker_bin
 
 from kraft import events, logs, store
 from kraft.adapters import subprocess as sp
+from kraft.worker import refstore
 
 from .test_subprocess_result_files import _REJECTED
 
@@ -546,6 +547,49 @@ async def test_run_task_runs_sandboxed_through_docker_and_removes_the_container_
     assert status == "done"
     assert (tmp_path / "docker-was-called").exists()
     assert docker.read_text().splitlines() == ["kraft-s-sandbox"]
+
+
+async def test_run_task_publishes_the_branch_a_sandboxed_session_committed(
+    run, docker, repo, run_dirs, database, tmp_path
+):
+    """The worker commits into its ref store, never the repository; the
+    branch reaches the repository only through the sync when the session
+    ends. The fake docker runs the command on the host, so the command writes
+    the store's loose ref itself, as git in the container would."""
+    await run(["true"], "s-setup")
+    branch = database.read(lambda c: store.branch_of(c, "w1"))
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", branch, str(wt)], cwd=repo, check=True)
+    tree = subprocess.check_output(["git", "rev-parse", "main^{tree}"], cwd=repo, text=True).strip()
+    work = subprocess.check_output(
+        ["git", "commit-tree", tree, "-p", "main", "-m", "w"], cwd=repo, text=True
+    ).strip()
+    gitdir = (repo / ".git" / "worktrees" / "wt").resolve()
+    loose = refstore.shadow_dir(run_dirs.base, gitdir) / "refs" / "heads" / branch
+    script = f"mkdir -p {loose.parent} && echo {work} > {loose}"
+
+    status, _ = await run(["sh", "-c", script], "s-refs", sandbox=DOCKER, cwd=wt)
+
+    assert status == "done"
+    head = subprocess.check_output(["git", "rev-parse", branch], cwd=repo, text=True)
+    assert head.strip() == work
+
+
+async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
+    run, docker, monkeypatch, tmp_path
+):
+    """Never launched without its ref store: that would be a sandbox whose
+    worker cannot commit, or worse, one given the repository's refs."""
+
+    def refuse(*a, **kw):
+        raise RuntimeError("not on a branch")
+
+    monkeypatch.setattr(sp._refstore, "prepare", refuse)
+    status, row = await run(["true"], "s-norefs", sandbox=DOCKER)
+
+    assert (status, row["status"]) == ("config_error", "config_error")
+    assert not (tmp_path / "docker-was-called").exists()
+    assert "not on a branch" in Path(row["log_path"]).read_text()
 
 
 async def test_run_task_tears_down_the_container_on_cancel(run, docker, database):
