@@ -35,6 +35,9 @@ def create_session(
     #: The `harnesses.yaml` harness an agent session runs on (Kraft-9elw1);
     #: `worker.reattach` resolves an adopted session's log reader from it.
     harness: str | None = None,
+    #: The `kraft.worker.backends` kind a sandboxed session runs in; None
+    #: unsandboxed.
+    sandbox: str | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -72,10 +75,10 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command, started_at, harness) "
+        "round, head_sha, thread, command, started_at, harness, sandbox) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -93,6 +96,7 @@ def create_session(
             command,
             now,
             harness,
+            sandbox,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()

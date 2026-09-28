@@ -26,6 +26,7 @@ from kraft.executor import gates, walk
 from kraft.policy import InstancePolicy, InstancePolicyInput
 from kraft.templates.environment import WorkItemTarget
 from kraft.templates.models import Chain, ResolvedChain
+from kraft.worker.backends import docker as docker_backend
 
 LAUNCH = executor.LaunchContext(repo_entry=entry_of({"setup_command": ""}))
 POLICY = _policy.Policy(loops={}, default=_policy.Cap(9, 3600))
@@ -227,8 +228,8 @@ async def test_the_kill_reaches_a_sandboxs_container(item_on, run_dirs, monkeypa
     async def teardown(session_id):
         torn_down.append(session_id)
 
-    monkeypatch.setattr(_subprocess._sandbox, "docker_argv", lambda cmd, *a, **kw: cmd)
-    monkeypatch.setattr(_subprocess._sandbox, "teardown", teardown)
+    monkeypatch.setattr(docker_backend, "docker_argv", lambda cmd, *a, **kw: cmd)
+    monkeypatch.setattr(docker_backend, "teardown", teardown)
     it = await item_on(_chain(), "build")
     hit = caps.Hit("build.run.impl", "time_cap_minutes", 1, 0.2)
 

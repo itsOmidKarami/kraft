@@ -27,8 +27,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask
-from kraft.worker import refstore as _refstore
-from kraft.worker import sandbox as _sandbox
+from kraft.worker import backends as _backends
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +371,8 @@ async def _adopt(
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:
             logger.exception("usage progress tick failed for adopted session %s", session_id)
+    for backend in _backends.for_session(row["sandbox"]):
+        await backend.collect(session_id, result_path)
     if run_dirs is not None:
         # Before the exit is resolved: what runs next reads the item branch.
         await _sync_item_refs(db, run_dirs, row["work_item_id"])
@@ -433,6 +434,8 @@ async def _guarded_adopt(
     launch_factory: Callable[[str], LaunchContext] | None = None,
     bd_cwd: str | None = None,
     on_approve: OnApprove | None = None,
+    #: The row's `worker_sessions.sandbox`: which backend to close it in.
+    sandbox: str | None = None,
 ) -> None:
     """`_adopt`, but a crash marks the work item needs_human instead of
     vanishing. `reattach` hands its tasks to the caller directly rather than
@@ -467,20 +470,31 @@ async def _guarded_adopt(
         # However this adopted session ends -- its client pid exiting, a
         # crash, or a shutdown cancelling this task -- its container is
         # parented by the docker daemon and outlives all three unless
-        # something says so (Kraft-rki). `teardown` is a no-op for a session
+        # something says so (Kraft-rki). Closing is a no-op for a session
         # that was never sandboxed, which is why this does not first work out
         # whether this one was: deciding that per call path is how the third
         # path got missed twice.
-        await asyncio.shield(_sandbox.teardown(session_id))
+        await asyncio.shield(_close_sandbox(sandbox, session_id))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
 
 
+async def _close_sandbox(kind: str | None, session_id: str) -> None:
+    """Close the sandbox a session row ran in (`worker_sessions.sandbox`)."""
+    for backend in _backends.for_session(kind):
+        await backend.close(session_id)
+
+
 async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
-    """Publish the item branch out of its sandbox's ref store, for a session
-    `run_task` is no longer there to sync: adopted after a restart, or found
-    dead by one. A no-op for an item that never ran sandboxed."""
-    for problem in await asyncio.to_thread(_refstore.sync_item, run_dirs.base, work_item_id):
+    """Publish the item branch out of its sandbox, for a session `run_task`
+    is no longer there to sync: adopted after a restart, or found dead by
+    one. A no-op for an item that never ran sandboxed."""
+    problems = [
+        p
+        for backend in _backends.every()
+        for p in await asyncio.to_thread(backend.code_out_item, run_dirs.base, work_item_id)
+    ]
+    for problem in problems:
         logger.warning("work item %s: %s", work_item_id, problem)
         await db.write(
             lambda c, p=problem: events.append(
@@ -544,7 +558,7 @@ async def reattach(
     # had.
     #
     # Resolved before the loop so it lands before that row's
-    # `_sandbox.teardown`: flipping a row back to adopted after tearing its
+    # `_close_sandbox`: flipping a row back to adopted after tearing its
     # sandbox down would tear down a container for a session about to be
     # treated as still-live.
     grace = [
@@ -564,16 +578,18 @@ async def reattach(
     # still writing its worktree, and no row names it any more. Swept before
     # anything below launches a container of its own (an escalation resume),
     # which the sweep would otherwise take for an orphan.
-    if orphans := await _sandbox.sweep_orphans(
-        keep={_sandbox.container_name(sid) for sid, adopting in adopt.items() if adopting}
-    ):
-        logger.warning("removed containers no live session owns: %s", ", ".join(orphans))
+    keep = {sid for sid, adopting in adopt.items() if adopting}
+    for backend in _backends.every():
+        if orphans := await backend.sweep(keep):
+            logger.warning(
+                "removed %s sandboxes no live session owns: %s", backend.kind, ", ".join(orphans)
+            )
 
     for r in rows:
         sid = r["id"]
         adopting = adopt[sid]
         if not adopting:
-            await _sandbox.teardown(sid)
+            await _close_sandbox(r["sandbox"], sid)
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == "pending":
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
@@ -603,6 +619,7 @@ async def reattach(
                     launch_factory=launch_factory,
                     bd_cwd=bd_cwd,
                     on_approve=on_approve,
+                    sandbox=r["sandbox"],
                 )
             )
             summary.adopted.append(sid)

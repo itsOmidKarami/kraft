@@ -4,7 +4,7 @@ A linked worktree commits through its repository's common gitdir, so a
 container that can commit could also write every ref there: `git update-ref
 refs/heads/main <its commit>` moved the operator's `main` (reproduced
 2026-09-28). This module gives each sandboxed worktree a directory of its own,
-`S`, which `sandbox.docker_argv` mounts *over* the common gitdir inside the
+`S`, which `backends.docker.docker_argv` mounts *over* the common gitdir inside the
 container: the worker sees every branch and tag as of its session's start and
 may create, move, pack or delete refs, but all of it lands in `S`. Objects are
 still shared (they are data, and a commit must write them).

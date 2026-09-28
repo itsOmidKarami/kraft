@@ -21,7 +21,7 @@ import psutil
 
 from kraft import caps, events, logs, store
 from kraft import usage as _usage
-from kraft.worker import refstore as _refstore
+from kraft.worker import backends as _backends
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
 
@@ -287,23 +287,18 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
-def sandbox_home(run_dirs, work_item_id: str) -> Path:
-    """The `HOME` a sandboxed item's containers share, kept across its
-    sessions so an agent CLI can resume one: the same directory for every
-    session of the item, never shared with another item."""
-    return run_dirs.base / "sandbox-home" / work_item_id
-
-
-async def _sync_refs(db, refs: _refstore.RefStore, work_item_id: str, session_id: str) -> None:
-    """Publish the item branch out of a sandboxed session's ref store, and
-    record why not when it could not: the branch then stays where it was, and
-    a person decides."""
+async def _sync_refs(
+    db, backend: _backends.SandboxBackend, refs, work_item_id: str, session_id: str
+) -> None:
+    """Publish the item branch out of a sandboxed session, and record why not
+    when it could not: the branch then stays where it was, and a person
+    decides."""
     await _record_unsynced(
         db,
         refs,
         work_item_id,
         session_id,
-        await asyncio.to_thread(_refstore.sync, refs, session_id),
+        await asyncio.to_thread(backend.code_out, refs, session_id),
     )
 
 
@@ -320,27 +315,6 @@ async def _record_unsynced(
                 {"session_id": session_id, "branch": refs.branch, "reason": problem},
             )
         )
-
-
-def _docker_launch_failed(cidfile: Path) -> bool:
-    """True if `docker run` itself never created the container -- the daemon
-    is down, or an image could not be pulled -- so the sandboxed command
-    never ran: an infra problem no agent edit can fix (Kraft-nc9gm).
-
-    Read off `--cidfile`, not the log (Kraft-6ltwh): the log holds the
-    sandboxed command's own output too, so a task that prints docker's
-    wording is not docker failing. Nor the exit code: daemon-down is plain 1
-    (docker-cli 29.7.2, probed 2026-09-22), the same code a failing command
-    returns. docker writes the id once the container exists and removes an
-    unwritten cidfile when create fails (probed the same day: daemon
-    unreachable exits 1, a refused create exits 125, and neither leaves the
-    file; a create that succeeds writes it before start). A container docker
-    created but could not start is not caught here; it fails as the task's
-    own, as it did before this check existed."""
-    try:
-        return not cidfile.read_text().strip()
-    except OSError:
-        return True
 
 
 def _resolve_exit_file(path: Path) -> str | None:
@@ -530,6 +504,7 @@ async def run_task(
     # Captured before any sandbox wrap reassigns `cmd` below (Kraft-s7c04.35) --
     # this must read as what actually ran, never a docker-wrapped invocation.
     command_ran = shlex.join(cmd)
+    backend = _backends.for_sandbox(sandbox) if sandbox else None
 
     await db.write(
         lambda c: store.create_session(
@@ -545,12 +520,13 @@ async def run_task(
             thread=thread,
             command=command_ran,
             harness=harness,
+            sandbox=backend.kind if backend is not None else None,
         )
     )
 
     full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
-    refs: _refstore.RefStore | None = None
-    if sandbox:
+    refs = None
+    if backend is not None:
         # The container writes its result here, and `result_path` is mounted
         # read-write into it by name -- docker can only bind-mount a file
         # that already exists, so create it now (empty) rather than letting
@@ -566,7 +542,7 @@ async def run_task(
         branch = await db.write(lambda c: store.branch_of(c, work_item_id))
         try:
             refs = await asyncio.to_thread(
-                _refstore.prepare,
+                backend.code_in,
                 run_dirs.base,
                 Path(cwd),
                 branch,
@@ -578,21 +554,17 @@ async def run_task(
             log_path.write_text(f"kraft: could not prepare the sandbox's ref store: {exc}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
-        if await _sandbox.missing_executable(
-            sandbox["image"], cmd[0], repo_entry.env if repo_entry is not None else None
+        if problem := await backend.probe(
+            sandbox, cmd[0], repo_entry.env if repo_entry is not None else None
         ):
-            log_path.write_text(
-                f"kraft: image {sandbox['image']!r} has no {cmd[0]!r} on its PATH, so this "
-                "sandboxed task cannot start; install it in the image (see the sandbox "
-                "section of the repos.yaml reference)\n"
-            )
+            log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
         if refs is not None:
             await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
-        home = sandbox_home(run_dirs, work_item_id)
+        home = backend.home(run_dirs, work_item_id)
         home.mkdir(parents=True, exist_ok=True)
-        cmd = _sandbox.docker_argv(
+        cmd = backend.wrap(
             cmd,
             cwd,
             sandbox,
@@ -602,10 +574,10 @@ async def run_task(
                 **(repo_entry.env if repo_entry is not None else {}),
                 **(env or {}),
             },
-            name=_sandbox.container_name(session_id),
+            session_id=session_id,
             result_path=result_path,
             cidfile=cidfile,
-            refstore=refs,
+            refs=refs,
             home=home,
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
             ro_paths=ro_paths,
@@ -756,10 +728,15 @@ async def run_task(
         try:
             await _kill_group(pgid, group_kill_grace, reap=proc.poll)
         finally:
-            if sandbox:
-                await _sandbox.teardown(session_id)
+            if backend is not None:
+                # Everything below reads the result file: bring it home
+                # before the sandbox holding it goes.
+                try:
+                    await backend.collect(session_id, result_path)
+                finally:
+                    await backend.close(session_id)
             if refs is not None:
-                await _sync_refs(db, refs, work_item_id, session_id)
+                await _sync_refs(db, backend, refs, work_item_id, session_id)
         if paused:
             # The cancelled path never reaches `session_exited`, so Task 6's
             # hook inside it never fires. Idempotent with that hook for the
@@ -801,7 +778,7 @@ async def run_task(
     # FileNotFoundError branch above, one step later and inside the sandboxed
     # path only (Kraft-nc9gm). Checked before every other status adjustment
     # below so it can't be shadowed by require_result_file or post_resolve.
-    if sandbox and status == "failed" and _docker_launch_failed(cidfile):
+    if backend is not None and status == "failed" and backend.launch_failed(cidfile):
         status = "config_error"
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell

@@ -31,7 +31,7 @@ from kraft.paths import (
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
-from kraft.worker import sandbox
+from kraft.worker import backends, sandbox
 from kraft.worker import steering as steering_mod
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
@@ -538,18 +538,12 @@ def _runs_forge_tasks() -> bool:
     )
 
 
-async def _docker_check(repo: config.RepoEntry, image: str) -> dict:
-    """A sandboxed repository's work items stop for a human without a daemon
-    to run them in, and its first launch pulls an image inside that
-    session's time cap: both are better learned here."""
-    name = f"sandbox {_label(repo)}"
-    daemon = await sandbox.docker_call("version", "--format", "{{.Server.Version}}")
-    if daemon is None or daemon[0] != 0:
-        return _check(name, False, "docker is not installed or its daemon is not reachable")
-    pulled = await sandbox.docker_call("image", "inspect", "--format", "{{.Id}}", image)
-    if pulled is None or pulled[0] != 0:
-        return _check(name, False, f"image {image!r} is not pulled -- run: docker pull {image}")
-    return _check(name, True, f"docker {daemon[1].strip()}, image {image}")
+async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
+    """Can this repository's sandbox run here at all? Its work items stop
+    for a human otherwise, and better learned here."""
+    value = policy.model_dump()
+    ok, detail = await backends.for_sandbox(value).health(value)
+    return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
 def _forge_check(repo: config.RepoEntry) -> dict:
@@ -653,7 +647,7 @@ async def _repo_checks() -> list[dict]:
                 )
             )
         elif (policy := repo.effective_sandbox) is not None:
-            checks.append(await _docker_check(repo, policy.image))
+            checks.append(await _sandbox_check(repo, policy))
         if auto:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:

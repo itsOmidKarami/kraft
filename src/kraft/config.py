@@ -221,7 +221,7 @@ class RepoEntry(BaseModel):
     env_passthrough: list[Annotated[str, Field(min_length=1)]] = []
     deny_tools: ToolNames = []
     steering: list[str] = []
-    #: Where this repository's tasks run (`kraft.worker.sandbox`). `false` is
+    #: Where this repository's tasks run (`kraft.worker.backends`). `false` is
     #: an explicit "none", kept as written so a re-save round-trips.
     sandbox: SandboxPolicy | Literal[False] | None = None
     #: The repository policy layer (`repository-policy-cannot-relax-instance-

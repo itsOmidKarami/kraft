@@ -179,6 +179,18 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # `harness` is worker_sessions' last surviving column once
         # `cost_estimated` is dropped, so its own trailing comma must go too.
         replace = (*replace, ("harness        TEXT,", "harness        TEXT"))
+    if version < 43:
+        drop_lines = (
+            *drop_lines,
+            "sandbox        TEXT",
+            "-- the sandbox backend a session ran in",
+            "-- session is cleaned up by the one it used",
+            "-- NULL for an unsandboxed session and every row older",
+            '-- read as "ask every backend"',
+        )
+        # Harmless when `cost_estimated` was already dropped (version < 41).
+        cost = "cost_estimated INTEGER NOT NULL DEFAULT 0"
+        replace = (*replace, (f"{cost},", cost))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -461,6 +473,8 @@ ADDED_COLUMNS = [
     (38, "worker_sessions", ("harness",), None),
     # 0: a row written before estimates existed never carried a guess (Kraft-wz83s)
     (40, "worker_sessions", ("cost_estimated",), 0),
+    # NULL: an older row names no backend, so every backend is asked to clean it
+    (42, "worker_sessions", ("sandbox",), None),
 ]
 
 
