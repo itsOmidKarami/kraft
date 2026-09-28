@@ -78,12 +78,21 @@ the person at the gate can find it.
 |---|---|
 | Touches authentication, sessions, tokens, secrets or permission checks | Add the library's security-review node if the library has one; otherwise say so in `rationale` |
 | A plan task is clearly heavier than the template assumed | Raise that task's `effort`, or its node's fix-loop `max_attempts` |
+| The plan's task count, at about 15-20 minutes per task, is more than the implementing task's `time_cap_minutes` holds | Raise that task's `time_cap_minutes` to fit, citing the plan's task count and the current cap |
 | The plan is docs-only, with no executable change | Skip a test node that has nothing to run against, never the review |
 | A risk section names a failure mode the chain never checks, and the library has the check | Add it |
 
 Leave it alone when the chain differs from what you would have picked but
 nothing is wrong with it, when you want to reorder for tidiness, when the plan is
 merely large, and when you are unsure. Unsure means no change.
+
+"Merely large" does not cover a time cap. A plan's size alone is no reason to
+add review or raise effort, but a task count the implementing task cannot finish
+inside its `time_cap_minutes` is concrete evidence: the cap stops the run
+mid-plan, a person has to retry it, and the plan was already there to count.
+Read the cap from the nodes you are given. Measured on a nine-task plan, tasks
+took 4 to 41 minutes each, about 17 on average, so budget roughly 15-20 minutes
+a task and round up.
 
 ## Output
 
