@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -149,3 +150,44 @@ async def test_reattach_closes_a_session_that_recorded_no_backend_everywhere(
     await reattach.reattach(database, run_dirs)
 
     assert (remote.closed, docker_closed) == (["s1"], ["s1"])
+
+
+async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
+    database, run_dirs, tmp_path, remote, monkeypatch
+):
+    """A backend that copies results out can fail to; the branch the session
+    committed must reach the repository all the same."""
+    published = []
+
+    async def fail(session_id, result_path):
+        raise OSError("copy-out failed")
+
+    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: SimpleNamespace(carried=None))
+    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid))
+    monkeypatch.setattr(remote, "collect", fail)
+    await database.write(
+        lambda c: store.create_work_item(
+            c,
+            id="w1",
+            bead_id="B",
+            title="t",
+            repo="/r",
+            chain_template="quick-task",
+            chain_definition="{}",
+        )
+    )
+
+    with pytest.raises(OSError, match="copy-out failed"):
+        await sp.run_task(
+            database,
+            run_dirs,
+            session_id="s1",
+            work_item_id="w1",
+            cmd=["true"],
+            node_id="verify",
+            hook_point="on.test.run",
+            cwd=tmp_path,
+            sandbox={"kind": "remote"},
+        )
+
+    assert (published, remote.closed) == (["s1"], ["s1"])

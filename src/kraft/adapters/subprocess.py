@@ -728,15 +728,20 @@ async def run_task(
         try:
             await _kill_group(pgid, group_kill_grace, reap=proc.poll)
         finally:
-            if backend is not None:
-                # Everything below reads the result file: bring it home
-                # before the sandbox holding it goes.
-                try:
-                    await backend.collect(session_id, result_path)
-                finally:
-                    await backend.close(session_id)
-            if refs is not None:
-                await _sync_refs(db, backend, refs, work_item_id, session_id)
+            # Nested so neither a collect nor a close that raises skips what
+            # follows it: the session's commits are published whatever became
+            # of its result file.
+            try:
+                if backend is not None:
+                    # Everything below reads the result file: bring it home
+                    # before the sandbox holding it goes.
+                    try:
+                        await backend.collect(session_id, result_path)
+                    finally:
+                        await backend.close(session_id)
+            finally:
+                if refs is not None:
+                    await _sync_refs(db, backend, refs, work_item_id, session_id)
         if paused:
             # The cancelled path never reaches `session_exited`, so Task 6's
             # hook inside it never fires. Idempotent with that hook for the

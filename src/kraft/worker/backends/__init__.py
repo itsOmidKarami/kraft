@@ -57,7 +57,8 @@ class SandboxBackend(Protocol):
         publish (adopted after a restart, or found dead)."""
 
     async def collect(self, session_id: str, result_path: Path) -> None:
-        """Bring the session's result file back to `result_path`."""
+        """Bring the session's result file back to `result_path`. A no-op
+        for a session this backend never ran."""
 
     async def close(self, session_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A
