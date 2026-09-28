@@ -175,6 +175,17 @@ failing the build. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
 
+## The model price table
+
+`src/kraft/prices.json` is what Kraft prices a *running* agent session with,
+until the agent reports its own cost when it exits. It is a snapshot of
+models.dev's Anthropic listing, with cache writes priced at the one-hour tier
+Claude Code uses (2x input). Nothing refreshes it automatically: when
+Anthropic's prices change, or a harness starts running a model the file does
+not list, run `just refresh-prices`, review the diff, and commit it. A model
+missing from the file gets no estimate, so its running sessions count as
+unpriced towards the budget until they exit.
+
 ## Design documents
 
 Specs and implementation plans are not committed. `.engineering/` and

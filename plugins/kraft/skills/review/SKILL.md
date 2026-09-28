@@ -19,6 +19,8 @@ read, so they spend a minute confirming instead of an hour reading.
 kraft view artifact ID             # the document the pending gate asks about
 kraft view docs ID                 # the spec and plan the work was held to
 kraft view diff ID --stat          # then the full diff where the stat looks risky
+kraft view threads ID --open       # review threads still waiting on an answer
+kraft view compare ID --from last_review --to latest --stat   # what changed since the last review
 ```
 
 The document's kind sets the question. A spec: does it solve the problem in
@@ -35,12 +37,17 @@ can state, not because nothing looked wrong. When unsure, say it is a
 judgement call and what you could not verify.
 
 A rejection needs a note, and the note is an instruction for whoever redoes the
-work. Draft it as one.
+work. Draft it as one. When the reasons are about specific lines, draft them as
+review threads instead (`add_review_comment`, one per finding, labeled
+`must_fix`, `question` or `nit`) and send them with
+`submit_review(outcome="request_changes")`: each thread is answered and
+resolved on its own, and a later review can check which ones held up. See
+`kraft:gates`.
 
 ## 3. Ask, then act
 
-Before `approve_gate` or `reject_gate`, the person has to have answered this
-gate. Your recommendation is not their answer, and neither is a general "go
+Before `approve_gate`, `reject_gate` or `submit_review`, the person has to have
+answered this gate. Your recommendation is not their answer, and neither is a general "go
 ahead" that predates the gate. An instruction that names this gate does count,
 even a conditional one ("approve it if it looks fine"): review first, act only
 if your own review meets the condition, and otherwise leave the gate pending and
