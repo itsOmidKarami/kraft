@@ -608,7 +608,7 @@ async def test_run_task_tears_down_the_container_on_cancel(run, docker, database
     assert docker.read_text().splitlines() == ["kraft-s-sandbox-cancel"]
 
 
-async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypatch):
+async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypatch, run_dirs):
     """Kraft-rki: `env=` was silently dropped once `sandbox` was set -- only
     `FORWARDED_ENV` crosses into the container bare. `dispatch.py` passes
     `PYTHONDONTWRITEBYTECODE=1` for `on.test.run` so a fix-loop re-measure
@@ -618,7 +618,7 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     real_docker_argv = sp._sandbox.docker_argv
 
     def fake_docker_argv(cmd, cwd, sandbox, results_dir, **kw):
-        seen["env"] = kw.get("env")
+        seen.update(kw)
         return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
 
     monkeypatch.setattr(sp._sandbox, "docker_argv", fake_docker_argv)
@@ -627,11 +627,14 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
         _writes_result({"status": "done"}),
         sandbox=DOCKER,
         env={"PYTHONDONTWRITEBYTECODE": "1"},
-        repo_entry=entry_of({"env": {"MY_REPO": "1"}}),
+        repo_entry=entry_of({"env": {"MY_REPO": "1"}, "env_passthrough": ["OPENAI_API_KEY"]}),
     )
 
     assert status == "done"
-    assert seen["env"] == {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+    assert {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}.items() <= seen["env"].items()
+    # A credential crosses by name only; the CLI gets a home that outlives --rm.
+    assert list(seen["passthrough"]) == ["OPENAI_API_KEY"]
+    assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"
 
 
 async def test_run_task_sandboxed_with_the_daemon_down_is_a_config_error(
