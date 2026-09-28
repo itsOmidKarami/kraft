@@ -637,3 +637,32 @@ def test_opencode_argv_every_flag_from_run_help():
     assert opencode.capabilities["rate_limit_signal"].reader == "opencode-json"
     assert not opencode.value_ok("permission_mode", "default")
     assert not opencode.supports("effort")
+
+
+@pytest.mark.parametrize(
+    "caps, mode, ok",
+    [
+        ({"permission_mode": {"cli": ["-m", "{value}"], "values": ["a", "b"]}}, "b", True),
+        ({"permission_mode": {"cli": ["-m", "{value}"], "values": ["a", "b"]}}, "c", False),
+        ({}, "a", False),
+    ],
+    ids=["accepted", "not-a-value", "no-permission-mode"],
+)
+def test_container_permission_mode_must_be_a_mode_the_harness_accepts(caps, mode, ok):
+    data = {
+        "id": "mini",
+        "kind": "cli",
+        "command": "mini",
+        "capabilities": {
+            "context": {"channel": "prompt"},
+            "usage": {"source": "result_file"},
+            **caps,
+            "prompt": {"cli": ["{value}"]},
+        },
+        "container_permission_mode": mode,
+    }
+    if ok:
+        assert harness.Harness.from_mapping(data, where="t").container_permission_mode == mode
+    else:
+        with pytest.raises(harness.HarnessError, match="container_permission_mode"):
+            harness.Harness.from_mapping(data, where="t")

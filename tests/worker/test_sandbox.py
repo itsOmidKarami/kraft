@@ -1,10 +1,14 @@
+import asyncio
 import os
 import subprocess
+import time
 from pathlib import Path
 
-from support.harness import make_repo
+import pytest
+from support.harness import fake_docker_bin, make_repo
 
 from kraft.worker import sandbox
+from kraft.worker.refstore import RefStore
 
 
 def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
@@ -13,11 +17,16 @@ def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
         cmd, "/work/item-1", {"kind": "docker", "image": "kraft-worker:py"}, "/run/results"
     )
     assert argv[:3] == ["docker", "run", "--rm"]
-    assert argv[3:5] == ["-u", f"{os.getuid()}:{os.getgid()}"]
+    assert argv[argv.index("-u") + 1] == f"{os.getuid()}:{os.getgid()}"
     # A setuid-root binary in the operator's image (su, mount, sudo) would
     # otherwise let the worker regain root and defeat the -u uid:gid above.
     assert "--security-opt=no-new-privileges" in argv
     assert "--cap-drop=ALL" in argv
+    # PID 1 ignores a signal it has no handler for: without an init, pause and
+    # cap signals never reach the agent.
+    assert "--init" in argv
+    # What `sweep_orphans` finds this Kraft's containers by.
+    assert argv[argv.index("--label") + 1] == sandbox.home_label()
     assert "/work/item-1:/work/item-1" in argv
     assert "/run/results:/run/results:ro" in argv
     w_i = argv.index("-w")
@@ -44,17 +53,66 @@ def _worktree(tmp_path):
     return repo, worktree, gitdir
 
 
-def test_docker_argv_mounts_the_repo_gitdir_read_only(tmp_path):
+def test_docker_argv_mounts_the_repo_gitdir_read_only_without_a_ref_store(tmp_path):
+    """Without a ref store the worker gets no writable ref anywhere in the
+    operator's repository: a commit fails rather than move a shared ref."""
     repo, worktree, gitdir = _worktree(tmp_path)
     argv = sandbox.docker_argv(
         ["git", "status"], worktree, {"kind": "docker", "image": "x"}, "/run/results"
     )
     git = repo / ".git"
     assert f"{git}:{git}:ro" in argv
-    # Read-write only where a commit from a linked worktree actually writes.
     for name in ("objects", "refs", "logs"):
-        assert f"{git / name}:{git / name}" in argv
+        assert f"{git / name}:{git / name}" not in argv
     assert f"{gitdir}:{gitdir}" in argv
+
+
+def test_docker_argv_mounts_the_ref_store_over_the_repo_gitdir(tmp_path):
+    """The worker's refs land in the store; only objects and LFS content,
+    which are data, reach the real gitdir read-write."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    git = repo / ".git"
+    (git / "HEAD").write_text("ref: refs/heads/main\n")
+    (git / "lfs").mkdir()
+    store = RefStore(tmp_path / "store", git, gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git", "status"],
+        worktree,
+        {"kind": "docker", "image": "x"},
+        "/run/results",
+        refstore=store,
+    )
+    assert f"{store.shadow}:{git}" in argv
+    assert f"{git / 'objects'}:{git / 'objects'}" in argv
+    assert f"{git / 'lfs'}:{git / 'lfs'}" in argv
+    assert f"{git / 'config'}:{git / 'config'}:ro" in argv
+    assert f"{git / 'HEAD'}:{git / 'HEAD'}:ro" in argv
+    rw_sources = [
+        Path(argv[i + 1].split(":")[0])
+        for i, a in enumerate(argv)
+        if a == "-v" and not argv[i + 1].endswith(":ro")
+    ]
+    assert git not in rw_sources
+    assert not [p for p in rw_sources if p.is_relative_to(git / "refs")]
+
+
+def test_docker_argv_mounts_every_alternate_object_dir_read_only(tmp_path):
+    """A `clone --shared` repository borrows objects from outside every other
+    mount; without its own mount the container reads `bad object HEAD`."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    borrowed = tmp_path / "upstream" / "objects"
+    borrowed.mkdir(parents=True)
+    (repo / ".git" / "objects" / "info").mkdir()
+    (repo / ".git" / "objects" / "info" / "alternates").write_text(f"{borrowed}\n")
+    store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git", "log"],
+        worktree,
+        {"kind": "docker", "image": "x"},
+        "/run/results",
+        refstore=store,
+    )
+    assert f"{borrowed}:{borrowed}:ro" in argv
 
 
 def test_docker_argv_leaves_every_host_code_execution_path_read_only(tmp_path):
@@ -120,15 +178,6 @@ def test_docker_argv_shadows_config_worktree_read_only(tmp_path):
     worktree_config = gitdir / "config.worktree"
     assert worktree_config.is_file()
     assert f"{worktree_config}:{worktree_config}:ro" in argv
-
-
-def test_docker_argv_creates_the_reflog_dir_a_commit_needs(tmp_path):
-    """`logs/` does not exist in a fresh clone and git makes it on the first
-    ref update -- which it cannot do under a read-only mount."""
-    repo, worktree, _ = _worktree(tmp_path)
-    assert not (repo / ".git" / "logs").exists()
-    sandbox.docker_argv(["git", "commit"], worktree, {"kind": "docker", "image": "x"}, "/run/res")
-    assert (repo / ".git" / "logs").is_dir()
 
 
 def test_docker_argv_mounts_only_this_session_s_result_file_read_write(tmp_path):
@@ -296,3 +345,166 @@ def test_hardened_env_still_lets_git_diff_run(tmp_path):
         env=env,
     )
     assert out.stdout.split() == ["f.txt"]
+
+
+def test_docker_argv_mounts_a_symlinked_worktree_at_its_real_path(tmp_path):
+    """git records a worktree's real path in its `gitdir` backlink; mounted
+    only at a symlinked path, the worktree looks gone to `git worktree prune`
+    inside the container, which then deletes its admin directory."""
+    _, worktree, gitdir = _worktree(tmp_path)
+    (gitdir / "gitdir").write_text(f"{worktree}/.git\n")
+    link = tmp_path / "link"
+    link.symlink_to(worktree)
+    argv = sandbox.docker_argv(["git", "status"], link, {"kind": "docker", "image": "x"}, None)
+    assert f"{worktree}:{worktree}" in argv
+    assert argv[argv.index("-w") + 1] == str(worktree)
+    backlink = gitdir / "gitdir"
+    assert f"{backlink}:{backlink}:ro" in argv
+
+
+def test_docker_argv_gives_the_worker_a_home_of_its_own(tmp_path):
+    """A uid with no passwd entry in the image gets HOME=/, where no agent CLI
+    can write its state; codex and gemini then refuse to start at all."""
+    home = tmp_path / "home"
+    argv = sandbox.docker_argv(["claude"], "/w", {"kind": "docker", "image": "x"}, None, home=home)
+    assert f"{home}:{home}" in argv
+    assert argv[argv.index(f"HOME={home}") - 1] == "-e"
+
+
+def test_docker_argv_forwards_passthrough_names_bare():
+    """A repo's `env_passthrough` is how a worker gets a credential; forwarded
+    by name, its value never lands on the argv (`ps`, `docker inspect`)."""
+    argv = sandbox.docker_argv(
+        ["codex"], "/w", {"kind": "docker", "image": "x"}, None, passthrough=["OPENAI_API_KEY"]
+    )
+    assert argv[argv.index("OPENAI_API_KEY") - 1] == "-e"
+    assert not [a for a in argv if a.startswith("OPENAI_API_KEY=")]
+
+
+def test_docker_argv_pins_hooks_off_for_git_in_the_container():
+    """A hook manager's hook points at a host interpreter, so it fails every
+    commit in the container; and a hook is the worker's code anyway."""
+    argv = sandbox.docker_argv(["git"], "/w", {"kind": "docker", "image": "x"}, None)
+    env = dict(a.split("=", 1) for a in argv if a.startswith("GIT_CONFIG_"))
+    pinned = {
+        env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"]
+        for i in range(int(env["GIT_CONFIG_COUNT"]))
+    }
+    assert pinned["core.hooksPath"] == os.devnull
+
+
+def test_docker_argv_mounts_extra_paths_read_only_at_the_same_path():
+    argv = sandbox.docker_argv(
+        ["amp"], "/w", {"kind": "docker", "image": "x"}, None, ro_paths=["/k/rules.json"]
+    )
+    assert "/k/rules.json:/k/rules.json:ro" in argv
+
+
+def test_git_identity_comes_from_the_repository_when_the_daemon_has_none(
+    repo, tmp_path, monkeypatch
+):
+    for name in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    subprocess.run(["git", "config", "user.name", "Op"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "op@x"], cwd=repo, check=True)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "b", str(wt)], cwd=repo, check=True)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
+    assert sandbox.git_identity(wt) == {
+        "GIT_AUTHOR_NAME": "Daemon",
+        "GIT_AUTHOR_EMAIL": "op@x",
+        "GIT_COMMITTER_NAME": "Op",
+        "GIT_COMMITTER_EMAIL": "op@x",
+    }
+
+
+@pytest.fixture
+def fake_docker(tmp_path, monkeypatch):
+    """The fake `docker` first on PATH; returns the file `docker rm` logs to."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}{os.pathsep}{os.environ['PATH']}")
+    log = tmp_path / "rm-log"
+    monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(log))
+    return log
+
+
+async def test_sweep_removes_only_containers_no_live_session_owns(
+    fake_docker, tmp_path, monkeypatch
+):
+    listed = tmp_path / "ps"
+    listed.write_text("kraft-live\nkraft-orphan\n")
+    monkeypatch.setenv("FAKE_DOCKER_PS", str(listed))
+    assert await sandbox.sweep_orphans(keep={"kraft-live"}) == ["kraft-orphan"]
+    assert fake_docker.read_text().split() == ["kraft-orphan"]
+
+
+async def test_teardown_gives_up_on_a_daemon_that_never_answers(tmp_path, monkeypatch):
+    """A wedged daemon hung `docker rm -f` forever, and teardown is awaited on
+    every session's way out and for every row at startup."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text("#!/bin/sh\nexec sleep 30\n")
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(sandbox, "DOCKER_CALL_TIMEOUT_S", 0.2)
+    started = time.monotonic()
+    await asyncio.wait_for(sandbox.teardown("s1"), 5)
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    "executable, missing", [("sh", False), ("kraft-no-such-cli", True)], ids=["present", "absent"]
+)
+async def test_an_image_without_the_command_is_told_apart(fake_docker, executable, missing):
+    assert await sandbox.missing_executable("img", executable) is missing
+
+
+async def test_an_inconclusive_image_check_never_blocks_a_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))  # no docker at all
+    assert await sandbox.missing_executable("img", "kraft-no-such-cli") is False
+
+
+def test_docker_argv_keeps_objects_info_read_only(tmp_path):
+    """`objects/info/alternates` names directories every later launch on the
+    repository mounts: writable, it let a worker mount any host directory."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    info = repo / ".git" / "objects" / "info"
+    info.mkdir()
+    store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git"], worktree, {"kind": "docker", "image": "x"}, None, refstore=store
+    )
+    assert f"{info}:{info}:ro" in argv
+
+
+def test_docker_argv_keeps_another_gitdir_read_only(tmp_path):
+    """A `.git` file naming a gitdir outside `worktrees/` (a submodule's
+    checkout) has no ref store; the file and its gitdir stay read-only."""
+    other = tmp_path / "super" / ".git" / "modules" / "sm"
+    other.mkdir(parents=True)
+    checkout = tmp_path / "sm"
+    checkout.mkdir()
+    (checkout / ".git").write_text(f"gitdir: {other}\n")
+    argv = sandbox.docker_argv(["git"], checkout, {"kind": "docker", "image": "x"}, None)
+    assert f"{checkout / '.git'}:{checkout / '.git'}:ro" in argv
+    assert f"{other}:{other}:ro" in argv
+
+
+async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp_path, monkeypatch):
+    """A version manager's shim sets PATH in the image's entrypoint, and a
+    repository may set it in `env`; a probe that skipped either stopped
+    launches that would have worked."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "argv"
+    (bin_dir / "docker").write_text(f'#!/bin/sh\necho "$@" > {log}\necho kraft-probe-yes\n')
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    assert await sandbox.missing_executable("img", "claude", {"PATH": "/opt/bin"}) is False
+    argv = log.read_text().split()
+    assert not [a for a in argv if a.startswith("--entrypoint")]
+    assert argv[argv.index("PATH=/opt/bin") - 1] == "-e"

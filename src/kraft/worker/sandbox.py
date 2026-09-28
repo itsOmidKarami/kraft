@@ -30,8 +30,14 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-from collections.abc import MutableMapping
+from collections.abc import Iterable, MutableMapping
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from kraft.paths import kraft_home
+
+if TYPE_CHECKING:
+    from kraft.worker.refstore import RefStore
 
 #: Kraft's own vars, plus whichever auth var this install's `claude` CLI
 #: actually uses, forwarded bare (`-e NAME`, no value) so docker copies each
@@ -86,6 +92,16 @@ def container_name(session_id: str) -> str:
     return f"kraft-{session_id}"
 
 
+#: The label every Kraft container carries, valued with the resolved
+#: `KRAFT_HOME`: what `sweep_orphans` lists by, so one Kraft never reaps
+#: another's containers (a dev instance beside an installed one).
+HOME_LABEL = "kraft.home"
+
+
+def home_label() -> str:
+    return f"{HOME_LABEL}={kraft_home().resolve()}"
+
+
 def docker_argv(
     cmd: list[str],
     cwd: str | Path,
@@ -95,6 +111,11 @@ def docker_argv(
     name: str | None = None,
     result_path: str | Path | None = None,
     cidfile: str | Path | None = None,
+    *,
+    refstore: RefStore | None = None,
+    home: str | Path | None = None,
+    passthrough: Iterable[str] = (),
+    ro_paths: Iterable[str | Path] = (),
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -124,9 +145,11 @@ def docker_argv(
     launch that is no session and has no results to read (a repository's
     `setup_command`, `builtins.run_setup_command`): nothing is mounted.
 
-    `<repo>/.git`: read-only, with `objects/`, `refs/`, `logs/` and this
-    worktree's own gitdir (`<repo>/.git/worktrees/<id>`) read-write -- what a
-    commit from inside a linked worktree actually writes. That worktree
+    `<repo>/.git`: the worktree's private ref store (`refstore` below), so no
+    ref the worker writes reaches the operator's repository; objects are
+    shared read-write. This worktree's own gitdir (`<repo>/.git/worktrees/<id>`)
+    is read-write -- what a commit from inside a linked worktree writes
+    besides objects and refs. That worktree
     gitdir has to be read-write wholesale: a commit rewrites HEAD, the index
     and per-worktree refs through lockfiles beside them, so the directory
     itself must be writable, and every file git redirects config and hooks
@@ -155,12 +178,31 @@ def docker_argv(
     the container, and leaves no file when it never got that far -- the one
     thing that tells docker's own launch failure from the sandboxed
     command's (`subprocess._docker_launch_failed`, Kraft-6ltwh).
+
+    `refstore`: the worktree's private ref store (`worker.refstore`), mounted
+    over the repository's common gitdir so the worker's ref writes never reach
+    the operator's refs. Without one, the common gitdir is read-only whole.
+
+    `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
+    has somewhere to keep its state across sessions. `passthrough`: names
+    forwarded bare, like `FORWARDED_ENV` -- a repo's `env_passthrough`, whose
+    values must never be written onto this argv. `ro_paths`: extra
+    host paths mounted read-only at the same path (a rules file).
+
+    `cwd` is resolved first: git records a worktree's real path, and a
+    worktree mounted only at a symlinked path looks gone to `git worktree
+    prune`, which then deletes its admin directory.
     """
-    cwd = str(cwd)
+    cwd = str(Path(cwd).resolve())
     argv = [
         "docker",
         "run",
         "--rm",
+        # PID 1 ignores a signal it installed no handler for, so without an
+        # init neither a pause's SIGINT nor a cap's SIGTERM reaches the agent.
+        "--init",
+        "--label",
+        home_label(),
         "-u",
         f"{os.getuid()}:{os.getgid()}",
         "--security-opt=no-new-privileges",
@@ -174,115 +216,183 @@ def docker_argv(
         argv += ["-v", f"{results_dir}:{results_dir}:ro"]
     if result_path is not None:
         argv += ["-v", f"{result_path}:{result_path}"]
-    argv += _gitdir_mounts(Path(cwd))
+    argv += _gitdir_mounts(Path(cwd), refstore)
+    for path in ro_paths:
+        argv += ["-v", f"{path}:{path}:ro"]
+    if home is not None:
+        argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
     if name is not None:
         argv += ["--name", name]
     if cidfile is not None:
         argv.append(f"--cidfile={cidfile}")
-    for env_name in FORWARDED_ENV:
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *passthrough)):
         argv += ["-e", env_name]
-    for env_name, value in (env or {}).items():
+    pins: dict[str, str] = {}
+    _pin(pins, _HARDENED_GIT_CONFIG)
+    for env_name, value in {**pins, **(env or {})}.items():
         argv += ["-e", f"{env_name}={value}"]
     argv.append(sandbox["image"])
     argv += cmd
     return argv
 
 
-#: The only paths under a repo's common gitdir a commit made from inside a
-#: linked worktree writes. None of them is ever executed by git (objects and
-#: refs are data, `logs/` is the reflog), so read-write here does not hand the
-#: container host code execution the way `hooks/` or `config` would.
-_WRITABLE_COMMON_GITDIR = ("objects", "refs", "logs")
+_IDENTITY = {
+    "GIT_AUTHOR_NAME": "user.name",
+    "GIT_AUTHOR_EMAIL": "user.email",
+    "GIT_COMMITTER_NAME": "user.name",
+    "GIT_COMMITTER_EMAIL": "user.email",
+}
 
 
-def _gitdir_mounts(cwd: Path) -> list[str]:
-    """`-v` arguments for the repo gitdir a worktree's `.git` file points at.
+def git_identity(cwd: Path) -> dict[str, str]:
+    """The identity a worker commits under, as git's env form: the daemon's
+    own `GIT_AUTHOR_*`/`GIT_COMMITTER_*` where set, else the host's
+    `user.name`/`user.email` for this repository. The container has neither
+    the host's `~/.gitconfig` nor a writable repo config to set one in, so
+    without this every commit fails "unable to auto-detect email address".
 
-    Empty when `cwd` has no `.git` at all (never expected for a real
-    invocation, but this is not the place to raise over it) or already has an
-    ordinary `.git` directory of its own -- that one is inside `cwd`, already
-    mounted with it, and nothing extra is needed.
+    Read through the common gitdir, never the worktree: a co-task's container
+    may be writing that worktree right now."""
+    dirs = linked_gitdirs(cwd)
+    gitdir = dirs[0] if dirs is not None else cwd / ".git"
+    env = dict(os.environ)
+    harden_host_git_env(env)
+    found: dict[str, str] = {}
+    looked_up: dict[str, str | None] = {}
+    for name, key in _IDENTITY.items():
+        if os.environ.get(name):
+            found[name] = os.environ[name]
+            continue
+        if key not in looked_up:
+            done = subprocess.run(
+                ["git", f"--git-dir={gitdir}", "config", "--get", key],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            looked_up[key] = done.stdout.strip() if done.returncode == 0 else None
+        if looked_up[key]:
+            found[name] = looked_up[key]
+    return found
 
-    The `is_dir()` guards below are read-write *carve-outs*, not read-only
-    shadows: a path that is missing stays covered by the read-only mount of
-    its parent, so a container that creates one gains nothing. (An earlier
-    revision guarded read-only shadows this way, where a missing path meant
-    no shadow at all and the container could just create it.)
-    """
+
+def _gitdir_of(cwd: Path) -> Path | None:
+    """The gitdir `cwd/.git` names, resolved, when it is a `gitdir:` file."""
     git_path = cwd / ".git"
     if git_path.is_dir():
-        return []
+        return None
     try:
         text = git_path.read_text()
     except OSError:
-        return []
+        return None
     if not text.startswith("gitdir:"):
+        return None
+    return Path(text.removeprefix("gitdir:").strip()).resolve()
+
+
+def linked_gitdirs(cwd: Path) -> tuple[Path, Path] | None:
+    """`(common gitdir, worktree gitdir)` for a linked worktree, resolved, or
+    None when `cwd/.git` is a directory or does not name `<repo>/.git/worktrees/<id>`."""
+    gitdir = _gitdir_of(cwd)
+    if gitdir is None or gitdir.parent.name != "worktrees":
+        return None
+    return gitdir.parent.parent, gitdir
+
+
+#: What a ref store mounts from the real common gitdir, read-only: files
+#: and directories git reads but a worker has no business writing.
+SHADOW_FILES = ("HEAD", "config", "shallow")
+#: `objects` and `lfs` are data a commit (or an LFS clean filter) writes, so
+#: they stay read-write; `info` (exclude, attributes) is read-only.
+SHADOW_DIRS = ("objects", "lfs", "info")
+_RW_SHADOW_DIRS = frozenset({"objects", "lfs"})
+
+
+def _alternates(objects: Path) -> list[Path]:
+    """Object directories `objects/info/alternates` borrows from (`clone
+    --shared`, `--reference`): outside every other mount, so without their own
+    the container cannot read those objects at all."""
+    try:
+        lines = (objects / "info" / "alternates").read_text().splitlines()
+    except OSError:
         return []
+    found = []
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#"):
+            path = Path(line) if Path(line).is_absolute() else objects / line
+            if path.resolve().is_dir():
+                found.append(path.resolve())
+    return found
+
+
+def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
+    """`-v` arguments for the gitdirs a linked worktree's `.git` file points at.
+
+    Empty when `cwd` is not a linked worktree: an ordinary `.git` directory is
+    inside `cwd`, already mounted with it.
+
+    The worktree's own gitdir `W` is read-write (a commit writes its index,
+    HEAD and lockfiles there), with the files git redirects config and the
+    common dir through shadowed read-only, created first so a worker cannot
+    dodge a shadow by deleting its file. The common gitdir is the private ref
+    store `refstore` when given, with the real `objects/` and `lfs/` inside
+    it read-write and `HEAD`, `config`, `info/` and `shallow` read-only; the
+    worker's refs, reflogs, `packed-refs` and `FETCH_HEAD` all land in the
+    store. Without a store it is read-only whole, and a commit cannot move a
+    ref at all.
+    """
+    dirs = linked_gitdirs(cwd)
+    if dirs is None:
+        # A `.git` file naming some other gitdir (a submodule's checkout, say):
+        # nothing to commit through a ref store, so both stay read-only.
+        other = _gitdir_of(cwd)
+        if other is None:
+            return []
+        return ["-v", f"{cwd / '.git'}:{cwd / '.git'}:ro", "-v", f"{other}:{other}:ro"]
+    common, worktree_gitdir = dirs
     # `.git` itself lives inside the read-write `cwd` mount. Left alone, a
     # sandboxed worker repoints it at a gitdir it builds inside the
     # worktree -- HEAD, objects/, refs/, a config with hooks -- and the next
     # host-side git command run there executes the worker's hook as the
     # invoking host user. It never legitimately changes for the life of the
     # worktree, so shadowing it read-only costs nothing.
-    mounts = ["-v", f"{git_path}:{git_path}:ro"]
-    gitdir = Path(text.removeprefix("gitdir:").strip())
-    # `<repo>/.git/worktrees/<id>` -> common gitdir `<repo>/.git`. Only that
-    # one subdirectory is this session's to write; every sibling worktree's
-    # gitdir stays read-only under the common mount.
-    common, worktree_gitdir = (
-        (gitdir.parent.parent, gitdir) if gitdir.parent.name == "worktrees" else (gitdir, None)
-    )
-    # `logs/` does not exist in a freshly cloned repo, and git creates it on
-    # the first ref update -- which it cannot do under the read-only mount,
-    # failing the commit. Creating it here is what git itself would do a
-    # moment later.
-    try:
-        (common / "logs").mkdir(exist_ok=True)
-    except OSError:
-        pass
-    mounts += ["-v", f"{common}:{common}:ro"]
-    for name in _WRITABLE_COMMON_GITDIR:
-        path = common / name
-        if path.is_dir():
-            mounts += ["-v", f"{path}:{path}"]
-    if worktree_gitdir is not None:
-        # A commit from this worktree writes all over its own gitdir (index,
-        # HEAD, COMMIT_EDITMSG, per-worktree refs, lockfiles), so this one is
-        # read-write wholesale -- with the exceptions below.
-        mounts += ["-v", f"{worktree_gitdir}:{worktree_gitdir}"]
-        # `commondir` is a file inside that read-write gitdir naming where
-        # `hooks/` and `config` actually resolve to (the common gitdir
-        # mounted above). Left writable, a worker repoints it at a directory
-        # of its own inside the worktree, carrying its own `config` and
-        # `hooks/pre-commit`, and the next host-side git command run here
-        # runs that hook as the invoking host user -- the same escape the
-        # read-only `hooks/`/`config` mounts exist to close, reached through
-        # the one file that redirects to them. It always exists once a
-        # linked worktree is created, but is created here too rather than
-        # guarded with `exists()`, so the shadow can never be dodged by a
-        # worker that deletes it first.
-        commondir = worktree_gitdir / "commondir"
-        try:
-            commondir.touch(exist_ok=True)
-        except OSError:
-            pass
-        mounts += ["-v", f"{commondir}:{commondir}:ro"]
-        # `config.worktree` is the other file inside this read-write gitdir git
-        # reads as part of its config stack -- whenever
-        # `extensions.worktreeConfig = true` (`git sparse-checkout set` turns
-        # this on), git reads it in addition to the common gitdir's `config`.
-        # Left writable, a worker plants `core.hooksPath` there just as easily
-        # as through `commondir`, and the next host-side `git commit` this
-        # worktree runs executes that hook as the invoking host user -- the
-        # same escape, a second file wide. Created here rather than guarded
-        # with `exists()` for the same reason as `commondir`: it must not be
-        # dodged by a worker that deletes it first.
-        worktree_config = worktree_gitdir / "config.worktree"
-        try:
-            worktree_config.touch(exist_ok=True)
-        except OSError:
-            pass
-        mounts += ["-v", f"{worktree_config}:{worktree_config}:ro"]
+    git_file = cwd / ".git"
+    mounts = ["-v", f"{git_file}:{git_file}:ro"]
+    if refstore is None:
+        mounts += ["-v", f"{common}:{common}:ro"]
+    else:
+        mounts += ["-v", f"{refstore.shadow}:{common}"]
+        for name in (*SHADOW_FILES, *SHADOW_DIRS):
+            path = common / name
+            if path.exists():
+                mode = "" if name in _RW_SHADOW_DIRS else ":ro"
+                mounts += ["-v", f"{path}:{path}{mode}"]
+        # `objects/info` is where `alternates` lives: read-write, a worker
+        # names any host directory there and every later sandboxed launch on
+        # this repository mounts it (and host git reads objects from it).
+        info = common / "objects" / "info"
+        if info.is_dir():
+            mounts += ["-v", f"{info}:{info}:ro"]
+        for alternate in _alternates(common / "objects"):
+            mounts += ["-v", f"{alternate}:{alternate}:ro"]
+    mounts += ["-v", f"{worktree_gitdir}:{worktree_gitdir}"]
+    # `commondir` names where `hooks/` and `config` resolve to, and
+    # `config.worktree` is read as part of the config stack whenever
+    # `extensions.worktreeConfig` is on: either one, rewritten, hands the next
+    # host-side git in this worktree a config of the worker's choosing.
+    # `gitdir` is the backlink `git worktree prune` checks: rewritten to a
+    # path that does not exist, the next host prune deletes this worktree's
+    # admin directory.
+    for name in ("commondir", "config.worktree", "gitdir"):
+        path = worktree_gitdir / name
+        if name != "gitdir":
+            try:
+                path.touch(exist_ok=True)
+            except OSError:
+                pass
+        if path.exists():
+            mounts += ["-v", f"{path}:{path}:ro"]
     return mounts
 
 
@@ -508,16 +618,97 @@ async def teardown(session_id: str) -> None:
     this one was sandboxed is how a path gets missed. Errors (already gone,
     docker not installed) are not this function's to raise: a container that
     is already down is the success case.
+
+    Bounded: a wedged daemon answers `docker rm` never, and this is awaited on
+    every session's way out and for every row at startup. A container that
+    outlives a timed-out call is `sweep_orphans`'s at the next start.
     """
+    await docker_call("rm", "-f", container_name(session_id))
+
+
+#: How long any one best-effort `docker` call Kraft makes on its own account
+#: (teardown, the orphan sweep, the image check) may take.
+DOCKER_CALL_TIMEOUT_S = 30.0
+
+
+async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+    """Run `docker args...`; `(returncode, stdout)`, or None when docker is
+    missing or did not answer in time (its client is then killed)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "docker",
-            "rm",
-            "-f",
-            container_name(session_id),
-            stdout=subprocess.DEVNULL,
+            *args,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        await proc.wait()
     except OSError:
-        pass
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout or DOCKER_CALL_TIMEOUT_S)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None
+    return proc.returncode, out.decode(errors="replace")
+
+
+async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
+    """`docker rm -f` every container this Kraft home started that no live
+    session owns, returning their names: a teardown that failed or timed out
+    (the daemon was briefly down) leaves one writing a worktree forever, and
+    only a scan finds it. Listed by `home_label`, never by name, so another
+    Kraft's containers on the same daemon are left alone."""
+    listed = await docker_call(
+        "ps", "-a", "--filter", f"label={home_label()}", "--format", "{{.Names}}"
+    )
+    if listed is None or listed[0] != 0:
+        return []
+    keep = set(keep)
+    orphans = [n for n in listed[1].split() if n not in keep]
+    for name in orphans:
+        await docker_call("rm", "-f", name)
+    return orphans
+
+
+#: `(image, executable)` pairs an image was seen to hold. Only a hit is
+#: remembered: an operator who fixes the image need not restart Kraft.
+_HAS_EXECUTABLE: set[tuple[str, str]] = set()
+
+
+async def missing_executable(
+    image: str, executable: str, env: dict[str, str] | None = None
+) -> bool:
+    """True only when `image` demonstrably lacks `executable`. A launch then
+    stops as `config_error` naming both, instead of exiting 127 inside a
+    container that exists -- which reads as the agent failing and opens a fix
+    loop no agent can win. Asked the way the launch will run: through the
+    image's own entrypoint (a version manager's shim sets `PATH` there) and
+    with the repository's literal `env`. Anything inconclusive -- no daemon,
+    no `sh`, an entrypoint that is the agent itself, a pull that failed -- is
+    False: the launch goes ahead and fails, or not, as it always did."""
+    key = (image, executable)
+    if key in _HAS_EXECUTABLE:
+        return False
+    env_args = [a for name, value in (env or {}).items() for a in ("-e", f"{name}={value}")]
+    probed = await docker_call(
+        "run",
+        "--rm",
+        "--label",
+        home_label(),
+        "--network=none",
+        "--cap-drop=ALL",
+        *env_args,
+        image,
+        "sh",
+        "-c",
+        'command -v "$0" >/dev/null && echo kraft-probe-yes || echo kraft-probe-no',
+        executable,
+        timeout=300,
+    )
+    if probed is None or probed[0] != 0:
+        return False
+    answer = probed[1].strip().splitlines()[-1:]
+    if answer == ["kraft-probe-yes"]:
+        _HAS_EXECUTABLE.add(key)
+        return False
+    return answer == ["kraft-probe-no"]

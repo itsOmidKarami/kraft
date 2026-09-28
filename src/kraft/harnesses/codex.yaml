@@ -32,6 +32,11 @@ tool_names:
 # launch whose policy would have to deny it is refused. Its other tools
 # (view_image, update_plan, MCP calls) were not probed.
 unhooked_tools: [WebSearch]
+# Inside Kraft's docker sandbox codex's own bubblewrap sandbox cannot create a
+# namespace (Docker's default seccomp profile), so every shell command it runs
+# fails with "bwrap: No permissions to create a new namespace" (probed with
+# codex-cli 0.158.0, 2026-09-28). The container is the boundary there.
+container_permission_mode: danger-full-access
 command: [codex, exec]
 # `codex exec resume <SESSION_ID> [PROMPT]` -- the id must precede the prompt,
 # which a trailing-flag model cannot express, so resume gets its own prefix.

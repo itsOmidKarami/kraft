@@ -71,7 +71,9 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
             f"{path} is not a Cursor hooks file Kraft can add its permission hook to "
             f"({exc}); fix or remove it"
         ) from exc
-    entries.append({"command": command_of(argv), "timeout": 10})
+    # Cursor allows the call when a hook crashes, times out or prints nothing,
+    # unless the entry says otherwise: Kraft's gate must deny instead.
+    entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
     if _git(worktree, "ls-files", "--error-unmatch", _REL).returncode == 0:

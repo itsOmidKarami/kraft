@@ -430,6 +430,25 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
     assert not stored.exists()
 
 
+def test_abandon_reclaims_what_a_sandbox_kept_beside_the_worktree(client, repo):
+    """A sandboxed item's ref store and its agent CLIs' home (caches, chats)
+    would otherwise outlive it in $KRAFT_HOME."""
+    from kraft.worker import refstore
+
+    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    _poll_events(client, wid, "gate_requested")
+    _set_status(wid, "paused")
+    run_dirs = client.app.state.run_dirs
+    store = refstore.prepare(run_dirs.base, run_dirs.worktrees / wid, None)
+    home = run_dirs.base / "sandbox-home" / wid
+    home.mkdir(parents=True)
+
+    client.post(f"/api/work-items/{wid}/abandon")
+
+    assert not store.shadow.exists()
+    assert not home.exists()
+
+
 def test_abandon_refuses_an_active_item(client, repo):
     """Pause first. Otherwise this races a running agent's writes."""
     wid = _post_default(client, repo)

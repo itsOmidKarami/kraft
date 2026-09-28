@@ -21,6 +21,7 @@ import psutil
 
 from kraft import caps, events, logs, store
 from kraft import usage as _usage
+from kraft.worker import refstore as _refstore
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
 
@@ -286,6 +287,41 @@ def _resolve(result_path: Path, returncode: int) -> str:
     return "done" if returncode == 0 else "failed"
 
 
+def sandbox_home(run_dirs, work_item_id: str) -> Path:
+    """The `HOME` a sandboxed item's containers share, kept across its
+    sessions so an agent CLI can resume one: the same directory for every
+    session of the item, never shared with another item."""
+    return run_dirs.base / "sandbox-home" / work_item_id
+
+
+async def _sync_refs(db, refs: _refstore.RefStore, work_item_id: str, session_id: str) -> None:
+    """Publish the item branch out of a sandboxed session's ref store, and
+    record why not when it could not: the branch then stays where it was, and
+    a person decides."""
+    await _record_unsynced(
+        db,
+        refs,
+        work_item_id,
+        session_id,
+        await asyncio.to_thread(_refstore.sync, refs, session_id),
+    )
+
+
+async def _record_unsynced(
+    db, refs, work_item_id: str, session_id: str, problem: str | None
+) -> None:
+    if problem:
+        logger.warning("session %s: %s", session_id, problem)
+        await db.write(
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "sandbox_branch_not_synced",
+                {"session_id": session_id, "branch": refs.branch, "reason": problem},
+            )
+        )
+
+
 def _docker_launch_failed(cidfile: Path) -> bool:
     """True if `docker run` itself never created the container -- the daemon
     is down, or an image could not be pulled -- so the sandboxed command
@@ -480,6 +516,9 @@ async def run_task(
     #: The `harnesses.yaml` harness this session runs on, recorded on its row
     #: for `worker.reattach` (Kraft-9elw1). Only `run_agent_task` sets it.
     harness: str | None = None,
+    #: Host paths a sandboxed launch also mounts read-only at the same path (a
+    #: rules file its CLI must read and never rewrite). Ignored unsandboxed.
+    ro_paths: tuple[str, ...] = (),
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -510,6 +549,7 @@ async def run_task(
     )
 
     full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
+    refs: _refstore.RefStore | None = None
     if sandbox:
         # The container writes its result here, and `result_path` is mounted
         # read-write into it by name -- docker can only bind-mount a file
@@ -518,15 +558,57 @@ async def run_task(
         result_path.touch(exist_ok=True)
         # docker refuses a cidfile that already exists.
         cidfile.unlink(missing_ok=True)
+        # `db.write` for the reads: this session's own row, and a co-task's
+        # just written, must both be seen.
+        others = await db.write(
+            lambda c: [s for s in store.live_session_ids(c, work_item_id) if s != session_id]
+        )
+        branch = await db.write(lambda c: store.branch_of(c, work_item_id))
+        try:
+            refs = await asyncio.to_thread(
+                _refstore.prepare,
+                run_dirs.base,
+                Path(cwd),
+                branch,
+                session_id=session_id,
+                live=others,
+                work_item_id=work_item_id,
+            )
+        except (OSError, RuntimeError) as exc:
+            log_path.write_text(f"kraft: could not prepare the sandbox's ref store: {exc}\n")
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
+        if await _sandbox.missing_executable(
+            sandbox["image"], cmd[0], repo_entry.env if repo_entry is not None else None
+        ):
+            log_path.write_text(
+                f"kraft: image {sandbox['image']!r} has no {cmd[0]!r} on its PATH, so this "
+                "sandboxed task cannot start; install it in the image (see the sandbox "
+                "section of the repos.yaml reference)\n"
+            )
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
+        if refs is not None:
+            await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
+        home = sandbox_home(run_dirs, work_item_id)
+        home.mkdir(parents=True, exist_ok=True)
         cmd = _sandbox.docker_argv(
             cmd,
             cwd,
             sandbox,
             run_dirs.results,
-            env={**(repo_entry.env if repo_entry is not None else {}), **(env or {})},
+            env={
+                **await asyncio.to_thread(_sandbox.git_identity, Path(cwd)),
+                **(repo_entry.env if repo_entry is not None else {}),
+                **(env or {}),
+            },
             name=_sandbox.container_name(session_id),
             result_path=result_path,
             cidfile=cidfile,
+            refstore=refs,
+            home=home,
+            passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+            ro_paths=ro_paths,
         )
     # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
     # pid yet. `pause_work_item`, `chain.skip_node`, and
@@ -676,6 +758,8 @@ async def run_task(
         finally:
             if sandbox:
                 await _sandbox.teardown(session_id)
+            if refs is not None:
+                await _sync_refs(db, refs, work_item_id, session_id)
         if paused:
             # The cancelled path never reaches `session_exited`, so Task 6's
             # hook inside it never fires. Idempotent with that hook for the

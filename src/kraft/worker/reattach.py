@@ -27,6 +27,7 @@ from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask
+from kraft.worker import refstore as _refstore
 from kraft.worker import sandbox as _sandbox
 
 logger = logging.getLogger(__name__)
@@ -371,6 +372,9 @@ async def _adopt(
                 await db.write(lambda c, u=live: store.session_progress(c, session_id, u))
         except Exception:
             logger.exception("usage progress tick failed for adopted session %s", session_id)
+    if run_dirs is not None:
+        # Before the exit is resolved: what runs next reads the item branch.
+        await _sync_item_refs(db, run_dirs, row["work_item_id"])
     await _exit_from_file(
         db,
         session_id,
@@ -468,6 +472,21 @@ async def _guarded_adopt(
         # whether this one was: deciding that per call path is how the third
         # path got missed twice.
         await asyncio.shield(_sandbox.teardown(session_id))
+        if run_dirs is not None:
+            await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
+
+
+async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
+    """Publish the item branch out of its sandbox's ref store, for a session
+    `run_task` is no longer there to sync: adopted after a restart, or found
+    dead by one. A no-op for an item that never ran sandboxed."""
+    for problem in await asyncio.to_thread(_refstore.sync_item, run_dirs.base, work_item_id):
+        logger.warning("work item %s: %s", work_item_id, problem)
+        await db.write(
+            lambda c, p=problem: events.append(
+                c, work_item_id, "sandbox_branch_not_synced", {"reason": p}
+            )
+        )
 
 
 async def reattach(
@@ -541,11 +560,21 @@ async def reattach(
         for r in grace:
             adopt[r["id"]] = _identity_ok(r["pid"], r["pid_start_time"])
 
+    # A container whose teardown failed or timed out before this start is
+    # still writing its worktree, and no row names it any more. Swept before
+    # anything below launches a container of its own (an escalation resume),
+    # which the sweep would otherwise take for an orphan.
+    if orphans := await _sandbox.sweep_orphans(
+        keep={_sandbox.container_name(sid) for sid, adopting in adopt.items() if adopting}
+    ):
+        logger.warning("removed containers no live session owns: %s", ", ".join(orphans))
+
     for r in rows:
         sid = r["id"]
         adopting = adopt[sid]
         if not adopting:
             await _sandbox.teardown(sid)
+            await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == "pending":
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
             await db.write(

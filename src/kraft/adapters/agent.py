@@ -558,7 +558,9 @@ def log_reader(h: _harness.Harness) -> str | None:
     return reader
 
 
-def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str]:
+def _config_dir(
+    run_dirs, h: _harness.Harness, session_id: str, sandboxed_item: str | None = None
+) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip).
 
@@ -567,10 +569,19 @@ def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str
     launch wrote. The files are rewritten on every launch, so whatever the CLI
     changed in them never outlives a session; each write is a rename, so two
     launches at once never read half a file. The user's own config is never
-    read or touched."""
+    read or touched.
+
+    A sandboxed item (`sandboxed_item`) gets a directory of its own inside its
+    sandbox home, which its containers already mount: the shared one would be
+    a directory one item's worker could rewrite under every other item's
+    launches, sandboxed or not."""
     if h.config_env is None:
         return {}
-    directory = run_dirs.base / "harness-config" / h.id
+    directory = (
+        _subprocess.sandbox_home(run_dirs, sandboxed_item) / ".kraft-harness-config" / h.id
+        if sandboxed_item is not None
+        else run_dirs.base / "harness-config" / h.id
+    )
     directory.mkdir(parents=True, exist_ok=True)
     for name, text in h.config_files.items():
         tmp = directory / f".{name}.{session_id}"
@@ -781,6 +792,22 @@ async def run_agent_task(
             f"in its hook, so it cannot deny {blind!r} as this launch's policy requires; "
             f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
         )
+    if sandbox and hooked and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
+        # The hook is a host command answering over Kraft's local API, and a
+        # container has neither: it would crash, and a crashed hook allows the
+        # call (codex, measured; cursor by its docs).
+        raise LaunchRefused(
+            f"harness {harness!r} holds this launch's tool policy with Kraft's permission "
+            f"hook, which cannot run inside a sandbox, and a sandboxed launch never runs "
+            f"with its policy unenforced; use a harness whose own rules the container "
+            f"holds (amp, opencode), or remove the tool policy (allowed_tools, "
+            f"deny_tools, or a grant beyond git-commit) at the layer that sets it"
+        )
+    if sandbox and h.container_permission_mode is not None:
+        default = h.capabilities["permission_mode"].always
+        defaults = (default,) if isinstance(default, str) else tuple(default or ())
+        if options.get("permission_mode") in (None, *defaults):
+            options["permission_mode"] = h.container_permission_mode
     if hooked:
         _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
     hook_argv: tuple[str, ...] = ()
@@ -798,6 +825,7 @@ async def run_agent_task(
             ) from exc
     rules_env: dict[str, str] = {}
     rules_argv: tuple[str, ...] = ()
+    rules_files: tuple[str, ...] = ()
     if ruled:
         if missing := _permission_rules.unmapped(h.tool_names, allowed_tools, deny_tools):
             raise LaunchRefused(
@@ -805,14 +833,16 @@ async def run_agent_task(
                 f"(its tool_names), so its permission rules cannot hold them as this "
                 f"launch's policy requires; drop them from the policy or use another harness"
             )
+        rules_dir = run_dirs.base / "harness-config" / h.id
         rules_env, rules_argv = _permission_rules.render(
             h.permission_rules,
             h.tool_names,
             allowed_tools,
             tuple(deny_tools),
-            directory=run_dirs.base / "harness-config" / h.id,
+            directory=rules_dir,
             session_id=session_id,
         )
+        rules_files = _permission_rules.files_in(rules_argv, rules_dir)
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
@@ -826,6 +856,7 @@ async def run_agent_task(
         extra=(*hook_argv, *rules_argv),
     )
     reader = log_reader(h)
+    config_env = _config_dir(run_dirs, h, session_id, work_item_id if sandbox else None)
     return await _subprocess.run_task(
         db,
         run_dirs,
@@ -847,7 +878,7 @@ async def run_agent_task(
                 {_hook_install.FAIL_CLOSED_ENV: "1"} if hooked and allowed_tools is not None else {}
             ),
             **({"KRAFT_REVIEW_PACKAGE": review_package} if review_package else {}),
-            **_config_dir(run_dirs, h, session_id),
+            **config_env,
             **rules_env,
         },
         post_resolve=_resolve_status(artifact, work_item_id, cwd, reader),
@@ -862,4 +893,5 @@ async def run_agent_task(
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,
+        ro_paths=rules_files,
     )

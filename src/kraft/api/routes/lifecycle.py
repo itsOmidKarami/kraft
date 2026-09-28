@@ -17,6 +17,7 @@ from kraft import builtins as builtins_mod
 from kraft import escalate, events, executor, node_runs, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
+from kraft.adapters.subprocess import sandbox_home
 from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
@@ -25,6 +26,7 @@ from kraft.executor import gates, stops, walk
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
+from kraft.worker import refstore
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +188,14 @@ async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[
     return ids
 
 
+def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
+    """Drop what a sandboxed item kept beside its worktree: the ref store
+    (found through the worktree's `.git`, so before the worktree goes) and
+    the sandbox home its agent CLIs wrote caches and chats into."""
+    refstore.discard(run_dirs.base, worktree)
+    shutil.rmtree(sandbox_home(run_dirs, wid), ignore_errors=True)
+
+
 async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) -> bool:
     """Reclaim the worktree and its branch.
 
@@ -236,6 +246,7 @@ async def abandon_work_item(wid: str, request: Request):
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
+    await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
     removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
@@ -260,6 +271,7 @@ async def _archive_one(app, row, by: str) -> bool:
     killed = await asyncio.to_thread(_kill_orphans_under, worktree)
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
+    await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
     removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
     return removed
