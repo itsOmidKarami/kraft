@@ -423,8 +423,12 @@ def _argv_on(monkeypatch, runtime, **kw):
         (docker.Runtime("docker", rootless=True), ["-u", "0:0"]),
         (docker.Runtime("podman"), ["-u", "1234:5678"]),
         (docker.Runtime("podman", rootless=True), ["--userns=keep-id", "-u", "1234:5678"]),
+        (
+            docker.Runtime("docker", engine="podman", rootless=True),
+            ["--userns=keep-id", "-u", "1234:5678"],
+        ),
     ],
-    ids=["docker", "rootless-docker", "podman", "rootless-podman"],
+    ids=["docker", "rootless-docker", "podman", "rootless-podman", "podman-docker-shim"],
 )
 def test_every_runtime_leaves_what_the_worker_writes_the_operators(monkeypatch, runtime, user):
     """Rootless docker maps container root to the operator and every other
@@ -469,16 +473,17 @@ async def test_the_refusal_stops_a_session_before_it_starts(monkeypatch):
 
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
-    """`machine(yaml, enforcing=False)`: this host's `sandbox.yaml` and
-    SELinux state; `docker info` and `podman info` answer rootful."""
+    """`machine(yaml, enforcing=False, labels=True)`: this host's
+    `sandbox.yaml`, whether SELinux enforces, and whether the runtime (a
+    rootful docker) labels its containers."""
     templates = tmp_path / "templates"
     templates.mkdir()
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
 
-    def go(yaml="", enforcing=False):
+    def go(yaml="", enforcing=False, labels=True):
         (templates / "sandbox.yaml").write_text(yaml)
         monkeypatch.setattr(docker, "_selinux_enforcing", lambda: enforcing)
-        monkeypatch.setattr(docker, "_rootless", lambda cli: False)
+        monkeypatch.setattr(docker, "_ask", lambda cli: ("docker", False, labels))
         return docker.detect_runtime()
 
     return go
@@ -499,26 +504,53 @@ def test_sandbox_yaml_decides_selinux_only_where_it_enforces(machine, yaml, enfo
     assert machine(yaml, enforcing).selinux == selinux
 
 
+def test_a_runtime_that_labels_nothing_needs_no_selinux_answer(machine):
+    """Docker applies no labels unless its daemon runs with SELinux support,
+    and then its containers' mounts work on an enforcing host as they are."""
+    assert machine("", enforcing=True, labels=False).selinux is None
+
+
 def test_sandbox_yaml_picks_the_cli(machine):
     assert machine("cli: podman").cli == "podman"
 
 
-@pytest.mark.parametrize(
-    ("cli", "answer", "rootless"),
-    [
-        ("docker", '["name=seccomp,profile=builtin","name=rootless","name=cgroupns"]', True),
-        ("docker", '["name=seccomp,profile=builtin"]', False),
-        ("podman", "true", True),
-        ("podman", "false", False),
-    ],
-)
-def test_rootless_is_what_the_runtime_says(tmp_path, monkeypatch, cli, answer, rootless):
+def _cli(tmp_path, monkeypatch, name, version, info):
+    """A `name` on PATH answering `--version` and `info` as given."""
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (bin_dir / cli).write_text(f"#!/bin/sh\necho '{answer}'\n")
-    (bin_dir / cli).chmod(0o755)
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / name).write_text(
+        f'#!/bin/sh\n[ "$1" = --version ] && {{ echo "{version}"; exit 0; }}\necho \'{info}\'\n'
+    )
+    (bin_dir / name).chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    assert docker._rootless(cli) is rootless
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "info", "answer"),
+    [
+        (
+            "docker",
+            "Docker version 29.3.1",
+            '["name=seccomp,profile=builtin","name=rootless","name=selinux"]',
+            ("docker", True, True),
+        ),
+        (
+            "docker",
+            "Docker version 29.3.1",
+            '["name=seccomp,profile=builtin"]',
+            ("docker", False, False),
+        ),
+        ("podman", "podman version 4.9.3", "true true", ("podman", True, True)),
+        ("podman", "podman version 4.9.3", "false false", ("podman", False, False)),
+        ("docker", "podman version 4.9.3", "true false", ("podman", True, False)),
+    ],
+    ids=["rootless-docker", "docker", "rootless-podman", "podman", "podman-docker-shim"],
+)
+def test_the_runtime_says_what_it_is(tmp_path, monkeypatch, name, version, info, answer):
+    """A `docker` that is podman underneath (the podman-docker shim) removes
+    cidfiles and needs `keep-id` exactly as podman does."""
+    _cli(tmp_path, monkeypatch, name, version, info)
+    assert docker._ask(name) == answer
 
 
 @pytest.mark.parametrize(
@@ -527,7 +559,7 @@ def test_rootless_is_what_the_runtime_says(tmp_path, monkeypatch, cli, answer, r
 def test_podman_launch_failures_are_told_apart_by_exit_code(monkeypatch, tmp_path, rc, failed):
     """Podman deletes the cidfile of a `--rm` container on its way out, so
     a session whose task failed would read as podman never starting it."""
-    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime("podman"))
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime("docker", engine="podman"))
     assert docker.launch_failed(tmp_path / "gone.cid", rc) is failed
 
 

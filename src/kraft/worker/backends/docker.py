@@ -77,6 +77,10 @@ class Runtime:
     an SELinux-enforcing host, and each gets them wrong differently."""
 
     cli: str = "docker"
+    #: What `cli` really is: `podman` behind a `docker` name (the
+    #: podman-docker shim) behaves as podman in every way that matters here.
+    #: None: what `cli` says.
+    engine: str | None = None
     #: The daemon (docker) or the CLI (podman) runs as the operator, so
     #: container uids map into the operator's subordinate range.
     rootless: bool = False
@@ -89,12 +93,16 @@ class Runtime:
         the operator's. Rootless docker maps container root to the operator
         (any other uid lands on a subordinate one); rootless podman needs
         `keep-id` for the operator's own uid to exist inside at all."""
-        if self.rootless and self.cli == "docker":
+        if self.rootless and not self.podman:
             return ["-u", "0:0"]
         user = ["-u", f"{os.getuid()}:{os.getgid()}"]
-        if self.rootless and self.cli == "podman":
+        if self.rootless and self.podman:
             return ["--userns=keep-id", *user]
         return user
+
+    @property
+    def podman(self) -> bool:
+        return (self.engine or self.cli) == "podman"
 
     def refusal(self) -> str | None:
         if self.selinux != "refuse":
@@ -108,7 +116,8 @@ class Runtime:
         )
 
     def describe(self) -> str:
-        parts = [self.cli, *(["rootless"] if self.rootless else [])]
+        parts = [self.cli, *(["(podman)"] if self.podman and self.cli != "podman" else [])]
+        parts += ["rootless"] if self.rootless else []
         if self.selinux in ("relabel", "disable"):
             parts.append(f"SELinux {self.selinux}")
         return " ".join(parts)
@@ -121,19 +130,32 @@ def _selinux_enforcing() -> bool:
         return False
 
 
-def _rootless(cli: str) -> bool:
-    """Asked of the runtime itself; anything inconclusive (no daemon, an
-    old CLI) is rootful, which is what every launch assumed before."""
-    fmt = "{{json .SecurityOptions}}" if cli == "docker" else "{{.Host.Security.Rootless}}"
+def _run(*argv: str) -> str | None:
     try:
-        done = subprocess.run(
-            [cli, "info", "--format", fmt], capture_output=True, text=True, timeout=10
-        )
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
     except OSError, subprocess.TimeoutExpired:
-        return False
-    if done.returncode != 0:
-        return False
-    return "name=rootless" in done.stdout if cli == "docker" else done.stdout.strip() == "true"
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _ask(cli: str) -> tuple[str, bool, bool]:
+    """`(engine, rootless, labels)`, asked of the runtime itself: what it
+    really is, whether it runs as the operator, and whether it applies
+    SELinux labels to containers (docker does only when its daemon was
+    started with SELinux support). Anything inconclusive (no daemon, an old
+    CLI) reads as a rootful, unlabelled docker, which is what every launch
+    assumed before."""
+    engine = "podman" if "podman" in (_run(cli, "--version") or "").lower() else "docker"
+    if engine == "docker":
+        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}") or ""
+        return engine, "name=rootless" in options, "name=selinux" in options
+    security = (
+        _run(
+            cli, "info", "--format", "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}"
+        )
+        or ""
+    ).split()
+    return engine, security[:1] == ["true"], security[1:2] == ["true"]
 
 
 def detect_runtime() -> Runtime:
@@ -146,10 +168,13 @@ def detect_runtime() -> Runtime:
     cli = host.cli or (
         "docker" if shutil.which("docker") else "podman" if shutil.which("podman") else "docker"
     )
+    engine, rootless, labels = _ask(cli)
     selinux = None
-    if _selinux_enforcing():
+    # Both: a permissive host denies nothing, and a runtime that applies no
+    # labels leaves its containers unconfined, so its mounts work as they are.
+    if labels and _selinux_enforcing():
         selinux = "refuse" if host.selinux == "auto" else host.selinux
-    return Runtime(cli=cli, rootless=_rootless(cli), selinux=selinux)
+    return Runtime(cli=cli, engine=engine, rootless=rootless, selinux=selinux)
 
 
 _RUNTIME: Runtime | None = None
@@ -553,7 +578,7 @@ def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
     Podman removes the cidfile when a `--rm` container exits, so it says
     nothing afterwards; podman instead reserves exit 125 for a failure of
     its own, before or instead of the command (probed with 4.9.3)."""
-    if runtime().cli == "podman":
+    if runtime().podman:
         return returncode == 125
     try:
         return not cidfile.read_text().strip()
