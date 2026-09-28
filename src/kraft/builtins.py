@@ -1082,7 +1082,13 @@ async def _rebase_members(
                 continue
             old = git_read(sub, "rev-parse", "HEAD")
             head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
-            if head:
+            # `refresh_worktree_base` now reports `sub_base`'s head even when
+            # the member's branch already contained it as an ancestor
+            # (Kraft-jypzx) -- that is not a move (`old` unchanged), and must
+            # not be reported as one: it would fire `mr_rebase`'s
+            # `on_base_changed` bounce on every ordinary run of a workspace
+            # item with any pending member.
+            if head and git_read(sub, "rev-parse", "HEAD") != old:
                 moved.append((rel, head))
                 if git_read(root, "rev-parse", f"HEAD:{rel}", expected_failure=True) == old:
                     repoint.append(rel)

@@ -598,7 +598,11 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-        if new_base:
+        # `refresh_worktree_base` now reports the upstream head even when the
+        # branch already contained it (Kraft-jypzx), which is the common case
+        # on an ordinary resume -- compare against what was already recorded
+        # so that case doesn't log a redundant event and DB write every time.
+        if new_base and new_base != row["base_ref"]:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
             await st.db.write(
                 lambda c: events.append(
@@ -897,7 +901,10 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
-        if new_base:
+        # See the matching comment in `resume_work_item` (Kraft-jypzx): an
+        # ordinary retry finds the branch already containing the upstream
+        # head, so gate the write on this actually changing base_ref.
+        if new_base and new_base != row["base_ref"]:
             worktree_head = git_read(worktree, "rev-parse", "HEAD", expected_failure=True)
             await st.db.write(
                 lambda c: events.append(
