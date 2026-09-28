@@ -915,6 +915,21 @@ class SandboxHost(_Model):
     #: both answers change something outside Kraft, so neither is picked for
     #: the operator.
     selinux: Literal["auto", "relabel", "disable"] = "auto"
+    #: Extra root certificates (PEM) a sandboxed task trusts on top of its
+    #: image's own: a corporate TLS-intercepting proxy's CA, say. Unset: the
+    #: daemon's `SSL_CERT_FILE`, if it has one. Read at each launch; a path
+    #: that cannot be read stops the launch (`worker.backends.docker_forward`).
+    ca_bundle: Path | None = None
+
+    @field_validator("ca_bundle")
+    @classmethod
+    def _absolute_ca_bundle(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        value = value.expanduser()
+        if not value.is_absolute():
+            raise ValueError(f"must be an absolute path, not {str(value)!r}")
+        return value
 
 
 # ── notify ───────────────────────────────────────────────────────────────────

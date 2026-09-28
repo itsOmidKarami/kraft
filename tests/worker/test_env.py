@@ -1,3 +1,4 @@
+import pytest
 from support.harness import entry_of
 
 from kraft.worker.env import BASELINE, worker_env
@@ -54,3 +55,22 @@ def test_forge_credentials_are_not_in_the_baseline(monkeypatch):
 def test_a_none_repo_entry_still_produces_a_usable_baseline(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin")
     assert worker_env(None)["PATH"] == "/usr/bin"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ALL_PROXY",
+        "all_proxy",
+        "REQUESTS_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
+        "CURL_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "SSL_CERT_DIR",
+    ],
+)
+def test_a_host_worker_behind_a_corporate_proxy_keeps_its_ca_and_proxy(monkeypatch, name):
+    """Each tool reads its own CA variable: a host worker that kept only
+    SSL_CERT_FILE failed TLS in node, curl, git and requests."""
+    monkeypatch.setenv(name, "/etc/corp/ca.pem")
+    assert worker_env(entry_of({}))[name] == "/etc/corp/ca.pem"

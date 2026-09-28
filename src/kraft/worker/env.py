@@ -17,7 +17,10 @@ from kraft.worker.sandbox import FORWARDED_ENV
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
 
-#: What a host process needs to run at all, plus network reachability. Forge
+#: What a host process needs to run at all, plus network reachability: the
+#: proxy variables, and the CA variables a host behind a TLS-intercepting proxy
+#: sets for each tool that reads its own (a sandboxed worker gets neither as
+#: is; `worker.backends.docker_forward` decides what crosses). Forge
 #: credentials are deliberately absent: Kraft's own forge calls go through
 #: `git.run_git`, and a worker does not push, merge or close beads. A repo
 #: whose node genuinely needs one names it in `env_passthrough`.
@@ -52,7 +55,14 @@ BASELINE = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
+        "ALL_PROXY",
+        "all_proxy",
         "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "NODE_EXTRA_CA_CERTS",
         "KRAFT_HOME",
         "KRAFT_RUN_DIR",
         "KRAFT_TEMPLATES_DIR",
