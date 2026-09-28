@@ -50,7 +50,10 @@ sandbox is `workspace-write`, and a sandbox escalation the model asks for goes
 to Codex's automatic reviewer (`approval_policy=on-request`,
 `approvals_reviewer=auto_review`), not to a human. A `permission_mode` of
 `read-only` or `danger-full-access` (a harness profile's `defaults:` or a task)
-changes the sandbox. The reviewer stays on in every mode.
+changes the sandbox. The reviewer stays on in every mode. Under Kraft's
+[docker sandbox](/reference/configuration/repos#sandboxed-workers) the default
+becomes `danger-full-access` (`container_permission_mode`): Codex's own
+sandbox cannot start inside a container, and the container is the boundary.
 
 Three capabilities are required — `prompt`, `context`, `usage` — since no
 agent dispatch can be built without them. Two are non-invocable —`usage`,
@@ -107,10 +110,13 @@ Amp needs credentials a headless process can use. See [Set up Amp and Cursor cre
   Cursor adds a `Co-authored-by: Cursor` trailer to every commit and the
   classifier refused those commits. The file adds no permission rule. The
   directory is shared by all launches, not one per launch, because `--resume`
-  has to find the chat an earlier launch wrote.
+  has to find the chat an earlier launch wrote. A sandboxed item gets one of
+  its own, inside its sandbox home.
 - **Tool policy.** `deny_tools` and `allowed_tools` go through a `preToolUse` hook. See [Cursor](/reference/permissions#cursor).
 - **Login.** The login lives in the OS keychain, not the config dir. With an
-  API key instead, name `CURSOR_API_KEY` in the repo's `env_passthrough`.
+  API key instead, name `CURSOR_API_KEY` in the repo's `env_passthrough`: the
+  only way a [sandboxed](/reference/configuration/repos#sandboxed-workers)
+  worker, which has no keychain, logs in.
 - **Usage.** Tokens come off the log's closing `result` line, one per run:
   uncached input, output, and cache reads and writes. Cursor reports no cost,
   so Kraft records none.
