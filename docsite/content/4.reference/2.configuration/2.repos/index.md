@@ -56,7 +56,7 @@ No key on an entry passes silently. A key within two edits of a field above (`au
 
 ## Sandboxed workers
 
-A sandboxed task runs `docker run --rm --init` as your own uid, with every capability dropped. Only what is listed here reaches the container.
+A sandboxed task runs `docker run --rm --init` (or `podman run`) with every capability dropped, as a user that leaves what it writes yours, on rootless Docker and Podman too. Which CLI runs it, and what happens on an SELinux-enforcing host, is [sandbox.yaml](/reference/configuration/sandbox)'s. Only what is listed here reaches the container.
 
 | What | How it reaches the container |
 |---|---|
@@ -68,7 +68,7 @@ A sandboxed task runs `docker run --rm --init` as your own uid, with every capab
 | Git identity | `GIT_AUTHOR_*` and `GIT_COMMITTER_*` from the daemon's environment, else your `user.name` and `user.email` for the repository. Repository hooks never run in the container, as they never run on a worker's commits outside one. |
 | Tool policy | Enforced inside the container or refused. Amp's and OpenCode's rules travel with the launch, and Amp's rules file is mounted read-only. Cursor's and Codex's policy needs Kraft's permission hook, which cannot run in a container, so a sandboxed Cursor or Codex task with `allowed_tools`, `deny_tools` or a grant other than `git-commit` is refused. Codex runs with `sandbox_mode=danger-full-access` unless a task or harness profile sets a mode other than `workspace-write`, because its own sandbox cannot start inside Docker. |
 
-**The image** must hold the agent CLI (and, for a fallback, every harness it may fall back to) on its `PATH`, plus `git`, `sh` and CA certificates. Before a task's first launch in an image, Kraft asks the image, through its own entrypoint and with the repository's `env`, whether the command is there; an image that answers no stops the item as a configuration error before anything runs. `kraft admin doctor` checks that the daemon answers and the image is pulled; pull it before filing work, or the first launch pulls it inside the task's time cap.
+**The image** must hold the agent CLI (and, for a fallback, every harness it may fall back to) on its `PATH`, plus `git`, `sh` and CA certificates. Before a task's first launch in an image, Kraft asks the image, through its own entrypoint and with the repository's `env`, whether the command is there; an image that answers no stops the item as a configuration error before anything runs. `kraft admin doctor` checks that the runtime answers, that SELinux has an answer in `sandbox.yaml` where it enforces, and that the image is pulled; pull it before filing work, or the first launch pulls it inside the task's time cap.
 
 **Not yet covered.** The container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable. There are no memory, CPU or process limits. A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch. A worker cannot reach Kraft's API, so `kraft item reply`, progress reports and an escalation's self-retry do not work from inside a sandbox. Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
 

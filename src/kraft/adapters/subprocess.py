@@ -783,7 +783,7 @@ async def run_task(
     # FileNotFoundError branch above, one step later and inside the sandboxed
     # path only (Kraft-nc9gm). Checked before every other status adjustment
     # below so it can't be shadowed by require_result_file or post_resolve.
-    if backend is not None and status == "failed" and backend.launch_failed(cidfile):
+    if backend is not None and status == "failed" and backend.launch_failed(cidfile, returncode):
         status = "config_error"
     # A session that exits clean with no result file at all never reached the
     # end of its own contract -- `_resolve`'s exit-code fallback cannot tell

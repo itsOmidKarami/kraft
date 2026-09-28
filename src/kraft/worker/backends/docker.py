@@ -19,10 +19,12 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kraft.paths import kraft_home
+from kraft.config import ConfigError
+from kraft.paths import default_templates_dir, kraft_home
 from kraft.worker import refstore as _refstore
 from kraft.worker.sandbox import (
     _HARDENED_GIT_CONFIG,
@@ -61,6 +63,131 @@ HOME_LABEL = "kraft.home"
 
 def home_label() -> str:
     return f"{HOME_LABEL}={kraft_home().resolve()}"
+
+
+class SandboxRefused(RuntimeError):
+    """This host cannot run a sandbox the way it is set up: a stop for a
+    person, never a task failure."""
+
+
+@dataclass(frozen=True)
+class Runtime:
+    """How this machine runs a container, detected once (`runtime()`): the
+    same flags mean different things to rootless docker, rootless podman and
+    an SELinux-enforcing host, and each gets them wrong differently."""
+
+    cli: str = "docker"
+    #: What `cli` really is: `podman` behind a `docker` name (the
+    #: podman-docker shim) behaves as podman in every way that matters here.
+    #: None: what `cli` says.
+    engine: str | None = None
+    #: The daemon (docker) or the CLI (podman) runs as the operator, so
+    #: container uids map into the operator's subordinate range.
+    rootless: bool = False
+    #: None unless SELinux enforces; then `sandbox.yaml`'s `relabel` or
+    #: `disable`, or `refuse` when it says neither.
+    selinux: str | None = None
+
+    def user_args(self) -> list[str]:
+        """Who the container runs as, so what it writes into the worktree is
+        the operator's. Rootless docker maps container root to the operator
+        (any other uid lands on a subordinate one); rootless podman needs
+        `keep-id` for the operator's own uid to exist inside at all."""
+        if self.rootless and not self.podman:
+            return ["-u", "0:0"]
+        user = ["-u", f"{os.getuid()}:{os.getgid()}"]
+        if self.rootless and self.podman:
+            return ["--userns=keep-id", *user]
+        return user
+
+    @property
+    def podman(self) -> bool:
+        return (self.engine or self.cli) == "podman"
+
+    def refusal(self) -> str | None:
+        if self.selinux != "refuse":
+            return None
+        return (
+            "SELinux is enforcing on this host and denies a container's bind mounts, "
+            "and sandbox.yaml does not say how to get past it: set `selinux: relabel` "
+            "(labels the worktree and repository files for containers, once) or "
+            "`selinux: disable` (turns SELinux separation off for Kraft's containers "
+            "only). See the sandbox.yaml reference"
+        )
+
+    def describe(self) -> str:
+        parts = [self.cli, *(["(podman)"] if self.podman and self.cli != "podman" else [])]
+        parts += ["rootless"] if self.rootless else []
+        if self.selinux in ("relabel", "disable"):
+            parts.append(f"SELinux {self.selinux}")
+        return " ".join(parts)
+
+
+def _selinux_enforcing() -> bool:
+    try:
+        return Path("/sys/fs/selinux/enforce").read_text().strip() == "1"
+    except OSError:
+        return False
+
+
+def _run(*argv: str) -> str | None:
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    except OSError, subprocess.TimeoutExpired:
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _ask(cli: str) -> tuple[str, bool, bool]:
+    """`(engine, rootless, labels)`, asked of the runtime itself: what it
+    really is, whether it runs as the operator, and whether it applies
+    SELinux labels to containers (docker does only when its daemon was
+    started with SELinux support). Anything inconclusive (no daemon, an old
+    CLI) reads as a rootful, unlabelled docker, which is what every launch
+    assumed before."""
+    engine = "podman" if "podman" in (_run(cli, "--version") or "").lower() else "docker"
+    if engine == "docker":
+        options = _run(cli, "info", "--format", "{{json .SecurityOptions}}") or ""
+        return engine, "name=rootless" in options, "name=selinux" in options
+    security = (
+        _run(
+            cli, "info", "--format", "{{.Host.Security.Rootless}} {{.Host.Security.SELinuxEnabled}}"
+        )
+        or ""
+    ).split()
+    return engine, security[:1] == ["true"], security[1:2] == ["true"]
+
+
+def detect_runtime() -> Runtime:
+    """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
+    `sandbox.yaml` that does not parse."""
+    from kraft import config
+
+    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    host = config.SandboxHost.load(templates / config.SandboxHost.FILE)
+    cli = host.cli or (
+        "docker" if shutil.which("docker") else "podman" if shutil.which("podman") else "docker"
+    )
+    engine, rootless, labels = _ask(cli)
+    selinux = None
+    # Both: a permissive host denies nothing, and a runtime that applies no
+    # labels leaves its containers unconfined, so its mounts work as they are.
+    if labels and _selinux_enforcing():
+        selinux = "refuse" if host.selinux == "auto" else host.selinux
+    return Runtime(cli=cli, engine=engine, rootless=rootless, selinux=selinux)
+
+
+_RUNTIME: Runtime | None = None
+
+
+def runtime(*, refresh: bool = False) -> Runtime:
+    """This machine's `Runtime`, detected on first use and kept for the
+    process: `docker info` is a round trip every launch would otherwise pay.
+    Doctor refreshes it, so a changed `sandbox.yaml` is picked up there."""
+    global _RUNTIME
+    if _RUNTIME is None or refresh:
+        _RUNTIME = detect_runtime()
+    return _RUNTIME
 
 
 def docker_argv(
@@ -154,9 +281,15 @@ def docker_argv(
     worktree mounted only at a symlinked path looks gone to `git worktree
     prune`, which then deletes its admin directory.
     """
+    try:
+        host = runtime()
+    except ConfigError as exc:
+        raise SandboxRefused(str(exc)) from exc
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
     cwd = str(Path(cwd).resolve())
     argv = [
-        "docker",
+        host.cli,
         "run",
         "--rm",
         # PID 1 ignores a signal it installed no handler for, so without an
@@ -164,9 +297,9 @@ def docker_argv(
         "--init",
         "--label",
         home_label(),
-        "-u",
-        f"{os.getuid()}:{os.getgid()}",
+        *host.user_args(),
         "--security-opt=no-new-privileges",
+        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
         "--cap-drop=ALL",
         "-v",
         f"{cwd}:{cwd}",
@@ -192,9 +325,23 @@ def docker_argv(
     _pin(pins, _HARDENED_GIT_CONFIG)
     for env_name, value in {**pins, **(env or {})}.items():
         argv += ["-e", f"{env_name}={value}"]
+    if host.selinux == "relabel":
+        argv = _relabelled(argv)
     argv.append(sandbox["image"])
     argv += cmd
     return argv
+
+
+def _relabelled(argv: list[str]) -> list[str]:
+    """Every `-v` shared-labelled (`z`) for SELinux. Never `Z`: that label is
+    private to one container, and would lock the operator out of their own
+    repository and every other session out of it."""
+    out = list(argv)
+    for i, arg in enumerate(out[:-1]):
+        if arg == "-v":
+            spec = out[i + 1]
+            out[i + 1] = f"{spec},z" if spec.endswith(":ro") else f"{spec}:z"
+    return out
 
 
 def _alternates(objects: Path) -> list[Path]:
@@ -320,8 +467,14 @@ async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, st
     """Run `docker args...`; `(returncode, stdout)`, or None when docker is
     missing or did not answer in time (its client is then killed)."""
     try:
+        cli = (await asyncio.to_thread(runtime)).cli
+    except ConfigError, OSError:
+        # A bad sandbox.yaml: best-effort calls stay quiet, and the launch
+        # that needs the runtime says why.
+        return None
+    try:
         proc = await asyncio.create_subprocess_exec(
-            "docker",
+            cli,
             *args,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -406,7 +559,7 @@ def sandbox_home(run_dirs, work_item_id: str) -> Path:
     return run_dirs.base / "sandbox-home" / work_item_id
 
 
-def launch_failed(cidfile: Path) -> bool:
+def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
     """True if `docker run` itself never created the container -- the daemon
     is down, or an image could not be pulled -- so the sandboxed command
     never ran: an infra problem no agent edit can fix (Kraft-nc9gm).
@@ -420,7 +573,13 @@ def launch_failed(cidfile: Path) -> bool:
     unreachable exits 1, a refused create exits 125, and neither leaves the
     file; a create that succeeds writes it before start). A container docker
     created but could not start is not caught here; it fails as the task's
-    own, as it did before this check existed."""
+    own, as it did before this check existed.
+
+    Podman removes the cidfile when a `--rm` container exits, so it says
+    nothing afterwards; podman instead reserves exit 125 for a failure of
+    its own, before or instead of the command (probed with 4.9.3)."""
+    if runtime().podman:
+        return returncode == 125
     try:
         return not cidfile.read_text().strip()
     except OSError:
@@ -438,6 +597,12 @@ class DockerBackend:
         return sandbox_home(run_dirs, work_item_id)
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
+        try:
+            host = await asyncio.to_thread(runtime)
+        except ConfigError as exc:
+            return str(exc)
+        if problem := host.refusal():
+            return problem
         if await missing_executable(sandbox["image"], executable, env):
             return (
                 f"image {sandbox['image']!r} has no {executable!r} on its PATH, so this "
@@ -480,8 +645,8 @@ class DockerBackend:
             ro_paths=ro_paths,
         )
 
-    def launch_failed(self, cidfile: Path) -> bool:
-        return launch_failed(cidfile)
+    def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
+        return launch_failed(cidfile, returncode)
 
     def code_out(self, refs: RefStore, session_id: str) -> str | None:
         return _refstore.sync(refs, session_id)
@@ -507,13 +672,20 @@ class DockerBackend:
 
     async def health(self, sandbox: dict) -> tuple[bool, str]:
         """A sandboxed repository's work items stop for a human without a
-        daemon to run them in, and its first launch pulls an image inside
-        that session's time cap: both are better learned from doctor."""
+        runtime to run them in, and its first launch pulls an image inside
+        that session's time cap: both are better learned from doctor.
+        Re-detects, so an edited `sandbox.yaml` shows here first."""
+        try:
+            host = await asyncio.to_thread(runtime, refresh=True)
+        except ConfigError as exc:
+            return False, str(exc)
+        if problem := host.refusal():
+            return False, problem
         image = sandbox["image"]
         daemon = await docker_call("version", "--format", "{{.Server.Version}}")
         if daemon is None or daemon[0] != 0:
-            return False, "docker is not installed or its daemon is not reachable"
+            return False, f"{host.cli} is not installed or its daemon is not reachable"
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
-            return False, f"image {image!r} is not pulled -- run: docker pull {image}"
-        return True, f"docker {daemon[1].strip()}, image {image}"
+            return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        return True, f"{host.describe()} {daemon[1].strip()}, image {image}"

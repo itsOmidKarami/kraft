@@ -146,6 +146,7 @@ SCHEMAS: dict[str, Callable[[], dict]] = {
     "repos.schema.json": repos_schema,
     "intake.schema.json": lambda: _model(config_mod.Intake, "Kraft intake"),
     "access.schema.json": lambda: _model(config_mod.Access, "Kraft access"),
+    "sandbox.schema.json": lambda: _model(config_mod.SandboxHost, "Kraft sandbox host"),
     "theme.schema.json": lambda: _model(config_mod.Theme, "Kraft theme"),
     "notify.schema.json": lambda: _model(config_mod.Notify, "Kraft notifications"),
 }

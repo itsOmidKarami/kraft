@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from support.harness import fake_docker_bin
 
+from kraft.config import ConfigError
 from kraft.worker import sandbox
 from kraft.worker.backends import docker
 from kraft.worker.refstore import RefStore
@@ -405,3 +406,172 @@ async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp
     argv = log.read_text().split()
     assert not [a for a in argv if a.startswith("--entrypoint")]
     assert argv[argv.index("PATH=/opt/bin") - 1] == "-e"
+
+
+# --- runtimes: docker, podman, rootless, SELinux --------------------------------------
+
+
+def _argv_on(monkeypatch, runtime, **kw):
+    monkeypatch.setattr(docker, "_RUNTIME", runtime)
+    return docker.docker_argv(["true"], "/w", {"kind": "docker", "image": "img"}, None, **kw)
+
+
+@pytest.mark.parametrize(
+    ("runtime", "user"),
+    [
+        (docker.Runtime("docker"), ["-u", "1234:5678"]),
+        (docker.Runtime("docker", rootless=True), ["-u", "0:0"]),
+        (docker.Runtime("podman"), ["-u", "1234:5678"]),
+        (docker.Runtime("podman", rootless=True), ["--userns=keep-id", "-u", "1234:5678"]),
+        (
+            docker.Runtime("docker", engine="podman", rootless=True),
+            ["--userns=keep-id", "-u", "1234:5678"],
+        ),
+    ],
+    ids=["docker", "rootless-docker", "podman", "rootless-podman", "podman-docker-shim"],
+)
+def test_every_runtime_leaves_what_the_worker_writes_the_operators(monkeypatch, runtime, user):
+    """Rootless docker maps container root to the operator and every other
+    uid to a subordinate one; rootless podman has no operator uid inside at
+    all without `keep-id`, so the worktree is not even writable. The
+    operator is not root here, or root and "the operator" would read alike."""
+    monkeypatch.setattr(os, "getuid", lambda: 1234)
+    monkeypatch.setattr(os, "getgid", lambda: 5678)
+    argv = _argv_on(monkeypatch, runtime)
+    assert argv[0] == runtime.cli
+    start = argv.index("--label") + 2
+    assert argv[start : start + len(user)] == user
+
+
+def test_selinux_relabel_shares_every_mount_and_never_privatises_one(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    argv = _argv_on(monkeypatch, docker.Runtime(selinux="relabel"), home=home, ro_paths=["/r"])
+    specs = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert specs and all(s.endswith((":z", ",z")) for s in specs)
+    assert "/r:/r:ro,z" in specs
+    assert not any(s.endswith("Z") for s in specs)
+
+
+def test_selinux_disable_turns_labels_off_for_the_container_only(monkeypatch):
+    argv = _argv_on(monkeypatch, docker.Runtime(selinux="disable"))
+    assert "--security-opt=label=disable" in argv
+    assert not any(a.endswith(":z") for a in argv)
+
+
+def test_an_enforcing_host_nobody_configured_refuses_the_launch(monkeypatch):
+    """Both answers change something outside Kraft, so neither is chosen for
+    the operator: the task stops and says which two there are."""
+    with pytest.raises(docker.SandboxRefused, match="selinux: relabel"):
+        _argv_on(monkeypatch, docker.Runtime(selinux="refuse"))
+
+
+async def test_the_refusal_stops_a_session_before_it_starts(monkeypatch):
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(selinux="refuse"))
+    reason = await docker.DockerBackend().probe({"kind": "docker", "image": "img"}, "x", None)
+    assert reason is not None and "selinux: disable" in reason
+
+
+@pytest.fixture
+def machine(tmp_path, monkeypatch):
+    """`machine(yaml, enforcing=False, labels=True)`: this host's
+    `sandbox.yaml`, whether SELinux enforces, and whether the runtime (a
+    rootful docker) labels its containers."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+
+    def go(yaml="", enforcing=False, labels=True):
+        (templates / "sandbox.yaml").write_text(yaml)
+        monkeypatch.setattr(docker, "_selinux_enforcing", lambda: enforcing)
+        monkeypatch.setattr(docker, "_ask", lambda cli: ("docker", False, labels))
+        return docker.detect_runtime()
+
+    return go
+
+
+@pytest.mark.parametrize(
+    ("yaml", "enforcing", "selinux"),
+    [
+        ("", False, None),
+        ("selinux: relabel", False, None),
+        ("", True, "refuse"),
+        ("selinux: relabel", True, "relabel"),
+        ("selinux: disable", True, "disable"),
+    ],
+    ids=["off", "off-configured", "enforcing-auto", "enforcing-relabel", "enforcing-disable"],
+)
+def test_sandbox_yaml_decides_selinux_only_where_it_enforces(machine, yaml, enforcing, selinux):
+    assert machine(yaml, enforcing).selinux == selinux
+
+
+def test_a_runtime_that_labels_nothing_needs_no_selinux_answer(machine):
+    """Docker applies no labels unless its daemon runs with SELinux support,
+    and then its containers' mounts work on an enforcing host as they are."""
+    assert machine("", enforcing=True, labels=False).selinux is None
+
+
+def test_sandbox_yaml_picks_the_cli(machine):
+    assert machine("cli: podman").cli == "podman"
+
+
+def _cli(tmp_path, monkeypatch, name, version, info):
+    """A `name` on PATH answering `--version` and `info` as given."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / name).write_text(
+        f'#!/bin/sh\n[ "$1" = --version ] && {{ echo "{version}"; exit 0; }}\necho \'{info}\'\n'
+    )
+    (bin_dir / name).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "info", "answer"),
+    [
+        (
+            "docker",
+            "Docker version 29.3.1",
+            '["name=seccomp,profile=builtin","name=rootless","name=selinux"]',
+            ("docker", True, True),
+        ),
+        (
+            "docker",
+            "Docker version 29.3.1",
+            '["name=seccomp,profile=builtin"]',
+            ("docker", False, False),
+        ),
+        ("podman", "podman version 4.9.3", "true true", ("podman", True, True)),
+        ("podman", "podman version 4.9.3", "false false", ("podman", False, False)),
+        ("docker", "podman version 4.9.3", "true false", ("podman", True, False)),
+    ],
+    ids=["rootless-docker", "docker", "rootless-podman", "podman", "podman-docker-shim"],
+)
+def test_the_runtime_says_what_it_is(tmp_path, monkeypatch, name, version, info, answer):
+    """A `docker` that is podman underneath (the podman-docker shim) removes
+    cidfiles and needs `keep-id` exactly as podman does."""
+    _cli(tmp_path, monkeypatch, name, version, info)
+    assert docker._ask(name) == answer
+
+
+@pytest.mark.parametrize(
+    ("rc", "failed"), [(125, True), (3, False), (127, False)], ids=["podman", "task", "no-cli"]
+)
+def test_podman_launch_failures_are_told_apart_by_exit_code(monkeypatch, tmp_path, rc, failed):
+    """Podman deletes the cidfile of a `--rm` container on its way out, so
+    a session whose task failed would read as podman never starting it."""
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime("docker", engine="podman"))
+    assert docker.launch_failed(tmp_path / "gone.cid", rc) is failed
+
+
+async def test_doctor_names_the_selinux_choice_before_anything_else(machine):
+    machine("", enforcing=True)
+    ok, detail = await docker.DockerBackend().health({"kind": "docker", "image": "img"})
+    assert not ok and "selinux: relabel" in detail
+
+
+async def test_a_sandbox_yaml_that_does_not_parse_stops_the_session(machine, monkeypatch):
+    with pytest.raises(ConfigError):
+        machine("cli: lxc")
+    monkeypatch.setattr(docker, "_RUNTIME", None)
+    reason = await docker.DockerBackend().probe({"kind": "docker", "image": "img"}, "x", None)
+    assert reason is not None and "sandbox.yaml" in reason

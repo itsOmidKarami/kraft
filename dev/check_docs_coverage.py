@@ -92,6 +92,12 @@ def access_fields() -> set[str]:
     return set(config.Access.model_fields)
 
 
+def sandbox_fields() -> set[str]:
+    from kraft import config
+
+    return set(config.SandboxHost.model_fields)
+
+
 def agent_task_keys() -> set[str]:
     from kraft.templates.models import AgentTask
 
@@ -119,6 +125,7 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("MCP tools", mcp_tool_names, "3.guides/1.agent-integration.md"),
     ("policy.yaml fields", policy_fields, "4.reference/2.configuration/3.policy.md"),
     ("access.yaml fields", access_fields, "4.reference/2.configuration/6.access.md"),
+    ("sandbox.yaml fields", sandbox_fields, "4.reference/2.configuration/8.sandbox.md"),
     (
         "library.yaml agent task keys",
         agent_task_keys,

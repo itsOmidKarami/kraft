@@ -45,9 +45,10 @@ class SandboxBackend(Protocol):
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results_dir, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox."""
 
-    def launch_failed(self, cidfile: Path) -> bool:
+    def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         """True when the sandbox itself never started, so the command never
-        ran."""
+        ran: `cidfile` is what the launch was given to write, `returncode`
+        what it exited with."""
 
     def code_out(self, refs: RefStore, session_id: str) -> str | None:
         """Publish what the session committed; why not, when it could not."""

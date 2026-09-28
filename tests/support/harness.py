@@ -198,8 +198,9 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
     `--name`/`--label` each take one following argument, so skipping
     flag+value pairs finds the image (the first survivor) and the command
-    (everything after it). `--init`, `--entrypoint=`, `--security-opt=...` and
-    `--cap-drop=...` are single tokens, dropped outright. `--cidfile=PATH`
+    (everything after it). `--init`, `--entrypoint=`, `--security-opt=...`,
+    `--cap-drop=...` and `--userns=...` are single tokens, dropped outright.
+    `docker info` answers nothing: a rootful runtime. `--cidfile=PATH`
     gets a fake container id, as docker writes one once it has created the
     container. `docker ps` prints `$FAKE_DOCKER_PS` (container names) when
     set; `docker rm -f NAME` -- `docker.teardown` -- appends `NAME` to
@@ -217,6 +218,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         "# look identical from the marker file the real command itself writes.\n"
         'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
         '[ "$1" = ps ] && { [ -z "${FAKE_DOCKER_PS:-}" ] || cat "$FAKE_DOCKER_PS"; exit 0; }\n'
+        '[ "$1" = info ] && exit 0\n'
         'if [ "$1" = "rm" ]; then\n'
         "  shift\n"
         '  for arg in "$@"; do\n'
@@ -232,7 +234,8 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'for arg in "$@"; do\n'
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
-        "    --rm|--init|--entrypoint=*|--network=*|--security-opt=*|--cap-drop=*) continue ;;\n"
+        "    --rm|--init|--entrypoint=*|--network=*|--security-opt=*|--cap-drop=*|--userns=*)\n"
+        "      continue ;;\n"
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
         "    *)\n"

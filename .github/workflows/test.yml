@@ -112,9 +112,10 @@ jobs:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the
     # bead behaviour Kraft relies on. Not a required check yet; that is Omid's
-    # call. KRAFT_E2E_REQUIRE=bd,docker makes a missing bd or docker an error
-    # instead of a green job that skipped everything; the runner's own daemon
-    # runs the sandbox's ref-store test against a real container. The paid
+    # call. KRAFT_E2E_REQUIRE=bd,docker,podman makes a missing bd, docker or
+    # podman an error instead of a green job that skipped everything; the
+    # runner's own docker daemon and its rootless podman run the sandbox's
+    # ref-store test against a real container each. The paid
     # claude test skips, and -rs prints why.
     name: e2e (real CLIs)
     runs-on: ubuntu-latest
@@ -137,7 +138,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest -m e2e -n auto -rs --junitxml=e2e-junit.xml
         env:
-          KRAFT_E2E_REQUIRE: bd,docker
+          KRAFT_E2E_REQUIRE: bd,docker,podman
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cli": {
+      "anyOf": [
+        {
+          "enum": [
+            "docker",
+            "podman"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cli"
+    },
+    "selinux": {
+      "default": "auto",
+      "enum": [
+        "auto",
+        "relabel",
+        "disable"
+      ],
+      "title": "Selinux",
+      "type": "string"
+    }
+  },
+  "title": "Kraft sandbox host",
+  "type": "object"
+}
