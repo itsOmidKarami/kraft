@@ -52,6 +52,10 @@ class SandboxBackend(Protocol):
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
         what `prepare` returned."""
 
+    def client_cwd(self, session_id: str) -> Path | None:
+        """The directory to start the wrapped command's client in, made for
+        the session and gone after `close`; None for the task's own `cwd`."""
+
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         """True when the sandbox itself never started, so the command never
         ran: `cidfile` is what the launch was given to write, `returncode`
@@ -67,6 +71,12 @@ class SandboxBackend(Protocol):
     async def collect(self, session_id: str, result_path: Path) -> None:
         """Bring the session's result file back to `result_path`. A no-op
         for a session this backend never ran."""
+
+    async def oom_killed(self, session_id: str) -> str | None:
+        """The memory limit the session's sandbox killed it at, or None: it
+        was not, or this backend cannot tell (a session it never ran). Asked
+        after the command exits and before `close`, which removes the
+        evidence; the runtime's own word only, never an exit code."""
 
     async def close(self, session_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A

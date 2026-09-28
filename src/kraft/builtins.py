@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import subprocess
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
@@ -653,24 +654,28 @@ async def run_setup_command(
         except _sandbox.SandboxNotReady as exc:
             raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
         refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
+        # Named like a session, so the sandbox can be asked whether its
+        # memory limit killed the command, and closed after.
+        setup_id = f"setup-{uuid.uuid4().hex[:12]}"
         argv = backend.wrap(
             ["sh", "-c", cmd],
             worktree,
             sandbox,
             None,
             env=repo_entry.env if repo_entry is not None else {},
+            session_id=setup_id,
             refs=refs,
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
             ca_bundle=ca_bundle,
         )
-        run = dict(args=argv)
+        run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
     else:
-        run = dict(args=cmd, shell=True)
+        run = dict(args=cmd, shell=True, cwd=worktree)
+    oom = None
     try:
         done = await asyncio.to_thread(
             subprocess.run,
             **run,
-            cwd=worktree,
             env=worker_env(repo_entry),
             capture_output=True,
             text=True,
@@ -683,6 +688,17 @@ async def run_setup_command(
             f"setup command for {worktree.name} must run in its sandbox, but "
             f"{argv[0]!r} could not be started: {exc}"
         ) from exc
+    finally:
+        if sandbox:
+            try:
+                oom = await backend.oom_killed(setup_id)
+            finally:
+                await backend.close(setup_id)
+    if oom is not None and done.returncode != 0:
+        raise RuntimeError(
+            f"setup command for {worktree.name} failed: a process in the sandbox was killed "
+            f"by its memory limit ({oom}): {cmd!r}; raise the sandbox's resources.memory"
+        )
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")

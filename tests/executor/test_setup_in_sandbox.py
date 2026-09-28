@@ -55,7 +55,10 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     assert argv[-4:] == [_SANDBOX["image"], "sh", "-c", _SETUP]
     assert "-e" in argv and "SETUP_FLAVOUR=benign" in argv
     assert not call.get("shell"), "a sandboxed setup went to a host shell"
-    assert call["cwd"] == tmp_path
+    # The client runs in a directory of Kraft's, never the worktree: podman
+    # leaves an `oom` file where its client runs.
+    name = argv[argv.index("--name") + 1]
+    assert call["cwd"] == docker_backend.client_dir(name.removeprefix("kraft-"))
     assert call["env"] == worker_env(entry)
 
 
@@ -95,6 +98,41 @@ async def test_a_sandboxed_setup_command_really_runs_in_the_container(tmp_path, 
 
     assert called.exists()
     assert (worktree / "prepared.txt").exists()
+
+
+@pytest.mark.parametrize("killed", [True, False], ids=["oom-killed", "exit-137-alone"])
+async def test_a_setup_command_runs_under_the_limits_and_names_the_one_that_killed_it(
+    tmp_path, monkeypatch, killed
+):
+    """The sandbox's limits bind the setup command too, and its container
+    outlives the command long enough to be asked whether its memory limit
+    killed it; then it is removed by name."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
+    removed = tmp_path / "docker-rm-log"
+    monkeypatch.setenv("FAKE_DOCKER_RM_LOG", str(removed))
+    answer = tmp_path / "inspect"
+    answer.write_text(f"{str(killed).lower()} 33554432\n")
+    monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
+    real = subprocess.run
+    argvs = []
+
+    def run(args, **kwargs):
+        argvs.append(args)
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+    sandbox = {**_SANDBOX, "resources": {"memory": "32m"}}
+
+    with pytest.raises(RuntimeError) as failed:
+        await kraft_builtins.run_setup_command(
+            tmp_path, tmp_path, entry_of({"setup_command": "exit 137"}), sandbox=sandbox
+        )
+
+    [argv] = argvs
+    assert "--memory=32m" in argv and "--rm" not in argv
+    assert removed.read_text().split() == [argv[argv.index("--name") + 1]]
+    named = "a process in the sandbox was killed by its memory limit (32m)" in str(failed.value)
+    assert named is killed
 
 
 def _without_docker(tmp_path, monkeypatch, *tools: str) -> list[dict]:

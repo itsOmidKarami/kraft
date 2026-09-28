@@ -600,6 +600,77 @@ async def test_an_image_without_the_command_stops_as_config_error(run, docker):
     assert "has no 'kraft-no-such-cli'" in Path(row["log_path"]).read_text()
 
 
+@pytest.mark.parametrize(
+    ("cmd", "inspect", "status"),
+    [
+        (["sh", "-c", "exit 137"], "true 33554432", "config_error"),
+        (["sh", "-c", "exit 137"], "false 33554432", "failed"),
+        (_writes_result({"status": "done"}), "true 33554432", "done"),
+    ],
+    ids=["oom-killed", "exit-137-alone", "survived-a-killed-child"],
+)
+async def test_a_session_its_memory_limit_killed_stops_naming_the_limit(
+    run, docker, database, tmp_path, monkeypatch, cmd, inspect, status
+):
+    """The same limit kills a retry the same way, so it is a stop for a
+    person, not a failure for a fix loop. Asked before the container is
+    removed (the fake's `rm` removes its `inspect` answer), and asked of the
+    runtime: exit 137 alone is also Kraft's own SIGKILL."""
+    answer = tmp_path / "inspect"
+    answer.write_text(inspect + "\n")
+    monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
+    sandbox = {**DOCKER, "resources": {"memory": "32m"}}
+
+    got, row = await run(cmd, "s-oom", sandbox=sandbox)
+
+    assert (got, row["status"]) == (status, status)
+    killed = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "sandbox_oom_killed"
+    ]
+    recorded = {"session_id": "s-oom", "memory": "32m"}
+    assert killed == ([] if inspect.startswith("false") else [recorded])
+    if status == "config_error":
+        last = Path(row["log_path"]).read_text().strip().splitlines()[-1]
+        assert last.startswith(
+            "kraft: a process in the sandbox was killed by its memory limit (32m)"
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "ends"),
+    [
+        (None, "config_error"),
+        ("failed", "config_error"),
+        ("unknown", "config_error"),
+        ("done_with_concerns", "done_with_concerns"),
+    ],
+    ids=["no-word", "failed", "unknown", "reported"],
+)
+async def test_an_oom_kill_overrides_only_a_session_without_a_result(
+    run, database, tmp_path, status, ends
+):
+    """`run` files work item `w1`. A session that reported a result keeps it."""
+    log = tmp_path / "s.log"
+    log.touch()
+    assert await sp.record_oom_kill(database, "w1", "s", log, "32m", status) == ends
+
+
+async def test_a_sandbox_client_runs_outside_the_worktree(run, docker, tmp_path, monkeypatch):
+    """Podman leaves an `oom` file where its client runs; in the worktree a
+    later session could commit it. The client's directory goes with it."""
+    popen, started = sp.subprocess.Popen, []
+    monkeypatch.setattr(
+        sp.subprocess, "Popen", lambda *a, **kw: started.append(kw.get("cwd")) or popen(*a, **kw)
+    )
+    status, _ = await run(["true"], "s-cwd", sandbox=DOCKER)
+
+    assert status == "done"
+    assert str(docker_backend.client_dir("s-cwd")) in started and str(tmp_path) not in started
+    assert not docker_backend.client_dir("s-cwd").exists()
+
+
 async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
     run, docker, monkeypatch, tmp_path
 ):
