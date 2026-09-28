@@ -741,3 +741,44 @@ def test_doctor_checks_a_sandboxed_repos_docker_and_image(
 
     assert [r["ok"] for r in rows] == [ok]
     assert detail in rows[0]["detail"]
+
+
+@pytest.mark.parametrize(
+    "proxy, warned", [("http://127.0.0.1:3128", True), ("http://proxy.corp:3128", False)]
+)
+def test_doctor_warns_that_a_loopback_proxy_cannot_reach_a_sandbox(
+    app, tmp_path, monkeypatch, proxy, warned
+):
+    """The container's loopback is its own, so the proxy is not forwarded."""
+    for name in ("HTTP_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    rows = _sandboxed_doctor_rows(app, tmp_path, "proxy ")
+    assert [(r["ok"], r["warn"]) for r in rows] == ([(True, True)] if warned else [])
+    assert not warned or ("`network:`" in rows[0]["detail"] and proxy in rows[0]["detail"])
+
+
+@pytest.mark.parametrize("usable", [False, True], ids=["unusable", "usable"])
+def test_doctor_warns_that_an_unusable_ssl_cert_file_is_ignored_by_sandboxes(
+    app, tmp_path, monkeypatch, usable
+):
+    """It is skipped, not refused, so only doctor can say it went unused."""
+    ca = tmp_path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nX\n-----END CERTIFICATE-----\n" if usable else "")
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca))
+    rows = _sandboxed_doctor_rows(app, tmp_path, "ca ")
+    assert [(r["ok"], r["warn"]) for r in rows] == ([] if usable else [(True, True)])
+    assert usable or ("holds no PEM certificate" in rows[0]["detail"])
+
+
+def _sandboxed_doctor_rows(app, tmp_path, prefix: str) -> list[dict]:
+    """Doctor's rows starting with `prefix`, for one repository sandboxed
+    in `img`."""
+    repo = make_repo(tmp_path)
+    asyncio.run(client.ensure_repo(str(repo)))
+    repos_yaml = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(repos_yaml.read_text())
+    data["repos"][0]["sandbox"] = {"kind": "docker", "image": "img"}
+    repos_yaml.write_text(yaml.safe_dump(data))
+
+    return [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith(prefix)]

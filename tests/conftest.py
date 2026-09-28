@@ -286,6 +286,14 @@ def _no_remembered_images(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_daemon_ca(monkeypatch):
+    """No test inherits this machine's `SSL_CERT_FILE`, which would make every
+    sandboxed launch build a CA bundle (`docker_forward.extra_ca`). A test of
+    the bundle sets its own."""
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _rootful_docker(monkeypatch):
     """Every test launches as rootful docker on a host without SELinux, the
     machine the argv tests describe, instead of whatever `docker info` on

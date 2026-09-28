@@ -26,12 +26,14 @@ from typing import TYPE_CHECKING
 from kraft.config import ConfigError
 from kraft.paths import default_templates_dir, kraft_home
 from kraft.worker import refstore as _refstore
+from kraft.worker.backends import docker_forward as _forward
 from kraft.worker.sandbox import (
     _HARDENED_GIT_CONFIG,
     _RW_SHADOW_DIRS,
     FORWARDED_ENV,
     SHADOW_DIRS,
     SHADOW_FILES,
+    SandboxNotReady,
     _gitdir_of,
     _pin,
     linked_gitdirs,
@@ -204,6 +206,7 @@ def docker_argv(
     home: str | Path | None = None,
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
+    ca_bundle: str | Path | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -255,6 +258,12 @@ def docker_argv(
     making, complete with a `hooks/` it populates itself, and the next
     host-side git command run in the worktree executes that hook as the
     invoking host user.
+
+    The daemon's proxy variables are forwarded bare, except one on its
+    loopback, and an extra CA arrives as one bundle at a fixed container path
+    with every CA variable naming it: `docker_forward`. `ca_bundle` is the
+    bundle `prepare` built, None for none. A repository's own `env` still
+    wins.
 
     `env` is `run_task`'s own `env=` argument -- e.g. `PYTHONDONTWRITEBYTECODE`
     for a fix-loop re-measure -- which is otherwise silently dropped: only
@@ -319,11 +328,13 @@ def docker_argv(
         argv += ["--name", name]
     if cidfile is not None:
         argv.append(f"--cidfile={cidfile}")
-    for env_name in dict.fromkeys((*FORWARDED_ENV, *passthrough)):
+    ca_mount, ca_env = _forward.ca_args(ca_bundle)
+    argv += ca_mount
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *_forward.forwarded_proxies(), *passthrough)):
         argv += ["-e", env_name]
     pins: dict[str, str] = {}
     _pin(pins, _HARDENED_GIT_CONFIG)
-    for env_name, value in {**pins, **(env or {})}.items():
+    for env_name, value in {**pins, **ca_env, **(env or {})}.items():
         argv += ["-e", f"{env_name}={value}"]
     if host.selinux == "relabel":
         argv = _relabelled(argv)
@@ -611,6 +622,16 @@ class DockerBackend:
             )
         return None
 
+    async def prepare(self, sandbox: dict) -> Path | None:
+        """The image's combined CA bundle, built when there is an extra CA
+        (`docker_forward.prepare`), for `wrap`'s `ca_bundle`."""
+        try:
+            return await _forward.prepare(sandbox["image"])
+        except ConfigError as exc:
+            raise SandboxNotReady(str(exc)) from exc
+        except OSError as exc:
+            raise SandboxNotReady(f"could not write the sandbox's CA bundle: {exc}") from exc
+
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
         return _refstore.prepare(run_base, cwd, branch, **kw)
 
@@ -629,6 +650,7 @@ class DockerBackend:
         home: str | Path | None = None,
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
+        ca_bundle: str | Path | None = None,
     ) -> list[str]:
         return docker_argv(
             cmd,
@@ -643,6 +665,7 @@ class DockerBackend:
             home=home,
             passthrough=passthrough,
             ro_paths=ro_paths,
+            ca_bundle=ca_bundle,
         )
 
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
@@ -681,6 +704,10 @@ class DockerBackend:
             return False, str(exc)
         if problem := host.refusal():
             return False, problem
+        try:
+            extra = await asyncio.to_thread(_forward.extra_ca)
+        except ConfigError as exc:
+            return False, str(exc)
         image = sandbox["image"]
         daemon = await docker_call("version", "--format", "{{.Server.Version}}")
         if daemon is None or daemon[0] != 0:
@@ -688,4 +715,5 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
-        return True, f"{host.describe()} {daemon[1].strip()}, image {image}"
+        trusts = f", extra CA from {extra[0]}" if extra is not None else ""
+        return True, f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}"
