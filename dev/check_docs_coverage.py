@@ -98,6 +98,12 @@ def sandbox_fields() -> set[str]:
     return set(config.SandboxHost.model_fields)
 
 
+def sandbox_policy_fields() -> set[str]:
+    from kraft import policy
+
+    return set(policy.SandboxPolicy.model_fields) | set(policy.SandboxResources.model_fields)
+
+
 def agent_task_keys() -> set[str]:
     from kraft.templates.models import AgentTask
 
@@ -126,6 +132,7 @@ CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("policy.yaml fields", policy_fields, "4.reference/2.configuration/3.policy.md"),
     ("access.yaml fields", access_fields, "4.reference/2.configuration/6.access.md"),
     ("sandbox.yaml fields", sandbox_fields, "4.reference/2.configuration/8.sandbox.md"),
+    ("sandbox policy fields", sandbox_policy_fields, "4.reference/2.configuration/2.repos"),
     (
         "library.yaml agent task keys",
         agent_task_keys,

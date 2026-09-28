@@ -600,6 +600,42 @@ async def test_an_image_without_the_command_stops_as_config_error(run, docker):
     assert "has no 'kraft-no-such-cli'" in Path(row["log_path"]).read_text()
 
 
+@pytest.mark.parametrize(
+    ("cmd", "inspect", "status"),
+    [
+        (["sh", "-c", "exit 137"], "true 33554432", "config_error"),
+        (["sh", "-c", "exit 137"], "false 33554432", "failed"),
+        (_writes_result({"status": "done"}), "true 33554432", "done"),
+    ],
+    ids=["oom-killed", "exit-137-alone", "survived-a-killed-child"],
+)
+async def test_a_session_its_memory_limit_killed_stops_naming_the_limit(
+    run, docker, database, tmp_path, monkeypatch, cmd, inspect, status
+):
+    """The same limit kills a retry the same way, so it is a stop for a
+    person, not a failure for a fix loop. Asked before the container is
+    removed (the fake's `rm` removes its `inspect` answer), and asked of the
+    runtime: exit 137 alone is also Kraft's own SIGKILL."""
+    answer = tmp_path / "inspect"
+    answer.write_text(inspect + "\n")
+    monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
+    sandbox = {**DOCKER, "resources": {"memory": "32m"}}
+
+    got, row = await run(cmd, "s-oom", sandbox=sandbox)
+
+    assert (got, row["status"]) == (status, status)
+    killed = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "sandbox_oom_killed"
+    ]
+    recorded = {"session_id": "s-oom", "memory": "32m"}
+    assert killed == ([] if inspect.startswith("false") else [recorded])
+    if status == "config_error":
+        last = Path(row["log_path"]).read_text().strip().splitlines()[-1]
+        assert last.startswith("kraft: killed by the sandbox's memory limit (32m)")
+
+
 async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
     run, docker, monkeypatch, tmp_path
 ):

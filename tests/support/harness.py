@@ -198,13 +198,13 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
     `--name`/`--label` each take one following argument, so skipping
     flag+value pairs finds the image (the first survivor) and the command
-    (everything after it). `--init`, `--entrypoint=`, `--security-opt=...`,
-    `--cap-drop=...` and `--userns=...` are single tokens, dropped outright.
-    `docker info` answers nothing: a rootful runtime. `--cidfile=PATH`
-    gets a fake container id, as docker writes one once it has created the
-    container. `docker ps` prints `$FAKE_DOCKER_PS` (container names) when
-    set; `docker rm -f NAME` -- `docker.teardown` -- appends `NAME` to
-    `$FAKE_DOCKER_RM_LOG` when set, so a test can tell teardown happened.
+    (everything after it). `--init` and `--flag=value`s are dropped. `docker
+    info` answers nothing: a rootful runtime. `--cidfile=PATH` gets a fake
+    container id, as docker writes one once it has created the container.
+    `docker ps` prints `$FAKE_DOCKER_PS` (container names) when set; `docker
+    rm -f NAME` -- `docker.teardown` -- appends `NAME` to `$FAKE_DOCKER_RM_LOG`
+    when set, and deletes `$FAKE_DOCKER_INSPECT`, which `docker inspect`
+    prints until then (`true 33554432`: a 32m limit OOM-killed it).
     """
     bin_dir = tmp_path / "fake-docker-bin"
     bin_dir.mkdir(exist_ok=True)
@@ -219,8 +219,10 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
         '[ "$1" = ps ] && { [ -z "${FAKE_DOCKER_PS:-}" ] || cat "$FAKE_DOCKER_PS"; exit 0; }\n'
         '[ "$1" = info ] && exit 0\n'
+        '[ "$1" = inspect ] && { cat "${FAKE_DOCKER_INSPECT:-/nonexistent}"; exit; }\n'
         'if [ "$1" = "rm" ]; then\n'
         "  shift\n"
+        '  [ -z "${FAKE_DOCKER_INSPECT:-}" ] || rm -f "$FAKE_DOCKER_INSPECT"\n'
         '  for arg in "$@"; do\n'
         '    [ "$arg" = "-f" ] && continue\n'
         '    if [ -n "${FAKE_DOCKER_RM_LOG:-}" ]; then echo "$arg" >> "$FAKE_DOCKER_RM_LOG"; fi\n'
@@ -234,9 +236,8 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         'for arg in "$@"; do\n'
         '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
         '  case "$arg" in\n'
-        "    --rm|--init|--entrypoint=*|--network=*|--security-opt=*|--cap-drop=*|--userns=*)\n"
-        "      continue ;;\n"
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
+        '    --rm|--init|--*=*) [ -n "$image" ] && cmd+=("$arg"); continue ;;\n'
         "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
         "    *)\n"
         '      if [ -z "$image" ]; then image="$arg"; else cmd+=("$arg"); fi\n'

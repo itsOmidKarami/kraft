@@ -48,7 +48,7 @@ repos:
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (see the `policy` row): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Names of `library.yaml` steering profiles given to every agent launch on this repo, before the task's own steering. Frozen into each work item when it is filed. |
-| `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. See [Sandboxed workers](#sandboxed-workers). |
+| `sandbox` | `null` | `{kind: docker, image: ..., resources: {...}}` — run this repo's task processes in that container, within the optional [resource limits](#resource-limits). Part of the repository policy layer: once set, no chain, node or task can turn it off or change it, limits included, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. See [Sandboxed workers](#sandboxed-workers). |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `grants`, `sandbox`, `allowed_harnesses`, `timeout_minutes`, `max_attempts` and the four caps (`time_cap_minutes`, `total_time_cap_minutes`, `token_budget`, `budget_usd`, each the work item's own, within `maxima.work_item`), applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes [intake](/concepts/vocabulary#intake) refuse the item. See [Policy fields](/reference/configuration/policy#policy-fields). |
 | `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for: `bot: <login>` or `check: <name>`. See [Automated review](#automated-review). |
 
@@ -56,7 +56,7 @@ No key on an entry passes silently. A key within two edits of a field above (`au
 
 ## Sandboxed workers
 
-A sandboxed task runs `docker run --rm --init` (or `podman run`) with every capability dropped, as a user that leaves what it writes yours, on rootless Docker and Podman too. Which CLI runs it, and what happens on an SELinux-enforcing host, is [sandbox.yaml](/reference/configuration/sandbox)'s. Only what is listed here reaches the container.
+A sandboxed task runs `docker run --init` (or `podman run`) with every capability dropped, within its [resource limits](#resource-limits), as a user that leaves what it writes yours, on rootless Docker and Podman too. Which CLI runs it, and what happens on an SELinux-enforcing host, is [sandbox.yaml](/reference/configuration/sandbox)'s. Only what is listed here reaches the container.
 
 | What | How it reaches the container |
 |---|---|
@@ -71,9 +71,30 @@ A sandboxed task runs `docker run --rm --init` (or `podman run`) with every capa
 
 **The image** must hold the agent CLI (and, for a fallback, every harness it may fall back to) on its `PATH`, plus `git`, `sh` and CA certificates. Before a task's first launch in an image, Kraft asks the image, through its own entrypoint and with the repository's `env`, whether the command is there; an image that answers no stops the item as a configuration error before anything runs. `kraft admin doctor` checks that the runtime answers, that SELinux has an answer in `sandbox.yaml` where it enforces, that an extra CA can be read, and that the image is pulled; pull it before filing work, or the first launch pulls it inside the task's time cap.
 
-**Not yet covered.** The container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable. There are no memory, CPU or process limits. A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch. A worker cannot reach Kraft's API, so `kraft item reply`, progress reports and an escalation's self-retry do not work from inside a sandbox. Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
+**Not yet covered.** The container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable. A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch. A worker cannot reach Kraft's API, so `kraft item reply`, progress reports and an escalation's self-retry do not work from inside a sandbox. Only repositories keeping refs in git's default files storage are supported; a reftable repository stops the item.
 
 Abandoning or archiving an item removes its ref store and sandbox home.
+
+### Resource limits
+
+```yaml
+sandbox:
+  kind: docker
+  image: ghcr.io/acme/agent:1
+  resources: {cpu: 2, memory: 4g, pids: 512}
+```
+
+| Field | Default | Means |
+|---|---|---|
+| `cpu` | unset | CPUs the container may use (`--cpus`), fractions allowed: `0.5`. |
+| `memory` | unset | A hard memory limit, swap included: a whole number with an optional unit `b`, `k`, `m` or `g` (binary, as Docker reads them), at least `6m`. Swap is held to the same limit (`--memory-swap`) wherever the runtime can limit swap; otherwise Docker would let the container swap as much again. |
+| `pids` | `4096` | Processes and threads at once (`--pids-limit`), which bounds a fork bomb. |
+
+The limits bind every sandboxed launch of the item, its setup command included, and they are part of the sandbox: a chain, node or task cannot loosen, tighten or drop them.
+
+A limit is applied or the task does not start. Docker runs a container without a limit whose cgroup controller is missing, with only a warning, and rootless Podman on cgroup v1 ignores every limit, so Kraft asks the runtime what it can enforce (Docker's `info`, Podman's cgroup controllers) and stops a task that sets a limit it cannot as a configuration error naming it. The fix is cgroup v2 and, for a rootless runtime, delegating the controllers to your user (systemd `Delegate=cpu memory pids` for `user@.service`). The default `pids` is left out, never refused, where the runtime cannot limit processes. `kraft admin doctor` names the limits the runtime enforces on each sandboxed repository's row, and fails a row whose limits it cannot.
+
+**Out of memory.** A session container is kept after it exits, so Kraft can ask the runtime whether the memory limit killed it, then removes it by name. When it did, Kraft records a `sandbox_oom_killed` event (`{session_id, memory}`) and the item stops for you as a configuration error naming the limit: the same limit would kill a retry the same way, so no fix loop runs. A session that still reported a result of its own (something it ran was killed and it got past it) keeps that result, with the event recorded. Only the runtime's own out-of-memory flag counts, never exit code 137, which is also what Kraft's own kill at a time cap looks like. A setup command the limit killed stops the item the same way. Podman on cgroup v1 can leave the kill unreported (seen with Podman 4.9), and the session then reads as failed.
 
 ## Automated review
 

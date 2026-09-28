@@ -68,6 +68,12 @@ class SandboxBackend(Protocol):
         """Bring the session's result file back to `result_path`. A no-op
         for a session this backend never ran."""
 
+    async def oom_killed(self, session_id: str) -> str | None:
+        """The memory limit the session's sandbox killed it at, or None: it
+        was not, or this backend cannot tell (a session it never ran). Asked
+        after the command exits and before `close`, which removes the
+        evidence; the runtime's own word only, never an exit code."""
+
     async def close(self, session_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A
         no-op for a session this backend never ran."""

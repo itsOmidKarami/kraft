@@ -317,6 +317,33 @@ async def _record_unsynced(
         )
 
 
+#: What a sandboxed session its memory limit killed is recorded as.
+SANDBOX_OOM_KILLED = "sandbox_oom_killed"
+
+
+async def record_oom_kill(
+    db, work_item_id: str, session_id: str, log_path: Path, memory: str, status: str | None
+) -> str:
+    """The status a session its sandbox's memory limit killed ends with, and
+    the record of it: `sandbox_oom_killed` and a `kraft:` line naming the
+    limit, the stop's cause. A session that failed (or left no word at all)
+    ends `config_error`, not `failed`: the same limit kills a retry the same
+    way, so no fix loop runs and the item stops for a person. One that still
+    reported a result of its own (something it ran was killed, and it got
+    past it) keeps it; the event is recorded all the same."""
+    with open(log_path, "a") as fh:
+        fh.write(
+            f"\nkraft: killed by the sandbox's memory limit ({memory}): raise the "
+            "sandbox's resources.memory, or make the task need less\n"
+        )
+    await db.write(
+        lambda c: events.append(
+            c, work_item_id, SANDBOX_OOM_KILLED, {"session_id": session_id, "memory": memory}
+        )
+    )
+    return "config_error" if status in (None, "failed", "unknown") else status
+
+
 def _resolve_exit_file(path: Path) -> str | None:
     """Status from a task's own recorded exit code, or None if absent/garbage.
 
@@ -655,6 +682,7 @@ async def run_task(
         daemon=True,
     )
     watcher.start()
+    oom: str | None = None
 
     try:
         try:
@@ -741,9 +769,11 @@ async def run_task(
             try:
                 if backend is not None:
                     # Everything below reads the result file: bring it home
-                    # before the sandbox holding it goes.
+                    # before the sandbox holding it goes -- and whether its
+                    # memory limit killed the session, which goes with it.
                     try:
                         await backend.collect(session_id, result_path)
+                        oom = await backend.oom_killed(session_id)
                     finally:
                         await backend.close(session_id)
             finally:
@@ -823,6 +853,8 @@ async def run_task(
     # "stopped on purpose" rather than "failed". The row is the authority.
     if await db.write(lambda c: store.session_status(c, session_id)) == "paused":
         return "paused"
+    if oom is not None:
+        status = await record_oom_kill(db, work_item_id, session_id, log_path, oom, status)
     fields = read_result_fields(result_path)
     seen = _usage.read(log_path, result_path, reader)
     await db.write(

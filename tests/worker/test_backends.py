@@ -66,6 +66,9 @@ class Remote:
         if sent.exists():
             shutil.copyfile(sent, result_path)
 
+    async def oom_killed(self, session_id):
+        return None
+
     async def close(self, session_id):
         self.closed.append(session_id)
 

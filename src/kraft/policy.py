@@ -21,6 +21,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     ValidationInfo,
+    model_serializer,
     model_validator,
 )
 from pydantic.dataclasses import dataclass as model
@@ -715,15 +716,79 @@ class InstancePolicyInput(BaseModel):
         return self
 
 
+#: `resources.memory` as `docker run --memory` takes it: a whole number of
+#: bytes, or of `k`, `m` or `g` (binary units, as docker reads them).
+_MEMORY = re.compile(r"[1-9][0-9]*[bkmg]?")
+_MEMORY_UNITS = {"b": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
+#: The smallest memory limit docker starts a container under.
+MIN_SANDBOX_MEMORY = 6 * 1024**2
+
+
+def memory_bytes(value: str) -> int:
+    """`resources.memory` (already validated) as a byte count."""
+    unit = value[-1] if value[-1] in _MEMORY_UNITS else "b"
+    return int(value.rstrip("bkmg")) * _MEMORY_UNITS[unit]
+
+
+def _memory(value: str) -> str:
+    value = value.strip().lower()
+    if not _MEMORY.fullmatch(value):
+        raise ValueError(
+            f"memory {value!r} is not a size: a whole number with an optional unit "
+            "b, k, m or g (`512m`, `4g`)"
+        )
+    if memory_bytes(value) < MIN_SANDBOX_MEMORY:
+        raise ValueError(f"memory {value!r} is under 6m, the least a container starts with")
+    return value
+
+
+def _without_unset(handler, value) -> dict:
+    return {k: v for k, v in handler(value).items() if v is not None}
+
+
+class SandboxResources(BaseModel):
+    """What a sandboxed launch may use: `cpu` (CPUs, fractions allowed),
+    `memory` (a hard limit, swap included) and `pids` (processes and
+    threads). A limit that is set is applied or the launch is refused
+    (`sandbox-limits-never-silently-drop`); unset `pids` is 4096 wherever
+    the runtime can enforce it. Frozen, like `SandboxPolicy`, which is hashed
+    whole."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    #: CPUs the sandbox may use (`--cpus`): `2`, `0.5`.
+    cpu: StrictFloat | None = Field(default=None, gt=0)
+    #: A hard memory limit, swap included (`--memory`): `512m`, `4g`. A
+    #: session it kills ends as a configuration error naming it.
+    memory: Annotated[StrictStr, AfterValidator(_memory)] | None = None
+    #: Processes and threads at once (`--pids-limit`). Unset: 4096.
+    pids: StrictInt | None = Field(default=None, ge=1)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        return _without_unset(handler, self)
+
+
 class SandboxPolicy(BaseModel):
-    """Where a task's process runs: `kind: docker` in `image`
-    (`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):
-    once a layer sets one, no narrower layer may change or remove it."""
+    """Where a task's process runs: `kind: docker` in `image`, within
+    `resources` (`kraft.worker.backends`). A permission-shaped safety field
+    (Ruling 105): once a layer sets one, no narrower layer may change or
+    remove it -- the whole value, `resources` included."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     kind: Literal["docker"]
     image: StrictStr = Field(min_length=1)
+    #: CPU, memory and process limits on every sandboxed run, the setup
+    #: command's included.
+    resources: SandboxResources | None = None
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        """Unset fields are left out, so a sandbox with no `resources` dumps
+        (and is frozen into a snapshot, and saved back to repos.yaml) as it
+        always did."""
+        return _without_unset(handler, self)
 
     @model_validator(mode="before")
     @classmethod

@@ -15,6 +15,7 @@ the design this implements.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -72,6 +73,16 @@ class SandboxRefused(RuntimeError):
     person, never a task failure."""
 
 
+#: Every limit a runtime may enforce: `resources`' three, and `swap`, which
+#: makes a memory limit a limit (without `--memory-swap` docker lets a
+#: container swap as much again).
+LIMIT_ORDER = ("cpu", "memory", "swap", "pids")
+LIMITS = frozenset(LIMIT_ORDER)
+#: `--pids-limit` when `resources.pids` is unset: bounds a fork bomb, and no
+#: build a worker runs comes near it.
+DEFAULT_PIDS = 4096
+
+
 @dataclass(frozen=True)
 class Runtime:
     """How this machine runs a container, detected once (`runtime()`): the
@@ -89,6 +100,57 @@ class Runtime:
     #: None unless SELinux enforces; then `sandbox.yaml`'s `relabel` or
     #: `disable`, or `refuse` when it says neither.
     selinux: str | None = None
+    #: Which of `LIMITS` this runtime can enforce: a cgroup controller it
+    #: lacks (cgroup v1 rootless, a v2 host that delegates none) makes docker
+    #: *drop* the limit with only a warning, so this is asked, not assumed.
+    limits: frozenset[str] = LIMITS
+
+    def limit_args(self, resources: dict | None) -> list[str]:
+        """`--cpus`, `--memory` and `--pids-limit` for a sandbox's
+        `resources`, or `SandboxRefused` for one this runtime cannot enforce
+        (`sandbox-limits-never-silently-drop`). The default pids limit is
+        left out where pids cannot be limited: refusing it would refuse every
+        launch on such a host, and nobody asked for it."""
+        resources = resources or {}
+        if problem := self.limits_refusal(resources):
+            raise SandboxRefused(problem)
+        args = []
+        if (cpu := resources.get("cpu")) is not None:
+            args.append(f"--cpus={cpu:g}")
+        if (memory := resources.get("memory")) is not None:
+            args.append(f"--memory={memory}")
+            if "swap" in self.limits:
+                args.append(f"--memory-swap={memory}")
+        pids = resources.get("pids")
+        if pids is None and "pids" in self.limits:
+            pids = DEFAULT_PIDS
+        if pids is not None:
+            args.append(f"--pids-limit={pids}")
+        return args
+
+    def limits_refusal(self, resources: dict | None) -> str | None:
+        """Why a launch under `resources` cannot start here, or None."""
+        wanted = [n for n in ("cpu", "memory", "pids") if (resources or {}).get(n) is not None]
+        missing = [n for n in wanted if n not in self.limits]
+        if not missing:
+            return None
+        return (
+            f"{self.describe()} cannot enforce the sandbox's {' and '.join(missing)} "
+            f"limit ({'; '.join(f'{n}: {resources[n]}' for n in missing)}): the cgroup "
+            "controller is not available to it, and the runtime would run the container "
+            "without the limit. Run it on cgroup v2 and, for a rootless runtime, delegate "
+            "the controllers to your user (systemd `Delegate=cpu memory pids` for "
+            "user@.service); or remove the limit from the sandbox's `resources`"
+        )
+
+    def describe_limits(self) -> str:
+        """Doctor's account of what `resources` can do on this runtime."""
+        if not self.limits & {"cpu", "memory", "pids"}:
+            return (
+                "no resource limits (no cgroup controllers: needs cgroup v2 with "
+                "Delegate= for a rootless runtime)"
+            )
+        return "limits " + ", ".join(n for n in LIMIT_ORDER if n in self.limits)
 
     def user_args(self) -> list[str]:
         """Who the container runs as, so what it writes into the worktree is
@@ -160,6 +222,37 @@ def _ask(cli: str) -> tuple[str, bool, bool]:
     return engine, security[:1] == ["true"], security[1:2] == ["true"]
 
 
+def _ask_limits(cli: str, engine: str) -> frozenset[str]:
+    """Which of `LIMITS` the runtime says it can enforce: docker's `info`
+    booleans (rootless docker reports what is delegated to it), podman's
+    cgroup controllers (rootless podman on cgroup v1 lists none). An answer
+    that does not parse -- no daemon, an old CLI -- reads as every limit,
+    what a launch assumed before it asked: the launch itself then fails, or
+    not, as it always did."""
+    if engine == "docker":
+        out = _run(
+            cli,
+            "info",
+            "--format",
+            "{{.CPUCfsQuota}} {{.MemoryLimit}} {{.SwapLimit}} {{.PidsLimit}}",
+        )
+        words = (out or "").split()
+        if len(words) != 4 or not set(words) <= {"true", "false"}:
+            return LIMITS
+        return frozenset(n for n, w in zip(LIMIT_ORDER, words, strict=True) if w == "true")
+    try:
+        controllers = json.loads(
+            _run(cli, "info", "--format", "{{json .Host.CgroupControllers}}") or ""
+        )
+    except ValueError:
+        return LIMITS
+    if not isinstance(controllers, list):
+        return LIMITS
+    # Podman sets a swap limit wherever it can set a memory one.
+    enforces = {"cpu": ("cpu",), "memory": ("memory", "swap"), "pids": ("pids",)}
+    return frozenset(n for c in controllers if c in enforces for n in enforces[c])
+
+
 def detect_runtime() -> Runtime:
     """Read `sandbox.yaml` and ask the runtime. Raises `ConfigError` for a
     `sandbox.yaml` that does not parse."""
@@ -176,7 +269,9 @@ def detect_runtime() -> Runtime:
     # labels leaves its containers unconfined, so its mounts work as they are.
     if labels and _selinux_enforcing():
         selinux = "refuse" if host.selinux == "auto" else host.selinux
-    return Runtime(cli=cli, engine=engine, rootless=rootless, selinux=selinux)
+    return Runtime(
+        cli=cli, engine=engine, rootless=rootless, selinux=selinux, limits=_ask_limits(cli, engine)
+    )
 
 
 _RUNTIME: Runtime | None = None
@@ -289,6 +384,12 @@ def docker_argv(
     `cwd` is resolved first: git records a worktree's real path, and a
     worktree mounted only at a symlinked path looks gone to `git worktree
     prune`, which then deletes its admin directory.
+
+    `sandbox['resources']` becomes the runtime's limit flags
+    (`Runtime.limit_args`), or `SandboxRefused` where it cannot enforce one.
+    A `name`d container runs without `--rm`: removed on exit, it could not be
+    asked whether its memory limit killed it (`oom_killed`), so `teardown`
+    removes it by name instead, and `sweep_orphans` whatever a crash left.
     """
     try:
         host = runtime()
@@ -300,7 +401,7 @@ def docker_argv(
     argv = [
         host.cli,
         "run",
-        "--rm",
+        *(["--rm"] if name is None else []),
         # PID 1 ignores a signal it installed no handler for, so without an
         # init neither a pause's SIGINT nor a cap's SIGTERM reaches the agent.
         "--init",
@@ -310,6 +411,7 @@ def docker_argv(
         "--security-opt=no-new-privileges",
         *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
         "--cap-drop=ALL",
+        *host.limit_args(sandbox.get("resources")),
         "-v",
         f"{cwd}:{cwd}",
         "-w",
@@ -469,6 +571,37 @@ async def teardown(session_id: str) -> None:
     await docker_call("rm", "-f", container_name(session_id))
 
 
+def _size(n: int) -> str:
+    """A byte count in docker's own units, as `resources.memory` spells it."""
+    for unit, size in (("g", 1024**3), ("m", 1024**2), ("k", 1024)):
+        if n % size == 0:
+            return f"{n // size}{unit}"
+    return str(n)
+
+
+async def oom_killed(session_id: str) -> str | None:
+    """The memory limit this session's container was killed at, read off
+    `State.OOMKilled` before `teardown` removes the container; None when it
+    was not, or cannot be told (already gone, no daemon).
+
+    Only the runtime's own OOM flag counts, never exit 137 alone: that is
+    also Kraft's own SIGKILL (a cap, a teardown). A container with no memory
+    limit that the host's OOM killer hit is None too: that is the host
+    running short, not a limit a retry would hit again."""
+    got = await docker_call(
+        "inspect",
+        "--format",
+        "{{.State.OOMKilled}} {{.HostConfig.Memory}}",
+        container_name(session_id),
+    )
+    if got is None or got[0] != 0:
+        return None
+    killed, _, memory = got[1].strip().partition(" ")
+    if killed != "true" or not memory.isdigit() or int(memory) <= 0:
+        return None
+    return _size(int(memory))
+
+
 #: How long any one best-effort `docker` call Kraft makes on its own account
 #: (teardown, the orphan sweep, the image check) may take.
 DOCKER_CALL_TIMEOUT_S = 30.0
@@ -588,7 +721,9 @@ def launch_failed(cidfile: Path, returncode: int | None = None) -> bool:
 
     Podman removes the cidfile when a `--rm` container exits, so it says
     nothing afterwards; podman instead reserves exit 125 for a failure of
-    its own, before or instead of the command (probed with 4.9.3)."""
+    its own, before or instead of the command (probed with 4.9.3). A session
+    no longer runs `--rm`, but the exit code stays the rule: it holds
+    whichever way a container was run."""
     if runtime().podman:
         return returncode == 125
     try:
@@ -612,7 +747,7 @@ class DockerBackend:
             host = await asyncio.to_thread(runtime)
         except ConfigError as exc:
             return str(exc)
-        if problem := host.refusal():
+        if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
             return problem
         if await missing_executable(sandbox["image"], executable, env):
             return (
@@ -681,6 +816,9 @@ class DockerBackend:
         """Nothing to fetch: the result file is bind-mounted, so the worker
         wrote it where Kraft reads it."""
 
+    async def oom_killed(self, session_id: str) -> str | None:
+        return await oom_killed(session_id)
+
     async def close(self, session_id: str) -> None:
         await teardown(session_id)
 
@@ -702,7 +840,7 @@ class DockerBackend:
             host = await asyncio.to_thread(runtime, refresh=True)
         except ConfigError as exc:
             return False, str(exc)
-        if problem := host.refusal():
+        if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
             return False, problem
         try:
             extra = await asyncio.to_thread(_forward.extra_ca)
@@ -716,4 +854,8 @@ class DockerBackend:
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
-        return True, f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}"
+        return (
+            True,
+            f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}, "
+            f"{host.describe_limits()}",
+        )

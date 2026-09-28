@@ -21,6 +21,7 @@ from kraft.adapters.subprocess import (
     _resolve_result_file,
     fail_abandoned_jobs,
     read_result_fields,
+    record_oom_kill,
 )
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
@@ -373,17 +374,15 @@ async def _adopt(
             logger.exception("usage progress tick failed for adopted session %s", session_id)
     for backend in _backends.for_session(row["sandbox"]):
         await backend.collect(session_id, result_path)
+    # Before `_guarded_adopt`'s `finally` closes the sandbox, which removes it.
+    oom = await _oom_killed(row["sandbox"], session_id)
     if run_dirs is not None:
         # Before the exit is resolved: what runs next reads the item branch.
         await _sync_item_refs(db, run_dirs, row["work_item_id"])
-    await _exit_from_file(
-        db,
-        session_id,
-        log_path,
-        result_path,
-        _adopted_status(result_path, is_agent=_is_agent_hook(db, row)),
-        reader,
-    )
+    status = _adopted_status(result_path, is_agent=_is_agent_hook(db, row))
+    if oom is not None:
+        status = await record_oom_kill(db, row["work_item_id"], session_id, log_path, oom, status)
+    await _exit_from_file(db, session_id, log_path, result_path, status, reader)
     if row["hook_point"] == ESCALATION_HOOK and run_dirs is not None:
         await _resume_adopted_escalation(
             db,
@@ -477,6 +476,14 @@ async def _guarded_adopt(
         await asyncio.shield(_close_sandbox(sandbox, session_id))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
+
+
+async def _oom_killed(kind: str | None, session_id: str) -> str | None:
+    """The memory limit a session row's sandbox killed it at, or None."""
+    for backend in _backends.for_session(kind):
+        if (memory := await backend.oom_killed(session_id)) is not None:
+            return memory
+    return None
 
 
 async def _close_sandbox(kind: str | None, session_id: str) -> None:
@@ -588,7 +595,11 @@ async def reattach(
     for r in rows:
         sid = r["id"]
         adopting = adopt[sid]
+        oom = None
         if not adopting:
+            # Asked before the close below removes the evidence.
+            if r["status"] != "pending":
+                oom = await _oom_killed(r["sandbox"], sid)
             await _close_sandbox(r["sandbox"], sid)
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == "pending":
@@ -630,6 +641,12 @@ async def reattach(
         # file -- so a green run Kraft merely cannot confirm pages nobody
         # (Kraft-s7c04.38).
         status = _evidenced_status(r["result_path"], is_agent=_is_agent_hook(db, r))
+        if oom is not None:
+            # Killed by its limit is evidence too: the item stops naming it,
+            # never as a session nobody can account for.
+            status = await record_oom_kill(
+                db, r["work_item_id"], sid, Path(r["log_path"]), oom, status
+            )
         if status is not None:
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             await _exit_from_file(

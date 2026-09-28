@@ -843,7 +843,7 @@
     },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`\n(`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it.",
+      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` (`kraft.worker.backends`). A permission-shaped safety field\n(Ruling 105): once a layer sets one, no narrower layer may change or\nremove it -- the whole value, `resources` included.",
       "properties": {
         "image": {
           "minLength": 1,
@@ -854,9 +854,66 @@
           "const": "docker",
           "title": "Kind",
           "type": "string"
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxResources"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "SandboxPolicy",
+      "type": "object"
+    },
+    "SandboxResources": {
+      "additionalProperties": false,
+      "description": "What a sandboxed launch may use: `cpu` (CPUs, fractions allowed),\n`memory` (a hard limit, swap included) and `pids` (processes and\nthreads). A limit that is set is applied or the launch is refused\n(`sandbox-limits-never-silently-drop`); unset `pids` is 4096 wherever\nthe runtime can enforce it. Frozen, like `SandboxPolicy`, which is hashed\nwhole.",
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids"
+        }
+      },
+      "title": "SandboxResources",
       "type": "object"
     },
     "SteeringProfile": {

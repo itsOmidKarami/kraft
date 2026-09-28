@@ -484,6 +484,7 @@ def machine(tmp_path, monkeypatch):
         (templates / "sandbox.yaml").write_text(yaml)
         monkeypatch.setattr(docker, "_selinux_enforcing", lambda: enforcing)
         monkeypatch.setattr(docker, "_ask", lambda cli: ("docker", False, labels))
+        monkeypatch.setattr(docker, "_ask_limits", lambda cli, engine: docker.LIMITS)
         return docker.detect_runtime()
 
     return go
