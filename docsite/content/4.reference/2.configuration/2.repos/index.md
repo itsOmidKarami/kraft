@@ -48,11 +48,29 @@ repos:
 | `local_files` | `[]` | Relative paths (no globs, no directories) to copy into every new worktree — for files `git worktree add` can't carry, like an untracked `.python-version`. Only a file the worktree's `.gitignore` covers is copied; an entry that is not, or a directory, is refused and named in its own section of the item's `worktree_prepared` event (`kraft view events`). |
 | `deny_tools` | `[]` | Tool names withheld from every agent task on this repo. Part of the repository policy layer (see the `policy` row): frozen into each work item when it is filed, and a later addition still applies to running items. |
 | `steering` | `[]` | Names of `library.yaml` steering profiles given to every agent launch on this repo, before the task's own steering. Frozen into each work item when it is filed. |
-| `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. |
+| `sandbox` | `null` | `{kind: docker, image: ...}` — run this repo's task processes in that container. Part of the repository policy layer: once set, no chain, node or task can turn it off, and `false` here cannot turn off one a layer set. Set it here or in `policy.sandbox`, not both. See [Sandboxed workers](#sandboxed-workers). |
 | `policy` | `null` | The repository policy layer: any of `allowed_tools`, `deny_tools`, `grants`, `sandbox`, `allowed_harnesses`, `timeout_minutes`, `max_attempts` and the four caps (`time_cap_minutes`, `total_time_cap_minutes`, `token_budget`, `budget_usd`, each the work item's own, within `maxima.work_item`), applied after `policy.yaml` and before the chain, and only ever tightening what `policy.yaml` allows. It binds every work item filed in this repo, whatever its chain; a value `policy.yaml` refuses makes [intake](/concepts/vocabulary#intake) refuse the item. See [Policy fields](/reference/configuration/policy#policy-fields). |
 | `automated_review` | `null` | The one automated reviewer a chain's `mr.automated_review` task waits for: `bot: <login>` or `check: <name>`. See [Automated review](#automated-review). |
 
 No key on an entry passes silently. A key within two edits of a field above (`automated_reviews:`) is refused when the file loads, naming the field it meant. Any other key the table doesn't list is kept, logged as a warning, and fails `kraft admin doctor` until it is removed.
+
+## Sandboxed workers
+
+A sandboxed task runs `docker run --rm --init` as your own uid, with every capability dropped. Only what is listed here reaches the container.
+
+| What | How it reaches the container |
+|---|---|
+| The worktree | Mounted read-write at its real path. |
+| The repository's refs | A private copy, per worktree, under `$KRAFT_HOME/run/sandbox-git/`. The worker sees every branch and tag as of its session's start and may create, move or delete refs, but only there. When the session ends, Kraft moves the item's branch in your repository to where the worker left it, and only if nothing else moved it meanwhile; any other ref the worker changed is dropped. A branch Kraft could not move is recorded as a `sandbox_branch_not_synced` event. |
+| Objects and LFS content | Your repository's `objects/` and `lfs/`, read-write: they are data a commit writes. Alternates are mounted read-only. |
+| `HOME` | `$KRAFT_HOME/run/sandbox-home/<work item>`, read-write and kept across sessions, so an agent CLI keeps its state and can resume a paused session. |
+| Credentials | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and every name in `env_passthrough`, forwarded by name, so their values never appear on the `docker` command line. Values in `env` are passed literally and are visible to `ps`; keep secrets in `env_passthrough`. |
+| Git identity | `GIT_AUTHOR_*` and `GIT_COMMITTER_*` from the daemon's environment, else your `user.name` and `user.email` for the repository. Repository hooks never run in the container. |
+| Tool policy | Enforced inside the container or refused: amp's and opencode's rules travel with the launch, but a harness whose policy needs Kraft's permission hook (codex, cursor) cannot run that hook in a container, so a sandboxed task with `allowed_tools` or `deny_tools` on it is refused. Codex runs with `sandbox_mode=danger-full-access` unless the task sets a mode, because its own sandbox cannot start inside Docker. |
+
+**The image** must hold the agent CLI (and, for a fallback, every harness it may fall back to) on its `PATH`, plus `git`, `sh` and CA certificates. An image without the task's command stops the item as a configuration error before anything runs. `kraft admin doctor` checks that the daemon answers and the image is pulled; pull it before filing work, or the first launch pulls it inside the task's time cap.
+
+**Not yet covered.** The container has the default bridge network: open egress, and on a cloud VM the metadata address is reachable. There are no memory, CPU or process limits. A worker can still delete objects from your repository, which breaks it loudly but cannot put content on another branch. A worker cannot reach Kraft's API, so `kraft item reply`, progress reports and an escalation's self-retry do not work from inside a sandbox.
 
 ## Automated review
 

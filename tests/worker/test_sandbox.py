@@ -1,6 +1,7 @@
 import asyncio
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -451,7 +452,9 @@ async def test_teardown_gives_up_on_a_daemon_that_never_answers(tmp_path, monkey
     (bin_dir / "docker").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(sandbox, "DOCKER_CALL_TIMEOUT_S", 0.2)
+    started = time.monotonic()
     await asyncio.wait_for(sandbox.teardown("s1"), 5)
+    assert time.monotonic() - started < 5
 
 
 @pytest.mark.parametrize(

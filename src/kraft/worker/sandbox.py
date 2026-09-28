@@ -146,9 +146,11 @@ def docker_argv(
     launch that is no session and has no results to read (a repository's
     `setup_command`, `builtins.run_setup_command`): nothing is mounted.
 
-    `<repo>/.git`: read-only, with `objects/`, `refs/`, `logs/` and this
-    worktree's own gitdir (`<repo>/.git/worktrees/<id>`) read-write -- what a
-    commit from inside a linked worktree actually writes. That worktree
+    `<repo>/.git`: the worktree's private ref store (`refstore` below), so no
+    ref the worker writes reaches the operator's repository; objects are
+    shared read-write. This worktree's own gitdir (`<repo>/.git/worktrees/<id>`)
+    is read-write -- what a commit from inside a linked worktree writes
+    besides objects and refs. That worktree
     gitdir has to be read-write wholesale: a commit rewrites HEAD, the index
     and per-worktree refs through lockfiles beside them, so the directory
     itself must be writable, and every file git redirects config and hooks

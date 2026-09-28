@@ -195,21 +195,15 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
 def fake_docker_bin(tmp_path: Path) -> Path:
     """A directory holding a `docker` that unwraps `docker run [OPTIONS] IMAGE
     CMD...` back to `CMD...` and execs it — proves the wrap shape a real
-    sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/`--name`
-    each consume exactly one following argument in what `sandbox.docker_argv`
-    emits (and `--label`), so skipping flag+value pairs generically finds the image (the
-    first survivor) and the real command (everything after it), regardless
-    of exact flag count or order. `--init` stands alone; `--security-opt=...`/`--cap-drop=...` carry
-    their value in the same token (`=`-joined), so they are dropped outright
-    rather than skip-one'd. `--cidfile=PATH` gets a fake container id, as
-    docker writes one once it has created the container.
-
-    `docker ps` prints `$FAKE_DOCKER_PS` (a file of container names), when set.
-    Also answers `docker rm -f NAME` -- the container teardown
-    `sandbox.teardown` issues once a sandboxed session's client side is down
-    -- by appending `NAME` to `$FAKE_DOCKER_RM_LOG` when that env var is set,
-    so a test can tell the real teardown call happened without a daemon to
-    actually ask.
+    sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
+    `--name`/`--label` each take one following argument, so skipping
+    flag+value pairs finds the image (the first survivor) and the command
+    (everything after it). `--init`, `--entrypoint=`, `--security-opt=...` and
+    `--cap-drop=...` are single tokens, dropped outright. `--cidfile=PATH`
+    gets a fake container id, as docker writes one once it has created the
+    container. `docker ps` prints `$FAKE_DOCKER_PS` (container names) when
+    set; `docker rm -f NAME` -- `sandbox.teardown` -- appends `NAME` to
+    `$FAKE_DOCKER_RM_LOG` when set, so a test can tell teardown happened.
     """
     bin_dir = tmp_path / "fake-docker-bin"
     bin_dir.mkdir(exist_ok=True)
@@ -222,10 +216,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         '# "the real command ran because nothing wrapped it at all" -- the two\n'
         "# look identical from the marker file the real command itself writes.\n"
         'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
-        'if [ "$1" = "ps" ]; then\n'
-        '  [ -n "${FAKE_DOCKER_PS:-}" ] && cat "$FAKE_DOCKER_PS"\n'
-        "  exit 0\n"
-        "fi\n"
+        '[ "$1" = ps ] && { [ -z "${FAKE_DOCKER_PS:-}" ] || cat "$FAKE_DOCKER_PS"; exit 0; }\n'
         'if [ "$1" = "rm" ]; then\n'
         "  shift\n"
         '  for arg in "$@"; do\n'
