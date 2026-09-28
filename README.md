@@ -61,8 +61,8 @@
 | src/kraft/client/context.py               |       47 |        2 |     96% |     32-33 |
 | src/kraft/client/reads.py                 |      162 |       16 |     90% |151, 221-222, 232-239, 297-300, 323, 329, 348-349, 370 |
 | src/kraft/client/transport.py             |       70 |        8 |     89% |52, 67-68, 114-115, 117, 128-129 |
-| src/kraft/config.py                       |      431 |       15 |     97% |100, 102, 120-122, 246, 445, 448, 547, 722-723, 768-769, 790-791 |
-| src/kraft/config\_schemas.py              |       73 |        7 |     90% |   159-165 |
+| src/kraft/config.py                       |      435 |       14 |     97% |102, 120-122, 246, 445, 448, 547, 722-723, 768-769, 790-791 |
+| src/kraft/config\_schemas.py              |       73 |        7 |     90% |   160-166 |
 | src/kraft/db.py                           |      112 |        0 |    100% |           |
 | src/kraft/doctor.py                       |      356 |       29 |     92% |108, 148-149, 166-167, 177-179, 191, 195-196, 235, 299-300, 334-341, 408-409, 502, 514-515, 566, 605, 613, 665-666, 691, 695-696 |
 | src/kraft/escalate.py                     |      173 |        6 |     97% |161, 264, 379, 509-510, 549 |
@@ -133,7 +133,7 @@
 | src/kraft/waits.py                        |      108 |        7 |     94% |286-288, 298-301 |
 | src/kraft/worker/\_\_init\_\_.py          |        0 |        0 |    100% |           |
 | src/kraft/worker/backends/\_\_init\_\_.py |       27 |        0 |    100% |           |
-| src/kraft/worker/backends/docker.py       |      168 |        3 |     98% |281-282, 376 |
+| src/kraft/worker/backends/docker.py       |      263 |       16 |     94% |122, 127-130, 136-137, 286-287, 428-429, 471-474, 529, 680-681 |
 | src/kraft/worker/env.py                   |        9 |        0 |    100% |           |
 | src/kraft/worker/reattach.py              |      217 |       22 |     90% |61-62, 70-71, 104-105, 204, 249-259, 290, 461, 467-468, 498-499 |
 | src/kraft/worker/refstore.py              |      189 |       11 |     94% |124-125, 130-131, 152, 200, 203, 256, 301-302, 325 |
@@ -141,7 +141,7 @@
 | src/kraft/worker/steering.py              |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py        |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                           |       61 |        0 |    100% |           |
-| **TOTAL**                                 | **19090** |  **987** | **95%** |           |
+| **TOTAL**                                 | **19189** |  **999** | **95%** |           |
 
 
 ## Setup coverage badge
