@@ -319,6 +319,8 @@ async def _record_unsynced(
 
 #: What a sandboxed session its memory limit killed is recorded as.
 SANDBOX_OOM_KILLED = "sandbox_oom_killed"
+#: How the log line `record_oom_kill` appends starts: the stop's cause.
+OOM_LINE = "kraft: a process in the sandbox was killed by its memory limit"
 
 
 async def record_oom_kill(
@@ -333,8 +335,8 @@ async def record_oom_kill(
     past it) keeps it; the event is recorded all the same."""
     with open(log_path, "a") as fh:
         fh.write(
-            f"\nkraft: killed by the sandbox's memory limit ({memory}): raise the "
-            "sandbox's resources.memory, or make the task need less\n"
+            f"\n{OOM_LINE} ({memory}): raise the sandbox's resources.memory, or make "
+            "the task need less\n"
         )
     await db.write(
         lambda c: events.append(
@@ -627,6 +629,9 @@ async def run_task(
     current_status = await db.write(lambda c: store.session_status(c, session_id))
     if current_status != "pending":
         return current_status
+    # A sandbox's client may run somewhere of the backend's own, not in the
+    # worktree: nothing it leaves behind lands where a worker commits.
+    client_cwd = backend.client_cwd(session_id) if backend is not None else None
     log = open(log_path, "w")
     try:
         try:
@@ -642,7 +647,7 @@ async def run_task(
             # reading the server's own stdin.
             proc = subprocess.Popen(
                 _wrap_with_exit_file(cmd, exit_path),
-                cwd=str(cwd),
+                cwd=str(client_cwd or cwd),
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -665,6 +670,8 @@ async def run_task(
             # agent can win by editing source (Kraft-579). The caller
             # short-circuits this straight to needs_human.
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            if backend is not None:
+                await backend.close(session_id)
             return "config_error"
     finally:
         log.close()  # the child holds its own dup'd fd

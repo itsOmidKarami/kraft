@@ -206,9 +206,22 @@ async def test_a_line_kraft_appended_after_the_output_is_the_cause(item_on, tmp_
     log = tmp_path / "s1.log"
     log.write_text(
         '{"type": "system"}\nworking\n\n'
-        "kraft: killed by the sandbox's memory limit (32m): raise it\n"
+        "kraft: a process in the sandbox was killed by its memory limit (32m): raise it\n"
     )
 
     reason = await _config_error_reason(item_on, [("s1", log, "config_error", "2026-01-01")])
 
-    assert reason.endswith(": kraft: killed by the sandbox's memory limit (32m): raise it")
+    assert reason.endswith(
+        ": kraft: a process in the sandbox was killed by its memory limit (32m): raise it"
+    )
+
+
+async def test_any_other_kraft_line_leaves_the_tasks_own_cause(item_on, tmp_path):
+    """Only the memory-limit line Kraft appends replaces the task's first
+    line; another `kraft:` line in the output is not the stop's cause."""
+    log = tmp_path / "s1.log"
+    log.write_text("the real cause\nkraft: error: something else\n")
+
+    reason = await _config_error_reason(item_on, [("s1", log, "config_error", "2026-01-01")])
+
+    assert reason.endswith(": the real cause")

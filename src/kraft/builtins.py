@@ -668,15 +668,14 @@ async def run_setup_command(
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
             ca_bundle=ca_bundle,
         )
-        run = dict(args=argv)
+        run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
     else:
-        run = dict(args=cmd, shell=True)
+        run = dict(args=cmd, shell=True, cwd=worktree)
     oom = None
     try:
         done = await asyncio.to_thread(
             subprocess.run,
             **run,
-            cwd=worktree,
             env=worker_env(repo_entry),
             capture_output=True,
             text=True,
@@ -697,8 +696,8 @@ async def run_setup_command(
                 await backend.close(setup_id)
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
-            f"setup command for {worktree.name} was killed by the sandbox's memory limit "
-            f"({oom}): {cmd!r}; raise the sandbox's resources.memory"
+            f"setup command for {worktree.name} failed: a process in the sandbox was killed "
+            f"by its memory limit ({oom}): {cmd!r}; raise the sandbox's resources.memory"
         )
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()

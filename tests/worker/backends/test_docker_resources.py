@@ -86,14 +86,47 @@ async def test_the_refusal_stops_a_session_before_it_starts_and_fails_doctor(mon
 @pytest.mark.parametrize(
     ("limits", "said"),
     [
-        (docker.LIMITS, "limits cpu, memory, swap, pids"),
-        (frozenset({"cpu", "memory"}), "limits cpu, memory"),
+        (docker.LIMITS, "limits cpu, memory, pids"),
+        (frozenset({"cpu", "memory"}), "limits cpu, memory (swap unbounded)"),
         (frozenset(), "no resource limits (no cgroup controllers: needs cgroup v2"),
     ],
-    ids=["all", "some", "none"],
+    ids=["all", "no-swap", "none"],
 )
 def test_doctor_says_which_limits_the_runtime_enforces(limits, said):
     assert docker.Runtime(limits=limits).describe_limits().startswith(said)
+
+
+@pytest.mark.parametrize(
+    ("cpu", "flag"),
+    [
+        (2.0, "--cpus=2"),
+        (0.5, "--cpus=0.5"),
+        (0.01, "--cpus=0.01"),
+        (1.1234567, "--cpus=1.1234567"),
+    ],
+    ids=["whole", "half", "least", "many-digits"],
+)
+def test_cpus_are_written_in_fixed_point_as_given(monkeypatch, cpu, flag):
+    """`:g` wrote 1e-05 and rounded to six digits; `--cpus` reads what it is given."""
+    assert _limits(_argv_on(monkeypatch, docker.Runtime(), {"cpu": cpu}))[0] == flag
+
+
+def test_an_inconclusive_runtime_refuses_a_limit_and_is_asked_again(tmp_path, monkeypatch):
+    """An `info` that did not answer (a daemon starting up) is not "every limit
+    works", and it is not kept: the next launch asks again."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
+    monkeypatch.setattr(docker, "_ask", lambda cli: ("docker", False, False))
+    answers = iter([None, docker.LIMITS])
+    monkeypatch.setattr(docker, "_ask_limits", lambda cli, engine: next(answers))
+    monkeypatch.setattr(docker, "_RUNTIME", None)
+
+    unsure = docker.runtime()
+    assert unsure.limit_args(None) == []  # the default pids limit is dropped
+    with pytest.raises(docker.SandboxRefused, match="could not tell whether"):
+        unsure.limit_args({"memory": "32m"})
+    assert docker.runtime().limits == docker.LIMITS
 
 
 def _cli(tmp_path, monkeypatch, name, info):
@@ -111,11 +144,11 @@ def _cli(tmp_path, monkeypatch, name, info):
         ("docker", "true true true true", docker.LIMITS),
         ("docker", "true true false false", {"cpu", "memory"}),
         ("docker", "false false false false", set()),
-        ("docker", "", docker.LIMITS),
+        ("docker", "", None),
         ("podman", '["cpuset","cpu","memory","pids"]', docker.LIMITS),
         ("podman", '["cpu"]', {"cpu"}),
         ("podman", "[]", set()),
-        ("podman", "", docker.LIMITS),
+        ("podman", "", None),
     ],
     ids=[
         "docker",
@@ -130,8 +163,8 @@ def _cli(tmp_path, monkeypatch, name, info):
 )
 def test_the_runtime_says_what_it_can_enforce(tmp_path, monkeypatch, engine, info, limits):
     """Rootless podman on cgroup v1 lists no controllers at all (seen as user
-    `kuser` on the dev container). An answer that does not parse reads as
-    every limit, what a launch assumed before it asked."""
+    `kuser` on the dev container). An answer that does not parse is no
+    answer, never every limit."""
     _cli(tmp_path, monkeypatch, "rt", info)
     assert docker._ask_limits("rt", engine) == limits
 
@@ -139,7 +172,10 @@ def test_the_runtime_says_what_it_can_enforce(tmp_path, monkeypatch, engine, inf
 def test_a_named_container_outlives_its_exit_and_an_unnamed_one_does_not(monkeypatch):
     """Removed on exit, a session's container could not be asked whether its
     memory limit killed it; `teardown` removes it by name instead."""
-    assert "--rm" not in _argv_on(monkeypatch, docker.Runtime(), name="kraft-s1")
+    named = _argv_on(monkeypatch, docker.Runtime(), name="kraft-s1")
+    assert "--rm" not in named
+    # A container a failed teardown leaves until the next start keeps no log.
+    assert "--log-driver=none" in named
     assert "--rm" in _argv_on(monkeypatch, docker.Runtime())
 
 
@@ -175,3 +211,19 @@ async def test_an_oom_kill_is_read_off_the_runtime_never_the_exit_code(inspect, 
     if answer is not None:
         inspect(answer)
     assert await docker.DockerBackend().oom_killed("s1") == memory
+
+
+@pytest.mark.parametrize("engine", ["podman", "docker"])
+async def test_podmans_oom_file_is_its_word_on_cgroup_v1(inspect, monkeypatch, engine):
+    """Podman on cgroup v1 never sets `State.OOMKilled`; its conmon writes an
+    `oom` file where the client runs, which `client_cwd` made Kraft's own
+    directory. Docker's word is its flag alone. `teardown` removes the file
+    with the directory."""
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime("docker", engine=engine))
+    inspect("false 33554432\n")
+    backend = docker.DockerBackend()
+    (backend.client_cwd("s1") / "oom").touch()
+
+    assert await backend.oom_killed("s1") == ("32m" if engine == "podman" else None)
+    await backend.close("s1")
+    assert not docker.client_dir("s1").exists()

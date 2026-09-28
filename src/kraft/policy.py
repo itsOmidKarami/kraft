@@ -21,6 +21,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     ValidationInfo,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -748,7 +749,7 @@ def _without_unset(handler, value) -> dict:
 
 class SandboxResources(BaseModel):
     """What a sandboxed launch may use: `cpu` (CPUs, fractions allowed),
-    `memory` (a hard limit, swap included) and `pids` (processes and
+    `memory` (a hard limit, swap too where it can be) and `pids` (processes and
     threads). A limit that is set is applied or the launch is refused
     (`sandbox-limits-never-silently-drop`); unset `pids` is 4096 wherever
     the runtime can enforce it. Frozen, like `SandboxPolicy`, which is hashed
@@ -756,10 +757,11 @@ class SandboxResources(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
-    #: CPUs the sandbox may use (`--cpus`): `2`, `0.5`.
-    cpu: StrictFloat | None = Field(default=None, gt=0)
-    #: A hard memory limit, swap included (`--memory`): `512m`, `4g`. A
-    #: session it kills ends as a configuration error naming it.
+    #: CPUs the sandbox may use (`--cpus`): `2`, `0.5`; at least `0.01`.
+    cpu: StrictFloat | None = Field(default=None, ge=0.01)
+    #: A hard memory limit (`--memory`): `512m`, `4g`. Swap is held to it
+    #: wherever the runtime can limit swap. A session it kills ends as a
+    #: configuration error naming it.
     memory: Annotated[StrictStr, AfterValidator(_memory)] | None = None
     #: Processes and threads at once (`--pids-limit`). Unset: 4096.
     pids: StrictInt | None = Field(default=None, ge=1)
@@ -782,6 +784,13 @@ class SandboxPolicy(BaseModel):
     #: CPU, memory and process limits on every sandboxed run, the setup
     #: command's included.
     resources: SandboxResources | None = None
+
+    @field_validator("resources")
+    @classmethod
+    def _no_empty_resources(cls, value: SandboxResources | None) -> SandboxResources | None:
+        """`resources: {}` sets no limit, so it is the same sandbox as none:
+        equal under the equality lock, and dumped without the key."""
+        return None if value == SandboxResources() else value
 
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:

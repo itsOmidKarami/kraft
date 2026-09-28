@@ -194,8 +194,8 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
 
 def fake_docker_bin(tmp_path: Path) -> Path:
     """A directory holding a `docker` that unwraps `docker run [OPTIONS] IMAGE
-    CMD...` back to `CMD...` and execs it — proves the wrap shape a real
-    sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
+    CMD...` back to `CMD...` and execs it in its `-w` — proves the wrap shape a
+    real sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
     `--name`/`--label` each take one following argument, so skipping
     flag+value pairs finds the image (the first survivor) and the command
     (everything after it). `--init` and `--flag=value`s are dropped. `docker
@@ -234,11 +234,11 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         "cmd=()\n"
         "skip=0\n"
         'for arg in "$@"; do\n'
-        '  if [ "$skip" = 1 ]; then skip=0; continue; fi\n'
+        '  if [ "$skip" != 0 ]; then [ "$skip" != -w ] || cd "$arg"; skip=0; continue; fi\n'
         '  case "$arg" in\n'
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         '    --rm|--init|--*=*) [ -n "$image" ] && cmd+=("$arg"); continue ;;\n'
-        "    -u|-v|-w|-e|--name|--label) skip=1; continue ;;\n"
+        "    -u|-v|-w|-e|--name|--label) skip=$arg; continue ;;\n"
         "    *)\n"
         '      if [ -z "$image" ]; then image="$arg"; else cmd+=("$arg"); fi\n'
         "      ;;\n"

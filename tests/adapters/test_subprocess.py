@@ -633,7 +633,42 @@ async def test_a_session_its_memory_limit_killed_stops_naming_the_limit(
     assert killed == ([] if inspect.startswith("false") else [recorded])
     if status == "config_error":
         last = Path(row["log_path"]).read_text().strip().splitlines()[-1]
-        assert last.startswith("kraft: killed by the sandbox's memory limit (32m)")
+        assert last.startswith(
+            "kraft: a process in the sandbox was killed by its memory limit (32m)"
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "ends"),
+    [
+        (None, "config_error"),
+        ("failed", "config_error"),
+        ("unknown", "config_error"),
+        ("done_with_concerns", "done_with_concerns"),
+    ],
+    ids=["no-word", "failed", "unknown", "reported"],
+)
+async def test_an_oom_kill_overrides_only_a_session_without_a_result(
+    run, database, tmp_path, status, ends
+):
+    """`run` files work item `w1`. A session that reported a result keeps it."""
+    log = tmp_path / "s.log"
+    log.touch()
+    assert await sp.record_oom_kill(database, "w1", "s", log, "32m", status) == ends
+
+
+async def test_a_sandbox_client_runs_outside_the_worktree(run, docker, tmp_path, monkeypatch):
+    """Podman leaves an `oom` file where its client runs; in the worktree a
+    later session could commit it. The client's directory goes with it."""
+    popen, started = sp.subprocess.Popen, []
+    monkeypatch.setattr(
+        sp.subprocess, "Popen", lambda *a, **kw: started.append(kw.get("cwd")) or popen(*a, **kw)
+    )
+    status, _ = await run(["true"], "s-cwd", sandbox=DOCKER)
+
+    assert status == "done"
+    assert str(docker_backend.client_dir("s-cwd")) in started and str(tmp_path) not in started
+    assert not docker_backend.client_dir("s-cwd").exists()
 
 
 async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(

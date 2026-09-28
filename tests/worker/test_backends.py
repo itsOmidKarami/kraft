@@ -52,6 +52,9 @@ class Remote:
         self.wrapped_with.append(kw.get("ca_bundle"))
         return ["env", f"KRAFT_RESULT_PATH={self.outbox / f'{session_id}.json'}", *cmd]
 
+    def client_cwd(self, session_id):
+        return None
+
     def launch_failed(self, cidfile):
         return False
 

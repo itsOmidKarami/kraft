@@ -55,7 +55,10 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     assert argv[-4:] == [_SANDBOX["image"], "sh", "-c", _SETUP]
     assert "-e" in argv and "SETUP_FLAVOUR=benign" in argv
     assert not call.get("shell"), "a sandboxed setup went to a host shell"
-    assert call["cwd"] == tmp_path
+    # The client runs in a directory of Kraft's, never the worktree: podman
+    # leaves an `oom` file where its client runs.
+    name = argv[argv.index("--name") + 1]
+    assert call["cwd"] == docker_backend.client_dir(name.removeprefix("kraft-"))
     assert call["env"] == worker_env(entry)
 
 
@@ -128,7 +131,7 @@ async def test_a_setup_command_runs_under_the_limits_and_names_the_one_that_kill
     [argv] = argvs
     assert "--memory=32m" in argv and "--rm" not in argv
     assert removed.read_text().split() == [argv[argv.index("--name") + 1]]
-    named = "killed by the sandbox's memory limit (32m)" in str(failed.value)
+    named = "a process in the sandbox was killed by its memory limit (32m)" in str(failed.value)
     assert named is killed
 
 

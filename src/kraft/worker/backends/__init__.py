@@ -52,6 +52,10 @@ class SandboxBackend(Protocol):
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
         what `prepare` returned."""
 
+    def client_cwd(self, session_id: str) -> Path | None:
+        """The directory to start the wrapped command's client in, made for
+        the session and gone after `close`; None for the task's own `cwd`."""
+
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         """True when the sandbox itself never started, so the command never
         ran: `cidfile` is what the launch was given to write, `returncode`

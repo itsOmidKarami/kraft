@@ -33,9 +33,9 @@ def _unavailable(cli: str, why: str):
 )
 def runtime(request, monkeypatch) -> docker.Runtime:
     """The runtime under test made this machine's through `sandbox.yaml`,
-    rootless or not as it really is, with `alpine:3` pulled. Skips where it
-    cannot enforce a memory and a pids limit: that host refuses a limited
-    launch, which the unit tier pins."""
+    rootless or not as it really is, with `alpine:3` pulled. One that cannot
+    enforce a memory and a pids limit is unavailable here, as one that cannot
+    pull is: a failure where KRAFT_E2E_REQUIRE names it."""
     cli = request.param
     have = subprocess.run([cli, "image", "inspect", IMAGE], capture_output=True)
     if have.returncode != 0:
@@ -47,7 +47,7 @@ def runtime(request, monkeypatch) -> docker.Runtime:
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
     detected = docker.detect_runtime()
     if not {"memory", "pids"} <= detected.limits:
-        pytest.skip(f"e2e: {detected.describe()} enforces {detected.describe_limits()}")
+        _unavailable(cli, f"e2e: {detected.describe()} enforces {detected.describe_limits()}")
     monkeypatch.setattr(docker, "_RUNTIME", detected)
     return detected
 
@@ -55,12 +55,6 @@ def runtime(request, monkeypatch) -> docker.Runtime:
 async def test_a_memory_hog_is_killed_by_its_limit_and_recorded(
     runtime, database, run_dirs, tmp_path
 ):
-    if runtime.podman and "v1" in subprocess.check_output(
-        [runtime.cli, "info", "--format", "{{.Host.CgroupsVersion}}"], text=True
-    ):
-        # Seen with podman 4.9.3, conmon 2.1.10 and runc on the dev container:
-        # the limit kills the hog, and State.OOMKilled still reads false.
-        pytest.skip("e2e: podman on cgroup v1 never reports State.OOMKilled")
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -99,6 +93,9 @@ async def test_a_memory_hog_is_killed_by_its_limit_and_recorded(
         [runtime.cli, "inspect", docker.container_name("s-hog")], capture_output=True
     )
     assert gone.returncode != 0
+    # Podman on cgroup v1 leaves an `oom` file where its client ran: never the
+    # worktree, and gone with the session.
+    assert not (work / "oom").exists() and not docker.client_dir("s-hog").exists()
 
 
 @pytest.mark.parametrize(("pids", "forks"), [(16, False), (256, True)], ids=["bites", "room"])

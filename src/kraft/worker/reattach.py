@@ -585,7 +585,10 @@ async def reattach(
     # still writing its worktree, and no row names it any more. Swept before
     # anything below launches a container of its own (an escalation resume),
     # which the sweep would otherwise take for an orphan.
-    keep = {sid for sid, adopting in adopt.items() if adopting}
+    # Every row's container is kept too, not only an adopted one's: the loop
+    # below closes each in turn, after asking whether its memory limit
+    # killed it -- which the sweep would otherwise have removed first.
+    keep = {r["id"] for r in rows}
     for backend in _backends.every():
         if orphans := await backend.sweep(keep):
             logger.warning(

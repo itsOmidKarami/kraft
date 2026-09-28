@@ -305,8 +305,8 @@ def _task_cause(
     db, work_item_id: str, node: ResolvedNode, task: ResolvedTask, status: str = CONFIG_ERROR
 ) -> str:
     """The first line of the newest `status` session log for `task` -- the
-    task's own account of why it stopped, unless Kraft appended its own
-    `kraft:` line after the output -- or "" when there is none or it
+    task's own account of why it stopped, unless Kraft appended the line
+    naming the sandbox's memory limit after it -- or "" when there is none or it
     cannot be read. Never raises: a stop must not become less legible than the
     generic pointer to the log, and must never escape the walk."""
     row = db.read(
@@ -322,9 +322,9 @@ def _task_cause(
     except OSError, ValueError:  # ValueError: UnicodeDecodeError
         return ""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # A `kraft:` line Kraft appended after the task's own output (a sandbox's
-    # memory limit killed it) is the cause; the task's first line is not.
-    own = [ln for ln in lines[1:] if ln.startswith("kraft: ")]
+    # The line Kraft appends after the task's own output when the sandbox's
+    # memory limit killed it is the cause; the task's first line is not.
+    own = [ln for ln in lines[1:] if ln.startswith(_subprocess.OOM_LINE)]
     line = own[-1] if own else next(iter(lines), "")
     return line if len(line) <= _STOP_CAUSE_MAX else line[: _STOP_CAUSE_MAX - 1] + "…"
 

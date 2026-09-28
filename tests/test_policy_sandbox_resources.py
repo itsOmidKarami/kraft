@@ -27,7 +27,7 @@ def test_resources_are_validated_and_normalised():
         ({"memory": "lots"}, "is not a size"),
         ({"memory": "1m"}, "under 6m"),
         ({"memory": 512}, "valid string"),
-        ({"cpu": 0}, "greater than 0"),
+        ({"cpu": 0.001}, "greater than or equal to 0.01"),
         ({"cpu": True}, "valid number"),
         ({"pids": 0}, "greater than or equal to 1"),
         ({"disk": "1g"}, "Extra inputs"),
@@ -36,7 +36,7 @@ def test_resources_are_validated_and_normalised():
         "memory-word",
         "memory-too-small",
         "memory-bare-int",
-        "cpu-zero",
+        "cpu-under-0.01",
         "cpu-bool",
         "pids-0",
         "unknown-limit",
@@ -53,6 +53,9 @@ def test_a_sandbox_without_resources_dumps_as_it_always_did():
     plain = {"kind": "docker", "image": "kraft/worker:1"}
     assert policy.SandboxPolicy.model_validate(plain).model_dump() == plain
     assert _sandbox(memory="4g").model_dump()["resources"] == {"memory": "4g"}
+    # `resources: {}` sets no limit: the same sandbox as none, lock included.
+    empty = policy.SandboxPolicy.model_validate({**plain, "resources": {}})
+    assert empty == policy.SandboxPolicy.model_validate(plain) and empty.model_dump() == plain
 
 
 @pytest.fixture

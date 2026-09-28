@@ -308,12 +308,12 @@
     },
     "SandboxResources": {
       "additionalProperties": false,
-      "description": "What a sandboxed launch may use: `cpu` (CPUs, fractions allowed),\n`memory` (a hard limit, swap included) and `pids` (processes and\nthreads). A limit that is set is applied or the launch is refused\n(`sandbox-limits-never-silently-drop`); unset `pids` is 4096 wherever\nthe runtime can enforce it. Frozen, like `SandboxPolicy`, which is hashed\nwhole.",
+      "description": "What a sandboxed launch may use: `cpu` (CPUs, fractions allowed),\n`memory` (a hard limit, swap too where it can be) and `pids` (processes and\nthreads). A limit that is set is applied or the launch is refused\n(`sandbox-limits-never-silently-drop`); unset `pids` is 4096 wherever\nthe runtime can enforce it. Frozen, like `SandboxPolicy`, which is hashed\nwhole.",
       "properties": {
         "cpu": {
           "anyOf": [
             {
-              "exclusiveMinimum": 0,
+              "minimum": 0.01,
               "type": "number"
             },
             {

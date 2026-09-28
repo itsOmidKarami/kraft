@@ -30,6 +30,10 @@ def oom_killed(tmp_path, monkeypatch):
     answer = tmp_path / "inspect"
     answer.write_text("true 33554432\n")
     monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
+    # Listed by the startup sweep, as real docker lists an exited container.
+    listed = tmp_path / "ps"
+    listed.write_text("kraft-s1\n")
+    monkeypatch.setenv("FAKE_DOCKER_PS", str(listed))
 
 
 def _killed(item):
