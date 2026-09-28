@@ -35,6 +35,9 @@ class Remote:
     async def probe(self, sandbox, executable, env):
         return None
 
+    async def prepare(self, sandbox):
+        return None
+
     def code_in(self, run_base, cwd, branch, **kw):
         return None
 

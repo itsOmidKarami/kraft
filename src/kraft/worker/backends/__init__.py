@@ -38,6 +38,12 @@ class SandboxBackend(Protocol):
         a session that could never start is `config_error`, not a task
         failure."""
 
+    async def prepare(self, sandbox: dict) -> str | None:
+        """Ready what a launch in `sandbox` needs on the host side (the
+        docker backend's CA bundle); why it cannot, or None. `probe` does
+        this too; a launch that has no probe (the setup command) calls it
+        itself."""
+
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
         """Put the worktree's code where the session will see it. `branch`
         None is a setup command: it sees the code and publishes nothing."""

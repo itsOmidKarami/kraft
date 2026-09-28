@@ -33,6 +33,7 @@ from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibrary
 from kraft.templates.models import AgentTask, ForgeTask
 from kraft.worker import backends, sandbox
 from kraft.worker import steering as steering_mod
+from kraft.worker.backends import docker_forward
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -546,6 +547,26 @@ async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
     return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
+def _proxy_check(repo: config.RepoEntry) -> dict | None:
+    """A warning when this machine's proxy is on its loopback: a container
+    has a loopback of its own, so the proxy is not forwarded and a sandboxed
+    task goes direct, which fails wherever only the proxy gets out. Read from
+    doctor's own environment, which is the daemon's when both were started
+    from the same shell."""
+    loopback = docker_forward.loopback_proxies()
+    if not loopback:
+        return None
+    named = ", ".join(f"{name}={value}" for name, value in loopback.items())
+    return _check(
+        f"proxy {_label(repo)}",
+        True,
+        f"{named} is on this machine's loopback, which a container cannot reach, so "
+        "sandboxed tasks run without it; `network:` in the sandbox policy (coming) "
+        "routes them through Kraft's own proxy instead",
+        warn=True,
+    )
+
+
 def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
@@ -648,6 +669,8 @@ async def _repo_checks() -> list[dict]:
             )
         elif (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
+            if (proxy := _proxy_check(repo)) is not None:
+                checks.append(proxy)
         if auto:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:
