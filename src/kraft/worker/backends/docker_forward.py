@@ -16,8 +16,10 @@ daemon's values cannot cross as they are, either:
   it, where nothing listens. Such a proxy is not forwarded (`forwarded_proxies`)
   and doctor says so (`loopback_proxies`); `network:` (a later part) is the fix.
 
-With no extra CA there is no probe, no mount and no variable: a launch is
-exactly what it was.
+The proxy variables are forwarded whenever the daemon has them. The CA side
+only acts when there is an extra CA: without one there is no probe, no mount
+and no CA variable, as before. The bundle `prepare` builds is handed to the
+launch explicitly (`DockerBackend.wrap(..., ca_bundle=)`), never remembered.
 """
 
 from __future__ import annotations
@@ -80,8 +82,8 @@ _PEM = re.compile(r"-----BEGIN CERTIFICATE-----\s.*?-----END CERTIFICATE-----", 
 
 def _is_loopback(value: str) -> bool:
     """Does a proxy URL point at this machine's loopback, where a container
-    cannot follow it? `127.0.0.0/8`, `::1`, `localhost` (and the unspecified
-    address, which a client connects to as loopback)."""
+    cannot follow it? `127.0.0.0/8` (IPv4-mapped too), `::1`, `localhost`
+    (and the unspecified address, which a client connects to as loopback)."""
     target = value if "://" in value else f"http://{value}"
     try:
         host = urlsplit(target).hostname
@@ -95,6 +97,9 @@ def _is_loopback(value: str) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
+    # An IPv4-mapped `::ffff:127.0.0.1` needs no unwrapping: since Python
+    # 3.13 (Kraft needs 3.14) `is_loopback`/`is_unspecified` read through
+    # `ipv4_mapped` themselves.
     return address.is_loopback or address.is_unspecified
 
 
@@ -126,39 +131,66 @@ def certificates(text: str) -> list[str]:
     return _PEM.findall(text)
 
 
+def _read_pem(path: Path) -> list[str]:
+    """`path`'s certificates. Raises `ValueError` saying why there are none
+    to use: unreadable (missing, a directory, no permission) or no PEM."""
+    try:
+        text = path.read_text(errors="replace")
+    except OSError as exc:
+        raise ValueError(f"{path} cannot be read ({exc.strerror or exc})") from exc
+    found = certificates(text)
+    if not found:
+        raise ValueError(f"{path} holds no PEM certificate")
+    return found
+
+
+def _sandbox_host(environ: Mapping[str, str]):
+    from kraft import config
+
+    templates = Path(environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    return config.SandboxHost.load(templates / config.SandboxHost.FILE)
+
+
 def extra_ca(environ: Mapping[str, str] | None = None) -> tuple[str, list[str]] | None:
     """`(where it came from, its certificates)`: `sandbox.yaml`'s
     `ca_bundle`, else the daemon's `SSL_CERT_FILE`, else None.
 
-    Raises `ConfigError` for one that is named and cannot be used -- missing,
-    unreadable, or holding no certificate. Skipping it would launch a
-    container that fails TLS somewhere later, with nothing saying why."""
-    from kraft import config
-
+    A `ca_bundle` that cannot be used raises `ConfigError`: someone named it
+    for sandboxes, and skipping it would launch a container that fails TLS
+    later with nothing saying why. An unusable `SSL_CERT_FILE` is only
+    ignored (`ignored_ssl_cert_file` says why, for doctor): it was never set
+    for sandboxes, and refusing on it would stop launches that ran before."""
     environ = os.environ if environ is None else environ
-    templates = Path(environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    host = config.SandboxHost.load(templates / config.SandboxHost.FILE)
+    host = _sandbox_host(environ)
     if host.ca_bundle is not None:
-        path, source = host.ca_bundle, "sandbox.yaml `ca_bundle`"
-    elif environ.get("SSL_CERT_FILE"):
-        path, source = Path(environ["SSL_CERT_FILE"]), "the daemon's SSL_CERT_FILE"
-    else:
+        try:
+            return f"sandbox.yaml `ca_bundle` ({host.ca_bundle})", _read_pem(host.ca_bundle)
+        except ValueError as exc:
+            raise ConfigError(
+                f"sandbox.yaml `ca_bundle`: {exc}, so a sandboxed task could not trust its "
+                "CA; fix the path or remove it (see the sandbox.yaml reference)"
+            ) from exc
+    if not environ.get("SSL_CERT_FILE"):
+        return None
+    path = Path(environ["SSL_CERT_FILE"])
+    try:
+        return f"the daemon's SSL_CERT_FILE ({path})", _read_pem(path)
+    except ValueError:
+        return None
+
+
+def ignored_ssl_cert_file(environ: Mapping[str, str] | None = None) -> str | None:
+    """Why the daemon's `SSL_CERT_FILE` is not used as the extra CA although
+    it is set, or None when it is used or does not apply. Raises
+    `ConfigError` for a `sandbox.yaml` that does not parse."""
+    environ = os.environ if environ is None else environ
+    if not environ.get("SSL_CERT_FILE") or _sandbox_host(environ).ca_bundle is not None:
         return None
     try:
-        text = path.read_text(errors="replace")
-    except OSError as exc:
-        raise ConfigError(
-            f"{source} names {path}, which cannot be read ({exc.strerror or exc}), so a "
-            "sandboxed task could not trust its CA; fix the path or remove it "
-            "(see the sandbox.yaml reference)"
-        ) from exc
-    found = certificates(text)
-    if not found:
-        raise ConfigError(
-            f"{source} names {path}, which holds no PEM certificate, so a sandboxed task "
-            "could not trust its CA; point it at a PEM bundle (see the sandbox.yaml reference)"
-        )
-    return f"{source} ({path})", found
+        _read_pem(Path(environ["SSL_CERT_FILE"]))
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 def _write(path: Path, text: str) -> None:
@@ -193,7 +225,7 @@ async def _read_image_roots(image: str) -> list[str] | None:
     """The image's own roots, read by a container with no network and its
     entrypoint bypassed (whatever one prints is not a certificate). `[]`
     when the image holds none of `IMAGE_ROOTS`; None when the run itself
-    failed (no daemon, no `sh`), which is not remembered."""
+    failed (a pull that timed out, no `sh`, the daemon)."""
     from kraft.worker.backends.docker import docker_call, home_label
 
     ran = await docker_call(
@@ -217,34 +249,23 @@ async def _read_image_roots(image: str) -> list[str] | None:
     return certificates(ran[1])
 
 
-#: `image` -> its combined bundle on the host, as the last `prepare` left it.
-#: What `docker_argv` mounts; no entry means no extra CA, so nothing mounted.
-#: A `prepare` that fails leaves the last good entry: that launch stops on
-#: its own error, and a concurrent one of the same image, already probed,
-#: must not lose its CA to it.
-_PREPARED: dict[str, Path] = {}
-
-
-def prepared(image: str) -> Path | None:
-    return _PREPARED.get(image)
-
-
 def ca_dir(environ: Mapping[str, str] | None = None) -> Path:
     environ = os.environ if environ is None else environ
     return Path(environ.get("KRAFT_RUN_DIR") or default_run_dir()) / "sandbox-ca"
 
 
 async def prepare(image: str) -> Path | None:
-    """Build `image`'s combined CA bundle, or forget it when there is no extra
-    CA any more; the bundle's host path, or None. Raises `ConfigError` for an
-    extra CA that cannot be used (`extra_ca`).
+    """`image`'s combined CA bundle on the host, built now, or None when there
+    is no extra CA. Raises `ConfigError` for a `ca_bundle` that cannot be used
+    (`extra_ca`) and for an image whose own roots could not be read: a bundle
+    of the extra CA alone would replace the store and fail TLS to every
+    public host.
 
     One bundle per image id under `run/sandbox-ca/`: `<id>.roots.pem`, the
     image's own roots, read once per image id (an id is immutable); `<id>.pem`,
     those plus the extra CA, rewritten when the extra CA changes."""
     extra = extra_ca()
     if extra is None:
-        _PREPARED.pop(image, None)
         return None
     _, extra_certs = extra
     base = ca_dir()
@@ -254,24 +275,28 @@ async def prepare(image: str) -> Path | None:
     if roots_file is not None and roots_file.is_file():
         roots = certificates(roots_file.read_text())
     else:
-        read = await _read_image_roots(image)
-        roots = read or []
+        roots = await _read_image_roots(image)
+        if roots is None:
+            raise ConfigError(
+                f"could not read image {image!r}'s own root certificates (the image did not "
+                "run: not pulled, no `sh`, or the runtime did not answer), and trusting the "
+                "extra CA alone would fail TLS to every other host; pull the image, or check "
+                "that it runs `sh`"
+            )
         # Run first, then ask its id: the run is what pulled an image that
         # was not here yet.
         image_id = image_id or await _image_id(image)
-        if read is not None and image_id:
-            _write(base / f"{image_id}.roots.pem", "".join(f"{c}\n" for c in read))
+        if image_id:
+            _write(base / f"{image_id}.roots.pem", "".join(f"{c}\n" for c in roots))
     name = image_id or "image-" + hashlib.sha256(image.encode()).hexdigest()[:32]
     bundle = base / f"{name}.pem"
     _write(bundle, "".join(f"{c}\n" for c in dict.fromkeys([*roots, *extra_certs])))
-    _PREPARED[image] = bundle
     return bundle
 
 
-def ca_args(image: str) -> tuple[list[str], dict[str, str]]:
-    """`docker run` mount arguments and variables for `image`'s prepared
-    bundle; nothing at all when there is none."""
-    bundle = prepared(image)
+def ca_args(bundle: str | Path | None) -> tuple[list[str], dict[str, str]]:
+    """`docker run` mount arguments and variables for a prepared `bundle`;
+    nothing at all without one."""
     if bundle is None:
         return [], {}
     return ["-v", f"{bundle}:{CONTAINER_CA}:ro"], dict.fromkeys(CA_VARS, CONTAINER_CA)

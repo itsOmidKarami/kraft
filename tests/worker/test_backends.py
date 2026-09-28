@@ -8,6 +8,7 @@ from kraft import store
 from kraft.adapters import subprocess as sp
 from kraft.worker import backends, reattach
 from kraft.worker.backends import docker as docker_backend
+from kraft.worker.sandbox import SandboxNotReady
 
 _CHAIN = """
 - id: implementation
@@ -28,6 +29,10 @@ class Remote:
         self.outbox = tmp_path / "remote-outbox"
         self.outbox.mkdir()
         self.closed: list[str] = []
+        #: What `prepare` hands back (or, a str, the problem it raises), and
+        #: the `ca_bundle` each `wrap` was given.
+        self.prepared: Path | str | None = None
+        self.wrapped_with: list = []
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -36,12 +41,15 @@ class Remote:
         return None
 
     async def prepare(self, sandbox):
-        return None
+        if isinstance(self.prepared, str):
+            raise SandboxNotReady(self.prepared)
+        return self.prepared
 
     def code_in(self, run_base, cwd, branch, **kw):
         return None
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+        self.wrapped_with.append(kw.get("ca_bundle"))
         return ["env", f"KRAFT_RESULT_PATH={self.outbox / f'{session_id}.json'}", *cmd]
 
     def launch_failed(self, cidfile):
@@ -98,10 +106,7 @@ def test_a_session_is_closed_by_the_backend_it_recorded_else_by_every_one(remote
     assert [b.kind for b in backends.for_session(kind)] == asked
 
 
-async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, tmp_path, remote):
-    """The seam's one rule: nothing reads a sandboxed session's result before
-    its backend has collected it, so a backend with no shared filesystem
-    works unchanged."""
+async def _run_on_remote(database, run_dirs, tmp_path) -> str:
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -113,7 +118,7 @@ async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, t
             chain_definition="{}",
         )
     )
-    status = await sp.run_task(
+    return await sp.run_task(
         database,
         run_dirs,
         session_id="s1",
@@ -124,6 +129,13 @@ async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, t
         cwd=tmp_path,
         sandbox={"kind": "remote"},
     )
+
+
+async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, tmp_path, remote):
+    """The seam's one rule: nothing reads a sandboxed session's result before
+    its backend has collected it, so a backend with no shared filesystem
+    works unchanged."""
+    status = await _run_on_remote(database, run_dirs, tmp_path)
 
     assert status == "done_with_concerns"
     row = database.read(
@@ -194,3 +206,25 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
         )
 
     assert (published, remote.closed) == (["s1"], ["s1"])
+
+
+@pytest.mark.parametrize(
+    "prepared", [Path("/run/sandbox-ca/abc.pem"), None], ids=["bundle", "no-extra-ca"]
+)
+async def test_a_session_is_wrapped_with_exactly_what_prepare_built(
+    database, run_dirs, tmp_path, remote, prepared
+):
+    """Handed over, not remembered: no CA means no `ca_bundle` at all."""
+    remote.prepared = prepared
+    assert await _run_on_remote(database, run_dirs, tmp_path) == "done_with_concerns"
+    assert remote.wrapped_with == [prepared]
+
+
+async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
+    database, run_dirs, tmp_path, remote
+):
+    remote.prepared = "image 'x' roots could not be read"
+    assert await _run_on_remote(database, run_dirs, tmp_path) == "config_error"
+    assert remote.wrapped_with == []
+    log = (run_dirs.logs / "s1.log").read_text()
+    assert "roots could not be read" in log

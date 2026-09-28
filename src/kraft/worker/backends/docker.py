@@ -33,6 +33,7 @@ from kraft.worker.sandbox import (
     FORWARDED_ENV,
     SHADOW_DIRS,
     SHADOW_FILES,
+    SandboxNotReady,
     _gitdir_of,
     _pin,
     linked_gitdirs,
@@ -205,6 +206,7 @@ def docker_argv(
     home: str | Path | None = None,
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
+    ca_bundle: str | Path | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -259,8 +261,9 @@ def docker_argv(
 
     The daemon's proxy variables are forwarded bare, except one on its
     loopback, and an extra CA arrives as one bundle at a fixed container path
-    with every CA variable naming it: `docker_forward`, and `prepare` must
-    have built the bundle first. A repository's own `env` still wins.
+    with every CA variable naming it: `docker_forward`. `ca_bundle` is the
+    bundle `prepare` built, None for none. A repository's own `env` still
+    wins.
 
     `env` is `run_task`'s own `env=` argument -- e.g. `PYTHONDONTWRITEBYTECODE`
     for a fix-loop re-measure -- which is otherwise silently dropped: only
@@ -325,7 +328,7 @@ def docker_argv(
         argv += ["--name", name]
     if cidfile is not None:
         argv.append(f"--cidfile={cidfile}")
-    ca_mount, ca_env = _forward.ca_args(sandbox["image"])
+    ca_mount, ca_env = _forward.ca_args(ca_bundle)
     argv += ca_mount
     for env_name in dict.fromkeys((*FORWARDED_ENV, *_forward.forwarded_proxies(), *passthrough)):
         argv += ["-e", env_name]
@@ -617,18 +620,17 @@ class DockerBackend:
                 "sandboxed task cannot start; install it in the image (see the sandbox "
                 "section of the repos.yaml reference)"
             )
-        return await self.prepare(sandbox)
-
-    async def prepare(self, sandbox: dict) -> str | None:
-        """The image's combined CA bundle, built when there is an extra CA
-        (`docker_forward.prepare`), for `wrap` to mount."""
-        try:
-            await _forward.prepare(sandbox["image"])
-        except ConfigError as exc:
-            return str(exc)
-        except OSError as exc:
-            return f"could not write the sandbox's CA bundle: {exc}"
         return None
+
+    async def prepare(self, sandbox: dict) -> Path | None:
+        """The image's combined CA bundle, built when there is an extra CA
+        (`docker_forward.prepare`), for `wrap`'s `ca_bundle`."""
+        try:
+            return await _forward.prepare(sandbox["image"])
+        except ConfigError as exc:
+            raise SandboxNotReady(str(exc)) from exc
+        except OSError as exc:
+            raise SandboxNotReady(f"could not write the sandbox's CA bundle: {exc}") from exc
 
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
         return _refstore.prepare(run_base, cwd, branch, **kw)
@@ -648,6 +650,7 @@ class DockerBackend:
         home: str | Path | None = None,
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
+        ca_bundle: str | Path | None = None,
     ) -> list[str]:
         return docker_argv(
             cmd,
@@ -662,6 +665,7 @@ class DockerBackend:
             home=home,
             passthrough=passthrough,
             ro_paths=ro_paths,
+            ca_bundle=ca_bundle,
         )
 
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:

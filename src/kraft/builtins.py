@@ -648,8 +648,10 @@ async def run_setup_command(
         # a session's store names the branch Kraft moves.
         run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
         backend = _backends.for_sandbox(sandbox)
-        if problem := await backend.prepare(sandbox):
-            raise RuntimeError(f"setup command for {worktree.name} cannot run: {problem}")
+        try:
+            ca_bundle = await backend.prepare(sandbox)
+        except _sandbox.SandboxNotReady as exc:
+            raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
         refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
         argv = backend.wrap(
             ["sh", "-c", cmd],
@@ -659,6 +661,7 @@ async def run_setup_command(
             env=repo_entry.env if repo_entry is not None else {},
             refs=refs,
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+            ca_bundle=ca_bundle,
         )
         run = dict(args=argv)
     else:

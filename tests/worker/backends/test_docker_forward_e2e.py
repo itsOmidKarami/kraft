@@ -10,7 +10,6 @@ import os
 import ssl
 import subprocess
 import threading
-from pathlib import Path
 
 import pytest
 from cryptography import x509
@@ -150,9 +149,10 @@ async def test_a_container_trusts_the_hosts_extra_ca_and_its_image_roots(runtime
     backend = docker.DockerBackend()
     sandbox = {"kind": "docker", "image": IMAGE}
     assert await backend.probe(sandbox, "python3", None) is None
+    bundle = await backend.prepare(sandbox)
     workdir = tmp_path / "work"
     workdir.mkdir()
-    argv = backend.wrap(["python3", "-c", FETCH, url], workdir, sandbox, None)
+    argv = backend.wrap(["python3", "-c", FETCH, url], workdir, sandbox, None, ca_bundle=bundle)
     # Reachability only, and only here: the test's server listens on the
     # host's loopback, which a container shares only on the host's network.
     # (A sandboxed launch never gets `--network=host`; the server could be put
@@ -166,4 +166,4 @@ async def test_a_container_trusts_the_hosts_extra_ca_and_its_image_roots(runtime
     assert body == "kraft-tls-ok"
     # The image's own public roots came along, not the test CA alone.
     assert int(roots) > 1
-    assert Path(docker_forward.prepared(IMAGE)).read_text().count("BEGIN CERTIFICATE") == int(roots)
+    assert len(docker_forward.certificates(bundle.read_text())) == int(roots)

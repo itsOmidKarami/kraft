@@ -567,6 +567,27 @@ def _proxy_check(repo: config.RepoEntry) -> dict | None:
     )
 
 
+def _ignored_ca_check(repo: config.RepoEntry) -> dict | None:
+    """A warning when this machine's `SSL_CERT_FILE` is set but cannot serve
+    as a sandbox's extra CA, so it is ignored and sandboxed tasks trust only
+    their image's roots. Read from doctor's own environment, like
+    `_proxy_check`. A `sandbox.yaml` that does not parse is the sandbox row's
+    to report."""
+    try:
+        why = docker_forward.ignored_ssl_cert_file()
+    except config.ConfigError:
+        return None
+    if why is None:
+        return None
+    return _check(
+        f"ca {_label(repo)}",
+        True,
+        f"SSL_CERT_FILE is ignored for sandboxed tasks: {why}; they trust only their "
+        "image's roots. Fix it, or name a CA in sandbox.yaml `ca_bundle`",
+        warn=True,
+    )
+
+
 def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
@@ -669,8 +690,9 @@ async def _repo_checks() -> list[dict]:
             )
         elif (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
-            if (proxy := _proxy_check(repo)) is not None:
-                checks.append(proxy)
+            for extra in (_proxy_check(repo), _ignored_ca_check(repo)):
+                if extra is not None:
+                    checks.append(extra)
         if auto:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:

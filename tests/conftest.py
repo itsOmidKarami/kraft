@@ -288,12 +288,9 @@ def _no_remembered_images(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_daemon_ca(monkeypatch):
     """No test inherits this machine's `SSL_CERT_FILE`, which would make every
-    sandboxed launch build a CA bundle (`docker_forward.extra_ca`), nor a
-    bundle an earlier test prepared. A test of the bundle sets its own."""
-    from kraft.worker.backends import docker_forward
-
+    sandboxed launch build a CA bundle (`docker_forward.extra_ca`). A test of
+    the bundle sets its own."""
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
-    monkeypatch.setattr(docker_forward, "_PREPARED", {})
 
 
 @pytest.fixture(autouse=True)

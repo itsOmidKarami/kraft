@@ -560,6 +560,12 @@ async def run_task(
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
+        try:
+            ca_bundle = await backend.prepare(sandbox)
+        except _sandbox.SandboxNotReady as exc:
+            log_path.write_text(f"kraft: {exc}\n")
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
         if refs is not None:
             await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
         home = backend.home(run_dirs, work_item_id)
@@ -581,6 +587,7 @@ async def run_task(
             home=home,
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
             ro_paths=ro_paths,
+            ca_bundle=ca_bundle,
         )
     # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
     # pid yet. `pause_work_item`, `chain.skip_node`, and

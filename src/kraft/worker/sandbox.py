@@ -48,6 +48,12 @@ FORWARDED_ENV = (
 )
 
 
+class SandboxNotReady(RuntimeError):
+    """A backend's `prepare` could not ready the host side of a launch: the
+    launch stops as `config_error` with this message, never goes ahead
+    without what it needed."""
+
+
 def submodule_refusal(who: str) -> str:
     """Why a sandbox and submodule members are refused together (Kraft-dshto,
     Ruling 180): one sentence, the same at load, connect, intake, doctor and
