@@ -549,30 +549,45 @@ async def test_run_task_runs_sandboxed_through_docker_and_removes_the_container_
     assert docker.read_text().splitlines() == ["kraft-s-sandbox"]
 
 
+@pytest.mark.parametrize("host_moved", [False, True], ids=["published", "host-moved"])
 async def test_run_task_publishes_the_branch_a_sandboxed_session_committed(
-    run, docker, repo, run_dirs, database, tmp_path
+    run, docker, repo, run_dirs, database, tmp_path, host_moved
 ):
     """The worker commits into its ref store, never the repository; the
     branch reaches the repository only through the sync when the session
-    ends. The fake docker runs the command on the host, so the command writes
-    the store's loose ref itself, as git in the container would."""
+    ends, and never over a move made in the repository meanwhile -- that one
+    is left alone and recorded, the only trace a person gets of it. The fake
+    docker runs the command on the host, so the command writes the store's
+    loose ref itself, as git in the container would."""
     await run(["true"], "s-setup")
     branch = database.read(lambda c: store.branch_of(c, "w1"))
     wt = tmp_path / "wt"
     subprocess.run(["git", "worktree", "add", "-q", "-b", branch, str(wt)], cwd=repo, check=True)
     tree = subprocess.check_output(["git", "rev-parse", "main^{tree}"], cwd=repo, text=True).strip()
-    work = subprocess.check_output(
-        ["git", "commit-tree", tree, "-p", "main", "-m", "w"], cwd=repo, text=True
-    ).strip()
+
+    def commit(message):
+        return subprocess.check_output(
+            ["git", "commit-tree", tree, "-p", "main", "-m", message], cwd=repo, text=True
+        ).strip()
+
+    work, host = commit("w"), commit("host")
     gitdir = (repo / ".git" / "worktrees" / "wt").resolve()
     loose = refstore.shadow_dir(run_dirs.base, gitdir) / "refs" / "heads" / branch
     script = f"mkdir -p {loose.parent} && echo {work} > {loose}"
+    if host_moved:
+        script += f" && git -C {repo} update-ref refs/heads/{branch} {host}"
 
     status, _ = await run(["sh", "-c", script], "s-refs", sandbox=DOCKER, cwd=wt)
 
     assert status == "done"
     head = subprocess.check_output(["git", "rev-parse", branch], cwd=repo, text=True)
-    assert head.strip() == work
+    assert head.strip() == (host if host_moved else work)
+    unsynced = [
+        e["payload"]
+        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
+        if e["type"] == "sandbox_branch_not_synced"
+    ]
+    assert [u["session_id"] for u in unsynced] == (["s-refs"] if host_moved else [])
 
 
 async def test_an_image_without_the_command_stops_as_config_error(run, docker):
@@ -632,6 +647,7 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
 
     monkeypatch.setattr(sp._sandbox, "docker_argv", fake_docker_argv)
 
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
     status, _ = await run(
         _writes_result({"status": "done"}),
         sandbox=DOCKER,
@@ -641,6 +657,8 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
 
     assert status == "done"
     assert {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}.items() <= seen["env"].items()
+    # The container has no ~/.gitconfig: the identity crosses as env.
+    assert seen["env"]["GIT_AUTHOR_NAME"] == "Daemon"
     # A credential crosses by name only; the CLI gets a home that outlives --rm.
     assert list(seen["passthrough"]) == ["OPENAI_API_KEY"]
     assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"

@@ -643,10 +643,11 @@ async def run_setup_command(
         # backend or package script the worker may have written. The docker
         # client runs on the host with the worker env, like `run_task`'s; the
         # container gets the entry's literal `env` and its passthrough names.
-        # It shares the worktree's ref store with the item's sessions, never
-        # rebuilding it: one of them may be live.
+        # It mounts the worktree's ref store as it stands -- one of the item's
+        # sessions may have it mounted -- and publishes nothing from it: only
+        # a session's store names the branch Kraft moves.
         run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
-        refs = await asyncio.to_thread(_refstore.prepare, run_base, worktree, None, reuse=True)
+        refs = await asyncio.to_thread(_refstore.prepare, run_base, worktree, None)
         argv = _sandbox.docker_argv(
             ["sh", "-c", cmd],
             worktree,
@@ -658,7 +659,6 @@ async def run_setup_command(
         )
         run = dict(args=argv)
     else:
-        refs = None
         run = dict(args=cmd, shell=True)
     try:
         done = await asyncio.to_thread(
@@ -677,9 +677,6 @@ async def run_setup_command(
             f"setup command for {worktree.name} must run in its sandbox, but "
             f"{argv[0]!r} could not be started: {exc}"
         ) from exc
-    finally:
-        if refs is not None and (problem := await asyncio.to_thread(_refstore.sync, refs)):
-            logger.warning("setup command for %s: %s", worktree.name, problem)
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
         raise RuntimeError(f"setup command failed for {worktree.name}: {cmd!r}: {detail}")

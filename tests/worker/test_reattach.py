@@ -657,7 +657,7 @@ async def test_a_session_found_dead_publishes_its_sandboxed_branch(
     subprocess.run(
         ["git", "worktree", "add", "-q", "-b", "kraft/w1", str(wt)], cwd=repo, check=True
     )
-    store_ = refstore.prepare(run_dirs.base, wt, "kraft/w1", reuse=False, work_item_id="w1")
+    store_ = refstore.prepare(run_dirs.base, wt, "kraft/w1", session_id="s1", work_item_id="w1")
     tree = subprocess.check_output(["git", "rev-parse", "main^{tree}"], cwd=repo, text=True).strip()
     work = subprocess.check_output(
         ["git", "commit-tree", tree, "-p", "main", "-m", "w"], cwd=repo, text=True
@@ -685,6 +685,42 @@ async def test_reattach_removes_a_container_no_session_owns(
     await reattach.reattach(database, run_dirs)
 
     assert docker_rm.read_text().split() == ["kraft-gone"]
+
+
+async def test_an_adopted_session_publishes_its_branch_before_its_exit_is_read(
+    item, database, run_dirs, docker_rm, repo, tmp_path, monkeypatch
+):
+    """What runs after an adopted session's exit reads the item branch, so
+    it must already be published by then, not in the teardown after."""
+    wt = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "-b", "kraft/w1", str(wt)], cwd=repo, check=True
+    )
+    store_ = refstore.prepare(run_dirs.base, wt, "kraft/w1", session_id="s1", work_item_id="w1")
+    tree = subprocess.check_output(["git", "rev-parse", "main^{tree}"], cwd=repo, text=True).strip()
+    work = subprocess.check_output(
+        ["git", "commit-tree", tree, "-p", "main", "-m", "w"], cwd=repo, text=True
+    ).strip()
+    (store_.shadow / "refs" / "heads" / "kraft").mkdir(parents=True, exist_ok=True)
+    (store_.shadow / "refs" / "heads" / "kraft" / "w1").write_text(work + "\n")
+    seen = []
+    real_exit = reattach._exit_from_file
+
+    async def exit_reading_the_branch(*a, **kw):
+        seen.append(
+            subprocess.check_output(["git", "rev-parse", "kraft/w1"], cwd=repo, text=True).strip()
+        )
+        return await real_exit(*a, **kw)
+
+    monkeypatch.setattr(reattach, "_exit_from_file", exit_reading_the_branch)
+    _result(run_dirs, "s1")
+    with _held_open() as (proc, pst):
+        await item.session("s1", IMPLEMENT, running=(proc.pid, pst))
+        _, adopted = await reattach.reattach(database, run_dirs)
+        proc.stdin.close()
+        await adopted["s1"]
+
+    assert seen == [work]
 
 
 # --- what an adopted session's exit reads as ---------------------------------------------

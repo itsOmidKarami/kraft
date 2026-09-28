@@ -116,7 +116,6 @@ def docker_argv(
     home: str | Path | None = None,
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
-    rw_paths: Iterable[str | Path] = (),
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -187,8 +186,8 @@ def docker_argv(
     `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
     has somewhere to keep its state across sessions. `passthrough`: names
     forwarded bare, like `FORWARDED_ENV` -- a repo's `env_passthrough`, whose
-    values must never be written onto this argv. `ro_paths`/`rw_paths`: extra
-    host paths mounted at the same path (a rules file, a CLI config dir).
+    values must never be written onto this argv. `ro_paths`: extra
+    host paths mounted read-only at the same path (a rules file).
 
     `cwd` is resolved first: git records a worktree's real path, and a
     worktree mounted only at a symlinked path looks gone to `git worktree
@@ -220,8 +219,6 @@ def docker_argv(
     argv += _gitdir_mounts(Path(cwd), refstore)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
-    for path in rw_paths:
-        argv += ["-v", f"{path}:{path}"]
     if home is not None:
         argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
     if name is not None:
@@ -279,9 +276,8 @@ def git_identity(cwd: Path) -> dict[str, str]:
     return found
 
 
-def linked_gitdirs(cwd: Path) -> tuple[Path, Path] | None:
-    """`(common gitdir, worktree gitdir)` for a linked worktree, resolved, or
-    None when `cwd/.git` is a directory or not a `gitdir:` file."""
+def _gitdir_of(cwd: Path) -> Path | None:
+    """The gitdir `cwd/.git` names, resolved, when it is a `gitdir:` file."""
     git_path = cwd / ".git"
     if git_path.is_dir():
         return None
@@ -291,8 +287,14 @@ def linked_gitdirs(cwd: Path) -> tuple[Path, Path] | None:
         return None
     if not text.startswith("gitdir:"):
         return None
-    gitdir = Path(text.removeprefix("gitdir:").strip()).resolve()
-    if gitdir.parent.name != "worktrees":
+    return Path(text.removeprefix("gitdir:").strip()).resolve()
+
+
+def linked_gitdirs(cwd: Path) -> tuple[Path, Path] | None:
+    """`(common gitdir, worktree gitdir)` for a linked worktree, resolved, or
+    None when `cwd/.git` is a directory or does not name `<repo>/.git/worktrees/<id>`."""
+    gitdir = _gitdir_of(cwd)
+    if gitdir is None or gitdir.parent.name != "worktrees":
         return None
     return gitdir.parent.parent, gitdir
 
@@ -342,7 +344,12 @@ def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
     """
     dirs = linked_gitdirs(cwd)
     if dirs is None:
-        return []
+        # A `.git` file naming some other gitdir (a submodule's checkout, say):
+        # nothing to commit through a ref store, so both stay read-only.
+        other = _gitdir_of(cwd)
+        if other is None:
+            return []
+        return ["-v", f"{cwd / '.git'}:{cwd / '.git'}:ro", "-v", f"{other}:{other}:ro"]
     common, worktree_gitdir = dirs
     # `.git` itself lives inside the read-write `cwd` mount. Left alone, a
     # sandboxed worker repoints it at a gitdir it builds inside the
@@ -361,6 +368,12 @@ def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
             if path.exists():
                 mode = "" if name in _RW_SHADOW_DIRS else ":ro"
                 mounts += ["-v", f"{path}:{path}{mode}"]
+        # `objects/info` is where `alternates` lives: read-write, a worker
+        # names any host directory there and every later sandboxed launch on
+        # this repository mounts it (and host git reads objects from it).
+        info = common / "objects" / "info"
+        if info.is_dir():
+            mounts += ["-v", f"{info}:{info}:ro"]
         for alternate in _alternates(common / "objects"):
             mounts += ["-v", f"{alternate}:{alternate}:ro"]
     mounts += ["-v", f"{worktree_gitdir}:{worktree_gitdir}"]
@@ -610,7 +623,7 @@ async def teardown(session_id: str) -> None:
     every session's way out and for every row at startup. A container that
     outlives a timed-out call is `sweep_orphans`'s at the next start.
     """
-    await _docker("rm", "-f", container_name(session_id))
+    await docker_call("rm", "-f", container_name(session_id))
 
 
 #: How long any one best-effort `docker` call Kraft makes on its own account
@@ -618,7 +631,7 @@ async def teardown(session_id: str) -> None:
 DOCKER_CALL_TIMEOUT_S = 30.0
 
 
-async def _docker(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
     """Run `docker args...`; `(returncode, stdout)`, or None when docker is
     missing or did not answer in time (its client is then killed)."""
     try:
@@ -645,7 +658,7 @@ async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
     (the daemon was briefly down) leaves one writing a worktree forever, and
     only a scan finds it. Listed by `home_label`, never by name, so another
     Kraft's containers on the same daemon are left alone."""
-    listed = await _docker(
+    listed = await docker_call(
         "ps", "-a", "--filter", f"label={home_label()}", "--format", "{{.Names}}"
     )
     if listed is None or listed[0] != 0:
@@ -653,7 +666,7 @@ async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
     keep = set(keep)
     orphans = [n for n in listed[1].split() if n not in keep]
     for name in orphans:
-        await _docker("rm", "-f", name)
+        await docker_call("rm", "-f", name)
     return orphans
 
 
@@ -662,36 +675,40 @@ async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
 _HAS_EXECUTABLE: set[tuple[str, str]] = set()
 
 
-async def missing_executable(image: str, executable: str) -> bool:
+async def missing_executable(
+    image: str, executable: str, env: dict[str, str] | None = None
+) -> bool:
     """True only when `image` demonstrably lacks `executable`. A launch then
     stops as `config_error` naming both, instead of exiting 127 inside a
     container that exists -- which reads as the agent failing and opens a fix
-    loop no agent can win. Anything inconclusive (no daemon, no `sh` in the
-    image, a pull that failed) is False: the launch goes ahead and fails, or
-    not, as it always did."""
-    if (image, executable) in _HAS_EXECUTABLE:
+    loop no agent can win. Asked the way the launch will run: through the
+    image's own entrypoint (a version manager's shim sets `PATH` there) and
+    with the repository's literal `env`. Anything inconclusive -- no daemon,
+    no `sh`, an entrypoint that is the agent itself, a pull that failed -- is
+    False: the launch goes ahead and fails, or not, as it always did."""
+    key = (image, executable)
+    if key in _HAS_EXECUTABLE:
         return False
-    probed = await _docker(
+    env_args = [a for name, value in (env or {}).items() for a in ("-e", f"{name}={value}")]
+    probed = await docker_call(
         "run",
         "--rm",
         "--label",
         home_label(),
         "--network=none",
         "--cap-drop=ALL",
-        "--entrypoint=",
+        *env_args,
         image,
         "sh",
         "-c",
-        'command -v "$0" >/dev/null && echo yes || echo no',
+        'command -v "$0" >/dev/null && echo kraft-probe-yes || echo kraft-probe-no',
         executable,
         timeout=300,
     )
-    if probed is None:
+    if probed is None or probed[0] != 0:
         return False
-    code, out = probed
-    if code != 0:
+    answer = probed[1].strip().splitlines()[-1:]
+    if answer == ["kraft-probe-yes"]:
+        _HAS_EXECUTABLE.add(key)
         return False
-    if out.strip() == "yes":
-        _HAS_EXECUTABLE.add((image, executable))
-        return False
-    return out.strip() == "no"
+    return answer == ["kraft-probe-no"]

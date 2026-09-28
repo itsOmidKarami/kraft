@@ -558,7 +558,9 @@ def log_reader(h: _harness.Harness) -> str | None:
     return reader
 
 
-def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str]:
+def _config_dir(
+    run_dirs, h: _harness.Harness, session_id: str, sandboxed_item: str | None = None
+) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip).
 
@@ -567,10 +569,19 @@ def _config_dir(run_dirs, h: _harness.Harness, session_id: str) -> dict[str, str
     launch wrote. The files are rewritten on every launch, so whatever the CLI
     changed in them never outlives a session; each write is a rename, so two
     launches at once never read half a file. The user's own config is never
-    read or touched."""
+    read or touched.
+
+    A sandboxed item (`sandboxed_item`) gets a directory of its own inside its
+    sandbox home, which its containers already mount: the shared one would be
+    a directory one item's worker could rewrite under every other item's
+    launches, sandboxed or not."""
     if h.config_env is None:
         return {}
-    directory = run_dirs.base / "harness-config" / h.id
+    directory = (
+        _subprocess.sandbox_home(run_dirs, sandboxed_item) / ".kraft-harness-config" / h.id
+        if sandboxed_item is not None
+        else run_dirs.base / "harness-config" / h.id
+    )
     directory.mkdir(parents=True, exist_ok=True)
     for name, text in h.config_files.items():
         tmp = directory / f".{name}.{session_id}"
@@ -789,7 +800,8 @@ async def run_agent_task(
             f"harness {harness!r} holds this launch's tool policy with Kraft's permission "
             f"hook, which cannot run inside a sandbox, and a sandboxed launch never runs "
             f"with its policy unenforced; use a harness whose own rules the container "
-            f"holds (amp, opencode), or drop allowed_tools/deny_tools for this task"
+            f"holds (amp, opencode), or remove the tool policy (allowed_tools, "
+            f"deny_tools, or a grant beyond git-commit) at the layer that sets it"
         )
     if sandbox and h.container_permission_mode is not None:
         default = h.capabilities["permission_mode"].always
@@ -844,7 +856,7 @@ async def run_agent_task(
         extra=(*hook_argv, *rules_argv),
     )
     reader = log_reader(h)
-    config_env = _config_dir(run_dirs, h, session_id)
+    config_env = _config_dir(run_dirs, h, session_id, work_item_id if sandbox else None)
     return await _subprocess.run_task(
         db,
         run_dirs,
@@ -882,5 +894,4 @@ async def run_agent_task(
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,
         ro_paths=rules_files,
-        rw_paths=tuple(config_env.values()),
     )

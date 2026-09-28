@@ -560,6 +560,15 @@ async def reattach(
         for r in grace:
             adopt[r["id"]] = _identity_ok(r["pid"], r["pid_start_time"])
 
+    # A container whose teardown failed or timed out before this start is
+    # still writing its worktree, and no row names it any more. Swept before
+    # anything below launches a container of its own (an escalation resume),
+    # which the sweep would otherwise take for an orphan.
+    if orphans := await _sandbox.sweep_orphans(
+        keep={_sandbox.container_name(sid) for sid, adopting in adopt.items() if adopting}
+    ):
+        logger.warning("removed containers no live session owns: %s", ", ".join(orphans))
+
     for r in rows:
         sid = r["id"]
         adopting = adopt[sid]
@@ -654,10 +663,4 @@ async def reattach(
             )
         )
 
-    # A container whose teardown failed or timed out before this start is
-    # still writing its worktree, and no row names it any more.
-    if orphans := await _sandbox.sweep_orphans(
-        keep={_sandbox.container_name(sid) for sid in adopted_tasks}
-    ):
-        logger.warning("removed containers no live session owns: %s", ", ".join(orphans))
     return summary, adopted_tasks

@@ -543,10 +543,10 @@ async def _docker_check(repo: config.RepoEntry, image: str) -> dict:
     to run them in, and its first launch pulls an image inside that
     session's time cap: both are better learned here."""
     name = f"sandbox {_label(repo)}"
-    daemon = await sandbox._docker("version", "--format", "{{.Server.Version}}")
+    daemon = await sandbox.docker_call("version", "--format", "{{.Server.Version}}")
     if daemon is None or daemon[0] != 0:
         return _check(name, False, "docker is not installed or its daemon is not reachable")
-    pulled = await sandbox._docker("image", "inspect", "--format", "{{.Id}}", image)
+    pulled = await sandbox.docker_call("image", "inspect", "--format", "{{.Id}}", image)
     if pulled is None or pulled[0] != 0:
         return _check(name, False, f"image {image!r} is not pulled -- run: docker pull {image}")
     return _check(name, True, f"docker {daemon[1].strip()}, image {image}")

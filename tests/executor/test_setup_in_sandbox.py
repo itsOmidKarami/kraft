@@ -333,3 +333,35 @@ async def test_a_members_live_sandbox_wraps_the_item(item_on):
     )
 
     assert dispatch.item_sandbox(it.row(), launch) == _SANDBOX
+
+
+async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_nothing(
+    tmp_path, repo, monkeypatch
+):
+    """The worktree's HEAD is the worker's to write, so a setup command's
+    store names no branch, and nothing it leaves there is ever published."""
+    monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "kraft/x", str(wt)], cwd=repo, check=True)
+    seen = {}
+    real_docker_argv = kraft_builtins._sandbox.docker_argv
+
+    def spy(cmd, cwd, sandbox, results_dir, **kw):
+        seen.update(kw)
+        return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
+
+    monkeypatch.setattr(kraft_builtins._sandbox, "docker_argv", spy)
+    published = []
+    monkeypatch.setattr(kraft_builtins._refstore, "sync", lambda *a, **kw: published.append(a))
+
+    await kraft_builtins.run_setup_command(
+        wt,
+        repo,
+        entry_of({"setup_command": _SETUP, "env_passthrough": ["X_KEY"]}),
+        sandbox=_SANDBOX,
+    )
+
+    assert seen["refstore"] is not None and seen["refstore"].branch is None
+    assert list(seen["passthrough"]) == ["X_KEY"]
+    assert published == []

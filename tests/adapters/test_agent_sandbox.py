@@ -50,9 +50,15 @@ def test_an_amp_rules_file_is_mounted_read_only_in_the_sandbox(run, tmp_path):
     assert seen["ro_paths"] == (str(tmp_path / "harness-config" / "amp" / "s1.json"),)
 
 
-def test_a_cli_config_dir_kraft_owns_is_mounted_read_write(run, tmp_path):
+def test_a_sandboxed_item_gets_a_cli_config_dir_of_its_own(run, tmp_path):
+    """The shared directory would be one item's worker's to rewrite under
+    every other item's launches; the item's sandbox home is already mounted."""
     seen = run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
-    assert seen["rw_paths"] == (str(tmp_path / "harness-config" / "cursor"),)
+    own = tmp_path / "sandbox-home" / "w1" / ".kraft-harness-config" / "cursor"
+    assert seen["env"]["CURSOR_CONFIG_DIR"] == str(own)
+    assert (own / "cli-config.json").is_file()
+    unsandboxed = run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path))
+    assert unsandboxed["env"]["CURSOR_CONFIG_DIR"] == str(tmp_path / "harness-config" / "cursor")
 
 
 @pytest.mark.parametrize(

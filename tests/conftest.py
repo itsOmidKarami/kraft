@@ -277,6 +277,15 @@ def _close_db_connections(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_remembered_images(monkeypatch):
+    """`sandbox.missing_executable` remembers images that had a command, for
+    the process: per test instead, so no test's answer depends on another's."""
+    from kraft.worker import sandbox
+
+    monkeypatch.setattr(sandbox, "_HAS_EXECUTABLE", set())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_kraft_home(tmp_path, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 

@@ -22,6 +22,11 @@ def test_docker_argv_wraps_the_command_and_forwards_the_fixed_env_set():
     # otherwise let the worker regain root and defeat the -u uid:gid above.
     assert "--security-opt=no-new-privileges" in argv
     assert "--cap-drop=ALL" in argv
+    # PID 1 ignores a signal it has no handler for: without an init, pause and
+    # cap signals never reach the agent.
+    assert "--init" in argv
+    # What `sweep_orphans` finds this Kraft's containers by.
+    assert argv[argv.index("--label") + 1] == sandbox.home_label()
     assert "/work/item-1:/work/item-1" in argv
     assert "/run/results:/run/results:ro" in argv
     w_i = argv.index("-w")
@@ -388,17 +393,11 @@ def test_docker_argv_pins_hooks_off_for_git_in_the_container():
     assert pinned["core.hooksPath"] == os.devnull
 
 
-def test_docker_argv_mounts_extra_paths_at_the_same_path(tmp_path):
+def test_docker_argv_mounts_extra_paths_read_only_at_the_same_path():
     argv = sandbox.docker_argv(
-        ["amp"],
-        "/w",
-        {"kind": "docker", "image": "x"},
-        None,
-        ro_paths=["/k/rules.json"],
-        rw_paths=["/k/config"],
+        ["amp"], "/w", {"kind": "docker", "image": "x"}, None, ro_paths=["/k/rules.json"]
     )
     assert "/k/rules.json:/k/rules.json:ro" in argv
-    assert "/k/config:/k/config" in argv
 
 
 def test_git_identity_comes_from_the_repository_when_the_daemon_has_none(
@@ -467,3 +466,45 @@ async def test_an_image_without_the_command_is_told_apart(fake_docker, executabl
 async def test_an_inconclusive_image_check_never_blocks_a_launch(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))  # no docker at all
     assert await sandbox.missing_executable("img", "kraft-no-such-cli") is False
+
+
+def test_docker_argv_keeps_objects_info_read_only(tmp_path):
+    """`objects/info/alternates` names directories every later launch on the
+    repository mounts: writable, it let a worker mount any host directory."""
+    repo, worktree, gitdir = _worktree(tmp_path)
+    info = repo / ".git" / "objects" / "info"
+    info.mkdir()
+    store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
+    argv = sandbox.docker_argv(
+        ["git"], worktree, {"kind": "docker", "image": "x"}, None, refstore=store
+    )
+    assert f"{info}:{info}:ro" in argv
+
+
+def test_docker_argv_keeps_another_gitdir_read_only(tmp_path):
+    """A `.git` file naming a gitdir outside `worktrees/` (a submodule's
+    checkout) has no ref store; the file and its gitdir stay read-only."""
+    other = tmp_path / "super" / ".git" / "modules" / "sm"
+    other.mkdir(parents=True)
+    checkout = tmp_path / "sm"
+    checkout.mkdir()
+    (checkout / ".git").write_text(f"gitdir: {other}\n")
+    argv = sandbox.docker_argv(["git"], checkout, {"kind": "docker", "image": "x"}, None)
+    assert f"{checkout / '.git'}:{checkout / '.git'}:ro" in argv
+    assert f"{other}:{other}:ro" in argv
+
+
+async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp_path, monkeypatch):
+    """A version manager's shim sets PATH in the image's entrypoint, and a
+    repository may set it in `env`; a probe that skipped either stopped
+    launches that would have worked."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "argv"
+    (bin_dir / "docker").write_text(f'#!/bin/sh\necho "$@" > {log}\necho kraft-probe-yes\n')
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    assert await sandbox.missing_executable("img", "claude", {"PATH": "/opt/bin"}) is False
+    argv = log.read_text().split()
+    assert not [a for a in argv if a.startswith("--entrypoint")]
+    assert argv[argv.index("PATH=/opt/bin") - 1] == "-e"
