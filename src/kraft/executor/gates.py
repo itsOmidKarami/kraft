@@ -1132,7 +1132,10 @@ async def resume_after_escalation(
             reason = str(exc)
             await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
             return status_of(db, work_item_id)
-        if new_base:
+        # `refresh_worktree_base` reports the upstream head even when the
+        # branch already contained it (Kraft-jypzx); skip the write when it
+        # matches what's already recorded, the ordinary case on a self-retry.
+        if new_base and new_base != row["base_ref"]:
             await db.write(lambda c: store.set_base_ref(c, work_item_id, new_base))
         # The retry the agent asked for, by the path it asked for (a node, a
         # step, a task, or a restart); an older request names only its node.

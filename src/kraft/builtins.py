@@ -782,10 +782,12 @@ async def refresh_worktree_base(
     top of whatever landed while the item sat stopped, not the commit it
     forked from.
 
-    Returns the new HEAD sha when the rebase moved the branch (the caller
-    stores it as the item's `base_ref`), or None when there was nothing to
-    do: no worktree yet, `repo`'s HEAD unreadable, the branch already
-    contains that HEAD, the branch already has an `origin` remote-tracking
+    Returns the upstream HEAD sha when the rebase moved the branch, or when
+    the branch already contains it (the caller stores it as the item's
+    `base_ref` either way -- Kraft-jypzx, a rebase done by hand outside Kraft
+    must not leave `base_ref` pointing at a commit the branch has moved past).
+    Returns None when there was nothing to do: no worktree yet, `repo`'s HEAD
+    unreadable, the branch already has an `origin` remote-tracking
     ref (unless `force`), or the worktree has uncommitted changes -- all are
     best-effort skips (logged), same posture as `ensure_worktree`'s other git
     steps. The dirty-tree case comes from a pause via SIGTERM
@@ -842,11 +844,13 @@ async def refresh_worktree_base(
         logger.warning("refresh_worktree_base: rev-parse HEAD failed in %s", repo)
         return None
     # Already up to date: exit 0 means head is already an ancestor of the tip.
+    # No rebase needed, but base_ref may still be stale (e.g. a human rebased
+    # the branch by hand) -- report head so the caller advances it (Kraft-jypzx).
     if (
         git_read(worktree, "merge-base", "--is-ancestor", head, "HEAD", expected_failure=True)
         is not None
     ):
-        return None
+        return head
     if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
@@ -958,6 +962,11 @@ async def mr_rebase(
     from kraft.executor.context import BASE_MOVED  # executor imports this module
 
     base = await base_branch(db, work_item_id, Path(repo))
+    prior_base_ref = db.read(
+        lambda c: c.execute(
+            "SELECT base_ref FROM work_items WHERE id = ?", (work_item_id,)
+        ).fetchone()
+    )["base_ref"]
 
     def remaining() -> float | None:
         return max(0.0, time_cap.at - _caps.monotonic()) if time_cap is not None else None
@@ -968,6 +977,12 @@ async def mr_rebase(
             new_head = await refresh_worktree_base(
                 Path(worktree), Path(repo), branch, base=base, timeout=remaining()
             )
+            # `refresh_worktree_base` now reports the upstream head even when
+            # the branch already contained it (Kraft-jypzx), so `base_ref` can
+            # catch up after a hand-rebase -- but that is not a rebase *this*
+            # call performed, and must not trip `on_base_changed`'s bounce.
+            if new_head == prior_base_ref:
+                new_head = None
         except RebaseConflict as exc:
             raise _explain_gitlink_conflict(exc, {rel for rel, _ in moved}, branch, base) from None
     except BaseBranchMissing as exc:
@@ -1067,7 +1082,13 @@ async def _rebase_members(
                 continue
             old = git_read(sub, "rev-parse", "HEAD")
             head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
-            if head:
+            # `refresh_worktree_base` now reports `sub_base`'s head even when
+            # the member's branch already contained it as an ancestor
+            # (Kraft-jypzx) -- that is not a move (`old` unchanged), and must
+            # not be reported as one: it would fire `mr_rebase`'s
+            # `on_base_changed` bounce on every ordinary run of a workspace
+            # item with any pending member.
+            if head and git_read(sub, "rev-parse", "HEAD") != old:
                 moved.append((rel, head))
                 if git_read(root, "rev-parse", f"HEAD:{rel}", expected_failure=True) == old:
                     repoint.append(rel)

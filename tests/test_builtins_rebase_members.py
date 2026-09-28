@@ -101,6 +101,25 @@ async def test_a_changed_member_is_rebased_and_the_root_repointed_at_it(
     assert _base_ref(database, row) == base_ref
 
 
+async def test_a_pending_member_whose_origin_has_not_moved_is_not_reported_as_moved(
+    database, run_dirs, tmp_path
+):
+    """Kraft-jypzx follow-up: `commits_ahead` sends a member with an ordinary
+    pending commit into `refresh_worktree_base`, which now reports the
+    member's own base head even when the member's branch already contains it
+    as an ancestor -- true here, since the member's origin never moved. That
+    is not a rebase and must not be counted in `moved`, or `has_rebase_bounce`
+    would bounce `BASE_MOVED` on every ordinary run of a workspace item with
+    any pending member."""
+    row, root, member = await _workspace(database, run_dirs, tmp_path)
+    before = git_read(member, "rev-parse", "HEAD")
+
+    status = await _mr_rebase(database, run_dirs, row, root, has_rebase_bounce=True)
+
+    assert status == "done"
+    assert git_read(member, "rev-parse", "HEAD") == before
+
+
 async def test_an_unchanged_member_is_not_touched(database, run_dirs, tmp_path):
     row, root, member = await _workspace(database, run_dirs, tmp_path, member_change=None)
     before = git_read(member, "rev-parse", "HEAD")
