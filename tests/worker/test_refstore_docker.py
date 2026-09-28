@@ -6,7 +6,8 @@ import subprocess
 
 import pytest
 
-from kraft.worker import refstore, sandbox
+from kraft.worker import refstore
+from kraft.worker.backends import docker
 
 BRANCH = "kraft/item-1"
 IMAGE = "kraft-test-git:latest"
@@ -51,7 +52,7 @@ def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image)
         # Deleting a ref rewrites packed-refs, which lives in the store.
         " git branch -D doomed"
     )
-    argv = sandbox.docker_argv(
+    argv = docker.docker_argv(
         ["sh", "-c", script],
         wt,
         {"kind": "docker", "image": git_image},

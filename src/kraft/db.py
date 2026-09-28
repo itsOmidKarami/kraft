@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 42
+SCHEMA_VERSION = 43
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -173,7 +173,12 @@ CREATE TABLE worker_sessions (
   -- from live tokens, not the agent's own figure -- 0 once the exit envelope
   -- (or a paused session's) lands, whether or not it carries a cost. Default
   -- 0 so a historical row, which never carried an estimate, reads as exact.
-  cost_estimated INTEGER NOT NULL DEFAULT 0
+  cost_estimated INTEGER NOT NULL DEFAULT 0,
+  -- the sandbox backend a session ran in (`kraft.worker.backends`), so the
+  -- session is cleaned up by the one it used whatever the config says now.
+  -- NULL for an unsandboxed session and every row older than this column:
+  -- read as "ask every backend", each a no-op for a session it never ran
+  sandbox        TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -940,6 +945,7 @@ FROM worker_sessions""",
         "ALTER TABLE review_threads_new RENAME TO review_threads",
         "CREATE INDEX idx_review_threads_item ON review_threads(work_item_id, gate)",
     ],
+    42: ["ALTER TABLE worker_sessions ADD COLUMN sandbox TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

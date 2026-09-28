@@ -15,7 +15,7 @@ from kraft import events, logs, store
 from kraft.adapters.forge import git
 from kraft.config import RepoEntry, base_ignore_args, git_read
 from kraft.paths import default_run_dir
-from kraft.worker import refstore as _refstore
+from kraft.worker import backends as _backends
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.env import worker_env
 
@@ -647,14 +647,15 @@ async def run_setup_command(
         # sessions may have it mounted -- and publishes nothing from it: only
         # a session's store names the branch Kraft moves.
         run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
-        refs = await asyncio.to_thread(_refstore.prepare, run_base, worktree, None)
-        argv = _sandbox.docker_argv(
+        backend = _backends.for_sandbox(sandbox)
+        refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
+        argv = backend.wrap(
             ["sh", "-c", cmd],
             worktree,
             sandbox,
             None,
             env=repo_entry.env if repo_entry is not None else {},
-            refstore=refs,
+            refs=refs,
             passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
         )
         run = dict(args=argv)

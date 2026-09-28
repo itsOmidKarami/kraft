@@ -25,6 +25,7 @@ from kraft.adapters.profiles import (  # noqa: F401 -- re-exported: callers use 
 from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
+from kraft.worker import backends as _backends
 from kraft.worker import steering as _steering
 
 _CTX = (
@@ -559,7 +560,7 @@ def log_reader(h: _harness.Harness) -> str | None:
 
 
 def _config_dir(
-    run_dirs, h: _harness.Harness, session_id: str, sandboxed_item: str | None = None
+    run_dirs, h: _harness.Harness, session_id: str, sandbox_home: Path | None = None
 ) -> dict[str, str]:
     """The env pointing `h`'s CLI at a config directory Kraft owns, freshly
     written, or `{}` for a harness that declares none (Kraft-bosip).
@@ -571,15 +572,15 @@ def _config_dir(
     launches at once never read half a file. The user's own config is never
     read or touched.
 
-    A sandboxed item (`sandboxed_item`) gets a directory of its own inside its
-    sandbox home, which its containers already mount: the shared one would be
-    a directory one item's worker could rewrite under every other item's
-    launches, sandboxed or not."""
+    A sandboxed item gets a directory of its own inside its `sandbox_home`,
+    which its sandboxes already mount: the shared one would be a directory
+    one item's worker could rewrite under every other item's launches,
+    sandboxed or not."""
     if h.config_env is None:
         return {}
     directory = (
-        _subprocess.sandbox_home(run_dirs, sandboxed_item) / ".kraft-harness-config" / h.id
-        if sandboxed_item is not None
+        sandbox_home / ".kraft-harness-config" / h.id
+        if sandbox_home is not None
         else run_dirs.base / "harness-config" / h.id
     )
     directory.mkdir(parents=True, exist_ok=True)
@@ -856,7 +857,14 @@ async def run_agent_task(
         extra=(*hook_argv, *rules_argv),
     )
     reader = log_reader(h)
-    config_env = _config_dir(run_dirs, h, session_id, work_item_id if sandbox else None)
+    config_env = _config_dir(
+        run_dirs,
+        h,
+        session_id,
+        _backends.for_sandbox(sandbox).home(run_dirs, work_item_id)
+        if sandbox and h.config_env is not None
+        else None,
+    )
     return await _subprocess.run_task(
         db,
         run_dirs,

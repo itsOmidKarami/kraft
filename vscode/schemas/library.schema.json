@@ -843,7 +843,7 @@
     },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`\n(`kraft.worker.sandbox`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it.",
+      "description": "Where a task's process runs: `kind: docker` in `image`\n(`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it.",
       "properties": {
         "image": {
           "minLength": 1,

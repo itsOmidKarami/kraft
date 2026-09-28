@@ -717,7 +717,7 @@ class InstancePolicyInput(BaseModel):
 
 class SandboxPolicy(BaseModel):
     """Where a task's process runs: `kind: docker` in `image`
-    (`kraft.worker.sandbox`). A permission-shaped safety field (Ruling 105):
+    (`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):
     once a layer sets one, no narrower layer may change or remove it."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)

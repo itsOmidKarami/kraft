@@ -1,0 +1,519 @@
+"""The docker backend (Kraft-rki): a sandboxed command runs in `docker run`,
+one container per session, with the worktree bind-mounted at its host path.
+
+The mounts (`docker_argv`) keep the container out of everything it has no
+business writing; `kraft.worker.sandbox` holds the other, load-bearing half --
+host git never runs what a worker plants -- and the guards every backend
+shares. `kraft.worker.refstore` is how this backend keeps a worker's refs out
+of the repository: code goes in and comes out through it, not through the
+mount.
+
+Read docs/superpowers/specs/2026-09-13-worker-sandbox-docker-design.md for
+the design this implements.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import subprocess
+from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from kraft.paths import kraft_home
+from kraft.worker import refstore as _refstore
+from kraft.worker.sandbox import (
+    _HARDENED_GIT_CONFIG,
+    _RW_SHADOW_DIRS,
+    FORWARDED_ENV,
+    SHADOW_DIRS,
+    SHADOW_FILES,
+    _gitdir_of,
+    _pin,
+    linked_gitdirs,
+)
+
+if TYPE_CHECKING:
+    from kraft.worker.refstore import RefStore
+
+
+def container_name(session_id: str) -> str:
+    """The `--name` a sandboxed session's container runs under.
+
+    A handle a caller can `docker kill`/`docker rm -f` by, independent of
+    whatever became of the `docker run` client's own pid -- that client is
+    the process Kraft's group-kill signals, but the container itself is
+    parented by the docker daemon, not that group, and does not die with it.
+    `session_id` is already a Kraft-minted id (safe for docker's
+    `[a-zA-Z0-9_.-]` name charset); prefixed so a stray `kraft-*` container is
+    obviously this tool's to clean up.
+    """
+    return f"kraft-{session_id}"
+
+
+#: The label every Kraft container carries, valued with the resolved
+#: `KRAFT_HOME`: what `sweep_orphans` lists by, so one Kraft never reaps
+#: another's containers (a dev instance beside an installed one).
+HOME_LABEL = "kraft.home"
+
+
+def home_label() -> str:
+    return f"{HOME_LABEL}={kraft_home().resolve()}"
+
+
+def docker_argv(
+    cmd: list[str],
+    cwd: str | Path,
+    sandbox: dict,
+    results_dir: str | Path | None,
+    env: dict | None = None,
+    name: str | None = None,
+    result_path: str | Path | None = None,
+    cidfile: str | Path | None = None,
+    *,
+    refstore: RefStore | None = None,
+    home: str | Path | None = None,
+    passthrough: Iterable[str] = (),
+    ro_paths: Iterable[str | Path] = (),
+) -> list[str]:
+    """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
+
+    Mounts `cwd` (the git worktree) at its original host path, so every
+    relative path the agent's own prompt already names stays meaningful
+    unchanged inside the container -- nothing downstream of this has to know
+    the process ran in one. Runs as the invoking host uid:gid so a container
+    default of root does not leave root-owned files behind in the worktree
+    for a later host-side step to trip over -- `--security-opt=no-new-privileges`
+    and `--cap-drop=ALL` are what keep that true: without them, a setuid-root
+    binary in the operator's image (`su`, `mount`, `sudo` all ship in most base
+    images) lets the worker regain root inside the container and write
+    root-owned or setuid-root files into the bind-mounted worktree anyway.
+
+    Everything else the container can reach is mounted read-only with exactly
+    the paths this session must write carved back out read-write, rather than
+    mounted read-write with the dangerous paths shadowed read-only: a
+    shadow list is a list of the escapes someone thought of (`.git/hooks`,
+    then `.git/modules/<sub>/hooks`, then `.git/worktrees/<id>/modules/...`),
+    and the container only has to find the one nobody listed.
+
+    `results_dir`: read-only, because a hook legitimately *reads* its
+    neighbours there (its own `<session>.review.md`, the previous fix
+    session's result file), but a session writing another session's
+    `<other>.json` would forge that session's status and findings. Only this
+    session's own `result_path` is mounted back read-write. `None` for a
+    launch that is no session and has no results to read (a repository's
+    `setup_command`, `builtins.run_setup_command`): nothing is mounted.
+
+    `<repo>/.git`: the worktree's private ref store (`refstore` below), so no
+    ref the worker writes reaches the operator's repository; objects are
+    shared read-write. This worktree's own gitdir (`<repo>/.git/worktrees/<id>`)
+    is read-write -- what a commit from inside a linked worktree writes
+    besides objects and refs. That worktree
+    gitdir has to be read-write wholesale: a commit rewrites HEAD, the index
+    and per-worktree refs through lockfiles beside them, so the directory
+    itself must be writable, and every file git redirects config and hooks
+    through (`commondir`, `config.worktree`, `modules/<sm>/config`) lives in
+    it. Those are not enumerated here -- `harden_host_git_env` is what makes
+    them harmless, by pinning `core.hooksPath` and friends on every git Kraft
+    itself runs, so whatever a worker plants in a file nobody listed still
+    has nothing to execute it.
+
+    A Kraft worktree's `.git` is a file pointing at that gitdir (`git
+    worktree`'s own layout), outside `cwd` -- without the mount every git
+    command inside the container fails to find it. That file lives inside
+    the read-write `cwd` mount, though, so it is shadowed read-only on top:
+    otherwise a sandboxed worker rewrites it to point at a gitdir of its own
+    making, complete with a `hooks/` it populates itself, and the next
+    host-side git command run in the worktree executes that hook as the
+    invoking host user.
+
+    `env` is `run_task`'s own `env=` argument -- e.g. `PYTHONDONTWRITEBYTECODE`
+    for a fix-loop re-measure -- which is otherwise silently dropped: only
+    `FORWARDED_ENV` crosses into the container by default. Passed through as
+    literal `-e NAME=VALUE`, unlike `FORWARDED_ENV`'s bare `-e NAME` (which
+    copies from docker's own process env, never written to disk).
+
+    `cidfile`: docker writes the container's id there once it has created
+    the container, and leaves no file when it never got that far -- the one
+    thing that tells docker's own launch failure from the sandboxed
+    command's (`launch_failed`, Kraft-6ltwh).
+
+    `refstore`: the worktree's private ref store (`worker.refstore`), mounted
+    over the repository's common gitdir so the worker's ref writes never reach
+    the operator's refs. Without one, the common gitdir is read-only whole.
+
+    `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
+    has somewhere to keep its state across sessions. `passthrough`: names
+    forwarded bare, like `FORWARDED_ENV` -- a repo's `env_passthrough`, whose
+    values must never be written onto this argv. `ro_paths`: extra
+    host paths mounted read-only at the same path (a rules file).
+
+    `cwd` is resolved first: git records a worktree's real path, and a
+    worktree mounted only at a symlinked path looks gone to `git worktree
+    prune`, which then deletes its admin directory.
+    """
+    cwd = str(Path(cwd).resolve())
+    argv = [
+        "docker",
+        "run",
+        "--rm",
+        # PID 1 ignores a signal it installed no handler for, so without an
+        # init neither a pause's SIGINT nor a cap's SIGTERM reaches the agent.
+        "--init",
+        "--label",
+        home_label(),
+        "-u",
+        f"{os.getuid()}:{os.getgid()}",
+        "--security-opt=no-new-privileges",
+        "--cap-drop=ALL",
+        "-v",
+        f"{cwd}:{cwd}",
+        "-w",
+        cwd,
+    ]
+    if results_dir is not None:
+        argv += ["-v", f"{results_dir}:{results_dir}:ro"]
+    if result_path is not None:
+        argv += ["-v", f"{result_path}:{result_path}"]
+    argv += _gitdir_mounts(Path(cwd), refstore)
+    for path in ro_paths:
+        argv += ["-v", f"{path}:{path}:ro"]
+    if home is not None:
+        argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
+    if name is not None:
+        argv += ["--name", name]
+    if cidfile is not None:
+        argv.append(f"--cidfile={cidfile}")
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *passthrough)):
+        argv += ["-e", env_name]
+    pins: dict[str, str] = {}
+    _pin(pins, _HARDENED_GIT_CONFIG)
+    for env_name, value in {**pins, **(env or {})}.items():
+        argv += ["-e", f"{env_name}={value}"]
+    argv.append(sandbox["image"])
+    argv += cmd
+    return argv
+
+
+def _alternates(objects: Path) -> list[Path]:
+    """Object directories `objects/info/alternates` borrows from (`clone
+    --shared`, `--reference`): outside every other mount, so without their own
+    the container cannot read those objects at all."""
+    try:
+        lines = (objects / "info" / "alternates").read_text().splitlines()
+    except OSError:
+        return []
+    found = []
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#"):
+            path = Path(line) if Path(line).is_absolute() else objects / line
+            if path.resolve().is_dir():
+                found.append(path.resolve())
+    return found
+
+
+def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
+    """`-v` arguments for the gitdirs a linked worktree's `.git` file points at.
+
+    Empty when `cwd` is not a linked worktree: an ordinary `.git` directory is
+    inside `cwd`, already mounted with it.
+
+    The worktree's own gitdir `W` is read-write (a commit writes its index,
+    HEAD and lockfiles there), with the files git redirects config and the
+    common dir through shadowed read-only, created first so a worker cannot
+    dodge a shadow by deleting its file. The common gitdir is the private ref
+    store `refstore` when given, with the real `objects/` and `lfs/` inside
+    it read-write and `HEAD`, `config`, `info/` and `shallow` read-only; the
+    worker's refs, reflogs, `packed-refs` and `FETCH_HEAD` all land in the
+    store. Without a store it is read-only whole, and a commit cannot move a
+    ref at all.
+    """
+    dirs = linked_gitdirs(cwd)
+    if dirs is None:
+        # A `.git` file naming some other gitdir (a submodule's checkout, say):
+        # nothing to commit through a ref store, so both stay read-only.
+        other = _gitdir_of(cwd)
+        if other is None:
+            return []
+        return ["-v", f"{cwd / '.git'}:{cwd / '.git'}:ro", "-v", f"{other}:{other}:ro"]
+    common, worktree_gitdir = dirs
+    # `.git` itself lives inside the read-write `cwd` mount. Left alone, a
+    # sandboxed worker repoints it at a gitdir it builds inside the
+    # worktree -- HEAD, objects/, refs/, a config with hooks -- and the next
+    # host-side git command run there executes the worker's hook as the
+    # invoking host user. It never legitimately changes for the life of the
+    # worktree, so shadowing it read-only costs nothing.
+    git_file = cwd / ".git"
+    mounts = ["-v", f"{git_file}:{git_file}:ro"]
+    if refstore is None:
+        mounts += ["-v", f"{common}:{common}:ro"]
+    else:
+        mounts += ["-v", f"{refstore.shadow}:{common}"]
+        for name in (*SHADOW_FILES, *SHADOW_DIRS):
+            path = common / name
+            if path.exists():
+                mode = "" if name in _RW_SHADOW_DIRS else ":ro"
+                mounts += ["-v", f"{path}:{path}{mode}"]
+        # `objects/info` is where `alternates` lives: read-write, a worker
+        # names any host directory there and every later sandboxed launch on
+        # this repository mounts it (and host git reads objects from it).
+        info = common / "objects" / "info"
+        if info.is_dir():
+            mounts += ["-v", f"{info}:{info}:ro"]
+        for alternate in _alternates(common / "objects"):
+            mounts += ["-v", f"{alternate}:{alternate}:ro"]
+    mounts += ["-v", f"{worktree_gitdir}:{worktree_gitdir}"]
+    # `commondir` names where `hooks/` and `config` resolve to, and
+    # `config.worktree` is read as part of the config stack whenever
+    # `extensions.worktreeConfig` is on: either one, rewritten, hands the next
+    # host-side git in this worktree a config of the worker's choosing.
+    # `gitdir` is the backlink `git worktree prune` checks: rewritten to a
+    # path that does not exist, the next host prune deletes this worktree's
+    # admin directory.
+    for name in ("commondir", "config.worktree", "gitdir"):
+        path = worktree_gitdir / name
+        if name != "gitdir":
+            try:
+                path.touch(exist_ok=True)
+            except OSError:
+                pass
+        if path.exists():
+            mounts += ["-v", f"{path}:{path}:ro"]
+    return mounts
+
+
+async def teardown(session_id: str) -> None:
+    """`docker rm -f` this session's container, best-effort.
+
+    The one place a session's container is torn down, called from every path
+    a session can *end* on -- `run_task`'s `finally` (normal exit, pause,
+    skip, timeout) and `reattach`'s (a session adopted or resolved after a
+    Kraft restart). The pid Kraft signals is `docker run`'s own client
+    process, not the container: the container is parented by the docker
+    daemon, so a killed -- or restarted-away-from -- client leaves it running
+    with the worktree still mounted (Kraft-rki).
+
+    Safe to call for a session that never had a sandbox at all: the name
+    (`container_name`) simply matches nothing, and `docker rm -f` on an
+    unknown name is a no-op this swallows. That is deliberate -- the callers
+    are "a session ended" points, and making them each first work out whether
+    this one was sandboxed is how a path gets missed. Errors (already gone,
+    docker not installed) are not this function's to raise: a container that
+    is already down is the success case.
+
+    Bounded: a wedged daemon answers `docker rm` never, and this is awaited on
+    every session's way out and for every row at startup. A container that
+    outlives a timed-out call is `sweep_orphans`'s at the next start.
+    """
+    await docker_call("rm", "-f", container_name(session_id))
+
+
+#: How long any one best-effort `docker` call Kraft makes on its own account
+#: (teardown, the orphan sweep, the image check) may take.
+DOCKER_CALL_TIMEOUT_S = 30.0
+
+
+async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+    """Run `docker args...`; `(returncode, stdout)`, or None when docker is
+    missing or did not answer in time (its client is then killed)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            *args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout or DOCKER_CALL_TIMEOUT_S)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None
+    return proc.returncode, out.decode(errors="replace")
+
+
+async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
+    """`docker rm -f` every container this Kraft home started that no live
+    session owns, returning their names: a teardown that failed or timed out
+    (the daemon was briefly down) leaves one writing a worktree forever, and
+    only a scan finds it. Listed by `home_label`, never by name, so another
+    Kraft's containers on the same daemon are left alone."""
+    listed = await docker_call(
+        "ps", "-a", "--filter", f"label={home_label()}", "--format", "{{.Names}}"
+    )
+    if listed is None or listed[0] != 0:
+        return []
+    keep = set(keep)
+    orphans = [n for n in listed[1].split() if n not in keep]
+    for name in orphans:
+        await docker_call("rm", "-f", name)
+    return orphans
+
+
+#: `(image, executable)` pairs an image was seen to hold. Only a hit is
+#: remembered: an operator who fixes the image need not restart Kraft.
+_HAS_EXECUTABLE: set[tuple[str, str]] = set()
+
+
+async def missing_executable(
+    image: str, executable: str, env: dict[str, str] | None = None
+) -> bool:
+    """True only when `image` demonstrably lacks `executable`. A launch then
+    stops as `config_error` naming both, instead of exiting 127 inside a
+    container that exists -- which reads as the agent failing and opens a fix
+    loop no agent can win. Asked the way the launch will run: through the
+    image's own entrypoint (a version manager's shim sets `PATH` there) and
+    with the repository's literal `env`. Anything inconclusive -- no daemon,
+    no `sh`, an entrypoint that is the agent itself, a pull that failed -- is
+    False: the launch goes ahead and fails, or not, as it always did."""
+    key = (image, executable)
+    if key in _HAS_EXECUTABLE:
+        return False
+    env_args = [a for name, value in (env or {}).items() for a in ("-e", f"{name}={value}")]
+    probed = await docker_call(
+        "run",
+        "--rm",
+        "--label",
+        home_label(),
+        "--network=none",
+        "--cap-drop=ALL",
+        *env_args,
+        image,
+        "sh",
+        "-c",
+        'command -v "$0" >/dev/null && echo kraft-probe-yes || echo kraft-probe-no',
+        executable,
+        timeout=300,
+    )
+    if probed is None or probed[0] != 0:
+        return False
+    answer = probed[1].strip().splitlines()[-1:]
+    if answer == ["kraft-probe-yes"]:
+        _HAS_EXECUTABLE.add(key)
+        return False
+    return answer == ["kraft-probe-no"]
+
+
+def sandbox_home(run_dirs, work_item_id: str) -> Path:
+    """The `HOME` a sandboxed item's containers share, kept across its
+    sessions so an agent CLI can resume one: the same directory for every
+    session of the item, never shared with another item."""
+    return run_dirs.base / "sandbox-home" / work_item_id
+
+
+def launch_failed(cidfile: Path) -> bool:
+    """True if `docker run` itself never created the container -- the daemon
+    is down, or an image could not be pulled -- so the sandboxed command
+    never ran: an infra problem no agent edit can fix (Kraft-nc9gm).
+
+    Read off `--cidfile`, not the log (Kraft-6ltwh): the log holds the
+    sandboxed command's own output too, so a task that prints docker's
+    wording is not docker failing. Nor the exit code: daemon-down is plain 1
+    (docker-cli 29.7.2, probed 2026-09-22), the same code a failing command
+    returns. docker writes the id once the container exists and removes an
+    unwritten cidfile when create fails (probed the same day: daemon
+    unreachable exits 1, a refused create exits 125, and neither leaves the
+    file; a create that succeeds writes it before start). A container docker
+    created but could not start is not caught here; it fails as the task's
+    own, as it did before this check existed."""
+    try:
+        return not cidfile.read_text().strip()
+    except OSError:
+        return True
+
+
+class DockerBackend:
+    """`kraft.worker.backends.SandboxBackend` over `docker run`. Every method
+    reads this module's functions at call time, so a test patching one of
+    them patches the backend too."""
+
+    kind = "docker"
+
+    def home(self, run_dirs, work_item_id: str) -> Path:
+        return sandbox_home(run_dirs, work_item_id)
+
+    async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
+        if await missing_executable(sandbox["image"], executable, env):
+            return (
+                f"image {sandbox['image']!r} has no {executable!r} on its PATH, so this "
+                "sandboxed task cannot start; install it in the image (see the sandbox "
+                "section of the repos.yaml reference)"
+            )
+        return None
+
+    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
+        return _refstore.prepare(run_base, cwd, branch, **kw)
+
+    def wrap(
+        self,
+        cmd: list[str],
+        cwd: str | Path,
+        sandbox: dict,
+        results_dir: str | Path | None,
+        env: dict | None = None,
+        *,
+        session_id: str | None = None,
+        result_path: str | Path | None = None,
+        cidfile: str | Path | None = None,
+        refs: RefStore | None = None,
+        home: str | Path | None = None,
+        passthrough: Iterable[str] = (),
+        ro_paths: Iterable[str | Path] = (),
+    ) -> list[str]:
+        return docker_argv(
+            cmd,
+            cwd,
+            sandbox,
+            results_dir,
+            env=env,
+            name=container_name(session_id) if session_id is not None else None,
+            result_path=result_path,
+            cidfile=cidfile,
+            refstore=refs,
+            home=home,
+            passthrough=passthrough,
+            ro_paths=ro_paths,
+        )
+
+    def launch_failed(self, cidfile: Path) -> bool:
+        return launch_failed(cidfile)
+
+    def code_out(self, refs: RefStore, session_id: str) -> str | None:
+        return _refstore.sync(refs, session_id)
+
+    def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
+        return _refstore.sync_item(run_base, work_item_id)
+
+    async def collect(self, session_id: str, result_path: Path) -> None:
+        """Nothing to fetch: the result file is bind-mounted, so the worker
+        wrote it where Kraft reads it."""
+
+    async def close(self, session_id: str) -> None:
+        await teardown(session_id)
+
+    async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
+        return await sweep_orphans({container_name(sid) for sid in keep_sessions})
+
+    def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
+        # The ref store is found through the worktree's `.git`, so this runs
+        # before the worktree goes.
+        _refstore.discard(run_dirs.base, worktree)
+        shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
+
+    async def health(self, sandbox: dict) -> tuple[bool, str]:
+        """A sandboxed repository's work items stop for a human without a
+        daemon to run them in, and its first launch pulls an image inside
+        that session's time cap: both are better learned from doctor."""
+        image = sandbox["image"]
+        daemon = await docker_call("version", "--format", "{{.Server.Version}}")
+        if daemon is None or daemon[0] != 0:
+            return False, "docker is not installed or its daemon is not reachable"
+        pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
+        if pulled is None or pulled[0] != 0:
+            return False, f"image {image!r} is not pulled -- run: docker pull {image}"
+        return True, f"docker {daemon[1].strip()}, image {image}"

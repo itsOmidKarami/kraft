@@ -202,7 +202,7 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     `--cap-drop=...` are single tokens, dropped outright. `--cidfile=PATH`
     gets a fake container id, as docker writes one once it has created the
     container. `docker ps` prints `$FAKE_DOCKER_PS` (container names) when
-    set; `docker rm -f NAME` -- `sandbox.teardown` -- appends `NAME` to
+    set; `docker rm -f NAME` -- `docker.teardown` -- appends `NAME` to
     `$FAKE_DOCKER_RM_LOG` when set, so a test can tell teardown happened.
     """
     bin_dir = tmp_path / "fake-docker-bin"

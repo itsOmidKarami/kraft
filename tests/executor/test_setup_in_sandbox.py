@@ -1,6 +1,6 @@
 """Kraft-p8nem: a sandboxed item's project-controlled commands never run on
 the host. Pinned at the launch: the argv and env each command is started
-with, and whether it went through `sandbox.docker_argv` or a bare host spawn.
+with, and whether it went through `docker_argv` or a bare host spawn.
 Every command here is benign (`true`, `touch`)."""
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from kraft import executor
 from kraft.api import deps
 from kraft.executor import dispatch
 from kraft.policy import SandboxPolicy
+from kraft.worker import refstore
+from kraft.worker.backends import docker as docker_backend
 from kraft.worker.env import worker_env
 
 _SANDBOX = {"kind": "docker", "image": "kraft/setup:1"}
@@ -345,15 +347,15 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
     wt = tmp_path / "wt"
     subprocess.run(["git", "worktree", "add", "-q", "-b", "kraft/x", str(wt)], cwd=repo, check=True)
     seen = {}
-    real_docker_argv = kraft_builtins._sandbox.docker_argv
+    real_docker_argv = docker_backend.docker_argv
 
     def spy(cmd, cwd, sandbox, results_dir, **kw):
         seen.update(kw)
         return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
 
-    monkeypatch.setattr(kraft_builtins._sandbox, "docker_argv", spy)
+    monkeypatch.setattr(docker_backend, "docker_argv", spy)
     published = []
-    monkeypatch.setattr(kraft_builtins._refstore, "sync", lambda *a, **kw: published.append(a))
+    monkeypatch.setattr(refstore, "sync", lambda *a, **kw: published.append(a))
 
     await kraft_builtins.run_setup_command(
         wt,

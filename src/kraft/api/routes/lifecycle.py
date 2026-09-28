@@ -17,7 +17,6 @@ from kraft import builtins as builtins_mod
 from kraft import escalate, events, executor, node_runs, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
-from kraft.adapters.subprocess import sandbox_home
 from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
@@ -26,7 +25,7 @@ from kraft.executor import gates, stops, walk
 from kraft.templates.forks import ChainPath, PathError, override_record
 from kraft.templates.models import AgentTask, GateNode
 from kraft.templates.retry import RetryOverrideError, validate_retry_override
-from kraft.worker import refstore
+from kraft.worker import backends
 
 logger = logging.getLogger(__name__)
 
@@ -189,11 +188,11 @@ async def _stop_live_sessions(st, wid: str, *, pause_item: bool = True) -> list[
 
 
 def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
-    """Drop what a sandboxed item kept beside its worktree: the ref store
-    (found through the worktree's `.git`, so before the worktree goes) and
-    the sandbox home its agent CLIs wrote caches and chats into."""
-    refstore.discard(run_dirs.base, worktree)
-    shutil.rmtree(sandbox_home(run_dirs, wid), ignore_errors=True)
+    """Drop what a sandboxed item kept beside its worktree (its code store,
+    and the home its agent CLIs wrote caches and chats into), before the
+    worktree goes."""
+    for backend in backends.every():
+        backend.release(run_dirs, worktree, wid)
 
 
 async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) -> bool:

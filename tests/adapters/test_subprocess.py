@@ -20,6 +20,7 @@ from support.harness import entry_of, fails_once, fake_docker_bin
 from kraft import events, logs, store
 from kraft.adapters import subprocess as sp
 from kraft.worker import refstore
+from kraft.worker.backends import docker as docker_backend
 
 from .test_subprocess_result_files import _REJECTED
 
@@ -608,7 +609,7 @@ async def test_a_ref_store_that_cannot_be_prepared_stops_as_config_error(
     def refuse(*a, **kw):
         raise RuntimeError("not on a branch")
 
-    monkeypatch.setattr(sp._refstore, "prepare", refuse)
+    monkeypatch.setattr(refstore, "prepare", refuse)
     status, row = await run(["true"], "s-norefs", sandbox=DOCKER)
 
     assert (status, row["status"]) == ("config_error", "config_error")
@@ -636,16 +637,16 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     """Kraft-rki: `env=` was silently dropped once `sandbox` was set -- only
     `FORWARDED_ENV` crosses into the container bare. `dispatch.py` passes
     `PYTHONDONTWRITEBYTECODE=1` for `on.test.run` so a fix-loop re-measure
-    cannot import a stale `.pyc`. `docker_argv` itself (test_sandbox.py) turns
+    cannot import a stale `.pyc`. `docker_argv` itself (backends/test_docker.py) turns
     `env=` into `-e` flags; this checks `run_task` forwards it at all."""
     seen = {}
-    real_docker_argv = sp._sandbox.docker_argv
+    real_docker_argv = docker_backend.docker_argv
 
     def fake_docker_argv(cmd, cwd, sandbox, results_dir, **kw):
         seen.update(kw)
         return real_docker_argv(cmd, cwd, sandbox, results_dir, **kw)
 
-    monkeypatch.setattr(sp._sandbox, "docker_argv", fake_docker_argv)
+    monkeypatch.setattr(docker_backend, "docker_argv", fake_docker_argv)
 
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
     status, _ = await run(

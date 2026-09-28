@@ -278,11 +278,11 @@ def _close_db_connections(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_remembered_images(monkeypatch):
-    """`sandbox.missing_executable` remembers images that had a command, for
+    """`docker.missing_executable` remembers images that had a command, for
     the process: per test instead, so no test's answer depends on another's."""
-    from kraft.worker import sandbox
+    from kraft.worker.backends import docker
 
-    monkeypatch.setattr(sandbox, "_HAS_EXECUTABLE", set())
+    monkeypatch.setattr(docker, "_HAS_EXECUTABLE", set())
 
 
 @pytest.fixture(autouse=True)
