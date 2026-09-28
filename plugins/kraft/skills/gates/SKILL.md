@@ -40,7 +40,10 @@ note. Threads work at any point in an item's life, gate or no gate:
   - `comment` queues them for the next agent that runs, without stopping
     anything. At a pending gate it also launches an agent to answer them.
   - `request_changes` redoes work: at a gate it rejects the gate with the
-    threads as the note; with no gate it re-runs the node the threads are about.
+    threads as the note. With no gate it picks the node the threads are about
+    and re-runs it now if that node is the one running or the item is stopped;
+    an earlier node waits until the running one finishes, and a paused item
+    until it is resumed. The response's `target` and `action` say which.
   - `approve` needs a pending gate, and is refused while any `must_fix` thread
     is unresolved.
 - `list_threads()` shows what is open and what the agents replied;
