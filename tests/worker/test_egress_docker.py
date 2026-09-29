@@ -134,7 +134,9 @@ def _gateway(cli: str) -> str:
 @pytest.fixture
 async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     """`launch(script, network)`: `script` run by `run_task` in a sandbox
-    with `network`, beside a host server listening on every address. Returns
+    with `network`, beside a host server listening on every address
+    (`upstream=` names another port on this host for `allowed.test`, and
+    `image=` and the rest are `run_task`'s). Returns
     `(what the script wrote to ./out, the refusal events, the NetworkMode
     of the relay and of relay B while it ran, and the transport)`; a launch
     that never ran fails with its log."""
@@ -147,6 +149,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
 
     server = await asyncio.start_server(serve, "0.0.0.0", 0)
     port = server.sockets[0].getsockname()[1]
+    dialled = [port]
 
     async def resolve(host, port_, **kw):
         if host == "allowed.test":
@@ -155,7 +158,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
 
     async def connect(address, port_):
         if address == ALLOWED_ADDRESS:
-            return await asyncio.open_connection("127.0.0.1", port)
+            return await asyncio.open_connection("127.0.0.1", dialled[0])
         return await asyncio.open_connection(address, port_)
 
     registry = channel.ChannelRegistry(
@@ -192,7 +195,8 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
 
-    async def go(script: str, network: dict):
+    async def go(script: str, network: dict, *, image=IMAGE, upstream=None, **kw):
+        dialled[0] = upstream or port
         status = await sp.run_task(
             database,
             short_run,
@@ -202,7 +206,8 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
             hook_point="on.test.run",
             cmd=["sh", "-c", script.format(gateway=_gateway(runtime.cli), port=port)],
             cwd=work,
-            sandbox={"kind": "docker", "image": IMAGE, "network": network},
+            sandbox={"kind": "docker", "image": image, "network": network},
+            **kw,
         )
         refused = [
             e["payload"]
