@@ -1,9 +1,29 @@
 # Contributing
 
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Requirements
+
+- [just](https://just.systems), the command runner every step below uses:
+  `brew install just`, `cargo install just`, or `uv tool install rust-just`.
+- [uv](https://docs.astral.sh/uv/). If you don't have Python 3.14
+  (`requires-python` in `pyproject.toml`), the first `uv sync` downloads it.
+- git.
+- Node 22 with npm, for the frontend, the docs site and the VS Code extension.
+  CI builds on Node 22; no `package.json` sets an `engines` floor, so use the
+  same major.
+
+`claude` is only needed for real agent runs, not for `just dev` or the tests.
+Semantic search is opt-in: `just setup-vector` downloads a model of roughly
+130 MB on first use, and search works without it in full-text mode.
+[`bd`](https://github.com/gastownhall/beads) (beads, an issue tracker) is
+optional: with it, every work item gets a tracked bead, and without it Kraft
+files work anyway and says so.
+
 ## Getting set up
 
 ```bash
-just setup      # uv sync + npm install
+just setup      # uv sync + npm ci
 just dev        # backend + vite, state in .dev/, agents faked, UI on :5173
 ```
 
@@ -12,15 +32,6 @@ is a symlink to `fixtures/fake-claude.sh` — the same fake the test suite uses,
 it cannot rot. A dev instance never spends tokens and never touches `~/.kraft`.
 
 Run `just` for the full list of recipes.
-
-Requirements: Python 3.14+ (`requires-python` in `pyproject.toml`),
-[uv](https://docs.astral.sh/uv/), and git. The frontend and the docs site build
-on Node 22 in CI; `frontend/package.json` sets no `engines` floor, so use the
-same major. `claude` is only needed for real agent runs, not for `just dev` or
-the tests. Semantic search is opt-in: `just setup-vector` downloads a model of
-roughly 130 MB on first use, and search works without it in full-text mode.
-[`bd`](https://github.com/gastownhall/beads) is optional: with it, every work
-item gets a tracked bead, and without it Kraft files work anyway and says so.
 
 `just dev-seed` fills a running dev instance with work items in every state by
 driving the real HTTP API, and `just dev-reset` throws `.dev/` away. A work item
@@ -33,19 +44,82 @@ to `just dev`'s daemon (state in `.dev/`, port 8766); **Run Extension
 (installed Kraft)** talks to `~/.kraft`, and acts on your real work items. Both
 rebuild the extension first.
 
-## Layout
+### Pre-commit hooks
+
+`.pre-commit-config.yaml` runs ruff, whitespace, YAML and file-size checks,
+and two local hooks. In a fresh clone, `uv run pre-commit install` sets them
+up. In a checkout where beads has taken over `core.hooksPath` (the
+maintainer's), `pre-commit install` refuses and `.beads/hooks/pre-commit` runs
+them instead. Either way, `uv run pre-commit run --all-files` runs them by
+hand. CI is the real gate; the hooks only catch things sooner.
+
+The two local hooks need `just` on `PATH`:
+
+- `config-schemas-current` runs `just schemas` when `src/kraft/` or
+  `vscode/schemas/` changes, and fails the commit if that rewrote a schema.
+  Stage the regenerated files and commit again.
+- `shipped-models-smoke` runs `just smoke-models` when `templates/` or
+  `src/kraft/harnesses/` changes. It launches the real `claude` CLI and spends
+  a few cents, so it needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
+  Without one it prints `SKIPPED` and lets the commit through.
+
+### Previewing the docs site
+
+```bash
+just docs       # cd docsite && npm ci && npm run dev
+```
+
+The site is served at <http://localhost:3000/kraft/>, not at the root: it is
+built for GitHub Pages under `/kraft/`. The dev server logs a `@nuxt/robots`
+ERROR and a few warnings as it starts; the site works regardless.
+
+## Finding something to work on
+
+Issues labelled
+[`good first issue`](https://github.com/itsOmidKarami/kraft/labels/good%20first%20issue)
+are small and self-contained. For anything bigger than a bug fix, open an issue
+first and say what you plan to do, so nobody spends a week on a change that
+does not fit.
+
+Comments, commit messages and the changelog cite IDs like `Kraft-y0g2`. They
+point into the maintainer's private issue tracker (beads), which you cannot
+see. Read one as "this was discussed"; the text beside it says what matters.
+Don't add new ones: cite a GitHub issue or pull request number instead.
+
+## Repository layout
 
 ```text
-src/kraft/        orchestrator: api, executor, policy, store, adapters/, index/
-frontend/         React SPA (vite)
-templates/        the V1 library, chains, harness profiles and policy: the install seed
-dev/seed.py       dev-instance seeder
-fixtures/         fake agent and the PATH shim just dev uses
+src/kraft/        the orchestrator: api/, executor/, store/, adapters/, worker/, cli/, index/, ...
+frontend/         the React SPA (vite); e2e/ is Playwright, sweep/ is a screenshot harness
+templates/        the default library, chains, harness profiles and policy: an install's seed
+tests/            backend tests, mirroring src/kraft/ (CLAUDE.md says why that matters)
+dev/              the dev-instance seeder, CI check scripts, release and codegen helpers
+fixtures/         the fake agent and the PATH shim `just dev` uses
+docs/             the testing guideline, the intent tree, the templates design draft
 docs/intent/      intended behaviour as pinned requirements, each tied to a test
 docsite/          the published documentation site
-docs/             testing guideline, intent tree, templates design draft
 plugins/          the Claude Code plugins: kraft and kraft-lite
+vscode/           the VS Code extension
+install.sh        the one-line installer the README points to
 ```
+
+The dot-directories are mostly the maintainer's agent tooling. You can ignore
+them unless you use the same tools:
+
+| Directory | What it is | Do you need it? |
+|---|---|---|
+| `.github/` | CI workflows, issue and PR templates, CODEOWNERS | Yes: CI lives here |
+| `.claude-plugin/` | the marketplace manifest that publishes `plugins/` | Only to rename a plugin or add one |
+| `.claude/` | Claude Code settings: a hook that blocks raw `pytest` (needs `jq`) | Only with Claude Code |
+| `.beads/` | beads config and git hooks for the maintainer's private tracker | No |
+| `.agents/` | a beads skill for agent sessions | No |
+| `.codex/` | Codex hooks that call `bd`; they fail without beads installed | No |
+| `.kraft-lite/` | this repo's Kraft Lite hook registry | No |
+| `.gitlab/` | the PR template for GitLab, from before the move to GitHub; a symlink to `.github/`'s | No |
+
+In `frontend/sweep/`, `briefs/`, `WAVES.md` and `HISTORY.md` are the
+maintainer's working notes from past UI fix passes. `frontend/sweep/README.md`
+covers the harness itself.
 
 ## Tests
 
@@ -63,10 +137,58 @@ just fix        # autofix
 change-tracking; a raw invocation skips it and runs the full ~14 minute suite.
 A Claude Code hook blocks it for agent sessions.
 
+**Your first `just test` is a full run.** testmon has no record yet of which
+tests touch which code (it keeps one in `.testmondata`), so it runs everything;
+later runs are change-selected. To start with one area, name it:
+
+```bash
+just test tests/cli -n auto            # one directory, in parallel
+just test tests/cli/test_service.py -k systemd
+```
+
 See [`docs/testing.md`](docs/testing.md) for the shape a test should take: the
 two tiers, the shared fixtures, and the mutate-then-confirm-it-fails procedure
 that is the only thing that actually proves a test pins something.
 `just check-tests` enforces what of that can be checked mechanically.
+[`docs/intent/README.md`](docs/intent/README.md) explains the intent tree and
+its `enforced-by:` pins, which break when you rename a pinned test.
+
+### What CI checks
+
+Every pull request runs these. `just ci-test` runs the first two jobs, in CI's
+order, on the full suite.
+
+| CI job | What it runs | Run it locally with |
+|---|---|---|
+| `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
+| `test` | the unit tier (`-m "not e2e"`), then `python -m kraft.intent` | `just ci-test`, or `just test` and `just intent` |
+| `e2e (real CLIs)` | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
+| `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
+| `frontend` | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
+| `vscode` | typecheck, unit tests, integration tests | `just test-vscode`, then `npm run test:integration` in `vscode/` |
+| `playwright` | the browser e2e suite against a fixture server | `just e2e-ci` |
+| `removals declared` | `dev/check_removals.py` against the PR description | see below |
+| `release impact declared` | exactly one `release::*` label | see [Pull requests and release labels](#pull-requests-and-release-labels) |
+| `docs` (only when `docsite/` changes) | `npm ci && npx nuxt generate` in `docsite/` | the same, in `docsite/` |
+| `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
+| `codeql` | GitHub's static analysis | nothing to run |
+
+**Removed tests.** If your pull request deletes a test function, a frontend
+test file, or an intent `## REQ` heading, list each one in its description,
+or `removals declared` fails:
+
+```markdown
+## Removed tests
+- tests/test_old.py::test_gone -- replaced by tests/test_new.py::test_here
+
+## Removed requirements
+- some-req-name -- superseded by other-req-name
+```
+
+A renamed test counts as a removal, so list its old id. The PR template has
+these sections, commented out; [`docs/testing.md`](docs/testing.md) has the
+full rule. To check before you push, save the description to a file and run
+`uv run python dev/check_removals.py origin/main BODY.md`.
 
 ## Pull requests and release labels
 

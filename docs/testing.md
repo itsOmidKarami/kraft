@@ -142,9 +142,10 @@ breaks.
 4. Revert the mutation.
 
 Do this for every new or consolidated pin before you consider the work
-done, and note the mutation in the commit or PR description (see the wave
-reports in this repo's history for the convention: "mutation: `<the
-change>` kills `<the test/case>`; applied, confirmed failing, reverted").
+done, and note the mutation in the commit or PR description: "mutation:
+`<the change>` kills `<the test/case>`; applied, confirmed failing,
+reverted". [#258](https://github.com/itsOmidKarami/kraft/pull/258) shows it
+as a table.
 
 ### Five vacuous shapes to watch for
 

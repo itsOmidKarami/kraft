@@ -8,10 +8,6 @@ repository.
 
 ## Kraft Workers
 
-A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker, running in a
-throwaway git worktree on its own branch. It commits everything it changes
-before it exits — uncommitted work never reaches the merge request and is
-destroyed with the worktree. This overrides the Conservative profile's
-"do not run git commits" for commits only: a worker still does not push,
-merge, sync Dolt, or close beads. Kraft does those itself. The full worker
-rules, including the environment allowlist, are in [CLAUDE.md](CLAUDE.md).
+A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker: it commits
+everything it changes before it exits, and leaves pushing, merging and the
+issue tracker to Kraft. The rules are in [CLAUDE.md](CLAUDE.md#kraft-workers).

@@ -160,4 +160,5 @@ Report security problems as [SECURITY.md](SECURITY.md) describes.
 
 Set-up, the `just` recipes, tests, and the pull request rules are in
 [CONTRIBUTING.md](CONTRIBUTING.md). Releases are described in
-[RELEASING.md](RELEASING.md).
+[RELEASING.md](RELEASING.md). Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
