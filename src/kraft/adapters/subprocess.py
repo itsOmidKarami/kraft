@@ -672,6 +672,11 @@ async def run_task(
             {k: v for k, v in repo_entry.env.items() if k not in sentinels}
             if repo_entry is not None
             else None,
+            paths=(
+                backend.home(run_dirs, work_item_id),
+                *((refs.shadow,) if refs is not None else ()),
+                result_path,
+            ),
         ):
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))

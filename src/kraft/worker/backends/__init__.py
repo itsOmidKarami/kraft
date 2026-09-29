@@ -33,10 +33,13 @@ class SandboxBackend(Protocol):
     def home(self, run_dirs, work_item_id: str) -> Path:
         """The item's own `HOME`, kept across its sessions."""
 
-    async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
+    async def probe(
+        self, sandbox: dict, executable: str, env: dict | None, *, paths: tuple[Path, ...] = ()
+    ) -> str | None:
         """Why a launch of `executable` cannot start, or None to go ahead:
         a session that could never start is `config_error`, not a task
-        failure."""
+        failure. `paths` are the host files and directories the container
+        writes: its HOME, its ref store, its result file."""
 
     async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """Ready what a launch in `sandbox` needs on the host side, after a

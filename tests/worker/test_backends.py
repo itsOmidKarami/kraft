@@ -54,8 +54,9 @@ class Remote:
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
 
-    async def probe(self, sandbox, executable, env):
+    async def probe(self, sandbox, executable, env, *, paths=()):
         self.probed_env = env
+        self.probed_paths = paths
         return None
 
     async def prepare(self, sandbox, *, kraft_ca=None):
@@ -184,6 +185,17 @@ async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, t
     assert (row["sandbox"], remote.closed) == ("remote", ["s1"])
 
 
+async def test_the_probe_is_shown_every_path_the_container_writes(
+    database, run_dirs, tmp_path, remote, monkeypatch
+):
+    """So a rootless runtime can refuse one someone else owns (spec §3)."""
+    refs = SimpleNamespace(shadow=tmp_path / "refs", branch=None, carried=None)
+    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: refs)
+    await _run_on_remote(database, run_dirs, tmp_path)
+    home = run_dirs.base / "remote-home" / "w1"
+    assert remote.probed_paths == (home, refs.shadow, sp.result_path_for(run_dirs, "s1"))
+
+
 async def test_reattach_closes_a_dead_session_in_the_backend_it_ran_in(
     item_on, database, run_dirs, remote, docker_closed
 ):
@@ -217,7 +229,9 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
     async def fail(session_id, result_path):
         raise OSError("copy-out failed")
 
-    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: SimpleNamespace(carried=None))
+    monkeypatch.setattr(
+        remote, "code_in", lambda *a, **kw: SimpleNamespace(carried=None, shadow=tmp_path)
+    )
     monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid))
     monkeypatch.setattr(remote, "collect", fail)
     await database.write(
