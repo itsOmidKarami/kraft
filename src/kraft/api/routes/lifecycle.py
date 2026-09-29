@@ -235,6 +235,7 @@ async def abandon_work_item(wid: str, request: Request):
     worktree is reaped separately, right before the worktree goes (Kraft-ugm6).
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
     if row["status"] == "active":
         raise HTTPException(409, "work item is active; pause it before abandoning")
@@ -309,6 +310,7 @@ async def pause_work_item(wid: str, request: Request):
     one mechanism: kill this attempt, carry new context into the next one.
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
@@ -475,6 +477,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     from_statuses = ["paused"]
     if row["status"] == "needs_human" and board._needs_context_stop(st, wid):
@@ -704,6 +707,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     from kraft.api.routes.gates import _decided_by  # local: it imports this module
 
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
@@ -1040,6 +1044,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     skip does not care what state stopped the item, only what node is current.
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     # /skip has no live task to gate a race the way spawn does for every other
     # door: paused/needs_human have none yet, and claim_for_run's to_status
     # ("active") is also one of skip's own from_statuses, so two concurrent

@@ -230,7 +230,7 @@ async def test_an_earlier_gates_must_fix_still_blocks_a_later_gate(item_on, scri
     # Half 2: claimed but unresolved -- the gate is open, but Task 3's own
     # must-fix guard still refuses to approve it.
     state = SimpleNamespace(db=it.database, tasks={})
-    request = SimpleNamespace(app=SimpleNamespace(state=state))
+    request = SimpleNamespace(app=SimpleNamespace(state=state), headers={})
     with pytest.raises(HTTPException) as exc:
         await gates_route.approve_gate(it.id, "review", request)
     assert exc.value.status_code == 409

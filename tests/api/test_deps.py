@@ -5,13 +5,18 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import os
+import sqlite3
 import warnings
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
 from fastapi import HTTPException
+from support import permissions
 
+from kraft import store
 from kraft.api import deps
 
 
@@ -248,3 +253,49 @@ def test_resolve_chain_or_422_prefixes_the_resolvers_own_message(tmp_path):
     assert excinfo.value.status_code == 422
     assert excinfo.value.detail.startswith("chain template 'nope': ")
     assert "no chain 'nope'" in excinfo.value.detail
+
+
+@pytest.fixture
+def templates_dir(tmp_path, monkeypatch):
+    return permissions.templates(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/work-items/w1/gates/review/approve", {}),
+        ("/api/work-items/w1/gates/review/reject", {"note": "no"}),
+        ("/api/work-items/w1/pause", None),
+        ("/api/work-items/w1/resume", {}),
+        ("/api/work-items/w1/skip", {}),
+        ("/api/work-items/w1/abandon", None),
+        ("/api/work-items/w1/retry", {}),
+    ],
+    ids=["approve", "reject", "pause", "resume", "skip", "abandon", "retry"],
+)
+@pytest.mark.parametrize(
+    ("caller", "refused"),
+    [("s-own", True), ("s-escalation", False), ("s-other", False), (None, False)],
+    ids=["own-worker", "own-escalation", "other-items-worker", "no-header"],
+)
+def test_a_worker_session_cannot_act_on_its_own_item(client, path, body, caller, refused):
+    """`deps.forbid_self_action`, the server's twin of the CLI's guard (design
+    §6 rule 2): a consistency check, not a boundary, as a caller can omit the
+    header. An escalation turn is not a worker, so it may."""
+    permissions.seed_session(sid="s-escalation", wid="w1", hook_point="escalation")
+    permissions.seed_session(sid="s-other", wid="w2")
+    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
+        store.create_session(
+            conn,
+            id="s-own",
+            work_item_id="w1",
+            node_id="implementation",
+            hook_point=permissions.PATH,
+            log_path="/tmp/kraft-test.log",
+            result_path="/tmp/kraft-test.json",
+        )
+    headers = {"X-Kraft-Session-Id": caller} if caller else {}
+    r = client.post(path, json=body, headers=headers)
+    assert (r.status_code == 403) is refused, r.text
+    if refused:
+        assert "cannot act on its own work item (w1)" in r.json()["detail"]
