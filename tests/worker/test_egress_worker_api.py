@@ -28,6 +28,8 @@ class _Api:
         self.answers: dict[str, tuple[int, object]] = {}
         #: Seconds a path takes to answer.
         self.slow: dict[str, float] = {}
+        #: When set, every call waits for it before answering.
+        self.release: asyncio.Event | None = None
         conn = sqlite3.connect(":memory:", check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("CREATE TABLE review_threads (id TEXT, work_item_id TEXT)")
@@ -52,6 +54,8 @@ class _Api:
             }
         )
         await asyncio.sleep(self.slow.get(request.url.path, 0))
+        if self.release is not None:
+            await self.release.wait()
         status, payload = self.answers.get(request.url.path, (200, {"ok": request.url.path}))
         return JSONResponse(payload, status_code=status)
 
@@ -235,3 +239,19 @@ async def test_a_call_the_daemon_does_not_answer_in_time_is_a_504(worker_api, mo
     api.slow["/api/work-items/w-own/progress"] = 3
     status, _, _ = await ask("progress", {"task": "1"})
     assert status == 504
+
+
+async def test_a_call_past_the_sessions_limit_waits_for_one_to_finish(worker_api):
+    api, ask = worker_api
+    api.release = asyncio.Event()
+    calls = [asyncio.create_task(ask("progress", {"task": "1"})) for _ in range(5)]
+
+    async def held():
+        while len(api.calls) < egress.MAX_WORKER_CALLS:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(held(), 5)
+    await asyncio.sleep(0.2)
+    assert len(api.calls) == egress.MAX_WORKER_CALLS
+    api.release.set()
+    assert [status for status, _, _ in await asyncio.gather(*calls)] == [200] * 5

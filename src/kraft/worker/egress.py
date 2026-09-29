@@ -59,6 +59,9 @@ MAX_REFUSAL_EVENTS = 100
 #: The most a worker API request may be: a permission hook's stdin carries the
 #: tool call's whole input, a file being written among it.
 MAX_WORKER_BODY = 16 * 1024 * 1024
+#: Worker API calls one session may have in flight, body read to answer;
+#: the next waits for one of them to finish.
+MAX_WORKER_CALLS = 4
 #: How much of a refused worker API route its event records.
 MAX_ROUTE = 256
 
@@ -156,6 +159,11 @@ class EgressSession:
     credentials: tuple[inject.InjectRule, ...] = ()
     #: Where the Kraft CA mints the leaf shown when TLS is terminated.
     run_dirs: object = None
+    #: Held from a worker API call's body to its answer: `MAX_WORKER_CALLS`
+    #: 16 MiB bodies at most, so a worker cannot exhaust the daemon's memory.
+    calls: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(MAX_WORKER_CALLS), repr=False, compare=False
+    )
 
 
 def _split(pattern: str) -> tuple[str, int | None]:
@@ -482,10 +490,9 @@ class EgressProxy:
         No header the client sent is read but the body's length: not its
         `Authorization`, not an `X-Kraft-Session-Id`. `/mcp` is the session
         MCP server's (`_mcp_call`)."""
-        # ponytail: no cap on one session's concurrent worker API connections,
-        # nor on the permission_decision events its asks record -- parity with
-        # a host worker, whose `kraft` and hook are unbounded too. A per-session
-        # semaphore and event cap if a worker is ever seen flooding the daemon.
+        # ponytail: no cap on the permission_decision events a session's asks
+        # record -- parity with a host worker, whose hook is unbounded too. An
+        # event cap if a worker is ever seen flooding the daemon.
         url = urlsplit(target)
         if url.path == "/mcp":
             return await self._mcp_call(reader, writer, session, method, headers, rest)
@@ -494,23 +501,26 @@ class EgressProxy:
             return await self._refuse_route(
                 writer, session, f"{method} {url.path}", "not a worker API verb"
             )
-        body = await _read_body(reader, writer, headers, rest)
-        if body is None:
-            return
-        form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
-        scope = callback.scope_for_channel(session)
-        call = verb(form, scope)
-        if isinstance(call, str):
-            return await _answer(writer, 400, "Bad Request", call)
-        api_method, path, payload = call
-        if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
-            return await self._refuse_route(
-                writer, session, f"{api_method} {path}", "not this session's to call"
-            )
-        try:
-            reply = await self._call(self._app, api_method, path, scope.session_id, json=payload)
-        except TimeoutError:
-            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
+        async with session.calls:
+            body = await _read_body(reader, writer, headers, rest)
+            if body is None:
+                return
+            form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
+            scope = callback.scope_for_channel(session)
+            call = verb(form, scope)
+            if isinstance(call, str):
+                return await _answer(writer, 400, "Bad Request", call)
+            api_method, path, payload = call
+            if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
+                return await self._refuse_route(
+                    writer, session, f"{api_method} {path}", "not this session's to call"
+                )
+            try:
+                reply = await self._call(
+                    self._app, api_method, path, scope.session_id, json=payload
+                )
+            except TimeoutError:
+                return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
         kind = reply.headers.get("content-type", "application/json")
         if verb is _permission_hook:
@@ -541,16 +551,19 @@ class EgressProxy:
             return await _answer(
                 writer, 405, "Method Not Allowed", "the session MCP server streams nothing"
             )
-        body = await _read_body(reader, writer, headers, rest)
-        if body is None:
-            return
-        passed = {_name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS}
-        try:
-            reply = await self._call(
-                self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
-            )
-        except TimeoutError:
-            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
+        async with session.calls:
+            body = await _read_body(reader, writer, headers, rest)
+            if body is None:
+                return
+            passed = {
+                _name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS
+            }
+            try:
+                reply = await self._call(
+                    self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
+                )
+            except TimeoutError:
+                return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         kind = reply.headers.get("content-type", "application/json")
         await _respond(writer, reply.status_code, reply.reason_phrase, kind, reply.content)
 
