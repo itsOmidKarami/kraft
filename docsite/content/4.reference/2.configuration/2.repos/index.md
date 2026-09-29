@@ -87,7 +87,7 @@ Permission checks under `network:`:
 - **Claude.** Launched with Kraft's MCP server at `http://kraft/mcp` and no other (`--strict-mcp-config`), which answers its permission tool for that session alone.
 - **Cursor** ignores a proxy, so it is refused under a network policy.
 
-**Without `network:`** the container has no route to Kraft. A sandboxed Claude task is refused before it starts (its permission tool would be missing and the CLI would exit), as is a Codex or Cursor task with a tool policy. Prompts do not tell the worker to run `kraft`: it tags its commits with the task number instead of reporting progress, and says what it did about each review thread in its result. No reply agent is launched for review threads. An escalation turn cannot resume the chain itself; a person retries it.
+**Without `network:`** the container has no route to Kraft. A sandboxed Claude task is refused before it starts (its permission tool would be missing and the CLI would exit), as is a Codex or Cursor task with a tool policy. Prompts do not tell the worker to run `kraft`: it tags its commits with the task number instead of reporting progress, and says what it did about each review thread in its result. No reply agent is launched for review threads: a `comment` review answers `reply_agent: false`, and the item records a `reply_agent_skipped` event saying why. An escalation turn cannot resume the chain itself; a person retries it.
 
 ### Resource limits
 

@@ -130,6 +130,8 @@ async def test_a_sandbox_without_network_gets_no_reply_agent(
 
     assert status == "no_channel"
     assert it.sessions(GATE) == []
+    [skipped] = it.events("reply_agent_skipped")
+    assert skipped["payload"]["gate"] == GATE
 
 
 async def test_nothing_unanswered_launches_nothing(item_on, run_dirs, tmp_path, monkeypatch):

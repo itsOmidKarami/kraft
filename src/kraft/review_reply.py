@@ -84,6 +84,25 @@ async def run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> s
         return "failed"
 
 
+async def refused_without_channel(db, row, launch, gate: str) -> bool:
+    """True, recorded on the item as `reply_agent_skipped`, when the item's
+    sandbox has no `network:`: the reply agent answers by `kraft item
+    reply`, which such a sandbox has no route for, so none runs."""
+    try:
+        sandbox = executor.item_sandbox(row, launch)
+    except executor.SandboxUnresolved:
+        return False
+    if _callback.reachable(sandbox):
+        return False
+    reason = "the item's sandbox has no `network:`, so no route to Kraft: no reply agent runs"
+    await db.write(
+        lambda c: events.append(
+            c, row["id"], "reply_agent_skipped", {"gate": gate, "reason": reason}
+        )
+    )
+    return True
+
+
 async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> str:
     threads = db.read(lambda c: store.unanswered(c, work_item_id))
     if not threads:
@@ -102,9 +121,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         sandbox = executor.item_sandbox(row, launch)
     except executor.SandboxUnresolved:
         return "no_agent"
-    if not _callback.reachable(sandbox):
-        # It answers by running `kraft item reply`, which a sandbox without
-        # `network:` has no route for: launched, it could only burn tokens.
+    if await refused_without_channel(db, row, launch, gate):
         return "no_channel"
     hit = db.read(lambda c: caps.at_launch(c, row, task))
     if hit is not None and hit.remaining_s <= 0:
