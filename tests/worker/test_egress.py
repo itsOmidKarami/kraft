@@ -131,12 +131,14 @@ async def test_an_absolute_form_request_is_forwarded_in_origin_form(proxy, inter
     p = await proxy(allow=["api.example.com"])
     reader, writer = await p.send(
         b"GET http://api.example.com/v1/x?q=1 HTTP/1.1\r\nHost: evil.example\r\n"
-        b"Proxy-Authorization: Basic c2VjcmV0\r\nConnection: keep-alive\r\n\r\n"
+        b"Proxy-Authorization: Basic c2VjcmV0\r\nConnection: keep-alive\r\nX-Name: caf\xe9\r\n\r\n"
     )
     echoed = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
     writer.close()
+    # An obs-text byte passes as the one byte it was, not re-encoded.
     assert echoed == (
-        b"GET /v1/x?q=1 HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n\r\n"
+        b"GET /v1/x?q=1 HTTP/1.1\r\nHost: api.example.com\r\nX-Name: caf\xe9\r\n"
+        b"Connection: close\r\n\r\n"
     )
     assert internet.dialled == [("93.184.216.34", 80)]
 

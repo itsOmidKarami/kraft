@@ -423,7 +423,7 @@ class EgressProxy:
             kept = "".join(f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"})
             out_writer.write(
                 f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
-                "Connection: close\r\n\r\n".encode()
+                "Connection: close\r\n\r\n".encode("latin-1")
             )
             if upstream is not None:
                 # One request's bytes and no more: whatever else the client
@@ -460,7 +460,9 @@ class EgressProxy:
             auth_line = f"Proxy-Authorization: {auth}\r\n" if auth else ""
             authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
             out_writer.write(
-                f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode()
+                f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode(
+                    "latin-1"
+                )
             )
             await out_writer.drain()
             reply, early = await asyncio.wait_for(_read_head(out_reader), CONNECT_TIMEOUT)
