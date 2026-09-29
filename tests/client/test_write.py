@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -117,3 +118,33 @@ def test_ensure_repo_reports_a_path_that_is_not_a_repo(wired, tmp_path):
 
     with pytest.raises(ValueError, match="400"):
         run_with_app(wired, scenario)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: client.ensure_repo("sub"),
+        lambda: client.disconnect_repo("sub"),
+        lambda: client.create_work_item("t", repo="sub"),
+        lambda: client.reindex("sub"),
+    ],
+    ids=["connect", "disconnect", "create", "reindex"],
+)
+def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch):
+    """The server resolves a relative path against its own cwd, so `kraft repo
+    connect .` connected the daemon's directory (Kraft-9efnk.32). Every verb
+    that sends a path makes it absolute where the caller stands."""
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        for fields in (kwargs.get("json") or {}, kwargs.get("params") or {}):
+            sent.extend(v for k, v in fields.items() if k in ("path", "repo"))
+        if path == "/repos/probe":
+            return httpx.Response(400, json={"detail": "not probed"})
+        return httpx.Response(201, json={"repos": [], "id": "w"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(call())
+    assert sent
+    assert set(sent) == {str(Path.cwd() / "sub")}

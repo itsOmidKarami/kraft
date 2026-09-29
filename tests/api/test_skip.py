@@ -39,6 +39,7 @@ def test_skip_advances_past_a_stopped_task_node_without_rerunning_it(client, rep
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "KRAFT_FAIL once",
             "repo": str(repo),
             "chain_template": "quick-task",
@@ -74,7 +75,7 @@ def test_skip_bypasses_a_pending_gate_without_approving_it(client, repo, monkeyp
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     ).json()["id"]
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
@@ -99,7 +100,12 @@ def test_skip_while_active_kills_the_running_session_and_still_advances(client, 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
     wid = client.post(
         "/api/work-items",
-        json={"title": "KRAFT_SLOW go", "repo": str(repo), "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "title": "KRAFT_SLOW go",
+            "repo": str(repo),
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
 
     deadline = time.monotonic() + 20
@@ -128,7 +134,7 @@ def test_two_concurrent_skips_produce_one_advance_and_one_409(client, repo, monk
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     ).json()["id"]
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
@@ -163,7 +169,7 @@ def test_skip_refuses_and_writes_nothing_when_a_walk_is_still_live_at_a_stop(
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
     wid = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     ).json()["id"]
     _poll_events(client, wid, "gate_requested")
     item = client.get(f"/api/work-items/{wid}").json()
@@ -208,7 +214,12 @@ def test_skip_cancels_the_live_walk_before_it_writes(client, repo, monkeypatch):
 
     wid = client.post(
         "/api/work-items",
-        json={"title": "KRAFT_SLOW go", "repo": str(repo), "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "title": "KRAFT_SLOW go",
+            "repo": str(repo),
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
 
     deadline = time.monotonic() + 20

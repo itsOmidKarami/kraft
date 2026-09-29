@@ -285,6 +285,7 @@ def test_intake_skip_nodes_rejects_an_unknown_node(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
@@ -302,6 +303,7 @@ def test_intake_skip_nodes_rejects_a_node_a_kept_node_bounces_to(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
@@ -323,6 +325,7 @@ def test_intake_skip_nodes_rejects_emptying_the_whole_chain(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",

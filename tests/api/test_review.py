@@ -9,20 +9,20 @@ import time
 from pathlib import Path
 
 import pytest
-from support.api import _await_gate, _poll_node_started, _review_early, _set_status
+from support.api import _await_gate, _poll_node_started, _review_early, _set_status, _started
 
 _REVIEW = pytest.mark.api_client(edit_templates=_review_early)
 
 
 def _post(client, repo):
-    return client.post(
-        "/api/work-items",
-        json={
+    return _started(
+        client,
+        {
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "review-early",
         },
-    ).json()["id"]
+    )
 
 
 def _worktree(client, wid) -> Path:
@@ -210,7 +210,7 @@ def test_worker_agents_cannot_use_human_routes(client, gated):
 
 def test_threads_can_be_filed_without_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo)})
     r = _new_thread(client, wid, label="question", anchor_sha="0" * 40)
     assert r.status_code == 201, r.text
     assert r.json()["gate"] is None
@@ -220,7 +220,7 @@ def test_threads_are_refused_on_a_finished_item(client, repo, monkeypatch):
     from support.api import _set_status
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "fix")
-    wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo)})
     _set_status(wid, "completed")
     assert _new_thread(client, wid, anchor_sha="0" * 40).status_code == 409
 
@@ -422,9 +422,7 @@ def test_an_unreadable_head_refuses_the_review_and_records_nothing(client, gated
 def test_a_gateless_comment_is_recorded_with_no_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")  # stays running at implementation
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
-        "id"
-    ]
+    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
     _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
     _new_thread(client, wid, label="question", anchor_sha="0" * 40)
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
@@ -440,9 +438,7 @@ def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkey
     on a thread with no gate has nothing to count an attempt against."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
-        "id"
-    ]
+    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
     _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
     tid = _new_thread(client, wid, anchor_sha="0" * 40).json()["id"]
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "comment"})
@@ -460,9 +456,7 @@ def test_a_reply_to_a_gateless_thread_has_no_attempt_number(client, repo, monkey
 def test_approve_needs_a_pending_gate(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post("/api/work-items", json={"title": "KRAFT_SLOW t", "repo": str(repo)}).json()[
-        "id"
-    ]
+    wid = _started(client, {"title": "KRAFT_SLOW t", "repo": str(repo)})
     _poll_node_started(client, wid, "spec")  # the worktree exists once its first node starts
     r = client.post(f"/api/work-items/{wid}/review", json={"outcome": "approve"})
     assert r.status_code == 409
@@ -538,10 +532,7 @@ def _paused_before_the_gate(client, repo, monkeypatch, delay="5"):
     would 409 on a walk "already running" against their own target."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", delay)
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
-    ).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
     r = client.post(f"/api/work-items/{wid}/pause")
     assert r.status_code == 200, r.text
@@ -619,10 +610,7 @@ def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
     (`walk.run_once`), never by pausing what is in flight."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
-    ).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")  # implementation already ran
     _target_thread(client, wid, "implementation")
 
@@ -640,10 +628,7 @@ def test_request_changes_for_an_earlier_node_does_not_stop_the_running_one(
 def test_request_changes_on_the_running_node_reruns_it(client, repo, monkeypatch):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
-    ).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
 
     r = client.post(
@@ -679,10 +664,7 @@ def test_a_resume_that_fails_then_succeeds_on_retry_reports_success(client, repo
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
-    ).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
 
     real_resume = review_routes.lifecycle.resume_work_item
@@ -732,10 +714,7 @@ def test_a_resume_that_fails_on_both_tries_in_the_rerun_branch_is_refused(
 
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "5")
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "review-early"},
-    ).json()["id"]
+    wid = _started(client, {"title": "t", "repo": str(repo), "chain_template": "review-early"})
     _poll_node_started(client, wid, "work_item_summary")
 
     calls = {"n": 0}

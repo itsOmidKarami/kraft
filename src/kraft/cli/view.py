@@ -191,7 +191,7 @@ def _cmd_watch(ns: argparse.Namespace) -> None:
         )
 
     async def run() -> None:
-        repo = ns.repo or await client.resolve_repo()
+        repo = client.absolute_path(ns.repo) if ns.repo else await client.resolve_repo()
         drawn = 0
 
         async def frame(drawn: int) -> tuple[int, int]:

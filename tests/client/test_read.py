@@ -70,7 +70,9 @@ def run_with_app(api, scenario):
 
 async def _create(repo, title="read me") -> str:
     async with client.transport.http() as http:
-        response = await http.post("/api/work-items", json={"title": title, "repo": str(repo)})
+        response = await http.post(
+            "/api/work-items", json={"autostart": True, "title": title, "repo": str(repo)}
+        )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 

@@ -52,7 +52,7 @@ def build() -> MCPServer:
     async def create_work_item(
         title: str,
         repo: str | None = None,
-        chain_template: str = "default",
+        chain_template: str | None = None,
         description: str | None = None,
         attachments: list[dict] | None = None,
         auto_gate: bool = True,
@@ -66,7 +66,8 @@ def build() -> MCPServer:
         """File a new Kraft work item. It is created **paused** and does not run:
         a human starts it from the board. Use this to hand finished work off to
         Kraft rather than doing it in this session. `repo` defaults to the repo
-        of the work item this session is standing in.
+        of the work item this session is standing in. `chain_template` defaults
+        to the repo's `default_chain_template`, else `default`.
 
         `description` is the brief — what the work actually is, in prose. The
         title is only a label; the spec node writes its design from the

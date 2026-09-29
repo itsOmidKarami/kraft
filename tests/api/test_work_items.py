@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import _await_gate, _poll_events, _post_default, _set_status
-from support.harness import make_repo, make_repo_with_engineering
+from support.api import _await_gate, _poll_events, _post_default, _set_status, _started
+from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
 from kraft.api.routes.work_items import NewWorkItem
@@ -48,7 +48,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 
     r = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     )
 
     assert r.status_code == 201, r.text
@@ -413,7 +413,7 @@ def test_get_work_item_reports_the_worktree_head(client, repo, monkeypatch):
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = _started(client, {"title": "x", "repo": str(repo)})
     body = client.get(f"/api/work-items/{wid}").json()
     assert "head_sha" in body
 
@@ -427,7 +427,7 @@ def test_get_work_item_head_sha_is_none_before_the_worktree_exists(client, repo,
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = _started(client, {"title": "x", "repo": str(repo)})
     body = client.get(f"/api/work-items/{wid}").json()
     assert body["head_sha"] is None
 
@@ -440,7 +440,7 @@ def _invalid_policy(tdir):
 def test_post_refused_when_policy_invalid(client, repo):
     r = client.post(
         "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "x", "repo": str(repo), "chain_template": "default"},
     )
     assert r.status_code != 201
     assert "policy" in r.json()["detail"].lower()
@@ -450,6 +450,7 @@ def test_post_materializes_chain(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "quick-task",
@@ -479,10 +480,7 @@ def _linked_worktree(repo, tmp_path, name="wt"):
 
 
 def test_a_single_repo_item_has_no_repos_panel(client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "solo", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(client, {"repo": str(repo), "title": "solo", "chain_template": "quick-task"})
     assert client.get(f"/api/work-items/{wid}").json()["repos"] == []
 
 
@@ -491,6 +489,7 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(client, tm
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
@@ -525,15 +524,15 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(client, tmp_path
     so the node after the spec gate is the chain revision, which reads the
     attached plan."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
-    wid = client.post(
-        "/api/work-items",
-        json={
+    wid = _started(
+        client,
+        {
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
             "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
         },
-    ).json()["id"]
+    )
     _await_gate(client, wid, "spec_approval")
     client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
     # spec, then spec_approval (a V1 gate is a node that starts too), then
@@ -583,7 +582,8 @@ def _twice(repo, tmp_path):
 def test_intake_rejects_an_attachment(client, repo, tmp_path, paths, detail):
     attachments = [{"kind": "plan", "path": path} for path in paths(repo, tmp_path)]
     r = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "attachments": attachments}
+        "/api/work-items",
+        json={"autostart": True, "title": "t", "repo": str(repo), "attachments": attachments},
     )
     assert r.status_code == 422
     if detail:
@@ -597,6 +597,7 @@ def test_intake_accepts_an_uncommitted_attachment(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
@@ -683,32 +684,37 @@ def test_intake_ignores_a_cwd_in_a_different_repo(client, repo, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("route", "status"),
-    [("work-items", None), ("triggers", "paused")],
-    ids=["work-items", "triggers"],
+    ("repo_default", "stored"),
+    [(None, None), ("default", None), ("quick-task", "quick-task")],
+    ids=["unset", "default", "quick-task"],
 )
-def test_no_chain_template_resolves_default_and_stays_distinguishable(client, repo, route, status):
-    """Kraft-cd47: an item created with no `chain_template` runs the `default`
-    template's chain like it always did, but its row stores that nothing was
-    chosen -- not the string "default", which an item that named that template
-    outright also stores. The two must not collide.
+@pytest.mark.parametrize("route", ["work-items", "triggers"])
+def test_no_chain_template_takes_the_repo_default_and_files_paused(
+    client, repo, route, repo_default, stored
+):
+    """An item filed with no `chain_template` runs its repo's
+    `default_chain_template`, at every door (Kraft-9efnk.11); an explicit one
+    still wins. A repo defaulting to `default`, as `kraft repo connect` writes
+    it, or to nothing runs `default` and stores None, not the string "default"
+    an item naming it outright stores (Kraft-cd47).
 
-    POST /triggers is the HTTP twin of a policy.yaml cron trigger (Kraft-859):
-    it always files the item paused, regardless of policy or template --
-    fire_trigger never reads body.autostart because TriggerBody has no such
-    field."""
-    unset = client.post(f"/api/{route}", json={"title": "t", "repo": str(repo)})
-    named = client.post(
-        f"/api/{route}", json={"title": "t", "repo": str(repo), "chain_template": "default"}
-    )
-    assert (unset.status_code, named.status_code) == (201, 201), unset.text + named.text
-    unset = client.get(f"/api/work-items/{unset.json()['id']}").json()
-    named = client.get(f"/api/work-items/{named.json()['id']}").json()
-    assert unset["chain_template"] is None
+    Both doors file paused when the caller does not ask otherwise:
+    POST /work-items' `autostart` defaults off (Kraft-9efnk.17), and POST
+    /triggers has no such field at all."""
+    if repo_default:
+        connect_repo(repo, default_chain_template=repo_default)
+
+    def filed(**chain):
+        r = client.post(f"/api/{route}", json={"title": "t", "repo": str(repo), **chain})
+        assert r.status_code == 201, r.text
+        return client.get(f"/api/work-items/{r.json()['id']}").json()
+
+    unset, named = filed(), filed(chain_template="default")
+    expected = filed(chain_template=repo_default or "default")
+    assert unset["chain_template"] == stored
     assert named["chain_template"] == "default"
-    assert unset["chain_definition"]["nodes"] == named["chain_definition"]["nodes"]
-    if status:
-        assert (unset["status"], named["status"]) == (status, status)
+    assert unset["chain_definition"]["nodes"] == expected["chain_definition"]["nodes"]
+    assert (unset["status"], named["status"]) == ("paused", "paused")
 
 
 def test_trigger_refuses_with_503_when_policy_is_invalid(client, repo):

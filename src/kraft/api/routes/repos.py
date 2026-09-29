@@ -5,10 +5,11 @@ import re
 import tempfile
 from itertools import count
 from pathlib import Path
+from typing import Annotated
 
 import yaml
 from fastapi import HTTPException, Request
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel
 
 from kraft import config as config_mod
 from kraft.api import api_router, deps
@@ -16,8 +17,19 @@ from kraft.api import api_router, deps
 logger = logging.getLogger(__name__)
 
 
+def _absolute(path: str) -> str:
+    """Refuse a relative path: this process would resolve it against its own
+    cwd, not the caller's, and connect the wrong directory (Kraft-9efnk.32)."""
+    if not Path(path).expanduser().is_absolute():
+        raise ValueError(f"path must be absolute, not {path!r}: resolve it where you stand")
+    return path
+
+
+AbsolutePath = Annotated[str, AfterValidator(_absolute)]
+
+
 class RepoBody(BaseModel):
-    path: str
+    path: AbsolutePath
     name: str | None = None
     default_chain_template: str | None = None
     test_command: str | None = None
@@ -37,7 +49,7 @@ class RepoBody(BaseModel):
 
 
 class ProbeBody(BaseModel):
-    path: str
+    path: AbsolutePath
 
 
 def _auto_connect_children(

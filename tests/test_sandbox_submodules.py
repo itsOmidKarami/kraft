@@ -138,7 +138,13 @@ def test_filing_a_workspace_item_once_a_member_is_sandboxed_is_refused(client, t
 
     r = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(root), "workspace": "ws", "members": ["a"]},
+        json={
+            "autostart": True,
+            "title": "t",
+            "repo": str(root),
+            "workspace": "ws",
+            "members": ["a"],
+        },
     )
 
     assert r.status_code == 422, r.text

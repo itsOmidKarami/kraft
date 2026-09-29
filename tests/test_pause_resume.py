@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from support.api import _started
 from support.harness import _git
 
 from kraft.config import git_read
@@ -68,10 +69,7 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
     if provider_session:
         monkeypatch.setenv("KRAFT_FAKE_CLAUDE_SESSION_ID", provider_session)
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(client, {"repo": str(repo), "title": "pause me", "chain_template": "quick-task"})
     session = _running_agent(client, wid)
 
     r = client.post(f"/api/work-items/{wid}/pause", json={})
@@ -142,10 +140,7 @@ def test_steer_and_resume_are_refused_while_the_item_is_running(monkeypatch, rep
     steer/resume accept, it did not remove the refusal for an item mid-run."""
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "10")
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(client, {"repo": str(repo), "title": "busy", "chain_template": "quick-task"})
     _running_agent(client, wid)
     for verb, body in (("steer", {"text": "x"}), ("resume", {"steer": "x"})):
         r = client.post(f"/api/work-items/{wid}/{verb}", json=body)
@@ -227,10 +222,9 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(monkeypatch, repo, client
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "refresh me", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(
+        client, {"repo": str(repo), "title": "refresh me", "chain_template": "quick-task"}
+    )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     _wait(
@@ -275,10 +269,9 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "raced rebase", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(
+        client, {"repo": str(repo), "title": "raced rebase", "chain_template": "quick-task"}
+    )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     _wait(
@@ -324,10 +317,9 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "dirty resume", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(
+        client, {"repo": str(repo), "title": "dirty resume", "chain_template": "quick-task"}
+    )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     item = _wait(
@@ -380,10 +372,9 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "conflict resume", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(
+        client, {"repo": str(repo), "title": "conflict resume", "chain_template": "quick-task"}
+    )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     item = _wait(
@@ -461,10 +452,9 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, r
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "-u", "origin", "main")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "pushed resume", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(
+        client, {"repo": str(repo), "title": "pushed resume", "chain_template": "quick-task"}
+    )
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
     item_before = _wait(
@@ -582,10 +572,7 @@ def test_pause_cancels_the_walk_task_not_just_the_session(monkeypatch, repo, cli
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE", "slow")
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "30")
 
-    wid = client.post(
-        "/api/work-items",
-        json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
-    ).json()["id"]
+    wid = _started(client, {"repo": str(repo), "title": "pause me", "chain_template": "quick-task"})
     _running_agent(client, wid)
 
     r = client.post(f"/api/work-items/{wid}/pause", json={})

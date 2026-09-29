@@ -217,7 +217,12 @@ def _completed_item(client, repo):
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "make it pass",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
@@ -424,6 +429,7 @@ def test_retry_restarts_a_stopped_node_that_has_no_fix_loop(client, repo):
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "repo": str(repo),
             "title": "KRAFT_FAIL once",
             "chain_template": "quick-task",
@@ -553,6 +559,7 @@ def test_retry_rebases_the_worktree_onto_a_moved_head(client, repo):
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "repo": str(repo),
             "title": "KRAFT_FAIL once",
             "chain_template": "quick-task",

@@ -360,6 +360,22 @@ def library_or_503(st):
     return st.library
 
 
+def chain_template_for(entry: RepoEntry, chain_template: str | None) -> str | None:
+    """The template an item filed in `entry`'s repo runs, as the row stores it:
+    the caller's own, else the repo's `default_chain_template`, else None --
+    the `default` template, un-chosen (Kraft-cd47). Every intake door asks this
+    one function (Kraft-9efnk.11). A workspace item asks its root repo.
+
+    A repo default other than `default` is stored by name, not as None: every
+    reader of the row (the board, the stage graph, analytics) reads None as
+    `default`, so a None here would misreport the chain the item runs.
+    """
+    if chain_template is not None:
+        return chain_template
+    default = entry.default_chain_template
+    return None if default in (None, "default") else default
+
+
 def resolve_chain(st, chain_template: str | None):
     """The resolved V1 chain `chain_template` names, or `None`.
 
@@ -399,6 +415,15 @@ def resolve_chain_or_422(st, chain_template: str | None):
         # The resolver's own message: it names the unknown id, or the path and
         # reference that broke the chain (Kraft-n1zp9).
         raise HTTPException(422, f"chain template {name!r}: {exc}") from exc
+
+
+def intake_chain_or_422(st, repo: str, chain_template: str | None):
+    """`(stored, chain)` for an intake door: `chain_template_for`'s value, to
+    store, and the chain it resolves. The library is checked first, so a broken
+    one answers 503 before the repo lookup can answer 422."""
+    library_or_503(st)
+    stored = chain_template_for(connected_or_422(st, repo), chain_template)
+    return stored, resolve_chain_or_422(st, stored)
 
 
 def repos_path(st) -> Path:

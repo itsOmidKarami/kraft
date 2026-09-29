@@ -29,7 +29,8 @@ def _stop(wid, suggested):
 
 def test_the_current_stop_s_suggestion_is_on_the_detail_payload(client, repo):
     wid = client.post(
-        "/api/work-items", json={"repo": str(repo), "title": "t", "chain_template": "quick-task"}
+        "/api/work-items",
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     detail = lambda: client.get(f"/api/work-items/{wid}").json()["suggested_action"]  # noqa: E731
     assert detail() is None

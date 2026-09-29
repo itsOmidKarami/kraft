@@ -43,9 +43,11 @@ def test_autostart_false_lands_paused_and_never_ran(client, tmp_path):
     assert item["worker_sessions"] == []
 
 
-def test_autostart_defaults_true_so_the_ui_is_unaffected(client, tmp_path):
+def test_autostart_true_starts_it_at_once(client, tmp_path):
     repo = connected_repo(tmp_path)
-    wid = client.post("/api/work-items", json={"title": "go now", "repo": str(repo)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "go now", "repo": str(repo)}
+    ).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "active"
 
 

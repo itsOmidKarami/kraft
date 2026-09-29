@@ -11,6 +11,18 @@ from kraft.client import transport
 from kraft.paths import RunDirs, default_run_dir
 
 
+def absolute_path(path: str) -> str:
+    """`path` made absolute against the caller's cwd, `~` expanded.
+
+    The server resolves a relative path against its OWN cwd, so `kraft repo
+    connect .` connected whatever directory the daemon started in (Kraft-9efnk.32).
+    Every client call that sends a filesystem path goes through this first. An
+    absolute path comes back unchanged (no symlink resolution): the server
+    already matches either spelling (`deps._connected`).
+    """
+    return os.path.abspath(os.path.expanduser(path))
+
+
 def resolve_context(cwd: Path | None = None) -> tuple[str | None, str]:
     """`(work_item_id, origin)` for the session calling us.
 

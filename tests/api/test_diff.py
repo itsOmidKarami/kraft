@@ -49,7 +49,12 @@ def seeded_item(client, tmp_path):
     repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "make it pass",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _wait_for_completion(client, wid)
     worktree = Path(client.get(f"/api/work-items/{wid}").json()["worktree_path"])

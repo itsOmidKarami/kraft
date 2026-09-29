@@ -84,7 +84,12 @@ def item_at_spec_gate(client, tmp_path):
     repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "add a flag", "chain_template": "spec-only"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "add a flag",
+            "chain_template": "spec-only",
+        },
     ).json()["id"]
     _await_gate(client, wid, "spec_approval")
     return wid

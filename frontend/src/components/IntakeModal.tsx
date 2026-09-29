@@ -118,6 +118,9 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
   // The workspace the picked repo roots, and its members whose repository is
   // enabled: picked by member id, shown by mount path.
   const byId = (id: string) => allRepos.find((r) => r.id === id);
+  // The chain the server applies when none is sent (`deps.chain_template_for`).
+  const repoDefault =
+    allRepos.find((r) => r.path === repo)?.default_chain_template || "default";
   const ws = repo
     ? Object.values(workspaces).find((w) => byId(w.root)?.path === repo)
     : undefined;
@@ -236,7 +239,11 @@ export function IntakeModal({ onClose }: { onClose: () => void }) {
         repo,
         title,
         ...(description.trim() ? { description } : {}),
-        ...(tpl === "default" ? {} : { chain_template: tpl }),
+        // Untouched -- still the repo's own default -- sends nothing, so the
+        // server applies that default and an unchosen `default` stays null
+        // (Kraft-cd47). Picking `default` on a repo defaulting to another
+        // chain is a real choice, and is sent.
+        ...(tpl === repoDefault ? {} : { chain_template: tpl }),
         ...(ws && picked.length
           ? { workspace: ws.id, members: picked, root_pointer_policy: pointer }
           : {}),

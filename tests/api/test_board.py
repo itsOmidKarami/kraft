@@ -23,7 +23,8 @@ from kraft import events, store
 
 def test_list_work_items_shape_and_cursor(client, tmp_path):
     client.post(
-        "/api/work-items", json={"title": "make the failing test pass", "repo": str(tmp_path)}
+        "/api/work-items",
+        json={"autostart": True, "title": "make the failing test pass", "repo": str(tmp_path)},
     )
     body = client.get("/api/work-items").json()
     assert set(body) == {"items", "cursor"}
@@ -201,7 +202,7 @@ async def _as_coro(value):
 def test_deferred_minor_findings_reach_the_detail_payload(client, repo):
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     nit = {
         "severity": "minor",
@@ -256,7 +257,7 @@ def test_get_work_item_includes_escalation_threads(client, repo):
     `turns`, `started_at`, `ended_at`, `status`)."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     _seed_escalation_session(client, wid, session_id="e1", thread=1, status="done")
     _seed_escalation_session(client, wid, session_id="e2", thread=1, status="done")
@@ -278,7 +279,7 @@ def test_get_work_item_survives_an_invalid_policy(client, repo):
     instead of raising AttributeError on st.policy.budget."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     client.app.state.policy = None
 
@@ -294,7 +295,7 @@ def test_concerns_reach_the_detail_payload(client, repo):
     a concern."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     _seed_events(
         client,
@@ -313,7 +314,7 @@ def test_mr_ref_reaches_the_detail_payload(client, repo):
     the detail screen's "Open MR" link reads it from here."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["mr_ref"] is None
 
@@ -351,7 +352,7 @@ def test_mr_ref_on_a_multi_repo_item_is_the_root_row_s_own(client, repo, root_mr
     no one merge request to link."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     member_mr = {"number": 1, "url": "https://forge.example/mr/1"}
     _seed_repo(client, wid, repo_path="/wt/pkg", role="submodule", merge_rank=0, mr_ref=member_mr)
@@ -372,7 +373,7 @@ def test_stop_reason_reaches_the_detail_payload(client, repo):
     thing that distinguishes them."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["stop_reason"] is None
 
@@ -392,7 +393,7 @@ def test_concerns_stop_at_the_gate_that_answered_them(client, repo):
     what a session reported since then."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     _seed_events(
         client,
@@ -458,7 +459,12 @@ def test_needs_context_question_reaches_the_detail_payload(client, repo, monkeyp
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "needs a decision",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     body = _wait_for_status(client, wid, "needs_human")
     assert body["needs_context_question"] == "which repo does this target?"
@@ -472,7 +478,7 @@ def test_needs_context_question_does_not_resurface_a_stale_answer(client, repo):
     `worker_session_exited.question` events would have produced."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     _seed_events(
         client,
@@ -509,7 +515,12 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(client, repo
     rolls them up per node and per item."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "make it pass",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _poll_events(client, wid, "work_item_completed", timeout=120)
 
@@ -539,7 +550,7 @@ def test_work_item_usage_rollup_is_captured_from_the_agent_envelope(client, repo
 def test_judge_stop_note_reaches_the_detail_payload(client, repo):
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     finding = {
         "severity": "important",
@@ -578,7 +589,7 @@ def test_judge_stop_note_stops_at_the_last_resolved_gate(client, repo):
     keeps."""
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "t", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "t", "chain_template": "quick-task"},
     ).json()["id"]
     finding = {
         "severity": "important",
@@ -723,7 +734,7 @@ def test_a_v1_item_lists_and_renders_its_chain_nodes(client, repo):
     # `kraft item create --json` printed a chain with no nodes.
     started = client.post(
         "/api/work-items",
-        json={"title": "t2", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t2", "repo": str(repo), "chain_template": "default"},
     ).json()
     assert [n["id"] for n in started["chain_definition"]["nodes"][:2]] == [
         "spec",
@@ -746,7 +757,9 @@ def test_a_card_marks_an_item_whose_last_launch_ran_on_a_fallback(client, tmp_pa
     """`every-fallback-switch-is-logged`: the board card carries the switch
     while the item's latest launch is the fallback's, and drops it once a
     later launch starts."""
-    wid = client.post("/api/work-items", json={"title": "t", "repo": str(tmp_path)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "t", "repo": str(tmp_path)}
+    ).json()["id"]
     _set_status(wid, "paused")  # keep the executor off this item
 
     def card():

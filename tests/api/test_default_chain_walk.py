@@ -128,7 +128,10 @@ def test_with_no_merge_request_metadata_the_draft_opens_with_the_default_body(
     fake = _on_a_fake_forge(monkeypatch)
     title = "make the failing test pass"
     body = {"title": title, "repo": str(repo), "chain_template": "default"}
-    r = client.post("/api/work-items", json={**body, "skip_nodes": ["describe_merge_request"]})
+    r = client.post(
+        "/api/work-items",
+        json={"autostart": True, **body, "skip_nodes": ["describe_merge_request"]},
+    )
     assert r.status_code == 201
 
     _walk_to_the_end(client, r.json()["id"])

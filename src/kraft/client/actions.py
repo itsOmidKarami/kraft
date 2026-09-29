@@ -15,7 +15,7 @@ from kraft.client import context, reads, transport
 async def create_work_item(
     title: str,
     repo: str | None = None,
-    chain_template: str = "default",
+    chain_template: str | None = None,
     description: str | None = None,
     attachments: list[dict] | None = None,
     auto_gate: bool = True,
@@ -37,6 +37,8 @@ async def create_work_item(
 
     `repo` defaults to the repo of the work item this session is standing in,
     which is the common case for a worker filing follow-up work.
+    `chain_template` unset is not sent, so the server applies the repo's
+    `default_chain_template` (Kraft-9efnk.11).
 
     `attachments` are documents that already exist —
     `[{"kind": "spec"|"plan", "path": "..."}]`, at most one of each. Each trims
@@ -70,8 +72,8 @@ async def create_work_item(
         "/work-items",
         {
             "title": title,
-            "repo": repo,
-            "chain_template": chain_template,
+            "repo": context.absolute_path(repo),
+            **({"chain_template": chain_template} if chain_template else {}),
             "autostart": autostart,
             "auto_gate": auto_gate,
             **({"implements_beads": implements_beads} if implements_beads else {}),
@@ -120,7 +122,7 @@ async def ensure_repo(path: str | None = None) -> dict:
     Idempotent by construction: `POST /repos` 409s on a path it already holds,
     and "already connected" is the goal state, not a failure.
     """
-    path = path or os.getcwd()
+    path = context.absolute_path(path or os.getcwd())
     status, body = await transport._post("/repos", {"path": path})
     if status == 409:
         # The probe still runs, and still first: it is what resolves the given
@@ -163,7 +165,7 @@ async def disconnect_repo(path: str | None = None) -> dict:
     Server-side `_connected` still matches a path against its `resolve()`, so a
     path differing only by `/var` -> `/private/var` behaves as before.
     """
-    path = path or os.getcwd()
+    path = context.absolute_path(path or os.getcwd())
     if path not in {entry["path"] for entry in await reads.repos()}:
         status, probed = await transport._post("/repos/probe", {"path": path})
         if status < 400:

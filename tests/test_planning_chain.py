@@ -53,7 +53,12 @@ def test_spec_gate_offers_the_document_then_reject_and_approve(client, tmp_path,
     repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
-        json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
+        json={
+            "autostart": True,
+            "title": "add a flag",
+            "repo": str(repo),
+            "chain_template": "default",
+        },
     ).json()["id"]
 
     _await_gate(client, wid, "spec_approval")
@@ -83,7 +88,12 @@ def test_a_rejected_plan_rerun_is_framed_as_a_revision(client, tmp_path, prompt_
     repo = connected_repo(tmp_path)
     wid = client.post(
         "/api/work-items",
-        json={"title": "add a flag", "repo": str(repo), "chain_template": "default"},
+        json={
+            "autostart": True,
+            "title": "add a flag",
+            "repo": str(repo),
+            "chain_template": "default",
+        },
     ).json()["id"]
 
     _await_gate(client, wid, "spec_approval")

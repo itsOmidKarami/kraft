@@ -81,7 +81,13 @@ def test_a_workspace_is_filed_only_against_its_own_root(client, tmp_path, repo):
     _workspace(client, tmp_path)
     r = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "workspace": "ws", "members": ["a"]},
+        json={
+            "autostart": True,
+            "title": "t",
+            "repo": str(repo),
+            "workspace": "ws",
+            "members": ["a"],
+        },
     )
     assert r.status_code == 422, r.text
     assert "rooted" in r.json()["detail"]

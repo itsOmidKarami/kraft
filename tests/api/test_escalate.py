@@ -16,7 +16,13 @@ from support.api import _poll_events, _set_status, _wait_for_status
 def _post(client, repo, title="fine so far", **body):
     return client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": title, "chain_template": "quick-task", **body},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": title,
+            "chain_template": "quick-task",
+            **body,
+        },
     ).json()["id"]
 
 

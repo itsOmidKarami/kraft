@@ -71,6 +71,7 @@ def test_reattach_adopts_running_agent(tmp_path):
                 "title": "make the failing test pass",
                 "repo": str(repo),
                 "chain_template": "quick-task",
+                "autostart": True,
             },
         ).json()["id"]
         started = _poll(srv.client, wid, "worker_session_started", pred=_impl)

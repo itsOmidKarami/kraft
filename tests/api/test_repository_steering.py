@@ -132,7 +132,12 @@ def test_intake_refuses_a_repository_naming_a_profile_the_library_lacks(tmp_path
         )
         r = client.post(
             "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+            json={
+                "autostart": True,
+                "title": "x",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         )
 
     assert r.status_code == 422, r.text

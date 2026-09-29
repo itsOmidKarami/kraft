@@ -311,7 +311,12 @@ def test_steer_and_resume_accept_a_needs_context_stop(monkeypatch, repo, client,
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "needs a decision",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _wait_for_status(client, wid, "needs_human")
 
@@ -361,6 +366,7 @@ def test_steer_and_resume_409_on_a_needs_human_stop_that_is_not_needs_context(
         wid = client.post(
             "/api/work-items",
             json={
+                "autostart": True,
                 "repo": str(repo),
                 "title": "needs a decision",
                 "chain_template": "quick-task-pytest",
@@ -418,7 +424,12 @@ def test_a_gate_after_an_answered_needs_context_is_not_a_needs_context_stop(
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which database should this target?")
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "needs a decision", "chain_template": "default"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "needs a decision",
+            "chain_template": "default",
+        },
     ).json()["id"]
     _await_gate(client, wid, "spec_approval")
     _approve_retrying(client, wid, "spec_approval")
@@ -459,7 +470,12 @@ def test_retry_racing_resume_on_a_needs_context_stop_produces_one_winner(monkeyp
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_QUESTION", "which repo does this target?")
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "needs a decision", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "needs a decision",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _wait_for_status(client, wid, "needs_human")
     app = client.app
