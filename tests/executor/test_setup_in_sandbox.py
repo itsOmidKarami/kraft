@@ -14,13 +14,17 @@ import subprocess
 import pytest
 from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
 
+# The backend that shares no filesystem, and a channel registry for its egress.
+from worker.test_backends import Remote, channels  # noqa: F401
+
 from kraft import builtins as kraft_builtins
 from kraft import config as _config
 from kraft import executor
 from kraft.api import deps
 from kraft.executor import dispatch
+from kraft.paths import RunDirs
 from kraft.policy import SandboxPolicy
-from kraft.worker import refstore
+from kraft.worker import backends, ca, refstore
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.env import worker_env
 
@@ -53,13 +57,60 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     argv = call["args"]
     assert argv[:2] == ["docker", "run"]
     assert argv[-4:] == [_SANDBOX["image"], "sh", "-c", _SETUP]
-    assert "-e" in argv and "SETUP_FLAVOUR=benign" in argv
+    # By name: the value is in the client's env (below), never on argv.
+    assert argv[argv.index("SETUP_FLAVOUR") - 1] == "-e"
+    assert not [a for a in argv if "benign" in a]
     assert not call.get("shell"), "a sandboxed setup went to a host shell"
     # The client runs in a directory of Kraft's, never the worktree: podman
     # leaves an `oom` file where its client runs.
     name = argv[argv.index("--name") + 1]
     assert call["cwd"] == docker_backend.client_dir(name.removeprefix("kraft-"))
     assert call["env"] == worker_env(entry)
+
+
+async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path, monkeypatch):
+    """Spec §6 in the install phase: each listed variable holds a sentinel
+    (no harness says more), the docker client holds no value, the bundle
+    trusts the Kraft CA, and a repository's own credential is injected
+    where `install` names its host."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
+    monkeypatch.setenv("REG_TOKEN", "reg-real-VALUE")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    opened, bundled = [], []
+
+    async def open_egress(db, backend, sid, wid, sandbox, lists, credentials=()):
+        opened.append(credentials)
+        return {"HTTPS_PROXY": "http://127.0.0.1:3128"}
+
+    async def close_egress(backend, sid):
+        pass
+
+    async def prepare(image, *, kraft_ca=None):
+        bundled.append(kraft_ca)
+
+    monkeypatch.setattr(kraft_builtins._subprocess, "open_egress", open_egress)
+    monkeypatch.setattr(kraft_builtins._subprocess, "close_egress", close_egress)
+    monkeypatch.setattr(docker_backend._forward, "prepare", prepare)
+    calls = _record_run(monkeypatch)
+    registry = {"domain": "registry.corp", "header": "authorization", "format": "Bearer %s"}
+    sandbox = {
+        **_SANDBOX,
+        "network": {"install": {"allow": ["registry.corp"]}},
+        "credentials": [{"env": "ANTHROPIC_API_KEY"}, {"env": "REG_TOKEN", "inject": [registry]}],
+    }
+    entry = entry_of({"setup_command": _SETUP, "env_passthrough": ["REG_TOKEN"]})
+
+    await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry, sandbox=sandbox)
+
+    [call] = calls
+    assert [a for a in call["args"] if a.startswith(("ANTHROPIC_API_KEY", "REG_TOKEN"))] == [
+        "ANTHROPIC_API_KEY=kraft-proxy-managed",
+        "REG_TOKEN=kraft-proxy-managed",
+    ]
+    assert not {"ANTHROPIC_API_KEY", "REG_TOKEN"} & set(call["env"])
+    [(rule,)] = opened
+    assert (rule.domain, rule.carrying(rule.value)) == ("registry.corp", "Bearer reg-real-VALUE")
+    assert bundled == [ca.ensure_ca(RunDirs(tmp_path / "run"))[0]]
 
 
 async def test_an_unsandboxed_setup_command_still_runs_on_the_host(tmp_path, monkeypatch):
@@ -405,3 +456,65 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
     assert seen["refstore"] is not None and seen["refstore"].branch is None
     assert list(seen["passthrough"]) == ["X_KEY"]
     assert published == []
+
+
+#: What a worker-written test would do with a managed credential's variable.
+_ECHO_KEY = "sh -c 'echo key=$E2E_KEY >> seen'"
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"id": "t", "kind": "subprocess", "command": _ECHO_KEY},
+        {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+    ],
+    ids=["subprocess-task", "test-scope"],
+)
+async def test_a_managed_credential_reaches_a_sandboxed_command_as_its_sentinel(
+    item_on,
+    tmp_path,
+    monkeypatch,
+    channels,  # noqa: F811
+    task,
+):
+    """Spec §6 for code the worker wrote: a subprocess task and a test scope
+    see the sentinel, never the repository's value, though neither caller
+    names a credential (the client's env: `test_backends`)."""
+    monkeypatch.delenv("E2E_KEY", raising=False)
+    remote = Remote(tmp_path)
+    monkeypatch.setitem(backends._BACKENDS, "docker", remote)
+    inner_wrap = remote.wrap
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, sentinels, **kw):
+        # What `docker_argv` puts in the container: `env=`, then the sentinels.
+        crossing = [f"{k}={v}" for k, v in {**(env or {}), **sentinels}.items()]
+        return inner_wrap(["env", *crossing, *cmd], cwd, sandbox, results_dir, env, **kw)
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    sandbox = {
+        **_SANDBOX,
+        "network": {"runtime": {"allow": ["api.test"]}},
+        "credentials": [{"env": "E2E_KEY", "inject": [{"domain": "api.test", "header": "x-key"}]}],
+    }
+    it = await item_on([{"id": "verify", "kind": "exec", "tasks": [task]}])
+    entry = entry_of(
+        {
+            "setup_command": "",
+            "sandbox": sandbox,
+            "env": {"E2E_KEY": "sk-real-VALUE"},
+            "test_scopes": [{"paths": ["**"], "command": _ECHO_KEY}],
+        }
+    )
+    node = it.chain.chain.nodes[0]
+
+    await dispatch.dispatch_node(
+        it.database,
+        it.run_dirs,
+        node.steps[0].tasks[0],
+        node,
+        it.row(),
+        it.repo,
+        launch=executor.LaunchContext(repo_entry=entry),
+    )
+
+    assert (it.repo / "seen").read_text() == "key=kraft-proxy-managed\n"

@@ -33,6 +33,7 @@ from pathlib import Path
 from kraft import events
 from kraft.worker import ca
 from kraft.worker.egress import SANDBOX_EGRESS_REFUSED, EgressProxy, EgressSession, PhaseLists
+from kraft.worker.inject import InjectRule
 from kraft.worker.sandbox import SandboxNotReady
 
 #: The longest a unix socket path may be, less its terminating NUL.
@@ -110,19 +111,32 @@ class ChannelRegistry:
         return base / session_id[:room] / _SOCKET
 
     async def open(
-        self, session_id: str, work_item_id: str, lists: PhaseLists, *, transport: str = "unix"
+        self,
+        session_id: str,
+        work_item_id: str,
+        lists: PhaseLists,
+        *,
+        transport: str = "unix",
+        credentials: tuple[InjectRule, ...] = (),
     ) -> Path | None:
         """Listen on the session's socket; the path to mount into its relay.
         A stale socket left by a daemon that died is replaced. Under
         `transport="tls"`, only register the session for the `TLSListener`:
-        no socket, and None."""
+        no socket, and None. `credentials` are what its proxy injects."""
 
         async def record(payload: dict) -> None:
             await self._db.write(
                 lambda c: events.append(c, work_item_id, SANDBOX_EGRESS_REFUSED, payload)
             )
 
-        session = EgressSession(session_id, lists, record, work_item_id)
+        session = EgressSession(
+            session_id,
+            lists,
+            record,
+            work_item_id,
+            credentials=credentials,
+            run_dirs=self._run_dirs,
+        )
         if transport == "tls":
             if session_id in self._open:
                 raise SandboxNotReady(f"session {session_id} already has an egress channel")

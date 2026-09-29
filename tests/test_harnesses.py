@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from kraft import harness
+from kraft import harness, policy
 from kraft.templates import environment as template_environment
 
 
@@ -20,6 +20,71 @@ def test_only_cursor_is_refused_under_a_network_policy():
     the CLI honours the proxy, not an edit to the YAML alone."""
     hs = harness.load(None).valid
     assert [name for name, h in hs.items() if not h.proxy_aware] == ["cursor"]
+
+
+def test_the_shipped_harnesses_declare_how_their_keys_are_proxy_managed():
+    """Spec §6's declarations, each sentinel shaped like the real key a CLI
+    may check the form of; amp, opencode and cursor are unverified, so none."""
+    declared = {
+        name: [
+            (c.env, c.sentinel, *((r.domain, r.header, r.format) for r in c.inject))
+            for c in h.credentials
+        ]
+        for name, h in harness.load(None).valid.items()
+    }
+    anthropic, openai = "api.anthropic.com", "api.openai.com"
+    assert declared == {
+        "claude": [
+            (
+                "ANTHROPIC_API_KEY",
+                "sk-ant-api03-kraft-proxy-managed",
+                (anthropic, "x-api-key", None),
+            ),
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "sk-ant-oat01-kraft-proxy-managed",
+                (anthropic, "authorization", "Bearer %s"),
+            ),
+        ],
+        "codex": [
+            ("CODEX_API_KEY", "sk-kraft-proxy-managed", (openai, "authorization", "Bearer %s"))
+        ],
+        "gemini": [
+            (
+                "GEMINI_API_KEY",
+                "AIzaKraftProxyManaged000000000000000000",
+                ("generativelanguage.googleapis.com", "x-goog-api-key", None),
+            )
+        ],
+        "amp": [],
+        "opencode": [],
+        "cursor": [],
+    }
+
+
+def test_a_repository_names_a_credential_and_its_harness_says_how():
+    """Ruling E2: `- env: NAME` takes the harness's declaration, anything it
+    sets itself winning; a repository's own credential stands as written;
+    one this harness does not declare still keeps its value out, a sentinel
+    in its place and nothing injecting it."""
+    claude = harness.load(None).valid["claude"]
+    # Named in full, so the repository's own even where claude has one.
+    own = policy.SandboxCredential(
+        env="CLAUDE_CODE_OAUTH_TOKEN",
+        inject=[{"domain": "registry.example.com", "header": "authorization"}],
+    )
+    wanted = (
+        policy.SandboxCredential(env="ANTHROPIC_API_KEY", sentinel="mine"),
+        own,
+        policy.SandboxCredential(env="OPENAI_API_KEY"),
+    )
+
+    managed = claude.managed_credentials(wanted)
+
+    assert managed[0] == claude.credentials[0].model_copy(update={"sentinel": "mine"})
+    assert managed[1] == own.model_copy(update={"sentinel": policy.DEFAULT_SENTINEL})
+    assert (managed[2].sentinel, managed[2].inject) == (policy.DEFAULT_SENTINEL, ())
+    assert claude.managed_credentials(None) == ()
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -221,6 +286,24 @@ _HOOK_CAPS = (
             "id: x\nkind: cli\ncommand: [x]\nnetwork: { require: [x.io] }\ncapabilities:\n"
             + _HOOK_CAPS,
             "'network' takes only 'requires', a list of network-policy@1 hosts",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\ncredentials: [{env: K, inject: x.io}]\n"
+            "capabilities:\n" + _HOOK_CAPS,
+            "'credentials' must be a list of {env, service, sentinel, inject:",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\nnetwork: { requires: [x.io] }\n"
+            "credentials: [{env: K, service: s, inject: [{domain: x.io, header: k}]}]\n"
+            "capabilities:\n" + _HOOK_CAPS,
+            "credential 'K' needs a 'service', a 'sentinel' and where to 'inject' it",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\nnetwork: { requires: [x.io] }\n"
+            "credentials: [{env: K, service: s, sentinel: v,"
+            " inject: [{domain: y.io, header: k}]}]\n"
+            "capabilities:\n" + _HOOK_CAPS,
+            "credential 'K' goes to 'y.io', which is not one of its 'network.requires'",
         ),
     ],
 )
@@ -453,9 +536,10 @@ def test_gemini_folds_context_into_the_prompt():
     """channel: prompt -- the weaker channel, and the whole contract must
     still arrive. `prompt` is declared last in gemini.yaml (not a
     bare-positional, so no ordering requirement forces it earlier), so this
-    checks content rather than position."""
+    checks content rather than position. `--skip-trust` on every launch:
+    every worktree is a folder gemini has never trusted (Kraft-6vvf3)."""
     argv = _argv("gemini")
-    assert argv[0] == "gemini"
+    assert argv[:2] == ["gemini", "--skip-trust"]
     assert argv[argv.index("-p") + 1] == "CTX\n\ndo the thing"
     assert "--append-system-prompt" not in argv
 

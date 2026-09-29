@@ -96,6 +96,28 @@ async def test_the_bundle_is_the_image_roots_then_the_extra_ca(host, tmp_path):
     assert docker_forward.certificates(bundle.read_text()) == [ROOT_A, ROOT_B, CORP]
 
 
+@pytest.mark.parametrize("extra", [False, True], ids=["no-extra-ca", "with-extra-ca"])
+async def test_a_managed_credential_puts_the_kraft_ca_in_a_bundle_of_its_own(host, extra):
+    """Spec §7 (P6): the Kraft CA joins the bundle of a launch with a
+    managed credential, extra CA or none; a launch without one never
+    trusts it, and building its bundle leaves the other's alone."""
+    if extra:
+        host.yaml(f"ca_bundle: {host.ca()}\n")
+    kraft = host.ca(_pem("KRAFT"), "kraft.pem")
+    managed = await docker.DockerBackend().prepare(SANDBOX, kraft_ca=kraft)
+    plain = await docker.DockerBackend().prepare(SANDBOX)
+    corp = [CORP] if extra else []
+    assert docker_forward.certificates(managed.read_text()) == [
+        ROOT_A,
+        ROOT_B,
+        *corp,
+        _pem("KRAFT"),
+    ]
+    assert (plain and docker_forward.certificates(plain.read_text())) == (
+        [ROOT_A, ROOT_B, CORP] if extra else None
+    )
+
+
 async def test_the_daemons_ssl_cert_file_is_the_extra_ca_when_sandbox_yaml_names_none(
     host, monkeypatch
 ):

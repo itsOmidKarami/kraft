@@ -25,6 +25,7 @@ from kraft.adapters.subprocess import (
     read_result_fields,
     record_oom_kill,
 )
+from kraft.config import ConfigError
 from kraft.executor import gates
 from kraft.executor.context import LaunchContext, OnApprove
 from kraft.executor.dispatch import ESCALATION_HOOK
@@ -34,6 +35,8 @@ from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
+from kraft.worker.env import worker_env
+from kraft.worker.inject import InjectRule
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +508,24 @@ async def _close_sandbox(kind: str | None, session_id: str, *, egress: bool = Fa
                 await close_egress(backend, session_id)
 
 
-async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> None:
+def _launch_environ(row: dict, launch_factory) -> dict[str, str]:
+    """The environment a session's launch read its credentials' values
+    from, read again the same way: `worker_env` of the repo entry it launched
+    with (`row['repo']`), so a value only that repo's `env:` or
+    `env_passthrough` supplied is found again. An entry since disconnected
+    or unreadable supplies none: its credentials are refused, never guessed
+    from the daemon's own env."""
+    if "repo" not in row:
+        return worker_env(None)  # launched with no repo entry
+    try:
+        entry = launch_factory(row["repo"]).repo_entry if launch_factory else None
+        return worker_env(entry) if entry is not None else {}
+    except ConfigError as exc:
+        logger.warning("repo %s unreadable, its credentials refused: %s", row["repo"], exc)
+        return {}
+
+
+async def _reopen_egress(session_id: str, work_item_id: str, egress: str, launch_factory) -> None:
     """Listen again for an adopted session, over the transport and with the
     lists it launched under -- never today's config. Its relay outlived the restart
     and reconnects per connection. Without a channel the worker keeps no
@@ -518,11 +538,13 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> Non
         row = json.loads(egress)
         # A TLS session's relay B dials the listener again, on the port it
         # persisted: registered, with no socket nothing would use.
+        environ = _launch_environ(row, launch_factory) if row.get("credentials") else {}
         await channels.open(
             session_id,
             work_item_id,
             PhaseLists.from_json(row),
             transport=row.get("transport", "unix"),
+            credentials=tuple(InjectRule.from_json(r, environ) for r in row.get("credentials", ())),
         )
     except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
         logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)
@@ -657,7 +679,7 @@ async def reattach(
         pid = r["pid"]
         if adopting:
             if r["egress"] is not None:
-                await _reopen_egress(sid, r["work_item_id"], r["egress"])
+                await _reopen_egress(sid, r["work_item_id"], r["egress"], launch_factory)
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             adopted_tasks[sid] = asyncio.create_task(
                 _guarded_adopt(

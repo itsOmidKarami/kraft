@@ -32,7 +32,7 @@ from pydantic import (
 )
 
 from kraft.paths import default_harnesses_dir
-from kraft.policy import host_pattern
+from kraft.policy import DEFAULT_SENTINEL, SandboxCredential, host_pattern
 
 #: Harnesses that ship with Kraft. Read from the package, never from
 #: `$KRAFT_HOME/templates/`, because `cli.seed_home` copies templates once and
@@ -166,6 +166,11 @@ class Harness:
     #: False for a CLI that ignores HTTP(S)_PROXY: under `network:` it has no
     #: route at all, so such a launch is refused by name instead.
     proxy_aware: bool = True
+    #: How the egress proxy can manage each credential this CLI reads (spec
+    #: §6): complete, each to a host of `network_requires`. What a repository
+    #: opts in to by naming its `env` under `sandbox.credentials` (ruling E2);
+    #: nothing is managed unless it does.
+    credentials: tuple[SandboxCredential, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -320,6 +325,19 @@ class Harness:
         except ValueError as exc:
             raise HarnessError(f"{where}: network.requires: {exc}") from None
 
+        for cred in parsed.credentials:
+            if cred.service is None or cred.sentinel is None or not cred.inject:
+                raise HarnessError(
+                    f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
+                    "and where to 'inject' it"
+                )
+            for rule in cred.inject:
+                if rule.domain not in requires:
+                    raise HarnessError(
+                        f"{where}: credential {cred.env!r} goes to {rule.domain!r}, "
+                        "which is not one of its 'network.requires' hosts"
+                    )
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -350,7 +368,15 @@ class Harness:
             container_permission_mode=parsed.container_permission_mode,
             network_requires=requires,
             proxy_aware=parsed.proxy_aware,
+            credentials=tuple(parsed.credentials),
         )
+
+    def managed_credentials(
+        self, wanted: tuple[SandboxCredential, ...] | None
+    ) -> tuple[SandboxCredential, ...]:
+        """A sandbox's `credentials` as a launch of this CLI manages them
+        (`manage`), from what this harness declares."""
+        return manage(wanted, self.credentials)
 
     def supports(self, name: str) -> bool:
         return name in self.capabilities
@@ -365,6 +391,34 @@ class Harness:
         if not cap.values:
             return True
         return any(re.fullmatch(p, value) for p in cap.values)
+
+
+def manage(
+    wanted: tuple[SandboxCredential, ...] | None, declared: tuple[SandboxCredential, ...] = ()
+) -> tuple[SandboxCredential, ...]:
+    """A sandbox's `credentials` as a launch manages them, each with a
+    sentinel: an entry naming just `env` takes the `declared` one of that
+    name (its harness's), its own fields winning. One not declared -- or
+    any, for a launch with no harness (a setup command) -- still holds only
+    a sentinel -- the repository said its value stays out of the container
+    -- with nothing injecting it unless it says where itself."""
+    by_env = {c.env: c for c in declared}
+    managed = []
+    for entry in wanted or ():
+        base = by_env.get(entry.env) if not entry.inject else None
+        if base is not None:
+            entry = base.model_copy(update={k: getattr(entry, k) for k in entry.model_fields_set})
+        if entry.sentinel is None:
+            entry = entry.model_copy(update={"sentinel": DEFAULT_SENTINEL})
+        managed.append(entry)
+    return tuple(managed)
+
+
+def sandbox_credentials(sandbox: dict | None) -> tuple[SandboxCredential, ...]:
+    """A dumped sandbox's `credentials`, as models again."""
+    return tuple(
+        SandboxCredential.model_validate(c) for c in (sandbox or {}).get("credentials") or ()
+    )
 
 
 @dataclass(frozen=True)
@@ -434,6 +488,7 @@ class HarnessInput(BaseModel):
     container_permission_mode: StrictStr | None = None
     network: NetworkInput | None = None
     proxy_aware: StrictBool = True
+    credentials: list[SandboxCredential] = []
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -469,6 +524,11 @@ def _shape_problem(exc: ValidationError) -> str:
             return f"{key!r} must be a string"
         case ("network", *_):
             return "'network' takes only 'requires', a list of network-policy@1 hosts"
+        case ("credentials", *_):
+            return (
+                "'credentials' must be a list of {env, service, sentinel, "
+                f"inject: [{{domain, header, format}}]}}: {error['msg']}"
+            )
         case ("proxy_aware", *_):
             return "'proxy_aware' must be true or false"
         case ("config_dir", *_):

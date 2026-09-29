@@ -264,6 +264,34 @@
       "title": "BuiltinTask",
       "type": "object"
     },
+    "CredentialInject": {
+      "additionalProperties": false,
+      "description": "Where the egress proxy puts a credential: `header` on every request\nto exactly `domain`, set to `format` with the value at its `%s`\n(`Bearer %s` for `Authorization`; unset, the value alone).",
+      "properties": {
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format"
+        },
+        "header": {
+          "title": "Header",
+          "type": "string"
+        }
+      },
+      "title": "CredentialInject",
+      "type": "object"
+    },
     "ExecNode": {
       "additionalProperties": false,
       "description": "An ordered node that runs work. Gate-only fields are absent here, so a\n`gate_after` or a `chain_finalized` on an execution node is a schema error\nrather than a silently ignored key (`gate-is-an-ordered-node`).",
@@ -865,6 +893,52 @@
       "title": "RecoveryPlan",
       "type": "object"
     },
+    "SandboxCredential": {
+      "additionalProperties": false,
+      "description": "One proxy-managed credential (credential@1's apiKey subset, spec \u00a76):\nthe container's `env` holds `sentinel`, and the egress proxy puts the\ndaemon's own value where `inject` says. Just `env:` names one a harness\ndeclares, which supplies the rest; a repository's own credential says\nit all. A name left out of `credentials` passes through as it always did.",
+      "properties": {
+        "env": {
+          "title": "Env",
+          "type": "string"
+        },
+        "inject": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialInject"
+          },
+          "title": "Inject",
+          "type": "array"
+        },
+        "sentinel": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sentinel"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service"
+        }
+      },
+      "title": "SandboxCredential",
+      "type": "object"
+    },
     "SandboxNetwork": {
       "additionalProperties": false,
       "description": "`network:`: deny-by-default egress for a sandboxed launch.\n`install` binds the setup command, `runtime` an agent session, which also\ngets its harness's own `network.requires` hosts (unioned at launch, never\nstored here). A phase left out grants nothing. Frozen, with tuples, like\n`SandboxResources`: `SandboxPolicy` is hashed and locked whole.",
@@ -883,8 +957,23 @@
     },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it -- the\nwhole value, `resources` and `network` included.",
+      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`), with `credentials` managed by the egress\nproxy. A permission-shaped safety field (Ruling 105): once a layer sets\none, no narrower layer may change or remove it -- the whole value,\n`resources`, `network` and `credentials` included.",
       "properties": {
+        "credentials": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SandboxCredential"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentials"
+        },
         "image": {
           "minLength": 1,
           "title": "Image",

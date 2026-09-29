@@ -20,12 +20,16 @@ from typing import TYPE_CHECKING
 import psutil
 
 from kraft import caps, events, logs, store
+from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.worker import backends as _backends
+from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
+from kraft.worker import inject as _inject
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
+from kraft.worker.inject import InjectRule
 
 if TYPE_CHECKING:
     from kraft.config import RepoEntry
@@ -466,13 +470,22 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
 
 
 async def open_egress(
-    db, backend, session_id: str, work_item_id: str, sandbox: dict, lists: PhaseLists
+    db,
+    backend,
+    session_id: str,
+    work_item_id: str,
+    sandbox: dict,
+    lists: PhaseLists,
+    credentials: tuple[InjectRule, ...] = (),
+    repo: str | None = None,
 ) -> dict:
-    """Open a session's egress under `sandbox['network']`: its channel, the
-    lists recorded on its row for a reattach (no `db` for a setup command,
-    which has no row and is never reattached), and the backend's route to
-    the channel. The proxy environment the launch adds; `SandboxNotReady`
-    whenever any of it is missing -- never a launch with open egress."""
+    """Open a session's egress under `sandbox['network']`: its channel, with
+    the `credentials` its proxy injects, the lists (and those credentials,
+    never their values) recorded on its row for a reattach (no `db` for a
+    setup command, which has no row and is never reattached), and the
+    backend's route to the channel. The proxy environment the launch adds;
+    `SandboxNotReady` whenever any of it is missing -- never a launch with
+    open egress."""
     channels = _channel.current()
     if channels is None:
         raise _sandbox.SandboxNotReady(
@@ -480,10 +493,18 @@ async def open_egress(
             "channel, and this process has none"
         )
     transport = await backend.egress_transport()
-    sock_path = await channels.open(session_id, work_item_id, lists, transport=transport)
+    sock_path = await channels.open(
+        session_id, work_item_id, lists, transport=transport, credentials=credentials
+    )
     if db is not None:
         # Which transport, for a reattach to re-register it the same way.
         egress = {**lists.to_json(), "transport": transport}
+        if credentials:
+            egress["credentials"] = [r.to_json() for r in credentials]
+            # Whose `worker_env` the values came from, for a reattach to
+            # read them again; absent, the daemon's own (no repo entry).
+            if repo is not None:
+                egress["repo"] = repo
         await db.write(lambda c: store.set_session_egress(c, session_id, egress))
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:
@@ -564,6 +585,11 @@ async def run_task(
     #: The harness's own hosts (`Harness.network_requires`), allowed on top of
     #: a `network:` sandbox's runtime list. Only `run_agent_task` sets it.
     network_requires: tuple[str, ...] = (),
+    #: The credentials this launch's harness declares (`Harness.credentials`),
+    #: which fill a sandbox entry naming just `env` (`harness.manage`). Only
+    #: `run_agent_task` sets it; the sandbox's own `credentials` are managed
+    #: for every launch regardless.
+    declared: tuple = (),
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -597,6 +623,19 @@ async def run_task(
     )
 
     full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
+    # A managed credential's value goes to the egress proxy, read from the
+    # worker env like any other; the container holds its sentinel, and the
+    # docker client does not hold the value either (spec §6). Read off the
+    # sandbox here, for every caller: a subprocess task or a test scope runs
+    # code the worker wrote, as an agent does.
+    credentials = (
+        _harness.manage(_harness.sandbox_credentials(sandbox), declared)
+        if backend is not None
+        else ()
+    )
+    sentinels = {c.env: c.sentinel for c in credentials}
+    rules = _inject.rules(credentials, full_env)
+    full_env = {k: v for k, v in full_env.items() if k not in sentinels}
     refs = None
     if backend is not None:
         # The container writes its result here, and `result_path` is mounted
@@ -627,13 +666,20 @@ async def run_task(
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
         if problem := await backend.probe(
-            sandbox, cmd[0], repo_entry.env if repo_entry is not None else None
+            sandbox,
+            cmd[0],
+            # A managed name never crosses, not even into the probe.
+            {k: v for k, v in repo_entry.env.items() if k not in sentinels}
+            if repo_entry is not None
+            else None,
         ):
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
         try:
-            ca_bundle = await backend.prepare(sandbox)
+            # The Kraft CA joins the bundle only when a credential is managed.
+            kraft_ca = _ca.ensure_ca(run_dirs)[0] if credentials else None
+            ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             log_path.write_text(f"kraft: {exc}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
@@ -643,7 +689,16 @@ async def run_task(
             # Before the worker exists: it has no route but this one.
             lists = PhaseLists.of(sandbox["network"], "runtime", network_requires)
             try:
-                proxy_env = await open_egress(db, backend, session_id, work_item_id, sandbox, lists)
+                proxy_env = await open_egress(
+                    db,
+                    backend,
+                    session_id,
+                    work_item_id,
+                    sandbox,
+                    lists,
+                    rules,
+                    repo_entry.path if repo_entry is not None else None,
+                )
             except BaseException as exc:
                 # Whatever part of the route did open, closed.
                 await close_egress(backend, session_id)
@@ -662,14 +717,19 @@ async def run_task(
                 await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
             home = backend.home(run_dirs, work_item_id)
             home.mkdir(parents=True, exist_ok=True)
+            # A repository's `env:` crosses by name, its value already in
+            # `full_env` (`worker_env`), never on the argv `ps` shows. It
+            # still outranks the git identity, and `env=` and the relay
+            # still outrank it.
+            repo_env = repo_entry.env if repo_entry is not None else {}
+            identity = await asyncio.to_thread(_sandbox.git_identity, Path(cwd))
             cmd = backend.wrap(
                 cmd,
                 cwd,
                 sandbox,
                 run_dirs.results,
                 env={
-                    **await asyncio.to_thread(_sandbox.git_identity, Path(cwd)),
-                    **(repo_entry.env if repo_entry is not None else {}),
+                    **{k: v for k, v in identity.items() if k not in repo_env},
                     **(env or {}),
                     # Last: the relay is the only route, whatever else says.
                     **proxy_env,
@@ -679,9 +739,13 @@ async def run_task(
                 cidfile=cidfile,
                 refs=refs,
                 home=home,
-                passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+                passthrough=(
+                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                    *repo_env,
+                ),
                 ro_paths=ro_paths,
                 ca_bundle=ca_bundle,
+                sentinels=sentinels,
             )
         # Kraft-qx1q: `create_session` above inserts this row 'pending' with no
         # pid yet. `pause_work_item`, `chain.skip_node`, and

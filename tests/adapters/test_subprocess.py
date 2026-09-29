@@ -720,19 +720,22 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
     monkeypatch.setattr(docker_backend, "docker_argv", fake_docker_argv)
 
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "Daemon")
+    # Done only if the fake docker, run in the client's own env (what a bare
+    # `-e MY_REPO` copies from), handed the value on.
+    writes = _writes_result({"status": "done"})
+    writes[-1] = '[ "$MY_REPO" = 1 ] && ' + writes[-1]
+    repo = {"env": {"MY_REPO": "1", "GIT_AUTHOR_NAME": "R"}, "env_passthrough": ["OPENAI_API_KEY"]}
     status, _ = await run(
-        _writes_result({"status": "done"}),
-        sandbox=DOCKER,
-        env={"PYTHONDONTWRITEBYTECODE": "1"},
-        repo_entry=entry_of({"env": {"MY_REPO": "1"}, "env_passthrough": ["OPENAI_API_KEY"]}),
+        writes, sandbox=DOCKER, env={"PYTHONDONTWRITEBYTECODE": "1"}, repo_entry=entry_of(repo)
     )
 
     assert status == "done"
-    assert {"MY_REPO": "1", "PYTHONDONTWRITEBYTECODE": "1"}.items() <= seen["env"].items()
-    # The container has no ~/.gitconfig: the identity crosses as env.
-    assert seen["env"]["GIT_AUTHOR_NAME"] == "Daemon"
-    # A credential crosses by name only; the CLI gets a home that outlives --rm.
-    assert list(seen["passthrough"]) == ["OPENAI_API_KEY"]
+    # The container has no ~/.gitconfig: the identity crosses as env, under a
+    # repository's own `env:`. That, and a credential, cross by name only
+    # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
+    assert seen["env"] == {"GIT_COMMITTER_NAME": "Daemon", "PYTHONDONTWRITEBYTECODE": "1"}
+    assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]
     assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"
 
 

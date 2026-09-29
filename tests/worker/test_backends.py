@@ -15,8 +15,10 @@ from support.harness import entry_of
 from kraft import builtins as kraft_builtins
 from kraft import events, store
 from kraft.adapters import subprocess as sp
+from kraft.config import ConfigError
+from kraft.executor.context import LaunchContext
 from kraft.paths import RunDirs
-from kraft.worker import backends, channel, reattach
+from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -53,9 +55,11 @@ class Remote:
         return run_dirs.base / "remote-home" / work_item_id
 
     async def probe(self, sandbox, executable, env):
+        self.probed_env = env
         return None
 
-    async def prepare(self, sandbox):
+    async def prepare(self, sandbox, *, kraft_ca=None):
+        self.kraft_ca = kraft_ca
         if isinstance(self.prepared, str):
             raise SandboxNotReady(self.prepared)
         return self.prepared
@@ -305,6 +309,7 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     assert status == "done_with_concerns"
     assert remote.calls == ["open_session", "wrap", "close", "close_session"]
     assert remote.wrapped_env[0]["HTTPS_PROXY"] == "http://127.0.0.1:3128"
+    assert remote.kraft_ca is None
     row = database.read(
         lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
     )
@@ -316,6 +321,51 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     }
     assert (remote.sock_path is None) == (transport == "tls")
     assert not channels.socket_path("s1").exists()
+
+
+async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch
+):
+    """Spec §6: read from the worker env into the session's proxy; the
+    container gets the sentinel and a bundle with the Kraft CA, the row the
+    rule and the repo whose env gave the value but not the value, and the
+    docker client not even the variable. Read off the sandbox by `run_task`
+    itself: a caller that says nothing of credentials still strips them."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    entry = entry_of({"path": "/r", "env": {"ANTHROPIC_API_KEY": "sk-real-VALUE"}})
+    remote.transport = "tls"
+    seen = {}
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+        seen["sentinels"] = kw["sentinels"]
+        seen["rules"] = channels.tls_session(session_id).credentials
+        seen["mints_in"] = channels.tls_session(session_id).run_dirs
+        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        return ["sh", "-c", 'echo "key=${ANTHROPIC_API_KEY-unset}"; exec "$@"', "sh", *inner]
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    credential = {
+        "env": "ANTHROPIC_API_KEY",
+        "sentinel": "sk-sentinel",
+        "inject": [{"domain": "a.io", "header": "x-api-key"}],
+    }
+    sandbox = {**_POLICED, "credentials": [credential]}
+
+    status = await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
+
+    assert status == "done_with_concerns"
+    assert seen["sentinels"] == {"ANTHROPIC_API_KEY": "sk-sentinel"}
+    (rule,) = seen["rules"]
+    assert (rule.domain, rule.header, rule.value) == ("a.io", "x-api-key", "sk-real-VALUE")
+    assert remote.kraft_ca == ca.ensure_ca(run_dirs)[0] and seen["mints_in"] is not None
+    row = database.read(
+        lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    recorded = json.loads(row["egress"])
+    assert (recorded["credentials"], recorded["repo"]) == ([rule.to_json()], "/r")
+    assert "sk-real-VALUE" not in row["egress"]
+    assert "key=unset" in (run_dirs.logs / "s1.log").read_text()
+    assert remote.probed_env == {}  # the repo's `env:` literal, not even for the probe
 
 
 @pytest.mark.parametrize("missing", ["channel", "route"])
@@ -391,11 +441,33 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     assert not channels.socket_path("s1").exists()
 
 
+class _Unreadable:
+    """`deps.launch`'s entry for a `repos.yaml` that no longer loads."""
+
+    def __getattr__(self, name):
+        raise ConfigError("repos.yaml: broken")
+
+
+@pytest.mark.parametrize(
+    ("launched_in", "entry", "value"),
+    [
+        (None, None, "sk-daemon"),
+        ("/r", {"path": "/r"}, "sk-daemon"),
+        ("/r", {"path": "/r", "env": {"ANTHROPIC_API_KEY": "sk-repo-env"}}, "sk-repo-env"),
+        ("/r", {"path": "/r", "env_passthrough": ["MY_KEY"]}, "sk-passthrough"),
+        ("/r", None, None),
+        ("/r", "unreadable", None),
+    ],
+    ids=["no-repo-entry", "repo", "repo-env", "repo-passthrough", "repo-gone", "repo-unreadable"],
+)
 async def test_reattach_re_registers_a_tls_session_with_no_socket(
-    item_on, database, run_dirs, remote, channels, monkeypatch
+    item_on, database, run_dirs, remote, channels, monkeypatch, launched_in, entry, value
 ):
     """Its relay B dials the listener again with the certificate it holds:
-    the session must be registered for it, and no socket made."""
+    the session must be registered for it, with the credentials it
+    launched with, and no socket made. Their values are read the way its
+    launch read them, through the repo entry it launched with; with that
+    entry gone or unreadable, none (fail closed), never the daemon's."""
     release = asyncio.Event()
 
     async def adopt(*args, **kw):
@@ -405,12 +477,26 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     item = await item_on(_CHAIN, "implementation")
     live = (os.getpid(), psutil.Process().create_time())
     await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
+    env = "MY_KEY" if entry and "env_passthrough" in entry else "ANTHROPIC_API_KEY"
+    rule = {"env": env, "domain": "a.io", "header": "x-api-key"}
+    rule |= {"sentinel": "sk-sentinel", "format": "%s"}
     egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
+    egress |= {"credentials": [rule]} | ({"repo": launched_in} if launched_in else {})
     await database.write(lambda c: store.set_session_egress(c, "s1", egress))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-daemon")
+    monkeypatch.setenv("MY_KEY", "sk-passthrough")
+    resolved = _Unreadable() if entry == "unreadable" else entry and entry_of(entry)
+    asked = []
 
-    _, tasks = await reattach.reattach(database, run_dirs)
+    def launch(path):
+        asked.append(path)
+        return LaunchContext(repo_entry=resolved)
 
-    assert channels.tls_session("s1") is not None
+    _, tasks = await reattach.reattach(database, run_dirs, launch_factory=launch)
+
+    (injected,) = channels.tls_session("s1").credentials
+    assert (injected.to_json(), injected.value) == (rule, value)
+    assert asked == ([launched_in] if launched_in else [])
     assert not channels.socket_path("s1").parent.exists()
     release.set()
     await tasks["s1"]

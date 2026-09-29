@@ -588,6 +588,7 @@ def docker_argv(
     ro_paths: Iterable[str | Path] = (),
     ca_bundle: str | Path | None = None,
     relay: str | None = None,
+    sentinels: dict[str, str] | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -643,14 +644,19 @@ def docker_argv(
     The daemon's proxy variables are forwarded bare, except one on its
     loopback, and an extra CA arrives as one bundle at a fixed container path
     with every CA variable naming it: `docker_forward`. `ca_bundle` is the
-    bundle `prepare` built, None for none. A repository's own `env` still
-    wins.
+    bundle `prepare` built, None for none. `env` wins over both, and any
+    literal over a bare name.
 
-    `env` is `run_task`'s own `env=` argument -- e.g. `PYTHONDONTWRITEBYTECODE`
-    for a fix-loop re-measure -- which is otherwise silently dropped: only
-    `FORWARDED_ENV` crosses into the container by default. Passed through as
-    literal `-e NAME=VALUE`, unlike `FORWARDED_ENV`'s bare `-e NAME` (which
-    copies from docker's own process env, never written to disk).
+    `env` is literal `-e NAME=VALUE`, so only what is no secret: the caller's
+    own values (`PYTHONDONTWRITEBYTECODE` for a fix-loop re-measure, the git
+    identity, the relay's proxy). Everything else crosses bare `-e NAME`,
+    copied from the docker client's own process env: `FORWARDED_ENV` and
+    `passthrough`, which is where a repository's `env:` and
+    `env_passthrough` go -- `ps` never shows their values.
+
+    `sentinels`: each proxy-managed credential's variable and the sentinel
+    it holds instead of its value (spec §6), literal and last, so no bare
+    `-e NAME` and no `env` can carry the real one in.
 
     `cidfile`: docker writes the container's id there once it has created
     the container, and leaves no file when it never got that far -- the one
@@ -663,8 +669,8 @@ def docker_argv(
 
     `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
     has somewhere to keep its state across sessions. `passthrough`: names
-    forwarded bare, like `FORWARDED_ENV` -- a repo's `env_passthrough`, whose
-    values must never be written onto this argv. `ro_paths`: extra
+    forwarded bare, like `FORWARDED_ENV` -- a repo's `env` and
+    `env_passthrough`, whose values must never be written onto this argv. `ro_paths`: extra
     host paths mounted read-only at the same path (a rules file).
 
     `cwd` is resolved first: git records a worktree's real path, and a
@@ -739,11 +745,15 @@ def docker_argv(
     ca_mount, ca_env = _forward.ca_args(ca_bundle)
     argv += ca_mount
     proxies = () if network else _forward.forwarded_proxies()
-    for env_name in dict.fromkeys((*FORWARDED_ENV, *proxies, *passthrough)):
-        argv += ["-e", env_name]
     pins: dict[str, str] = {}
     _pin(pins, _HARDENED_GIT_CONFIG)
-    for env_name, value in {**pins, **ca_env, **(env or {})}.items():
+    literal = {**pins, **ca_env, **(env or {}), **(sentinels or {})}
+    # A name given both ways crosses once, literal: which of two `-e` wins
+    # is the runtime's business, not something to leave to it.
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *proxies, *passthrough)):
+        if env_name not in literal:
+            argv += ["-e", env_name]
+    for env_name, value in literal.items():
         argv += ["-e", f"{env_name}={value}"]
     if host.selinux == "relabel":
         argv = _relabelled(argv)
@@ -1006,9 +1016,12 @@ async def oom_killed(session_id: str) -> str | None:
 DOCKER_CALL_TIMEOUT_S = 30.0
 
 
-async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+async def docker_call(
+    *args: str, timeout: float | None = None, env: dict[str, str] | None = None
+) -> tuple[int, str] | None:
     """Run `docker args...`; `(returncode, stdout)`, or None when docker is
-    missing or did not answer in time (its client is then killed)."""
+    missing or did not answer in time (its client is then killed). `env`
+    overlays the client's own environment, for a bare `-e NAME` to copy."""
     try:
         cli = (await asyncio.to_thread(runtime)).cli
     except ConfigError, OSError:
@@ -1017,10 +1030,12 @@ async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, st
         return None
     try:
         proc = await asyncio.create_subprocess_exec(
-            cli,
+            # Found on the daemon's PATH, not on one `env` sets.
+            shutil.which(cli) or cli,
             *args,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=None if env is None else {**os.environ, **env},
         )
     except OSError:
         return None
@@ -1106,13 +1121,13 @@ async def missing_executable(
     container that exists -- which reads as the agent failing and opens a fix
     loop no agent can win. Asked the way the launch will run: through the
     image's own entrypoint (a version manager's shim sets `PATH` there) and
-    with the repository's literal `env`. Anything inconclusive -- no daemon,
+    with the repository's `env`, by name like the launch. Anything inconclusive -- no daemon,
     no `sh`, an entrypoint that is the agent itself, a pull that failed -- is
     False: the launch goes ahead and fails, or not, as it always did."""
     key = (image, executable)
     if key in _HAS_EXECUTABLE:
         return False
-    env_args = [a for name, value in (env or {}).items() for a in ("-e", f"{name}={value}")]
+    env_args = [a for name in (env or {}) for a in ("-e", name)]
     probed = await docker_call(
         "run",
         "--rm",
@@ -1127,6 +1142,7 @@ async def missing_executable(
         'command -v "$0" >/dev/null && echo kraft-probe-yes || echo kraft-probe-no',
         executable,
         timeout=300,
+        env=env,
     )
     if probed is None or probed[0] != 0:
         return False
@@ -1198,11 +1214,12 @@ class DockerBackend:
             )
         return None
 
-    async def prepare(self, sandbox: dict) -> Path | None:
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """The image's combined CA bundle, built when there is an extra CA
-        (`docker_forward.prepare`), for `wrap`'s `ca_bundle`."""
+        or a `kraft_ca` (`docker_forward.prepare`), for `wrap`'s
+        `ca_bundle`."""
         try:
-            return await _forward.prepare(sandbox["image"])
+            return await _forward.prepare(sandbox["image"], kraft_ca=kraft_ca)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
         except OSError as exc:
@@ -1227,6 +1244,7 @@ class DockerBackend:
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,
+        sentinels: dict[str, str] | None = None,
     ) -> list[str]:
         network = sandbox.get("network") and session_id is not None
         return docker_argv(
@@ -1244,6 +1262,7 @@ class DockerBackend:
             ro_paths=ro_paths,
             ca_bundle=ca_bundle,
             relay=relay_name(session_id) if network else None,
+            sentinels=sentinels,
         )
 
     def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:

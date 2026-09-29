@@ -13,11 +13,14 @@ from typing import NoReturn
 
 from kraft import caps as _caps
 from kraft import events, logs, store
+from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
 from kraft.config import RepoEntry, base_ignore_args, git_read
-from kraft.paths import default_run_dir
+from kraft.paths import RunDirs, default_run_dir
 from kraft.worker import backends as _backends
+from kraft.worker import ca as _ca
+from kraft.worker import inject as _inject
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
@@ -640,19 +643,27 @@ async def run_setup_command(
         )
     if not cmd:
         return ""
+    client_env = worker_env(repo_entry)
+    sentinels: dict[str, str] = {}
     if sandbox:
         # Never on the host for a sandboxed item (Kraft-p8nem): the worktree
         # is the worker's to write, so `uv sync` or `npm ci` there runs a build
         # backend or package script the worker may have written. The docker
         # client runs on the host with the worker env, like `run_task`'s; the
-        # container gets the entry's literal `env` and its passthrough names.
+        # container gets the entry's `env` and passthrough names, bare.
         # It mounts the worktree's ref store as it stands -- one of the item's
         # sessions may have it mounted -- and publishes nothing from it: only
         # a session's store names the branch Kraft moves.
         run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
         backend = _backends.for_sandbox(sandbox)
+        # No harness here: an entry naming just `env` holds its sentinel
+        # and nothing injects it; a repository's own credential is injected
+        # where the install phase names its host.
+        credentials = _harness.manage(_harness.sandbox_credentials(sandbox))
+        sentinels = {c.env: c.sentinel for c in credentials}
         try:
-            ca_bundle = await backend.prepare(sandbox)
+            kraft_ca = _ca.ensure_ca(RunDirs(run_base))[0] if credentials else None
+            ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
         refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
@@ -672,6 +683,7 @@ async def run_setup_command(
                     worktree.name,
                     sandbox,
                     PhaseLists.of(sandbox["network"], "install"),
+                    _inject.rules(credentials, client_env),
                 )
                 if network
                 else {}
@@ -681,11 +693,17 @@ async def run_setup_command(
                 worktree,
                 sandbox,
                 None,
-                env={**(repo_entry.env if repo_entry is not None else {}), **proxy_env},
+                env=proxy_env,
                 session_id=setup_id,
                 refs=refs,
-                passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+                # The entry's `env:` by name too: its values are in the
+                # client's own env (`worker_env` below), never on argv.
+                passthrough=(
+                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                    *(repo_entry.env if repo_entry is not None else {}),
+                ),
                 ca_bundle=ca_bundle,
+                sentinels=sentinels,
             )
         except BaseException as exc:
             if network:
@@ -701,7 +719,8 @@ async def run_setup_command(
         done = await asyncio.to_thread(
             subprocess.run,
             **run,
-            env=worker_env(repo_entry),
+            # A managed credential's value is the egress proxy's alone.
+            env={k: v for k, v in client_env.items() if k not in sentinels},
             capture_output=True,
             text=True,
         )

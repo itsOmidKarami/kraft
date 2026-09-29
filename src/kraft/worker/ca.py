@@ -6,8 +6,9 @@ It signs, for now, the daemon's loopback TLS listener (`server_cert`) and
 one client certificate per egress session on a VM-backed runtime
 (`mint_session_cert`), whose subject CN is the session id -- the only
 identity the listener trusts, since every relay-B connection arrives from
-127.0.0.1. P6's per-host leaves for credential injection mint from the same
-root through `_leaf`.
+127.0.0.1. And one server certificate per injected host (`mint_host_leaf`),
+which the egress proxy shows a worker's client when it terminates TLS to
+inject a credential (P6).
 
 Every certificate carries what Python 3.13+'s `VERIFY_X509_STRICT` (on in
 `ssl.create_default_context`) demands: critical basicConstraints and
@@ -23,7 +24,9 @@ from __future__ import annotations
 import datetime
 import ipaddress
 import os
+import re
 import shutil
+import threading
 from pathlib import Path
 
 from cryptography import x509
@@ -53,22 +56,32 @@ def _dir(run_dirs) -> Path:
     return directory
 
 
+def _write(path: Path, data: bytes, mode: int) -> None:
+    """`data` at `path` whole or not at all: written to a file of its own,
+    created `mode` (a key's 0600 never readable by anyone else even for an
+    instant), then renamed over `path`. A reader never sees half a file,
+    and a crash never leaves one where the next mint would reuse it."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+    tmp.unlink(missing_ok=True)  # one a crash left, perhaps not `mode`
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _write_key(path: Path, key: ec.EllipticCurvePrivateKey) -> None:
-    """Created 0600, never readable by anyone else even for an instant."""
-    path.unlink(missing_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as out:
-        out.write(
-            key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-        )
+    pem = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    _write(path, pem, 0o600)
 
 
 def _write_cert(path: Path, cert: x509.Certificate) -> None:
-    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    _write(path, cert.public_bytes(serialization.Encoding.PEM), 0o666)
 
 
 def _name(cn: str) -> x509.Name:
@@ -200,6 +213,58 @@ def server_cert(run_dirs) -> tuple[Path, Path]:
             x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
             *(x509.DNSName(name) for name in GATEWAY_HOSTS),
         ],
+    )
+
+
+#: One exact DNS name, lowercase: no wildcard, no port, nothing a path
+#: could make more of.
+_EXACT_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
+
+
+def mint_host_leaf(run_dirs, host: str) -> tuple[Path, Path]:
+    """`run/ca/hosts/<host>/leaf.pem` and `leaf.key`: a server certificate
+    for exactly `host` (SAN `DNSName(host)`), for the egress proxy to show a
+    worker's client when it terminates TLS to inject a credential (spec §6).
+    Keyed by the host as DNS compares it (case, a trailing dot), cached
+    like `server_cert`: minted again only when missing or older than the
+    CA. `ValueError` for anything but an exact host -- the name is a
+    directory. One at a time: the proxy mints on each CONNECT's thread, and
+    a CLI opens several connections at once; hold `HOST_LEAF_LOCK` around
+    this and the load too, or another re-mint can land between the files."""
+    name = host.lower().rstrip(".")
+    if not _EXACT_HOST.fullmatch(name):
+        raise ValueError(f"{host!r} is not an exact host name to mint a certificate for")
+    # ponytail: one lock for every host; per-host locks if minting ever shows up.
+    with HOST_LEAF_LOCK:
+        return _host_leaf(run_dirs, name)
+
+
+#: Held while a host leaf is checked and minted (`mint_host_leaf`), and by
+#: the proxy while it loads the pair: a re-mint rewrites both files.
+HOST_LEAF_LOCK = threading.RLock()
+
+
+def _host_leaf(run_dirs, name: str) -> tuple[Path, Path]:
+    ca_cert_path, _ = ensure_ca(run_dirs)
+    directory = _dir(run_dirs) / "hosts" / name
+    for d in (directory.parent, directory):
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        d.chmod(0o700)
+    cert_path, key_path = directory / "leaf.pem", directory / "leaf.key"
+    if (
+        cert_path.is_file()
+        and key_path.is_file()
+        and cert_path.stat().st_mtime >= ca_cert_path.stat().st_mtime
+    ):
+        return cert_path, key_path
+    return _leaf(
+        run_dirs,
+        cert_path,
+        key_path,
+        name,
+        usage=ExtendedKeyUsageOID.SERVER_AUTH,
+        days=_SERVER_DAYS,
+        san=[x509.DNSName(name)],
     )
 
 
