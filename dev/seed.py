@@ -171,7 +171,13 @@ def main() -> int:
     for title, template, want in ITEMS:
         wid = (
             client.post(
-                "/work-items", json={"title": title, "repo": str(REPO), "chain_template": template}
+                "/work-items",
+                json={
+                    "title": title,
+                    "repo": str(REPO),
+                    "chain_template": template,
+                    "autostart": True,
+                },
             )
             .raise_for_status()
             .json()["id"]
