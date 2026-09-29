@@ -5,9 +5,11 @@ beside a repo's own hooks, and never committed."""
 import asyncio
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -119,6 +121,30 @@ def test_a_planted_symlink_is_refused_and_nothing_is_written_through_it(tmp_path
     with pytest.raises(hi.HookFileError, match="symlink"):
         hi.install_cursor_hook(wt, ARGV)
     assert list(outside.iterdir()) == []
+
+
+def test_a_planted_fifo_is_refused_at_once(tmp_path):
+    """Opened blocking, a FIFO waits for a writer that never comes, and the
+    daemon's event loop with it."""
+    _, wt = _worktree(tmp_path)
+    (wt / ".cursor").mkdir()
+    fifo = wt / ".cursor/hooks.json"
+    os.mkfifo(fifo)
+    raised = []
+
+    def install():
+        try:
+            hi.install_cursor_hook(wt, ARGV)
+        except hi.HookFileError as exc:
+            raised.append(exc)
+
+    worker = threading.Thread(target=install, daemon=True)
+    worker.start()
+    worker.join(5)
+    if worker.is_alive():  # free it before failing: a writer ends its wait
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+    assert not worker.is_alive(), "install_cursor_hook blocked on a FIFO"
+    assert raised and "not a regular file" in str(raised[0])
 
 
 # -- codex: per-launch -c flags, trusted from `codex app-server` (Kraft-4in7z.3)

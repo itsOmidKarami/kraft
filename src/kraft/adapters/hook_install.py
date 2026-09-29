@@ -11,10 +11,13 @@ worktree's index. A repo's own hooks stay; Kraft's entry sits beside them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -65,10 +68,13 @@ def _git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
 
 def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
     """Kraft's entry into `hooks.json` under the open `.cursor` directory,
-    never through a symlink: read with O_NOFOLLOW, replaced by a rename."""
+    never through a symlink and never blocking on what a worker planted:
+    opened O_NONBLOCK|O_NOFOLLOW and read only if it is a regular file (a
+    FIFO opened blocking waits for a writer forever, and the daemon's loop
+    with it), replaced by a rename of a fresh temp file."""
     name = path.name
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
     except FileNotFoundError:
         data = {"version": 1, "hooks": {}}
     except OSError as exc:
@@ -76,8 +82,11 @@ def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
             f"{path} is not a file Kraft can read (a symlink, or {exc.strerror}); remove it"
         ) from exc
     else:
-        with os.fdopen(fd) as f:
-            text = f.read()
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise HookFileError(f"{path} is not a regular file; remove it")
+            os.set_blocking(fd, True)
+            text = f.read().decode(errors="replace")
         try:
             data = json.loads(text)
         except ValueError as exc:
@@ -90,14 +99,17 @@ def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
     # Cursor allows the call when a hook crashes, times out or prints nothing,
     # unless the entry says otherwise: Kraft's gate must deny instead.
     entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
-    tmp = f".{name}.{os.getpid()}.tmp"
+    # Random and exclusive: nothing planted under the name is opened.
+    tmp = f".{name}.{secrets.token_hex(8)}.tmp"
     try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         with os.fdopen(os.open(tmp, flags, 0o644, dir_fd=dfd), "w") as f:
             f.write(json.dumps(data, indent=2) + "\n")
         # A rename replaces a symlink planted since, never writes through it.
         os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
     except OSError as exc:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp, dir_fd=dfd)
         raise HookFileError(f"could not write {path}: {exc}") from exc
 
 
@@ -119,7 +131,9 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     # Every step below goes through a directory fd opened without following.
     try:
         (worktree / ".cursor").mkdir(exist_ok=True)
-        dfd = os.open(worktree / ".cursor", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        dfd = os.open(
+            worktree / ".cursor", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+        )
     except OSError as exc:
         raise HookFileError(
             f"{worktree / '.cursor'} is not a directory Kraft can write its permission hook "
