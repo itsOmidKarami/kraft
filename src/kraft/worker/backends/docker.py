@@ -425,6 +425,42 @@ def socket_channel(relay_image: str) -> bool | None:
     return host.socket_channel
 
 
+def _vm_evidence(host: Runtime) -> str:
+    """What the runtime says about running in a VM, in its own words (spike
+    4.5a's detection): docker's `OperatingSystem` (`Docker Desktop`),
+    podman's `ServiceIsRemote` (podman machine). Empty when it says
+    nothing: the probe's answer stands on its own."""
+    if host.podman:
+        remote = (_run(host.cli, "info", "--format", "{{.Host.ServiceIsRemote}}") or "").strip()
+        return f"ServiceIsRemote: {remote}" if remote == "true" else ""
+    system = (_run(host.cli, "info", "--format", "{{.OperatingSystem}}") or "").strip()
+    return f"OperatingSystem: {system}" if system else ""
+
+
+def channel_refusal(
+    host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
+) -> str | None:
+    """Why a sandbox with `network:` cannot run here, given `socket_channel`'s
+    answer; None when it can. Shared by a launch and doctor, which also
+    passes what the runtime `said` about itself (`_vm_evidence`)."""
+    if reachable is False:
+        return (
+            f"{host.describe()}{f' ({said})' if said else ''} runs its containers in a VM "
+            "(Docker Desktop, podman machine), where a container cannot connect to a host "
+            "unix socket, so a sandbox with `network:` has no route out. The VM transport "
+            "is not available yet: run Kraft on Linux-native docker or podman, or remove "
+            "the sandbox's `network`"
+        )
+    if reachable is None:
+        return (
+            f"could not tell whether {host.describe()} lets a container reach a host "
+            f"unix socket, which a sandbox with `network:` needs: the probe did not "
+            f"run. Pull the relay image ({host.cli} pull {relay_image}) and check "
+            "`kraft admin doctor`"
+        )
+    return None
+
+
 def relay_argv(session_id: str, sock_path: Path, relay_image: str) -> list[str]:
     """`docker run -d` for a session's relay: no network of its own,
     forwarding 127.0.0.1:3128 in its namespace -- which the worker joins --
@@ -1055,21 +1091,8 @@ class DockerBackend:
             host = await asyncio.to_thread(runtime)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
-        if reachable is False:
-            raise SandboxNotReady(
-                f"{host.describe()} runs its containers in a VM (Docker Desktop, podman "
-                "machine), where a container cannot connect to a host unix socket, so a "
-                "sandbox with `network:` has no route out. The VM transport is not "
-                "available yet: run Kraft on Linux-native docker or podman, or remove "
-                "the sandbox's `network`"
-            )
-        if reachable is None:
-            raise SandboxNotReady(
-                f"could not tell whether {host.describe()} lets a container reach a host "
-                f"unix socket, which a sandbox with `network:` needs: the probe did not "
-                f"run. Pull the relay image ({host.cli} pull {image}) and check "
-                "`kraft admin doctor`"
-            )
+        if problem := channel_refusal(host, image, reachable):
+            raise SandboxNotReady(problem)
         try:
             argv = relay_argv(session_id, sock_path, image)
         except SandboxRefused as exc:
@@ -1122,9 +1145,28 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        egress = ""
+        if sandbox.get("network"):
+            # A launch never pulls it (`--pull=never` in the probe), and the
+            # refreshed runtime above forgot the probe's last answer.
+            try:
+                relay = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            except ConfigError as exc:
+                return False, str(exc)
+            pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay)
+            if pulled is None or pulled[0] != 0:
+                return False, (
+                    f"the egress relay image {relay!r} is not pulled -- "
+                    f"run: {host.cli} pull {relay}"
+                )
+            reachable = await asyncio.to_thread(socket_channel, relay)
+            said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+            if problem := channel_refusal(host, relay, reachable, said):
+                return False, problem
+            egress = f", egress relay {relay}"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
         return (
             True,
             f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}, "
-            f"{host.describe_limits()}",
+            f"{host.describe_limits()}{egress}",
         )

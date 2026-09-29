@@ -4,6 +4,7 @@ refuses a runtime whose containers cannot reach a host unix socket."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -171,3 +172,56 @@ def test_the_probe_believes_only_the_relays_own_answer(monkeypatch, returncode, 
     assert {"--network=none", "--pull=never", "--cap-drop=ALL"} <= set(argv)
     mounted = argv[argv.index("-v") + 1].split(":")[0]
     assert argv[-1] == f"UNIX-CONNECT:{mounted}/s.sock"
+
+
+@pytest.fixture
+def healthy_but_relay(monkeypatch):
+    """`health` on a machine whose daemon answers and whose repository image
+    is pulled; `pulled["relay"]` says whether the relay image is."""
+    pulled = {"relay": True}
+    relay = docker._forward._sandbox_host(os.environ).relay_image
+
+    async def call(*args, timeout=None):
+        if args[0] == "version":
+            return 0, "29.3.1"
+        return (0, "sha") if args[-1] != relay or pulled["relay"] else (1, "")
+
+    monkeypatch.setattr(docker, "docker_call", call)
+    monkeypatch.setattr(docker, "detect_runtime", docker.Runtime)
+    return SimpleNamespace(pulled=pulled, relay=relay)
+
+
+async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay, monkeypatch):
+    """A launch never pulls it: the probe runs `--pull=never`."""
+    monkeypatch.setattr(docker, "socket_channel", lambda image: True)
+    backend = docker.DockerBackend()
+    ok, detail = await backend.health(POLICED)
+    assert ok and f"egress relay {healthy_but_relay.relay}" in detail
+
+    healthy_but_relay.pulled["relay"] = False
+    ok, detail = await backend.health(POLICED)
+    assert not ok and f"docker pull {healthy_but_relay.relay}" in detail
+
+
+@pytest.mark.parametrize(
+    ("engine", "info", "said"),
+    [
+        ("docker", "Docker Desktop", "OperatingSystem: Docker Desktop"),
+        ("podman", "true", "ServiceIsRemote: true"),
+    ],
+    ids=["docker-desktop", "podman-machine"],
+)
+async def test_doctor_fails_naming_the_vm_runtime_when_network_is_set(
+    healthy_but_relay, monkeypatch, engine, info, said
+):
+    """Doctor asks the probe again (a launch's cached answer may be from
+    before the runtime changed) and names the VM in the runtime's words."""
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(socket_channel=True))
+    monkeypatch.setattr(docker, "detect_runtime", lambda: docker.Runtime(engine, engine=engine))
+    monkeypatch.setattr(docker, "_probe_socket_channel", lambda host, image: False)
+    monkeypatch.setattr(docker, "_run", lambda *argv: f"{info}\n")
+
+    ok, detail = await docker.DockerBackend().health(POLICED)
+
+    assert not ok
+    assert f"({said})" in detail and "VM transport is not available yet" in detail
