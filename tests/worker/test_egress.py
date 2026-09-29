@@ -129,7 +129,7 @@ async def test_an_allowed_host_is_tunnelled_to_the_address_it_checked(proxy, int
 async def test_an_absolute_form_request_is_forwarded_in_origin_form(proxy, internet):
     p = await proxy(allow=["api.example.com"])
     reader, writer = await p.send(
-        b"GET http://api.example.com/v1/x?q=1 HTTP/1.1\r\nHost: api.example.com\r\n"
+        b"GET http://api.example.com/v1/x?q=1 HTTP/1.1\r\nHost: evil.example\r\n"
         b"Proxy-Authorization: Basic c2VjcmV0\r\nConnection: keep-alive\r\n\r\n"
     )
     echoed = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
@@ -189,6 +189,9 @@ def test_match(host, port, allow, deny, allowed):
         "metadata.google.internal",
         "127.0.0.1",
         "169.254.169.254",
+        "::7f00:1",
+        "2002:7f00:1::",
+        "64:ff9b::a9fe:a9fe",
     ],
     ids=[
         "loopback",
@@ -200,6 +203,9 @@ def test_match(host, port, allow, deny, allowed):
         "metadata-name",
         "loopback-literal",
         "metadata-literal",
+        "v4-compatible-loopback",
+        "6to4-loopback",
+        "nat64-metadata",
     ],
 )
 async def test_always_denied_addresses_even_under_an_exact_allow(host):
@@ -217,14 +223,27 @@ async def test_always_denied_addresses_even_under_an_exact_allow(host):
         ("db.internal", ["db.internal:443"], True),
         ("10.0.0.5", ["10.0.0.5"], True),
         ("10.0.0.5", ["*"], False),
+        ("100.100.1.1", ["*"], False),
+        ("100.100.1.1", ["100.100.1.1"], True),
+        ("64:ff9b::a00:1", ["*"], False),
     ],
-    ids=["one-label-wildcard", "star-star", "exact", "exact-with-port", "literal", "star"],
+    ids=[
+        "one-label-wildcard",
+        "star-star",
+        "exact",
+        "exact-with-port",
+        "literal",
+        "star",
+        "shared-address-space",
+        "shared-address-space-exact",
+        "nat64-private",
+    ],
 )
-async def test_a_private_address_needs_an_exact_allow_entry(host, allow, allowed):
+async def test_a_non_public_address_needs_an_exact_allow_entry(host, allow, allowed):
     proxy = egress.EgressProxy(getaddrinfo=_getaddrinfo, environ={})
     verdict = await proxy.resolve_and_check(host, 443, allow=tuple(allow))
     assert verdict.allowed is allowed
-    assert verdict.addresses == (("10.0.0.5",) if allowed else ())
+    assert verdict.addresses == (tuple(_DNS.get(host, [host])) if allowed else ())
 
 
 async def test_a_refusal_is_one_403_line_recorded_once_per_host(proxy, internet):
@@ -251,6 +270,19 @@ async def test_a_refusal_is_one_403_line_recorded_once_per_host(proxy, internet)
         },
     ]
     assert internet.dialled == []
+
+
+async def test_refusal_events_are_capped_per_session(proxy, monkeypatch):
+    """A client walking many hosts cannot flood the timeline: past the cap
+    one last event says the rest are not recorded, and each is still a 403."""
+    monkeypatch.setattr(egress, "MAX_REFUSAL_EVENTS", 2)
+    p = await proxy()
+    for host in ("a.test", "b.test", "c.test", "d.test"):
+        answer = await p.ask(f"CONNECT {host}:443 HTTP/1.1\r\n\r\n".encode())
+        assert answer.startswith(b"HTTP/1.1 403 ")
+    assert [e.get("host") for e in p.events] == ["a.test", "b.test", None]
+    assert p.events[-1]["suppressed"] is True
+    assert p.session.refused == {"a.test", "b.test"}
 
 
 @pytest.mark.parametrize(
@@ -298,6 +330,47 @@ async def test_chains_to_the_daemons_upstream_proxy(proxy, internet, env, dialle
         assert (await reader.readuntil(b"\r\n\r\n")).startswith(b"HTTP/1.1 200 ")
     writer.close()
     assert internet.dialled == [dialled]
+
+
+@pytest.mark.parametrize(
+    ("sent", "forwarded"),
+    [
+        (
+            b"POST http://api.example.com/a HTTP/1.1\r\nHost: api.example.com\r\n"
+            b"Content-Length: 3\r\n\r\nabcGET http://evil.example/ HTTP/1.1\r\n\r\n",
+            b"POST http://api.example.com/a HTTP/1.1\r\nHost: api.example.com\r\n"
+            b"Content-Length: 3\r\nConnection: close\r\n\r\nabc",
+        ),
+        (
+            b"GET http://evil.example\\@api.example.com/x HTTP/1.1\r\nHost: evil.example\r\n\r\n",
+            b"GET http://api.example.com/x HTTP/1.1\r\nHost: api.example.com\r\n"
+            b"Connection: close\r\n\r\n",
+        ),
+    ],
+    ids=["pipelined-request-dropped", "backslash-userinfo"],
+)
+async def test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked(
+    proxy, internet, sent, forwarded
+):
+    """Chained upstream, the request line and Host are rebuilt from what was
+    checked and only one request's bytes go on: the upstream never sees a
+    second request, or a URL it might parse as a different host."""
+    p = await proxy(allow=["api.example.com"], env={"HTTP_PROXY": "http://proxy.corp:3128"})
+    reader, writer = await p.send(sent)
+    echoed = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+    writer.close()
+    assert echoed == forwarded.partition(b"\r\n\r\n")[0] + b"\r\n\r\n"
+    assert b"".join(internet.received) == forwarded
+    assert internet.dialled == [("proxy.corp", 3128)]
+
+
+async def test_a_chunked_request_is_refused_before_an_upstream_proxy(proxy, internet):
+    p = await proxy(allow=["api.example.com"], env={"HTTP_PROXY": "http://proxy.corp:3128"})
+    answer = await p.ask(
+        b"POST http://api.example.com/ HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+    )
+    assert answer.startswith(b"HTTP/1.1 400 Bad Request\r\n")
+    assert internet.dialled == []
 
 
 @pytest.mark.parametrize(

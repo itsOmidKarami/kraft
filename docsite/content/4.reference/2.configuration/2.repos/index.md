@@ -134,9 +134,9 @@ Deny wins over allow. A phase that is missing or has empty lists allows nothing,
 - cloud metadata names and addresses;
 - the host's own addresses, which are what its hostname resolves to.
 
-Kraft checks the address a name resolves to, resolving it once on the host, and then connects to that checked address. If any address a name resolves to is denied, the whole name is refused. A private address (RFC 1918, IPv6 ULA) is reachable only through an allow entry naming its host exactly, never through a wildcard.
+Kraft checks the address a name resolves to, resolving it once on the host, and then connects to that checked address. If any address a name resolves to is denied, the whole name is refused. An IPv4 address carried inside an IPv6 one (IPv4-mapped, IPv4-compatible, 6to4, NAT64 `64:ff9b::/96`) is checked as that IPv4 address as well. Any other non-public address (RFC 1918, IPv6 ULA, the shared `100.64.0.0/10` range, reserved ranges) is reachable only through an allow entry naming its host exactly, never through a wildcard.
 
-**Refusals.** A refused request is answered `403` with a one-line reason. Kraft records one `sandbox_egress_refused` event (`{session_id, host, port, phase, reason}`) per session and host, so a retry loop does not flood the timeline: `kraft view events --type sandbox_egress_refused`.
+**Refusals.** A refused request is answered `403` with a one-line reason. Kraft records one `sandbox_egress_refused` event (`{session_id, host, port, phase, reason}`) per session and host, so a retry loop does not flood the timeline: `kraft view events --type sandbox_egress_refused`. After 100 hosts, one last event with `suppressed: true` says later refusals in that session are not recorded; they are still refused.
 
 **Clients that ignore the proxy.** Anything that does not use `HTTP(S)_PROXY`, such as git over SSH or a raw socket, has no route at all. A harness whose file declares `proxy_aware: false` (Cursor) is refused under a network policy as a configuration error before it starts.
 

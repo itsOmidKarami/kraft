@@ -10,7 +10,7 @@ session's lifetime, is the channel's (`kraft.worker.channel`).
 Per connection: parse `CONNECT host:port` or an absolute-form `http://`
 request; refuse host `kraft` (the worker API, not yet available); match the
 host against the lists (deny wins); resolve it once on the host and refuse
-an always-denied address or a private one the allow list does not name
+an always-denied address or a non-public one the allow list does not name
 exactly; then dial the address that was checked -- never the name again, so
 a DNS answer that changes between check and dial (rebinding) cannot slip a
 different address through. Outbound connections chain through the daemon's
@@ -39,6 +39,9 @@ MAX_HEAD = 64 * 1024
 HEAD_TIMEOUT = 30.0
 #: Seconds a dial to an origin or the upstream proxy may take.
 CONNECT_TIMEOUT = 30.0
+#: Distinct hosts a session's refusals are recorded for; past this, one last
+#: event says the rest are not (they are still refused).
+MAX_REFUSAL_EVENTS = 100
 
 #: Cloud metadata names, refused whatever they resolve to. Their usual
 #: address (169.254.169.254) is link-local, and refused by address as well.
@@ -113,7 +116,10 @@ class EgressSession:
     #: Records one refusal; gets the event payload. Called once per host.
     record_refusal: Callable[[dict], Awaitable[None]]
     #: Hosts already recorded, so a client's retry loop cannot flood events.
+    #: At most `MAX_REFUSAL_EVENTS` of them.
     refused: set[str] = field(default_factory=set)
+    #: Set once the cap is reached and the one "suppressed" event is recorded.
+    suppressed: bool = False
 
 
 def _split(pattern: str) -> tuple[str, int | None]:
@@ -155,13 +161,26 @@ def match(host: str, port: int, allow: tuple[str, ...], deny: tuple[str, ...]) -
     return Verdict(False, f"{host}:{port} is not on the allow list")
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
 def _address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
-        addr = ipaddress.ip_address(value.split("%", 1)[0])
+        return ipaddress.ip_address(value.split("%", 1)[0])
     except ValueError:
         return None
-    mapped = getattr(addr, "ipv4_mapped", None)
-    return mapped or addr
+
+
+def _with_embedded(addr) -> list:
+    """`addr` and any IPv4 address an IPv6 one carries (mapped, compatible
+    `::a.b.c.d`, 6to4, NAT64), every one of which is checked: a route to the
+    embedded address is a route to it."""
+    if addr.version == 4:
+        return [addr]
+    embedded = [addr.ipv4_mapped, addr.sixtofour]
+    if int(addr) >> 32 == 0 or addr in _NAT64:
+        embedded.append(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
+    return [addr, *(e for e in embedded if e is not None)]
 
 
 class EgressProxy:
@@ -189,20 +208,22 @@ class EgressProxy:
     async def _own_addresses(self) -> set:
         # ponytail: the host's own addresses are loopback (refused anyway)
         # plus what its hostname resolves to. No interface enumeration, so a
-        # second NIC's address is caught only by the private-address rule.
+        # second NIC's address is caught only by the non-public-address rule.
         try:
             names = await self._resolve(socket.gethostname(), 0)
         except OSError:
             return set()
-        return {a for n in names if (a := _address(n)) is not None}
+        return {e for n in names if (a := _address(n)) is not None for e in _with_embedded(a)}
 
     async def resolve_and_check(self, host: str, port: int, *, allow: tuple[str, ...]) -> Verdict:
         """Resolve `host` once, on the host, and check every address it
         answers: loopback, link-local, unspecified, a metadata address or the
         host's own refuse outright (any one of them refuses the lot: a
-        rebinding answer mixes a public address with a private one); a
-        private (RFC 1918, ULA) address needs an allow entry naming `host`
-        exactly, never a wildcard. Allowed: the addresses to dial."""
+        rebinding answer mixes a public address with a private one); any
+        other non-global address (RFC 1918, ULA, shared, reserved) needs an
+        allow entry naming `host` exactly, never a wildcard. An IPv4 address
+        embedded in an IPv6 one is checked too. Allowed: the addresses to
+        dial."""
         host = _norm(host)
         if host in _METADATA_NAMES:
             return Verdict(False, f"{host} is a cloud metadata name, which is always denied")
@@ -213,24 +234,25 @@ class EgressProxy:
         own = await self._own_addresses()
         exact = any(_exact(p, host, port) for p in allow)
         for raw in addresses:
-            addr = _address(raw)
-            if addr is None:
+            found = _address(raw)
+            if found is None:
                 return Verdict(False, f"{host} resolves to {raw!r}, not an address")
-            if (
-                addr.is_loopback
-                or addr.is_link_local
-                or addr.is_unspecified
-                or addr.is_multicast
-                or addr in _METADATA_ADDRESSES
-                or addr in own
-            ):
-                return Verdict(False, f"{host} resolves to {addr}, which is always denied")
-            if addr.is_private and not exact:
-                return Verdict(
-                    False,
-                    f"{host} resolves to private address {addr}; only an allow entry "
-                    f"naming {host} exactly reaches it",
-                )
+            for addr in _with_embedded(found):
+                if (
+                    addr.is_loopback
+                    or addr.is_link_local
+                    or addr.is_unspecified
+                    or addr.is_multicast
+                    or addr in _METADATA_ADDRESSES
+                    or addr in own
+                ):
+                    return Verdict(False, f"{host} resolves to {addr}, which is always denied")
+                if not addr.is_global and not exact:
+                    return Verdict(
+                        False,
+                        f"{host} resolves to non-public address {addr}; only an allow entry "
+                        f"naming {host} exactly reaches it",
+                    )
         return Verdict(True, addresses=tuple(addresses))
 
     def _upstream(self, scheme: str, host: str) -> tuple[str, int, str | None] | None:
@@ -294,6 +316,11 @@ class EgressProxy:
 
         tunnel = method == "CONNECT"
         upstream = self._upstream("https" if tunnel else "http", _norm(host))
+        length = 0
+        if not tunnel and upstream is not None:
+            length = _content_length(headers)
+            if isinstance(length, str):
+                return await _answer(writer, 400, "Bad Request", length)
         try:
             if upstream is None:
                 out_reader, out_writer = await self._dial(verdict.addresses, port)
@@ -325,12 +352,32 @@ class EgressProxy:
                 if upstream is not None:
                     writer.write(early)
             else:
-                line = target if upstream is not None else _origin_form(target)
-                kept = "".join(f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS)
+                # Rebuilt from what was checked, never the client's own target
+                # or Host: an upstream parsing either differently would reach
+                # a host the policy never saw.
+                authority = f"[{host}]" if ":" in host else host
+                if port != 80:
+                    authority += f":{port}"
+                line = _origin_form(target)
+                if upstream is not None:
+                    line = f"http://{authority}{line}"
+                kept = "".join(
+                    f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"}
+                )
                 out_writer.write(
-                    f"{method} {line} HTTP/1.1\r\n{kept}{auth_line}"
+                    f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
                     "Connection: close\r\n\r\n".encode()
                 )
+            if not tunnel and upstream is not None:
+                # One request's bytes and no more: whatever else the client
+                # sends (a pipelined request) must never reach the upstream.
+                out_writer.write(rest[:length])
+                await asyncio.gather(
+                    _copy(reader, out_writer, length - len(rest[:length])),
+                    _pump(out_reader, writer),
+                    return_exceptions=True,
+                )
+                return
             if rest:
                 out_writer.write(rest)
             await asyncio.gather(
@@ -341,7 +388,20 @@ class EgressProxy:
 
     async def _refuse(self, writer, session: EgressSession, host: str, port: int, reason: str):
         host = _norm(host)
-        if host not in session.refused:
+        if host in session.refused or session.suppressed:
+            pass
+        elif len(session.refused) >= MAX_REFUSAL_EVENTS:
+            session.suppressed = True
+            await session.record_refusal(
+                {
+                    "session_id": session.session_id,
+                    "phase": session.lists.phase,
+                    "suppressed": True,
+                    "reason": f"over {MAX_REFUSAL_EVENTS} hosts refused; "
+                    "later refusals are not recorded",
+                }
+            )
+        else:
             session.refused.add(host)
             await session.record_refusal(
                 {
@@ -405,6 +465,21 @@ def _origin_form(target: str) -> str:
     return (url.path or "/") + (f"?{url.query}" if url.query else "")
 
 
+def _content_length(headers: list[str]) -> int | str:
+    """The request body's length for a request forwarded upstream, or why it
+    is a 400. A chunked body is refused: its end is where the upstream says,
+    so one request cannot be forwarded and nothing after it."""
+    if any(_name(h) == "transfer-encoding" for h in headers):
+        return "Transfer-Encoding is not forwarded to an upstream proxy; send Content-Length"
+    values = {h.split(":", 1)[1].strip() for h in headers if _name(h) == "content-length"}
+    if not values:
+        return 0
+    value = values.pop()
+    if values or not (value.isascii() and value.isdigit()):
+        return "Content-Length must be one number"
+    return int(value)
+
+
 def _name(header: str) -> str:
     return header.split(":", 1)[0].strip().lower()
 
@@ -417,6 +492,17 @@ async def _answer(writer: asyncio.StreamWriter, code: int, phrase: str, reason: 
         + body
     )
     await writer.drain()
+
+
+async def _copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, remaining: int) -> None:
+    """Copy exactly `remaining` bytes, then stop reading `src`."""
+    while remaining > 0:
+        data = await src.read(min(remaining, 65536))
+        if not data:
+            return
+        dst.write(data)
+        await dst.drain()
+        remaining -= len(data)
 
 
 async def _pump(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
