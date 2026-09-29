@@ -1,27 +1,22 @@
 <script setup lang="ts">
-// The shipped `default` chain (templates/chains/default.yaml), simplified: it
-// leaves out some nodes that never ask a person, and keeps every node where
-// the chain stops for one. A stop is marked in words, not colour
-// alone.
+// The shipped `default` chain (templates/chains/default.yaml), simplified for
+// an overview: one verb per step, and only the final review marked as a stop.
+// The real chain has more nodes and approval gates than this. A stop is
+// marked in words, not colour alone.
 const stages: { name: string, stop?: string }[] = [
-  { name: 'spec' },
-  { name: 'spec_approval', stop: 'you approve' },
+  { name: 'specify' },
   { name: 'plan' },
-  { name: 'plan_approval', stop: 'you approve' },
-  { name: 'chain_revision_approval', stop: 'you approve, if a change is proposed' },
-  { name: 'implementation' },
-  { name: 'verification' },
-  { name: 'local_review', stop: 'you approve' },
-  { name: 'draft_merge_request' },
-  { name: 'final_review', stop: 'you approve' },
-  { name: 'external_approval', stop: 'waits only if your forge requires a review' },
+  { name: 'implement' },
+  { name: 'verify' },
+  { name: 'draft MR' },
+  { name: 'review', stop: 'you approve' },
   { name: 'merge' },
 ]
 </script>
 
 <template>
   <figure class="hero-mono stage-strip">
-    <div role="list" aria-label="The default chain's nodes, in order" class="stage-strip__nodes">
+    <div role="list" aria-label="The default chain's steps, in order" class="stage-strip__nodes">
       <span class="stage-strip__prompt" aria-hidden="true">›</span>
       <template v-for="(stage, i) in stages" :key="stage.name">
         <span role="listitem" :class="{ 'stage-strip__stop': stage.stop }">
@@ -31,8 +26,7 @@ const stages: { name: string, stop?: string }[] = [
       </template>
     </div>
     <figcaption class="stage-strip__caption">
-      The default chain, simplified: some nodes are left out, but every place it
-      stops for a person is shown.
+      The default chain, simplified: some steps and approval gates are left out.
     </figcaption>
   </figure>
 </template>
