@@ -302,6 +302,20 @@ def test_docker_argv_forwards_passthrough_names_bare():
     assert not [a for a in argv if a.startswith("OPENAI_API_KEY=")]
 
 
+def test_a_name_given_both_bare_and_literal_crosses_once_as_the_literal():
+    """Two `-e` for one name leave the winner to the runtime; the literal (the
+    relay's proxy, a CA path, a pin) is the one that must hold."""
+    argv = docker.docker_argv(
+        ["codex"],
+        "/w",
+        {"kind": "docker", "image": "x"},
+        None,
+        env={"HTTPS_PROXY": "http://127.0.0.1:3128"},
+        passthrough=["HTTPS_PROXY"],
+    )
+    assert [a for a in argv if a.startswith("HTTPS_PROXY")] == ["HTTPS_PROXY=http://127.0.0.1:3128"]
+
+
 def test_docker_argv_pins_hooks_off_for_git_in_the_container():
     """A hook manager's hook points at a host interpreter, so it fails every
     commit in the container; and a hook is the worker's code anyway."""
@@ -399,13 +413,19 @@ async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "argv"
-    (bin_dir / "docker").write_text(f'#!/bin/sh\necho "$@" > {log}\necho kraft-probe-yes\n')
+    (bin_dir / "docker").write_text(
+        f'#!/bin/sh\necho "$@" > {log}\necho "$PATH" >> {log}\necho kraft-probe-yes\n'
+    )
     (bin_dir / "docker").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     assert await docker.missing_executable("img", "claude", {"PATH": "/opt/bin"}) is False
-    argv = log.read_text().split()
+    line, client_path = log.read_text().splitlines()
+    argv = line.split()
     assert not [a for a in argv if a.startswith("--entrypoint")]
-    assert argv[argv.index("PATH=/opt/bin") - 1] == "-e"
+    # By name, like the launch: the value rides in the client's env.
+    assert argv[argv.index("PATH") - 1] == "-e"
+    assert "PATH=/opt/bin" not in argv
+    assert client_path == "/opt/bin"
 
 
 # --- runtimes: docker, podman, rootless, SELinux --------------------------------------

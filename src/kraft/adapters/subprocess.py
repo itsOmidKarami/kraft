@@ -662,14 +662,19 @@ async def run_task(
                 await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
             home = backend.home(run_dirs, work_item_id)
             home.mkdir(parents=True, exist_ok=True)
+            # A repository's `env:` crosses by name, its value already in
+            # `full_env` (`worker_env`), never on the argv `ps` shows. It
+            # still outranks the git identity, and `env=` and the relay
+            # still outrank it.
+            repo_env = repo_entry.env if repo_entry is not None else {}
+            identity = await asyncio.to_thread(_sandbox.git_identity, Path(cwd))
             cmd = backend.wrap(
                 cmd,
                 cwd,
                 sandbox,
                 run_dirs.results,
                 env={
-                    **await asyncio.to_thread(_sandbox.git_identity, Path(cwd)),
-                    **(repo_entry.env if repo_entry is not None else {}),
+                    **{k: v for k, v in identity.items() if k not in repo_env},
                     **(env or {}),
                     # Last: the relay is the only route, whatever else says.
                     **proxy_env,
@@ -679,7 +684,10 @@ async def run_task(
                 cidfile=cidfile,
                 refs=refs,
                 home=home,
-                passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+                passthrough=(
+                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                    *repo_env,
+                ),
                 ro_paths=ro_paths,
                 ca_bundle=ca_bundle,
             )

@@ -53,7 +53,9 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     argv = call["args"]
     assert argv[:2] == ["docker", "run"]
     assert argv[-4:] == [_SANDBOX["image"], "sh", "-c", _SETUP]
-    assert "-e" in argv and "SETUP_FLAVOUR=benign" in argv
+    # By name: the value is in the client's env (below), never on argv.
+    assert argv[argv.index("SETUP_FLAVOUR") - 1] == "-e"
+    assert not [a for a in argv if "benign" in a]
     assert not call.get("shell"), "a sandboxed setup went to a host shell"
     # The client runs in a directory of Kraft's, never the worktree: podman
     # leaves an `oom` file where its client runs.

@@ -645,7 +645,7 @@ async def run_setup_command(
         # is the worker's to write, so `uv sync` or `npm ci` there runs a build
         # backend or package script the worker may have written. The docker
         # client runs on the host with the worker env, like `run_task`'s; the
-        # container gets the entry's literal `env` and its passthrough names.
+        # container gets the entry's `env` and passthrough names, bare.
         # It mounts the worktree's ref store as it stands -- one of the item's
         # sessions may have it mounted -- and publishes nothing from it: only
         # a session's store names the branch Kraft moves.
@@ -681,10 +681,15 @@ async def run_setup_command(
                 worktree,
                 sandbox,
                 None,
-                env={**(repo_entry.env if repo_entry is not None else {}), **proxy_env},
+                env=proxy_env,
                 session_id=setup_id,
                 refs=refs,
-                passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+                # The entry's `env:` by name too: its values are in the
+                # client's own env (`worker_env` below), never on argv.
+                passthrough=(
+                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                    *(repo_entry.env if repo_entry is not None else {}),
+                ),
                 ca_bundle=ca_bundle,
             )
         except BaseException as exc:
