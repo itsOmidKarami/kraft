@@ -42,11 +42,11 @@ orientation: horizontal
 ::u-page-section
 ---
 title: A gate stops the chain where a human decides
-description: Approve, reject with a note that re-runs the node that wrote the document, or open the full detail view.
+description: Read what the agent wrote, then approve, or reject with a note that re-runs the node that wrote it.
 orientation: horizontal
 reverse: true
 ---
-![Approving a spec_approval gate from the board's side panel](/assets/gate.png)
+![A spec an agent wrote, waiting for your approval in the item's detail view](/assets/gate.png)
 ::
 
 ::u-page-section
@@ -55,7 +55,7 @@ title: Search, ⌘K
 description: Full-text search, with optional vector search, across work items, pending actions, and linked documents.
 orientation: horizontal
 ---
-![The search overlay: a query for "caching" surfacing a pending gate action, the matching work item, and a source-repo attribution](/assets/search.png)
+![The search overlay: a query for "CSV" surfacing a pending approval, the matching work items, and agent session summaries](/assets/search.png)
 ::
 
 ::u-page-section
