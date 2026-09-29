@@ -218,6 +218,10 @@ def test_install_and_uninstall_service_use_the_real_launchd(tmp_path, monkeypatc
 @pytest.mark.skipif(not shutil.which("kraft"), reason="no installed `kraft` on PATH to supervise")
 @pytest.mark.skipif(not shutil.which("systemctl"), reason="no systemctl on this box")
 @pytest.mark.skipif(
+    _real_user_manager_home() is None,
+    reason="no reachable systemd --user manager on this box",
+)
+@pytest.mark.skipif(
     _operator_has_a_real_service(),
     reason="this machine has a real kraft service installed; the test would unload it",
 )

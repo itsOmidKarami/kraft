@@ -3,8 +3,8 @@
 
 Runs against the HTTP API rather than writing rows: the data is then whatever
 the real executor produces, so it cannot drift from the schema or from the
-states the code can actually reach. Expects `just dev` to be running with the
-fake agent on PATH — see docs/superpowers/specs/2026-09-04-packaging-and-dev-execution-design.md.
+states the code can actually reach. Expects `just dev` to be running, which
+puts the fake agent (fixtures/fake-claude.sh) ahead of the real one on PATH.
 """
 
 from __future__ import annotations
