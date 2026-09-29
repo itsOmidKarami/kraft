@@ -91,12 +91,18 @@ def test_a_codex_launch_that_must_deny_web_search_is_refused(run, tmp_path, poli
         _codex(run, tmp_path, **policy)
 
 
-NETWORKED = {"kind": "docker", "image": "x", "network": {"runtime": {"allow": ["x.io"]}}}
+NETWORKED = {
+    "kind": "docker",
+    "image": "x",
+    "network": {"runtime": {"allow": ["x.io"]}},
+    "resources": {"memory": "1g"},
+}
 
 
 @pytest.fixture
 def image_codex(tmp_path, monkeypatch):
-    """A fake `docker` on PATH that logs each argv to the returned file, then
+    """A fake `docker` on PATH that logs each argv to the returned file (read
+    it with `_calls`), then
     runs the command as `fake_docker_bin` does; FAKE_DOCKER_RUN_FAILS makes
     `docker run` fail as a runtime would before starting the container."""
     from support.harness import fake_docker_bin
@@ -106,7 +112,7 @@ def image_codex(tmp_path, monkeypatch):
     wrapper.mkdir()
     (wrapper / "docker").write_text(
         "#!/bin/sh\n"
-        f'printf "%s\\n" "$*" >> {log}\n'
+        f'printf "%s\\0" "$@" >> {log}; printf "\\n" >> {log}\n'
         '[ -n "${FAKE_DOCKER_RUN_FAILS:-}" ] && [ "$1" = run ] && exit 125\n'
         f'exec {fake_docker_bin(tmp_path)}/docker "$@"\n'
     )
@@ -126,12 +132,25 @@ def test_a_sandboxed_codex_under_network_hooks_through_the_shim(run, tmp_path, i
     hook, _ = _hook_flags(cmd)
     assert '"/opt/kraft/bin/kraft admin permission-hook codex"' in hook
     assert sys.executable not in hook
-    asked = image_codex.read_text().splitlines()
-    assert len(asked) == 4
-    for argv in asked:
-        before, image, after = argv.partition(" x ")
-        assert before.startswith("run --rm ") and "--network=none" in before.split()
-        assert "/opt/kraft/bin:ro" in before and after.startswith(f"{FAKE} app-server ")
+    calls = _calls(image_codex)
+    runs = [c for c in calls if c[0] == "run"]
+    assert len(runs) == 4
+    for argv in runs:
+        at = argv.index("x")
+        flags, command = argv[:at], argv[at + 1 :]
+        assert {"--rm", "--init", "--network=none", "--memory=1g"} <= set(flags)
+        assert any(f.endswith(":/opt/kraft/bin:ro") for f in flags)
+        assert any(f.endswith(":/kraft/home:ro") for f in flags)
+        exe = [*shlex.split(FAKE), "app-server"]
+        assert command[:2] == ["sh", "-c"] and command[4 : 4 + len(exe)] == exe
+    # A client killed at a timeout leaves its container: each is removed by name.
+    named = {argv[argv.index("--name") + 1] for argv in runs}
+    removed = {n for c in calls if c[:2] == ["rm", "-f"] for n in c[2:]}
+    assert named == removed
+
+
+def _calls(log):
+    return [line.split("\0")[:-1] for line in log.read_text().splitlines()]
 
 
 @pytest.mark.parametrize(

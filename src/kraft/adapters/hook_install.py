@@ -228,14 +228,15 @@ def _exe_identity(exe: list[str]) -> tuple:
 
 
 async def codex_hook_flags(
-    exe: list[str], argv: list[str], cwd: Path, runner: list[str] | None = None
+    exe: list[str], argv: list[str], cwd: Path, runner=None
 ) -> tuple[str, ...]:
     """The `-c` flags that install Kraft's preToolUse hook in one codex
     launch, trusted: checked by listing them once more, since an untrusted
-    hook is skipped without a word. `runner` prefixes `exe` to run the
-    session's own codex (a sandbox's `oneshot`); None is the host's, cached
-    per codex binary and command. Raises `CodexTrustError` on anything else
-    -- the caller refuses the launch rather than run it unenforced."""
+    hook is skipped without a word. `runner` runs the session's own codex (a
+    sandbox backend's `oneshot`: `.argv()` prefixes each run of `exe`,
+    `.close()` after); None is the host's, cached per codex binary and
+    command. Raises `CodexTrustError` on anything else -- the caller refuses
+    the launch rather than run it unenforced."""
     command = command_of(argv)
     hook = f'hooks.PreToolUse=[{{hooks=[{{type="command",command={_toml(command)},timeout=10}}]}}]'
     # ponytail: an image's codex is asked on every launch (two short
@@ -244,9 +245,12 @@ async def codex_hook_flags(
     key = None if runner is not None else (_exe_identity(exe), hook)
     if key in _codex_flags:
         return _codex_flags[key]
-    runner = runner or []
+
+    def prefix() -> list[str]:
+        return runner.argv() if runner is not None else []
+
     try:
-        found = await _codex_hook(exe, [hook, _HOOKS_ON], cwd, command, runner)
+        found = await _codex_hook(exe, [hook, _HOOKS_ON], cwd, command, prefix())
         # `enabled` too: a `[hooks.state."<key>"] enabled = false` in the
         # config under a worker-writable HOME is a lower layer than `-c`,
         # and would switch the hook off with its trust intact (measured).
@@ -254,7 +258,7 @@ async def codex_hook_flags(
             f"hooks.state={{{_toml(found['key'])}="
             f"{{trusted_hash={_toml(found['currentHash'])},enabled=true}}}}"
         )
-        listed = await _codex_hook(exe, [hook, _HOOKS_ON, state], cwd, command, runner)
+        listed = await _codex_hook(exe, [hook, _HOOKS_ON, state], cwd, command, prefix())
         if listed.get("trustStatus") != "trusted":
             raise CodexTrustError("codex did not trust Kraft's hook with the hash it listed")
         if listed.get("enabled") is not True:
@@ -267,6 +271,9 @@ async def codex_hook_flags(
         ) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise CodexTrustError(f"`{shlex.join(exe)} app-server`: {exc!r}") from exc
+    finally:
+        if runner is not None:
+            await runner.close()
     # The launch carries exactly the flags checked: a sibling session editing
     # the shared HOME after the check cannot turn the hook off.
     flags = ("-c", hook, "-c", _HOOKS_ON, "-c", state)

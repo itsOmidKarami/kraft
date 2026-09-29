@@ -21,8 +21,9 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -751,13 +752,47 @@ def docker_argv(
     return argv
 
 
-def oneshot_argv(sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
-    """`docker run` up to and including the image, for one short command
-    asked the way a session of `sandbox` would ask it -- its user, its
-    worktree (read-only), its HOME, the shim at `shim.CONTAINER_DIR` -- but
-    with no network and stdin attached. For what only the image's own
-    binaries can answer: codex's hook trust hash (`hook_install`).
-    `SandboxRefused` where the runtime cannot run one."""
+#: Inside a one-shot container: the item's HOME, read-only, and the
+#: writable HOME the command runs with in its place (a tmpfs).
+ONESHOT_HOME_RO = "/kraft/home"
+ONESHOT_HOME = "/kraft/oneshot-home"
+#: Copies the one file of the item's HOME the command reads (codex's own
+#: config, which a worker may have written) into the writable HOME, then
+#: runs the command: codex app-server will not start on a read-only HOME.
+_ONESHOT_SH = (
+    'mkdir -p "$HOME/.codex" && { [ ! -f "$0/.codex/config.toml" ] || '
+    'cp "$0/.codex/config.toml" "$HOME/.codex/"; } && exec "$@"'
+)
+
+
+@dataclass
+class Oneshot:
+    """Short commands in a session's image, each asked the way a session of
+    it would ask -- its user, limits and init, its worktree read-only, its
+    HOME's codex config, the shim at `shim.CONTAINER_DIR` -- but with no
+    network and stdin attached. For what only the image's own binaries can
+    answer: codex's hook trust hash (`hook_install`). Each `argv()` names
+    its container, and `close()` removes every one still there: killing a
+    `docker run` client that timed out leaves its container running."""
+
+    cli: str
+    flags: list[str]
+    tail: list[str]
+    names: list[str] = field(default_factory=list)
+
+    def argv(self) -> list[str]:
+        name = f"kraft-oneshot-{uuid.uuid4().hex[:16]}"
+        self.names.append(name)
+        return [self.cli, "run", "--name", name, *self.flags, *self.tail]
+
+    async def close(self) -> None:
+        if self.names:
+            await docker_call("rm", "-f", *self.names)
+
+
+def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+    """`Oneshot` for `sandbox`; `SandboxRefused` where the runtime cannot
+    run one or enforce its limits."""
     try:
         host = runtime()
     except ConfigError as exc:
@@ -765,10 +800,9 @@ def oneshot_argv(sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
     if problem := host.refusal():
         raise SandboxRefused(problem)
     cwd = str(Path(cwd).resolve())
-    argv = [
-        host.cli,
-        "run",
+    flags = [
         "--rm",
+        "--init",
         "--interactive=true",
         "--label",
         home_label(),
@@ -776,6 +810,7 @@ def oneshot_argv(sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
         "--security-opt=no-new-privileges",
         *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
         "--cap-drop=ALL",
+        *host.limit_args(sandbox.get("resources")),
         "--network=none",
         "-v",
         f"{cwd}:{cwd}:ro",
@@ -784,13 +819,14 @@ def oneshot_argv(sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
         "-v",
         f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro",
         "-v",
-        f"{home}:{home}",
+        f"{home}:{ONESHOT_HOME_RO}:ro",
+        f"--tmpfs={ONESHOT_HOME}:rw,mode=1777",
         "-e",
-        f"HOME={home}",
+        f"HOME={ONESHOT_HOME}",
     ]
     if host.selinux == "relabel":
-        argv = _relabelled(argv)
-    return [*argv, sandbox["image"]]
+        flags = _relabelled(flags)
+    return Oneshot(host.cli, flags, [sandbox["image"], "sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO])
 
 
 def _relabelled(argv: list[str]) -> list[str]:
@@ -1210,9 +1246,9 @@ class DockerBackend:
             relay=relay_name(session_id) if network else None,
         )
 
-    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
+    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
         try:
-            return oneshot_argv(sandbox, cwd, home)
+            return oneshot(sandbox, cwd, home)
         except SandboxRefused as exc:
             raise SandboxNotReady(str(exc)) from exc
 
