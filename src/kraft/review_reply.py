@@ -159,6 +159,7 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,
         sandbox=sandbox,
+        checkout=executor.sandbox_checkout(row, launch, worktree) if sandbox else None,
         task_instruction=_PROMPT.format(
             title=row["title"], threads=store.render_note(threads, summary)
         ),

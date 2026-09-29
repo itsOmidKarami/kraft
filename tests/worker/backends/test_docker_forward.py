@@ -9,7 +9,7 @@ from support.harness import entry_of
 
 from kraft import builtins as kraft_builtins
 from kraft.worker.backends import docker, docker_forward
-from kraft.worker.sandbox import SandboxNotReady
+from kraft.worker.sandbox import Checkout, SandboxNotReady
 
 IMAGE = "kraft-worker:py"
 SANDBOX = {"kind": "docker", "image": IMAGE}
@@ -263,7 +263,11 @@ def _setup_runs(host) -> list[str]:
 async def test_a_setup_command_gets_the_bundle_too(host, tmp_path):
     host.yaml(f"ca_bundle: {host.ca()}\n")
     await kraft_builtins.run_setup_command(
-        tmp_path, tmp_path, entry_of({"setup_command": "true"}), sandbox=SANDBOX
+        tmp_path,
+        tmp_path,
+        entry_of({"setup_command": "true"}),
+        sandbox=SANDBOX,
+        checkout=Checkout(tmp_path, {}),
     )
     [run] = _setup_runs(host)
     bundle = tmp_path / "run" / "sandbox-ca" / "abc123.pem"
@@ -275,7 +279,11 @@ async def test_a_setup_command_with_an_unusable_ca_does_not_run(host, tmp_path):
     host.yaml("ca_bundle: /nonexistent/corp.pem\n")
     with pytest.raises(RuntimeError, match="could not trust its CA"):
         await kraft_builtins.run_setup_command(
-            tmp_path, tmp_path, entry_of({"setup_command": "true"}), sandbox=SANDBOX
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "true"}),
+            sandbox=SANDBOX,
+            checkout=Checkout(tmp_path, {}),
         )
     assert _setup_runs(host) == []
 

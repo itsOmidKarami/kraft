@@ -11,7 +11,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -297,21 +297,19 @@ def _resolve(result_path: Path, returncode: int) -> str:
 async def _sync_refs(
     db, backend: _backends.SandboxBackend, refs, work_item_id: str, session_id: str
 ) -> None:
-    """Publish the item branch out of a sandboxed session, and record why not
-    when it could not: the branch then stays where it was, and a person
-    decides."""
-    await _record_unsynced(
-        db,
-        refs,
-        work_item_id,
-        session_id,
-        await asyncio.to_thread(backend.code_out, refs, session_id),
-    )
+    """Publish the item branch out of a sandboxed session, in every repository
+    of its checkout, and record why not where it could not: the branch there
+    then stays where it was, and a person decides."""
+    problems = await asyncio.to_thread(backend.code_out, refs, session_id)
+    branch = refs[0].branch if refs else None
+    for problem in problems:
+        await _record_unsynced(db, branch, work_item_id, session_id, problem)
 
 
 async def _record_unsynced(
-    db, refs, work_item_id: str, session_id: str, problem: str | None
+    db, branch: str | None, work_item_id: str, session_id: str, problem: str | None
 ) -> None:
+    """One `sandbox_branch_not_synced`; `problem` names the repository."""
     if problem:
         logger.warning("session %s: %s", session_id, problem)
         await db.write(
@@ -319,7 +317,7 @@ async def _record_unsynced(
                 c,
                 work_item_id,
                 "sandbox_branch_not_synced",
-                {"session_id": session_id, "branch": refs.branch, "reason": problem},
+                {"session_id": session_id, "branch": branch, "reason": problem},
             )
         )
 
@@ -544,6 +542,27 @@ async def close_egress(backend, session_id: str) -> None:
             await channels.close(session_id)
 
 
+async def _item_identity(db, work_item_id: str) -> dict[str, str]:
+    """The item root's identity (`builtins.item_identity`, J3). The row is read
+    here and `git config` runs off the event loop: `db` stays on this thread."""
+    row = db.read(
+        lambda c: c.execute("SELECT repo FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    if row is None:
+        return {}
+    return await asyncio.to_thread(_sandbox.git_identity, Path(row["repo"]))
+
+
+def _declared_members(db, work_item_id: str) -> list[str]:
+    """The workspace members `work_item_id`'s checkout assembles."""
+    from kraft.builtins import item_mounts  # `builtins` imports this module
+
+    row = db.read(
+        lambda c: c.execute("SELECT * FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    return item_mounts(row) if row is not None else []
+
+
 async def run_task(
     db,
     run_dirs,
@@ -611,6 +630,11 @@ async def run_task(
     #: `run_agent_task` sets it; the sandbox's own `credentials` are managed
     #: for every launch regardless.
     declared: tuple = (),
+    #: A sandboxed launch's whole checkout (`stops.sandbox_checkout`): what
+    #: the container mounts, `cwd` being where in it the command runs --
+    #: a workspace member's, for a task fanned out into one. None mounts
+    #: `cwd` alone, with no member (Kraft-ju36l).
+    checkout: _sandbox.Checkout | None = None,
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -657,10 +681,23 @@ async def run_task(
     sentinels = {c.env: c.sentinel for c in credentials}
     rules = _inject.rules(credentials, full_env)
     full_env = {k: v for k, v in full_env.items() if k not in sentinels}
-    refs = None
+    refs: Sequence = ()
+    root, members = checkout if checkout is not None else (Path(cwd), {})
     if backend is not None:
+        if checkout is None and (unmounted := _declared_members(db, work_item_id)):
+            # Fails closed for a caller that forgot: unmounted, a member's
+            # `.git` is the worker's to rewrite between the drift check and
+            # host git (Kraft-ju36l).
+            log_path.write_text(
+                f"kraft: this sandboxed launch was not given the checkout of workspace "
+                f"members {', '.join(unmounted)} to mount, so it does not start\n"
+            )
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
         # Before anything below writes one of them.
-        if problem := await backend.owner_refusal(run_dirs, Path(cwd), work_item_id, result_path):
+        if problem := await backend.owner_refusal(
+            run_dirs, root, work_item_id, result_path, members=members
+        ):
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
@@ -681,8 +718,9 @@ async def run_task(
             refs = await asyncio.to_thread(
                 backend.code_in,
                 run_dirs.base,
-                Path(cwd),
+                root,
                 branch,
+                members=members,
                 session_id=session_id,
                 live=others,
                 work_item_id=work_item_id,
@@ -739,8 +777,8 @@ async def run_task(
     launched = False
     try:
         if backend is not None:
-            if refs is not None:
-                await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
+            for store_ in refs or ():
+                await _record_unsynced(db, store_.branch, work_item_id, session_id, store_.carried)
             home = backend.home(run_dirs, work_item_id)
             home.mkdir(parents=True, exist_ok=True)
             # A repository's `env:` crosses by name, its value already in
@@ -748,10 +786,10 @@ async def run_task(
             # still outranks the git identity, and `env=` and the relay
             # still outrank it.
             repo_env = repo_entry.env if repo_entry is not None else {}
-            identity = await asyncio.to_thread(_sandbox.git_identity, Path(cwd))
+            identity = await _item_identity(db, work_item_id)
             cmd = backend.wrap(
                 cmd,
-                cwd,
+                root,
                 sandbox,
                 run_dirs.results,
                 env={
@@ -764,6 +802,7 @@ async def run_task(
                 result_path=result_path,
                 cidfile=cidfile,
                 refs=refs,
+                workdir=cwd,
                 home=home,
                 passthrough=(
                     *(repo_entry.env_passthrough if repo_entry is not None else ()),
@@ -784,6 +823,14 @@ async def run_task(
         current_status = await db.write(lambda c: store.session_status(c, session_id))
         if current_status != "pending":
             return current_status
+        if backend is None:
+            # The root's commit identity, under everything the repository and
+            # caller set. A workspace member is a worktree of its connected
+            # repository, where Kraft writes no identity (Kraft-ju36l), so a
+            # commit there gets the root's from here, as the sandbox does --
+            # the item's, never `cwd`'s, which is the member on a fanned-out run.
+            identity = await _item_identity(db, work_item_id)
+            full_env = {**identity, **full_env}
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = backend.client_cwd(session_id) if backend is not None else None
@@ -948,7 +995,7 @@ async def run_task(
                             if network:
                                 await close_egress(backend, session_id)
             finally:
-                if refs is not None:
+                if refs:
                     await _sync_refs(db, backend, refs, work_item_id, session_id)
         if paused:
             # The cancelled path never reaches `session_exited`, so Task 6's

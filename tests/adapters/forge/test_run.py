@@ -787,7 +787,7 @@ async def test_a_conflict_is_rebased_onto_the_items_base_branch(
     run_forge.item = await item_on(back_half(), repo=repo, target=target)
     bases = []
 
-    async def forced(_worktree, _repo, _branch, base):
+    async def forced(_worktree, _repo, _branch, base, **_):
         bases.append(base)
 
     monkeypatch.setattr(forge.run._builtins, "mr_rebase_forced", forced)

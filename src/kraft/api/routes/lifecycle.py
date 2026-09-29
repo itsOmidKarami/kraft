@@ -195,8 +195,12 @@ def _forget_sandbox(run_dirs, worktree: Path, wid: str) -> None:
         backend.release(run_dirs, worktree, wid)
 
 
-async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) -> bool:
-    """Reclaim the worktree and its branch.
+async def _remove_worktree(
+    repo: Path, worktree: Path, branch: str, wid: str, members: list[Path] | None = None
+) -> bool:
+    """Reclaim the worktree and its branch, and the same in each of `members`
+    -- the connected repositories its workspace members were checked out
+    from (`builtins.member_repositories`, Kraft-ju36l).
 
     Takes the branch rather than the work item id: the name is stored on the
     row now, and rebuilding it here would be a second derivation that can
@@ -205,7 +209,9 @@ async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) ->
     Best-effort: the row is already abandoned by the time this runs, and a git
     failure here must not leave the item in a state the board cannot show. The
     prune is between the two because a directory removed out from under git
-    leaves an administrative entry that makes the branch delete fail.
+    leaves an administrative entry that makes the branch delete fail --
+    removing the root removes each member's directory with it, so a member
+    repository is pruned the same way. Only the root's outcome is returned.
     """
     ok = True
     for args in (
@@ -219,9 +225,43 @@ async def _remove_worktree(repo: Path, worktree: Path, branch: str, wid: str) ->
         if done.returncode != 0:
             logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
+    for member in members or []:
+        # Best-effort per member, like the rest: a member repository moved or
+        # deleted since must not keep the refs and attachments below alive.
+        if not member.is_dir():
+            logger.warning("abandon %s: member repository %s is gone", branch, member)
+            continue
+        try:
+            await _remove_member_branch(member, branch)
+        except OSError as exc:
+            logger.warning("abandon %s in %s: %s", branch, member, exc)
     # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
     await asyncio.to_thread(node_runs.drop_refs, repo, wid)
     return ok
+
+
+async def _remove_member_branch(member: Path, branch: str) -> None:
+    """Prune `member`'s stale worktree entry and delete `branch` there."""
+    await asyncio.to_thread(
+        subprocess.run, ["git", "worktree", "prune"], cwd=member, capture_output=True
+    )
+    ref = f"refs/heads/{branch}"
+    if git_read(member, "rev-parse", "--verify", "--quiet", ref, expected_failure=True):
+        done = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "branch", "-D", branch],
+            cwd=member,
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            logger.warning("abandon %s in %s: %s", branch, member, done.stderr.strip())
+
+
+def _connected_members(st, row) -> list[Path]:
+    """`row`'s members' connected repositories, read before its worktree goes."""
+    connected = builtins_mod.member_repositories(row, deps.launch(st, row["repo"]).repositories)
+    return [m for m in connected.values() if m is not None]
 
 
 @api_router.post("/work-items/{wid}/abandon")
@@ -247,7 +287,9 @@ async def abandon_work_item(wid: str, request: Request):
     if killed:
         logger.warning("abandon %s: killed orphaned process(es) %s under worktree", wid, killed)
     await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
-    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
+    removed = await _remove_worktree(
+        Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
+    )
     # Best-effort, like the worktree removal beside it: the row is already
     # abandoned, and a failure to delete a directory must not leave the item in
     # a state the board cannot show.
@@ -272,7 +314,9 @@ async def _archive_one(app, row, by: str) -> bool:
     if killed:
         logger.warning("archive %s: killed orphaned process(es) %s under worktree", wid, killed)
     await asyncio.to_thread(_forget_sandbox, st.run_dirs, worktree, wid)
-    removed = await _remove_worktree(Path(row["repo"]), worktree, store.branch_for(row), wid)
+    removed = await _remove_worktree(
+        Path(row["repo"]), worktree, store.branch_for(row), wid, _connected_members(st, row)
+    )
     shutil.rmtree(st.run_dirs.attachments / wid, ignore_errors=True)
     return removed
 
@@ -591,8 +635,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
-            # The refresh runs host git in the worktree (Kraft-dshto).
-            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            # The refresh runs host git in the worktree and its members (Kraft-ju36l).
+            stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree,
                 Path(row["repo"]),
@@ -898,8 +942,8 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
-            # The refresh runs host git in the worktree (Kraft-dshto).
-            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            # The refresh runs host git in the worktree and its members (Kraft-ju36l).
+            stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree,
                 Path(row["repo"]),

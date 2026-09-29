@@ -16,7 +16,7 @@ lets such a backend exist without reworking every caller.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -34,11 +34,12 @@ class SandboxBackend(Protocol):
         """The item's own `HOME`, kept across its sessions."""
 
     async def owner_refusal(
-        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
+        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path, **kw
     ) -> str | None:
-        """Why a path this launch's container writes (its HOME, ref store or
+        """Why a path this launch's container writes (its HOME, ref stores or
         result file) belongs to someone it cannot write as, or None. Asked
-        before Kraft writes any of them; `config_error` when it answers."""
+        before Kraft writes any of them; `config_error` when it answers.
+        `members=` as for `code_in`."""
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         """Why a launch of `executable` cannot start, or None to go ahead:
@@ -53,14 +54,18 @@ class SandboxBackend(Protocol):
         `worker.sandbox.SandboxNotReady` saying why the launch cannot go
         ahead (`config_error`)."""
 
-    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
-        """Put the worktree's code where the session will see it. `branch`
-        None is a setup command: it sees the code and publishes nothing."""
+    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> Sequence[RefStore]:
+        """Put the worktree's code where the session will see it, and return
+        what `wrap` mounts as `refs=` and `code_out` publishes. `branch`
+        None is a setup command: it sees the code and publishes nothing.
+        `members=` is each workspace member's trusted `(common gitdir, admin
+        dir)` by mount path (`sandbox.Checkout`), code the session sees too."""
 
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results_dir, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
         what `prepare` returned, `sentinels=` each proxy-managed
-        credential's variable and what it holds in the value's place."""
+        credential's variable and what it holds in the value's place,
+        `workdir=` where under `cwd` the command runs when not at its top."""
 
     def oneshot(self, sandbox: dict, cwd, home):
         """Short commands in the session's image, asked as its session would
@@ -77,8 +82,9 @@ class SandboxBackend(Protocol):
         ran: `cidfile` is what the launch was given to write, `returncode`
         what it exited with."""
 
-    def code_out(self, refs: RefStore, session_id: str) -> str | None:
-        """Publish what the session committed; why not, when it could not."""
+    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+        """Publish what the session committed, in every repository of the
+        checkout; why not, per repository that could not."""
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
         """`code_out` for every session of the item no launch is left to

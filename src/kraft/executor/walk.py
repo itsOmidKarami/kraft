@@ -1752,9 +1752,10 @@ async def run_once(
     # failed to start" -- node_started, then needs_human naming it -- should
     # not disappear just because the failure now happens a moment earlier.
     try:
-        # Before the worktree is touched at all: host git in a sandboxed
-        # item's submodule runs what its worker planted there (Kraft-dshto).
-        stops.refuse_sandboxed_submodules(row, launch, run_dirs.worktrees / work_item_id)
+        # Before the worktree is touched at all: host git in a member or a
+        # nested repository runs what a sandboxed worker planted in its
+        # config (Kraft-nx4id, Kraft-ju36l).
+        stops.refuse_planted_repos(row, launch, run_dirs.worktrees / work_item_id)
         # A sandboxed item's setup_command runs in its sandbox, never on the
         # host (Kraft-p8nem).
         sandbox = dispatch.item_sandbox(row, launch)
@@ -1766,6 +1767,7 @@ async def run_once(
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
             sandbox=sandbox,
+            repositories=launch.repositories if launch else None,
         )
         # What the deleted `env_setup` node used to do, as implicit runtime
         # preparation: V1 has no builtin action for it, and every node from the
@@ -1784,7 +1786,12 @@ async def run_once(
         # its whole stdout to the events table each time.
         report = (
             await _builtins.prepare_runtime(
-                worktree, Path(row["repo"]), launch.repo_entry if launch else None, sandbox=sandbox
+                worktree,
+                Path(row["repo"]),
+                launch.repo_entry if launch else None,
+                sandbox=sandbox,
+                # Its members now exist, checked out by Kraft just above.
+                checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
             )
             if start_index == 0
             else None

@@ -172,7 +172,10 @@ if [ -n "${KRAFT_RESULT_PATH:-}" ]; then
   fi
   json="$json}"
   printf '%s' "$json" > "$rtmp"
-  mv "$rtmp" "$KRAFT_RESULT_PATH"
+  # In place, not mv: in a sandbox the result file is its own read-write
+  # mount inside a read-only results directory, so a rename onto it fails.
+  cat "$rtmp" > "$KRAFT_RESULT_PATH"
+  rm -f "$rtmp"
 fi
 
 # The rest of the stream, in the real CLI's shapes: after the init line above,

@@ -1,8 +1,10 @@
 import os
+import shutil
 import subprocess
 import threading
 
 import pytest
+from support.workspace import member_checkout
 
 from kraft.worker import refstore
 
@@ -39,7 +41,20 @@ def _commit_object(repo, parent, message="work"):
     """A commit in the repository's object store that no ref points at: what a
     sandboxed worker's `git commit` leaves behind in the shared objects."""
     tree = _git(repo, "rev-parse", f"{parent}^{{tree}}")
-    return _git(repo, "commit-tree", tree, "-p", parent, "-m", message)
+    # An identity of its own: a member repository in a test has none, and CI no global one.
+    return _git(
+        repo,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit-tree",
+        tree,
+        "-p",
+        parent,
+        "-m",
+        message,
+    )
 
 
 def _move_in_store(store, ref, oid):
@@ -262,3 +277,68 @@ def test_discard_forgets_the_store(worktree, prepare, tmp_path):
     refstore.discard(tmp_path / "run", worktree)
     assert not store.shadow.exists()
     assert not list((tmp_path / "run" / "sandbox-git").iterdir())
+
+
+@pytest.fixture(params=[False, True], ids=["own-repository", "inside-the-roots-gitdir"])
+def workspace(request, tmp_path):
+    """A root worktree and its member, and every store a session there mounts."""
+    ws = member_checkout(tmp_path, BRANCH, nested=request.param)
+    ws.stores = refstore.prepare_stores(
+        tmp_path / "run",
+        ws.wt,
+        BRANCH,
+        members=ws.checkout.members,
+        session_id="s1",
+        work_item_id="w1",
+    )
+    return ws
+
+
+def test_a_member_store_publishes_only_the_item_branch_into_its_repository(workspace):
+    """Kraft-ju36l, I4 for a member: its store is its connected repository's,
+    and of what the worker moves there only the item branch reaches it."""
+    ws = workspace
+    member_main, root_branch = _git(ws.m, "rev-parse", "main"), _git(ws.root, "rev-parse", BRANCH)
+    work = _commit_object(ws.m, member_main)
+    member = ws.stores[1]
+    _move_in_store(member, f"refs/heads/{BRANCH}", work)
+    _move_in_store(member, "refs/heads/main", work)
+
+    assert refstore.sync_all(ws.stores, "s1") == []
+
+    assert _git(ws.m, "rev-parse", BRANCH) == work
+    assert _git(ws.m, "rev-parse", "main") == member_main
+    assert _git(ws.root, "rev-parse", BRANCH) == root_branch
+
+
+def test_a_member_common_inside_the_root_common_gets_its_mount_point_from_kraft(tmp_path):
+    """The member's store mounts at its common gitdir, inside the root's store
+    here: docker would otherwise create the mount point there as root, where
+    the next rebuild cannot remove it."""
+    ws = member_checkout(tmp_path, BRANCH, nested=True)
+    root, member = refstore.prepare_stores(
+        tmp_path / "run", ws.wt, BRANCH, members=ws.checkout.members, session_id="s1"
+    )
+    assert (root.shadow / member.common.relative_to(root.common)).is_dir()
+
+
+def test_a_mount_point_is_never_made_through_what_a_worker_left_in_the_store(tmp_path):
+    """A live co-task keeps the root's store as it is, with anything its
+    worker put there: a symlink where the member's mount point goes must not
+    have Kraft make directories wherever it points."""
+    ws = member_checkout(tmp_path, BRANCH, nested=True)
+    kw = {"members": ws.checkout.members}
+    root, _ = refstore.prepare_stores(tmp_path / "run", ws.wt, BRANCH, session_id="s1", **kw)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shutil.rmtree(root.shadow / "modules")
+    (root.shadow / "modules").symlink_to(elsewhere)
+
+    with pytest.raises(RuntimeError, match="not a directory Kraft made"):
+        refstore.prepare_stores(tmp_path / "run", ws.wt, BRANCH, session_id="s2", live=["s1"], **kw)
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_member_kraft_did_not_check_out_is_never_mounted(repo, worktree, tmp_path):
+    with pytest.raises(RuntimeError, match="repos/pkg"):
+        refstore.prepare_stores(tmp_path / "run", worktree, BRANCH, members={"repos/pkg": None})
