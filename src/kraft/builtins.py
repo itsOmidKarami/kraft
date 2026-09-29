@@ -420,6 +420,22 @@ def _add_member(
             f"{rel} in {worktree} is not the empty directory the checkout made; "
             "Kraft checks a member out only into that"
         )
+    # A branch of this name already in the member repository (a rejected gate
+    # kept it, or a person made it) is taken only where the root points.
+    existing = git_read(
+        member_repo,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"refs/heads/{branch}^{{commit}}",
+        expected_failure=True,
+    )
+    if existing and existing != sha:
+        raise RuntimeError(
+            f"{member_repo} already has a branch {branch} at {existing[:12]}, not at "
+            f"{sha[:12]}, the commit {rel} points at; move or delete that branch by "
+            "hand, then retry"
+        )
     _add_worktree(member_repo, target, branch, sha)
 
 

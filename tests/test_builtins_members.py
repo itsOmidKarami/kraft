@@ -179,3 +179,30 @@ async def test_a_connected_path_inside_another_repository_is_refused(tmp_path, d
 
     assert not (run_dirs.worktrees / "w1").exists()
     assert git_read(sub, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.parametrize("at_gitlink", [True, False], ids=["at-the-gitlink", "elsewhere"])
+async def test_a_member_branch_already_in_the_repository_is_reused_only_at_the_gitlink(
+    tmp_path, database, run_dirs, at_gitlink
+):
+    """A branch of the item's name the member repository already has -- a
+    rejected gate kept it, or someone made it -- is checked out only when it
+    sits where the root's gitlink points. Anywhere else it would silently
+    replace what the root records, so the item stops and the branch stays."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
+    branch = wtree.branch(database)
+    _git(sub, "branch", branch)
+    if not at_gitlink:
+        _git(sub, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+        _git(sub, "branch", "-f", branch)
+    tip = git_read(sub, "rev-parse", branch)
+
+    if at_gitlink:
+        worktree = await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
+        assert git_read(worktree / "repos" / "pkg", "rev-parse", "HEAD") == tip
+    else:
+        with pytest.raises(RuntimeError, match=f"already has a branch {branch}"):
+            await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
+        assert not (run_dirs.worktrees / "w1").exists()
+    assert git_read(sub, "rev-parse", branch) == tip
