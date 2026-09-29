@@ -623,3 +623,58 @@ async def test_worktree_preparation_reruns_the_setup_command_on_every_entry(
     for n in (1, 2):
         await kraft_builtins.prepare_runtime(run_dirs.worktrees / "w1", Path(repo), entry)
         assert marker.read_text().count("run") == before + n
+
+
+def _plant(gitdir: Path, kind: str, main: str, orig: str) -> None:
+    """What a sandboxed worker can write into its own worktree gitdir: the
+    state of a git operation that points at the operator's `main`."""
+    planted = gitdir / kind
+    if kind in ("rebase-merge", "rebase-apply", "sequencer"):
+        planted.mkdir()
+        for name, text in {
+            "head-name": "refs/heads/main",
+            "orig-head": orig,
+            "onto": main,
+            "interactive": "",
+            "git-rebase-todo": "",
+            "head": orig,
+        }.items():
+            (planted / name).write_text(f"{text}\n")
+    else:
+        planted.write_text(f"{orig}\n")
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+        "sequencer",
+    ],
+)
+async def test_a_planted_operation_never_moves_a_branch(kind, database, run_dirs, repo):
+    """Kraft-xngty: a worker planted `rebase-merge/` naming `main`, Kraft's
+    rebase failed on it, and its `git rebase --abort` reset the operator's
+    `main` to the planted `orig-head`. Kraft continues or aborts only an
+    operation it started, so any other one stops the item for a person."""
+    _commit(repo, "first.txt", "first\n", "first")
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    worktree_head = _commit(worktree, "work.txt", "work\n", "worktree work")
+    main = _commit(repo, "moved.txt", "moved on\n", "moved on")
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    _plant(gitdir, kind, main, git_read(repo, "rev-parse", "main~1"))
+
+    with pytest.raises(RuntimeError) as stopped:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    assert git_read(repo, "rev-parse", "main") == main
+    assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
+    assert git_read(worktree, "rev-parse", "HEAD") == worktree_head
+    assert f"has a {kind} Kraft did not start" in str(stopped.value)
+    assert (gitdir / kind).exists(), "the planted state is left for a person"

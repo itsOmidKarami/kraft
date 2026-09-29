@@ -934,6 +934,15 @@ async def refresh_worktree_base(
     if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
+    if operation := _operation_in_progress(worktree):
+        # Kraft-xngty: a worker can write this state into its own gitdir,
+        # naming any branch, and `git rebase --abort` would then reset that
+        # branch to the planted `orig-head`. Kraft never rebases over, or
+        # aborts, an operation it did not start.
+        raise RuntimeError(
+            f"{worktree} has a {operation} Kraft did not start; "
+            "finish or abort it by hand, then retry"
+        )
     try:
         done = await asyncio.to_thread(
             subprocess.run,
@@ -964,6 +973,28 @@ async def refresh_worktree_base(
             ),
         )
     return head
+
+
+#: What a git operation in progress leaves in a worktree's own gitdir.
+_OPERATION_STATE = (
+    "rebase-merge",
+    "rebase-apply",
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "BISECT_LOG",
+    "sequencer",
+)
+
+
+def _operation_in_progress(worktree: Path) -> str | None:
+    """The first of `_OPERATION_STATE` present in `worktree`'s gitdir, found by
+    `lexists` so a planted symlink counts, or None. None too when git cannot
+    name the gitdir, since `git rebase` then cannot run either."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
+        return None
+    return next((n for n in _OPERATION_STATE if os.path.lexists(Path(gitdir, n))), None)
 
 
 #: Seconds `git rebase --abort` gets (Kraft-ujep9). Fixed, not the item's time
