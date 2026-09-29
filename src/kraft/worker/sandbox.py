@@ -23,8 +23,9 @@ the design this implements.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
-from collections.abc import MutableMapping
+from collections.abc import Collection, MutableMapping
 from pathlib import Path
 
 #: Kraft's own vars, plus whichever auth var this install's `claude` CLI
@@ -145,6 +146,91 @@ def inside(worktree: Path, rel: str) -> bool:
         if os.path.islink(path):
             return False
     return (worktree / rel).resolve().is_relative_to(worktree.resolve())
+
+
+#: The most of one worker-writable file Kraft reads: `packed-refs` of a very
+#: large repository fits many times over, and a worker cannot make Kraft read more.
+_MAX_READ = 64 * 1024 * 1024
+
+
+def read_regular(path: Path, within: Path) -> str | None:
+    """`path`'s text, only if it is a regular file genuinely inside `within`:
+    the worker writes there, so a symlink could point Kraft at any host file,
+    and a FIFO would block the read (and any lock around it) forever."""
+    try:
+        if not path.resolve().is_relative_to(within.resolve()):
+            return None
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return os.read(fd, _MAX_READ).decode(errors="replace")
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Path] | None:
+    """The trusted `(common gitdir, admin dir)` of member `rel` of `worktree`,
+    whose connected repository is `repo_path`, or None when it has none.
+
+    Derived from the operator's repository, never from `rel/.git`, which the
+    worker writes (Kraft-ju36l, spec I3): the common gitdir is what git in
+    `repo_path` says, and the admin dir is the `worktrees/*` entry of it whose
+    `gitdir` file names this member's `.git`."""
+    done = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        return None
+    common = Path(done.stdout.strip()).resolve()
+    want = os.path.realpath(worktree / rel / ".git")
+    for admin in sorted((common / "worktrees").glob("*")):
+        named = read_regular(admin / "gitdir", common)
+        if named is not None and os.path.realpath(named.strip()) == want:
+            return common, admin
+    return None
+
+
+def _names(path: Path, within: Path, target: Path, *, prefix: str = "") -> bool:
+    """Whether the regular file `path` holds `prefix` plus a path that
+    resolves to `target`, relative ones read against `path`'s directory."""
+    text = read_regular(path, within)
+    if text is None or not text.startswith(prefix):
+        return False
+    named = Path(text.removeprefix(prefix).strip())
+    return (path.parent / named).resolve() == target.resolve()
+
+
+def foreign_members(worktree: Path, expected: dict[str, tuple[Path, Path] | None]) -> list[str]:
+    """The declared members of `worktree` whose checkout is not the one Kraft
+    made (Kraft-ju36l, spec 3.3): host git in one would read config Kraft did
+    not check. `expected[rel]` is `member_gitdirs`'s answer; None means no
+    connected repository, which covers an old-layout member and an item
+    filed before workspaces.
+
+    A member is Kraft's only when its path is genuinely inside the worktree,
+    its `.git` is a regular file naming exactly the expected admin dir, and
+    that admin dir's `commondir` leads to the expected common gitdir."""
+    foreign = []
+    for rel, dirs in expected.items():
+        gitfile = worktree / rel / ".git"
+        ours = (
+            dirs is not None
+            and inside(worktree, rel)
+            and not os.path.islink(gitfile)
+            and _names(gitfile, worktree, dirs[1], prefix="gitdir:")
+            and _names(dirs[1] / "commondir", dirs[1], dirs[0])
+        )
+        if not ours:
+            foreign.append(rel)
+    return sorted(foreign)
 
 
 #: What a ref store mounts from the real common gitdir, read-only: files
@@ -326,16 +412,19 @@ def _gitlinks_at(worktree: Path, rev: str) -> dict[str, str] | None:
     return links
 
 
-def planted_repos(worktree: Path, base: str | None) -> list[str] | None:
+def planted_repos(
+    worktree: Path, base: str | None, mounts: Collection[str] = ()
+) -> list[str] | None:
     """The nested repositories in a sandboxed item's `worktree` its worker
     made, which no host git may be let near -- or None when git cannot say.
 
-    A sandboxed item declares no submodules (Ruling 180 refuses the pairing),
-    so none of these is Kraft's: an untracked nested repository, a gitlink
-    whose directory holds a `.git` (git enters those), and a gitlink the
-    branch added or moved since `base`. A gitlink `base` already had, left
-    unpopulated, is the repository's own and inert -- git has nothing to
-    enter -- so it does not stop a sandboxed item on a repo with submodules."""
+    An untracked nested repository, a gitlink whose directory holds a `.git`
+    (git enters those), and a gitlink the branch added or moved since `base`.
+    A gitlink `base` already had, left unpopulated, is the repository's own
+    and inert -- git has nothing to enter -- so it does not stop a sandboxed
+    item on a repo with submodules. A declared member in `mounts` is Kraft's,
+    populated and moved alike: its caller has checked it with
+    `foreign_members` first."""
     found = nested_repos(worktree)
     at_base = _gitlinks_at(worktree, base) if base else {}
     if found is None or at_base is None:
@@ -343,9 +432,12 @@ def planted_repos(worktree: Path, base: str | None) -> list[str] | None:
     return sorted(
         path
         for path, sha in found.items()
-        if sha is None
-        or os.path.lexists(worktree / path / ".git")
-        or (base and at_base.get(path) != sha)
+        if path not in mounts
+        and (
+            sha is None
+            or os.path.lexists(worktree / path / ".git")
+            or (base and at_base.get(path) != sha)
+        )
     )
 
 
