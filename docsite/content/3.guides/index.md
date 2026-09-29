@@ -15,3 +15,7 @@ Each guide walks through one job from start to finish.
 - [Kraft for VS Code](/guides/vscode): clear gates, review a branch and edit config files from the editor.
 - [Add a security review or a gate reviewer](/guides/add-review-agents): put the shipped `security-review` and `gate-review` skills into a chain of your own.
 - [Reviewing a change](/guides/review-a-change): comment on a work item at any point, and see your feedback reach the next agent.
+- [Write your own chain](/guides/write-your-own-chain): add a lint node with an agent that fixes what it reports, a time cap, and no skipping.
+- [Switch a task to another harness](/guides/switch-harness): run agent tasks on Codex or another CLI instead of Claude Code.
+- [Upgrading your templates](/guides/upgrading-templates): take new shipped chains and library tasks after an upgrade without losing your edits.
+- [Operate a Kraft server](/guides/operations): back up the database, find logs, reclaim disk space, run two instances, and run Kraft as a service.

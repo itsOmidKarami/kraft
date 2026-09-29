@@ -288,11 +288,11 @@ Page rules:
 | The permission gate (`src/kraft/harnesses/*.yaml`, `permissions`) | `docsite/content/4.reference/4.permissions.md` |
 | A harness (`src/kraft/harnesses/*.yaml`, `harness.py`) | `docsite/content/4.reference/5.harnesses/` |
 | An MCP tool (`src/kraft/mcp.py`) | `docsite/content/4.reference/8.mcp-tools.md` |
-| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/1.agent-integration.md` |
+| A Claude Code plugin skill (`plugins/kraft/skills/`) | `docsite/content/3.guides/01.agent-integration.md` |
 | A `KRAFT_*` environment variable, or a variable passed to workers (`src/kraft/worker/env.py`) | `docsite/content/4.reference/2.configuration/9.environment-variables.md` |
 | A new event type (`events.append`), or the notification webhook (`src/kraft/notify.py`) | `docsite/content/4.reference/9.events.md` |
 | A stop reason (`store.mark_needs_human`) or a `kraft admin doctor` check | `docsite/content/1.get-started/3.troubleshooting.md` |
-| `access.yaml` / remote-access behaviour | `docsite/content/3.guides/3.remote-access.md`, and `SECURITY.md` if it's security-relevant |
+| `access.yaml` / remote-access behaviour | `docsite/content/3.guides/03.remote-access.md`, and `SECURITY.md` if it's security-relevant |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but it does not validate every internal link or
