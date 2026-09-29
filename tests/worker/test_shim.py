@@ -90,12 +90,6 @@ _ODD = "a & b=c+d %20\nnext line é"
         (["item", "retry", "--steer", _ODD], "retry", {"id": "", "steer": _ODD}),
         (["view", "show"], "show", {"id": ""}),
         (["view", "threads", "w-x", "--open"], "threads", {"id": "w-x", "open": "1"}),
-        (["view", "diff", "--stat"], "diff", {"id": ""}),
-        (
-            ["view", "compare", "--from", "attempt:1", "--to=latest", "--nodes", "a,b"],
-            "compare",
-            {"id": "", "from": "attempt:1", "to": "latest", "nodes": "a,b"},
-        ),
     ],
     ids=[
         "progress",
@@ -105,8 +99,6 @@ _ODD = "a & b=c+d %20\nnext line é"
         "retry",
         "show",
         "threads",
-        "diff",
-        "compare",
     ],
 )
 def test_a_verb_posts_its_fields_url_encoded_and_prints_the_answer(

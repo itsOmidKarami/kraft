@@ -456,15 +456,13 @@ class EgressProxy:
         call = verb(form, scope)
         if isinstance(call, str):
             return await _answer(writer, 400, "Bad Request", call)
-        api_method, path, payload, params = call
+        api_method, path, payload = call
         if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
             return await self._refuse_route(
                 writer, session, f"{api_method} {path}", "not this session's to call"
             )
         try:
-            reply = await self._call(
-                self._app, api_method, path, scope.session_id, json=payload, params=params
-            )
+            reply = await self._call(self._app, api_method, path, scope.session_id, json=payload)
         except TimeoutError:
             return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
@@ -588,10 +586,10 @@ class EgressProxy:
 
 
 # The worker API's verbs, one per `kraft` shim verb (spec §5): its form
-# fields in, the API call it is out -- `(method, path, JSON body, query)`,
+# fields in, the API call it is out -- `(method, path, JSON body)`,
 # or why the form is a 400. An `id` is the session's own item unless the
 # form names one, which the allowlist then has to pass.
-_Call = tuple[str, str, dict | None, dict | None]
+_Call = tuple[str, str, dict | None]
 
 
 def _item(form: dict, scope: callback.SessionScope) -> str:
@@ -601,43 +599,34 @@ def _item(form: dict, scope: callback.SessionScope) -> str:
 def _progress(form, scope) -> _Call | str:
     if "task" not in form:
         return "progress needs a task"
-    return "POST", f"{_item(form, scope)}/progress", {"task": form["task"]}, None
+    return "POST", f"{_item(form, scope)}/progress", {"task": form["task"]}
 
 
 def _retry(form, scope) -> _Call:
     steer = form.get("steer", "").strip()
-    return "POST", f"{_item(form, scope)}/retry", {"steer": steer} if steer else {}, None
+    return "POST", f"{_item(form, scope)}/retry", {"steer": steer} if steer else {}
 
 
 def _reply(form, scope) -> _Call | str:
     if not form.get("thread") or "body" not in form:
         return "reply needs a thread and a body"
     payload = {"body": form["body"], **({"claim": form["claim"]} if form.get("claim") else {})}
-    return "POST", f"/api/threads/{form['thread']}/replies", payload, None
+    return "POST", f"/api/threads/{form['thread']}/replies", payload
 
 
 def _show(form, scope) -> _Call:
-    return "GET", _item(form, scope), None, None
+    return "GET", _item(form, scope), None
 
 
 def _threads(form, scope) -> _Call:
-    return "GET", f"{_item(form, scope)}/threads", None, None
-
-
-def _diff(form, scope) -> _Call:
-    return "GET", f"{_item(form, scope)}/diff", None, None
-
-
-def _compare(form, scope) -> _Call:
-    params = {k: form[k] for k in ("from", "to", "nodes") if form.get(k)}
-    return "GET", f"{_item(form, scope)}/compare", None, params
+    return "GET", f"{_item(form, scope)}/threads", None
 
 
 def _permission_hook(form, scope) -> _Call | str:
     if not form.get("harness") or "stdin" not in form:
         return "permission-hook needs a harness and its stdin"
     path = f"/api/worker-sessions/{scope.session_id}/permission-hook"
-    return "POST", path, {"harness": form["harness"], "stdin": form["stdin"]}, None
+    return "POST", path, {"harness": form["harness"], "stdin": form["stdin"]}
 
 
 _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
@@ -646,8 +635,6 @@ _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
     "reply": _reply,
     "show": _show,
     "threads": _threads,
-    "diff": _diff,
-    "compare": _compare,
     "permission-hook": _permission_hook,
 }
 

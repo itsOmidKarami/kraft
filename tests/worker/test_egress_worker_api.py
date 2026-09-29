@@ -107,7 +107,6 @@ async def worker_api():
         ),
         ("show", {"id": "w-own"}, ("GET", "/api/work-items/w-own", None)),
         ("threads", {}, ("GET", "/api/work-items/w-own/threads", None)),
-        ("diff", {}, ("GET", "/api/work-items/w-own/diff", None)),
         (
             "permission-hook",
             {"harness": "cursor", "stdin": '{"tool_name": "Shell"}'},
@@ -118,7 +117,7 @@ async def worker_api():
             ),
         ),
     ],
-    ids=["progress", "retry", "retry-steered", "reply", "show", "threads", "diff", "hook"],
+    ids=["progress", "retry", "retry-steered", "reply", "show", "threads", "hook"],
 )
 async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, verb, form, call):
     """The session and the credential are the channel's and the daemon's,
@@ -135,16 +134,6 @@ async def test_a_verb_is_its_api_call_made_as_the_channel_session(worker_api, ve
     assert (seen["method"], seen["path"], seen["json"]) == call
     assert (seen["session"], seen["authorization"]) == ("s-own", "Bearer daemon-token")
     assert events == []
-
-
-async def test_compare_passes_its_targets_as_the_query(worker_api):
-    api, ask = worker_api
-    await ask("compare", {"from": "attempt:1", "to": "latest", "nodes": "a,b"})
-    [seen] = api.calls
-    assert (seen["path"], seen["query"]) == (
-        "/api/work-items/w-own/compare",
-        {"from": "attempt:1", "to": "latest", "nodes": "a,b"},
-    )
 
 
 @pytest.mark.parametrize(

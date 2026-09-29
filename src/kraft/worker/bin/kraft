@@ -17,7 +17,7 @@ URL=http://kraft/w
 usage() {
 	echo "kraft: $1" >&2
 	echo "in a sandbox kraft has only: item progress K [ID] | item reply THREAD --body B" \
-		"[--claim C] | item retry [ID] [--steer S] | view show|threads|diff|compare [ID]" \
+		"[--claim C] | item retry [ID] [--steer S] | view show|threads [ID]" \
 		"| admin permission-hook HARNESS" >&2
 	exit 2
 }
@@ -89,23 +89,17 @@ item_retry() {
 	post retry "id=$id" "steer=$steer"
 }
 
-# view show|threads|diff|compare [ID]: the payload as JSON, whatever
-# rendering flag the host CLI would have taken.
+# view show|threads [ID]: the payload as JSON, whatever rendering flag the
+# host CLI would have taken. No diff or compare: Kraft reads no git in a live
+# sandboxed worktree, and the worker has git of its own.
 view() {
 	verb=$1
 	shift
-	open= from= to= nodes=
+	open=
 	while [ $# -gt 0 ]; do
 		case $verb:$1 in
 		threads:--open) open=1 ;;
-		compare:--from) [ $# -ge 2 ] || usage "--from needs a value"; from=$2; shift ;;
-		compare:--from=*) from=${1#--from=} ;;
-		compare:--to) [ $# -ge 2 ] || usage "--to needs a value"; to=$2; shift ;;
-		compare:--to=*) to=${1#--to=} ;;
-		compare:--nodes) [ $# -ge 2 ] || usage "--nodes needs a value"; nodes=$2; shift ;;
-		compare:--nodes=*) nodes=${1#--nodes=} ;;
-		*:--json | diff:--stat | diff:--name-only | diff:--no-pager) ;;
-		compare:--stat | compare:--name-only | compare:--no-pager) ;;
+		*:--json) ;;
 		*:-*) usage "unknown option: $1" ;;
 		*) positional "$1" ;;
 		esac
@@ -113,7 +107,6 @@ view() {
 	done
 	case $verb in
 	threads) post threads "id=$id" "open=$open" ;;
-	compare) post compare "id=$id" "from=$from" "to=$to" "nodes=$nodes" ;;
 	*) post "$verb" "id=$id" ;;
 	esac
 }
@@ -159,7 +152,7 @@ case "$group $verb" in
 "item progress") item_progress "$@" ;;
 "item reply") item_reply "$@" ;;
 "item retry") item_retry "$@" ;;
-"view show" | "view threads" | "view diff" | "view compare") view "$verb" "$@" ;;
+"view show" | "view threads") view "$verb" "$@" ;;
 "admin permission-hook") permission_hook "$@" ;;
 *) usage "not available in a sandbox: kraft $group $verb" ;;
 esac

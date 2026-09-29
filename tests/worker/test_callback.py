@@ -18,8 +18,6 @@ def _allowed(method, path):
 _OWN_ITEM = [
     ("GET", "/api/work-items/{}"),
     ("GET", "/api/work-items/{}/threads"),
-    ("GET", "/api/work-items/{}/diff"),
-    ("GET", "/api/work-items/{}/compare"),
     ("POST", "/api/work-items/{}/progress"),
     ("POST", "/api/work-items/{}/retry"),
 ]
@@ -67,6 +65,9 @@ def test_the_mcp_endpoint_is_the_channel_session_own(method):
         ("GET", "/api/work-items"),
         ("GET", "/api/worker-sessions/s-own/log"),
         ("POST", "/api/threads/t-own/comments"),
+        # Host git on a live sandboxed worktree is refused anyway (D16).
+        ("GET", "/api/work-items/w-own/diff"),
+        ("GET", "/api/work-items/w-own/compare"),
         # Shaped like a listed route, but not one path segment of plain id.
         ("POST", "/api/work-items/w-own/progress/extra"),
         ("POST", "/api/work-items/w-other/../w-own/progress"),
