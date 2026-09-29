@@ -1,7 +1,8 @@
 """One sandboxed workspace item through the walk, end to end (Kraft-ju36l):
-a worker commits in the member and in the root from inside its sandbox and
-plants programs in the member's admin dir, then the chain publishes both
-repositories, the member first, and bumps the root's pointer to what merged.
+a worker commits in the member and in the root from inside its sandbox, then
+the chain publishes both repositories, the member first, and bumps the root's
+pointer to what merged. That nothing a worker plants runs is the key test's
+(`worker/test_host_git_trust.py`) and the WP3 e2e's to pin, not this one's.
 
 `fake` runs the worker on the host through the fake `docker`, which mounts
 nothing: the script moves each commit into its ref store itself, as git in a
@@ -50,29 +51,19 @@ def runtime(request, tmp_path, monkeypatch):
     return request.param, build_git_image(request.param, tmp_path, monkeypatch)
 
 
-def _script(wt: Path, member_admin: Path, marker: Path, branch: str, into_stores: list) -> str:
-    """The worker: a member commit that selects the `evil` filter and diff, a
-    root commit over the moved gitlink, then `filter-clean`, `textconv` and
-    every hook planted in the member's admin dir. `into_stores` is `(repo,
-    head before, store)` for the fake runtime; a real one's worker moves each
-    repository's `main` too, which only its ref store sees."""
+def _script(wt: Path, branch: str, into_stores: list) -> str:
+    """The worker: a member commit, then a root commit over the moved gitlink.
+    `into_stores` is `(repo, head before, store)` for the fake runtime; a real
+    one's worker moves each repository's `main` too, which only its ref store
+    sees."""
     q = shlex.quote
-    touch = f"touch {q(str(marker))}"
-    config = f'[filter "evil"]\n\tclean = {touch}\n[diff "evil"]\n\ttextconv = {touch}\n'
-    hooks = member_admin / "hooks"
     lines = [
         "set -e",
         f"cd {q(str(wt / _REL))}",
-        "printf '* filter=evil diff=evil\\n' > .gitattributes && echo 'x = 1' > lib.py",
+        "echo 'x = 1' > lib.py",
         f"git add -A && git {_ID} commit -qm 'member work'",
         f"cd {q(str(wt))}",
         f"echo root > root.txt && git add -A && git {_ID} commit -qm 'root work'",
-        f"printf %s {q(config)} >> {q(str(member_admin / 'config'))}",
-        f"mkdir -p {q(str(hooks))}",
-        *(
-            f"printf '#!/bin/sh\\n{touch}\\n' > {q(str(hooks / h))} && chmod +x {q(str(hooks / h))}"
-            for h in ("pre-push", "pre-commit", "post-checkout", "reference-transaction")
-        ),
     ]
     if not into_stores:
         lines += [f"git -C {q(str(r))} update-ref refs/heads/main HEAD" for r in (wt / _REL, wt)]
@@ -107,14 +98,12 @@ async def test_a_sandboxed_workspace_item_walks_to_merged_with_its_pointer_bumpe
     )
     wt, m = wt.resolve(), tmp_path / "pkg-connected"
     branch = store.branch_for(row)
-    member_admin = member_gitdirs(m, wt, _REL)[1]
-    stores = [(wt / _REL, member_admin), (wt, linked_gitdirs(wt)[1])]
-    marker = tmp_path / "PWNED"
+    stores = [(wt / _REL, member_gitdirs(m, wt, _REL)[1]), (wt, linked_gitdirs(wt)[1])]
     fake = [
         (repo, _git_out(repo, "rev-parse", "HEAD"), refstore.shadow_dir(run_dirs.base, admin))
         for repo, admin in stores
     ]
-    script = _script(wt, member_admin, marker, branch, fake if name == "fake" else [])
+    script = _script(wt, branch, fake if name == "fake" else [])
     (wt / "worker.sh").write_text(script)
     mains = {r: _git_out(r, "rev-parse", "main") for r in (m, Path(row["repo"]))}
     landing = _LandingForge()
@@ -145,4 +134,3 @@ async def test_a_sandboxed_workspace_item_walks_to_merged_with_its_pointer_bumpe
     assert "root work" in _git_out(origin, "log", "--format=%s", "main")
     assert _git_out(origin, "rev-parse", "main:repos/pkg") == merged
     assert {r: _git_out(r, "rev-parse", "main") for r in mains} == mains
-    assert not marker.exists()
