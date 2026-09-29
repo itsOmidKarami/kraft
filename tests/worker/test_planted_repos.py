@@ -229,7 +229,8 @@ def test_a_planted_repository_stops_a_sandboxed_item_naming_its_path(repo):
 
 def test_a_clean_sandboxed_worktree_goes_through(repo):
     base = _git(repo, "rev-parse", "HEAD")
-    assert stops.refuse_planted_repos(_row(repo, base), _launch(repo, _SANDBOX), repo) is None
+    checked = stops.refuse_planted_repos(_row(repo, base), _launch(repo, _SANDBOX), repo)
+    assert checked == sandbox.Checkout(repo, {})
 
 
 def test_an_unsandboxed_item_never_even_looks(repo, monkeypatch):
@@ -439,3 +440,25 @@ async def test_a_connected_path_that_is_only_a_directory_in_another_repository_h
     (sub / "empty").mkdir()
     assert sandbox.member_gitdirs(sub / "empty", wt, _REL) is None
     assert sandbox.member_gitdirs(tmp_path / "gone", wt, _REL) is None
+
+
+@pytest.mark.parametrize(("swapped", "found"), [("gitfile", "own"), ("member", None)])
+async def test_a_member_symlinked_into_another_worktree_never_yields_that_ones_admin_dir(
+    tmp_path, database, run_dirs, swapped, found
+):
+    """Resolving the member path would follow the worker's symlink into
+    another checkout of the same repository and hand back that one's admin
+    dir, to be mounted read-write. Only the worktree's own path is resolved,
+    and a member reached through a symlink has no gitdirs at all."""
+    wt, sub, expected = await _member_checkout(database, run_dirs, tmp_path)
+    victim = tmp_path / "victim"
+    _git(sub, "worktree", "add", "-q", "-b", "kraft/victim", str(victim))
+    link = wt / _REL / ".git" if swapped == "gitfile" else wt / _REL
+    if swapped == "gitfile":
+        link.unlink()
+    else:
+        (wt / _REL).rename(tmp_path / "member-aside")
+    link.symlink_to(victim / ".git" if swapped == "gitfile" else victim)
+
+    got = sandbox.member_gitdirs(sub, wt, _REL)
+    assert got == (expected[_REL] if found == "own" else None)

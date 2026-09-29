@@ -559,6 +559,7 @@ async def dispatch(
             grants=inv.grants,
             steering_texts=inv.steering_texts,
             sandbox=sandbox,
+            checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
             task_instruction=task_instruction,
             title=row["title"],
             repo_path=row["repo"],

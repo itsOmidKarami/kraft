@@ -19,11 +19,12 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -595,7 +596,8 @@ def docker_argv(
     result_path: str | Path | None = None,
     cidfile: str | Path | None = None,
     *,
-    refstore: RefStore | None = None,
+    refstores: Sequence[RefStore] = (),
+    workdir: str | Path | None = None,
     home: str | Path | None = None,
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
@@ -631,8 +633,9 @@ def docker_argv(
     launch that is no session and has no results to read (a repository's
     `setup_command`, `builtins.run_setup_command`): nothing is mounted.
 
-    `<repo>/.git`: the worktree's private ref store (`refstore` below), so no
-    ref the worker writes reaches the operator's repository; objects are
+    `<repo>/.git`, for every repository of the checkout -- the worktree's own
+    and each workspace member's: a private ref store (`refstores` below), so
+    no ref the worker writes reaches the operator's repository; objects are
     shared read-write. This worktree's own gitdir (`<repo>/.git/worktrees/<id>`)
     is read-write -- what a commit from inside a linked worktree writes
     besides objects and refs. That worktree
@@ -676,9 +679,17 @@ def docker_argv(
     thing that tells docker's own launch failure from the sandboxed
     command's (`launch_failed`, Kraft-6ltwh).
 
-    `refstore`: the worktree's private ref store (`worker.refstore`), mounted
-    over the repository's common gitdir so the worker's ref writes never reach
-    the operator's refs. Without one, the common gitdir is read-only whole.
+    `refstores`: the checkout's private ref stores (`worker.refstore`), each
+    mounted over its repository's common gitdir so the worker's ref writes
+    never reach the operator's refs: the worktree's own, then each workspace
+    member's, mounted exactly as the worktree's is, from what the store
+    recorded and never from the member's `.git` (Kraft-ju36l). Without one,
+    the worktree's common gitdir is read-only whole.
+
+    `workdir`: where in `cwd` the command runs, when not at its top (a task
+    fanned out into a workspace member). `cwd` is still what is mounted:
+    only its own path is resolved on the host, never a directory under it the
+    worker could have swapped for a symlink.
 
     `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
     has somewhere to keep its state across sessions. `passthrough`: names
@@ -713,6 +724,7 @@ def docker_argv(
     network = bool(sandbox.get("network"))
     if network and relay is None:
         raise SandboxRefused("a sandbox under `network:` runs only beside its session's relay")
+    rel = Path(workdir).relative_to(cwd) if workdir is not None else Path()
     cwd = str(Path(cwd).resolve())
     argv = [
         host.cli,
@@ -733,13 +745,13 @@ def docker_argv(
         "-v",
         f"{cwd}:{cwd}",
         "-w",
-        cwd,
+        str(Path(cwd) / rel),
     ]
     if results_dir is not None:
         argv += ["-v", f"{results_dir}:{results_dir}:ro"]
     if result_path is not None:
         argv += ["-v", f"{result_path}:{result_path}"]
-    argv += _gitdir_mounts(Path(cwd), refstore)
+    argv += _gitdir_mounts(Path(cwd), refstores)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
     if network:
@@ -878,22 +890,53 @@ def _alternates(objects: Path) -> list[Path]:
     return found
 
 
-def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
-    """`-v` arguments for the gitdirs a linked worktree's `.git` file points at.
+def _gitdir_mounts(cwd: Path, refstores: Sequence[RefStore] = ()) -> list[str]:
+    """`-v` arguments for the gitdirs a linked worktree's `.git` file points at,
+    the worktree's own and then each workspace member's (`_linked_mounts`).
 
-    Empty when `cwd` is not a linked worktree: an ordinary `.git` directory is
-    inside `cwd`, already mounted with it.
+    Empty for the worktree's own when `cwd` is not a linked worktree: an
+    ordinary `.git` directory is inside `cwd`, already mounted with it.
 
-    The worktree's own gitdir `W` is read-write (a commit writes its index,
-    HEAD and lockfiles there), with the files git redirects config and the
-    common dir through shadowed read-only, created first so a worker cannot
-    dodge a shadow by deleting its file. The common gitdir is the private ref
-    store `refstore` when given, with the real `objects/` and `lfs/` inside
-    it read-write and `HEAD`, `config`, `info/` and `shallow` read-only; the
-    worker's refs, reflogs, `packed-refs` and `FETCH_HEAD` all land in the
-    store. Without a store it is read-only whole, and a commit cannot move a
-    ref at all.
+    A member's come from its store alone -- the common gitdir and admin dir
+    Kraft derived from the operator's repository -- never from reading
+    `<member>/.git`, which the worker writes: a gitfile it repointed would
+    otherwise get any host `<x>/worktrees/<y>` mounted read-write (Kraft-ju36l).
     """
+    own = next((s for s in refstores if s.checkout is None), None)
+    mounts = _worktree_mounts(cwd, own)
+    pinned: set[Path] = set()
+    for store in refstores:
+        if store.checkout is not None:
+            mounts += _pin_path(cwd, store.checkout, pinned)
+            mounts += _linked_mounts(
+                store.checkout / ".git", store.common, store.worktree_gitdir, store
+            )
+    return mounts
+
+
+def _pin_path(cwd: Path, checkout: Path, pinned: set[Path]) -> list[str]:
+    """Every directory from `cwd` down to `checkout`, bound onto itself, top
+    first. The member's `.git` is read-only, but it sits in the read-write
+    worktree: a worker that renamed any directory above it (`mv repos
+    repos.x`) and rebuilt the path would hand host git a `.git` of its own.
+    A mount point cannot be renamed or removed (EBUSY), so the path to the
+    member stays the one Kraft checked, for as long as any container has it
+    mounted (Kraft-ju36l, J6).
+
+    Each must be a real directory when the launch is built: a symlink there
+    would have docker mount whatever it names."""
+    path, mounts = cwd, []
+    for part in checkout.relative_to(cwd).parts:
+        path = path / part
+        if not stat.S_ISDIR(os.lstat(path).st_mode):
+            raise SandboxRefused(f"{path} is not a directory; the member under it is not mounted")
+        if path not in pinned:
+            pinned.add(path)
+            mounts += ["-v", f"{path}:{path}"]
+    return mounts
+
+
+def _worktree_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
     dirs = linked_gitdirs(cwd)
     if dirs is None:
         # A `.git` file naming some other gitdir (a submodule's checkout, say):
@@ -902,14 +945,30 @@ def _gitdir_mounts(cwd: Path, refstore: RefStore | None) -> list[str]:
         if other is None:
             return []
         return ["-v", f"{cwd / '.git'}:{cwd / '.git'}:ro", "-v", f"{other}:{other}:ro"]
-    common, worktree_gitdir = dirs
+    return _linked_mounts(cwd / ".git", *dirs, refstore)
+
+
+def _linked_mounts(
+    git_file: Path, common: Path, worktree_gitdir: Path, refstore: RefStore | None
+) -> list[str]:
+    """One linked worktree's gitdirs: `git_file`, its `.git`, names
+    `worktree_gitdir` (`W`) in the repository whose common gitdir is `common`.
+
+    `W` is read-write (a commit writes its index, HEAD and lockfiles there),
+    with the files git redirects config and the common dir through shadowed
+    read-only, created first so a worker cannot dodge a shadow by deleting
+    its file. The common gitdir is the private ref store `refstore` when
+    given, with the real `objects/` and `lfs/` inside it read-write and
+    `HEAD`, `config`, `info/` and `shallow` read-only; the worker's refs,
+    reflogs, `packed-refs` and `FETCH_HEAD` all land in the store. Without a
+    store it is read-only whole, and a commit cannot move a ref at all.
+    """
     # `.git` itself lives inside the read-write `cwd` mount. Left alone, a
     # sandboxed worker repoints it at a gitdir it builds inside the
     # worktree -- HEAD, objects/, refs/, a config with hooks -- and the next
     # host-side git command run there executes the worker's hook as the
     # invoking host user. It never legitimately changes for the life of the
     # worktree, so shadowing it read-only costs nothing.
-    git_file = cwd / ".git"
     mounts = ["-v", f"{git_file}:{git_file}:ro"]
     if refstore is None:
         mounts += ["-v", f"{common}:{common}:ro"]
@@ -1258,7 +1317,13 @@ class DockerBackend:
         return sandbox_home(run_dirs, work_item_id)
 
     async def owner_refusal(
-        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
+        self,
+        run_dirs,
+        cwd: Path,
+        work_item_id: str,
+        result_path: Path,
+        *,
+        members: Mapping[str, tuple[Path, Path] | None] = {},
     ) -> str | None:
         try:
             host = await asyncio.to_thread(runtime)
@@ -1267,8 +1332,10 @@ class DockerBackend:
         if not host.rootless:
             return None
         dirs = linked_gitdirs(Path(cwd))
-        shadow = (_refstore.shadow_dir(run_dirs.base, dirs[1]),) if dirs is not None else ()
-        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadow, result_path), host)
+        admins = [dirs[1]] if dirs is not None else []
+        admins += [d[1] for d in members.values() if d is not None]
+        shadows = [_refstore.shadow_dir(run_dirs.base, a) for a in admins]
+        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadows, result_path), host)
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
@@ -1296,8 +1363,8 @@ class DockerBackend:
         except OSError as exc:
             raise SandboxNotReady(f"could not write the sandbox's CA bundle: {exc}") from exc
 
-    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
-        return _refstore.prepare(run_base, cwd, branch, **kw)
+    def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> tuple[RefStore, ...]:
+        return _refstore.prepare_stores(run_base, cwd, branch, **kw)
 
     def wrap(
         self,
@@ -1310,7 +1377,8 @@ class DockerBackend:
         session_id: str | None = None,
         result_path: str | Path | None = None,
         cidfile: str | Path | None = None,
-        refs: RefStore | None = None,
+        refs: Sequence[RefStore] = (),
+        workdir: str | Path | None = None,
         home: str | Path | None = None,
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
@@ -1327,7 +1395,8 @@ class DockerBackend:
             name=container_name(session_id) if session_id is not None else None,
             result_path=result_path,
             cidfile=cidfile,
-            refstore=refs,
+            refstores=refs,
+            workdir=workdir,
             home=home,
             passthrough=passthrough,
             ro_paths=ro_paths,
@@ -1345,8 +1414,8 @@ class DockerBackend:
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         return launch_failed(cidfile, returncode)
 
-    def code_out(self, refs: RefStore, session_id: str) -> str | None:
-        return _refstore.sync(refs, session_id)
+    def code_out(self, refs: Sequence[RefStore], session_id: str) -> list[str]:
+        return _refstore.sync_all(refs, session_id)
 
     def code_out_item(self, run_base: Path, work_item_id: str) -> list[str]:
         return _refstore.sync_item(run_base, work_item_id)
@@ -1473,8 +1542,9 @@ class DockerBackend:
 
     def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
         # The ref store is found through the worktree's `.git`, so this runs
-        # before the worktree goes.
+        # before the worktree goes; its members' by the item they record.
         _refstore.discard(run_dirs.base, worktree)
+        _refstore.discard_item(run_dirs.base, work_item_id)
         shutil.rmtree(sandbox_home(run_dirs, work_item_id), ignore_errors=True)
 
     async def health(self, sandbox: dict) -> tuple[bool, str]:

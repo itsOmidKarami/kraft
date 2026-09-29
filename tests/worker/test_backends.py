@@ -20,7 +20,7 @@ from kraft.executor.context import LaunchContext
 from kraft.paths import RunDirs
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
-from kraft.worker.sandbox import SandboxNotReady
+from kraft.worker.sandbox import Checkout, SandboxNotReady
 
 _CHAIN = """
 - id: implementation
@@ -56,7 +56,7 @@ class Remote:
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
 
-    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path):
+    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path, **kw):
         return self.foreign
 
     async def probe(self, sandbox, executable, env):
@@ -85,7 +85,7 @@ class Remote:
         return False
 
     def code_out(self, refs, session_id):
-        return None
+        return []
 
     def code_out_item(self, run_base, work_item_id):
         return []
@@ -234,8 +234,10 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
     async def fail(session_id, result_path):
         raise OSError("copy-out failed")
 
-    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: SimpleNamespace(carried=None))
-    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid))
+    monkeypatch.setattr(
+        remote, "code_in", lambda *a, **kw: (SimpleNamespace(carried=None, branch=None),)
+    )
+    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid) or [])
     monkeypatch.setattr(remote, "collect", fail)
     await database.write(
         lambda c: store.create_work_item(
@@ -567,7 +569,11 @@ async def test_a_setup_command_under_network_uses_the_install_list_not_runtime(
     monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
 
     await kraft_builtins.run_setup_command(
-        worktree, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+        worktree,
+        tmp_path,
+        entry_of({"setup_command": "true"}),
+        sandbox=_SETUP_POLICED,
+        checkout=Checkout(worktree, {}),
     )
 
     assert answers[0].startswith(b"HTTP/1.1 403") and b"not on the allow list" in answers[0]
@@ -594,7 +600,11 @@ async def test_a_setup_command_under_network_without_a_channel_or_route_never_ru
 
     with pytest.raises(RuntimeError, match="cannot run: .*egress"):
         await kraft_builtins.run_setup_command(
-            tmp_path, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "true"}),
+            sandbox=_SETUP_POLICED,
+            checkout=Checkout(tmp_path, {}),
         )
 
     assert ran == [] and "wrap" not in remote.calls
