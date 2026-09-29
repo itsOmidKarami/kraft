@@ -644,7 +644,7 @@ def docker_argv(
         *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
         "--cap-drop=ALL",
         *host.limit_args(sandbox.get("resources")),
-        *([f"--network=container:{relay}"] if network else []),
+        *([] if network else []),  # GATE MUTATION: worker back on the default bridge
         "-v",
         f"{cwd}:{cwd}",
         "-w",
