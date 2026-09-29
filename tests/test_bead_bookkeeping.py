@@ -117,7 +117,7 @@ async def test_item_filed_while_bd_was_down_still_gets_a_bead_by_completion(
 
 
 async def test_no_app_fixture_still_avoids_the_operators_real_home(
-    tmp_path, monkeypatch, database, run_dirs, repo
+    tmp_path, tmp_path_factory, monkeypatch, database, run_dirs, repo
 ):
     """Kraft-t5g: bd's fallback when it finds no `.beads/` walking up from cwd
     is a hardcoded `~/.beads`. A test with no `app` fixture and no explicit
@@ -126,9 +126,9 @@ async def test_no_app_fixture_still_avoids_the_operators_real_home(
     import pwd
 
     monkeypatch.delenv("KRAFT_BD_CWD", raising=False)
-    # The autouse fixture already swapped HOME to somewhere under this test's
-    # own tmp_path -- proof it ran, not a re-check of its own logic.
-    assert Path(os.environ["HOME"]).is_relative_to(tmp_path)
+    # The autouse fixture already swapped HOME to somewhere under pytest's
+    # base temp -- proof it ran, not a re-check of its own logic.
+    assert Path(os.environ["HOME"]).is_relative_to(tmp_path_factory.getbasetemp())
 
     # `pwd` reads the OS-level home directly, ignoring $HOME -- the one way to
     # name the operator's real home while HOME itself is monkeypatched.
