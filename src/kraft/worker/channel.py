@@ -122,7 +122,7 @@ class ChannelRegistry:
                 lambda c: events.append(c, work_item_id, SANDBOX_EGRESS_REFUSED, payload)
             )
 
-        session = EgressSession(session_id, lists, record)
+        session = EgressSession(session_id, lists, record, work_item_id)
         if transport == "tls":
             if session_id in self._open:
                 raise SandboxNotReady(f"session {session_id} already has an egress channel")

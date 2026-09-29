@@ -8,15 +8,16 @@ already refused -- arrives as an `EgressSession`. The listener, and so the
 session's lifetime, is the channel's (`kraft.worker.channel`).
 
 Per connection: parse `CONNECT host:port` or an absolute-form `http://`
-request; refuse host `kraft` (the worker API, not yet available); match the
-host against the lists (deny wins); resolve it once on the host and refuse
-an always-denied address or a non-public one the allow list does not name
-exactly; then dial the address that was checked -- never the name again, so
-a DNS answer that changes between check and dial (rebinding) cannot slip a
-different address through. Outbound connections chain through the daemon's
-own `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` covers the host; then the
-name is still checked, but the upstream resolves it again and dials what it
-gets, so the dialled-address guarantee holds only without one.
+request; serve host `kraft` as the worker API (spec §5, P5) for the session
+the channel says it is, never forwarded; match the host against the lists
+(deny wins); resolve it once on the host and refuse an always-denied address
+or a non-public one the allow list does not name exactly; then dial the
+address that was checked -- never the name again, so a DNS answer that
+changes between check and dial (rebinding) cannot slip a different address
+through. Outbound connections chain through the daemon's own
+`HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` covers the host; then the name
+is still checked, but the upstream resolves it again and dials what it gets,
+so the dialled-address guarantee holds only without one.
 """
 
 from __future__ import annotations
@@ -24,13 +25,19 @@ from __future__ import annotations
 import asyncio
 import base64
 import ipaddress
+import json
 import os
 import re
 import socket
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
+
+import httpx
+
+from kraft import store
+from kraft.worker import callback
 
 #: What a connection a session's policy refused is recorded as.
 SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
@@ -44,6 +51,11 @@ CONNECT_TIMEOUT = 30.0
 #: Distinct hosts a session's refusals are recorded for; past this, one last
 #: event says the rest are not (they are still refused).
 MAX_REFUSAL_EVENTS = 100
+#: The most a worker API form may be: a permission hook's stdin carries the
+#: tool call's whole input, a file being written among it.
+MAX_WORKER_BODY = 16 * 1024 * 1024
+#: How much of a refused worker API route its event records.
+MAX_ROUTE = 256
 
 #: Cloud metadata names, refused whatever they resolve to. Their usual
 #: address (169.254.169.254) is link-local, and refused by address as well.
@@ -122,6 +134,8 @@ class EgressSession:
     lists: PhaseLists
     #: Records one refusal; gets the event payload. Called once per host.
     record_refusal: Callable[[dict], Awaitable[None]]
+    #: The session's work item: all the worker API lets it act on.
+    work_item_id: str = ""
     #: Hosts already recorded, so a client's retry loop cannot flood events.
     #: At most `MAX_REFUSAL_EVENTS` of them.
     refused: set[str] = field(default_factory=set)
@@ -193,7 +207,9 @@ def _with_embedded(addr) -> list:
 
 class EgressProxy:
     """One per daemon. `connect`, `getaddrinfo` and `environ` are seams for
-    tests; the daemon takes the defaults."""
+    tests; the daemon takes the defaults. `app` is the daemon's own API,
+    which serves the worker API in-process; a proxy without one refuses
+    host `kraft`."""
 
     def __init__(
         self,
@@ -201,10 +217,12 @@ class EgressProxy:
         connect=asyncio.open_connection,
         getaddrinfo=None,
         environ: Mapping[str, str] = os.environ,
+        app=None,
     ):
         self._connect = connect
         self._getaddrinfo = getaddrinfo
         self._environ = environ
+        self._app = app
 
     async def _resolve(self, host: str, port: int) -> list[str]:
         if _address(host) is not None:
@@ -313,9 +331,12 @@ class EgressProxy:
         method, host, port, target, headers = request
 
         if _norm(host) == "kraft":
-            return await self._refuse(
-                writer, session, host, port, "the worker API (host 'kraft') is not available yet"
-            )
+            if method == "CONNECT" or self._app is None:
+                why = "no worker API here" if self._app is None else "it is plain http://kraft"
+                return await self._refuse(
+                    writer, session, host, port, f"host 'kraft' is the worker API, and {why}"
+                )
+            return await self._worker_api(reader, writer, session, method, target, headers, rest)
         verdict = match(host, port, session.lists.allow, session.lists.deny)
         if verdict.allowed:
             verdict = await self.resolve_and_check(host, port, allow=session.lists.allow)
@@ -394,9 +415,87 @@ class EgressProxy:
         finally:
             out_writer.close()
 
-    async def _refuse(self, writer, session: EgressSession, host: str, port: int, reason: str):
+    async def _worker_api(
+        self, reader, writer, session: EgressSession, method, target, headers, rest
+    ):
+        """One worker API call: a `kraft` shim verb's form fields, turned into
+        the API call it names and made in-process as the channel's session.
+        No header the client sent is read but the body's length: not its
+        `Authorization`, not an `X-Kraft-Session-Id`."""
+        url = urlsplit(target)
+        verb = _VERBS.get(url.path.removeprefix("/w/")) if url.path.startswith("/w/") else None
+        if method != "POST" or verb is None:
+            return await self._refuse_route(
+                writer, session, f"{method} {url.path}", "not a worker API verb"
+            )
+        length = _content_length(headers)
+        if isinstance(length, str):
+            return await _answer(writer, 400, "Bad Request", length)
+        if length > MAX_WORKER_BODY:
+            return await _answer(writer, 413, "Content Too Large", "the form is too large")
+        body = rest[:length]
+        body += await asyncio.wait_for(reader.readexactly(length - len(body)), HEAD_TIMEOUT)
+        form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
+        scope = callback.scope_for_channel(session)
+        call = verb(form, scope)
+        if isinstance(call, str):
+            return await _answer(writer, 400, "Bad Request", call)
+        api_method, path, payload, params = call
+        if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
+            return await self._refuse_route(
+                writer, session, f"{api_method} {path}", "not this session's to call"
+            )
+        state = self._app.state
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self._app), base_url="http://kraft"
+        ) as client:
+            reply = await client.request(
+                api_method,
+                path,
+                json=payload,
+                params=params,
+                headers={
+                    "Authorization": f"Bearer {state.mcp_token}",
+                    "X-Kraft-Session-Id": scope.session_id,
+                },
+            )
+        status, text = reply.status_code, reply.content
+        kind = reply.headers.get("content-type", "application/json")
+        if verb is _permission_hook:
+            # The hook's own answer, as the shim prints it; anything else is
+            # the shim's to fail closed on.
+            answer = reply.json() if status == 200 else {}
+            if answer.get("code") != 0:
+                return await _answer(
+                    writer, 502, "Bad Gateway", f"the hook was not answered: {text[:200]!r}"
+                )
+            text, kind = answer["body"].encode(), "application/json"
+        elif verb is _threads and status == 200 and form.get("open"):
+            text = json.dumps([t for t in reply.json() if t["state"] != "resolved"]).encode()
+        await _respond(writer, status, reply.reason_phrase, kind, text)
+
+    def _thread_owner(self, tid: str) -> str | None:
+        row = self._app.state.db.read(lambda c: store.thread_row(c, tid))
+        return row["work_item_id"] if row is not None else None
+
+    async def _refuse_route(self, writer, session: EgressSession, route: str, reason: str):
+        await self._refuse(writer, session, "kraft", 80, reason, route=route[:MAX_ROUTE])
+
+    async def _refuse(
+        self,
+        writer,
+        session: EgressSession,
+        host: str,
+        port: int,
+        reason: str,
+        *,
+        route: str | None = None,
+    ):
+        """403, and one event per host -- per route, for the worker API --
+        up to the session's cap."""
         host = _norm(host)
-        if host in session.refused or session.suppressed:
+        key = route or host
+        if key in session.refused or session.suppressed:
             pass
         elif len(session.refused) >= MAX_REFUSAL_EVENTS:
             session.suppressed = True
@@ -410,17 +509,83 @@ class EgressProxy:
                 }
             )
         else:
-            session.refused.add(host)
+            session.refused.add(key)
             await session.record_refusal(
                 {
                     "session_id": session.session_id,
                     "host": host,
                     "port": port,
+                    **({"route": route} if route else {}),
                     "phase": session.lists.phase,
                     "reason": reason,
                 }
             )
         await _answer(writer, 403, "Forbidden", reason)
+
+
+# The worker API's verbs, one per `kraft` shim verb (spec §5): its form
+# fields in, the API call it is out -- `(method, path, JSON body, query)`,
+# or why the form is a 400. An `id` is the session's own item unless the
+# form names one, which the allowlist then has to pass.
+_Call = tuple[str, str, dict | None, dict | None]
+
+
+def _item(form: dict, scope: callback.SessionScope) -> str:
+    return f"/api/work-items/{form.get('id') or scope.work_item_id}"
+
+
+def _progress(form, scope) -> _Call | str:
+    if "task" not in form:
+        return "progress needs a task"
+    return "POST", f"{_item(form, scope)}/progress", {"task": form["task"]}, None
+
+
+def _retry(form, scope) -> _Call:
+    steer = form.get("steer", "").strip()
+    return "POST", f"{_item(form, scope)}/retry", {"steer": steer} if steer else {}, None
+
+
+def _reply(form, scope) -> _Call | str:
+    if not form.get("thread") or "body" not in form:
+        return "reply needs a thread and a body"
+    payload = {"body": form["body"], **({"claim": form["claim"]} if form.get("claim") else {})}
+    return "POST", f"/api/threads/{form['thread']}/replies", payload, None
+
+
+def _show(form, scope) -> _Call:
+    return "GET", _item(form, scope), None, None
+
+
+def _threads(form, scope) -> _Call:
+    return "GET", f"{_item(form, scope)}/threads", None, None
+
+
+def _diff(form, scope) -> _Call:
+    return "GET", f"{_item(form, scope)}/diff", None, None
+
+
+def _compare(form, scope) -> _Call:
+    params = {k: form[k] for k in ("from", "to", "nodes") if form.get(k)}
+    return "GET", f"{_item(form, scope)}/compare", None, params
+
+
+def _permission_hook(form, scope) -> _Call | str:
+    if not form.get("harness") or "stdin" not in form:
+        return "permission-hook needs a harness and its stdin"
+    path = f"/api/worker-sessions/{scope.session_id}/permission-hook"
+    return "POST", path, {"harness": form["harness"], "stdin": form["stdin"]}, None
+
+
+_VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
+    "progress": _progress,
+    "retry": _retry,
+    "reply": _reply,
+    "show": _show,
+    "threads": _threads,
+    "diff": _diff,
+    "compare": _compare,
+    "permission-hook": _permission_hook,
+}
 
 
 async def _read_head(reader: asyncio.StreamReader) -> tuple[bytes | None, bytes]:
@@ -497,9 +662,12 @@ def _name(header: str) -> str:
 
 
 async def _answer(writer: asyncio.StreamWriter, code: int, phrase: str, reason: str) -> None:
-    body = f"kraft: {reason}\n".encode()
+    await _respond(writer, code, phrase, "text/plain", f"kraft: {reason}\n".encode())
+
+
+async def _respond(writer, code: int, phrase: str, content_type: str, body: bytes) -> None:
     writer.write(
-        f"HTTP/1.1 {code} {phrase}\r\nContent-Type: text/plain\r\n"
+        f"HTTP/1.1 {code} {phrase}\r\nContent-Type: {content_type}\r\n"
         f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
         + body
     )

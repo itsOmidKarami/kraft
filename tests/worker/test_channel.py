@@ -14,6 +14,9 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from kraft import events, store
 from kraft.paths import RunDirs
@@ -75,6 +78,33 @@ async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
     rows = database.read(lambda c: events.read_after(c, 0, "w1"))
     refused = [r for r in rows if r["type"] == egress.SANDBOX_EGRESS_REFUSED]
     assert [r["payload"]["session_id"] for r in refused] == ["0123456789abcdef0123"]
+
+
+async def test_a_worker_api_call_acts_as_the_session_whose_socket_it_came_in_on(
+    database, short_run
+):
+    """Two sessions of two items: each socket's worker API calls are its own
+    session's, on its own item, and only the daemon's app sees them."""
+    seen = []
+
+    async def api(request):
+        seen.append((request.headers["x-kraft-session-id"], request.url.path))
+        return JSONResponse({})
+
+    app = Starlette(routes=[Route("/{path:path}", api)])
+    app.state.mcp_token = "t"
+    reg = channel.ChannelRegistry(short_run, database, egress.EgressProxy(app=app))
+    try:
+        paths = [await reg.open(f"session-{n}-000000", f"w{n}", _DENY_ALL) for n in "AB"]
+        for path in paths:
+            answer = await _ask(path, b"POST http://kraft/w/show HTTP/1.1\r\n\r\n")
+            assert answer.startswith(b"HTTP/1.1 200 "), answer
+    finally:
+        await reg.close_all()
+    assert seen == [
+        ("session-A-000000", "/api/work-items/wA"),
+        ("session-B-000000", "/api/work-items/wB"),
+    ]
 
 
 async def test_close_stops_the_listener_and_removes_its_directory(registry):

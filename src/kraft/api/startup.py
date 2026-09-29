@@ -31,6 +31,7 @@ from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, d
 from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker import steering as steering_mod
+from kraft.worker.egress import EgressProxy
 from kraft.ws import Broadcaster
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,10 @@ async def lifespan(app: FastAPI):
     database = await Database.open(run_dirs.db)
     # Before reattach, which re-opens adopted sessions' egress channels: the
     # listeners run on this loop, the one every launch awaits on.
-    app.state.egress_channels = channel_mod.ChannelRegistry(run_dirs, database)
+    # The proxy serves the worker API (host `kraft`) out of this app.
+    app.state.egress_channels = channel_mod.ChannelRegistry(
+        run_dirs, database, EgressProxy(app=app)
+    )
     channel_mod.install(app.state.egress_channels)
     # Where a VM-backed runtime's relays reach the same registry: up before
     # reattach too, on the port those relays were started against.
