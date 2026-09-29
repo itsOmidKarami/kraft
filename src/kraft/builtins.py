@@ -696,7 +696,14 @@ async def ensure_worktree(
     # a node into a known-broken environment and let the verify node retry a
     # deterministic failure ten times over (Kraft-s0w2l).
     try:
-        await run_setup_command(worktree, Path(repo), repo_entry, sandbox=sandbox)
+        # Before the members are checked out: there are none to mount yet.
+        await run_setup_command(
+            worktree,
+            Path(repo),
+            repo_entry,
+            sandbox=sandbox,
+            checkout=_sandbox.Checkout(worktree, {}) if sandbox else None,
+        )
     except RuntimeError as exc:
         # Only the creating caller may throw away a worktree other nodes are
         # already using, so the discard lives here and not in the helper.
@@ -807,6 +814,13 @@ async def run_setup_command(
         return ""
     client_env = worker_env(repo_entry)
     sentinels: dict[str, str] = {}
+    if sandbox and checkout is None:
+        # Fails closed for a caller that forgot, as `run_task` does: a member
+        # left unmounted has a `.git` the container can rewrite (Kraft-ju36l).
+        raise RuntimeError(
+            f"setup command for {worktree.name} cannot run: its sandbox was not given "
+            "the checkout to mount, workspace members included"
+        )
     if sandbox:
         # Never on the host for a sandboxed item (Kraft-p8nem): the worktree
         # is the worker's to write, so `uv sync` or `npm ci` there runs a build
@@ -835,7 +849,7 @@ async def run_setup_command(
             run_base,
             worktree,
             None,
-            members=checkout.members if checkout is not None else {},
+            members=checkout.members,
             work_item_id=worktree.name,
         )
         # Named like a session, so the sandbox can be asked whether its

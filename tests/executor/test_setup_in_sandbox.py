@@ -13,6 +13,7 @@ import subprocess
 
 import pytest
 from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
+from support.workspace import member_checkout, repositories, workspace_item
 
 # The backend that shares no filesystem, and a channel registry for its egress.
 from worker.test_backends import Remote, channels  # noqa: F401
@@ -23,10 +24,11 @@ from kraft import executor
 from kraft.api import deps
 from kraft.executor import dispatch
 from kraft.paths import RunDirs
-from kraft.policy import SandboxPolicy
+from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy, TemplatePolicyOverride
 from kraft.worker import backends, ca, refstore
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.env import worker_env
+from kraft.worker.sandbox import Checkout, member_gitdirs
 
 _SANDBOX = {"kind": "docker", "image": "kraft/setup:1"}
 _SETUP = "touch prepared.txt"
@@ -51,7 +53,9 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     entry = entry_of({"setup_command": _SETUP, "env": {"SETUP_FLAVOUR": "benign"}})
     calls = _record_run(monkeypatch)
 
-    await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry, sandbox=_SANDBOX)
+    await kraft_builtins.run_setup_command(
+        tmp_path, tmp_path, entry, sandbox=_SANDBOX, checkout=Checkout(tmp_path, {})
+    )
 
     [call] = calls
     argv = call["args"]
@@ -100,7 +104,9 @@ async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path,
     }
     entry = entry_of({"setup_command": _SETUP, "env_passthrough": ["REG_TOKEN"]})
 
-    await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry, sandbox=sandbox)
+    await kraft_builtins.run_setup_command(
+        tmp_path, tmp_path, entry, sandbox=sandbox, checkout=Checkout(tmp_path, {})
+    )
 
     [call] = calls
     assert [a for a in call["args"] if a.startswith(("ANTHROPIC_API_KEY", "REG_TOKEN"))] == [
@@ -145,6 +151,7 @@ async def test_a_sandboxed_setup_command_really_runs_in_the_container(tmp_path, 
         tmp_path,
         entry_of({"setup_command": _SETUP, "env_passthrough": ["FAKE_DOCKER_CALLED"]}),
         sandbox=_SANDBOX,
+        checkout=Checkout(worktree, {}),
     )
 
     assert called.exists()
@@ -176,7 +183,11 @@ async def test_a_setup_command_runs_under_the_limits_and_names_the_one_that_kill
 
     with pytest.raises(RuntimeError) as failed:
         await kraft_builtins.run_setup_command(
-            tmp_path, tmp_path, entry_of({"setup_command": "exit 137"}), sandbox=sandbox
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "exit 137"}),
+            sandbox=sandbox,
+            checkout=Checkout(tmp_path, {}),
         )
 
     [argv] = argvs
@@ -219,7 +230,11 @@ async def test_no_docker_means_no_setup_never_a_host_fallback(tmp_path, monkeypa
 
     with pytest.raises(RuntimeError, match="must run in its sandbox.*'docker'"):
         await kraft_builtins.run_setup_command(
-            worktree, tmp_path, entry_of({"setup_command": _SETUP}), sandbox=_SANDBOX
+            worktree,
+            tmp_path,
+            entry_of({"setup_command": _SETUP}),
+            sandbox=_SANDBOX,
+            checkout=Checkout(worktree, {}),
         )
 
     assert [s["args"][0] for s in spawned] == ["docker"]
@@ -312,12 +327,12 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
     tmp_path, repo, monkeypatch, entry, expected
 ):
     """`ensure_worktree` at creation and `prepare_runtime` at walk entry: each
-    a `run_setup_command`, each handed the item's sandbox -- and the second,
-    run once the members exist, the checkout the sandbox mounts (Kraft-ju36l)."""
+    a `run_setup_command`, each handed the item's sandbox and, sandboxed, the
+    checkout it mounts."""
     seen = []
 
     async def run_setup_command(worktree, repo, repo_entry, *, sandbox=None, checkout=None):
-        seen.append((sandbox, checkout and checkout.root == worktree))
+        seen.append((sandbox, checkout and checkout == Checkout(worktree, {})))
         return ""
 
     async def run_task(*_a, **_kw):
@@ -334,7 +349,60 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
     )
 
     assert status == "completed"
-    assert seen == [(expected, None), (expected, bool(expected) or None)]
+    assert seen == [(expected, bool(expected) or None)] * 2
+
+
+async def test_a_sandboxed_setup_command_given_no_checkout_never_runs(tmp_path, monkeypatch):
+    """Whichever caller forgot the checkout, members and all: nothing runs."""
+    calls = _record_run(monkeypatch)
+    with pytest.raises(RuntimeError, match="not given the checkout"):
+        await kraft_builtins.run_setup_command(
+            tmp_path, tmp_path, entry_of({"setup_command": _SETUP}), sandbox=_SANDBOX
+        )
+    assert calls == []
+
+
+async def test_the_walk_mounts_a_workspace_members_in_its_entry_setup(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """At walk entry the members exist: the setup command mounts each one
+    the drift check passed, not just the root (Kraft-ju36l)."""
+    policy = InstancePolicy.from_input(InstancePolicyInput()).apply_template_override(
+        TemplatePolicyOverride(sandbox=SandboxPolicy(**_SANDBOX))
+    )
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    row, _, worktree = await workspace_item(
+        database,
+        run_dirs,
+        tmp_path,
+        [task],
+        effective_policy=policy,
+        repository_policies={"pkg": policy},
+    )
+    seen = []
+
+    async def run_setup_command(worktree, repo, repo_entry, *, sandbox=None, checkout=None):
+        seen.append(checkout)
+        return ""
+
+    async def run_task(*_a, **_kw):
+        return "done"
+
+    monkeypatch.setattr(kraft_builtins, "run_setup_command", run_setup_command)
+    monkeypatch.setattr(dispatch._subprocess, "run_task", run_task)
+    await executor.run_once(
+        database,
+        run_dirs,
+        work_item_id=row["id"],
+        launch=executor.LaunchContext(
+            repo_entry=entry_of({"setup_command": _SETUP}),
+            repositories=repositories(tmp_path, "pkg"),
+        ),
+    )
+
+    member = member_gitdirs(tmp_path / "pkg-connected", worktree, "repos/pkg")
+    assert member is not None
+    assert seen == [Checkout(worktree, {"repos/pkg": member})]
 
 
 async def test_a_sandboxed_item_without_docker_stops_for_a_human(tmp_path, repo, monkeypatch):
@@ -431,11 +499,11 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
     tmp_path, repo, monkeypatch
 ):
     """The worktree's HEAD is the worker's to write, so a setup command's
-    store names no branch, and nothing it leaves there is ever published."""
+    stores -- the root's and each member's it is given -- name no branch, and
+    nothing it leaves there is ever published."""
     monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path)}:{os.environ['PATH']}")
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
-    wt = tmp_path / "wt"
-    subprocess.run(["git", "worktree", "add", "-q", "-b", "kraft/x", str(wt)], cwd=repo, check=True)
+    ws = member_checkout(tmp_path / "side", "kraft/x")
     seen = {}
     real_docker_argv = docker_backend.docker_argv
 
@@ -448,13 +516,18 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
     monkeypatch.setattr(refstore, "sync", lambda *a, **kw: published.append(a))
 
     await kraft_builtins.run_setup_command(
-        wt,
-        repo,
+        ws.wt,
+        ws.root,
         entry_of({"setup_command": _SETUP, "env_passthrough": ["X_KEY"]}),
         sandbox=_SANDBOX,
+        checkout=ws.checkout,
     )
 
-    assert [s.branch for s in seen["refstores"]] == [None]
+    stores = seen["refstores"]
+    assert [(s.branch, s.checkout) for s in stores] == [
+        (None, None),
+        (None, ws.wt.resolve() / "repos" / "pkg"),
+    ]
     assert list(seen["passthrough"]) == ["X_KEY"]
     assert published == []
 

@@ -20,7 +20,7 @@ from kraft.executor.context import LaunchContext
 from kraft.paths import RunDirs
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
-from kraft.worker.sandbox import SandboxNotReady
+from kraft.worker.sandbox import Checkout, SandboxNotReady
 
 _CHAIN = """
 - id: implementation
@@ -569,7 +569,11 @@ async def test_a_setup_command_under_network_uses_the_install_list_not_runtime(
     monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
 
     await kraft_builtins.run_setup_command(
-        worktree, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+        worktree,
+        tmp_path,
+        entry_of({"setup_command": "true"}),
+        sandbox=_SETUP_POLICED,
+        checkout=Checkout(worktree, {}),
     )
 
     assert answers[0].startswith(b"HTTP/1.1 403") and b"not on the allow list" in answers[0]
@@ -596,7 +600,11 @@ async def test_a_setup_command_under_network_without_a_channel_or_route_never_ru
 
     with pytest.raises(RuntimeError, match="cannot run: .*egress"):
         await kraft_builtins.run_setup_command(
-            tmp_path, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+            tmp_path,
+            tmp_path,
+            entry_of({"setup_command": "true"}),
+            sandbox=_SETUP_POLICED,
+            checkout=Checkout(tmp_path, {}),
         )
 
     assert ran == [] and "wrap" not in remote.calls
