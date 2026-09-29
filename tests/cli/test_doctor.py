@@ -552,8 +552,10 @@ def test_mcp_check_passes_on_the_plugin_alone_and_fails_on_nothing(app, plugins,
     """The plugin alone is the recommended install, no `kraft admin init`; with
     nothing registered a Claude launch is refused, a real failure."""
     (Path.home() / ".claude.json").unlink()
-    (Path.home() / ".claude").mkdir()
+    (Path.home() / ".claude" / "plugins").mkdir(parents=True)
     (Path.home() / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": plugins}))
+    installs = {"version": 2, "plugins": {key: [{"scope": "user"}] for key in plugins}}
+    (Path.home() / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installs))
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is ok
     assert ("mcp__plugin_kraft_kraft__" if ok else "kraft admin init") in check["detail"]
