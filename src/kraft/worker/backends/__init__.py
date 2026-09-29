@@ -52,6 +52,12 @@ class SandboxBackend(Protocol):
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
         what `prepare` returned."""
 
+    def oneshot(self, sandbox: dict, cwd, home):
+        """Short commands in the session's image, asked as its session would
+        but with no network, stdin attached: `.argv()` per command (the
+        argv up to it), `await .close()` after. `worker.sandbox.SandboxNotReady`
+        where it cannot."""
+
     def client_cwd(self, session_id: str) -> Path | None:
         """The directory to start the wrapped command's client in, made for
         the session and gone after `close`; None for the task's own `cwd`."""
@@ -93,7 +99,8 @@ class SandboxBackend(Protocol):
         before it starts, to the channel listening at `sock_path`
         (`worker.channel`), None under the "tls" transport: docker starts a
         relay the worker joins. Returns
-        the environment the launch must add (its proxy); `{}` for a sandbox
+        the environment the launch must add (its proxy, and a PATH with the
+        `kraft` shim first); `{}` for a sandbox
         with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
         route cannot be made (`config_error`), never opens egress instead."""
 

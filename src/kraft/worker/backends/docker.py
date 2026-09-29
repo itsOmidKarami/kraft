@@ -21,8 +21,9 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,6 +33,7 @@ from kraft.paths import RunDirs, default_run_dir, default_templates_dir, kraft_h
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
 from kraft.worker import refstore as _refstore
+from kraft.worker import shim as _shim
 from kraft.worker.backends import docker_forward as _forward
 from kraft.worker.sandbox import (
     _HARDENED_GIT_CONFIG,
@@ -679,7 +681,9 @@ def docker_argv(
     namespace (`relay_argv`), where loopback is its only interface, and
     none of the daemon's proxy variables is forwarded -- its proxy is the
     relay, set by the caller from `open_session`. Without a `relay` it is
-    refused, never run on the default bridge.
+    refused, never run on the default bridge. Such a launch also mounts the
+    `kraft` shim read-only at `shim.CONTAINER_DIR`: its route to the worker
+    API, and its permission hook's command.
     """
     try:
         host = runtime()
@@ -721,6 +725,11 @@ def docker_argv(
     argv += _gitdir_mounts(Path(cwd), refstore)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
+    if network:
+        # Whatever this launch's policy: a hook command that is not there
+        # runs the call (codex treats an unrunnable hook as allow), and a
+        # sibling launch in the worktree may need the hook this one does not.
+        argv += ["-v", f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro"]
     if home is not None:
         argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
     if name is not None:
@@ -741,6 +750,83 @@ def docker_argv(
     argv.append(sandbox["image"])
     argv += cmd
     return argv
+
+
+#: Inside a one-shot container: the item's HOME, read-only, and the
+#: writable HOME the command runs with in its place (a tmpfs).
+ONESHOT_HOME_RO = "/kraft/home"
+ONESHOT_HOME = "/kraft/oneshot-home"
+#: Copies the one file of the item's HOME the command reads (codex's own
+#: config, which a worker may have written) into the writable HOME, then
+#: runs the command: codex app-server will not start on a read-only HOME.
+_ONESHOT_SH = (
+    'mkdir -p "$HOME/.codex" && { [ ! -f "$0/.codex/config.toml" ] || '
+    'cp "$0/.codex/config.toml" "$HOME/.codex/"; } && exec "$@"'
+)
+
+
+@dataclass
+class Oneshot:
+    """Short commands in a session's image, each asked the way a session of
+    it would ask -- its user, limits and init, its worktree read-only, its
+    HOME's codex config, the shim at `shim.CONTAINER_DIR` -- but with no
+    network and stdin attached. For what only the image's own binaries can
+    answer: codex's hook trust hash (`hook_install`). Each `argv()` names
+    its container, and `close()` removes every one still there: killing a
+    `docker run` client that timed out leaves its container running."""
+
+    cli: str
+    flags: list[str]
+    tail: list[str]
+    names: list[str] = field(default_factory=list)
+
+    def argv(self) -> list[str]:
+        name = f"kraft-oneshot-{uuid.uuid4().hex[:16]}"
+        self.names.append(name)
+        return [self.cli, "run", "--name", name, *self.flags, *self.tail]
+
+    async def close(self) -> None:
+        if self.names:
+            await docker_call("rm", "-f", *self.names)
+
+
+def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+    """`Oneshot` for `sandbox`; `SandboxRefused` where the runtime cannot
+    run one or enforce its limits."""
+    try:
+        host = runtime()
+    except ConfigError as exc:
+        raise SandboxRefused(str(exc)) from exc
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
+    cwd = str(Path(cwd).resolve())
+    flags = [
+        "--rm",
+        "--init",
+        "--interactive=true",
+        "--label",
+        home_label(),
+        *host.user_args(),
+        "--security-opt=no-new-privileges",
+        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
+        "--cap-drop=ALL",
+        *host.limit_args(sandbox.get("resources")),
+        "--network=none",
+        "-v",
+        f"{cwd}:{cwd}:ro",
+        "-w",
+        cwd,
+        "-v",
+        f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro",
+        "-v",
+        f"{home}:{ONESHOT_HOME_RO}:ro",
+        f"--tmpfs={ONESHOT_HOME}:rw,mode=1777",
+        "-e",
+        f"HOME={ONESHOT_HOME}",
+    ]
+    if host.selinux == "relabel":
+        flags = _relabelled(flags)
+    return Oneshot(host.cli, flags, [sandbox["image"], "sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO])
 
 
 def _relabelled(argv: list[str]) -> list[str]:
@@ -988,6 +1074,25 @@ async def sweep_volumes(keep: Iterable[str] = ()) -> list[str]:
     return orphans
 
 
+#: A container's PATH when its image sets none: the runtime's own default.
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+async def image_path(image: str) -> str | None:
+    """The PATH `image` gives its containers (its `Config.Env`), the
+    runtime's default when it sets none; None when it could not be read. A
+    launch under `network:` puts the `kraft` shim first on it: `-e PATH`
+    replaces the image's, it does not extend it."""
+    inspected = await docker_call("image", "inspect", "--format", "{{json .Config.Env}}", image)
+    if inspected is None or inspected[0] != 0:
+        return None
+    try:
+        env = json.loads(inspected[1]) or []
+    except ValueError:
+        return None
+    return next((e[5:] for e in env if e.startswith("PATH=")), DEFAULT_PATH)
+
+
 #: `(image, executable)` pairs an image was seen to hold. Only a hit is
 #: remembered: an operator who fixes the image need not restart Kraft.
 _HAS_EXECUTABLE: set[tuple[str, str]] = set()
@@ -1141,6 +1246,12 @@ class DockerBackend:
             relay=relay_name(session_id) if network else None,
         )
 
+    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+        try:
+            return oneshot(sandbox, cwd, home)
+        except SandboxRefused as exc:
+            raise SandboxNotReady(str(exc)) from exc
+
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         return launch_failed(cidfile, returncode)
 
@@ -1193,6 +1304,14 @@ class DockerBackend:
         if not sandbox.get("network"):
             return {}
         image, host = await self._relay_image()
+        # ponytail: replaces a repository's own literal `env: PATH` under
+        # `network:`; prepend to that instead if a repository ever needs one.
+        path = await image_path(sandbox["image"])
+        if path is None:
+            raise SandboxNotReady(
+                f"could not read image {sandbox['image']!r}'s PATH to put the `kraft` shim "
+                "first on it (the image is not pulled, or the runtime did not answer)"
+            )
         try:
             if sock_path is None:
                 await self._open_relay_b(session_id, image, host)
@@ -1201,7 +1320,7 @@ class DockerBackend:
             await self.close_session(session_id)
             raise SandboxNotReady(str(exc)) from exc
         await self._run_or_remove(session_id, argv, f"the sandbox's egress relay from {image!r}")
-        return dict(RELAY_PROXY_ENV)
+        return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
 
     async def _open_relay_b(self, session_id: str, image: str, host: Runtime) -> None:
         """The TLS transport's half: the session's volume, its client

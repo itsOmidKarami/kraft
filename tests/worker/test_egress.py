@@ -292,13 +292,13 @@ async def test_refusal_events_are_capped_per_session(proxy, monkeypatch):
     [b"CONNECT kraft:80 HTTP/1.1", b"GET http://kraft/v1/progress HTTP/1.1"],
     ids=["connect", "absolute-form"],
 )
-async def test_host_kraft_is_refused_by_name_until_the_worker_api_lands(
-    proxy, internet, request_line
-):
+async def test_host_kraft_is_refused_by_a_proxy_with_no_worker_api(proxy, internet, request_line):
+    """Never forwarded, whatever the allow list says: host `kraft` is the
+    worker API or nothing (`test_egress_worker_api.py` has the API)."""
     p = await proxy(allow=["**", "kraft"])
     answer = await p.ask(request_line + b"\r\n\r\n")
     assert answer.startswith(b"HTTP/1.1 403 ")
-    assert b"the worker API (host 'kraft') is not available yet" in answer
+    assert b"host 'kraft' is the worker API, and no worker API here" in answer
     assert internet.dialled == []
 
 

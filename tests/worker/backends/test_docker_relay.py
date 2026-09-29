@@ -5,6 +5,7 @@ and refuses when it cannot tell."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kraft.worker import ca
+from kraft.worker import ca, shim
 from kraft.worker.backends import docker
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -25,9 +26,10 @@ SOCK = Path("/run/sn/0123456789abcdef/s.sock")
 @pytest.fixture
 def calls(monkeypatch):
     """Every `docker_call` a test makes, answered `(0, "")` unless the test
-    says otherwise by name (`answers["run"] = (125, "")`)."""
+    says otherwise by name (`answers["run"] = (125, "")`); the image's
+    `Config.Env` holds `PATH=/img/bin`."""
     made: list[tuple[str, ...]] = []
-    answers: dict[str, tuple[int, str] | None] = {}
+    answers: dict[str, tuple[int, str] | None] = {"image": (0, '["PATH=/img/bin"]\n')}
 
     async def call(*args, timeout=None):
         made.append(args)
@@ -50,6 +52,42 @@ def test_network_set_replaces_forwarded_proxies_with_the_relay(monkeypatch):
     assert "HTTPS_PROXY" not in policed
     assert not any(a.startswith("--network") for a in open_)
     assert open_[open_.index("HTTPS_PROXY") - 1] == "-e"
+
+
+def test_every_launch_under_network_mounts_the_shim_read_only():
+    """Whatever this launch's policy: its hook's command, and a missing one
+    runs the call (codex treats an unrunnable hook as allow)."""
+    backend = docker.DockerBackend()
+    policed = backend.wrap(["true"], "/w", POLICED, None, session_id="s1")
+    open_ = backend.wrap(["true"], "/w", {"kind": "docker", "image": "img"}, None, session_id="s1")
+
+    assert policed[policed.index(f"{shim.HOST_DIR}:/opt/kraft/bin:ro") - 1] == "-v"
+    assert not any("/opt/kraft/bin" in a for a in open_)
+
+
+@pytest.mark.parametrize(
+    ("answer", "path"),
+    [
+        ((0, json.dumps(["A=b", "PATH=/opt/x:/usr/bin"])), "/opt/kraft/bin:/opt/x:/usr/bin"),
+        ((0, "null"), f"/opt/kraft/bin:{docker.DEFAULT_PATH}"),
+        ((1, ""), None),
+        (None, None),
+    ],
+    ids=["image-path", "image-sets-none", "not-pulled", "no-answer"],
+)
+async def test_the_shim_goes_first_on_the_image_own_path(calls, monkeypatch, answer, path):
+    """`-e PATH` replaces the image's, so it is read off the image; one that
+    cannot be read is refused before any relay starts."""
+    monkeypatch.setattr(docker, "socket_channel", lambda image: True)
+    calls.answers["image"] = answer
+    if path is None:
+        with pytest.raises(SandboxNotReady, match="PATH"):
+            await docker.DockerBackend().open_session("s1", POLICED, SOCK)
+        assert [c[0] for c in calls.made] == ["image"]
+    else:
+        env = await docker.DockerBackend().open_session("s1", POLICED, SOCK)
+        assert env["PATH"] == path
+    assert calls.made[0] == ("image", "inspect", "--format", "{{json .Config.Env}}", "img")
 
 
 def test_a_network_sandbox_never_runs_without_its_relay():
@@ -96,11 +134,11 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
     env = await backend.open_session("s1", POLICED, SOCK)
     await backend.close_session("s1")
 
-    assert env == docker.RELAY_PROXY_ENV
+    assert env == {**docker.RELAY_PROXY_ENV, "PATH": "/opt/kraft/bin:/img/bin"}
     assert env["HTTPS_PROXY"] == env["http_proxy"] == "http://127.0.0.1:3128"
     assert env["NO_PROXY"] == env["no_proxy"] == ""
-    assert calls.made[0][:4] == ("run", "-d", "--name", "kraft-relay-s1")
-    assert calls.made[1:] == [
+    assert calls.made[1][:4] == ("run", "-d", "--name", "kraft-relay-s1")
+    assert calls.made[2:] == [
         ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
         ("volume", "rm", "-f", "kraft-egress-s1"),
     ]
@@ -148,9 +186,12 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
     certs = ca.session_dir(run_dirs, "s1")
     backend = docker.DockerBackend()
 
-    assert await backend.open_session("s1", POLICED, None) == docker.RELAY_PROXY_ENV
+    assert await backend.open_session("s1", POLICED, None) == {
+        **docker.RELAY_PROXY_ENV,
+        "PATH": "/opt/kraft/bin:/img/bin",
+    }
 
-    create, relay_b, relay = calls.made
+    _, create, relay_b, relay = calls.made
     assert create == (
         "volume", "create", "--label", docker.home_label(),
         "--label", docker.VOLUME_LABEL, "kraft-egress-s1",
@@ -172,7 +213,7 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
     assert relay[-1] == "UNIX-CONNECT:/tmp/s.sock"
 
     await backend.close_session("s1")
-    assert calls.made[3:] == [
+    assert calls.made[4:] == [
         ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
         ("volume", "rm", "-f", "kraft-egress-s1"),
     ]
@@ -182,7 +223,7 @@ async def test_the_tls_transport_joins_two_relays_through_a_volume(
 async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls):
     with pytest.raises(SandboxNotReady, match="TLS listener has not started"):
         await docker.DockerBackend().open_session("s1", POLICED, None)
-    assert calls.made == []
+    assert [c[0] for c in calls.made] == ["image"]
 
 
 @pytest.mark.parametrize("sock", [SOCK, None], ids=["unix", "tls"])

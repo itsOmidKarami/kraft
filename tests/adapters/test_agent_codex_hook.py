@@ -3,6 +3,7 @@ enforce puts Kraft's PreToolUse hook on the command line, trusted for that
 launch by the hash `codex app-server` lists -- on a resume too, since codex
 reads its config again per invocation. No trust, no launch."""
 
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -42,7 +43,7 @@ def test_a_codex_launch_with_deny_tools_carries_its_trusted_hook(run, tmp_path):
     seen = _codex(run, tmp_path, deny_tools=("Bash",))
     cmd = seen["cmd"]
     hook, state = _hook_flags(cmd)
-    assert cmd[2:7] == ["exec", "-c", hook, "-c", state]
+    assert cmd[2:9] == ["exec", "-c", hook, "-c", "features.hooks=true", "-c", state]
     assert hook.startswith("hooks.PreToolUse=") and "permission-hook codex" in hook
     assert state.startswith("hooks.state=") and "trusted_hash=" in state
     assert "Bash" not in cmd
@@ -58,7 +59,17 @@ def test_a_codex_launch_under_an_allowlist_runs_fail_closed(run, tmp_path):
 def test_a_codex_resume_keeps_the_hook(run, tmp_path):
     cmd = _codex(run, tmp_path, deny_tools=("Bash",), resume_session_id="thread-1")["cmd"]
     hook, state = _hook_flags(cmd)
-    assert cmd[2:9] == ["exec", "resume", "thread-1", "-c", hook, "-c", state]
+    assert cmd[2:11] == [
+        "exec",
+        "resume",
+        "thread-1",
+        "-c",
+        hook,
+        "-c",
+        "features.hooks=true",
+        "-c",
+        state,
+    ]
 
 
 def test_a_codex_launch_with_nothing_to_enforce_gets_no_hook(run, tmp_path, monkeypatch):
@@ -78,3 +89,95 @@ def test_a_codex_launch_that_must_deny_web_search_is_refused(run, tmp_path, poli
     """Codex's web search runs on OpenAI's side; its hook never sees it."""
     with pytest.raises(LaunchRefused, match="WebSearch"):
         _codex(run, tmp_path, **policy)
+
+
+NETWORKED = {
+    "kind": "docker",
+    "image": "x",
+    "network": {"runtime": {"allow": ["x.io"]}},
+    "resources": {"memory": "1g"},
+}
+
+
+@pytest.fixture
+def image_codex(tmp_path, monkeypatch):
+    """A fake `docker` on PATH that logs each argv to the returned file (read
+    it with `_calls`), then
+    runs the command as `fake_docker_bin` does; FAKE_DOCKER_RUN_FAILS makes
+    `docker run` fail as a runtime would before starting the container."""
+    from support.harness import fake_docker_bin
+
+    log = tmp_path / "docker.log"
+    wrapper = tmp_path / "logging-docker"
+    wrapper.mkdir()
+    (wrapper / "docker").write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\0" "$@" >> {log}; printf "\\n" >> {log}\n'
+        '[ -n "${FAKE_DOCKER_RUN_FAILS:-}" ] && [ "$1" = run ] && exit 125\n'
+        f'exec {fake_docker_bin(tmp_path)}/docker "$@"\n'
+    )
+    (wrapper / "docker").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{wrapper}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CODEX_LOG", str(tmp_path / "codex.log"))
+    return log
+
+
+def test_a_sandboxed_codex_under_network_hooks_through_the_shim(run, tmp_path, image_codex):
+    """Its channel is the hook's route to Kraft: the launch runs, its hook the
+    shim at its fixed container path, never the host's interpreter; and the
+    hook is trusted by the codex the session runs -- the image's, asked in a
+    container with no network -- never the host's, which may hash it otherwise."""
+    for _ in range(2):  # never cached: the image under a tag can change
+        cmd = _codex(run, tmp_path, deny_tools=("Bash",), sandbox=NETWORKED)["cmd"]
+    hook, _ = _hook_flags(cmd)
+    assert '"/opt/kraft/bin/kraft admin permission-hook codex"' in hook
+    assert sys.executable not in hook
+    calls = _calls(image_codex)
+    runs = [c for c in calls if c[0] == "run"]
+    assert len(runs) == 4
+    for argv in runs:
+        at = argv.index("x")
+        flags, command = argv[:at], argv[at + 1 :]
+        assert {"--rm", "--init", "--network=none", "--memory=1g"} <= set(flags)
+        assert any(f.endswith(":/opt/kraft/bin:ro") for f in flags)
+        assert any(f.endswith(":/kraft/home:ro") for f in flags)
+        exe = [*shlex.split(FAKE), "app-server"]
+        assert command[:2] == ["sh", "-c"] and command[4 : 4 + len(exe)] == exe
+    # A client killed at a timeout leaves its container: each is removed by name.
+    named = {argv[argv.index("--name") + 1] for argv in runs}
+    removed = {n for c in calls if c[:2] == ["rm", "-f"] for n in c[2:]}
+    assert named == removed
+
+
+def _calls(log):
+    return [line.split("\0")[:-1] for line in log.read_text().splitlines()]
+
+
+@pytest.mark.parametrize(
+    "why, match",
+    [
+        ("runtime-refuses", "SELinux"),
+        ("run-fails", "exited before answering"),
+        ("image-codex-distrusts", "did not trust"),
+    ],
+)
+def test_a_sandboxed_codex_whose_image_cannot_vouch_for_the_hook_is_refused(
+    run, tmp_path, monkeypatch, image_codex, why, match
+):
+    """Codex skips an untrusted hook without a word (measured, 0.155.0), so
+    trust the image's codex could not confirm is no launch -- and never the
+    host's codex asked instead."""
+    from kraft.worker.backends import docker
+
+    if why == "runtime-refuses":
+        monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(selinux="refuse"))
+    elif why == "run-fails":
+        monkeypatch.setenv("FAKE_DOCKER_RUN_FAILS", "1")
+    else:
+        monkeypatch.setenv("FAKE_CODEX_MODE", "distrust")
+    with pytest.raises(LaunchRefused, match=f"permission hook.*{match}"):
+        _codex(run, tmp_path, deny_tools=("Bash",), sandbox=NETWORKED)
+    codex_log = tmp_path / "codex.log"
+    spawned = codex_log.read_text().splitlines() if codex_log.exists() else []
+    assert len(spawned) == (2 if why == "image-codex-distrusts" else 0)
+    assert image_codex.exists() == (why != "runtime-refuses")

@@ -5,9 +5,11 @@ beside a repo's own hooks, and never committed."""
 import asyncio
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -104,6 +106,47 @@ def test_a_hooks_file_kraft_cannot_read_is_refused_by_name(tmp_path):
         assert (wt / ".cursor/hooks.json").read_text() == body
 
 
+@pytest.mark.parametrize("planted", ["file", "dir"])
+def test_a_planted_symlink_is_refused_and_nothing_is_written_through_it(tmp_path, planted):
+    """A sandboxed worker can plant either in the worktree it writes; the
+    host following it would write wherever it points."""
+    _, wt = _worktree(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if planted == "file":
+        (wt / ".cursor").mkdir()
+        (wt / ".cursor/hooks.json").symlink_to(outside / "hooks.json")  # dangling
+    else:
+        (wt / ".cursor").symlink_to(outside)
+    with pytest.raises(hi.HookFileError, match="symlink"):
+        hi.install_cursor_hook(wt, ARGV)
+    assert list(outside.iterdir()) == []
+
+
+def test_a_planted_fifo_is_refused_at_once(tmp_path):
+    """Opened blocking, a FIFO waits for a writer that never comes, and the
+    daemon's event loop with it."""
+    _, wt = _worktree(tmp_path)
+    (wt / ".cursor").mkdir()
+    fifo = wt / ".cursor/hooks.json"
+    os.mkfifo(fifo)
+    raised = []
+
+    def install():
+        try:
+            hi.install_cursor_hook(wt, ARGV)
+        except hi.HookFileError as exc:
+            raised.append(exc)
+
+    worker = threading.Thread(target=install, daemon=True)
+    worker.start()
+    worker.join(5)
+    if worker.is_alive():  # free it before failing: a writer ends its wait
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+    assert not worker.is_alive(), "install_cursor_hook blocked on a FIFO"
+    assert raised and "not a regular file" in str(raised[0])
+
+
 # -- codex: per-launch -c flags, trusted from `codex app-server` (Kraft-4in7z.3)
 
 FAKE_CODEX = [sys.executable, str(Path(__file__).parents[1] / "support/fake_codex_app_server.py")]
@@ -130,12 +173,27 @@ def test_codex_flags_install_kraft_hook_trusted_by_the_hash_codex_lists(fake_cod
         'hooks.PreToolUse=[{hooks=[{type="command",'
         'command="/py -m kraft admin permission-hook codex",timeout=10}]}]',
         "-c",
+        "features.hooks=true",
+        "-c",
         'hooks.state={"/<session-flags>/config.toml:pre_tool_use:0:0"='
-        f'{{trusted_hash="{digest}"}}}}',
+        f'{{trusted_hash="{digest}",enabled=true}}}}',
     )
     # Listed once for the hash, once more to see codex trusts it.
     first, check = fake_codex()
-    assert first == ["app-server", *flags[:2]] and check == ["app-server", *flags]
+    assert first == ["app-server", *flags[:4]] and check == ["app-server", *flags]
+
+
+@pytest.mark.parametrize("planted", ["disabled", "hooks-off"])
+def test_a_worker_planted_codex_config_cannot_switch_the_hook_off(
+    fake_codex, monkeypatch, tmp_path, planted
+):
+    """The config under a worker's HOME is a layer below `-c`: the launch's
+    own flags list the hook enabled and trusted whatever it says, and the
+    launch carries the same flags, so an edit after the check changes
+    nothing."""
+    monkeypatch.setenv("FAKE_CODEX_PLANTED", planted)
+    flags = asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    assert "features.hooks=true" in flags and flags[-1].endswith(",enabled=true}}")
 
 
 def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
@@ -146,6 +204,33 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
     assert len(fake_codex()) == 4
 
 
+class _Here:
+    """A `runner` that runs codex right here: the sandboxed path, no container."""
+
+    def argv(self):
+        return []
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "host"])
+def test_another_trusted_pre_tool_use_hook_refuses_only_a_sandboxed_launch(
+    fake_codex, monkeypatch, tmp_path, sandboxed
+):
+    """A worker can plant its own hook, trusted, in the config under its
+    HOME; whether it could outvote Kraft's deny is not a question to test
+    in production, so a sandboxed launch is refused, naming it. A host
+    operator's own ~/.codex hooks are theirs."""
+    monkeypatch.setenv("FAKE_CODEX_PLANTED", "trusted-hook")
+    flags = hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path, _Here() if sandboxed else None)
+    if sandboxed:
+        with pytest.raises(hi.CodexTrustError, match=r"user .*config\.toml.*echo allow"):
+            asyncio.run(flags)
+    else:
+        assert asyncio.run(flags)
+
+
 @pytest.mark.parametrize(
     ("mode", "match"),
     [
@@ -153,6 +238,7 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
         ("hang", "no hooks/list within 2s"),
         ("unlisted", "did not list"),
         ("distrust", "did not trust"),
+        ("stuck-disabled", "not enabled"),
     ],
 )
 def test_codex_that_cannot_trust_the_hook_is_an_error(

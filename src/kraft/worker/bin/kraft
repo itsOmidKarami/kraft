@@ -1,0 +1,158 @@
+#!/bin/sh
+# kraft, inside a sandbox (sandbox part 2, P5; spec §5): the worker verbs of
+# Kraft's CLI, so an image needs no Kraft, only sh and curl. Kraft mounts
+# this read-only and puts it first on PATH.
+#
+# Each verb posts its fields, URL-encoded by curl, to http://kraft/w/<verb>,
+# which the sandbox's proxy serves as this session. Nothing here builds JSON:
+# the answer is printed as the API gave it. The two deny bodies below are
+# fixed text, each a permission_hooks.TRANSLATORS render of a deny.
+#
+# curl runs with -q, first: no .curlrc is read. HOME is the worker's to
+# write, and one there could point the hook's answer at the worker's own.
+set -u
+
+URL=http://kraft/w
+
+usage() {
+	echo "kraft: $1" >&2
+	echo "in a sandbox kraft has only: item progress K [ID] | item reply THREAD --body B" \
+		"[--claim C] | item retry [ID] [--steer S] | view show|threads [ID]" \
+		"| admin permission-hook HARNESS" >&2
+	exit 2
+}
+
+# post VERB NAME=VALUE...: the fields to http://kraft/w/VERB; exits curl's way.
+post() {
+	verb=$1
+	shift
+	n=$#
+	while [ "$n" -gt 0 ]; do
+		set -- "$@" --data-urlencode "$1"
+		shift
+		n=$((n - 1))
+	done
+	exec curl -q -sS --fail-with-body -H 'Expect:' "$@" "$URL/$verb"
+}
+
+# The one optional ID the item and view verbs take; set by `positional`.
+id=
+positional() {
+	[ -z "$id" ] || usage "unexpected argument: $1"
+	id=$1
+}
+
+item_progress() {
+	task=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--json) ;;
+		-*) usage "unknown option: $1" ;;
+		*) if [ -z "$task" ]; then task=$1; else positional "$1"; fi ;;
+		esac
+		shift
+	done
+	[ -n "$task" ] || usage "item progress needs the task number K"
+	post progress "task=$task" "id=$id"
+}
+
+item_reply() {
+	thread= body= claim= has_body=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--body) [ $# -ge 2 ] || usage "--body needs a value"; body=$2; has_body=1; shift ;;
+		--body=*) body=${1#--body=}; has_body=1 ;;
+		--claim) [ $# -ge 2 ] || usage "--claim needs a value"; claim=$2; shift ;;
+		--claim=*) claim=${1#--claim=} ;;
+		--json) ;;
+		-*) usage "unknown option: $1" ;;
+		*) [ -z "$thread" ] || usage "unexpected argument: $1"; thread=$1 ;;
+		esac
+		shift
+	done
+	[ -n "$thread" ] && [ -n "$has_body" ] || usage "item reply needs THREAD and --body"
+	post reply "thread=$thread" "body=$body" "claim=$claim"
+}
+
+item_retry() {
+	steer=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--steer) [ $# -ge 2 ] || usage "--steer needs a value"; steer=$2; shift ;;
+		--steer=*) steer=${1#--steer=} ;;
+		--json) ;;
+		-*) usage "unknown option: $1" ;;
+		*) positional "$1" ;;
+		esac
+		shift
+	done
+	post retry "id=$id" "steer=$steer"
+}
+
+# view show|threads [ID]: the payload as JSON, whatever rendering flag the
+# host CLI would have taken. No diff or compare: Kraft reads no git in a live
+# sandboxed worktree, and the worker has git of its own.
+view() {
+	verb=$1
+	shift
+	open=
+	while [ $# -gt 0 ]; do
+		case $verb:$1 in
+		threads:--open) open=1 ;;
+		*:--json) ;;
+		*:-*) usage "unknown option: $1" ;;
+		*) positional "$1" ;;
+		esac
+		shift
+	done
+	case $verb in
+	threads) post threads "id=$id" "open=$open" ;;
+	*) post "$verb" "id=$id" ;;
+	esac
+}
+
+# The harness's own deny, for when Kraft cannot answer. Exit 2 as well:
+# a Claude-shaped hook (codex) reads stdout only on exit 0 and treats any
+# other failure but 2 as no decision, which lets the call run.
+deny() {
+	case $1 in
+	cursor) printf '%s' '{"permission": "deny", "agent_message": "Kraft: Kraft could not be reached", "user_message": "Kraft: Kraft could not be reached"}' ;;
+	codex) printf '%s' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Kraft: Kraft could not be reached"}}' ;;
+	esac
+	exit 2
+}
+
+permission_hook() {
+	[ $# -ge 1 ] || usage "admin permission-hook needs a harness"
+	harness=$1
+	shift
+	case $harness in
+	cursor | codex) ;;
+	*) usage "no permission hook for harness: $harness" ;;
+	esac
+	# The session's policy decides fail-closed in the daemon, not this flag.
+	[ $# -eq 0 ] || [ "$*" = --fail-closed ] || usage "unexpected argument: $*"
+	# The answer is printed only once curl has it all and succeeded; any
+	# failure at all -- no proxy, no daemon, an error, a timeout -- denies.
+	if answer=$(curl -q -sS --fail-with-body --max-time 9 -H 'Expect:' \
+		--data-urlencode "harness=$harness" --data-urlencode "stdin@-" \
+		"$URL/permission-hook"); then
+		printf '%s' "$answer"
+		exit 0
+	fi
+	echo "kraft permission-hook: Kraft could not answer: $answer" >&2
+	deny "$harness"
+}
+
+[ $# -ge 2 ] || usage "a group and a verb, please"
+group=$1
+verb=$2
+shift 2
+case "$group $verb" in
+"item progress") item_progress "$@" ;;
+"item reply") item_reply "$@" ;;
+"item retry") item_retry "$@" ;;
+"view show" | "view threads") view "$verb" "$@" ;;
+"admin permission-hook") permission_hook "$@" ;;
+*) usage "not available in a sandbox: kraft $group $verb" ;;
+esac

@@ -1,12 +1,15 @@
 """`kraft.adapters.agent` launching into a docker sandbox: a tool policy is
 enforced in the container or the launch is refused, never run unenforced."""
 
+import json
+
 import pytest
 
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
 DOCKER = {"kind": "docker", "image": "x"}
+NETWORKED = {**DOCKER, "network": {"runtime": {"allow": ["x.io"]}}}
 
 
 @pytest.mark.parametrize("harness", ["codex", "cursor"])
@@ -19,10 +22,12 @@ DOCKER = {"kind": "docker", "image": "x"}
     ],
     ids=["deny", "allowlist"],
 )
-def test_a_hook_enforced_policy_is_refused_in_a_sandbox(run, tmp_path, harness, policy):
-    """The hook is a host command calling Kraft's local API; in a container it
-    crashes, and a crashed hook lets the call through."""
-    with pytest.raises(LaunchRefused, match="cannot run inside a sandbox"):
+def test_a_hook_enforced_policy_is_refused_in_a_sandbox_without_network(
+    run, tmp_path, harness, policy
+):
+    """The hook reaches Kraft only through the session's channel; without one
+    it crashes, and a crashed hook lets the call through. `network:` is the fix."""
+    with pytest.raises(LaunchRefused, match="cannot run inside a sandbox without `network:`"):
         run(
             harness=harness,
             command=harness,
@@ -91,3 +96,33 @@ def test_codex_leaves_isolation_to_the_container(run, tmp_path, sandbox, mode, e
         **({"permission_mode": mode} if mode else {}),
     )
     assert f"sandbox_mode={expected}" in seen["cmd"]
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "servers"),
+    [
+        (NETWORKED, {"kraft": {"type": "http", "url": "http://kraft/mcp"}}),
+        (None, None),
+    ],
+    ids=["network", "host"],
+)
+def test_claude_under_network_asks_its_session_mcp_server_alone(run, tmp_path, sandbox, servers):
+    """The host's registration of Kraft's MCP server is out of the
+    container's reach; its channel reaches the session's own. On the host
+    the launch is as it was."""
+    cmd = run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)["cmd"]
+    assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
+    if servers is None:
+        assert "--mcp-config" not in cmd and "--strict-mcp-config" not in cmd
+    else:
+        at = cmd.index("--strict-mcp-config")
+        assert cmd[at + 1] == "--mcp-config"
+        assert json.loads(cmd[at + 2]) == {"mcpServers": servers}
+
+
+def test_claude_in_a_sandbox_without_network_is_refused_before_launch(run, tmp_path):
+    """Every claude launch names Kraft's MCP permission tool, and a sandbox
+    without `network:` has no route to any Kraft MCP server: the CLI exits 1
+    at start naming the missing tool (spike 5.5). Refused, naming the fix."""
+    with pytest.raises(LaunchRefused, match=r"'claude'.*give the sandbox a `network:`"):
+        run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
