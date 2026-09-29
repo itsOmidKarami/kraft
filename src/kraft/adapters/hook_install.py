@@ -213,11 +213,29 @@ async def _codex_hook(
         if proc.returncode is None:
             proc.kill()
         await proc.wait()
-    for group in result.get("data") or ():
-        for hook in group.get("hooks") or ():
-            if hook.get("source") == "sessionFlags" and hook.get("command") == command:
-                return hook
-    raise CodexTrustError("codex app-server did not list Kraft's preToolUse hook")
+    hooks = [h for group in result.get("data") or () for h in group.get("hooks") or ()]
+    ours = next(
+        (h for h in hooks if h.get("source") == "sessionFlags" and h.get("command") == command),
+        None,
+    )
+    if ours is None:
+        raise CodexTrustError("codex app-server did not list Kraft's preToolUse hook")
+    # A worker can plant a PreToolUse hook of its own, and its trusted_hash,
+    # in the config under its HOME (measured, 0.155.0: listed enabled and
+    # trusted beside Kraft's). Whether it could outvote Kraft's deny is not
+    # found out: any other that would run refuses the launch.
+    for h in hooks:
+        if (
+            h is not ours
+            and h.get("eventName") == "preToolUse"
+            and h.get("enabled") is not False
+            and h.get("trustStatus") != "untrusted"
+        ):
+            raise CodexTrustError(
+                f"another preToolUse hook would run beside Kraft's: {h.get('source')} "
+                f"{h.get('key')} ({h.get('command')!r}); remove it"
+            )
+    return ours
 
 
 def _exe_identity(exe: list[str]) -> tuple:

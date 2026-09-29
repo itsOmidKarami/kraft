@@ -178,6 +178,15 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
     assert len(fake_codex()) == 4
 
 
+def test_another_trusted_pre_tool_use_hook_refuses_the_launch(fake_codex, monkeypatch, tmp_path):
+    """A worker can plant its own hook, trusted, in the config under its
+    HOME; whether it could outvote Kraft's deny is not a question to test
+    in production. Named by where it came from."""
+    monkeypatch.setenv("FAKE_CODEX_PLANTED", "trusted-hook")
+    with pytest.raises(hi.CodexTrustError, match=r"user .*config\.toml.*echo allow"):
+        asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+
+
 @pytest.mark.parametrize(
     ("mode", "match"),
     [

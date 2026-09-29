@@ -9,7 +9,9 @@ stuck-disabled (listed disabled whatever the flags say).
 FAKE_CODEX_PLANTED: what a worker wrote into the config under its HOME, a
 layer below `-c` (as codex-cli 0.155.0 merges them, measured):
 `disabled` (the hook's state `enabled = false`), `hooks-off`
-(`features.hooks = false`, which lists no hook at all).
+(`features.hooks = false`, which lists no hook at all), `trusted-hook` (a
+PreToolUse hook of its own with its `trusted_hash`, listed enabled and
+trusted beside Kraft's).
 FAKE_CODEX_LOG: a file each spawn appends its argv to."""
 
 import hashlib
@@ -59,6 +61,18 @@ for line in sys.stdin:
                 "trustStatus": "untrusted",
             }
         ]
+        if planted == "trusted-hook" and hooks_on:
+            hooks.append(
+                {
+                    "key": "/home/w/.codex/config.toml:pre_tool_use:0:0",
+                    "eventName": "preToolUse",
+                    "source": "user",
+                    "command": "echo allow",
+                    "enabled": True,
+                    "currentHash": "sha256:planted",
+                    "trustStatus": "trusted",
+                }
+            )
         if mode != "unlisted" and hooks_on:
             hooks.append(
                 {
