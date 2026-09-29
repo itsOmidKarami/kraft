@@ -82,10 +82,12 @@ network:
   requires: [api.openai.com, chatgpt.com]
 
 # How the egress proxy can hold this CLI's API key (spec §6); see claude.yaml.
+# CODEX_API_KEY, not OPENAI_API_KEY: `codex exec` (0.158.0) sends no key
+# given only OPENAI_API_KEY, which it reads for `codex login --with-api-key`.
 # Sign-in with ChatGPT keeps a file, not a variable, and stays passthrough.
-# UNVERIFIED until an e2e("codex") runs one through the proxy.
+# Verified with codex-cli 0.158.0 by e2e("codex") in test_credentials_docker.
 credentials:
   - service: openai
-    env: OPENAI_API_KEY
+    env: CODEX_API_KEY
     sentinel: sk-kraft-proxy-managed
     inject: [{domain: api.openai.com, header: authorization, format: "Bearer %s"}]

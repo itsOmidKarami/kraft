@@ -68,8 +68,9 @@ network:
 # How the egress proxy can hold this CLI's credentials (spec §6): the
 # container gets the sentinel, shaped like the real key, and the proxy puts
 # the daemon's own value in the header on requests to the host. Only for a
-# repository that names the `env` under `sandbox.credentials`. UNVERIFIED
-# until an e2e("claude") runs one through the proxy.
+# repository that names the `env` under `sandbox.credentials`.
+# ANTHROPIC_API_KEY verified with claude 2.1.284 by e2e("claude") in
+# test_credentials_docker; CLAUDE_CODE_OAUTH_TOKEN is UNVERIFIED.
 credentials:
   - service: anthropic
     env: ANTHROPIC_API_KEY

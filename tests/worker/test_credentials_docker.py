@@ -175,11 +175,14 @@ def _cli_image(cli: str, harness_id: str) -> str:
 @pytest.mark.parametrize(
     "harness_id", [pytest.param(h, marks=pytest.mark.e2e(h)) for h in _CLI_PACKAGES]
 )
+# An image not built yet is built here, once, well past the default timeout.
+@pytest.mark.timeout(1800)
 async def test_the_real_cli_sends_the_sentinel_and_trusts_the_bundle(
     launch,  # noqa: F811
     runtime,  # noqa: F811
     api,
     harness_id,
+    tmp_path,
 ):
     """Task 6.5: each CLI whose harness declares a credential, run as a
     launch runs it, against a fake of its API host. The host getting the real
@@ -193,6 +196,8 @@ async def test_the_real_cli_sends_the_sentinel_and_trusts_the_bundle(
     (rule,) = declared.inject
     port, seen = await api(rule.domain, rule.header, (rule.format or "%s").replace("%s", REAL))
     argv = harness.build_argv(h, prompt="Reply with OK.", context="A smoke test. Use no tools.")
+    # A worktree is a git repository, which codex requires of its cwd.
+    subprocess.run(["git", "init", "-q", str(tmp_path / "work")], check=True)
     script = shlex.join(argv).replace("{", "{{").replace("}", "}}") + " > out 2>&1"
 
     out, refused, *_ = await launch(

@@ -47,7 +47,7 @@ def test_the_shipped_harnesses_declare_how_their_keys_are_proxy_managed():
             ),
         ],
         "codex": [
-            ("OPENAI_API_KEY", "sk-kraft-proxy-managed", (openai, "authorization", "Bearer %s"))
+            ("CODEX_API_KEY", "sk-kraft-proxy-managed", (openai, "authorization", "Bearer %s"))
         ],
         "gemini": [
             (
@@ -536,9 +536,10 @@ def test_gemini_folds_context_into_the_prompt():
     """channel: prompt -- the weaker channel, and the whole contract must
     still arrive. `prompt` is declared last in gemini.yaml (not a
     bare-positional, so no ordering requirement forces it earlier), so this
-    checks content rather than position."""
+    checks content rather than position. `--skip-trust` on every launch:
+    every worktree is a folder gemini has never trusted (Kraft-6vvf3)."""
     argv = _argv("gemini")
-    assert argv[0] == "gemini"
+    assert argv[:2] == ["gemini", "--skip-trust"]
     assert argv[argv.index("-p") + 1] == "CTX\n\ndo the thing"
     assert "--append-system-prompt" not in argv
 

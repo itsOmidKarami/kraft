@@ -27,7 +27,7 @@ _OWN = {"env": "MY_KEY", "inject": [{"domain": "a.io", "header": "x-key"}]}
             {"ANTHROPIC_API_KEY": "sk"},
             True,
             "proxy-managed: ANTHROPIC_API_KEY on api.anthropic.com; passes through: "
-            "CLAUDE_CODE_OAUTH_TOKEN, GEMINI_API_KEY, OPENAI_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN, CODEX_API_KEY, GEMINI_API_KEY",
         ),
         ([{"env": "ANTHROPIC_API_KEY"}], {}, {}, False, "no value for ANTHROPIC_API_KEY"),
         ([{"env": "ANTHROPIC_API_KEY"}], {"env": {"ANTHROPIC_API_KEY": "sk"}}, {}, True, None),
