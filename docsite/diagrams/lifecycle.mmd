@@ -1,0 +1,17 @@
+flowchart TD
+  subgraph filing["Filing"]
+    direction LR
+    file["File<br/>web UI, CLI, MCP,<br/>trigger, auto-intake"] --> intake["Intake<br/>check, freeze chain<br/>and policy, snapshot<br/>attachments"] --> paused(["paused<br/>unless autostart"]) --> start["Start<br/>cut the worktree,<br/>run setup_command"]
+  end
+
+  subgraph chain["The default chain, to its final gate"]
+    direction LR
+    docs["spec, plan,<br/>chain_revision<br/>each with a gate"] --> impl["implementation,<br/>verification<br/>in a fix loop"] --> local{{"local_review"}} --> mr["draft merge request,<br/>CI and automated<br/>review, fix loop"] --> final{{"final_review"}}
+  end
+
+  subgraph landing["The chain's last nodes, and after"]
+    direction LR
+    land["mark ready,<br/>external approval,<br/>merge, post-merge CI"] --> done(["completed<br/>beads closed"]) --> archive["archived<br/>worktree and<br/>branch removed"]
+  end
+
+  filing --> chain --> landing

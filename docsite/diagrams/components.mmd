@@ -1,0 +1,39 @@
+flowchart TB
+  subgraph clients["Clients"]
+    direction LR
+    browser["Browser<br/>React SPA"]
+    cli["kraft CLI"]
+    mcpc["Coding agent<br/>kraft admin mcp"]
+  end
+
+  subgraph daemon["kraft: one FastAPI process"]
+    api["HTTP API and WebSocket"]
+    exec["Executor"]
+    pollers["Pollers: waits, rate limits,<br/>time caps, triggers,<br/>auto-intake, archive"]
+    store[("orchestrator.db<br/>SQLite, one writer")]
+    index[("index.db<br/>search")]
+    egress["Egress proxy"]
+  end
+
+  subgraph item["One per running task"]
+    agent["Worker session<br/>an agent CLI or a subprocess"]
+    wt["git worktree<br/>one per work item"]
+  end
+
+  forge["gh or glab"]
+  bd["bd, optional"]
+
+  browser --> api
+  cli --> api
+  mcpc --> api
+  api --> store
+  api --> index
+  api --> exec
+  pollers --> exec
+  exec --> store
+  exec -- "spawns" --> agent
+  exec -- "forge tasks" --> forge
+  exec --> bd
+  agent -- "edits and commits" --> wt
+  agent -- "permission hook,<br/>progress, replies" --> api
+  agent -. "network, when sandboxed" .-> egress

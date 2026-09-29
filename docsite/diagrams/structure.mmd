@@ -1,0 +1,22 @@
+flowchart TD
+  chain["Chain<br/>ordered nodes, frozen onto the item at intake"]
+  gate{{"Gate node<br/>waits for a person"}}
+  exec["Exec node"]
+  main["Steps<br/>run in order"]
+  task["Tasks in one step<br/>run in parallel<br/>agent, subprocess, builtin, forge"]
+  session["Worker session<br/>one run of one task: its status,<br/>log, result file and usage"]
+  recovery["on_failure recovery<br/>once per entry, then measure again"]
+  fix["fix_loop<br/>repair, then measure again<br/>a judge from the second attempt<br/>bounded by attempts and wall clock"]
+  esc["escalation task<br/>can earn the node a fresh entry"]
+  stop(["needs_human"])
+  next(["next node"])
+
+  chain --> gate
+  chain --> exec --> main --> task --> session
+  main -- "a task fails" --> recovery
+  recovery -- "passes" --> next
+  recovery -- "still failing" --> fix
+  fix -- "passes" --> next
+  fix -- "cap reached, or the judge stops" --> esc
+  esc -- "retry" --> main
+  esc -- "cannot help" --> stop
