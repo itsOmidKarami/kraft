@@ -456,24 +456,36 @@ def socket_channel(relay_image: str) -> bool | None:
 
 
 def _vm_evidence(host: Runtime) -> str:
-    """What the runtime says about running in a VM, in its own words (spike
-    4.5a's detection): docker's `OperatingSystem` (`Docker Desktop`),
-    podman's `ServiceIsRemote` (podman machine). Empty when it says
-    nothing: the probe's answer stands on its own."""
+    """That the runtime runs in a VM, in its own words (spike 4.5a's
+    detection): docker's `OperatingSystem` saying `Docker Desktop`,
+    podman's `ServiceIsRemote` (podman machine). Empty when it says neither:
+    a socket refused there is not a VM's, and the two-hop transport would
+    not reach the daemon's loopback either."""
     if host.podman:
         remote = (_run(host.cli, "info", "--format", "{{.Host.ServiceIsRemote}}") or "").strip()
         return f"ServiceIsRemote: {remote}" if remote == "true" else ""
     system = (_run(host.cli, "info", "--format", "{{.OperatingSystem}}") or "").strip()
-    return f"OperatingSystem: {system}" if system else ""
+    return f"OperatingSystem: {system}" if "Docker Desktop" in system else ""
 
 
-def channel_refusal(host: Runtime, relay_image: str, reachable: bool | None) -> str | None:
+def channel_refusal(
+    host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
+) -> str | None:
     """Why a sandbox with `network:` cannot run here, given `socket_channel`'s
-    answer; None when it can: over a socket per session (True) or the
-    two-hop TLS transport (False, a runtime in a VM). Shared by a launch
-    and doctor."""
-    if reachable is not None:
+    answer and, for False, what the runtime `said` about running in a VM
+    (`_vm_evidence`); None when it can: over a socket per session (True) or
+    the two-hop TLS transport (False, in a VM). Shared by a launch and
+    doctor."""
+    if reachable is True or (reachable is False and said):
         return None
+    if reachable is False:
+        return (
+            f"a container on {host.describe()} could not connect to a host unix socket, "
+            "but the runtime does not say it runs in a VM (Docker Desktop, podman "
+            "machine), where Kraft would reach it another way: an SELinux `connectto` "
+            f"denial or the permissions on {_run_dirs().sockets} stop it. Fix that, "
+            "then check `kraft admin doctor`"
+        )
     return (
         f"could not tell whether {host.describe()} lets a container reach a host "
         f"unix socket, which decides how a sandbox with `network:` reaches Kraft's "
@@ -1162,12 +1174,14 @@ class DockerBackend:
 
     async def egress_transport(self) -> str:
         """ "unix" where a container can connect to a host unix socket, "tls"
-        where the runtime runs in a VM and cannot (spike 4.5a); refused
-        (`SandboxNotReady`) when the probe could not tell."""
+        where it cannot and the runtime says it runs in a VM (spike 4.5a);
+        refused (`SandboxNotReady`) otherwise, or when the probe could not
+        tell."""
         image, host = await self._relay_image()
         reachable = await asyncio.to_thread(socket_channel, image)
-        if reachable is None:
-            raise SandboxNotReady(channel_refusal(host, image, reachable))
+        said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+        if problem := channel_refusal(host, image, reachable, said):
+            raise SandboxNotReady(problem)
         return "unix" if reachable else "tls"
 
     async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
@@ -1291,12 +1305,12 @@ class DockerBackend:
                     f"run: {host.cli} pull {relay}"
                 )
             reachable = await asyncio.to_thread(socket_channel, relay)
-            if problem := channel_refusal(host, relay, reachable):
+            said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+            if problem := channel_refusal(host, relay, reachable, said):
                 return False, problem
             egress = f", egress relay {relay}"
-            if reachable is False:
-                said = await asyncio.to_thread(_vm_evidence, host)
-                egress += f" over the two-hop TLS transport ({said or 'a runtime in a VM'})"
+            if said:
+                egress += f" over the two-hop TLS transport ({said})"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
         return (
             True,

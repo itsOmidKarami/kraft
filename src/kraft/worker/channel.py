@@ -27,7 +27,7 @@ import shutil
 import socket
 import ssl
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from kraft import events
@@ -53,6 +53,9 @@ class _Channel:
     #: The unix socket and its listener; both None under the TLS transport.
     path: Path | None = None
     server: asyncio.Server | None = None
+    #: Every connection being served, over either transport: cancelled when
+    #: the channel closes, or a tunnel would outlive its session.
+    serving: set[asyncio.Task] = field(default_factory=set)
 
 
 class ChannelRegistry:
@@ -69,6 +72,24 @@ class ChannelRegistry:
         """The one proxy every session's connections are handed to, over
         either transport."""
         return self._proxy
+
+    async def _serve(self, channel: _Channel, reader, writer) -> None:
+        task = asyncio.current_task()
+        channel.serving.add(task)
+        try:
+            await self._proxy.handle(reader, writer, channel.session)
+        finally:
+            channel.serving.discard(task)
+
+    async def serve_tls(self, session_id: str, reader, writer) -> None:
+        """A TLS connection whose certificate names `session_id`: served if
+        that is an open TLS-transport session, else closed with nothing
+        written (no HTTP framing is owed to a stale relay)."""
+        channel = self._open.get(session_id)
+        if channel is None or channel.path is not None:
+            writer.close()
+            return
+        await self._serve(channel, reader, writer)
 
     def tls_session(self, session_id: str) -> EgressSession | None:
         """The session a client certificate's subject names, if it is open
@@ -116,10 +137,11 @@ class ChannelRegistry:
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             directory.chmod(0o700)
         path.unlink(missing_ok=True)
-        server = await asyncio.start_unix_server(
-            lambda r, w: self._proxy.handle(r, w, session), path=str(path)
+        channel = _Channel(session, path)
+        channel.server = await asyncio.start_unix_server(
+            lambda r, w: self._serve(channel, r, w), path=str(path)
         )
-        self._open[session_id] = _Channel(session, path, server)
+        self._open[session_id] = channel
         return path
 
     async def close(self, session_id: str, *, keep_dir: bool = False) -> None:
@@ -128,7 +150,13 @@ class ChannelRegistry:
         nothing here may hold up the rest of a session's teardown. A no-op
         for a session with no channel."""
         channel = self._open.pop(session_id, None)
-        if channel is None or channel.server is None:
+        if channel is None:
+            return
+        for task in channel.serving:
+            task.cancel()
+        if channel.serving:
+            await asyncio.wait(channel.serving, timeout=5)
+        if channel.server is None:
             return
         channel.server.close()
         try:
@@ -248,14 +276,9 @@ class TLSListener:
 
     async def _handle(self, reader, writer) -> None:
         """No certificate never gets here (`CERT_REQUIRED` refuses the
-        handshake). A certificate naming no open TLS session is closed on
-        with nothing written: no HTTP framing is owed to a stale relay."""
+        handshake); the registry serves the session the certificate names."""
         subject = dict(rdn[0] for rdn in writer.get_extra_info("peercert")["subject"])
-        session = self._registry.tls_session(subject.get("commonName", ""))
-        if session is None:
-            writer.close()
-            return
-        await self._registry.proxy.handle(reader, writer, session)
+        await self._registry.serve_tls(subject.get("commonName", ""), reader, writer)
 
     async def close(self) -> None:
         """Stop listening, at shutdown; the port file stays for the next

@@ -225,3 +225,54 @@ async def test_doctor_hears_only_krafts_own_listener_and_only_while_it_listens(
         assert "did not answer" in await problem()
     finally:
         squatter.close()
+
+
+@pytest.mark.parametrize("transport", ["unix", "tls"])
+async def test_closing_a_session_ends_the_tunnels_it_already_has(
+    registry, database, short_run, transport
+):
+    """Forgetting a session cuts what it has open, not only what it would
+    open next: an idle tunnel ends when its session closes."""
+    held = []  # the upstream's connections, open and silent until the end
+    upstream = await asyncio.start_server(lambda r, w: held.append(w), "127.0.0.1", 0)
+
+    async def resolve(host, port, **kw):
+        if host != "a.test":  # the host's own addresses
+            return await asyncio.get_running_loop().getaddrinfo(host, port, **kw)
+        return [(0, 0, 0, "", ("10.254.254.254", port))]
+
+    async def connect(address, port):
+        return await asyncio.open_connection("127.0.0.1", upstream.sockets[0].getsockname()[1])
+
+    reg = channel.ChannelRegistry(
+        short_run, database, egress.EgressProxy(getaddrinfo=resolve, connect=connect)
+    )
+    tls = channel.TLSListener(reg, short_run)
+    sid = "0123456789abcdef0123"
+    path = await reg.open(
+        sid, "w1", egress.PhaseLists("runtime", ("a.test",), ()), transport=transport
+    )
+    if path is not None:
+        reader, writer = await asyncio.open_unix_connection(str(path))
+    else:
+        context = ssl.create_default_context(cafile=ca.ensure_ca(short_run)[0])
+        context.load_cert_chain(*ca.mint_session_cert(short_run, sid))
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", await tls.start(), ssl=context, server_hostname="127.0.0.1"
+        )
+    try:
+        writer.write(b"CONNECT a.test:443 HTTP/1.1\r\n\r\n")
+        assert (await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)).startswith(
+            b"HTTP/1.1 200"
+        )
+        await reg.close(sid)
+        try:
+            ended = await asyncio.wait_for(reader.read(), 5) == b""
+        except ConnectionError, ssl.SSLError:
+            ended = True
+        assert ended
+    finally:
+        writer.close()
+        await tls.close()
+        await reg.close_all()
+        upstream.close()

@@ -106,15 +106,29 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
     ]
 
 
-async def test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell(monkeypatch):
-    backend = docker.DockerBackend()
-    for reachable, transport in ((True, "unix"), (False, "tls")):
-        monkeypatch.setattr(docker, "socket_channel", lambda image, r=reachable: r)
-        assert await backend.egress_transport() == transport
-
-    monkeypatch.setattr(docker, "socket_channel", lambda image: None)
-    with pytest.raises(SandboxNotReady, match="could not tell"):
-        await backend.egress_transport()
+@pytest.mark.parametrize(
+    ("reachable", "said", "transport"),
+    [
+        (True, "", "unix"),
+        (False, "OperatingSystem: Docker Desktop", "tls"),
+        (False, "", "does not say it runs in a VM"),
+        (None, "", "could not tell"),
+    ],
+    ids=["linux-native", "vm", "socket-refused-off-a-vm", "inconclusive"],
+)
+async def test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell(
+    monkeypatch, reachable, said, transport
+):
+    """The two-hop transport only where the runtime says it runs in a VM:
+    a socket refused anywhere else (SELinux, permissions) is a problem to
+    fix, and a relay B there could not reach the loopback listener."""
+    monkeypatch.setattr(docker, "socket_channel", lambda image: reachable)
+    monkeypatch.setattr(docker, "_vm_evidence", lambda host: said)
+    if transport in ("unix", "tls"):
+        assert await docker.DockerBackend().egress_transport() == transport
+    else:
+        with pytest.raises(SandboxNotReady, match=transport):
+            await docker.DockerBackend().egress_transport()
 
 
 @pytest.mark.parametrize(
@@ -294,15 +308,18 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay
     [
         ("docker", "Docker Desktop", "OperatingSystem: Docker Desktop"),
         ("podman", "true", "ServiceIsRemote: true"),
+        ("docker", "Ubuntu 24.04", None),
+        ("podman", "false", None),
     ],
-    ids=["docker-desktop", "podman-machine"],
+    ids=["docker-desktop", "podman-machine", "docker-not-a-vm", "podman-not-a-vm"],
 )
 async def test_doctor_names_the_two_hop_transport_on_a_vm_runtime(
     healthy_but_relay, monkeypatch, engine, info, said
 ):
     """Not a failure since P4b: doctor asks the probe again (a launch's
     cached answer may be from before the runtime changed) and says which
-    transport egress takes, naming the VM in the runtime's words."""
+    transport egress takes, naming the VM in the runtime's words. Where
+    the runtime says no VM, the refused socket is a failure."""
     monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(socket_channel=True))
     monkeypatch.setattr(docker, "detect_runtime", lambda: docker.Runtime(engine, engine=engine))
     monkeypatch.setattr(docker, "_probe_socket_channel", lambda host, image: False)
@@ -310,5 +327,5 @@ async def test_doctor_names_the_two_hop_transport_on_a_vm_runtime(
 
     ok, detail = await docker.DockerBackend().health(POLICED)
 
-    assert ok
-    assert f"two-hop TLS transport ({said})" in detail
+    assert ok is (said is not None)
+    assert f"two-hop TLS transport ({said})" in detail if said else "SELinux" in detail

@@ -107,7 +107,10 @@ def runtime(request, probed, monkeypatch) -> docker.Runtime:
         return probed
     if probed.socket_channel is False:
         pytest.skip("the probe already takes the two-hop transport here")
+    # The seam, in the test only: a refused socket, and the runtime saying
+    # it runs in a VM, which a Linux runner never does.
     monkeypatch.setattr(docker, "_RUNTIME", replace(probed, socket_channel=False))
+    monkeypatch.setattr(docker, "_vm_evidence", lambda host: "forced by the test")
     if not probed.podman:
         # Podman adds host.containers.internal, the host's address, itself.
         real = docker.relay_b_argv
