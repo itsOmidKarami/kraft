@@ -38,6 +38,7 @@ def test_the_tools_are_registered():
         "reply_to_thread",
         "resume_work_item",
         "retry_work_item",
+        "raise_budget",
         "skip_work_item",
         "complete_work_item",
         "cancel_work_item",

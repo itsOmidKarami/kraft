@@ -117,10 +117,20 @@ def test_approve_gate_defaults_to_the_pending_gate(wired, tmp_path):
         lambda wid: client.pause(work_item_id=wid),
         lambda wid: client.resume(work_item_id=wid),
         lambda wid: client.skip(work_item_id=wid),
+        lambda wid: client.raise_budget(50.0, work_item_id=wid),
         lambda wid: client.submit_review("comment", work_item_id=wid),
         lambda wid: client.add_review_comment("hi", work_item_id=wid),
     ],
-    ids=["approve", "reject", "pause", "resume", "skip", "submit_review", "add_review_comment"],
+    ids=[
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "skip",
+        "raise_budget",
+        "submit_review",
+        "add_review_comment",
+    ],
 )
 def test_every_act_function_refuses_a_worker_acting_on_itself(wired, tmp_path, monkeypatch, call):
     """The guard has to be wired into all four, not just the one that was
@@ -147,6 +157,19 @@ def test_retry_on_an_item_that_is_not_stopped_is_a_readable_409(wired, tmp_path)
         return await client.retry(work_item_id=created["id"])
 
     with pytest.raises(ValueError, match="409"):
+        run_with_app(wired, scenario)
+
+
+def test_raise_budget_reaches_the_raise_route(wired, tmp_path):
+    """The route's own 409 proves both the URL (a wrong one is a 404) and the
+    body (a missing `budget_usd` is a 422)."""
+    repo = connected_repo(tmp_path)
+
+    async def scenario():
+        created = await client.create_work_item("not stopped", repo=str(repo))
+        return await client.raise_budget(None, work_item_id=created["id"])
+
+    with pytest.raises(ValueError, match="409.*not stopped"):
         run_with_app(wired, scenario)
 
 

@@ -194,6 +194,15 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
+    async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
+        """Raise a stopped Kraft work item's own dollar cap and retry it, the
+        board's Raise budget button. `budget_usd` is the new cap in dollars,
+        or null for no cap. Only for an item stopped for a human; set-policy
+        can only tighten `budget_usd`. Only a human should decide this — ask
+        first."""
+        return await client.raise_budget(budget_usd, work_item_id)
+
+    @server.tool()
     async def skip_work_item(
         note: str | None = None, work_item_id: str | None = None, path: str | None = None
     ) -> dict:
@@ -326,7 +335,8 @@ def build() -> MCPServer:
         scope: `{"paths": {"merge_request_feedback.ci.await_ci":
         {"total_time_cap_minutes": 60}}}`. It replaces the whole stored
         override; `clear` removes it. Refused, naming the field, past an
-        administrator maximum. On a running or waiting item it binds from the
+        administrator maximum. It never raises a dollar cap: `raise_budget`
+        does that for a stopped item. On a running or waiting item it binds from the
         next node entered and the next observation of a wait."""
         return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)
 
