@@ -186,7 +186,9 @@ def _cmd_watch(ns: argparse.Namespace) -> None:
             "watch has no --json; use `kraft view events --json` to stream structured output"
         )
     if not sys.stdout.isatty():
-        raise ValueError("watch needs a terminal to redraw in — try `kraft view events` in a pipe")
+        raise ValueError(
+            "watch needs a terminal to redraw in — try `kraft view events -f` in a pipe"
+        )
 
     async def run() -> None:
         repo = ns.repo or await client.resolve_repo()

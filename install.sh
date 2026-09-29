@@ -42,5 +42,7 @@ uv tool install --force --from "$wheel_file" kraft-sdlc
 
 echo
 echo "$(kraft --version) installed."
-echo "next: kraft admin init   # register Kraft with your agent"
-echo "then: kraft              # start the server"
+echo "next: kraft              # start the server"
+echo "then, in Claude Code:  /plugin marketplace add itsOmidKarami/kraft"
+echo "                       /plugin install kraft@kraft, then /kraft:onboard in your repo"
+echo "or, terminal only:     kraft admin init, then kraft repo connect in your repo"
