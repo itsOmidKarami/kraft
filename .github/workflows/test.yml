@@ -239,6 +239,11 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      # What a real install has: Kraft's MCP server registered with Claude
+      # Code. A Claude launch without one is refused
+      # (`registration.permission_tool`), fake agent or not.
+      - name: register kraft with claude code
+        run: echo '{"mcpServers":{"kraft":{"command":"kraft","args":["admin","mcp"]}}}' > ~/.claude.json
       - name: start the harness server
         run: |
           uv run python frontend/e2e/serve.py > e2e-server.log 2>&1 &
