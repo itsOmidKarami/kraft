@@ -24,6 +24,7 @@ BASE = f"http://127.0.0.1:{os.environ.get('KRAFT_PORT', '8765')}"
 
 CALC = "def add(a, b):\n    return a - b\n"
 TEST = "from calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+MCP_JSON = '{"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}\n'
 
 #: title, template, expected end state. The instruction the agent receives is the
 #: title, so KRAFT_FAIL / KRAFT_SLOW in a title steer that item's fake agent
@@ -51,6 +52,11 @@ def build_repo() -> None:
     git("config", "user.name", "Kraft Dev")
     (REPO / "calc.py").write_text(CALC)
     (REPO / "test_calc.py").write_text(TEST)
+    # A Claude launch is refused unless something registers Kraft's MCP server
+    # (`registration.permission_tool`). Committed here, the seed repo carries its
+    # own registration, so a dev instance works on a machine that never ran
+    # `kraft admin init` or installed the plugin. The fake agent never calls it.
+    (REPO / ".mcp.json").write_text(MCP_JSON)
     git("add", "-A")
     git("commit", "-qm", "initial")
     # Intake calls `bd create` in KRAFT_BD_CWD; without a workspace here it would
