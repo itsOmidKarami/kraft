@@ -222,6 +222,17 @@ def test_repo_and_template_filters_narrow_the_whole_report(conn):
     assert none["by_node"] == [] and none["weekly_merged"] == []
 
 
+def test_the_default_filter_counts_items_stored_with_no_chain_named(conn):
+    """An unchosen `default` is stored as NULL (Kraft-cd47); filtering on
+    `default` still counts it, in both windows (Kraft-9efnk.38)."""
+    before = analytics.compute(conn, range_="7d", template="default", now=NOW)["totals"]
+    _item(conn, "n1", template=None, created=_at(1))
+    _item(conn, "n2", template=None, status="completed", created=_at(10))
+    after = analytics.compute(conn, range_="7d", template="default", now=NOW)["totals"]
+    assert after["work_items"] == before["work_items"] + 1
+    assert after["completed_prev"] == before["completed_prev"] + 1
+
+
 def test_endpoint_serves_it_and_rejects_a_bad_range(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from support.harness import fake_templates_dir, isolated_bd
