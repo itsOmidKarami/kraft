@@ -804,6 +804,14 @@ async def run_agent_task(
             f"holds (amp, opencode), or remove the tool policy (allowed_tools, "
             f"deny_tools, or a grant beyond git-commit) at the layer that sets it"
         )
+    if sandbox and sandbox.get("network") and not h.proxy_aware:
+        # Its only route out is the relay's proxy, which this CLI ignores: it
+        # would fail closed, and mysteriously (spec §4).
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) declares `proxy_aware: false`: it ignores "
+            f"HTTP(S)_PROXY, and a sandbox with `network:` has no other route out; use "
+            f"another harness, or remove the sandbox's `network`"
+        )
     if sandbox and h.container_permission_mode is not None:
         default = h.capabilities["permission_mode"].always
         defaults = (default,) if isinstance(default, str) else tuple(default or ())
