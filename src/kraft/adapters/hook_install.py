@@ -186,7 +186,7 @@ def _toml(s: str) -> str:
 
 
 async def _codex_hook(
-    exe: list[str], flags: list[str], cwd: Path, command: str, runner: list[str]
+    exe: list[str], flags: list[str], cwd: Path, command: str, runner: list[str], sandboxed: bool
 ) -> dict:
     """Kraft's own entry in `codex app-server -c <flags>`'s `hooks/list`."""
     import asyncio
@@ -237,8 +237,9 @@ async def _codex_hook(
     # A worker can plant a PreToolUse hook of its own, and its trusted_hash,
     # in the config under its HOME (measured, 0.155.0: listed enabled and
     # trusted beside Kraft's). Whether it could outvote Kraft's deny is not
-    # found out: any other that would run refuses the launch.
-    for h in hooks:
+    # found out: any other that would run refuses a sandboxed launch. A host
+    # operator's own ~/.codex hooks are theirs (a separate bead).
+    for h in hooks if sandboxed else ():
         if (
             h is not ours
             and h.get("eventName") == "preToolUse"
@@ -282,7 +283,8 @@ async def codex_hook_flags(
         return runner.argv() if runner is not None else []
 
     try:
-        found = await _codex_hook(exe, [hook, _HOOKS_ON], cwd, command, prefix())
+        sandboxed = runner is not None
+        found = await _codex_hook(exe, [hook, _HOOKS_ON], cwd, command, prefix(), sandboxed)
         # `enabled` too: a `[hooks.state."<key>"] enabled = false` in the
         # config under a worker-writable HOME is a lower layer than `-c`,
         # and would switch the hook off with its trust intact (measured).
@@ -290,7 +292,7 @@ async def codex_hook_flags(
             f"hooks.state={{{_toml(found['key'])}="
             f"{{trusted_hash={_toml(found['currentHash'])},enabled=true}}}}"
         )
-        listed = await _codex_hook(exe, [hook, _HOOKS_ON, state], cwd, command, prefix())
+        listed = await _codex_hook(exe, [hook, _HOOKS_ON, state], cwd, command, prefix(), sandboxed)
         if listed.get("trustStatus") != "trusted":
             raise CodexTrustError("codex did not trust Kraft's hook with the hash it listed")
         if listed.get("enabled") is not True:

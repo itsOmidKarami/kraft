@@ -204,13 +204,31 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
     assert len(fake_codex()) == 4
 
 
-def test_another_trusted_pre_tool_use_hook_refuses_the_launch(fake_codex, monkeypatch, tmp_path):
+class _Here:
+    """A `runner` that runs codex right here: the sandboxed path, no container."""
+
+    def argv(self):
+        return []
+
+    async def close(self):
+        pass
+
+
+@pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "host"])
+def test_another_trusted_pre_tool_use_hook_refuses_only_a_sandboxed_launch(
+    fake_codex, monkeypatch, tmp_path, sandboxed
+):
     """A worker can plant its own hook, trusted, in the config under its
     HOME; whether it could outvote Kraft's deny is not a question to test
-    in production. Named by where it came from."""
+    in production, so a sandboxed launch is refused, naming it. A host
+    operator's own ~/.codex hooks are theirs."""
     monkeypatch.setenv("FAKE_CODEX_PLANTED", "trusted-hook")
-    with pytest.raises(hi.CodexTrustError, match=r"user .*config\.toml.*echo allow"):
-        asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    flags = hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path, _Here() if sandboxed else None)
+    if sandboxed:
+        with pytest.raises(hi.CodexTrustError, match=r"user .*config\.toml.*echo allow"):
+            asyncio.run(flags)
+    else:
+        assert asyncio.run(flags)
 
 
 @pytest.mark.parametrize(
