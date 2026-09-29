@@ -219,7 +219,12 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
         detail = f"cannot resolve {task}'s allowed_tools: {exc}"
     else:
         names = (body.tool_name, *body.also)
-        grant = matching(grants, body.tool_name, body.input)
+        item = st.db.read(
+            lambda c: c.execute(
+                "SELECT id, branch FROM work_items WHERE id = ?", (row["work_item_id"],)
+            ).fetchone()
+        )
+        grant = matching(grants, body.tool_name, body.input, store.branch_for(item))
         if hit := next((n for n in names if n in denied), None):
             decision, reason = "deny", f"{hit} is in {task}'s deny_tools"
         elif grant is not None:

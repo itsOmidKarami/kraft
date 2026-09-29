@@ -40,10 +40,12 @@ _SAFE_CONFIG = frozenset({"user.name", "user.email"})
 #: Per subcommand: long options that make git run a caller-chosen command
 #: (git accepts any unambiguous prefix, so a prefix of these is refused too),
 #: and short-option letters doing the same. A push is also held to the
-#: branch it names: nothing that deletes or pushes every ref (`--delete`,
-#: `--mirror`, `--all`/`--branches`, `--prune`), names the destination by
-#: option (`--repo`), or takes a separate value that would pass for the
-#: remote (`-o`/`--push-option`). `--force` stays allowed.
+#: branch it names: nothing that deletes or pushes other refs (`--delete`,
+#: `--mirror`, `--all`/`--branches`, `--prune`, `--tags`, `--follow-tags`,
+#: `--recurse-submodules`), names the destination by option (`--repo`), or
+#: takes a separate value that would pass for the remote
+#: (`-o`/`--push-option`). A plain `--force`/`-f` is refused (Kraft-9efnk.15);
+#: `--force-with-lease` is no prefix of `force`, so it stays allowed.
 _UNSAFE_LONG = {
     "push": (
         "receive-pack",
@@ -55,19 +57,38 @@ _UNSAFE_LONG = {
         "prune",
         "repo",
         "push-option",
+        "force",
+        "tags",
+        "follow-tags",
+        "recurse-submodules",
     ),
     "rebase": ("exec", "strategy"),
     "commit": (),
 }
-_UNSAFE_SHORT = {"push": "do", "rebase": "xs", "commit": ""}
+_UNSAFE_SHORT = {"push": "dof", "rebase": "xs", "commit": ""}
 
 #: What a push's first positional must be: a configured remote's name, never
 #: a URL or path (`host:repo`, `/tmp/r`, `ext::cmd`) git would push to instead.
 _REMOTE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
-def _git_subcommand(command: str) -> str | None:
-    """The subcommand of `command` if it is one plain, safe git call."""
+def _updates_only(specs: list[str], branch: str) -> bool:
+    """Whether a push's refspecs are at least one, and each updates `branch`
+    and nothing else: `B`, `refs/heads/B`, or `SRC:` either. Never a forced
+    `+spec`, nor an empty `SRC`, which deletes."""
+    own = (branch, f"refs/heads/{branch}")
+    for spec in specs:
+        src, colon, dst = spec.partition(":")
+        if spec.startswith("+") or (dst if colon else src) not in own or (colon and not src):
+            return False
+    return bool(specs)
+
+
+def _git_subcommand(command: str, branch: str) -> str | None:
+    """The subcommand of `command` if it is one plain, safe git call. A push
+    must name a remote and `branch` there: one naming no refspec pushes what
+    the worktree's config says (`push.default`, an upstream), which this
+    cannot see, so it matches nothing."""
     if _SHELL_META & set(command) or any(not c.isprintable() for c in command):
         return None
     try:
@@ -102,20 +123,23 @@ def _git_subcommand(command: str) -> str | None:
         args = words[i + 1 :]
         end = args.index("--") if "--" in args else len(args)
         positional = [a for a in args[:end] if not a.startswith("-")] + args[end + 1 :]
-        if positional and not _REMOTE.fullmatch(positional[0]):
+        if not positional or not _REMOTE.fullmatch(positional[0]):
+            return None
+        if not _updates_only(positional[1:], branch):
             return None
     return sub
 
 
-def matching(grants: Iterable[str], tool: str, input: dict) -> str | None:
+def matching(grants: Iterable[str], tool: str, input: dict, branch: str) -> str | None:
     """The first of `grants` that `(tool, input)` is an instance of, else None.
 
-    Only `Bash` (Kraft's policy name for a shell) can match a git grant.
+    Only `Bash` (Kraft's policy name for a shell) can match a git grant, and
+    `git-push` only a push to `branch`, the work item's own.
     """
     if tool != "Bash":
         return None
     command = input.get("command")
-    sub = _git_subcommand(command) if isinstance(command, str) else None
+    sub = _git_subcommand(command, branch) if isinstance(command, str) else None
     if sub is None:
         return None
     return next((g for g in grants if g == f"git-{sub}"), None)

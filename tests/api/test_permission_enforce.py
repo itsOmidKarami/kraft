@@ -16,7 +16,8 @@ from support.permissions import PATH, ask, events_of, seed_session, templates
 
 from kraft import harness, permission_hooks
 
-_PUSH = {"command": "git push"}
+#: A push to `seed_session`'s item's own branch, from its title and id.
+_PUSH = {"command": "git push origin kraft/t-w1"}
 _LS = {"command": "ls"}
 
 
@@ -36,7 +37,13 @@ def templates_dir(tmp_path, monkeypatch):
         # A grant never lifts a deny.
         ({"deny_tools": ["Bash"], "grants": ["git-push"]}, "Bash", _PUSH, "deny", "git-push"),
         # A call the grant doesn't cover is no opinion, not the grant's allow.
-        ({"grants": ["git-push"]}, "Bash", {"command": "git push; rm -rf x"}, "no_opinion", None),
+        (
+            {"grants": ["git-push"]},
+            "Bash",
+            {"command": "git push origin kraft/t-w1; rm -rf x"},
+            "no_opinion",
+            None,
+        ),
     ],
     ids=[
         "denied",
@@ -115,16 +122,21 @@ def test_prompt_mode_honours_a_grant_under_an_allowlist(client):
 
 
 @pytest.mark.parametrize(
-    ("hook_point", "behavior", "grant"),
-    [("escalation", "allow", "git-push"), (PATH, "deny", None)],
-    ids=["escalation", "chain-task"],
+    ("hook_point", "push", "behavior", "grant"),
+    [
+        ("escalation", _PUSH, "allow", "git-push"),
+        (PATH, _PUSH, "deny", None),
+        ("escalation", {"command": "git push --force origin main"}, "deny", None),
+    ],
+    ids=["escalation", "chain-task", "escalation-force-to-main"],
 )
-def test_an_escalation_turn_holds_the_default_push_grant(client, hook_point, behavior, grant):
-    """Kraft-4in7z: an escalation turn's plain `git push` passes an allowlist
-    without Bash on `defaults.escalation_grants`, which nothing set; a chain
-    task at the same node gets no such default."""
+def test_an_escalation_turn_holds_the_default_push_grant(client, hook_point, push, behavior, grant):
+    """Kraft-4in7z: an escalation turn's push of its item's branch passes an
+    allowlist without Bash on `defaults.escalation_grants`, which nothing set;
+    a chain task at the same node gets no such default. Kraft-9efnk.15: the
+    grant covers that branch only, so a force-push to `main` is denied."""
     seed_session(hook_point=hook_point, policy={"allowed_tools": ["Read"]})
-    assert ask(client, input=_PUSH).json()["behavior"] == behavior
+    assert ask(client, input=push).json()["behavior"] == behavior
     [event] = events_of(client, "permission_decision")
     assert (event["decision"], event["grant"]) == (behavior, grant)
 
