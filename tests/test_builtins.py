@@ -500,7 +500,8 @@ async def test_a_sandboxed_member_with_no_connected_repository_is_never_cloned_u
 ):
     """`submodule update --init` is the old layout: the member's gitdir under
     the root's worktree gitdir, which a sandboxed worker writes. A sandboxed
-    item whose member has no connected repository stops instead."""
+    item whose member has no connected repository stops instead, leaving no
+    worktree for a retry to take as already set up."""
     root, _sub = make_repo_with_submodule(tmp_path)
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
 
@@ -508,6 +509,7 @@ async def test_a_sandboxed_member_with_no_connected_repository_is_never_cloned_u
         await wtree.ensure(database, run_dirs, root, sandbox={"kind": "docker", "image": "i"})
 
     assert not list((root / ".git" / "worktrees").glob("*/modules"))
+    assert not (run_dirs.worktrees / "w1").exists()
 
 
 async def test_an_item_filed_before_workspaces_keeps_its_submodules_on_a_new_worktree(

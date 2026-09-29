@@ -294,25 +294,6 @@ def _item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     return item_sandbox(row, launch)
 
 
-def _expected_members(row, launch: LaunchContext | None, worktree: Path) -> dict:
-    """`sandbox.foreign_members`' `expected` for `row`'s declared members: each
-    one's trusted gitdirs, from its connected repository in repos.yaml, or
-    None when it has none -- an old-layout or pre-workspace member, a missing
-    `launch`, or a `repos.yaml` that cannot be read. None is foreign, so every
-    way of not knowing fails closed."""
-    repositories = launch.repositories if launch is not None else {}
-    expected = {}
-    for rel, rid in _builtins.item_members(row):
-        try:
-            entry = repositories.get(rid) if rid is not None else None
-        except _config.ConfigError:
-            entry = None
-        expected[rel] = (
-            _sandbox.member_gitdirs(Path(entry.path), worktree, rel) if entry is not None else None
-        )
-    return expected
-
-
 def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | None) -> None:
     """Raise `RuntimeError` naming the paths when `row`'s item runs sandboxed
     and its `worktree` holds a git repository Kraft did not create: a
@@ -338,7 +319,13 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
         sandbox, unresolved = None, exc
     if sandbox is None and unresolved is None:
         return
-    expected = _expected_members(row, launch, worktree)
+    # None is foreign, so every way of not knowing a member's repository --
+    # a missing `launch` included -- fails closed.
+    connected = _builtins.member_repositories(row, launch.repositories if launch else {})
+    expected = {
+        rel: _sandbox.member_gitdirs(m, worktree, rel) if m is not None else None
+        for rel, m in connected.items()
+    }
     foreign = _sandbox.foreign_members(worktree, expected)
     found = [_sandbox.planted_repos(worktree, row["base_ref"], mounts=list(expected))]
     for rel in [r for r in expected if r not in foreign]:

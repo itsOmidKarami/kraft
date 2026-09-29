@@ -17,7 +17,7 @@ from kraft import events, logs, store
 from kraft import harness as _harness
 from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
-from kraft.config import RepoEntry, base_ignore_args, git_read
+from kraft.config import ConfigError, RepoEntry, base_ignore_args, git_read
 from kraft.paths import RunDirs, default_run_dir
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
@@ -483,8 +483,10 @@ async def _setup_submodules(
     )
 
 
-async def _discard_worktree(repo: Path, worktree: Path) -> str | None:
-    """Remove a worktree whose setup failed, keeping its branch. Returns a
+async def _discard_worktree(repo: Path, worktree: Path, members=()) -> str | None:
+    """Remove a worktree whose setup failed, keeping its branch, and prune
+    each of `members` -- the connected repositories its members were checked
+    out from, which removing the root leaves with a stale entry. Returns a
     reason when the directory survives, or None.
 
     `ensure_worktree` returns early when the directory exists, so a worktree
@@ -494,11 +496,12 @@ async def _discard_worktree(repo: Path, worktree: Path) -> str | None:
     Not best-effort like the abandon path -- a survivor is reported into the
     error the caller is about to raise, because silence here is the bug.
     """
-    for args in (
-        ["git", "worktree", "remove", "--force", str(worktree)],
-        ["git", "worktree", "prune"],
+    for cwd, args in (
+        (repo, ["git", "worktree", "remove", "--force", str(worktree)]),
+        (repo, ["git", "worktree", "prune"]),
+        *((m, ["git", "worktree", "prune"]) for m in members),
     ):
-        await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
+        await asyncio.to_thread(subprocess.run, args, cwd=cwd, capture_output=True, text=True)
     return None if not worktree.exists() else f"{worktree} still present"
 
 
@@ -642,16 +645,24 @@ async def ensure_worktree(
         raise RuntimeError(f"{exc}{suffix}") from exc
     members = item_members(row) if row is not None else []
     if members:
-        await _setup_submodules(
-            db,
-            Path(repo),
-            worktree,
-            branch,
-            work_item_id,
-            members,
-            repositories or {},
-            sandboxed=sandbox is not None,
-        )
+        try:
+            await _setup_submodules(
+                db,
+                Path(repo),
+                worktree,
+                branch,
+                work_item_id,
+                members,
+                repositories or {},
+                sandboxed=sandbox is not None,
+            )
+        except RuntimeError as exc:
+            # As for a failed setup command: a retry must find no worktree, or
+            # it would skip the members entirely.
+            connected = [m for m in member_repositories(row, repositories or {}).values() if m]
+            left = await _discard_worktree(Path(repo), worktree, connected)
+            suffix = f" (and its worktree could not be removed: {left})" if left else ""
+            raise RuntimeError(f"{exc}{suffix}") from exc
     return worktree
 
 
@@ -677,6 +688,22 @@ def item_members(row) -> list[tuple[str, str | None]]:
         members = [(p, None) for p in json.loads(row["submodules"])]
         logger.info("%s: filed before workspaces; its submodules are %s", row["id"], members)
     return members
+
+
+def member_repositories(row, repositories: Mapping[str, RepoEntry]) -> dict[str, Path | None]:
+    """Each declared member's connected repository, by mount path: read from
+    repos.yaml by id, never from the member's gitfile, which a worker writes
+    (Kraft-ju36l). None for a member with none -- an old-layout or
+    pre-workspace member, a repository no longer connected, or a repos.yaml
+    that cannot be read."""
+    found: dict[str, Path | None] = {}
+    for rel, rid in item_members(row):
+        try:
+            entry = repositories.get(rid) if rid is not None else None
+        except ConfigError:
+            entry = None
+        found[rel] = Path(entry.path) if entry is not None else None
+    return found
 
 
 def item_mounts(row) -> list[str]:

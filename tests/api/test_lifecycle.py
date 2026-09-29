@@ -449,6 +449,37 @@ def test_abandon_reclaims_what_a_sandbox_kept_beside_the_worktree(client, repo):
     assert not home.exists()
 
 
+def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
+    """Kraft-ju36l: a workspace member is a worktree of its connected
+    repository, on the item's branch there. Abandon reclaims both, as it does
+    the root's, so the operator's member repository keeps nothing of it."""
+    from support.harness import make_repo_with_submodule
+
+    from kraft.config import git_read
+
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    connect = {"path": str(root.resolve()), "setup_command": ""}
+    assert client.post("/api/repos", json=connect).status_code == 201
+    member_repo = root.resolve() / "libs" / "a"
+    wid = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(root.resolve()), "workspace": "ws", "members": ["a"]}
+        | {"chain_template": "default"},
+    ).json()["id"]
+    _poll_events(client, wid, "gate_requested")
+    branch = client.get(f"/api/work-items/{wid}").json()["branch"]
+    worktrees = git_read(member_repo, "worktree", "list", "--porcelain")
+    assert worktrees.count("worktree ") == 2, "fixture never made a member worktree"
+    _set_status(wid, "paused")
+
+    r = client.post(f"/api/work-items/{wid}/abandon")
+
+    assert r.status_code == 200, r.text
+    worktrees = git_read(member_repo, "worktree", "list", "--porcelain")
+    assert worktrees.count("worktree ") == 1
+    assert not git_read(member_repo, "branch", "--list", branch)
+
+
 def test_abandon_refuses_an_active_item(client, repo):
     """Pause first. Otherwise this races a running agent's writes."""
     wid = _post_default(client, repo)
