@@ -682,15 +682,20 @@ def test_intake_ignores_a_cwd_in_a_different_repo(client, repo, tmp_path):
     assert "not found" in r.text
 
 
-@pytest.mark.parametrize("repo_default", [None, "quick-task"], ids=["no-repo-default", "repo"])
+@pytest.mark.parametrize(
+    ("repo_default", "stored"),
+    [(None, None), ("default", None), ("quick-task", "quick-task")],
+    ids=["unset", "default", "quick-task"],
+)
 @pytest.mark.parametrize("route", ["work-items", "triggers"])
 def test_no_chain_template_takes_the_repo_default_and_files_paused(
-    client, repo, route, repo_default
+    client, repo, route, repo_default, stored
 ):
     """An item filed with no `chain_template` runs its repo's
     `default_chain_template`, at every door (Kraft-9efnk.11); an explicit one
-    still wins. With no repo default it runs `default` and stores None, not
-    the string "default" an item naming it outright stores (Kraft-cd47).
+    still wins. A repo defaulting to `default`, as `kraft repo connect` writes
+    it, or to nothing runs `default` and stores None, not the string "default"
+    an item naming it outright stores (Kraft-cd47).
 
     Both doors file paused when the caller does not ask otherwise:
     POST /work-items' `autostart` defaults off (Kraft-9efnk.17), and POST
@@ -705,7 +710,7 @@ def test_no_chain_template_takes_the_repo_default_and_files_paused(
 
     unset, named = filed(), filed(chain_template="default")
     expected = filed(chain_template=repo_default or "default")
-    assert unset["chain_template"] == repo_default
+    assert unset["chain_template"] == stored
     assert named["chain_template"] == "default"
     assert unset["chain_definition"]["nodes"] == expected["chain_definition"]["nodes"]
     assert (unset["status"], named["status"]) == ("paused", "paused")
