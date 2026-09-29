@@ -5,6 +5,7 @@ the TLS transport, serving `egress.EgressProxy` on the daemon's loop."""
 from __future__ import annotations
 
 import asyncio
+import functools
 import shutil
 import socket
 import ssl
@@ -202,3 +203,25 @@ async def test_the_tls_port_survives_a_restart_and_a_taken_one_is_replaced(regis
 
     assert moved != port
     assert int((short_run.ca / "tls-port").read_text()) == moved
+
+
+async def test_doctor_hears_only_krafts_own_listener_and_only_while_it_listens(
+    registry, short_run, tmp_path
+):
+    problem = functools.partial(asyncio.to_thread, channel.tls_listener_problem, short_run)
+    assert "no egress TLS listener has started" in await problem()
+    tls = channel.TLSListener(registry, short_run)
+    port = await tls.start()
+    assert await problem() is None
+    await tls.close()
+    assert f"did not answer on 127.0.0.1:{port}" in await problem()
+
+    # Another TLS server on the port, its certificate signed by another CA.
+    other = RunDirs(tmp_path / "other")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(*ca.server_cert(other))
+    squatter = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", port, ssl=context)
+    try:
+        assert "did not answer" in await problem()
+    finally:
+        squatter.close()

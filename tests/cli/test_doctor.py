@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -774,17 +775,16 @@ def test_doctor_warns_that_an_unusable_ssl_cert_file_is_ignored_by_sandboxes(
 @pytest.mark.parametrize("network", [None, {"runtime": {"allow": ["a.io"]}}], ids=["open", "set"])
 def test_doctor_warns_about_open_egress_on_a_sandboxed_repo(app, tmp_path, monkeypatch, network):
     """Spec §1: open stays the default, and doctor says so. Under `network:`
-    Kraft's own proxy reaches a loopback one, so that warning goes too."""
-
-    async def healthy(self, sandbox):
-        return True, "ready"
-
-    monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", healthy)
+    Kraft's own proxy reaches a loopback one, so that warning goes too, and
+    the TLS listener is checked: down here, between lifespans."""
+    ready = AsyncMock(return_value=(True, "ready"))
+    monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", ready)
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
     rows = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), network=network)
     warned = [(r["name"].split()[0], r["ok"], r["warn"]) for r in rows]
-    assert warned == ([] if network else [("egress", True, True), ("proxy", True, True)])
-    assert network or "open egress" in rows[0]["detail"]
+    listener, opened = [("egress", False, False)], [("egress", True, True), ("proxy", True, True)]
+    assert warned == (listener if network else opened)
+    assert ("did not answer" if network else "open egress") in rows[0]["detail"]
 
 
 def _sandboxed_doctor_rows(app, tmp_path, prefix, **sandbox) -> list[dict]:

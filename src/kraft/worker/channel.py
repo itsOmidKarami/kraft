@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import socket
 import ssl
 import sys
 from dataclasses import dataclass
@@ -176,6 +177,28 @@ def tls_port(run_dirs) -> int | None:
         return int((run_dirs.ca / _PORT_FILE).read_text())
     except OSError, ValueError:
         return None
+
+
+def tls_listener_problem(run_dirs) -> str | None:
+    """Doctor's: why the daemon's TLS listener did not answer on its
+    persisted port as Kraft's own (a server certificate the Kraft CA signed),
+    or None. Blocking. No client certificate is presented, so the listener
+    serves it nothing."""
+    port, ca_cert = tls_port(run_dirs), run_dirs.ca / "ca.pem"
+    if port is None or not ca_cert.is_file():
+        return f"no egress TLS listener has started under {run_dirs.ca}"
+    try:
+        context = ssl.create_default_context(cafile=ca_cert)
+        with (
+            socket.create_connection(("127.0.0.1", port), timeout=5) as raw,
+            context.wrap_socket(raw, server_hostname="127.0.0.1"),
+        ):
+            return None
+    except OSError as exc:
+        return (
+            f"the egress TLS listener did not answer on 127.0.0.1:{port} ({exc}): a sandbox "
+            "under `network:` on a runtime in a VM has no route out; restart the server"
+        )
 
 
 class TLSListener:

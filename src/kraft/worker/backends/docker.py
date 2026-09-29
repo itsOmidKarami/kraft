@@ -467,28 +467,19 @@ def _vm_evidence(host: Runtime) -> str:
     return f"OperatingSystem: {system}" if system else ""
 
 
-def channel_refusal(
-    host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
-) -> str | None:
+def channel_refusal(host: Runtime, relay_image: str, reachable: bool | None) -> str | None:
     """Why a sandbox with `network:` cannot run here, given `socket_channel`'s
-    answer; None when it can. Shared by a launch and doctor, which also
-    passes what the runtime `said` about itself (`_vm_evidence`)."""
-    if reachable is False:
-        return (
-            f"{host.describe()}{f' ({said})' if said else ''} runs its containers in a VM "
-            "(Docker Desktop, podman machine), where a container cannot connect to a host "
-            "unix socket, so a sandbox with `network:` has no route out. The VM transport "
-            "is not available yet: run Kraft on Linux-native docker or podman, or remove "
-            "the sandbox's `network`"
-        )
-    if reachable is None:
-        return (
-            f"could not tell whether {host.describe()} lets a container reach a host "
-            f"unix socket, which a sandbox with `network:` needs: the probe did not "
-            f"run. Pull the relay image ({host.cli} pull {relay_image}) and check "
-            "`kraft admin doctor`"
-        )
-    return None
+    answer; None when it can: over a socket per session (True) or the
+    two-hop TLS transport (False, a runtime in a VM). Shared by a launch
+    and doctor."""
+    if reachable is not None:
+        return None
+    return (
+        f"could not tell whether {host.describe()} lets a container reach a host "
+        f"unix socket, which decides how a sandbox with `network:` reaches Kraft's "
+        f"egress proxy: the probe did not run. Pull the relay image "
+        f"({host.cli} pull {relay_image}) and check `kraft admin doctor`"
+    )
 
 
 def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[str], *socat):
@@ -1300,10 +1291,12 @@ class DockerBackend:
                     f"run: {host.cli} pull {relay}"
                 )
             reachable = await asyncio.to_thread(socket_channel, relay)
-            said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
-            if problem := channel_refusal(host, relay, reachable, said):
+            if problem := channel_refusal(host, relay, reachable):
                 return False, problem
             egress = f", egress relay {relay}"
+            if reachable is False:
+                said = await asyncio.to_thread(_vm_evidence, host)
+                egress += f" over the two-hop TLS transport ({said or 'a runtime in a VM'})"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
         return (
             True,

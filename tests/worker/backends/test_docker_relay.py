@@ -297,11 +297,12 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay
     ],
     ids=["docker-desktop", "podman-machine"],
 )
-async def test_doctor_fails_naming_the_vm_runtime_when_network_is_set(
+async def test_doctor_names_the_two_hop_transport_on_a_vm_runtime(
     healthy_but_relay, monkeypatch, engine, info, said
 ):
-    """Doctor asks the probe again (a launch's cached answer may be from
-    before the runtime changed) and names the VM in the runtime's words."""
+    """Not a failure since P4b: doctor asks the probe again (a launch's
+    cached answer may be from before the runtime changed) and says which
+    transport egress takes, naming the VM in the runtime's words."""
     monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(socket_channel=True))
     monkeypatch.setattr(docker, "detect_runtime", lambda: docker.Runtime(engine, engine=engine))
     monkeypatch.setattr(docker, "_probe_socket_channel", lambda host, image: False)
@@ -309,5 +310,5 @@ async def test_doctor_fails_naming_the_vm_runtime_when_network_is_set(
 
     ok, detail = await docker.DockerBackend().health(POLICED)
 
-    assert not ok
-    assert f"({said})" in detail and "VM transport is not available yet" in detail
+    assert ok
+    assert f"two-hop TLS transport ({said})" in detail
