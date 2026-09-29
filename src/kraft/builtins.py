@@ -13,11 +13,16 @@ from typing import NoReturn
 
 from kraft import caps as _caps
 from kraft import events, logs, store
+from kraft import harness as _harness
+from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
 from kraft.config import RepoEntry, base_ignore_args, git_read
-from kraft.paths import default_run_dir
+from kraft.paths import RunDirs, default_run_dir
 from kraft.worker import backends as _backends
+from kraft.worker import ca as _ca
+from kraft.worker import inject as _inject
 from kraft.worker import sandbox as _sandbox
+from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
@@ -638,36 +643,74 @@ async def run_setup_command(
         )
     if not cmd:
         return ""
+    client_env = worker_env(repo_entry)
+    sentinels: dict[str, str] = {}
     if sandbox:
         # Never on the host for a sandboxed item (Kraft-p8nem): the worktree
         # is the worker's to write, so `uv sync` or `npm ci` there runs a build
         # backend or package script the worker may have written. The docker
         # client runs on the host with the worker env, like `run_task`'s; the
-        # container gets the entry's literal `env` and its passthrough names.
+        # container gets the entry's `env` and passthrough names, bare.
         # It mounts the worktree's ref store as it stands -- one of the item's
         # sessions may have it mounted -- and publishes nothing from it: only
         # a session's store names the branch Kraft moves.
         run_base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
         backend = _backends.for_sandbox(sandbox)
+        # No harness here: an entry naming just `env` holds its sentinel
+        # and nothing injects it; a repository's own credential is injected
+        # where the install phase names its host.
+        credentials = _harness.manage(_harness.sandbox_credentials(sandbox))
+        sentinels = {c.env: c.sentinel for c in credentials}
         try:
-            ca_bundle = await backend.prepare(sandbox)
+            kraft_ca = _ca.ensure_ca(RunDirs(run_base))[0] if credentials else None
+            ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
         refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
         # Named like a session, so the sandbox can be asked whether its
         # memory limit killed the command, and closed after.
         setup_id = f"setup-{uuid.uuid4().hex[:12]}"
-        argv = backend.wrap(
-            ["sh", "-c", cmd],
-            worktree,
-            sandbox,
-            None,
-            env=repo_entry.env if repo_entry is not None else {},
-            session_id=setup_id,
-            refs=refs,
-            passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
-            ca_bundle=ca_bundle,
-        )
+        network = bool(sandbox.get("network"))
+        try:
+            # The install phase's lists, never the runtime's or the harness's
+            # hosts (spec §1). No session row: nothing reattaches a setup
+            # command. Its worktree is named for its work item.
+            proxy_env = (
+                await _subprocess.open_egress(
+                    None,
+                    backend,
+                    setup_id,
+                    worktree.name,
+                    sandbox,
+                    PhaseLists.of(sandbox["network"], "install"),
+                    _inject.rules(credentials, client_env),
+                )
+                if network
+                else {}
+            )
+            argv = backend.wrap(
+                ["sh", "-c", cmd],
+                worktree,
+                sandbox,
+                None,
+                env=proxy_env,
+                session_id=setup_id,
+                refs=refs,
+                # The entry's `env:` by name too: its values are in the
+                # client's own env (`worker_env` below), never on argv.
+                passthrough=(
+                    *(repo_entry.env_passthrough if repo_entry is not None else ()),
+                    *(repo_entry.env if repo_entry is not None else {}),
+                ),
+                ca_bundle=ca_bundle,
+                sentinels=sentinels,
+            )
+        except BaseException as exc:
+            if network:
+                await _subprocess.close_egress(backend, setup_id)
+            if isinstance(exc, _sandbox.SandboxNotReady):
+                raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
+            raise
         run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
     else:
         run = dict(args=cmd, shell=True, cwd=worktree)
@@ -676,7 +719,8 @@ async def run_setup_command(
         done = await asyncio.to_thread(
             subprocess.run,
             **run,
-            env=worker_env(repo_entry),
+            # A managed credential's value is the egress proxy's alone.
+            env={k: v for k, v in client_env.items() if k not in sentinels},
             capture_output=True,
             text=True,
         )
@@ -693,7 +737,12 @@ async def run_setup_command(
             try:
                 oom = await backend.oom_killed(setup_id)
             finally:
-                await backend.close(setup_id)
+                # The command, then its route out (spec §4).
+                try:
+                    await backend.close(setup_id)
+                finally:
+                    if network:
+                        await _subprocess.close_egress(backend, setup_id)
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
             f"setup command for {worktree.name} failed: a process in the sandbox was killed "

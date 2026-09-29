@@ -9,6 +9,7 @@ only thing that stops a doctor command from growing output nobody reads
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -31,9 +32,10 @@ from kraft.paths import (
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
-from kraft.worker import backends, sandbox
+from kraft.worker import backends, channel, sandbox
 from kraft.worker import steering as steering_mod
 from kraft.worker.backends import docker_forward
+from kraft.worker.env import worker_env
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -547,12 +549,30 @@ async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
     return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
-def _proxy_check(repo: config.RepoEntry) -> dict | None:
-    """A warning when this machine's proxy is on its loopback: a container
-    has a loopback of its own, so the proxy is not forwarded and a sandboxed
-    task goes direct, which fails wherever only the proxy gets out. Read from
-    doctor's own environment, which is the daemon's when both were started
-    from the same shell."""
+def _egress_check(repo: config.RepoEntry, policy) -> dict | None:
+    """A warning when a sandbox sets no `network:`: its tasks can reach
+    anywhere, the cloud metadata address included (spec §1: open stays the
+    default for now, and doctor says so)."""
+    if policy.network is not None:
+        return None
+    return _check(
+        f"egress {_label(repo)}",
+        True,
+        "sandboxed tasks here have open egress: set `network:` in the sandbox policy "
+        "to allow only the hosts they need",
+        warn=True,
+    )
+
+
+def _proxy_check(repo: config.RepoEntry, policy) -> dict | None:
+    """A warning when this machine's proxy is on its loopback and the sandbox
+    sets no `network:`: a container has a loopback of its own, so the proxy
+    is not forwarded and a sandboxed task goes direct, which fails wherever
+    only the proxy gets out. Under `network:` Kraft's own proxy chains to it
+    from the host. Read from doctor's own environment, which is the daemon's
+    when both were started from the same shell."""
+    if policy.network is not None:
+        return None
     loopback = docker_forward.loopback_proxies()
     if not loopback:
         return None
@@ -561,8 +581,8 @@ def _proxy_check(repo: config.RepoEntry) -> dict | None:
         f"proxy {_label(repo)}",
         True,
         f"{named} is on this machine's loopback, which a container cannot reach, so "
-        "sandboxed tasks run without it; `network:` in the sandbox policy (coming) "
-        "routes them through Kraft's own proxy instead",
+        "sandboxed tasks run without it; `network:` in the sandbox policy routes them "
+        "through Kraft's own proxy instead",
         warn=True,
     )
 
@@ -588,6 +608,48 @@ def _ignored_ca_check(repo: config.RepoEntry) -> dict | None:
     )
 
 
+def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
+    """Which names this sandbox's egress proxy holds, on which
+    hosts (as each harness resolves them), and which
+    names a harness declares still pass through. A managed name with no value
+    fails: the proxy refuses every request that should carry it. The value is
+    looked for as a launch reads it, `worker_env` of this entry, in doctor's
+    own environment, which is the daemon's when both were started from the
+    same shell."""
+    if not policy.credentials:
+        return None
+    harnesses = harness.load(None).valid.values()
+    hosts: dict[str, set[str]] = {c.env: set() for c in policy.credentials}
+    for h in harnesses:
+        for cred in h.managed_credentials(policy.credentials):
+            hosts[cred.env].update(rule.domain for rule in cred.inject)
+    passing = sorted({c.env for h in harnesses for c in h.credentials} - hosts.keys())
+    environ = worker_env(repo)
+    missing = [name for name in hosts if name not in environ]
+    detail = "proxy-managed: " + "; ".join(
+        f"{name} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
+        for name, on in hosts.items()
+    )
+    if passing:
+        detail += f"; passes through: {', '.join(passing)}"
+    # A name alone that no harness declares: nothing injects it, silently.
+    declared = {i: [c.env for c in h.credentials] for i, h in harness.load(None).valid.items()}
+    orphans = [
+        c.env
+        for c in policy.credentials
+        if not c.inject and not any(c.env in names for names in declared.values())
+    ]
+    if orphans:
+        by = "; ".join(f"{i} declares {', '.join(names)}" for i, names in declared.items() if names)
+        detail = (
+            f"{', '.join(orphans)} is managed but no harness declares how to inject it, "
+            f"so it is only a sentinel; {by}; {detail}"
+        )
+    if missing:
+        detail = f"no value for {', '.join(missing)} here, so its requests are refused; {detail}"
+    return _check(f"credentials {_label(repo)}", not missing, detail, warn=bool(orphans))
+
+
 def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
@@ -607,6 +669,15 @@ def _forge_check(repo: config.RepoEntry) -> dict:
     if not shutil.which(cli):
         return _check(name, False, f"`{cli}` is not on PATH — the forge nodes cannot run")
     return _check(name, True, f"{repo.forge} · {cli}")
+
+
+async def _tls_listener_check() -> dict:
+    """The server's egress TLS listener, which a sandbox's relay dials on a
+    runtime in a VM, answering as Kraft's own on the port it persisted."""
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    problem = await asyncio.to_thread(channel.tls_listener_problem, run_dirs)
+    detail = problem or f"answers on 127.0.0.1:{channel.tls_port(run_dirs)}"
+    return _check("egress listener", problem is None, detail)
 
 
 def _label(repo: config.RepoEntry) -> str:
@@ -640,6 +711,7 @@ async def _repo_checks() -> list[dict]:
         for ws_id, ws in (await client.workspaces()).items()
         for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
     }
+    networked = False
     for repo in repos:
         path = Path(repo.path)
         name = f"repo {_label(repo)}"
@@ -690,13 +762,21 @@ async def _repo_checks() -> list[dict]:
             )
         elif (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
-            for extra in (_proxy_check(repo), _ignored_ca_check(repo)):
+            networked = networked or policy.network is not None
+            for extra in (
+                _egress_check(repo, policy),
+                _proxy_check(repo, policy),
+                _ignored_ca_check(repo),
+                _credential_check(repo, policy),
+            ):
                 if extra is not None:
                     checks.append(extra)
         if auto:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:
             checks.append(_steering_check(repo, profiles))
+    if networked:
+        checks.append(await _tls_listener_check())
     return checks or [_check("repos", True, "none connected")]
 
 

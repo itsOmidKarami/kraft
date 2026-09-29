@@ -111,9 +111,13 @@ def test_cpus_are_written_in_fixed_point_as_given(monkeypatch, cpu, flag):
     assert _limits(_argv_on(monkeypatch, docker.Runtime(), {"cpu": cpu}))[0] == flag
 
 
-def test_an_inconclusive_runtime_refuses_a_limit_and_is_asked_again(tmp_path, monkeypatch):
-    """An `info` that did not answer (a daemon starting up) is not "every limit
-    works", and it is not kept: the next launch asks again."""
+@pytest.mark.parametrize("asked_again_by", ["expiry", "doctor"])
+def test_an_inconclusive_runtime_refuses_a_limit_and_is_asked_again(
+    tmp_path, monkeypatch, asked_again_by
+):
+    """An `info` that did not answer (a daemon starting up, or hung for ~30s)
+    is not "every limit works". It is kept briefly, so a hung daemon is not
+    asked on every call (Kraft-zfu0a), then asked again; doctor asks at once."""
     templates = tmp_path / "templates"
     templates.mkdir()
     monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(templates))
@@ -126,7 +130,10 @@ def test_an_inconclusive_runtime_refuses_a_limit_and_is_asked_again(tmp_path, mo
     assert unsure.limit_args(None) == []  # the default pids limit is dropped
     with pytest.raises(docker.SandboxRefused, match="could not tell whether"):
         unsure.limit_args({"memory": "32m"})
-    assert docker.runtime().limits == docker.LIMITS
+    assert docker.runtime() is unsure
+    if asked_again_by == "expiry":
+        monkeypatch.setattr(docker, "_UNSURE_UNTIL", 0.0)
+    assert docker.runtime(refresh=asked_again_by == "doctor").limits == docker.LIMITS
 
 
 def _cli(tmp_path, monkeypatch, name, info):

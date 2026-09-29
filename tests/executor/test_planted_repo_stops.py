@@ -27,7 +27,12 @@ from kraft.executor import dispatch, walk
 from kraft.executor.context import CONFIG_ERROR, LaunchContext
 
 NO_SETUP = LaunchContext(repo_entry=entry_of({"setup_command": ""}))
-_SANDBOX = {"kind": "docker", "image": "kraft/policy:1"}
+#: With `network:`: a claude-shaped agent is refused a sandbox without one.
+_SANDBOX = {
+    "kind": "docker",
+    "image": "kraft/policy:1",
+    "network": {"runtime": {"allow": ["x.io"]}},
+}
 _SANDBOXED = pytest.mark.parametrize("sandboxed", [True, False], ids=["sandboxed", "unsandboxed"])
 
 

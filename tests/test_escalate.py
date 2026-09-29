@@ -453,6 +453,32 @@ def test_dispatch_forwards_the_repo_s_resolved_sandbox(tmp_path, monkeypatch):
     assert seen["sandbox"] == {"kind": "docker", "image": "kraft-worker:py"}
 
 
+@pytest.mark.parametrize(
+    ("network", "told"),
+    [({"runtime": {"allow": ["x.io"]}}, True), (None, False)],
+    ids=["network", "no-network"],
+)
+async def test_a_sandboxed_turn_is_told_to_retry_only_with_a_route_to_kraft(
+    monkeypatch, database, run_dirs, network, told
+):
+    """Its channel carries `kraft item retry` to the self-retry carve-out; a
+    sandbox without `network:` has none, so the turn reports instead."""
+    seen = {}
+
+    async def fake_run_agent_task(db, run_dirs, *, session_id, task_instruction, **kw):
+        seen["task_instruction"] = task_instruction
+        return "done"
+
+    monkeypatch.setattr("kraft.escalate._agent.run_agent_task", fake_run_agent_task)
+    await _seed_needs_human(database, run_dirs, "w1")
+    sandbox = {"kind": "docker", "image": "x", **({"network": network} if network else {})}
+    launch = executor.LaunchContext(repo_entry=entry_of({"sandbox": sandbox}), skills_dir=None)
+    await escalate.dispatch(database, run_dirs, work_item_id="w1", message="m", launch=launch)
+    instruction = seen["task_instruction"]
+    assert ("run `kraft item retry` yourself" in instruction) is told
+    assert ("no route to Kraft" in instruction) is not told
+
+
 async def test_escalation_running_reports_a_pending_or_running_session(database, run_dirs):
 
     wid = "w1"

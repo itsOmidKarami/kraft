@@ -274,6 +274,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # The project's Python, not the runner's 3.12: the tests it parses may
+      # use 3.14-only syntax (Kraft-neyhg). Stdlib only, so nothing is synced.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       # The body is read live, not off the event payload: a re-run replays the
       # original payload, and re-running this job after editing the body is
       # how a declaration is picked up.
@@ -283,7 +286,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/pr-body.md"
-          python3 dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
+          uv run --python 3.14 --no-project python dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
 
   release-impact:
     # Every pull request declares what it ships. The version comes from the git

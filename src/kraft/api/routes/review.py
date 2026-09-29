@@ -316,6 +316,9 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
     if gate is None:
         # Nothing pending to reply for: no gate, no reply agent to launch.
         return {"review_id": rid, "outcome": "comment", "gate": None, "reply_agent": False}
+    launch = deps.launch(st, row["repo"])
+    if await review_reply.refused_without_channel(st.db, row, launch, gate):
+        return {"review_id": rid, "outcome": "comment", "gate": gate, "reply_agent": False}
     try:
         deps.spawn(
             request.app,
@@ -326,7 +329,7 @@ async def _submit(st, request: Request, row, gate: str | None, body: ReviewIn):
                 work_item_id=wid,
                 gate=gate,
                 nodes=nodes,
-                launch=deps.launch(st, row["repo"]),
+                launch=launch,
             ),
         )
         spawned = True

@@ -22,9 +22,17 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, ConfigDict, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+)
 
 from kraft.paths import default_harnesses_dir
+from kraft.policy import DEFAULT_SENTINEL, SandboxCredential, host_pattern
 
 #: Harnesses that ship with Kraft. Read from the package, never from
 #: `$KRAFT_HOME/templates/`, because `cli.seed_home` copies templates once and
@@ -58,6 +66,10 @@ KNOWN = (
     # would otherwise refuse those writes (Kraft-rs9pk). `{value}` is one JSON
     # array of absolute paths, which is also a TOML inline array.
     "writable_dirs",
+    # Kraft fills it, never a task: a sandboxed launch under `network:`'s
+    # MCP servers, one JSON object `{"mcpServers": {...}}` naming the
+    # session's own at `http://kraft/mcp`, reached through its channel.
+    "mcp_config",
 )
 
 #: Without these three, no agent dispatch can be built at all.
@@ -148,6 +160,20 @@ class Harness:
     #: a namespace under Docker's default seccomp profile, so every shell
     #: command it runs fails) is told to leave isolation to the container.
     container_permission_mode: str | None = None
+    #: The hosts the CLI itself must reach (its model API), added to a
+    #: `network:` launch's runtime allow list. A policy `deny` still wins.
+    network_requires: tuple[str, ...] = ()
+    #: False for a CLI that ignores HTTP(S)_PROXY: under `network:` it has no
+    #: route at all, so such a launch is refused by name instead.
+    proxy_aware: bool = True
+    #: How the egress proxy can manage each credential this CLI reads (spec
+    #: §6): complete, each to a host of `network_requires`. What a repository
+    #: opts in to by naming its `env` under `sandbox.credentials`;
+    #: nothing is managed unless it does.
+    credentials: tuple[SandboxCredential, ...] = ()
+    #: The oldest CLI release whose `--version` a launch accepts, for a CLI
+    #: whose older releases refuse this file's argv. None: no check.
+    min_version: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -297,6 +323,27 @@ class Harness:
                     "'permission_mode' capability accepts"
                 )
 
+        if parsed.min_version is not None and not _VERSION.fullmatch(parsed.min_version):
+            raise HarnessError(f"{where}: min_version {parsed.min_version!r} is not N.N.N")
+
+        try:
+            requires = tuple(map(host_pattern, parsed.network.requires if parsed.network else ()))
+        except ValueError as exc:
+            raise HarnessError(f"{where}: network.requires: {exc}") from None
+
+        for cred in parsed.credentials:
+            if cred.service is None or cred.sentinel is None or not cred.inject:
+                raise HarnessError(
+                    f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
+                    "and where to 'inject' it"
+                )
+            for rule in cred.inject:
+                if rule.domain not in requires:
+                    raise HarnessError(
+                        f"{where}: credential {cred.env!r} goes to {rule.domain!r}, "
+                        "which is not one of its 'network.requires' hosts"
+                    )
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -325,7 +372,18 @@ class Harness:
             permission_hook=parsed.permission_hook,
             permission_rules=parsed.permission_rules,
             container_permission_mode=parsed.container_permission_mode,
+            network_requires=requires,
+            proxy_aware=parsed.proxy_aware,
+            credentials=tuple(parsed.credentials),
+            min_version=parsed.min_version,
         )
+
+    def managed_credentials(
+        self, wanted: tuple[SandboxCredential, ...] | None
+    ) -> tuple[SandboxCredential, ...]:
+        """A sandbox's `credentials` as a launch of this CLI manages them
+        (`manage`), from what this harness declares."""
+        return manage(wanted, self.credentials)
 
     def supports(self, name: str) -> bool:
         return name in self.capabilities
@@ -340,6 +398,34 @@ class Harness:
         if not cap.values:
             return True
         return any(re.fullmatch(p, value) for p in cap.values)
+
+
+def manage(
+    wanted: tuple[SandboxCredential, ...] | None, declared: tuple[SandboxCredential, ...] = ()
+) -> tuple[SandboxCredential, ...]:
+    """A sandbox's `credentials` as a launch manages them, each with a
+    sentinel: an entry naming just `env` takes the `declared` one of that
+    name (its harness's), its own fields winning. One not declared -- or
+    any, for a launch with no harness (a setup command) -- still holds only
+    a sentinel -- the repository said its value stays out of the container
+    -- with nothing injecting it unless it says where itself."""
+    by_env = {c.env: c for c in declared}
+    managed = []
+    for entry in wanted or ():
+        base = by_env.get(entry.env) if not entry.inject else None
+        if base is not None:
+            entry = base.model_copy(update={k: getattr(entry, k) for k in entry.model_fields_set})
+        if entry.sentinel is None:
+            entry = entry.model_copy(update={"sentinel": DEFAULT_SENTINEL})
+        managed.append(entry)
+    return tuple(managed)
+
+
+def sandbox_credentials(sandbox: dict | None) -> tuple[SandboxCredential, ...]:
+    """A dumped sandbox's `credentials`, as models again."""
+    return tuple(
+        SandboxCredential.model_validate(c) for c in (sandbox or {}).get("credentials") or ()
+    )
 
 
 @dataclass(frozen=True)
@@ -380,6 +466,15 @@ class ConfigDirInput(BaseModel):
     files: dict[StrictStr, dict[StrictStr, Any]] = {}
 
 
+class NetworkInput(BaseModel):
+    """`network:` as written. A new key, so unlike the rest of the file an
+    unknown one refuses: a misspelt `requires` must not load as no hosts."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    requires: list[StrictStr] = []
+
+
 class HarnessInput(BaseModel):
     """One harness file as written. Everything is defaulted so that a missing
     key reaches `Harness.from_input`, which refuses it in the same words as a
@@ -398,6 +493,31 @@ class HarnessInput(BaseModel):
     permission_hook: StrictStr | None = None
     permission_rules: StrictStr | None = None
     container_permission_mode: StrictStr | None = None
+    network: NetworkInput | None = None
+    proxy_aware: StrictBool = True
+    credentials: list[SandboxCredential] = []
+    min_version: StrictStr | None = None
+
+
+_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+
+
+def find_version(text: str, name: str) -> str | None:
+    """The version in a CLI's `--version` output (`opencode v2.0.15`): the
+    first on a line naming the CLI, else the first at all -- a wrapper may
+    print its runtime's version first. None when there is none."""
+    lines = text.splitlines()
+    for line in [x for x in lines if name in x] + lines:
+        if found := _VERSION.search(line):
+            return found[0]
+    return None
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    """`version` for comparing: a pre-release sorts below its release
+    (`2.0.0-beta.1` < `2.0.0` < `2.0.1-rc`)."""
+    core, _, pre = version.partition("-")
+    return (*map(int, core.split(".")), 0 if pre else 1)
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -431,6 +551,15 @@ def _shape_problem(exc: ValidationError) -> str:
             return "'unhooked_tools' must be a list of strings"
         case ("permission_hook" | "permission_rules" as key,):
             return f"{key!r} must be a string"
+        case ("network", *_):
+            return "'network' takes only 'requires', a list of network-policy@1 hosts"
+        case ("credentials", *_):
+            return (
+                "'credentials' must be a list of {env, service, sentinel, "
+                f"inject: [{{domain, header, format}}]}}: {error['msg']}"
+            )
+        case ("proxy_aware", *_):
+            return "'proxy_aware' must be true or false"
         case ("config_dir", *_):
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
     return "expected a top-level mapping"

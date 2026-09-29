@@ -4,7 +4,10 @@
 # declares no `resume` capability at all.
 id: gemini
 kind: cli
-command: [gemini]
+# `--skip-trust` trusts the worktree for this session: without it a headless
+# gemini (0.61.0) outside a trusted folder refuses to start (Kraft-6vvf3),
+# and every Kraft worktree is a fresh folder. Checked against 0.61.0's --help.
+command: [gemini, --skip-trust]
 
 capabilities:
   context:         { channel: prompt }
@@ -20,3 +23,18 @@ capabilities:
 
 # Absent: effort, deny_tools, allowed_tools, approval_channel, resume,
 # autocompact, rate_limit_signal.
+
+# The host this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). UNVERIFIED: taken from the Gemini API docs, not
+# probed; an e2e("gemini") under `network:` confirms it.
+network:
+  requires: [generativelanguage.googleapis.com]
+
+# How the egress proxy can hold this CLI's API key (spec §6); see claude.yaml.
+# The sentinel has a real key's shape: AIza and 39 characters in all.
+# Verified with gemini 0.61.0 by e2e("gemini") in test_credentials_docker.
+credentials:
+  - service: google
+    env: GEMINI_API_KEY
+    sentinel: AIzaKraftProxyManaged000000000000000000
+    inject: [{domain: generativelanguage.googleapis.com, header: x-goog-api-key}]

@@ -74,3 +74,20 @@ capabilities:
 
 # Absent, deliberately: approval_channel, autocompact. A binding naming one of those is rejected
 # at load, naming this file.
+
+# The hosts this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). api.openai.com is the model API; chatgpt.com (sign-in
+# with ChatGPT) is UNVERIFIED until an e2e("codex") runs under `network:`.
+network:
+  requires: [api.openai.com, chatgpt.com]
+
+# How the egress proxy can hold this CLI's API key (spec §6); see claude.yaml.
+# CODEX_API_KEY, not OPENAI_API_KEY: `codex exec` (0.158.0) sends no key
+# given only OPENAI_API_KEY, which it reads for `codex login --with-api-key`.
+# Sign-in with ChatGPT keeps a file, not a variable, and stays passthrough.
+# Verified with codex-cli 0.158.0 by e2e("codex") in test_credentials_docker.
+credentials:
+  - service: openai
+    env: CODEX_API_KEY
+    sentinel: sk-kraft-proxy-managed
+    inject: [{domain: api.openai.com, header: authorization, format: "Bearer %s"}]

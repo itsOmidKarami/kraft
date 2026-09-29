@@ -18,16 +18,23 @@ import asyncio
 import json
 import os
 import shutil
+import socket
 import subprocess
+import tempfile
+import time
+import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kraft.config import ConfigError
-from kraft.paths import default_run_dir, default_templates_dir, kraft_home
+from kraft.paths import RunDirs, default_run_dir, default_templates_dir, kraft_home
+from kraft.worker import ca as _ca
+from kraft.worker import channel as _channel
 from kraft.worker import refstore as _refstore
+from kraft.worker import shim as _shim
 from kraft.worker.backends import docker_forward as _forward
 from kraft.worker.sandbox import (
     _HARDENED_GIT_CONFIG,
@@ -59,6 +66,55 @@ def container_name(session_id: str) -> str:
     return f"kraft-{session_id}"
 
 
+def relay_name(session_id: str) -> str:
+    """The `--name` of a session's relay under `network:`, which its worker
+    joins (`--network container:<this>`)."""
+    return f"kraft-relay-{session_id}"
+
+
+def relay_b_name(session_id: str) -> str:
+    """The `--name` of a TLS-transport session's second relay: on the
+    default network, from the session's volume to the daemon's listener."""
+    return f"kraft-relay-b-{session_id}"
+
+
+def volume_name(session_id: str) -> str:
+    """The named volume a TLS-transport session's two relays share its
+    socket through: inside the runtime's VM, where a unix socket works."""
+    return f"kraft-egress-{session_id}"
+
+
+#: What a relay is labelled besides `home_label`, so it reads as one.
+RELAY_LABEL = "kraft.role=relay"
+#: And a session's volume, so the sweep lists volumes by it.
+VOLUME_LABEL = "kraft.role=egress-volume"
+#: Where both relays mount the session's volume: the relay image's `/tmp`,
+#: sticky and world-writable, which a fresh volume takes on -- a relay
+#: running as the operator could not create its socket in a new directory
+#: (root's, 0755).
+_HOP_DIR = "/tmp"
+_HOP_SOCKET = f"{_HOP_DIR}/s.sock"
+#: Where relay B mounts its session's certificate directory, read-only.
+_RELAY_B_CERTS = "/c"
+#: Where the relay listens in the network namespace it shares with its
+#: worker, and so the proxy every worker under `network:` is told to use.
+RELAY_PORT = 3128
+#: The worker's proxy environment under `network:`, both spellings, and
+#: `NODE_USE_ENV_PROXY` for Node's own fetch. `NO_PROXY` is empty: the
+#: worker has no route but this one.
+RELAY_PROXY_ENV = {
+    **{
+        name: f"http://127.0.0.1:{RELAY_PORT}"
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    },
+    "NO_PROXY": "",
+    "no_proxy": "",
+    "NODE_USE_ENV_PROXY": "1",
+}
+#: The relay's own limits: socat forks one small process per connection.
+_RELAY_LIMITS = {"memory": "64m", "pids": 256}
+
+
 #: The label every Kraft container carries, valued with the resolved
 #: `KRAFT_HOME`: what `sweep_orphans` lists by, so one Kraft never reaps
 #: another's containers (a dev instance beside an installed one).
@@ -67,6 +123,12 @@ HOME_LABEL = "kraft.home"
 
 def home_label() -> str:
     return f"{HOME_LABEL}={kraft_home().resolve()}"
+
+
+def _run_dirs() -> RunDirs:
+    """The daemon's run dir, resolved: a runtime in a VM shares the host's
+    files by their real path (macOS's `/tmp` is `/private/tmp`)."""
+    return RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()).resolve())
 
 
 class SandboxRefused(RuntimeError):
@@ -109,6 +171,13 @@ class Runtime:
     #: daemon, an old CLI): `limits` is then empty, a requested limit is
     #: refused, and `runtime()` asks again next time instead of keeping it.
     limits_known: bool = True
+    #: Whether a container with no network can `connect()` to a host unix
+    #: socket bind-mounted into it: True on Linux-native docker and podman,
+    #: False where the runtime runs in a VM (Docker Desktop, podman machine:
+    #: the socket is there, `connect` fails ENOTSUP -- spike 4.5a). None
+    #: until a launch under `network:` asks (`socket_channel`); doctor's
+    #: refresh forgets it.
+    socket_channel: bool | None = None
 
     def limit_args(self, resources: dict | None) -> list[str]:
         """`--cpus`, `--memory` and `--pids-limit` for a sandbox's
@@ -170,6 +239,13 @@ class Runtime:
             if n in self.limits
         ]
         return "limits " + ", ".join(said)
+
+    def security_args(self) -> list[str]:
+        """The privilege drop every container Kraft starts runs under: no
+        setuid gain, no capabilities, and SELinux separation off only where
+        sandbox.yaml says `selinux: disable`."""
+        label = ["--security-opt=label=disable"] if self.selinux == "disable" else []
+        return ["--security-opt=no-new-privileges", *label, "--cap-drop=ALL"]
 
     def user_args(self) -> list[str]:
         """Who the container runs as, so what it writes into the worktree is
@@ -306,20 +382,207 @@ def detect_runtime() -> Runtime:
 
 
 _RUNTIME: Runtime | None = None
+#: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
+_UNSURE_UNTIL = 0.0
+#: ponytail: fixed; a hung daemon costs one ~30s `info` per this many seconds
+#: instead of one per `docker_call`. Make it a sandbox.yaml knob if it bites.
+UNSURE_TTL = 30.0
 
 
 def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
-    runtime that did not say what limits it enforces is not kept: the next
-    launch asks again rather than refusing every limit until a restart."""
-    global _RUNTIME
-    if _RUNTIME is None or refresh:
-        detected = detect_runtime()
-        _RUNTIME = detected if detected.limits_known else None
-        return detected
+    runtime that did not say what limits it enforces is kept only
+    `UNSURE_TTL` seconds: a launch after that asks again rather than refusing
+    every limit until a restart, and a hung daemon is not asked on every call."""
+    global _RUNTIME, _UNSURE_UNTIL
+    if (
+        refresh
+        or _RUNTIME is None
+        or (not _RUNTIME.limits_known and time.monotonic() >= _UNSURE_UNTIL)
+    ):
+        _RUNTIME = detect_runtime()
+        _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
     return _RUNTIME
+
+
+def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
+    """Can a `--network none` container reach a host unix socket here? Binds
+    one under the run dir and has the relay image connect to it. True or
+    False only on the relay's own answer (socat exits 1 when `connect`
+    fails); None when the probe did not get that far -- no daemon, the
+    image not pulled (never pulled here: that could outlast the timeout)."""
+    base = _run_dirs().sockets
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        where = Path(tempfile.mkdtemp(prefix="probe-", dir=base))
+    except OSError:
+        return None
+    try:
+        path = where / "s.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
+            # Never accepted: a connection the backlog holds is an answer.
+            listener.listen(1)
+            argv = [
+                host.cli,
+                "run",
+                "--rm",
+                "--pull=never",
+                "--network=none",
+                "--label",
+                home_label(),
+                *host.user_args(),
+                *host.security_args(),
+                "-v",
+                f"{where}:{where}",
+                "--entrypoint",
+                "socat",
+                relay_image,
+                "-u",
+                "OPEN:/dev/null",
+                f"UNIX-CONNECT:{path}",
+            ]
+            if host.selinux == "relabel":
+                argv = _relabelled(argv)
+            try:
+                done = subprocess.run(argv, capture_output=True, timeout=30)
+            except OSError, subprocess.TimeoutExpired:
+                return None
+    except OSError:
+        return None
+    finally:
+        shutil.rmtree(where, ignore_errors=True)
+    return {0: True, 1: False}.get(done.returncode)
+
+
+def socket_channel(relay_image: str) -> bool | None:
+    """`Runtime.socket_channel`, probed once and kept on the cached runtime
+    (a doctor refresh forgets it); an inconclusive answer is asked again.
+    Kept only if the cached runtime is still the one probed: a refresh that
+    landed meanwhile wins."""
+    global _RUNTIME
+    host = runtime()
+    if host.socket_channel is None:
+        answer = _probe_socket_channel(host, relay_image)
+        if answer is not None and _RUNTIME is host:
+            _RUNTIME = replace(host, socket_channel=answer)
+        return answer
+    return host.socket_channel
+
+
+def _vm_evidence(host: Runtime) -> str:
+    """That the runtime runs in a VM, in its own words (spike 4.5a's
+    detection): docker's `OperatingSystem` saying `Docker Desktop`,
+    podman's `ServiceIsRemote` (podman machine). Empty when it says neither:
+    a socket refused there is not a VM's, and the two-hop transport would
+    not reach the daemon's loopback either."""
+    if host.podman:
+        remote = (_run(host.cli, "info", "--format", "{{.Host.ServiceIsRemote}}") or "").strip()
+        return f"ServiceIsRemote: {remote}" if remote == "true" else ""
+    system = (_run(host.cli, "info", "--format", "{{.OperatingSystem}}") or "").strip()
+    return f"OperatingSystem: {system}" if "Docker Desktop" in system else ""
+
+
+def channel_refusal(
+    host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
+) -> str | None:
+    """Why a sandbox with `network:` cannot run here, given `socket_channel`'s
+    answer and, for False, what the runtime `said` about running in a VM
+    (`_vm_evidence`); None when it can: over a socket per session (True) or
+    the two-hop TLS transport (False, in a VM). Shared by a launch and
+    doctor."""
+    if reachable is True or (reachable is False and said):
+        return None
+    if reachable is False:
+        return (
+            f"a container on {host.describe()} could not connect to a host unix socket, "
+            "but the runtime does not say it runs in a VM (Docker Desktop, podman "
+            "machine), where Kraft would reach it another way: an SELinux `connectto` "
+            f"denial or the permissions on {_run_dirs().sockets} stop it. Fix that, "
+            "then check `kraft admin doctor`"
+        )
+    return (
+        f"could not tell whether {host.describe()} lets a container reach a host "
+        f"unix socket, which decides how a sandbox with `network:` reaches Kraft's "
+        f"egress proxy: the probe did not run. Pull the relay image "
+        f"({host.cli} pull {relay_image}) and check `kraft admin doctor`"
+    )
+
+
+def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[str], *socat):
+    """`docker run -d` for a relay running `socat` with `socat` arguments: as
+    locked down as a worker, read-only, small, labelled as a relay, and
+    named (no `--rm`: `close_session` removes it; `sweep_orphans` whatever a
+    crash left)."""
+    host = runtime()
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
+    limits = {n: v for n, v in _RELAY_LIMITS.items() if n in host.limits}
+    argv = [
+        host.cli,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *network,
+        "--label",
+        home_label(),
+        "--label",
+        RELAY_LABEL,
+        *host.user_args(),
+        *host.security_args(),
+        "--read-only",
+        "--log-driver=none",
+        *host.limit_args(limits),
+        *(a for mount in mounts for a in ("-v", mount)),
+        "--entrypoint",
+        "socat",
+    ]
+    if host.selinux == "relabel":
+        argv = _relabelled(argv)
+    return [*argv, relay_image, *socat]
+
+
+def relay_argv(session_id: str, sock_path: Path | None, relay_image: str) -> list[str]:
+    """The session's relay, which its worker joins: no network of its own,
+    forwarding 127.0.0.1:3128 in its namespace to the session's socket. That
+    is the channel's, whose directory is mounted (a file mount would miss a
+    socket the daemon re-creates after a restart); or, `sock_path` None, the
+    one relay B listens on in the session's volume (the TLS transport)."""
+    if sock_path is None:
+        mount, target = f"{volume_name(session_id)}:{_HOP_DIR}", _HOP_SOCKET
+    else:
+        mount, target = f"{sock_path.parent}:{sock_path.parent}", str(sock_path)
+    return _relay_argv(
+        relay_name(session_id),
+        relay_image,
+        ["--network=none"],
+        [mount],
+        f"TCP-LISTEN:{RELAY_PORT},bind=127.0.0.1,fork,reuseaddr",
+        f"UNIX-CONNECT:{target}",
+    )
+
+
+def relay_b_argv(session_id: str, relay_image: str, port: int, cert_dir: Path) -> list[str]:
+    """A TLS-transport session's second relay, on the default network: the
+    socket in the session's volume, to the daemon's listener at the
+    runtime's gateway name, presenting the session's client certificate and
+    verifying the daemon's against the Kraft CA. It mounts that volume and
+    `cert_dir` (the session's certificate, key and the CA's certificate,
+    read-only), nothing else; the worker shares neither."""
+    gateway = _ca.GATEWAY_HOSTS[1 if runtime().podman else 0]
+    certs = _RELAY_B_CERTS
+    return _relay_argv(
+        relay_b_name(session_id),
+        relay_image,
+        [],
+        [f"{volume_name(session_id)}:{_HOP_DIR}", f"{cert_dir}:{certs}:ro"],
+        f"UNIX-LISTEN:{_HOP_SOCKET},fork,mode=600,unlink-early",
+        f"OPENSSL:{gateway}:{port},cert={certs}/client.pem,key={certs}/key.pem,"
+        f"cafile={certs}/ca.pem,verify=1",
+    )
 
 
 def docker_argv(
@@ -337,6 +600,8 @@ def docker_argv(
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
     ca_bundle: str | Path | None = None,
+    relay: str | None = None,
+    sentinels: dict[str, str] | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -392,14 +657,19 @@ def docker_argv(
     The daemon's proxy variables are forwarded bare, except one on its
     loopback, and an extra CA arrives as one bundle at a fixed container path
     with every CA variable naming it: `docker_forward`. `ca_bundle` is the
-    bundle `prepare` built, None for none. A repository's own `env` still
-    wins.
+    bundle `prepare` built, None for none. `env` wins over both, and any
+    literal over a bare name.
 
-    `env` is `run_task`'s own `env=` argument -- e.g. `PYTHONDONTWRITEBYTECODE`
-    for a fix-loop re-measure -- which is otherwise silently dropped: only
-    `FORWARDED_ENV` crosses into the container by default. Passed through as
-    literal `-e NAME=VALUE`, unlike `FORWARDED_ENV`'s bare `-e NAME` (which
-    copies from docker's own process env, never written to disk).
+    `env` is literal `-e NAME=VALUE`, so only what is no secret: the caller's
+    own values (`PYTHONDONTWRITEBYTECODE` for a fix-loop re-measure, the git
+    identity, the relay's proxy). Everything else crosses bare `-e NAME`,
+    copied from the docker client's own process env: `FORWARDED_ENV` and
+    `passthrough`, which is where a repository's `env:` and
+    `env_passthrough` go -- `ps` never shows their values.
+
+    `sentinels`: each proxy-managed credential's variable and the sentinel
+    it holds instead of its value (spec §6), literal and last, so no bare
+    `-e NAME` and no `env` can carry the real one in.
 
     `cidfile`: docker writes the container's id there once it has created
     the container, and leaves no file when it never got that far -- the one
@@ -412,8 +682,8 @@ def docker_argv(
 
     `home`: a directory mounted read-write and set as `HOME`, so an agent CLI
     has somewhere to keep its state across sessions. `passthrough`: names
-    forwarded bare, like `FORWARDED_ENV` -- a repo's `env_passthrough`, whose
-    values must never be written onto this argv. `ro_paths`: extra
+    forwarded bare, like `FORWARDED_ENV` -- a repo's `env` and
+    `env_passthrough`, whose values must never be written onto this argv. `ro_paths`: extra
     host paths mounted read-only at the same path (a rules file).
 
     `cwd` is resolved first: git records a worktree's real path, and a
@@ -425,6 +695,14 @@ def docker_argv(
     A `name`d container runs without `--rm`: removed on exit, it could not be
     asked whether its memory limit killed it (`oom_killed`), so `teardown`
     removes it by name instead, and `sweep_orphans` whatever a crash left.
+
+    `sandbox['network']` set: the container joins `relay`'s network
+    namespace (`relay_argv`), where loopback is its only interface, and
+    none of the daemon's proxy variables is forwarded -- its proxy is the
+    relay, set by the caller from `open_session`. Without a `relay` it is
+    refused, never run on the default bridge. Such a launch also mounts the
+    `kraft` shim read-only at `shim.CONTAINER_DIR`: its route to the worker
+    API, and its permission hook's command.
     """
     try:
         host = runtime()
@@ -432,6 +710,9 @@ def docker_argv(
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
         raise SandboxRefused(problem)
+    network = bool(sandbox.get("network"))
+    if network and relay is None:
+        raise SandboxRefused("a sandbox under `network:` runs only beside its session's relay")
     cwd = str(Path(cwd).resolve())
     argv = [
         host.cli,
@@ -446,10 +727,9 @@ def docker_argv(
         "--label",
         home_label(),
         *host.user_args(),
-        "--security-opt=no-new-privileges",
-        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
-        "--cap-drop=ALL",
+        *host.security_args(),
         *host.limit_args(sandbox.get("resources")),
+        *([f"--network=container:{relay}"] if network else []),
         "-v",
         f"{cwd}:{cwd}",
         "-w",
@@ -462,6 +742,11 @@ def docker_argv(
     argv += _gitdir_mounts(Path(cwd), refstore)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
+    if network:
+        # Whatever this launch's policy: a hook command that is not there
+        # runs the call (codex treats an unrunnable hook as allow), and a
+        # sibling launch in the worktree may need the hook this one does not.
+        argv += ["-v", f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro"]
     if home is not None:
         argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
     if name is not None:
@@ -470,17 +755,97 @@ def docker_argv(
         argv.append(f"--cidfile={cidfile}")
     ca_mount, ca_env = _forward.ca_args(ca_bundle)
     argv += ca_mount
-    for env_name in dict.fromkeys((*FORWARDED_ENV, *_forward.forwarded_proxies(), *passthrough)):
-        argv += ["-e", env_name]
+    proxies = () if network else _forward.forwarded_proxies()
     pins: dict[str, str] = {}
     _pin(pins, _HARDENED_GIT_CONFIG)
-    for env_name, value in {**pins, **ca_env, **(env or {})}.items():
+    literal = {**pins, **ca_env, **(env or {}), **(sentinels or {})}
+    # A name given both ways crosses once, literal: which of two `-e` wins
+    # is the runtime's business, not something to leave to it.
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *proxies, *passthrough)):
+        if env_name not in literal:
+            argv += ["-e", env_name]
+    for env_name, value in literal.items():
         argv += ["-e", f"{env_name}={value}"]
     if host.selinux == "relabel":
         argv = _relabelled(argv)
     argv.append(sandbox["image"])
     argv += cmd
     return argv
+
+
+#: Inside a one-shot container: the item's HOME, read-only, and the
+#: writable HOME the command runs with in its place (a tmpfs).
+ONESHOT_HOME_RO = "/kraft/home"
+ONESHOT_HOME = "/kraft/oneshot-home"
+#: Copies the one file of the item's HOME the command reads (codex's own
+#: config, which a worker may have written) into the writable HOME, then
+#: runs the command: codex app-server will not start on a read-only HOME.
+_ONESHOT_SH = (
+    'mkdir -p "$HOME/.codex" && { [ ! -f "$0/.codex/config.toml" ] || '
+    'cp "$0/.codex/config.toml" "$HOME/.codex/"; } && exec "$@"'
+)
+
+
+@dataclass
+class Oneshot:
+    """Short commands in a session's image, each asked the way a session of
+    it would ask -- its user, limits and init, its worktree read-only, its
+    HOME's codex config, the shim at `shim.CONTAINER_DIR` -- but with no
+    network and stdin attached. For what only the image's own binaries can
+    answer: codex's hook trust hash (`hook_install`). Each `argv()` names
+    its container, and `close()` removes every one still there: killing a
+    `docker run` client that timed out leaves its container running."""
+
+    cli: str
+    flags: list[str]
+    tail: list[str]
+    names: list[str] = field(default_factory=list)
+
+    def argv(self) -> list[str]:
+        name = f"kraft-oneshot-{uuid.uuid4().hex[:16]}"
+        self.names.append(name)
+        return [self.cli, "run", "--name", name, *self.flags, *self.tail]
+
+    async def close(self) -> None:
+        if self.names:
+            await docker_call("rm", "-f", *self.names)
+
+
+def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+    """`Oneshot` for `sandbox`; `SandboxRefused` where the runtime cannot
+    run one or enforce its limits."""
+    try:
+        host = runtime()
+    except ConfigError as exc:
+        raise SandboxRefused(str(exc)) from exc
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
+    cwd = str(Path(cwd).resolve())
+    flags = [
+        "--rm",
+        "--init",
+        "--interactive=true",
+        "--label",
+        home_label(),
+        *host.user_args(),
+        *host.security_args(),
+        *host.limit_args(sandbox.get("resources")),
+        "--network=none",
+        "-v",
+        f"{cwd}:{cwd}:ro",
+        "-w",
+        cwd,
+        "-v",
+        f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro",
+        "-v",
+        f"{home}:{ONESHOT_HOME_RO}:ro",
+        f"--tmpfs={ONESHOT_HOME}:rw,mode=1777",
+        "-e",
+        f"HOME={ONESHOT_HOME}",
+    ]
+    if host.selinux == "relabel":
+        flags = _relabelled(flags)
+    return Oneshot(host.cli, flags, [sandbox["image"], "sh", "-c", _ONESHOT_SH, ONESHOT_HOME_RO])
 
 
 def _relabelled(argv: list[str]) -> list[str]:
@@ -660,9 +1025,12 @@ async def oom_killed(session_id: str) -> str | None:
 DOCKER_CALL_TIMEOUT_S = 30.0
 
 
-async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, str] | None:
+async def docker_call(
+    *args: str, timeout: float | None = None, env: dict[str, str] | None = None
+) -> tuple[int, str] | None:
     """Run `docker args...`; `(returncode, stdout)`, or None when docker is
-    missing or did not answer in time (its client is then killed)."""
+    missing or did not answer in time (its client is then killed). `env`
+    overlays the client's own environment, for a bare `-e NAME` to copy."""
     try:
         cli = (await asyncio.to_thread(runtime)).cli
     except ConfigError, OSError:
@@ -671,10 +1039,12 @@ async def docker_call(*args: str, timeout: float | None = None) -> tuple[int, st
         return None
     try:
         proc = await asyncio.create_subprocess_exec(
-            cli,
+            # Found on the daemon's PATH, not on one `env` sets.
+            shutil.which(cli) or cli,
             *args,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=None if env is None else {**os.environ, **env},
         )
     except OSError:
         return None
@@ -705,6 +1075,48 @@ async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:
     return orphans
 
 
+async def sweep_volumes(keep: Iterable[str] = ()) -> list[str]:
+    """`sweep_orphans` for the TLS transport's session volumes: every one
+    this Kraft home made that no live session owns, removed after the
+    relays that mounted it."""
+    listed = await docker_call(
+        "volume",
+        "ls",
+        "--filter",
+        f"label={home_label()}",
+        "--filter",
+        f"label={VOLUME_LABEL}",
+        "--format",
+        "{{.Name}}",
+    )
+    if listed is None or listed[0] != 0:
+        return []
+    keep = set(keep)
+    orphans = [n for n in listed[1].split() if n not in keep]
+    for name in orphans:
+        await docker_call("volume", "rm", "-f", name)
+    return orphans
+
+
+#: A container's PATH when its image sets none: the runtime's own default.
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+async def image_path(image: str) -> str | None:
+    """The PATH `image` gives its containers (its `Config.Env`), the
+    runtime's default when it sets none; None when it could not be read. A
+    launch under `network:` puts the `kraft` shim first on it: `-e PATH`
+    replaces the image's, it does not extend it."""
+    inspected = await docker_call("image", "inspect", "--format", "{{json .Config.Env}}", image)
+    if inspected is None or inspected[0] != 0:
+        return None
+    try:
+        env = json.loads(inspected[1]) or []
+    except ValueError:
+        return None
+    return next((e[5:] for e in env if e.startswith("PATH=")), DEFAULT_PATH)
+
+
 #: `(image, executable)` pairs an image was seen to hold. Only a hit is
 #: remembered: an operator who fixes the image need not restart Kraft.
 _HAS_EXECUTABLE: set[tuple[str, str]] = set()
@@ -718,20 +1130,24 @@ async def missing_executable(
     container that exists -- which reads as the agent failing and opens a fix
     loop no agent can win. Asked the way the launch will run: through the
     image's own entrypoint (a version manager's shim sets `PATH` there) and
-    with the repository's literal `env`. Anything inconclusive -- no daemon,
+    with the repository's `env`, by name like the launch. Anything inconclusive -- no daemon,
     no `sh`, an entrypoint that is the agent itself, a pull that failed -- is
     False: the launch goes ahead and fails, or not, as it always did."""
     key = (image, executable)
     if key in _HAS_EXECUTABLE:
         return False
-    env_args = [a for name, value in (env or {}).items() for a in ("-e", f"{name}={value}")]
+    try:
+        host = await asyncio.to_thread(runtime)
+    except ConfigError, OSError:
+        return False
+    env_args = [a for name in (env or {}) for a in ("-e", name)]
     probed = await docker_call(
         "run",
         "--rm",
         "--label",
         home_label(),
         "--network=none",
-        "--cap-drop=ALL",
+        *host.security_args(),
         *env_args,
         image,
         "sh",
@@ -739,6 +1155,7 @@ async def missing_executable(
         'command -v "$0" >/dev/null && echo kraft-probe-yes || echo kraft-probe-no',
         executable,
         timeout=300,
+        env=env,
     )
     if probed is None or probed[0] != 0:
         return False
@@ -747,6 +1164,25 @@ async def missing_executable(
         _HAS_EXECUTABLE.add(key)
         return False
     return answer == ["kraft-probe-no"]
+
+
+def foreign_owned(paths: Iterable[Path], host: Runtime) -> str | None:
+    """Why a rootless container cannot use one of `paths`: it writes as the
+    operator, and a path someone else owns (left by another runtime, before
+    a switch) fails it mid-session instead. Spec §3."""
+    uid = os.getuid()
+    for path in paths:
+        try:
+            owner = path.stat().st_uid
+        except FileNotFoundError:
+            continue
+        if owner != uid:
+            return (
+                f"{path} is owned by uid {owner}, not by you (uid {uid}), and a "
+                f"{host.describe()} container writes as you, so it cannot use it "
+                f"(left by another runtime?); `sudo chown -R {uid} {path}`, or remove it"
+            )
+    return None
 
 
 def sandbox_home(run_dirs, work_item_id: str) -> Path:
@@ -795,6 +1231,19 @@ class DockerBackend:
     def home(self, run_dirs, work_item_id: str) -> Path:
         return sandbox_home(run_dirs, work_item_id)
 
+    async def owner_refusal(
+        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
+    ) -> str | None:
+        try:
+            host = await asyncio.to_thread(runtime)
+        except ConfigError:
+            return None  # `probe` says why
+        if not host.rootless:
+            return None
+        dirs = linked_gitdirs(Path(cwd))
+        shadow = (_refstore.shadow_dir(run_dirs.base, dirs[1]),) if dirs is not None else ()
+        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadow, result_path), host)
+
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
             host = await asyncio.to_thread(runtime)
@@ -810,11 +1259,12 @@ class DockerBackend:
             )
         return None
 
-    async def prepare(self, sandbox: dict) -> Path | None:
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """The image's combined CA bundle, built when there is an extra CA
-        (`docker_forward.prepare`), for `wrap`'s `ca_bundle`."""
+        or a `kraft_ca` (`docker_forward.prepare`), for `wrap`'s
+        `ca_bundle`."""
         try:
-            return await _forward.prepare(sandbox["image"])
+            return await _forward.prepare(sandbox["image"], kraft_ca=kraft_ca)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
         except OSError as exc:
@@ -839,7 +1289,9 @@ class DockerBackend:
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,
+        sentinels: dict[str, str] | None = None,
     ) -> list[str]:
+        network = sandbox.get("network") and session_id is not None
         return docker_argv(
             cmd,
             cwd,
@@ -854,7 +1306,15 @@ class DockerBackend:
             passthrough=passthrough,
             ro_paths=ro_paths,
             ca_bundle=ca_bundle,
+            relay=relay_name(session_id) if network else None,
+            sentinels=sentinels,
         )
+
+    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
+        try:
+            return oneshot(sandbox, cwd, home)
+        except SandboxRefused as exc:
+            raise SandboxNotReady(str(exc)) from exc
 
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         return launch_failed(cidfile, returncode)
@@ -880,8 +1340,110 @@ class DockerBackend:
     async def close(self, session_id: str) -> None:
         await teardown(session_id)
 
+    async def _relay_image(self) -> tuple[str, Runtime]:
+        try:
+            image = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            return image, await asyncio.to_thread(runtime)
+        except ConfigError as exc:
+            raise SandboxNotReady(str(exc)) from exc
+
+    async def egress_transport(self) -> str:
+        """ "unix" where a container can connect to a host unix socket, "tls"
+        where it cannot and the runtime says it runs in a VM (spike 4.5a);
+        refused (`SandboxNotReady`) otherwise, or when the probe could not
+        tell."""
+        image, host = await self._relay_image()
+        reachable = await asyncio.to_thread(socket_channel, image)
+        said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+        if problem := channel_refusal(host, image, reachable, said):
+            raise SandboxNotReady(problem)
+        return "unix" if reachable else "tls"
+
+    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
+        """Start the session's relay (`relay_argv`) and return the worker's
+        proxy environment; `{}` for a sandbox with no `network`. Under the
+        TLS transport (`sock_path` None) the relay reaches the daemon
+        through relay B (`relay_b_argv`) and a volume between them. Whatever
+        did not start is refused (`SandboxNotReady`) and all of it removed."""
+        if not sandbox.get("network"):
+            return {}
+        image, host = await self._relay_image()
+        # ponytail: replaces a repository's own literal `env: PATH` under
+        # `network:`; prepend to that instead if a repository ever needs one.
+        path = await image_path(sandbox["image"])
+        if path is None:
+            raise SandboxNotReady(
+                f"could not read image {sandbox['image']!r}'s PATH to put the `kraft` shim "
+                "first on it (the image is not pulled, or the runtime did not answer)"
+            )
+        try:
+            if sock_path is None:
+                await self._open_relay_b(session_id, image, host)
+            argv = relay_argv(session_id, sock_path, image)
+        except SandboxRefused as exc:
+            await self.close_session(session_id)
+            raise SandboxNotReady(str(exc)) from exc
+        await self._run_or_remove(session_id, argv, f"the sandbox's egress relay from {image!r}")
+        return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
+
+    async def _open_relay_b(self, session_id: str, image: str, host: Runtime) -> None:
+        """The TLS transport's half: the session's volume, its client
+        certificate, and relay B dialling the listener's persisted port."""
+        run_dirs = _run_dirs()
+        port = _channel.tls_port(run_dirs)
+        if port is None:
+            raise SandboxNotReady(
+                "the Kraft server's egress TLS listener has not started, so a sandbox "
+                "with `network:` on this runtime has no route; restart the server"
+            )
+        await asyncio.to_thread(_ca.mint_session_cert, run_dirs, session_id)
+        await self._run_or_remove(
+            session_id,
+            [
+                host.cli,
+                "volume",
+                "create",
+                "--label",
+                home_label(),
+                "--label",
+                VOLUME_LABEL,
+                volume_name(session_id),
+            ],
+            "the sandbox's egress volume",
+        )
+        argv = relay_b_argv(session_id, image, port, _ca.session_dir(run_dirs, session_id))
+        await self._run_or_remove(session_id, argv, f"the sandbox's egress relay B from {image!r}")
+
+    async def _run_or_remove(self, session_id: str, argv: list[str], what: str) -> None:
+        done = await docker_call(*argv[1:])
+        if done is None or done[0] != 0:
+            await self.close_session(session_id)
+            raise SandboxNotReady(
+                f"could not start {what}: `{argv[0]} {argv[1]}` "
+                f"{'did not answer' if done is None else 'failed'}"
+            )
+
+    async def close_session(self, session_id: str) -> None:
+        """`docker rm -f` the session's relays, then its volume, and discard
+        its client certificate, bounded like `teardown`: whichever transport
+        it ran, each a no-op for what it never had. The socket is the
+        channel's to close (`ChannelRegistry.close`), not this backend's."""
+        await docker_call("rm", "-f", relay_name(session_id), relay_b_name(session_id))
+        await docker_call("volume", "rm", "-f", volume_name(session_id))
+        _ca.discard_session_cert(_run_dirs(), session_id)
+
     async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
-        return await sweep_orphans({container_name(sid) for sid in keep_sessions})
+        """What no live session owns: containers, relays included, then the
+        volumes they mounted, then client certificates (named for nothing)."""
+        keep = set(keep_sessions)
+        names = (container_name, relay_name, relay_b_name)
+        gone = await sweep_orphans({name(sid) for sid in keep for name in names})
+        gone += await sweep_volumes({volume_name(sid) for sid in keep})
+        sessions = _run_dirs().ca / "sessions"
+        for directory in sessions.iterdir() if sessions.is_dir() else ():
+            if directory.name not in keep:
+                _ca.discard_session_cert(_run_dirs(), directory.name)
+        return gone
 
     def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
         # The ref store is found through the worktree's `.git`, so this runs
@@ -911,9 +1473,30 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        egress = ""
+        if sandbox.get("network"):
+            # A launch never pulls it (`--pull=never` in the probe), and the
+            # refreshed runtime above forgot the probe's last answer.
+            try:
+                relay = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            except ConfigError as exc:
+                return False, str(exc)
+            pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay)
+            if pulled is None or pulled[0] != 0:
+                return False, (
+                    f"the egress relay image {relay!r} is not pulled -- "
+                    f"run: {host.cli} pull {relay}"
+                )
+            reachable = await asyncio.to_thread(socket_channel, relay)
+            said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+            if problem := channel_refusal(host, relay, reachable, said):
+                return False, problem
+            egress = f", egress relay {relay}"
+            if said:
+                egress += f" over the two-hop TLS transport ({said})"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
         return (
             True,
             f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}, "
-            f"{host.describe_limits()}",
+            f"{host.describe_limits()}{egress}",
         )

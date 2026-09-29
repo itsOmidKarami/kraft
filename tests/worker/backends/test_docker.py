@@ -7,7 +7,8 @@ import pytest
 from support.harness import fake_docker_bin
 
 from kraft.config import ConfigError
-from kraft.worker import sandbox
+from kraft.paths import RunDirs
+from kraft.worker import refstore, sandbox
 from kraft.worker.backends import docker
 from kraft.worker.refstore import RefStore
 
@@ -302,6 +303,40 @@ def test_docker_argv_forwards_passthrough_names_bare():
     assert not [a for a in argv if a.startswith("OPENAI_API_KEY=")]
 
 
+def test_a_name_given_both_bare_and_literal_crosses_once_as_the_literal():
+    """Two `-e` for one name leave the winner to the runtime; the literal (the
+    relay's proxy, a CA path, a pin) is the one that must hold."""
+    argv = docker.docker_argv(
+        ["codex"],
+        "/w",
+        {"kind": "docker", "image": "x"},
+        None,
+        env={"HTTPS_PROXY": "http://127.0.0.1:3128"},
+        passthrough=["HTTPS_PROXY"],
+    )
+    assert [a for a in argv if a.startswith("HTTPS_PROXY")] == ["HTTPS_PROXY=http://127.0.0.1:3128"]
+
+
+def test_a_managed_credential_crosses_as_its_sentinel_and_nothing_else(monkeypatch):
+    """Spec §6: the variable holds the sentinel, literal, over its bare
+    `FORWARDED_ENV` name, a passthrough name and the caller's own `env`;
+    the daemon's value is on no argument."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real-VALUE")
+    argv = docker.docker_argv(
+        ["claude"],
+        "/w",
+        {"kind": "docker", "image": "x"},
+        None,
+        env={"ANTHROPIC_API_KEY": "from-the-caller"},
+        passthrough=["ANTHROPIC_API_KEY"],
+        sentinels={"ANTHROPIC_API_KEY": "sk-ant-api03-kraft-proxy-managed"},
+    )
+    assert [a for a in argv if "ANTHROPIC_API_KEY" in a] == [
+        "ANTHROPIC_API_KEY=sk-ant-api03-kraft-proxy-managed"
+    ]
+    assert not [a for a in argv if "real-VALUE" in a]
+
+
 def test_docker_argv_pins_hooks_off_for_git_in_the_container():
     """A hook manager's hook points at a host interpreter, so it fails every
     commit in the container; and a hook is the worker's code anyway."""
@@ -399,13 +434,20 @@ async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "argv"
-    (bin_dir / "docker").write_text(f'#!/bin/sh\necho "$@" > {log}\necho kraft-probe-yes\n')
+    (bin_dir / "docker").write_text(
+        f'#!/bin/sh\necho "$@" > {log}\necho "$PATH" >> {log}\necho kraft-probe-yes\n'
+    )
     (bin_dir / "docker").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     assert await docker.missing_executable("img", "claude", {"PATH": "/opt/bin"}) is False
-    argv = log.read_text().split()
+    line, client_path = log.read_text().splitlines()
+    argv = line.split()
     assert not [a for a in argv if a.startswith("--entrypoint")]
-    assert argv[argv.index("PATH=/opt/bin") - 1] == "-e"
+    assert {"--security-opt=no-new-privileges", "--cap-drop=ALL"} <= set(argv)
+    # By name, like the launch: the value rides in the client's env.
+    assert argv[argv.index("PATH") - 1] == "-e"
+    assert "PATH=/opt/bin" not in argv
+    assert client_path == "/opt/bin"
 
 
 # --- runtimes: docker, podman, rootless, SELinux --------------------------------------
@@ -463,6 +505,46 @@ def test_an_enforcing_host_nobody_configured_refuses_the_launch(monkeypatch):
     the operator: the task stops and says which two there are."""
     with pytest.raises(docker.SandboxRefused, match="selinux: relabel"):
         _argv_on(monkeypatch, docker.Runtime(selinux="refuse"))
+
+
+@pytest.mark.parametrize(
+    ("rootless", "theirs"),
+    [(True, "home"), (True, "refs"), (True, "result"), (False, "home")],
+    ids=["home", "ref-store", "result-file", "rootful"],
+)
+async def test_a_rootless_runtime_refuses_a_path_someone_else_owns(
+    monkeypatch, tmp_path, rootless, theirs
+):
+    """Its container writes as the operator, so a HOME, ref store or result
+    file another runtime left behind would fail it mid-session. Spec §3."""
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(rootless=rootless))
+    run_dirs = RunDirs(base=tmp_path / "run")
+    monkeypatch.setattr(docker, "linked_gitdirs", lambda cwd: (tmp_path, tmp_path / "wt"))
+    paths = {
+        "home": docker.sandbox_home(run_dirs, "w1"),
+        "refs": refstore.shadow_dir(run_dirs.base, tmp_path / "wt"),
+        "result": tmp_path / "s1.json",
+    }
+    # A first launch has no HOME or result file yet: neither is refused.
+    mine = [p for k, p in paths.items() if k not in (theirs, "home", "result")]
+    for path in [*mine, paths[theirs]]:
+        path.mkdir(parents=True, exist_ok=True)
+    uid = os.getuid() + 1  # a root test run would hide a uid bug
+    monkeypatch.setattr(docker.os, "getuid", lambda: uid)
+    real_stat = Path.stat
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda p, **kw: (
+            os.stat_result((0, 0, 0, 0, uid, 0, 0, 0, 0, 0)) if p in mine else real_stat(p, **kw)
+        ),
+    )
+    reason = await docker.DockerBackend().owner_refusal(run_dirs, tmp_path, "w1", paths["result"])
+    if rootless:
+        path = paths[theirs]
+        assert f"{path} is owned by uid" in reason and f"chown -R {uid} {path}" in reason
+    else:
+        assert reason is None
 
 
 async def test_the_refusal_stops_a_session_before_it_starts(monkeypatch):

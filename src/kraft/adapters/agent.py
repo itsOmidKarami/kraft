@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -26,6 +27,8 @@ from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import backends as _backends
+from kraft.worker import callback as _callback
+from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 _CTX = (
@@ -643,12 +646,41 @@ def _restricted(
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
+async def _cli_version(exe: list[str], name: str, cwd: str | Path, runner=None) -> str | None:
+    """`exe --version`, parsed; None when it cannot be told -- not installed,
+    no answer, no version in it -- and the launch goes ahead as ever. `runner`
+    is a sandbox backend's `oneshot`, asking the image's own CLI."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *(runner.argv() if runner is not None else ()),
+            *exe,
+            "--version",
+            cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), 60)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return None
+    except OSError:
+        return None
+    finally:
+        if runner is not None:
+            await runner.close()
+    return _harness.find_version(out.decode(errors="replace"), name)
+
+
 def _install_hook(
     h: _harness.Harness,
     cwd: Path,
     allowed: tuple[str, ...] | None,
     deny: tuple[str, ...],
     grants: tuple[str, ...],
+    sandbox: dict | None,
 ) -> None:
     """Kraft's pre-tool hook in the worktree when there is policy to enforce
     (Kraft-4in7z). The entry is the same for every launch and never removed:
@@ -661,7 +693,7 @@ def _install_hook(
     # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
     if h.permission_hook == "cursor":
         try:
-            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
+            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id, sandbox))
         except _hook_install.HookFileError as exc:
             # Its policy needs the hook; without it the launch runs unenforced.
             raise LaunchRefused(str(exc)) from exc
@@ -793,32 +825,95 @@ async def run_agent_task(
             f"in its hook, so it cannot deny {blind!r} as this launch's policy requires; "
             f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
         )
-    if sandbox and hooked and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
-        # The hook is a host command answering over Kraft's local API, and a
-        # container has neither: it would crash, and a crashed hook allows the
-        # call (codex, measured; cursor by its docs).
+    channel = bool(sandbox and sandbox.get("network"))
+    asks = h.capabilities.get("approval_channel")
+    if sandbox and not channel and asks is not None and asks.always:
+        # Every launch names Kraft's MCP permission tool, and only a channel
+        # reaches a Kraft MCP server from a sandbox: without one the CLI exits
+        # at start naming the missing tool (spike 5.5).
+        raise LaunchRefused(
+            f"harness {harness!r} asks Kraft's permission gate through an MCP tool on every "
+            f"launch, which a sandbox without `network:` cannot reach (the CLI would exit at "
+            f"start); give the sandbox a `network:`, or run this task unsandboxed"
+        )
+    if (
+        sandbox
+        and not channel
+        and hooked
+        and _hook_install.needs_hook(allowed_tools, deny_tools, grants)
+    ):
+        # The hook reaches Kraft only through the session's channel (the
+        # `kraft` shim), and a sandbox without `network:` has none: it would
+        # crash, and a crashed hook allows the call (codex, measured; cursor
+        # by its docs).
         raise LaunchRefused(
             f"harness {harness!r} holds this launch's tool policy with Kraft's permission "
-            f"hook, which cannot run inside a sandbox, and a sandboxed launch never runs "
-            f"with its policy unenforced; use a harness whose own rules the container "
+            f"hook, which cannot run inside a sandbox without `network:` (its only route "
+            f"to Kraft), and a sandboxed launch never runs with its policy unenforced; "
+            f"give the sandbox a `network:`, use a harness whose own rules the container "
             f"holds (amp, opencode), or remove the tool policy (allowed_tools, "
             f"deny_tools, or a grant beyond git-commit) at the layer that sets it"
         )
+    if sandbox and sandbox.get("network") and not h.proxy_aware:
+        # Its only route out is the relay's proxy, which this CLI ignores: it
+        # would fail closed, and mysteriously (spec §4).
+        raise LaunchRefused(
+            f"harness {harness!r} ({h.path}) declares `proxy_aware: false`: it ignores "
+            f"HTTP(S)_PROXY, and a sandbox with `network:` has no other route out; use "
+            f"another harness, or remove the sandbox's `network`"
+        )
+    if h.min_version is not None:
+        exe = shlex.split(command) if command else [h.command[0]]
+        # ponytail: a sandboxed launch asks its image on every launch (one short
+        # container); cache on the image id if that shows.
+        try:
+            runner = (
+                await asyncio.to_thread(
+                    _backends.for_sandbox(sandbox).oneshot,
+                    sandbox,
+                    cwd,
+                    _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
+                )
+                if sandbox
+                else None
+            )
+        except _sandbox.SandboxNotReady:
+            found = None  # the backend's own probe refuses this launch, by name
+        else:
+            found = await _cli_version(exe, h.id, cwd, runner)
+        if found is not None and _harness.version_key(found) < _harness.version_key(h.min_version):
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {h.min_version} or newer, "
+                f"and {'the sandbox image has' if sandbox else 'this machine has'} "
+                f"{found}; older releases refuse its command line"
+            )
     if sandbox and h.container_permission_mode is not None:
         default = h.capabilities["permission_mode"].always
         defaults = (default,) if isinstance(default, str) else tuple(default or ())
         if options.get("permission_mode") in (None, *defaults):
             options["permission_mode"] = h.container_permission_mode
     if hooked:
-        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
+        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants, sandbox)
     hook_argv: tuple[str, ...] = ()
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
         try:
-            hook_argv = await _hook_install.codex_hook_flags(
-                exe, _hook_install.hook_argv(h.id), Path(cwd)
+            # The session's own codex vouches for the hook: a sandbox's is the
+            # image's, and another version may hash it otherwise (skipped).
+            runner = (
+                await asyncio.to_thread(
+                    _backends.for_sandbox(sandbox).oneshot,
+                    sandbox,
+                    cwd,
+                    _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
+                )
+                if sandbox
+                else None
             )
-        except _hook_install.CodexTrustError as exc:
+            hook_argv = await _hook_install.codex_hook_flags(
+                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), runner
+            )
+        except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
             # Never launched unenforced, never with every hook trusted.
             raise LaunchRefused(
                 f"harness {harness!r} cannot run Kraft's permission hook, which this "
@@ -847,6 +942,11 @@ async def run_agent_task(
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
+    if channel and h.supports("mcp_config"):
+        # Its only MCP server is the session's own, through the channel: the
+        # host's registration is not in the sandbox (spike 5.5).
+        url = f"{_callback.address(sandbox['kind'])}/mcp"
+        options["mcp_config"] = json.dumps({"mcpServers": {"kraft": {"type": "http", "url": url}}})
     cmd = _harness.build_argv(
         h,
         command=command or None,
@@ -898,6 +998,8 @@ async def run_agent_task(
         repo_entry=repo_entry,
         reader=reader,
         time_cap=time_cap,
+        network_requires=h.network_requires,
+        declared=h.credentials,
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,

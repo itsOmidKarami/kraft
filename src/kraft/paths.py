@@ -107,6 +107,19 @@ class RunDirs:
         """
         return self.base / "attachments"
 
+    @property
+    def sockets(self) -> Path:
+        """Each sandboxed session's egress socket, `sn/<short>/s.sock`
+        (`worker.channel`): kept short, since a unix socket path may be at
+        most 104 bytes on macOS and 108 on Linux."""
+        return self.base / "sn"
+
+    @property
+    def ca(self) -> Path:
+        """The Kraft CA, its key (0600) and the certificates it signed
+        (`worker.ca`); the egress TLS listener's persisted port."""
+        return self.base / "ca"
+
     def ensure(self) -> RunDirs:
         for d in (self.logs, self.results, self.worktrees, self.attachments):
             d.mkdir(parents=True, exist_ok=True)

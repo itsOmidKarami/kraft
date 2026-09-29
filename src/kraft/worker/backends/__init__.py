@@ -33,16 +33,25 @@ class SandboxBackend(Protocol):
     def home(self, run_dirs, work_item_id: str) -> Path:
         """The item's own `HOME`, kept across its sessions."""
 
+    async def owner_refusal(
+        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
+    ) -> str | None:
+        """Why a path this launch's container writes (its HOME, ref store or
+        result file) belongs to someone it cannot write as, or None. Asked
+        before Kraft writes any of them; `config_error` when it answers."""
+
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         """Why a launch of `executable` cannot start, or None to go ahead:
         a session that could never start is `config_error`, not a task
         failure."""
 
-    async def prepare(self, sandbox: dict) -> Path | None:
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """Ready what a launch in `sandbox` needs on the host side, after a
         successful `probe`: the CA bundle to hand `wrap` as `ca_bundle`, or
-        None for none. Raises `worker.sandbox.SandboxNotReady` saying why the
-        launch cannot go ahead (`config_error`)."""
+        None for none -- with `kraft_ca` (the Kraft CA's certificate, when
+        the launch has a proxy-managed credential) trusted too. Raises
+        `worker.sandbox.SandboxNotReady` saying why the launch cannot go
+        ahead (`config_error`)."""
 
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
         """Put the worktree's code where the session will see it. `branch`
@@ -50,7 +59,14 @@ class SandboxBackend(Protocol):
 
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results_dir, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
-        what `prepare` returned."""
+        what `prepare` returned, `sentinels=` each proxy-managed
+        credential's variable and what it holds in the value's place."""
+
+    def oneshot(self, sandbox: dict, cwd, home):
+        """Short commands in the session's image, asked as its session would
+        but with no network, stdin attached: `.argv()` per command (the
+        argv up to it), `await .close()` after. `worker.sandbox.SandboxNotReady`
+        where it cannot."""
 
     def client_cwd(self, session_id: str) -> Path | None:
         """The directory to start the wrapped command's client in, made for
@@ -81,6 +97,27 @@ class SandboxBackend(Protocol):
     async def close(self, session_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A
         no-op for a session this backend never ran."""
+
+    async def egress_transport(self) -> str:
+        """How this backend's sessions reach the egress channel, asked before
+        it opens: "unix", a socket per session, or "tls", the daemon's one
+        mTLS listener (a runtime in a VM cannot connect to a host socket).
+        Raises `worker.sandbox.SandboxNotReady` when it cannot tell."""
+
+    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
+        """Ready the session's egress route under `sandbox['network']`
+        before it starts, to the channel listening at `sock_path`
+        (`worker.channel`), None under the "tls" transport: docker starts a
+        relay the worker joins. Returns
+        the environment the launch must add (its proxy, and a PATH with the
+        `kraft` shim first); `{}` for a sandbox
+        with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
+        route cannot be made (`config_error`), never opens egress instead."""
+
+    async def close_session(self, session_id: str) -> None:
+        """Undo `open_session`, best-effort and bounded like `close`, and a
+        no-op for a session with no route. The channel itself is closed by
+        whoever opened it (`run_task`, reattach), not by the backend."""
 
     async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
         """Remove what this Kraft home started that no session in

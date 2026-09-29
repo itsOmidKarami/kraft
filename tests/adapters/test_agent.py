@@ -422,13 +422,17 @@ def test_autocompact_is_exempt_because_it_rides_along_with_resume(run):
     assert "--autocompact" not in run(harness="gemini", command="gemini", autocompact="auto")["cmd"]
 
 
+#: A claude launch is sandboxed only under `network:` (its MCP permission tool).
+NET = {"runtime": {"allow": ["x.io"]}}
+
+
 @pytest.mark.parametrize(
     "overrides, key, expected",
     [
         (
-            {"sandbox": {"kind": "docker", "image": "kraft-worker"}},
+            {"sandbox": {"kind": "docker", "image": "kraft-worker", "network": NET}},
             "sandbox",
-            {"kind": "docker", "image": "kraft-worker"},
+            {"kind": "docker", "image": "kraft-worker", "network": NET},
         ),
         ({}, "sandbox", None),
     ],

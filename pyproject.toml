@@ -26,6 +26,9 @@ dependencies = [
     # mcp 2.x: FastMCP was renamed MCPServer and list_tools() became sync, so
     # this is a floor on the API kraft/mcp.py actually uses, not just on bugfixes.
     "mcp>=2",
+    # The Kraft CA (P4b egress on VM runtimes; P6 credential injection later):
+    # the extensions VERIFY_X509_STRICT needs, not a shell-out to openssl.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -64,9 +67,11 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 # Built SPA and default config, copied in by `just install`. Absent from a plain
-# checkout, so a build that skips that recipe ships an API with no UI.
+# checkout, so a build that skips that recipe ships an API with no UI. Beside
+# them, files checked in: skills, harnesses, prices and the sandbox's `kraft`
+# shim (mode 0755 in git, which the wheel keeps).
 [tool.setuptools.package-data]
-kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*", "prices.json"]
+kraft = ["_bundled/**/*", "skills/**/*", "harnesses/**/*", "prices.json", "worker/bin/kraft"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins/kraft-lite/tests"]

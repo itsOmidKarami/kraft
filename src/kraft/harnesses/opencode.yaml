@@ -24,6 +24,12 @@
 id: opencode
 kind: cli
 command: [opencode, run]
+# Kraft-8cml5: 2.x only. npm's opencode-ai is still 1.x (1.18.33 on
+# 2026-09-29) and refuses `--standalone` and `--log-level error`; 2.x ships as
+# a binary (opencode.ai/files/bin/<version>, Homebrew anomalyco/tap/opencode-v2).
+# 2.0.0's `run --help` has every flag below and `session export` (checked
+# 2026-09-29). A launch asks `opencode --version` and refuses an older one.
+min_version: "2.0.0"
 
 # Kraft-4in7z.4: no per-call hook (a plugin's tool.execute.before never loaded
 # in the probe). deny_tools and allowed_tools are written into the launch's
@@ -73,3 +79,7 @@ capabilities:
 # the model id, `-m provider/model#high`), restrict_tools and approval_channel
 # (tool permissions are config rules, not `run` flags; see permission_rules
 # above), autocompact (config `compaction`, not a flag).
+
+# No `network.requires`: opencode talks to whichever model provider it is
+# configured for, so a repository running it under `network:` must allow that
+# provider's API host in its own runtime list. Proxy awareness is UNVERIFIED.

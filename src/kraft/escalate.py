@@ -23,6 +23,7 @@ from kraft.adapters import agent as _agent
 from kraft.adapters.subprocess import result_path_for
 from kraft.executor import LaunchContext, stops
 from kraft.templates.models import AgentTask, GateNode, TaskKind
+from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
 _SESSIONS = ".engineering/sessions"
@@ -54,6 +55,14 @@ _NEEDS_HUMAN_ACTION = (
     "If you are not confident it is fixed, say so and stop instead -- a "
     "human decides from there.\n"
 )
+#: `_NEEDS_HUMAN_ACTION` for a turn in a sandbox with no route to Kraft
+#: (no `network:`): it cannot run `kraft` at all, so it reports instead.
+_NEEDS_HUMAN_ACTION_NO_CHANNEL = (
+    "You are running in a sandbox with no route to Kraft, so you cannot resume "
+    "the chain yourself. If you resolve the problem, say so plainly, and a "
+    "human retries it. If you are not confident it is fixed, say so and stop "
+    "instead -- a human decides from there.\n"
+)
 #: `{action_line}` for a `paused` item (Kraft-k5ol widened `/escalate` to
 #: accept one). Neither self-action route works here: `retry_work_item` 409s
 #: on anything but `needs_human`, and `resume_work_item` 409s while *any*
@@ -82,6 +91,14 @@ _HANDS_OFF = (
     "Skip action on the board). Abandoning is theirs as well: `kraft item "
     "abandon --yes {work_item_id}`.\n"
 )
+
+
+def _action_line(status: str, sandbox: dict | None) -> str:
+    if status != "needs_human":
+        return _PAUSED_ACTION
+    return _NEEDS_HUMAN_ACTION if _callback.reachable(sandbox) else _NEEDS_HUMAN_ACTION_NO_CHANNEL
+
+
 _STATE = (
     "{opening}"
     "Status: {status}\n"
@@ -386,18 +403,6 @@ async def dispatch(
     session_id = uuid.uuid4().hex
     worktree = run_dirs.worktrees / work_item_id
 
-    task_instruction = _STATE.format(
-        opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
-        status=row["status"],
-        node_id=row["current_node_id"],
-        reason_line=_reason_line(_last_stop(db, work_item_id, evts), row["status"]),
-        judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
-        description_line=_description_line(row),
-        action_line=_NEEDS_HUMAN_ACTION if row["status"] == "needs_human" else _PAUSED_ACTION,
-        hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
-        message=message,
-    )
-
     # Node-scoped (Kraft-l8ype, `stuck-escalation-is-an-exec-node-control`):
     # the turn runs under the policy of the node the item stopped at, resolved
     # from its snapshot like every other agent launch -- instance, repository,
@@ -462,6 +467,17 @@ async def dispatch(
     except executor.SandboxUnresolved as exc:
         await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
+    task_instruction = _STATE.format(
+        opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
+        status=row["status"],
+        node_id=row["current_node_id"],
+        reason_line=_reason_line(_last_stop(db, work_item_id, evts), row["status"]),
+        judge_line=_judge_line(db, work_item_id, row["current_node_id"], evts=evts),
+        description_line=_description_line(row),
+        action_line=_action_line(row["status"], sandbox),
+        hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
+        message=message,
+    )
     try:
         inv = _agent.resolve_agent_task(
             ESCALATION_TASK.model_copy(update={"harness": harness_id}),

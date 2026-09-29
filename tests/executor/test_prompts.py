@@ -23,6 +23,18 @@ def _task(skill: str | None = None) -> AgentTask:
 WORKER = _task()
 REVIEWER = _task("kraft:code-review")
 
+#: Where a worker can run `kraft` (host, a sandbox with `network:`) and where not.
+DOCKER = {"kind": "docker", "image": "x"}
+REACHABLE = pytest.mark.parametrize(
+    ("sandbox", "reachable"),
+    [
+        (None, True),
+        ({**DOCKER, "network": {"runtime": {"allow": ["x.io"]}}}, True),
+        (DOCKER, False),
+    ],
+    ids=["host", "network", "no-network"],
+)
+
 
 def test_attachment_note_lists_each_document_and_keeps_the_imperative_for_the_implementer():
     out = prompts.attachment_note(
@@ -230,6 +242,18 @@ def test_rebase_drift_note_truncates_a_long_diff(repo):
     assert "(truncated)" in note
 
 
+@REACHABLE
+def test_a_worker_reports_progress_by_kraft_only_where_it_can_run_it(
+    monkeypatch, sandbox, reachable
+):
+    """A sandbox without `network:` has no route to Kraft: the commit tag,
+    which Kraft reads when no report was made, is all it is asked for."""
+    monkeypatch.setattr(prompts._progress, "tasks_for", lambda row, worktree: ["a", "b"])
+    note = prompts.progress_note(WORKER, {"id": "w1"}, "/wt", sandbox=sandbox)
+    assert "This plan has 2 tasks." in note and "`(task K)`" in note
+    assert ("kraft item progress" in note) is reachable
+
+
 # -- review_threads_note (review threads anywhere §1) -----------------------------
 
 
@@ -245,15 +269,18 @@ async def _published(database, **kw):
     return tid
 
 
-async def test_a_working_agent_is_told_to_address_and_reply(database):
+@REACHABLE
+async def test_a_working_agent_is_told_to_address_and_reply(database, sandbox, reachable):
+    """By `kraft item reply` where it can run it; by its summary where not."""
     await mk_item(database)
     tid = await _published(database)
     row = database.read(lambda c: c.execute("SELECT * FROM work_items WHERE id='w1'").fetchone())
 
-    text = prompts.review_threads_note(WORKER, row, database, None)
+    text = prompts.review_threads_note(WORKER, row, database, None, sandbox)
 
     assert f"[{tid}]" in text and "evict LRU" in text
-    assert "kraft item reply" in text
+    assert ("kraft item reply" in text) is reachable
+    assert ("summary" in text) is not reachable
 
 
 async def test_a_reviewer_judges_against_the_threads_and_does_not_reply(database):

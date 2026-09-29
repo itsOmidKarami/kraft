@@ -191,6 +191,17 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
         # Harmless when `cost_estimated` was already dropped (version < 41).
         cost = "cost_estimated INTEGER NOT NULL DEFAULT 0"
         replace = (*replace, (f"{cost},", cost))
+    if version < 44:
+        drop_lines = (
+            *drop_lines,
+            "egress         TEXT",
+            "-- a sandboxed session's egress lists",
+            "-- them, JSON {",
+            "-- reattach re-opens its channel",
+            "-- NULL: no `network`",
+        )
+        # Harmless when `sandbox` was already dropped (version < 43).
+        replace = (*replace, ("sandbox        TEXT,", "sandbox        TEXT"))
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -475,6 +486,8 @@ ADDED_COLUMNS = [
     (40, "worker_sessions", ("cost_estimated",), 0),
     # NULL: an older row names no backend, so every backend is asked to clean it
     (42, "worker_sessions", ("sandbox",), None),
+    # NULL: no `network` policy, so an adopted session has no channel to re-open
+    (43, "worker_sessions", ("egress",), None),
 ]
 
 

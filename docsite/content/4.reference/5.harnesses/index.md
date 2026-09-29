@@ -28,7 +28,7 @@ Kraft ships six harnesses:
 | `claude` | `claude` | Full capability set. |
 | `codex` | `codex exec` | No `restrict_tools`, `approval_channel`, or `autocompact` — a profile or task asking for one of those is rejected at load. `deny_tools` and `allowed_tools` work through a `PreToolUse` hook passed with `-c` and trusted for that launch only, answered by the [permission gate](/reference/permissions#codex); web search never reaches it. Tokens, the thread id and a usage-limit stop are read off its `--json` log; it reports no cost, and no reset time for a limit. |
 | `cursor` | `agent -p --trust` | Cursor's agent CLI. Runs in `--auto-review` (Cursor's classifier); `permission_mode: force` overrides it. No out-of-band context channel (context goes in the prompt), no `effort` (a model id can carry one, such as `'name[effort=high]'`), and no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. `deny_tools` and `allowed_tools` work through a `preToolUse` hook Kraft installs in the worktree, answered by the [permission gate](/reference/permissions#cursor). Tokens and the chat id `resume` takes are read off its `stream-json` log; it reports no cost. An API-key install needs `env_passthrough: [CURSOR_API_KEY]` on the repo. |
-| `opencode` | `opencode run` | No out-of-band context channel (context goes in the prompt), no `restrict_tools`, `approval_channel` or `autocompact`. `deny_tools` and `allowed_tools` are written into the launch's own OpenCode config, with `--standalone`, when the task's policy sets either ([permission gate](/reference/permissions#opencode-and-amp-rules-written-at-launch)). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. That log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails. A `task` sub-agent's tokens are not in the log. |
+| `opencode` | `opencode run` | Needs OpenCode 2.0.0 or newer (not npm's 1.x `opencode-ai`); an older one is refused at launch. No out-of-band context channel (context goes in the prompt), no `restrict_tools`, `approval_channel` or `autocompact`. `deny_tools` and `allowed_tools` are written into the launch's own OpenCode config, with `--standalone`, when the task's policy sets either ([permission gate](/reference/permissions#opencode-and-amp-rules-written-at-launch)). `model` is `provider/model` for any provider OpenCode knows. There is no `effort`: name a variant in the model id (`openai/gpt-5.5#high`). Every launch passes `--auto`, since `run` otherwise rejects every permission request. Tokens, cost, the session id and a rate-limit stop are read off its `--format json` log. That log leaves out the last step's usage, so Kraft reads the session's totals from `opencode session export <session id>` when the run ends, and falls back to the log's steps if that fails. A `task` sub-agent's tokens are not in the log. |
 | `gemini` | `gemini` | No out-of-band context channel (context goes in-band via the prompt), no `effort`, no `resume` at all (Gemini's `--resume` takes an index or `"latest"`, not a session id, so the capability isn't declared). |
 | `amp` | `amp -x` | No `model`: Amp picks it. `effort` is Amp's mode (`-m low\|medium\|high\|ultra`). Context goes in-band via the prompt. No `permission_mode` (Amp asks for no approvals), no `restrict_tools`, `approval_channel`, `autocompact` or `rate_limit_signal`. `deny_tools` and `allowed_tools` go into a settings file of the launch's own (`--settings-file`) when the task's policy sets either ([permission gate](/reference/permissions#opencode-and-amp-rules-written-at-launch)). Tokens and the thread id `resume` takes are read off its `--stream-json` log; it reports no cost. Both command lines pass `--no-archive-after-execute`, because an archived thread can't be resumed. |
 
@@ -37,7 +37,7 @@ Kraft ships six harnesses:
 A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `writable_dirs` — and each harness's own YAML
+`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `writable_dirs`, `mcp_config` — and each harness's own YAML
 (a YAML file per harness) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
 acceptEdits|auto|...` for Claude, `-c sandbox_mode=read-only|workspace-write|...`
@@ -79,6 +79,14 @@ and `/tmp`, so without the grant a codex worker on a default install
 directories outright, because Codex's automatic reviewer is not relied on for
 either one. A harness
 that doesn't declare `writable_dirs` gets nothing extra.
+
+Another is filled by Kraft only for a [sandboxed](/reference/configuration/repos#sandboxed-workers)
+launch with `network:`: `mcp_config`, the CLI's MCP servers as one JSON object,
+`{"mcpServers": {"kraft": {"type": "http", "url": "http://kraft/mcp"}}}`: Kraft's
+own server for that session, reached through the sandbox's route out, since the
+MCP server registered on your machine is out of the container's reach. Claude
+binds it to `--strict-mcp-config --mcp-config {value}`, so that server is its
+only one and its `approval_channel` tool is answered there.
 
 Some harnesses declare `values:` on a capability — a closed vocabulary the
 CLI itself would reject (Codex's `effort` is `minimal, low, medium, high, xhigh`,

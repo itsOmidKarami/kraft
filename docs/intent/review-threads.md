@@ -137,8 +137,10 @@ origin: src/kraft/api/routes/lifecycle.py
 
 ## REQ working-agent-dispatch-carries-unanswered-threads
 WHEN an agent task with no skill is dispatched, the system SHALL include every
-unanswered review thread on its item, with the instruction to reply to each.
-enforced-by: tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply, tests/executor/test_dispatch_review_threads.py::test_the_implementer_prompt_carries_a_mid_run_thread
+unanswered review thread on its item, with the instruction to reply to each;
+in a sandbox with no route to Kraft (no `network:`), to say in its result what
+it did about each instead.
+enforced-by: tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply[host], tests/executor/test_prompts.py::test_a_working_agent_is_told_to_address_and_reply[no-network], tests/executor/test_dispatch_review_threads.py::test_the_implementer_prompt_carries_a_mid_run_thread, tests/executor/test_dispatch_review_threads.py::test_a_sandboxed_worker_is_told_to_run_kraft_only_with_a_route_to_it[no-network]
 origin: src/kraft/executor/prompts.py
 
 ## REQ reviewer-dispatch-judges-against-unanswered-threads

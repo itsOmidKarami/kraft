@@ -83,7 +83,12 @@ async def test_a_live_repository_deny_list_still_applies_on_top_of_the_frozen_on
     assert {"WebFetch", "Bash"} <= set(_flag(fake_agent.argv()[0], "--disallowed-tools"))
 
 
-_SANDBOX = {"kind": "docker", "image": "kraft/policy:1"}
+#: With `network:`: a claude-shaped agent is refused a sandbox without one.
+_SANDBOX = {
+    "kind": "docker",
+    "image": "kraft/policy:1",
+    "network": {"runtime": {"allow": ["x.io"]}},
+}
 _OTHER = {"kind": "docker", "image": "kraft/other:2"}
 _BUILTIN = {"id": "run", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"}
 
