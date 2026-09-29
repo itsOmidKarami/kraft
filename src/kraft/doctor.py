@@ -632,9 +632,22 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     )
     if passing:
         detail += f"; passes through: {', '.join(passing)}"
+    # A name alone that no harness declares: nothing injects it, silently.
+    declared = {i: [c.env for c in h.credentials] for i, h in harness.load(None).valid.items()}
+    orphans = [
+        c.env
+        for c in policy.credentials
+        if not c.inject and not any(c.env in names for names in declared.values())
+    ]
+    if orphans:
+        by = "; ".join(f"{i} declares {', '.join(names)}" for i, names in declared.items() if names)
+        detail = (
+            f"{', '.join(orphans)} is managed but no harness declares how to inject it, "
+            f"so it is only a sentinel; {by}; {detail}"
+        )
     if missing:
         detail = f"no value for {', '.join(missing)} here, so its requests are refused; {detail}"
-    return _check(f"credentials {_label(repo)}", not missing, detail)
+    return _check(f"credentials {_label(repo)}", not missing, detail, warn=bool(orphans))
 
 
 def _forge_check(repo: config.RepoEntry) -> dict:

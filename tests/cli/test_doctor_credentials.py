@@ -33,11 +33,12 @@ _OWN = {"env": "MY_KEY", "inject": [{"domain": "a.io", "header": "x-key"}]}
         ([{"env": "ANTHROPIC_API_KEY"}], {"env": {"ANTHROPIC_API_KEY": "sk"}}, {}, True, None),
         ([_OWN], {"env_passthrough": ["MY_KEY"]}, {"MY_KEY": "k"}, True, "MY_KEY on a.io"),
         (
-            [{"env": "NOBODYS_KEY"}],
-            {"env": {"NOBODYS_KEY": "k"}},
+            [{"env": "OPENAI_API_KEY"}],
+            {"env": {"OPENAI_API_KEY": "k"}},
             {},
-            True,
-            "NOBODYS_KEY on no host",
+            "warn",
+            "OPENAI_API_KEY is managed but no harness declares how to inject it, so it is "
+            "only a sentinel; claude declares ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN; ",
         ),
     ],
     ids=["none", "named", "no-value", "value-from-repo-env", "its-own", "declared-nowhere"],
@@ -46,13 +47,14 @@ def test_doctor_lists_a_sandboxs_proxy_managed_credentials(
     app, tmp_path, monkeypatch, credentials, repo, daemon, ok, said
 ):
     """Each managed name with its hosts, every other name a harness declares
-    as passing through, and a failure for a managed name with no value where
+    as passing through, a failure for a managed name with no value where
     its launch would read one (`worker_env`, doctor's own env for the
-    daemon's)."""
+    daemon's), and a warning for a name only, which no harness declares
+    (codex's is CODEX_API_KEY, not OPENAI_API_KEY)."""
     monkeypatch.setattr(
         "kraft.worker.backends.docker.DockerBackend.health", AsyncMock(return_value=(True, "ok"))
     )
-    for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MY_KEY", "NOBODYS_KEY"):
+    for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MY_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     for name, value in daemon.items():
         monkeypatch.setenv(name, value)
@@ -66,5 +68,7 @@ def test_doctor_lists_a_sandboxs_proxy_managed_credentials(
 
     rows = [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("credentials ")]
 
-    assert [r["ok"] for r in rows] == ([] if ok is None else [ok])
+    assert [(r["ok"], r["warn"]) for r in rows] == (
+        [] if ok is None else [(bool(ok), ok == "warn")]
+    )
     assert said is None or said in rows[0]["detail"]
