@@ -43,7 +43,7 @@ from kraft.worker import callback, inject, session_mcp
 #: What a connection a session's policy refused is recorded as.
 SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
 
-#: The most a request line plus its headers may be (R9).
+#: The most a request line plus its headers may be.
 MAX_HEAD = 64 * 1024
 #: Seconds a connection may sit before its request head is complete.
 HEAD_TIMEOUT = 30.0
@@ -59,6 +59,9 @@ MAX_REFUSAL_EVENTS = 100
 #: The most a worker API request may be: a permission hook's stdin carries the
 #: tool call's whole input, a file being written among it.
 MAX_WORKER_BODY = 16 * 1024 * 1024
+#: Worker API calls one session may have in flight, body read to answer;
+#: the next waits for one of them to finish.
+MAX_WORKER_CALLS = 4
 #: How much of a refused worker API route its event records.
 MAX_ROUTE = 256
 
@@ -91,6 +94,11 @@ _CONNECT_TARGET = re.compile(r"\[?([^\[\]]+?)\]?:(\d{1,5})")
 #: nothing forwarded can split into a second request.
 _HEADER_LINE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7e\x80-\xff]*")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+#: A host name as the policy may match it: ASCII letters, digits and hyphens
+#: in dot-separated labels, the last starting with a letter. Anything else
+#: (a soft hyphen IDNA drops, `0x7f.1`, `16909060`) could reach the resolver
+#: as a name the lists never saw.
+_HOSTNAME = re.compile(r"([A-Za-z0-9-]+\.)*[A-Za-z][A-Za-z0-9-]*\.?")
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,11 @@ class EgressSession:
     credentials: tuple[inject.InjectRule, ...] = ()
     #: Where the Kraft CA mints the leaf shown when TLS is terminated.
     run_dirs: object = None
+    #: Held from a worker API call's body to its answer: `MAX_WORKER_CALLS`
+    #: 16 MiB bodies at most, so a worker cannot exhaust the daemon's memory.
+    calls: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(MAX_WORKER_CALLS), repr=False, compare=False
+    )
 
 
 def _split(pattern: str) -> tuple[str, int | None]:
@@ -418,7 +431,7 @@ class EgressProxy:
             kept = "".join(f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"})
             out_writer.write(
                 f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
-                "Connection: close\r\n\r\n".encode()
+                "Connection: close\r\n\r\n".encode("latin-1")
             )
             if upstream is not None:
                 # One request's bytes and no more: whatever else the client
@@ -455,7 +468,9 @@ class EgressProxy:
             auth_line = f"Proxy-Authorization: {auth}\r\n" if auth else ""
             authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
             out_writer.write(
-                f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode()
+                f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode(
+                    "latin-1"
+                )
             )
             await out_writer.drain()
             reply, early = await asyncio.wait_for(_read_head(out_reader), CONNECT_TIMEOUT)
@@ -475,10 +490,9 @@ class EgressProxy:
         No header the client sent is read but the body's length: not its
         `Authorization`, not an `X-Kraft-Session-Id`. `/mcp` is the session
         MCP server's (`_mcp_call`)."""
-        # ponytail: no cap on one session's concurrent worker API connections,
-        # nor on the permission_decision events its asks record -- parity with
-        # a host worker, whose `kraft` and hook are unbounded too. A per-session
-        # semaphore and event cap if a worker is ever seen flooding the daemon.
+        # ponytail: no cap on the permission_decision events a session's asks
+        # record -- parity with a host worker, whose hook is unbounded too. An
+        # event cap if a worker is ever seen flooding the daemon.
         url = urlsplit(target)
         if url.path == "/mcp":
             return await self._mcp_call(reader, writer, session, method, headers, rest)
@@ -487,23 +501,26 @@ class EgressProxy:
             return await self._refuse_route(
                 writer, session, f"{method} {url.path}", "not a worker API verb"
             )
-        body = await _read_body(reader, writer, headers, rest)
-        if body is None:
-            return
-        form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
-        scope = callback.scope_for_channel(session)
-        call = verb(form, scope)
-        if isinstance(call, str):
-            return await _answer(writer, 400, "Bad Request", call)
-        api_method, path, payload = call
-        if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
-            return await self._refuse_route(
-                writer, session, f"{api_method} {path}", "not this session's to call"
-            )
-        try:
-            reply = await self._call(self._app, api_method, path, scope.session_id, json=payload)
-        except TimeoutError:
-            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
+        async with session.calls:
+            body = await _read_body(reader, writer, headers, rest)
+            if body is None:
+                return
+            form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
+            scope = callback.scope_for_channel(session)
+            call = verb(form, scope)
+            if isinstance(call, str):
+                return await _answer(writer, 400, "Bad Request", call)
+            api_method, path, payload = call
+            if not callback.allowed(scope, api_method, path, thread_owner=self._thread_owner):
+                return await self._refuse_route(
+                    writer, session, f"{api_method} {path}", "not this session's to call"
+                )
+            try:
+                reply = await self._call(
+                    self._app, api_method, path, scope.session_id, json=payload
+                )
+            except TimeoutError:
+                return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
         kind = reply.headers.get("content-type", "application/json")
         if verb is _permission_hook:
@@ -534,16 +551,19 @@ class EgressProxy:
             return await _answer(
                 writer, 405, "Method Not Allowed", "the session MCP server streams nothing"
             )
-        body = await _read_body(reader, writer, headers, rest)
-        if body is None:
-            return
-        passed = {_name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS}
-        try:
-            reply = await self._call(
-                self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
-            )
-        except TimeoutError:
-            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
+        async with session.calls:
+            body = await _read_body(reader, writer, headers, rest)
+            if body is None:
+                return
+            passed = {
+                _name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS
+            }
+            try:
+                reply = await self._call(
+                    self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
+                )
+            except TimeoutError:
+                return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         kind = reply.headers.get("content-type", "application/json")
         await _respond(writer, reply.status_code, reply.reason_phrase, kind, reply.content)
 
@@ -748,6 +768,8 @@ def _parse(head: bytes) -> tuple[str, str, int, str, list[str]] | str:
         return f"method {method!r} is not proxied"
     if not 0 < port < 65536:
         return f"port {port} is out of range"
+    if len(host) > 253 or (_address(host) is None and not _HOSTNAME.fullmatch(host)):
+        return f"{host!r} is neither an IP address nor an ASCII host name"
     return method, host, port, target, [h for h in headers if h]
 
 

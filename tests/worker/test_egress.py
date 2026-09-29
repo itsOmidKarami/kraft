@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import sys
 
 import pytest
 
@@ -130,12 +131,14 @@ async def test_an_absolute_form_request_is_forwarded_in_origin_form(proxy, inter
     p = await proxy(allow=["api.example.com"])
     reader, writer = await p.send(
         b"GET http://api.example.com/v1/x?q=1 HTTP/1.1\r\nHost: evil.example\r\n"
-        b"Proxy-Authorization: Basic c2VjcmV0\r\nConnection: keep-alive\r\n\r\n"
+        b"Proxy-Authorization: Basic c2VjcmV0\r\nConnection: keep-alive\r\nX-Name: caf\xe9\r\n\r\n"
     )
     echoed = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
     writer.close()
+    # An obs-text byte passes as the one byte it was, not re-encoded.
     assert echoed == (
-        b"GET /v1/x?q=1 HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n\r\n"
+        b"GET /v1/x?q=1 HTTP/1.1\r\nHost: api.example.com\r\nX-Name: caf\xe9\r\n"
+        b"Connection: close\r\n\r\n"
     )
     assert internet.dialled == [("93.184.216.34", 80)]
 
@@ -421,6 +424,39 @@ async def test_a_malformed_request_gets_400(proxy, internet, head):
     p = await proxy(allow=["**"])
     assert (await p.ask(head)).startswith(b"HTTP/1.1 400 Bad Request\r\n")
     assert internet.dialled == [] and p.events == []
+
+
+@pytest.mark.parametrize(
+    ("host", "ok"),
+    [
+        ("ev\xadil.com", False),
+        ("0x7f.1", False),
+        ("16909060", False),
+        ("1.2.3.04", False),
+        ("a." * 126 + "io", False),
+        ("[2001:db8::1]", True),
+        ("api.example.com", True),
+    ],
+    ids=["soft-hyphen", "hex-ipv4", "integer-ipv4", "octal-ipv4", "254-bytes", "ipv6", "name"],
+)
+@pytest.mark.parametrize("form", ["CONNECT {}:443", "GET http://{}/"])
+def test_only_an_ip_literal_or_an_ascii_host_name_is_parsed(host, ok, form):
+    head = f"{form.format(host)} HTTP/1.1".encode("latin-1")
+    assert isinstance(egress._parse(head), tuple) is ok
+
+
+async def test_a_deny_carve_out_cannot_be_spelt_around(proxy, internet, monkeypatch):
+    async def idna(host, port, _real=_getaddrinfo, **_):  # a real resolver drops the soft hyphen
+        return await _real(host if host.isascii() else host.encode("idna").decode(), port)
+
+    monkeypatch.setitem(_DNS, "gist.x.com", ["93.184.216.40"])
+    monkeypatch.setattr(sys.modules[__name__], "_getaddrinfo", idna)
+    p = await proxy(allow=["*.x.com"], deny=["gist.x.com"])
+    reader, writer = await p.send(b"CONNECT gi\xadst.x.com:443 HTTP/1.1\r\n\r\n")
+    answer = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+    writer.close()
+    assert internet.dialled == []
+    assert answer.startswith(b"HTTP/1.1 400 Bad Request\r\n")
 
 
 async def test_an_idle_connection_is_dropped_before_a_request(proxy, internet, monkeypatch):

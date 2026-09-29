@@ -609,7 +609,7 @@ def _ignored_ca_check(repo: config.RepoEntry) -> dict | None:
 
 
 def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
-    """Ruling E2: which names this sandbox's egress proxy holds, on which
+    """Which names this sandbox's egress proxy holds, on which
     hosts (as each harness resolves them), and which
     names a harness declares still pass through. A managed name with no value
     fails: the proxy refuses every request that should carry it. The value is
