@@ -104,6 +104,23 @@ def test_a_hooks_file_kraft_cannot_read_is_refused_by_name(tmp_path):
         assert (wt / ".cursor/hooks.json").read_text() == body
 
 
+@pytest.mark.parametrize("planted", ["file", "dir"])
+def test_a_planted_symlink_is_refused_and_nothing_is_written_through_it(tmp_path, planted):
+    """A sandboxed worker can plant either in the worktree it writes; the
+    host following it would write wherever it points."""
+    _, wt = _worktree(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if planted == "file":
+        (wt / ".cursor").mkdir()
+        (wt / ".cursor/hooks.json").symlink_to(outside / "hooks.json")  # dangling
+    else:
+        (wt / ".cursor").symlink_to(outside)
+    with pytest.raises(hi.HookFileError, match="symlink"):
+        hi.install_cursor_hook(wt, ARGV)
+    assert list(outside.iterdir()) == []
+
+
 # -- codex: per-launch -c flags, trusted from `codex app-server` (Kraft-4in7z.3)
 
 FAKE_CODEX = [sys.executable, str(Path(__file__).parents[1] / "support/fake_codex_app_server.py")]

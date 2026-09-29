@@ -63,26 +63,72 @@ def _git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(worktree), *args], capture_output=True, text=True)
 
 
+def _write_cursor_hook(dfd: int, path: Path, argv: list[str]) -> None:
+    """Kraft's entry into `hooks.json` under the open `.cursor` directory,
+    never through a symlink: read with O_NOFOLLOW, replaced by a rename."""
+    name = path.name
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dfd)
+    except FileNotFoundError:
+        data = {"version": 1, "hooks": {}}
+    except OSError as exc:
+        raise HookFileError(
+            f"{path} is not a file Kraft can read (a symlink, or {exc.strerror}); remove it"
+        ) from exc
+    else:
+        with os.fdopen(fd) as f:
+            text = f.read()
+        try:
+            data = json.loads(text)
+        except ValueError as exc:
+            raise _unusable(path, exc) from exc
+    try:
+        entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
+        entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
+    except (AttributeError, TypeError) as exc:
+        raise _unusable(path, exc) from exc
+    # Cursor allows the call when a hook crashes, times out or prints nothing,
+    # unless the entry says otherwise: Kraft's gate must deny instead.
+    entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
+    tmp = f".{name}.{os.getpid()}.tmp"
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        with os.fdopen(os.open(tmp, flags, 0o644, dir_fd=dfd), "w") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+        # A rename replaces a symlink planted since, never writes through it.
+        os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    except OSError as exc:
+        raise HookFileError(f"could not write {path}: {exc}") from exc
+
+
+def _unusable(path: Path, exc: Exception) -> HookFileError:
+    return HookFileError(
+        f"{path} is not a Cursor hooks file Kraft can add its permission hook to "
+        f"({exc}); fix or remove it"
+    )
+
+
 def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
     """Make Kraft's preToolUse entry `argv`. Never removed while the worktree
     lives: sibling launches share it, and one with nothing to enforce gets
     `no_opinion` from the gate. Idempotent: a relaunch replaces Kraft's
     entry, never adds a second."""
     path = worktree / _REL
+    # A sandboxed worker writes this worktree: a symlink it planted at
+    # `.cursor` or the file would have the host write wherever it points.
+    # Every step below goes through a directory fd opened without following.
     try:
-        data = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
-        entries = data.setdefault("hooks", {}).setdefault("preToolUse", [])
-        entries[:] = [e for e in entries if _OURS not in str(e.get("command", ""))]
-    except (ValueError, AttributeError, TypeError) as exc:
+        (worktree / ".cursor").mkdir(exist_ok=True)
+        dfd = os.open(worktree / ".cursor", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
         raise HookFileError(
-            f"{path} is not a Cursor hooks file Kraft can add its permission hook to "
-            f"({exc}); fix or remove it"
+            f"{worktree / '.cursor'} is not a directory Kraft can write its permission hook "
+            f"into (a symlink, or {exc.strerror}); remove it"
         ) from exc
-    # Cursor allows the call when a hook crashes, times out or prints nothing,
-    # unless the entry says otherwise: Kraft's gate must deny instead.
-    entries.append({"command": command_of(argv), "timeout": 10, "failClosed": True})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    try:
+        _write_cursor_hook(dfd, path, argv)
+    finally:
+        os.close(dfd)
     if _git(worktree, "ls-files", "--error-unmatch", _REL).returncode == 0:
         _git(worktree, "update-index", "--skip-worktree", _REL).check_returncode()
         return
