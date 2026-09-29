@@ -10,6 +10,7 @@ from kraft import store as _store
 from kraft.adapters import agent as _agent
 from kraft.config import RepoEntry, git_read
 from kraft.templates.models import AgentTask, ResolvedTask
+from kraft.worker import callback as _callback
 
 FIX_PROMPT = (
     "The checks in node {node_id} failed for this work item. Fix the code so they "
@@ -383,9 +384,13 @@ _PROGRESS_NOTE = (
     "`kraft item progress K`. Include `(task K)` in the subject of each "
     "commit for that task."
 )
+#: For a worker whose sandbox has no route to Kraft: the commit tag alone.
+_PROGRESS_NOTE_NO_CHANNEL = (
+    "\n\nThis plan has {total} tasks. Include `(task K)` in the subject of each commit for task K."
+)
 
 
-def progress_note(task: AgentTask, work_item_row, worktree, db=None) -> str:
+def progress_note(task: AgentTask, work_item_row, worktree, db=None, sandbox=None) -> str:
     """Only for the task doing the work from the brief, and only for a plan with
     `## Task N` headings to count.
 
@@ -401,7 +406,8 @@ def progress_note(task: AgentTask, work_item_row, worktree, db=None) -> str:
         # Kraft-hj2q9: a run a rejection bounced back follows the note, not the plan.
         return ""
     tasks = _progress.tasks_for(work_item_row, Path(worktree))
-    return _PROGRESS_NOTE.format(total=len(tasks)) if tasks else ""
+    note = _PROGRESS_NOTE if _callback.reachable(sandbox) else _PROGRESS_NOTE_NO_CHANNEL
+    return note.format(total=len(tasks)) if tasks else ""
 
 
 #: The item's unanswered review threads, framed by role: a working agent
@@ -414,6 +420,11 @@ _THREADS_FOR_WORKER = (
     'answer it: `kraft item reply <thread-id> --claim fixed --body "..."` when you '
     "changed the code, `--claim answered` when you are replying without a change.\n\n"
 )
+_THREADS_FOR_WORKER_NO_CHANNEL = (
+    "\n\nA person reviewing this work left these threads. Address each one. "
+    "This sandbox has no route to Kraft, so you cannot reply to them yourself: "
+    "say in your result's summary what you did about each, by thread id.\n\n"
+)
 _THREADS_FOR_REVIEWER = (
     "\n\nA person reviewing this work left these threads. Check whether the change "
     "addresses each one. Report an unaddressed `must_fix` thread as a finding. Do not "
@@ -421,7 +432,7 @@ _THREADS_FOR_REVIEWER = (
 )
 
 
-def review_threads_note(task: AgentTask, work_item_row, db, note: str | None) -> str:
+def review_threads_note(task: AgentTask, work_item_row, db, note: str | None, sandbox=None) -> str:
     """The item's unanswered review threads, for every agent launch, framed by
     role (review threads anywhere §1). A thread the note already lists -- the
     rejection note on a rework run -- is left out, so none appears twice."""
@@ -430,7 +441,11 @@ def review_threads_note(task: AgentTask, work_item_row, db, note: str | None) ->
     body = _store.render_threads(threads)
     if not body:
         return ""
-    return (_THREADS_FOR_WORKER if task.skill is None else _THREADS_FOR_REVIEWER) + body
+    if task.skill is not None:
+        return _THREADS_FOR_REVIEWER + body
+    return (
+        _THREADS_FOR_WORKER if _callback.reachable(sandbox) else _THREADS_FOR_WORKER_NO_CHANNEL
+    ) + body
 
 
 #: What verify will run, shown to the node that can still act on it. 49c0cefd

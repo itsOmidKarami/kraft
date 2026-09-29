@@ -108,6 +108,30 @@ async def test_the_reply_agent_runs_under_the_gate_with_edit_denied(
     assert "why is this a list, not a set?" in prompt
 
 
+async def test_a_sandbox_without_network_gets_no_reply_agent(
+    item_on, run_dirs, tmp_path, monkeypatch
+):
+    """It answers by `kraft item reply`, which such a sandbox cannot reach."""
+    _seed(tmp_path, monkeypatch)
+    it = await _item(item_on, run_dirs)
+    await _published_unanswered_thread(it)
+    launch = executor.LaunchContext(
+        repo_entry=entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "x"}})
+    )
+
+    status = await review_reply.run(
+        it.database,
+        it.run_dirs,
+        work_item_id=it.id,
+        gate=GATE,
+        nodes=it.chain.chain.nodes,
+        launch=launch,
+    )
+
+    assert status == "no_channel"
+    assert it.sessions(GATE) == []
+
+
 async def test_nothing_unanswered_launches_nothing(item_on, run_dirs, tmp_path, monkeypatch):
     _seed(tmp_path, monkeypatch)
     it = await _item(item_on, run_dirs)

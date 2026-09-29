@@ -26,6 +26,7 @@ from kraft import caps, events, executor, store
 from kraft.adapters import agent as _agent
 from kraft.executor import read_only
 from kraft.templates.models import AgentTask
+from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,10 @@ async def _run(db, run_dirs, *, work_item_id: str, gate: str, nodes, launch) -> 
         sandbox = executor.item_sandbox(row, launch)
     except executor.SandboxUnresolved:
         return "no_agent"
+    if not _callback.reachable(sandbox):
+        # It answers by running `kraft item reply`, which a sandbox without
+        # `network:` has no route for: launched, it could only burn tokens.
+        return "no_channel"
     hit = db.read(lambda c: caps.at_launch(c, row, task))
     if hit is not None and hit.remaining_s <= 0:
         return "no_agent"

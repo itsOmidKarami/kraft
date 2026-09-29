@@ -41,6 +41,13 @@ def address(kind: str) -> str:
     raise ValueError(f"no worker API address for a {kind!r} worker")
 
 
+def reachable(sandbox: dict | None) -> bool:
+    """Whether a worker launched in `sandbox` can run `kraft`: on the host,
+    or sandboxed with `network:`, whose channel serves this API through the
+    shim. A prompt tells a worker to run `kraft ...` only when this holds."""
+    return not sandbox or bool(sandbox.get("network"))
+
+
 # One path segment. What it may be is then decided by equality with an id
 # the server made (the scope's, or a thread's own), never by its shape.
 _P = r"(?P<p>[^/]+)"
