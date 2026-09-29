@@ -57,11 +57,12 @@ def cli_commands() -> set[str]:
 
 
 def mcp_tool_names() -> set[str]:
-    """Every function decorated `@server.tool()` in mcp.py."""
+    """Every function decorated `@server.tool()` in mcp.py. Async too: every
+    tool is `async def`, and matching `FunctionDef` alone found none of them."""
     tree = ast.parse((SRC / "mcp.py").read_text())
     names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             for dec in node.decorator_list:
                 if (
                     isinstance(dec, ast.Call)
@@ -122,13 +123,32 @@ def harness_capabilities() -> set[str]:
     return set(harness.KNOWN)
 
 
+_ENV_NAME = re.compile(r"KRAFT_[A-Z0-9_]+")
+
+
+def env_vars() -> set[str]:
+    """Every `KRAFT_*` environment variable the source names: a string literal
+    that is exactly such a name, the way `os.environ.get("KRAFT_HOME")` and the
+    worker allowlists spell one. A name inside prose (`$KRAFT_RESULT_PATH` in a
+    prompt) or an identifier (`_KRAFT_ROOTS`) is not a string of its own."""
+    return {
+        node.value
+        for path in SRC.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and _ENV_NAME.fullmatch(node.value)
+    }
+
+
 # (label, extractor, docsite page or folder; a folder counts every page in
 # it). A subset of CONTRIBUTING.md's "User-facing docs" table: only sources with a
 # machine-readable list of names.
 _LIBRARY = "4.reference/2.configuration/4.library-and-chains.md"
 CHECKS: list[tuple[str, Callable[[], set[str]], str]] = [
     ("kraft CLI commands", cli_commands, "4.reference/1.cli"),
-    ("MCP tools", mcp_tool_names, "3.guides/1.agent-integration.md"),
+    ("MCP tools", mcp_tool_names, "4.reference/8.mcp-tools.md"),
+    ("environment variables", env_vars, "4.reference/2.configuration/9.environment-variables.md"),
     ("policy.yaml fields", policy_fields, "4.reference/2.configuration/3.policy.md"),
     ("access.yaml fields", access_fields, "4.reference/2.configuration/6.access.md"),
     ("sandbox.yaml fields", sandbox_fields, "4.reference/2.configuration/8.sandbox.md"),
@@ -180,7 +200,14 @@ def main() -> int:
         target = DOCSITE / page
         pages = sorted(target.glob("**/*.md")) if target.is_dir() else [target]
         text = "\n".join(p.read_text() for p in pages)
-        missing = sorted(term for term in extractor() if term not in text)
+        terms = extractor()
+        if not terms:
+            # An extractor that finds nothing makes its check pass vacuously:
+            # how the MCP check sat silent while it matched no tool at all.
+            failed = True
+            print(f"{label}: the extractor found nothing, so nothing was checked")
+            continue
+        missing = sorted(term for term in terms if term not in text)
         if missing:
             failed = True
             print(f"docsite/content/{page}: missing {label}: {missing}")
