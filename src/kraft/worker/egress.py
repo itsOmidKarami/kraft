@@ -14,7 +14,9 @@ an always-denied address or a non-public one the allow list does not name
 exactly; then dial the address that was checked -- never the name again, so
 a DNS answer that changes between check and dial (rebinding) cannot slip a
 different address through. Outbound connections chain through the daemon's
-own `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` covers the host.
+own `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` covers the host; then the
+name is still checked, but the upstream resolves it again and dials what it
+gets, so the dialled-address guarantee holds only without one.
 """
 
 from __future__ import annotations

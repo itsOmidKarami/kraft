@@ -1195,7 +1195,8 @@ deny SHALL win, an agent session SHALL use the `runtime` lists plus its
 harness's own hosts, and a setup command the `install` lists alone.
 Loopback, link-local, cloud metadata and the host's own addresses SHALL be
 unreachable under any policy, checked on the resolved address that is then
-dialled, an IPv4 address embedded in an IPv6 one checked as well; any other
+dialled (through an upstream proxy the name is checked the same way, but the
+upstream resolves it again), an IPv4 address embedded in an IPv6 one checked as well; any other
 non-public address SHALL be reachable only through an allow entry naming
 its host exactly. Each refused host SHALL be answered 403 and recorded once
 per session as `sandbox_egress_refused`, up to a cap past which one last
