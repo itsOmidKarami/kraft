@@ -205,3 +205,232 @@ async def test_the_diagnosis_bundle_reads_no_status_while_a_sandboxed_session_ru
         assert bundle["git_status"].startswith("(not read: the worktree status is available once")
     else:
         assert "?? left.txt" in bundle["git_status"]
+
+
+# -- Kraft-ju36l: a member checkout Kraft did not make stops the item ----------------
+
+import dataclasses  # noqa: E402
+
+import yaml  # noqa: E402
+from support.harness import make_repo_with_submodule, v1_chain, v1_walk  # noqa: E402
+from support.workspace import repositories, workspace_item, workspace_target  # noqa: E402
+
+from kraft import events  # noqa: E402
+from kraft.executor import gates  # noqa: E402
+from kraft.policy import (  # noqa: E402
+    InstancePolicy,
+    InstancePolicyInput,
+    SandboxPolicy,
+    TemplatePolicyOverride,
+)
+from kraft.worker import sandbox as sandbox_mod  # noqa: E402
+
+_REL = "repos/pkg"
+_PLAIN_SANDBOX = {"kind": "docker", "image": "img"}
+_NODES = [
+    {
+        "id": "implementation",
+        "kind": "exec",
+        "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
+    }
+]
+_DRIFT = "git repositories Kraft did not create"
+
+
+def _sandboxed_policy() -> dict:
+    policy = InstancePolicy.from_input(InstancePolicyInput()).apply_template_override(
+        TemplatePolicyOverride(sandbox=SandboxPolicy(**_PLAIN_SANDBOX))
+    )
+    return {"effective_policy": policy, "repository_policies": {"pkg": policy}}
+
+
+def _swap_member(worktree: Path, rel: str) -> None:
+    """What a worker can do to a member it can write: move it aside and put a
+    `.git` of its own at the mount path, naming a repository it built."""
+    top = worktree / Path(rel).parts[0]
+    top.rename(top.with_name(top.name + "-moved"))
+    (worktree / "evil").mkdir()
+    _git(worktree / "evil", "init", "-q")
+    (worktree / rel).mkdir(parents=True)
+    (worktree / rel / ".git").write_text(f"gitdir: {worktree / 'evil' / '.git'}\n")
+
+
+@_SANDBOXED
+async def test_a_member_drift_stops_the_next_task_before_it_launches(
+    database, run_dirs, tmp_path, monkeypatch, sandboxed
+):
+    """A sandboxed item's member whose checkout is no longer the one Kraft
+    made stops the next task as a config error naming it, before it launches
+    and before host git runs in it. An unsandboxed item's worker could do the
+    same on the host; it is not checked, and no member is scanned."""
+    policy = _sandboxed_policy() if sandboxed else {}
+    row, node, worktree = await workspace_item(
+        database, run_dirs, tmp_path, _NODES[0]["tasks"], **policy
+    )
+    launched = _launches(monkeypatch)
+    scans = []
+    real = sandbox_mod.foreign_members
+    monkeypatch.setattr(sandbox_mod, "foreign_members", lambda *a: scans.append(a) or real(*a))
+    _swap_member(worktree, _REL)
+    launch = LaunchContext(
+        repo_entry=entry_of({"setup_command": ""}), repositories=repositories(tmp_path, "pkg")
+    )
+
+    status = await dispatch.dispatch_node(
+        database, run_dirs, node.steps[0].tasks[0], node, row, worktree, launch=launch
+    )
+
+    if sandboxed:
+        assert (status, launched) == (CONFIG_ERROR, [])
+        (log,) = database.read(
+            lambda c: c.execute(
+                "SELECT log_path FROM worker_sessions WHERE status = ?", (CONFIG_ERROR,)
+            ).fetchone()
+        )
+        assert f"{_DRIFT}: {_REL}" in Path(log).read_text()
+    else:
+        assert (status, launched, scans) == ("done", ["n.main.t"], [])
+
+
+def _old_layout(root: Path, worktree: Path, rel: str) -> None:
+    """`worktree` with member `rel` checked out as Kraft did before
+    Kraft-ju36l: `submodule update --init`, its gitdir under the root's
+    worktree gitdir, which a sandboxed worker writes."""
+    _git(root, "worktree", "add", "-q", "-b", "kraft/old-layout", str(worktree))
+    _git(worktree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--", rel)
+
+
+def _reason(evts) -> str:
+    return next(e for e in reversed(evts) if e["type"] == "work_item_needs_human")["payload"][
+        "reason"
+    ]
+
+
+def _sandboxed(materialized):
+    """`materialized` as an item filed sandboxed, which `materialize` still
+    refuses to build over members (Ruling 180)."""
+    layer = TemplatePolicyOverride(sandbox=SandboxPolicy(**_PLAIN_SANDBOX))
+    return dataclasses.replace(
+        materialized, policy=materialized.policy.apply_template_override(layer)
+    )
+
+
+@pytest.mark.parametrize(
+    ("chain", "item", "entry"),
+    [
+        pytest.param(
+            _sandboxed(v1_chain(_NODES, repo="/r", target=workspace_target({"a": "libs/a"}))),
+            {},
+            {},
+            id="a-workspace-snapshot-frozen-sandboxed",
+        ),
+        pytest.param(
+            v1_chain(_NODES, repo="/r"),
+            {"submodules": ["libs/a"], "root_merge_policy": "bump"},
+            {"sandbox": _PLAIN_SANDBOX},
+            id="a-legacy-submodules-column-under-a-live-sandbox",
+        ),
+    ],
+)
+async def test_an_old_layout_member_stops_the_walk_before_host_git_runs(
+    tmp_path, run_dirs, monkeypatch, chain, item, entry
+):
+    """An item in flight from before Kraft-ju36l, its member's gitdir where
+    the worker writes it -- including Kraft-zvqwl's legacy column -- stops
+    for a person naming the member. No session, and no push, ever ran."""
+    pushed = []
+    monkeypatch.setattr("kraft.adapters.forge.git.push", lambda *a: pushed.append(a))
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+
+    async def old_layout(_database):
+        _old_layout(root, run_dirs.worktrees / "w1", "libs/a")
+
+    status, evts, sessions, _row = await v1_walk(
+        tmp_path,
+        chain,
+        repo=root,
+        repo_entry=entry_of({"path": str(root), "setup_command": "", **entry}),
+        run_dirs=run_dirs,
+        after_item=old_layout,
+        **item,
+    )
+
+    assert status == "needs_human"
+    assert f"{_DRIFT}: libs/a" in _reason(evts)
+    assert sessions == [] and pushed == []
+
+
+@pytest.fixture
+def refreshed(monkeypatch):
+    """Every `refresh_worktree_base` a door makes, recorded, never run."""
+    calls = []
+
+    async def fake(*args, **kwargs):
+        calls.append(args)
+
+    monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("door", "stopped"), [("retry", "needs_human"), ("resume", "paused")], ids=["retry", "resume"]
+)
+def test_an_old_layout_member_stops_a_door_before_it_refreshes_the_worktree(
+    client, tmp_path, refreshed, door, stopped
+):
+    """`/retry` and `/resume` rebase the worktree before the walk, which is
+    host git in it and its members. A sandbox added to a member after filing
+    binds the item live (`dispatch._task_sandbox`), so the door stops it."""
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    root = root.resolve()
+    assert client.post("/api/repos", json={"path": str(root), "enabled": False}).status_code == 201
+    r = client.post(
+        "/api/work-items",
+        json={"title": "t", "repo": str(root), "workspace": "ws", "members": ["a"]}
+        | {"autostart": False},
+    )
+    wid = r.json()["id"]
+    from support.api import _force_node
+
+    _force_node(wid, "spec", stopped)
+    _old_layout(root, Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid, "libs/a")
+    repos_yaml = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(repos_yaml.read_text())
+    next(e for e in data["repos"] if e["path"] == str(root / "libs" / "a"))["sandbox"] = (
+        _PLAIN_SANDBOX
+    )
+    repos_yaml.write_text(yaml.safe_dump(data))
+
+    r = client.post(f"/api/work-items/{wid}/{door}", json={})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "needs_human"
+    assert f"{_DRIFT}: libs/a" in _reason(client.get(f"/api/work-items/{wid}/events").json())
+    assert refreshed == []
+
+
+async def test_an_old_layout_member_stops_an_escalations_self_retry_before_the_refresh(
+    item_on, tmp_path, run_dirs, refreshed
+):
+    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
+    it = await item_on(
+        _NODES, "implementation", repo=root, target=workspace_target({"a": "libs/a"})
+    )
+    _old_layout(root, run_dirs.worktrees / it.id, "libs/a")
+    await it.database.write(
+        lambda c: store.mark_needs_human(c, it.id, "implementation", "stuck", stuck=True)
+    )
+    cursor = it.events()[-1]["seq"]
+    request = {"node_id": "implementation", "key": None, "gate_key": None, "steer": None}
+    await it.database.write(
+        lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
+    )
+    launch = LaunchContext(repo_entry=entry_of({"path": str(root), "sandbox": _PLAIN_SANDBOX}))
+
+    status = await gates.resume_after_escalation(
+        it.database, run_dirs, work_item_id=it.id, cursor=cursor, launch=launch
+    )
+
+    assert status == "needs_human"
+    assert f"{_DRIFT}: libs/a" in _reason(it.events())
+    assert refreshed == [] and not it.events("work_item_retried")

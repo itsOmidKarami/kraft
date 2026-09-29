@@ -27,6 +27,13 @@ def workspace_target(
     )
 
 
+def repositories(tmp_path, *members: str) -> dict:
+    """`launch.repositories` for `workspace_item`'s `members`: each one's
+    connected repository, the operator's clone of the repository the root's
+    `.gitmodules` names -- so that one is what a member's pushes reach."""
+    return {m: entry_of({"id": m, "path": str(tmp_path / f"{m}-connected")}) for m in members}
+
+
 async def workspace_item(
     database,
     run_dirs,
@@ -81,16 +88,14 @@ async def workspace_item(
         _git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     # Each member checked out of its connected repository, as the walk does
-    # with `launch.repositories` (Kraft-ju36l); a legacy item has no ids. The
-    # operator's clone of each, whose `origin` is the repository the root's
-    # `.gitmodules` names -- what a member's pushes and fetches reach.
-    repositories = {}
-    for m, origin in connected.items():
-        clone = tmp_path / f"{m}-connected"
-        _git(tmp_path, "clone", "-q", str(origin), str(clone))
-        repositories[m] = entry_of({"id": m, "path": str(clone)})
+    # with `launch.repositories` (Kraft-ju36l); a legacy item has no ids.
+    for m, origin in ({} if legacy else connected).items():
+        _git(tmp_path, "clone", "-q", str(origin), str(tmp_path / f"{m}-connected"))
     worktree = await wtree.ensure(
-        database, run_dirs, root, repositories=None if legacy else repositories
+        database,
+        run_dirs,
+        root,
+        repositories=None if legacy else repositories(tmp_path, *connected),
     )
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     return row, chain.chain.nodes[0], worktree

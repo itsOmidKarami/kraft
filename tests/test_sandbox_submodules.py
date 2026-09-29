@@ -19,10 +19,7 @@ import yaml
 from support.harness import entry_of, make_repo_with_submodule, v1_chain, v1_walk
 from support.workspace import workspace_target
 
-from kraft import client, config, doctor, events, executor, store
-from kraft.api import deps
-from kraft.executor import gates, stops
-from kraft.executor.context import LaunchContext
+from kraft import client, config, doctor, executor
 from kraft.policy import (
     InstancePolicy,
     InstancePolicyInput,
@@ -206,53 +203,6 @@ def test_doctor_fails_the_row_of_a_repository_sandboxing_a_workspace(app, tmp_pa
     assert "workspaces.ws: repository 'a' sets a sandbox" in rows[0]["detail"]
 
 
-def _reason(evts) -> str:
-    return next(e for e in reversed(evts) if e["type"] == "work_item_needs_human")["payload"][
-        "reason"
-    ]
-
-
-@pytest.mark.parametrize(
-    ("chain", "item", "entry"),
-    [
-        pytest.param(
-            _sandboxed(v1_chain(_NODES, repo="/r", target=workspace_target({"a": "libs/a"}))),
-            {},
-            {},
-            id="a-workspace-snapshot-frozen-sandboxed",
-        ),
-        pytest.param(
-            v1_chain(_NODES, repo="/r"),
-            {"submodules": ["repos/pkg"], "root_merge_policy": "bump"},
-            {"sandbox": SANDBOX},
-            id="a-legacy-submodules-column-under-a-live-sandbox",
-        ),
-    ],
-)
-async def test_an_in_flight_item_stops_for_a_human_before_its_worktree_is_touched(
-    tmp_path, monkeypatch, chain, item, entry
-):
-    """Kraft-zvqwl's legacy column counts as submodule members too. The stop
-    comes before `ensure_worktree`, so no worktree exists and no host git ran
-    in one -- the push last of all."""
-    pushed = []
-    monkeypatch.setattr("kraft.adapters.forge.git.push", lambda *a: pushed.append(a))
-    root, _sub = make_repo_with_submodule(tmp_path)
-
-    status, evts, sessions, _row = await v1_walk(
-        tmp_path,
-        chain,
-        repo=root,
-        repo_entry=entry_of({"path": str(root), "setup_command": "", **entry}),
-        **item,
-    )
-
-    assert status == "needs_human"
-    assert WHY in _reason(evts)
-    assert not (tmp_path / "run" / "worktrees" / "w1").exists()
-    assert sessions == [] and pushed == []
-
-
 async def test_an_unsandboxed_item_with_submodules_is_not_stopped(tmp_path):
     root, _sub = make_repo_with_submodule(tmp_path)
     status, _evts, _sessions, _row = await v1_walk(
@@ -264,98 +214,3 @@ async def test_an_unsandboxed_item_with_submodules_is_not_stopped(tmp_path):
         root_merge_policy="bump",
     )
     assert status == "completed"
-
-
-@pytest.fixture
-def refreshed(monkeypatch):
-    """Every `refresh_worktree_base` a door makes, recorded, never run."""
-    calls = []
-
-    async def fake(*args, **kwargs):
-        calls.append(args)
-
-    monkeypatch.setattr("kraft.builtins.refresh_worktree_base", fake)
-    return calls
-
-
-@pytest.mark.parametrize(
-    ("door", "stopped"), [("retry", "needs_human"), ("resume", "paused")], ids=["retry", "resume"]
-)
-def test_a_door_stops_the_item_before_it_refreshes_the_worktree(
-    client, tmp_path, refreshed, door, stopped
-):
-    """`/retry` and `/resume` rebase the worktree before the walk, which is
-    host git in it. A sandbox added to a member after filing binds the item
-    live (`dispatch._task_sandbox`), so the door stops it instead."""
-    root = _connect_workspace(client, tmp_path)
-    r = client.post(
-        "/api/work-items",
-        json={
-            "title": "t",
-            "repo": str(root),
-            "workspace": "ws",
-            "members": ["a"],
-            "autostart": False,
-        },
-    )
-    wid = r.json()["id"]
-    from support.api import _force_node
-
-    _force_node(wid, "spec", stopped)
-    _set_sandbox(tmp_path, root / "libs" / "a")
-
-    r = client.post(f"/api/work-items/{wid}/{door}", json={})
-
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "needs_human"
-    evts = client.get(f"/api/work-items/{wid}/events").json()
-    assert WHY in _reason(evts)
-    assert refreshed == []
-
-
-async def test_an_escalations_self_retry_stops_before_it_refreshes_the_worktree(
-    item_on, run_dirs, refreshed
-):
-    it = await item_on(_NODES, "implementation", target=workspace_target({"a": "libs/a"}))
-    await it.database.write(
-        lambda c: store.mark_needs_human(c, it.id, "implementation", "stuck", stuck=True)
-    )
-    cursor = it.events()[-1]["seq"]
-    request = {"node_id": "implementation", "key": None, "gate_key": None, "steer": None}
-    await it.database.write(
-        lambda c: events.append(c, it.id, "work_item_self_retry_requested", request)
-    )
-    launch = LaunchContext(
-        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}),
-    )
-
-    status = await gates.resume_after_escalation(
-        it.database, run_dirs, work_item_id=it.id, cursor=cursor, launch=launch
-    )
-
-    assert status == "needs_human"
-    assert WHY in _reason(it.events())
-    assert refreshed == [] and not it.events("work_item_retried")
-
-
-def test_the_guard_lets_a_sandboxed_item_without_submodules_through():
-    """Only the pairing stops an item: a sandbox on one repository is the
-    ordinary sandboxed run."""
-    row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
-    row["submodules"] = None
-    launch = LaunchContext(
-        repo_entry=entry_of({"path": "/r", "sandbox": SANDBOX}),
-    )
-    assert stops.refuse_sandboxed_submodules(row, launch) is None
-
-
-def test_the_guard_reads_an_unreadable_repos_yaml_as_a_stop_not_as_no_sandbox():
-    """A poisoned entry (`deps._PoisonedRepoEntry`) must not read as "no
-    sandbox" and wave the item through."""
-
-    row = {"id": "w1", "materialized_chain": v1_chain(_NODES, repo="/r").to_json()}
-    row["submodules"] = '["repos/pkg"]'
-    poisoned = deps._PoisonedRepoEntry(config.ConfigError("repos.yaml: broken"))
-    launch = LaunchContext(repo_entry=poisoned)
-    with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
-        stops.refuse_sandboxed_submodules(row, launch)

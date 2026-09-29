@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 
 from kraft import builtins as _builtins
 from kraft import caps as _caps
+from kraft import config as _config
 from kraft import events, store, waits
 from kraft import policy as _policy
 from kraft.adapters import subprocess as _subprocess
@@ -293,45 +294,42 @@ def _item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     return item_sandbox(row, launch)
 
 
-def refuse_sandboxed_submodules(
-    row, launch: LaunchContext | None, worktree: Path | None = None
-) -> None:
-    """Raise `RuntimeError` naming why, when `row`'s item runs sandboxed and
-    host git in its `worktree` could reach a submodule's config, which a
-    sandboxed worker writes. Called before any host-side git touches the
-    worktree -- the walk and every door that refreshes the worktree first --
-    and each caller already turns a `RuntimeError` into a stop for a human.
-
-    Two ways in. The item mounts submodules (Kraft-dshto): refused at intake
-    since Ruling 180, but an item filed before that, or one filed before
-    workspaces (Kraft-zvqwl), can still be in flight. Or the worker made its
-    own (Kraft-nx4id): `refuse_planted_repos`."""
-    mounts = _builtins.item_mounts(row)
-    if not mounts:
-        refuse_planted_repos(row, launch, worktree)
-        return
-    if _item_sandbox(row, launch) is None:
-        return
-    snapshot = store.materialized_chain_of(row)
-    refusal = (snapshot.sandbox_refusal() if snapshot is not None else None) or (
-        _sandbox.submodule_refusal(f"work item {row['id']}")
-    )
-    raise RuntimeError(f"{refusal}. Its submodules: {', '.join(mounts)}")
+def _expected_members(row, launch: LaunchContext | None, worktree: Path) -> dict:
+    """`sandbox.foreign_members`' `expected` for `row`'s declared members: each
+    one's trusted gitdirs, from its connected repository in repos.yaml, or
+    None when it has none -- an old-layout or pre-workspace member, a missing
+    `launch`, or a `repos.yaml` that cannot be read. None is foreign, so every
+    way of not knowing fails closed."""
+    repositories = launch.repositories if launch is not None else {}
+    expected = {}
+    for rel, rid in _builtins.item_members(row):
+        try:
+            entry = repositories.get(rid) if rid is not None else None
+        except _config.ConfigError:
+            entry = None
+        expected[rel] = (
+            _sandbox.member_gitdirs(Path(entry.path), worktree, rel) if entry is not None else None
+        )
+    return expected
 
 
 def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | None) -> None:
     """Raise `RuntimeError` naming the paths when `row`'s item runs sandboxed
-    and its `worktree` holds a git repository Kraft did not create
-    (`sandbox.planted_repos`): an untracked one, a populated gitlink, or a
-    gitlink the branch added or moved. Host git never enters one
-    (`sandbox.SUBMODULES_UNENTERED`), but a commit or a rebase still reads
-    its config file, and a gitlink in the merge request is not work anyone
-    asked for. Also each task's own dispatch check. An item that mounts
-    submodules is `refuse_sandboxed_submodules`'s.
+    and its `worktree` holds a git repository Kraft did not create: a
+    declared member whose checkout is not the one Kraft made
+    (`sandbox.foreign_members`, Kraft-ju36l), or anywhere in the root or a
+    member, an untracked repository, a populated gitlink, or a gitlink the
+    branch added or moved (`sandbox.planted_repos`, Kraft-nx4id). Host git
+    never enters a nested repository (`sandbox.SUBMODULES_UNENTERED`), but a
+    commit or a rebase still reads its config file, and a gitlink in the
+    merge request is not work anyone asked for. Called before any host-side
+    git touches the worktree -- the walk, every door that refreshes the
+    worktree first, and each task's dispatch -- and each caller already turns
+    a `RuntimeError` into a stop for a human.
 
     An unsandboxed item costs no git at all; one whose sandbox cannot be
     resolved stops only if its worktree holds something it could matter to."""
-    if worktree is None or not worktree.is_dir() or _builtins.item_mounts(row):
+    if worktree is None or not worktree.is_dir():
         return
     unresolved = None
     try:
@@ -340,14 +338,25 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
         sandbox, unresolved = None, exc
     if sandbox is None and unresolved is None:
         return
-    planted = _sandbox.planted_repos(worktree, row["base_ref"])
-    if planted == []:
+    expected = _expected_members(row, launch, worktree)
+    foreign = _sandbox.foreign_members(worktree, expected)
+    found = [_sandbox.planted_repos(worktree, row["base_ref"], mounts=list(expected))]
+    for rel in [r for r in expected if r not in foreign]:
+        # The member's base is the gitlink the root's base records, read
+        # from the root's own objects; never anything inside the member.
+        base = row["base_ref"] and _config.git_read(
+            worktree, "rev-parse", f"{row['base_ref']}:{rel}", expected_failure=True
+        )
+        inner = _sandbox.planted_repos(worktree / rel, base or None)
+        found.append(None if inner is None else [f"{rel}/{p}" for p in inner])
+    if not foreign and all(f == [] for f in found):
         return
     if unresolved is not None:
         raise unresolved
-    if planted is None:
+    if any(f is None for f in found):
         raise RuntimeError(f"work item {row['id']} runs sandboxed, and git cannot read its index")
-    raise RuntimeError(_sandbox.planted_refusal(f"work item {row['id']}", planted))
+    planted = [p for f in found for p in f or []]
+    raise RuntimeError(_sandbox.planted_refusal(f"work item {row['id']}", foreign + planted))
 
 
 def refuse_live_sandboxed_session(db, row, launch: LaunchContext | None, *, what: str) -> None:

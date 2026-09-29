@@ -243,13 +243,18 @@ def test_an_unsandboxed_item_never_even_looks(repo, monkeypatch):
     assert calls == []
 
 
-def test_the_walk_entry_guard_delegates_a_plain_item_to_the_planted_scan(repo):
-    """With no declared submodules, `refuse_sandboxed_submodules` (the walk
-    and the doors) stops on a planted repository exactly as dispatch does."""
-    base = _git(repo, "rev-parse", "HEAD")
-    _nested(repo, "vendor/x")
-    with pytest.raises(RuntimeError, match="vendor/x"):
-        stops.refuse_sandboxed_submodules(_row(repo, base), _launch(repo, _SANDBOX), repo)
+def test_an_unreadable_repos_yaml_stops_an_item_with_members_rather_than_reads_as_no_sandbox(
+    repo,
+):
+    """A poisoned entry (`deps._PoisonedRepoEntry`) must not read as "no
+    sandbox" and wave an item with members through."""
+    from kraft import config
+    from kraft.api import deps
+
+    row = _row(repo, _git(repo, "rev-parse", "HEAD")) | {"submodules": '["repos/pkg"]'}
+    launch = LaunchContext(repo_entry=deps._PoisonedRepoEntry(config.ConfigError("broken")))
+    with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
+        stops.refuse_planted_repos(row, launch, repo)
 
 
 def test_an_unreadable_index_stops_rather_than_reads_as_clean(repo, monkeypatch):

@@ -63,7 +63,6 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
 )
-from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
@@ -374,6 +373,15 @@ def frozen_steering(row) -> dict:
     }
 
 
+def _item_root(row, worktree, repository: str | None) -> Path:
+    """The item's own worktree: `worktree` itself, or for a run `_fan_out`
+    made for a member `repository`, the root its mount sits in."""
+    snapshot = store.materialized_chain_of(row)
+    mounts = snapshot.target.mounts.values() if snapshot is not None and repository else ()
+    path = next((m.path for m in mounts if m.repository == repository), None)
+    return Path(worktree) if path is None else Path(worktree).parents[len(Path(path).parts) - 1]
+
+
 def _fan_out(row, worktree, launch: LaunchContext | None) -> list[tuple[str, Path, LaunchContext]]:
     """Where a `scope: each_repository` task runs: once per repository the
     item's frozen target selects -- the root in the assembled checkout, each
@@ -646,7 +654,9 @@ async def _dispatch_task(
     # walk may have left a repository of its own in the worktree (Kraft-nx4id).
     # `rev-parse` above reads HEAD alone and never looks at a gitlink.
     try:
-        stops.refuse_planted_repos(work_item_row, launch, Path(worktree))
+        stops.refuse_planted_repos(
+            work_item_row, launch, _item_root(work_item_row, worktree, repository)
+        )
     except RuntimeError as exc:
         return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
     # Every enclosing scope's time cap, and this task's own (`kraft.caps`):
@@ -1033,7 +1043,15 @@ async def _dispatch_task(
             )
         )
         return status
-    if sandbox and _sandbox.planted_repos(Path(worktree), work_item_row["base_ref"]) != []:
+    try:
+        if sandbox:
+            stops.refuse_planted_repos(
+                work_item_row, launch, _item_root(work_item_row, worktree, repository)
+            )
+        planted = False
+    except RuntimeError:
+        planted = True
+    if planted:
         await db.write(
             lambda c: events.append(
                 c,

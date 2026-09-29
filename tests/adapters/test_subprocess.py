@@ -792,30 +792,3 @@ async def test_run_task_nets_a_resumed_session_with_its_own_reader(run):
     _, row = await run(codex(160), "s-resumed", reader="codex-json")
 
     assert row["tokens_in"] == 60
-
-
-async def test_an_unsandboxed_session_commits_in_a_member_as_the_root(run, tmp_path, monkeypatch):
-    """Kraft-ju36l (J3): a workspace member is a worktree of its connected
-    repository, and Kraft writes no identity into that repository's config.
-    A session's commit there is the root's identity all the same, carried in
-    the environment, and the member repository's config is left as it was."""
-    from support.harness import _git, make_repo
-
-    from kraft.config import git_read
-
-    for name in [k for k in os.environ if k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))]:
-        monkeypatch.delenv(name)
-    (tmp_path / "empty.gitconfig").write_text("")
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "empty.gitconfig"))
-    root, member_repo = make_repo(tmp_path, "root"), make_repo(tmp_path, "member")
-    _git(root, "config", "user.email", "root@example.com")
-    _git(member_repo, "config", "--unset", "user.email")
-    _git(member_repo, "worktree", "add", "-q", "-b", "kraft/w1", str(root / "m"))
-    before = (member_repo / ".git" / "config").read_text()
-
-    status, _ = await run(["sh", "-c", "cd m && git commit -q --allow-empty -m work"], cwd=root)
-
-    assert status == "done"
-    authors = git_read(root / "m", "log", "-1", "--format=%ae %ce")
-    assert authors == "root@example.com root@example.com"
-    assert (member_repo / ".git" / "config").read_text() == before

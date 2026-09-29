@@ -591,8 +591,8 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
-            # The refresh runs host git in the worktree (Kraft-dshto).
-            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            # The refresh runs host git in the worktree and its members (Kraft-ju36l).
+            stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree,
                 Path(row["repo"]),
@@ -898,8 +898,8 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
         worktree = st.run_dirs.worktrees / wid
         conflict = None
         try:
-            # The refresh runs host git in the worktree (Kraft-dshto).
-            stops.refuse_sandboxed_submodules(row, deps.launch(st, row["repo"]), worktree)
+            # The refresh runs host git in the worktree and its members (Kraft-ju36l).
+            stops.refuse_planted_repos(row, deps.launch(st, row["repo"]), worktree)
             new_base = await builtins_mod.refresh_worktree_base(
                 worktree,
                 Path(row["repo"]),
