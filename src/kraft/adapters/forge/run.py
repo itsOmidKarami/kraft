@@ -166,7 +166,9 @@ async def _rebase_conflict_away(
     (Kraft-puqxq).
     """
     try:
-        new_head = await _builtins.mr_rebase_forced(repo, orig_repo, branch, base)
+        new_head = await _builtins.mr_rebase_forced(
+            repo, orig_repo, branch, base, identity=_builtins.item_identity(db, work_item_id)
+        )
     except git.UnsafeWorktree:
         raise  # not a conflict: `run_task` stops the item for a person
     except RuntimeError as exc:

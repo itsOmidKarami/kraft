@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from support import worktree as wtree
 from support.harness import _git, entry_of, make_repo, v1_chain
-from support.workspace import workspace_item
+from support.workspace import repositories, workspace_item
 
 from kraft.executor import dispatch
 from kraft.executor.context import LaunchContext
@@ -111,9 +111,11 @@ async def test_each_repository_binds_its_own_task_and_the_checkout_binds_all(
         repository_policies={"ws": _policy(), "pkg": _policy(sandbox=_SANDBOX.model_dump())},
     )
     each, once = node.tasks()
+    # Sandboxed, a member is checked against the repository it came from.
+    launch = LaunchContext(repo_entry=NO_SETUP, repositories=repositories(tmp_path, "pkg"))
 
-    await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=LAUNCH)
-    await dispatch.dispatch_node(database, run_dirs, once, node, row, worktree, launch=LAUNCH)
+    await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)
+    await dispatch.dispatch_node(database, run_dirs, once, node, row, worktree, launch=launch)
 
     assert [sandbox for _, sandbox in ran] == [_SANDBOX.model_dump()] * 3
 
@@ -122,11 +124,13 @@ async def test_a_fanned_out_run_reads_its_own_repositorys_entry(database, run_di
     """A member's run is configured by the member's `repos.yaml` entry, never
     the root's. Its live sandbox wraps the whole item (Ruling 189), the
     root's run included."""
-    member = entry_of({"setup_command": "", "sandbox": {"kind": "docker", "image": "member:live"}})
-    launch = LaunchContext(repo_entry=NO_SETUP, repositories={"ws": NO_SETUP, "pkg": member})
     row, node, worktree = await workspace_item(
         database, run_dirs, tmp_path, [_task("each", scope="each_repository")]
     )
+    connected = str(repositories(tmp_path, "pkg")["pkg"].path)
+    live = {"kind": "docker", "image": "member:live"}
+    member = entry_of({"path": connected, "setup_command": "", "sandbox": live})
+    launch = LaunchContext(repo_entry=NO_SETUP, repositories={"ws": NO_SETUP, "pkg": member})
     (each,) = node.tasks()
 
     await dispatch.dispatch_node(database, run_dirs, each, node, row, worktree, launch=launch)

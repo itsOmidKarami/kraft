@@ -544,6 +544,17 @@ async def close_egress(backend, session_id: str) -> None:
             await channels.close(session_id)
 
 
+async def _item_identity(db, work_item_id: str) -> dict[str, str]:
+    """The item root's identity (`builtins.item_identity`, J3). The row is read
+    here and `git config` runs off the event loop: `db` stays on this thread."""
+    row = db.read(
+        lambda c: c.execute("SELECT repo FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    if row is None:
+        return {}
+    return await asyncio.to_thread(_sandbox.git_identity, Path(row["repo"]))
+
+
 async def run_task(
     db,
     run_dirs,
@@ -748,7 +759,7 @@ async def run_task(
             # still outranks the git identity, and `env=` and the relay
             # still outrank it.
             repo_env = repo_entry.env if repo_entry is not None else {}
-            identity = await asyncio.to_thread(_sandbox.git_identity, Path(cwd))
+            identity = await _item_identity(db, work_item_id)
             cmd = backend.wrap(
                 cmd,
                 cwd,
@@ -784,6 +795,14 @@ async def run_task(
         current_status = await db.write(lambda c: store.session_status(c, session_id))
         if current_status != "pending":
             return current_status
+        if backend is None:
+            # The root's commit identity, under everything the repository and
+            # caller set. A workspace member is a worktree of its connected
+            # repository, where Kraft writes no identity (Kraft-ju36l), so a
+            # commit there gets the root's from here, as the sandbox does --
+            # the item's, never `cwd`'s, which is the member on a fanned-out run.
+            identity = await _item_identity(db, work_item_id)
+            full_env = {**identity, **full_env}
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = backend.client_cwd(session_id) if backend is not None else None

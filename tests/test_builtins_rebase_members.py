@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import _git
-from support.workspace import workspace_item
+from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import builtins as kraft_builtins
 from kraft import caps, store
@@ -262,3 +262,124 @@ async def test_a_root_file_conflict_gets_no_gitlink_sentence(database, run_dirs,
         await _mr_rebase(database, run_dirs, row, root)
 
     assert "also moved member" not in str(raised.value)
+
+
+async def test_a_members_rebase_commits_as_the_root_and_writes_no_identity_into_its_repository(
+    database, run_dirs, tmp_path, monkeypatch
+):
+    """Kraft-ju36l (J3): the member is a worktree of its connected repository,
+    whose config Kraft never writes. With no identity there or in the global
+    config, Kraft's rebase of the member still commits, as the root's
+    identity, handed to that one command; the worker's authorship stays."""
+    row, root, member = await _workspace(database, run_dirs, tmp_path)
+    connected = tmp_path / "pkg-connected"
+    only_the_root_has_an_identity(monkeypatch, tmp_path, row)
+    before = (connected / ".git" / "config").read_text()
+    moved = _move_member_origin(tmp_path)
+
+    status = await _mr_rebase(database, run_dirs, row, root)
+
+    assert status == "done"
+    assert git_read(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert git_read(member, "log", "-1", "--format=%ae %ce") == f"t@t {ROOT_EMAIL}"
+    assert (connected / ".git" / "config").read_text() == before
+
+
+# -- Kraft-xngty in a member: its admin dir is the worker's to write too --
+
+from types import SimpleNamespace  # noqa: E402
+
+from kraft.adapters.forge import git as forge_git  # noqa: E402
+from kraft.adapters.forge.run import _point_at_merged_members  # noqa: E402
+
+
+def _refs(*repos) -> list[str]:
+    """Each repository's branches and `refs/stash`: what an operator owns.
+    Remote-tracking refs move with Kraft's own fetch."""
+    fmt = "--format=%(refname) %(objectname)"
+    return [git_read(r, "for-each-ref", fmt, "refs/heads", "refs/stash") for r in repos]
+
+
+class _Merged:
+    def __init__(self, sha):
+        self.sha = sha
+
+    async def find_mr(self, *, repo, branch):
+        return SimpleNamespace(state="merged", merged_sha=self.sha)
+
+
+async def _door(door, database, run_dirs, row, root, member, branch):
+    if door == "mr_rebase":
+        return await _mr_rebase(database, run_dirs, row, root)
+    if door == "restore_branch":
+        return kraft_builtins.restore_branch(member, branch, "main")
+    if door == "commit_stragglers":
+        (member / "calc.py").write_text("left behind\n")
+        return await forge_git.commit_stragglers(member, branch=branch, base="main", message="w")
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE work_item_repos SET merge_state = 'merged' WHERE role = 'submodule'"
+        )
+    )
+    sha = git_read(member, "rev-parse", "HEAD~1")
+    return await _point_at_merged_members(_Merged(sha), database, root, branch, row["id"])
+
+
+@pytest.mark.parametrize(
+    ("kind", "door"),
+    [
+        pytest.param("rebase-merge", "mr_rebase", id="rebase-merge-member"),
+        pytest.param("rebase-apply", "mr_rebase", id="rebase-apply-member"),
+        pytest.param("HEAD", "mr_rebase", id="planted-head-member"),
+        pytest.param(
+            "MERGE_AUTOSTASH", "restore_branch", id="MERGE_AUTOSTASH-restore_branch-member"
+        ),
+        pytest.param(
+            "MERGE_AUTOSTASH", "commit_stragglers", id="MERGE_AUTOSTASH-commit_stragglers-member"
+        ),
+        pytest.param("MERGE_AUTOSTASH", "pointer_bump", id="MERGE_AUTOSTASH-pointer_bump-member"),
+    ],
+)
+async def test_planted_state_in_a_members_admin_dir_never_moves_an_operator_ref(
+    database, run_dirs, tmp_path, kind, door
+):
+    """Plan 1.1 `[member]`: a member is a worktree of its connected repository,
+    so its admin dir -- HEAD and any operation state -- sits in that
+    repository, and the worker writes it. Planted there, naming the member
+    repository's own `main`, a Kraft rebase, checkout or commit in the member
+    stops for a person and moves no ref of the member repository or its
+    origin."""
+    row, root, member = await _workspace(database, run_dirs, tmp_path)
+    connected, branch = tmp_path / "pkg-connected", store.branch_for(row)
+    _commit(connected, "operator.txt", "the operator's own\n", "operator work")
+    _move_member_origin(tmp_path)
+    admin = Path(git_read(member, "rev-parse", "--absolute-git-dir"))
+    main, orig = (
+        git_read(connected, "rev-parse", "main"),
+        git_read(connected, "rev-parse", "main~1"),
+    )
+    if kind in ("rebase-merge", "rebase-apply"):
+        (admin / kind).mkdir()
+        for name, text in {"head-name": "refs/heads/main", "orig-head": orig, "onto": main}.items():
+            (admin / kind / name).write_text(f"{text}\n")
+        (admin / kind / "interactive").write_text("")
+    else:
+        # An operator branch at the member's own commit, so nothing but the
+        # guard stands between Kraft and moving it.
+        _git(connected, "branch", "side", branch)
+    if kind == "MERGE_AUTOSTASH":
+        (member / "calc.py").write_text("the worker's stash\n")
+        stash = git_read(member, "stash", "create")
+        _git(member, "checkout", "--", "calc.py")
+        (admin / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
+    if kind == "HEAD" or door == "restore_branch":
+        (admin / "HEAD").write_text("ref: refs/heads/side\n")
+    before = _refs(connected, tmp_path / "pkg")
+
+    try:
+        status = await _door(door, database, run_dirs, row, root, member, branch)
+    except RuntimeError:
+        status = "raised"
+
+    assert _refs(connected, tmp_path / "pkg") == before
+    assert status in ("raised", "config_error")
