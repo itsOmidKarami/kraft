@@ -6,8 +6,9 @@ It signs, for now, the daemon's loopback TLS listener (`server_cert`) and
 one client certificate per egress session on a VM-backed runtime
 (`mint_session_cert`), whose subject CN is the session id -- the only
 identity the listener trusts, since every relay-B connection arrives from
-127.0.0.1. P6's per-host leaves for credential injection mint from the same
-root through `_leaf`.
+127.0.0.1. And one server certificate per injected host (`mint_host_leaf`),
+which the egress proxy shows a worker's client when it terminates TLS to
+inject a credential (P6).
 
 Every certificate carries what Python 3.13+'s `VERIFY_X509_STRICT` (on in
 `ssl.create_default_context`) demands: critical basicConstraints and
@@ -23,6 +24,7 @@ from __future__ import annotations
 import datetime
 import ipaddress
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -200,6 +202,45 @@ def server_cert(run_dirs) -> tuple[Path, Path]:
             x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
             *(x509.DNSName(name) for name in GATEWAY_HOSTS),
         ],
+    )
+
+
+#: One exact DNS name, lowercase: no wildcard, no port, nothing a path
+#: could make more of.
+_EXACT_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
+
+
+def mint_host_leaf(run_dirs, host: str) -> tuple[Path, Path]:
+    """`run/ca/hosts/<host>/leaf.pem` and `leaf.key`: a server certificate
+    for exactly `host` (SAN `DNSName(host)`), for the egress proxy to show a
+    worker's client when it terminates TLS to inject a credential (spec §6).
+    Keyed by the host as DNS compares it (case, a trailing dot), cached
+    like `server_cert`: minted again only when missing or older than the
+    CA. `ValueError` for anything but an exact host -- the name is a
+    directory."""
+    name = host.lower().rstrip(".")
+    if not _EXACT_HOST.fullmatch(name):
+        raise ValueError(f"{host!r} is not an exact host name to mint a certificate for")
+    ca_cert_path, _ = ensure_ca(run_dirs)
+    directory = _dir(run_dirs) / "hosts" / name
+    for d in (directory.parent, directory):
+        d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        d.chmod(0o700)
+    cert_path, key_path = directory / "leaf.pem", directory / "leaf.key"
+    if (
+        cert_path.is_file()
+        and key_path.is_file()
+        and cert_path.stat().st_mtime >= ca_cert_path.stat().st_mtime
+    ):
+        return cert_path, key_path
+    return _leaf(
+        run_dirs,
+        cert_path,
+        key_path,
+        name,
+        usage=ExtendedKeyUsageOID.SERVER_AUTH,
+        days=_SERVER_DAYS,
+        san=[x509.DNSName(name)],
     )
 
 
