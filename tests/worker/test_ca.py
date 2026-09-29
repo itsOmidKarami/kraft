@@ -7,13 +7,16 @@ import asyncio
 import ssl
 import stat
 
+import pytest
+
 from kraft.paths import RunDirs
 from kraft.worker import ca
 
 
-async def _handshake(server_run: RunDirs, client: tuple) -> str | None:
+async def _handshake(server_run: RunDirs, client: tuple, hostname: str = "127.0.0.1") -> str | None:
     """Dial a loopback TLS server holding `server_run`'s server certificate
-    and trusting only its CA, presenting `client` (cert, key). The CN the
+    and trusting only its CA, presenting `client` (cert, key) and verifying
+    the server as `hostname`. The CN the
     server saw, or None when the handshake was refused."""
     ca_cert, _ = ca.ensure_ca(server_run)
     server_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert)
@@ -37,7 +40,7 @@ async def _handshake(server_run: RunDirs, client: tuple) -> str | None:
     port = server.sockets[0].getsockname()[1]
     try:
         reader, writer = await asyncio.open_connection(
-            "127.0.0.1", port, ssl=client_ctx, server_hostname="127.0.0.1"
+            "127.0.0.1", port, ssl=client_ctx, server_hostname=hostname
         )
         answer = await asyncio.wait_for(reader.read(), 5)
         writer.close()
@@ -62,6 +65,15 @@ async def test_a_session_certificate_passes_a_strict_handshake_as_its_session_id
     client = ca.mint_session_cert(run_dirs, "01JSESSION0000000000000001")
 
     assert await _handshake(run_dirs, client) == "01JSESSION0000000000000001"
+
+
+@pytest.mark.parametrize("hostname", ca.GATEWAY_HOSTS)
+async def test_the_listener_verifies_as_each_name_a_relay_dials_it_by(run_dirs, hostname):
+    """Relay B reaches the daemon as its runtime's gateway name, never as
+    127.0.0.1, and socat checks the certificate against that name."""
+    client = ca.mint_session_cert(run_dirs, "s1")
+
+    assert await _handshake(run_dirs, client, hostname) == "s1"
 
 
 async def test_a_certificate_from_another_ca_is_refused(run_dirs, tmp_path):

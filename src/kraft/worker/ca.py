@@ -40,6 +40,10 @@ _SERVER_DAYS = _CA_DAYS
 _SESSION_DAYS = 7
 #: Backdating, for a runtime VM's clock a little behind the host's.
 _SKEW = datetime.timedelta(minutes=5)
+#: The names relay B dials the daemon by from a VM-backed runtime (Docker
+#: Desktop's, podman machine's); socat verifies the listener's certificate
+#: against the one it dialled.
+GATEWAY_HOSTS = ("host.docker.internal", "host.containers.internal")
 
 
 def _dir(run_dirs) -> Path:
@@ -173,8 +177,9 @@ def _leaf(
 
 def server_cert(run_dirs) -> tuple[Path, Path]:
     """`run/ca/server.pem` and `server.key`, the daemon listener's: CN
-    `kraft-daemon`, SAN `IP:127.0.0.1`. Minted once, again only when missing
-    or older than the CA (rotated by hand)."""
+    `kraft-daemon`, SAN `IP:127.0.0.1` and every `GATEWAY_HOSTS` name.
+    Minted once, again only when missing or older than the CA (rotated by
+    hand)."""
     ca_cert_path, _ = ensure_ca(run_dirs)
     directory = _dir(run_dirs)
     cert_path, key_path = directory / "server.pem", directory / "server.key"
@@ -191,7 +196,10 @@ def server_cert(run_dirs) -> tuple[Path, Path]:
         "kraft-daemon",
         usage=ExtendedKeyUsageOID.SERVER_AUTH,
         days=_SERVER_DAYS,
-        san=[x509.IPAddress(ipaddress.ip_address("127.0.0.1"))],
+        san=[
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+            *(x509.DNSName(name) for name in GATEWAY_HOSTS),
+        ],
     )
 
 
