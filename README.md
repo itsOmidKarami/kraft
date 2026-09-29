@@ -13,11 +13,11 @@
 | src/kraft/adapters/forge/\_\_init\_\_.py     |        8 |        0 |    100% |           |
 | src/kraft/adapters/forge/ci.py               |       45 |        0 |    100% |           |
 | src/kraft/adapters/forge/gh.py               |      152 |       14 |     91% |172, 252, 276, 282-292, 314-315, 370, 421 |
-| src/kraft/adapters/forge/git.py              |      104 |        4 |     96% |225-232, 369 |
+| src/kraft/adapters/forge/git.py              |      120 |        4 |     97% |47, 287-288, 425 |
 | src/kraft/adapters/forge/glab.py             |      176 |        9 |     95% |239-240, 327, 359-360, 426, 429, 442, 464 |
 | src/kraft/adapters/forge/models.py           |      156 |        0 |    100% |           |
 | src/kraft/adapters/forge/mr.py               |      124 |        5 |     96% |74, 197, 249, 315-316 |
-| src/kraft/adapters/forge/run.py              |      436 |       11 |     97% |401, 585-587, 828-829, 859-870, 1362, 1455 |
+| src/kraft/adapters/forge/run.py              |      442 |       11 |     98% |403, 587-589, 830-831, 861-872, 1371, 1465 |
 | src/kraft/adapters/hook\_install.py          |      149 |        5 |     97% |110-113, 220 |
 | src/kraft/adapters/profiles.py               |       33 |        0 |    100% |           |
 | src/kraft/adapters/subprocess.py             |      377 |       11 |     97% |242-243, 257-258, 285, 468-469, 809, 835-836, 1005 |
@@ -45,7 +45,7 @@
 | src/kraft/auth.py                            |       74 |        8 |     89% |44, 48, 50-51, 96-99 |
 | src/kraft/auto\_escalate\_delay.py           |       48 |        8 |     83% |140-148, 181-186 |
 | src/kraft/automated\_review.py               |       12 |        0 |    100% |           |
-| src/kraft/builtins.py                        |      394 |       18 |     95% |106-107, 115, 199, 265, 356-358, 399-400, 414-415, 713, 729, 830-831, 1306-1309 |
+| src/kraft/builtins.py                        |      397 |       18 |     95% |106-107, 115, 206, 272, 363-365, 406-407, 421-422, 720, 736, 837-838, 1318-1321 |
 | src/kraft/cap\_levels.py                     |       59 |        0 |    100% |           |
 | src/kraft/capabilities.py                    |       22 |        0 |    100% |           |
 | src/kraft/caps.py                            |      269 |       17 |     94% |291, 317, 328, 340-341, 354, 451, 523, 568-570, 608-613 |
@@ -69,7 +69,7 @@
 | src/kraft/events.py                          |       17 |        0 |    100% |           |
 | src/kraft/executor/\_\_init\_\_.py           |        9 |        0 |    100% |           |
 | src/kraft/executor/context.py                |       54 |        2 |     96% |  215, 246 |
-| src/kraft/executor/dispatch.py               |      644 |       17 |     97% |215, 252, 319, 370, 385, 479, 490, 493, 524-525, 875-876, 1184, 1192, 1842, 2194, 2200 |
+| src/kraft/executor/dispatch.py               |      644 |       17 |     97% |215, 252, 319, 370, 385, 479, 490, 493, 524-525, 875-876, 1185, 1193, 1843, 2195, 2201 |
 | src/kraft/executor/entry.py                  |      122 |        1 |     99% |       313 |
 | src/kraft/executor/fallback.py               |       82 |        0 |    100% |           |
 | src/kraft/executor/gates.py                  |      326 |       12 |     96% |95, 222, 337, 340, 343, 346, 583, 716, 798, 851-852, 1139 |
@@ -150,7 +150,7 @@
 | src/kraft/worker/steering.py                 |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py           |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                              |       61 |        0 |    100% |           |
-| **TOTAL**                                    | **21348** | **1124** | **95%** |           |
+| **TOTAL**                                    | **21373** | **1124** | **95%** |           |
 
 
 ## Setup coverage badge
