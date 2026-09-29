@@ -773,18 +773,15 @@ def test_doctor_warns_that_an_unusable_ssl_cert_file_is_ignored_by_sandboxes(
 
 @pytest.mark.parametrize("network", [None, {"runtime": {"allow": ["a.io"]}}], ids=["open", "set"])
 def test_doctor_warns_about_open_egress_on_a_sandboxed_repo(app, tmp_path, monkeypatch, network):
-    """Spec §1: open stays the default, so doctor says so, per repository. A
-    loopback proxy is reached through Kraft's own proxy under `network:`, so
-    only an open sandbox is warned about it."""
-    from kraft.worker.backends import docker
+    """Spec §1: open stays the default, and doctor says so. Under `network:`
+    Kraft's own proxy reaches a loopback one, so that warning goes too."""
 
     async def healthy(self, sandbox):
         return True, "ready"
 
-    monkeypatch.setattr(docker.DockerBackend, "health", healthy)
+    monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", healthy)
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
-    extra = {"network": network} if network else {}
-    rows = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), **extra)
+    rows = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), network=network)
     warned = [(r["name"].split()[0], r["ok"], r["warn"]) for r in rows]
     assert warned == ([] if network else [("egress", True, True), ("proxy", True, True)])
     assert network or "open egress" in rows[0]["detail"]
@@ -798,6 +795,6 @@ def _sandboxed_doctor_rows(app, tmp_path, prefix, **sandbox) -> list[dict]:
     repos_yaml = tmp_path / "templates" / "repos.yaml"
     data = yaml.safe_load(repos_yaml.read_text())
     data["repos"][0]["sandbox"] = {"kind": "docker", "image": "img", **sandbox}
-    repos_yaml.write_text(yaml.safe_dump(data))
+    repos_yaml.write_text(yaml.safe_dump(data))  # `network: None` is no network
 
     return [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith(prefix)]
