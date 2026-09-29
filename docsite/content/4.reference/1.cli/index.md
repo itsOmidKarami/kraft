@@ -1,5 +1,7 @@
 ---
 title: CLI
+navigation:
+  title: Overview
 description: Every kraft verb, grouped by what it does.
 ---
 

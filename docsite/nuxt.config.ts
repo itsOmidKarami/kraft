@@ -2,6 +2,9 @@
 // Nuxt-generated asset URL (_nuxt/*, _payload.json, the _ipx image proxy)
 // needs that prefix or it 404s and the page loads unstyled.
 const baseURL = '/kraft/'
+// The bare origin. Site config joins app.baseURL onto it itself, so an origin
+// that already ends in /kraft/ doubles the prefix (og:image at /kraft/kraft/).
+const origin = 'https://itsomidkarami.github.io'
 
 export default defineNuxtConfig({
   extends: ['docus'],
@@ -13,7 +16,14 @@ export default defineNuxtConfig({
     },
   },
   site: {
-    url: 'https://itsomidkarami.github.io/kraft/',
+    url: origin,
+    name: 'Kraft',
+  },
+  runtimeConfig: {
+    // Read by server/plugins/sitemap.ts. Docus's sitemap route ignores
+    // site.url and takes a host only from NUXT_SITE_URL, which would also
+    // override site.url above.
+    sitemapBase: `${origin}${baseURL.replace(/\/$/, '')}`,
   },
   // The IPX image proxy double-prefixes app.baseURL for content images
   // (/kraft/_ipx/_/kraft/assets/...), 404ing every screenshot. These are

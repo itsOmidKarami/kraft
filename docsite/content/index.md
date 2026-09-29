@@ -1,12 +1,13 @@
 ---
-title: Kraft
+title: Run your coding agent from spec to pull request
+description: 'A local orchestrator that runs your coding agent from spec to pull request, each task in its own git worktree, and stops only when a decision is yours.'
 ---
 
 ::u-page-hero
 ---
 headline: '$ uv tool install kraft-sdlc && kraft'
 title: 'Hand your coding agent a spec and walk away. Kraft only interrupts you when a decision is yours.'
-description: 'Each work item runs in its own git worktree, on your machine, until it opens the pull request. Retries and spend are capped, and it stops at gates for your approval.'
+description: 'A local orchestrator that runs your coding agent from spec to pull request, each task in its own git worktree, and stops only when a decision is yours. Retries and spend are capped.'
 links:
   - label: Get started
     to: /get-started
@@ -81,6 +82,15 @@ class: max-w-2xl
 ---
 ::::u-page-card
 ---
+to: /get-started/why-kraft
+title: Why Kraft
+description: What it does that a session, a loop or a skill does not, and when not to use it.
+variant: ghost
+---
+::::
+
+::::u-page-card
+---
 to: /get-started
 title: Get started
 description: Install Kraft and run your first work item.
@@ -130,7 +140,7 @@ links:
     color: neutral
     variant: outline
   - label: CONTRIBUTING.md
-    to: /project/contributing
+    to: https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md
     target: _blank
     color: neutral
     variant: outline

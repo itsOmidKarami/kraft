@@ -26,12 +26,6 @@ session to the end of a task.
 
 New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
 
-Under the hood, a work item runs as a
-[chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary) of ordered
-nodes, each running tasks through plugin adapters (a headless agent, a
-subprocess, a builtin). How it fits together:
-[Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
-
 ![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
 
 <table>
@@ -55,6 +49,42 @@ that re-runs the producing node, or open the full detail view.
 </tr>
 </table>
 
+Each work item follows a
+[chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary): a list of
+steps such as write the spec, write the plan, implement, verify and open the
+pull request. Some steps run your coding agent, some run a command, and some
+stop and wait for you. Chains are YAML files you can edit. How the pieces fit
+together is in
+[Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
+
+## Requirements
+
+- **macOS or Linux.** CI runs on Linux, and `kraft admin install-service`
+  supports launchd and systemd only. Windows is not supported, and WSL is
+  untested.
+- **`git`.**
+- **[uv](https://docs.astral.sh/uv/) 0.9.0 or newer**, which fetches Python
+  3.14 for you. Older uv offers only a 3.14 release candidate and the install
+  fails; `uv self update` upgrades it. Or Homebrew on macOS.
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, installed
+  and logged in. Every agent task in the shipped chains runs on it.
+- **`gh` or `glab`**, logged in, for the steps that open and merge the pull
+  request on GitHub or GitLab.
+
+**Supported agents:** Claude Code, Codex, Cursor, Gemini, OpenCode and Amp all
+run as [harnesses](https://itsomidkarami.github.io/kraft/reference/harnesses).
+The shipped chains use Claude Code only; to use another agent, edit the chains.
+
+## What it costs
+
+Kraft is free and Apache-2.0 licensed. Your agent provider bills you for the
+sessions Kraft runs. The shipped `policy.yaml` caps spend at $10 per work item
+and $50 per day across all items, and `kraft item create --budget USD` sets one
+item's cap. A cap stops the next agent task from starting, so spend can go over
+it by the cost of the task already running. In testing, a small fix on the
+`quick-task` chain cost a few cents. See
+[Caps and budgets](https://itsomidkarami.github.io/kraft/concepts/caps-and-budgets).
+
 ## Install
 
 Install Kraft with `uv`, or with Homebrew on macOS:
@@ -72,7 +102,15 @@ claude plugin marketplace add itsOmidKarami/kraft
 claude plugin install kraft@kraft
 ```
 
-Then open a Claude Code session in your repo, run this, and follow what it asks:
+Start the server and leave it running in its own terminal:
+
+```bash
+kraft              # http://127.0.0.1:8765
+kraft --version    # in another terminal: confirms what you installed
+```
+
+Then open a Claude Code session in your repo, run this, and follow what it
+asks. It needs the server running:
 
 ```text
 /kraft:onboard
@@ -87,14 +125,9 @@ Every install path, connecting your agent, and updating with
 
 ## First run
 
-```bash
-kraft              # http://127.0.0.1:8765
-kraft --version    # confirms what you installed
-```
-
-Open the URL, then follow the
+Open http://127.0.0.1:8765, then follow the
 [first-work-item tutorial](https://itsomidkarami.github.io/kraft/get-started/first-work-item)
-to connect a repo and file your first work item.
+to file your first work item.
 
 ## Analytics
 
@@ -116,6 +149,12 @@ pipeline.
 
 Kraft Lite (`plugins/kraft-lite/`) runs a chain inside a single agent session
 with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
+
+## Project status
+
+Kraft is young. Expect rough edges and frequent releases. Report bugs and ask
+questions in [GitHub issues](https://github.com/itsOmidKarami/kraft/issues).
+Report security problems as [SECURITY.md](SECURITY.md) describes.
 
 ## Contributing
 

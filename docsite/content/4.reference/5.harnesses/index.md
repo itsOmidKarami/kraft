@@ -1,5 +1,7 @@
 ---
 title: Agent harnesses
+navigation:
+  title: Overview
 description: Which agent CLIs Kraft runs, what each supports, and how a task picks one.
 ---
 
@@ -18,8 +20,12 @@ names a harness *profile* in its `harness:` field, and `harnesses.yaml` says
 which harness (the profile's `provider`) that profile runs:
 
 ```yaml
-spec_author: { kind: agent, harness: codex, prompt: "...", produces: spec }
+spec_author: { kind: agent, harness: claude, prompt: "...", produces: spec }
 ```
+
+Every agent task Kraft ships names `claude`. To run a task on another
+harness, make sure `harnesses.yaml` has a profile for it (the shipped file has
+`claude` and `codex`) and change the task's `harness:` to that profile's id.
 
 Kraft ships six harnesses:
 

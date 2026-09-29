@@ -1,5 +1,7 @@
 ---
 title: Guides
+navigation:
+  title: Overview
 description: Task-focused how-tos for driving, extending, and reaching Kraft.
 ---
 
