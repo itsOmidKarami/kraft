@@ -26,6 +26,8 @@ class _Api:
     def __init__(self):
         self.calls: list[dict] = []
         self.answers: dict[str, tuple[int, object]] = {}
+        #: Seconds a path takes to answer.
+        self.slow: dict[str, float] = {}
         conn = sqlite3.connect(":memory:", check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("CREATE TABLE review_threads (id TEXT, work_item_id TEXT)")
@@ -49,6 +51,7 @@ class _Api:
                 "authorization": request.headers.get("authorization"),
             }
         )
+        await asyncio.sleep(self.slow.get(request.url.path, 0))
         status, payload = self.answers.get(request.url.path, (200, {"ok": request.url.path}))
         return JSONResponse(payload, status_code=status)
 
@@ -227,3 +230,19 @@ async def test_the_mcp_endpoint_takes_only_its_transport_methods(worker_api):
     assert [(e["route"], e["reason"]) for e in events] == [
         ("PUT /mcp", "not this session's to call")
     ]
+
+
+async def test_the_mcp_endpoint_streams_nothing(worker_api):
+    """Stateless: no event stream to open, so a GET is answered at once
+    rather than held open for good."""
+    _, ask = worker_api
+    status, body, _ = await ask(None, method="GET", target="http://kraft/mcp")
+    assert (status, body) == (405, b"kraft: the session MCP server streams nothing\n")
+
+
+async def test_a_call_the_daemon_does_not_answer_in_time_is_a_504(worker_api, monkeypatch):
+    api, ask = worker_api
+    monkeypatch.setattr(egress, "CALL_TIMEOUT", 0.2)
+    api.slow["/api/work-items/w-own/progress"] = 3
+    status, _, _ = await ask("progress", {"task": "1"})
+    assert status == 504

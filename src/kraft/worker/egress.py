@@ -49,6 +49,10 @@ MAX_HEAD = 64 * 1024
 HEAD_TIMEOUT = 30.0
 #: Seconds a dial to an origin or the upstream proxy may take.
 CONNECT_TIMEOUT = 30.0
+#: How long one in-process worker API call may take before the worker gets a
+#: 504: every call is a short request, and a stuck one would hold its
+#: connection (and the worker) forever.
+CALL_TIMEOUT = 30.0
 #: Distinct hosts a session's refusals are recorded for; past this, one last
 #: event says the rest are not (they are still refused).
 MAX_REFUSAL_EVENTS = 100
@@ -432,6 +436,10 @@ class EgressProxy:
         No header the client sent is read but the body's length: not its
         `Authorization`, not an `X-Kraft-Session-Id`. `/mcp` is the session
         MCP server's (`_mcp_call`)."""
+        # ponytail: no cap on one session's concurrent worker API connections,
+        # nor on the permission_decision events its asks record -- parity with
+        # a host worker, whose `kraft` and hook are unbounded too. A per-session
+        # semaphore and event cap if a worker is ever seen flooding the daemon.
         url = urlsplit(target)
         if url.path == "/mcp":
             return await self._mcp_call(reader, writer, session, method, headers, rest)
@@ -453,9 +461,12 @@ class EgressProxy:
             return await self._refuse_route(
                 writer, session, f"{api_method} {path}", "not this session's to call"
             )
-        reply = await self._call(
-            self._app, api_method, path, scope.session_id, json=payload, params=params
-        )
+        try:
+            reply = await self._call(
+                self._app, api_method, path, scope.session_id, json=payload, params=params
+            )
+        except TimeoutError:
+            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         status, text = reply.status_code, reply.content
         kind = reply.headers.get("content-type", "application/json")
         if verb is _permission_hook:
@@ -481,13 +492,21 @@ class EgressProxy:
             return await self._refuse_route(
                 writer, session, f"{method} /mcp", "not this session's to call"
             )
+        if method == "GET":
+            # Stateless: a GET would open an event stream nothing ever ends.
+            return await _answer(
+                writer, 405, "Method Not Allowed", "the session MCP server streams nothing"
+            )
         body = await _read_body(reader, writer, headers, rest)
         if body is None:
             return
         passed = {_name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS}
-        reply = await self._call(
-            self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
-        )
+        try:
+            reply = await self._call(
+                self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
+            )
+        except TimeoutError:
+            return await _answer(writer, 504, "Gateway Timeout", "Kraft did not answer in time")
         kind = reply.headers.get("content-type", "application/json")
         await _respond(writer, reply.status_code, reply.reason_phrase, kind, reply.content)
 
@@ -495,12 +514,18 @@ class EgressProxy:
         """The session MCP server's permission ask: the daemon's own
         permission route, the gate the host's MCP tool asks."""
         path = f"/api/worker-sessions/{session_id}/permission"
-        reply = await self._call(self._app, "POST", path, session_id, json=ask)
+        # Inside an /mcp call's own bound: shorter, so the tool denies first.
+        reply = await self._call(
+            self._app, "POST", path, session_id, json=ask, timeout=CALL_TIMEOUT * 0.8
+        )
         return reply.status_code, reply.json()
 
-    async def _call(self, asgi, method: str, path: str, session_id: str, **kw) -> httpx.Response:
+    async def _call(
+        self, asgi, method: str, path: str, session_id: str, *, timeout: float | None = None, **kw
+    ) -> httpx.Response:
         """`method path` in-process on `asgi` as `session_id`, with the
-        daemon's own token: the one way a worker's callback reaches Kraft."""
+        daemon's own token: the one way a worker's callback reaches Kraft.
+        `TimeoutError` after `timeout` (`CALL_TIMEOUT`)."""
         headers = {
             **kw.pop("headers", {}),
             "Authorization": f"Bearer {self._app.state.mcp_token}",
@@ -509,7 +534,9 @@ class EgressProxy:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=asgi), base_url="http://kraft"
         ) as client:
-            return await client.request(method, path, headers=headers, **kw)
+            return await asyncio.wait_for(
+                client.request(method, path, headers=headers, **kw), timeout or CALL_TIMEOUT
+            )
 
     def _thread_owner(self, tid: str) -> str | None:
         row = self._app.state.db.read(lambda c: store.thread_row(c, tid))
