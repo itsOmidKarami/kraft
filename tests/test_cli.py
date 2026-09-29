@@ -257,7 +257,7 @@ class _FakePopen:
         return self._exit_code
 
 
-def test_detach_returns_once_the_child_writes_the_pidfile(monkeypatch, tmp_path, capsys):
+def test_detach_returns_once_the_child_is_up(monkeypatch, tmp_path, capsys):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     run_dir = tmp_path / "run"
     monkeypatch.setenv("KRAFT_RUN_DIR", str(run_dir))
@@ -271,6 +271,13 @@ def test_detach_returns_once_the_child_writes_the_pidfile(monkeypatch, tmp_path,
         )
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    async def healthy():
+        return {"status": "ok"}
+
+    # Up means answering /api/health too, not only the pidfile
+    # (tests/cli/test_admin.py pins that wait).
+    monkeypatch.setattr(cli.admin.client, "health", healthy)
     cli.main(["admin", "start", "--detach"])
     out = capsys.readouterr().out
     assert "127.0.0.1:8765" in out
