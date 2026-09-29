@@ -44,7 +44,7 @@ async def _handshake(server_run: RunDirs, client: tuple, hostname: str = "127.0.
         )
         answer = await asyncio.wait_for(reader.read(), 5)
         writer.close()
-    except ssl.SSLError, ConnectionError:
+    except OSError:  # SSLError and ConnectionError
         answer = b""
     finally:
         server.close()

@@ -268,7 +268,7 @@ async def test_closing_a_session_ends_the_tunnels_it_already_has(
         await reg.close(sid)
         try:
             ended = await asyncio.wait_for(reader.read(), 5) == b""
-        except ConnectionError, ssl.SSLError:
+        except OSError:  # SSLError and ConnectionError
             ended = True
         assert ended
     finally:
