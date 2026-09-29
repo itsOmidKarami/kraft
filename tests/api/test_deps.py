@@ -322,8 +322,11 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
             result_path="/tmp/kraft-test.json",
         )
     headers = {"X-Kraft-Session-Id": caller} if caller else {}
-    if caller == "s-escalation" and path.endswith(("/approve", "/reject")):
-        refused = True  # Kraft-9efnk.16: a gate is a human's, not the escalation agent's
+    # Kraft-9efnk.16 / .29: a gate and a spending cap are a human's, not the
+    # escalation agent's.
+    spending = path.endswith("/budget/raise") or (body or {}).keys() & {"budget_usd", "policy"}
+    if caller == "s-escalation" and (path.endswith(("/approve", "/reject")) or spending):
+        refused = True
     r = client.request(method, path, json=body, headers=headers)
     assert (r.status_code == 403) is refused, r.text
     if refused:
