@@ -200,6 +200,8 @@ async def _run_one(
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
     automated_review: AutomatedReview | None = None,
+    #: The repository's `ci_checks:`; False skips the `mr.ci` wait.
+    ci_checks: bool = True,
     merge_requested: bool = False,
     #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
     #: records the merge request it opened or reused there (Kraft-mjsf).
@@ -315,6 +317,20 @@ async def _run_one(
             # red, forever (Kraft-bxj8). `git push -u` is a no-op when the
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
+            if not ci_checks:
+                await db.write(
+                    lambda c: events.append(
+                        c,
+                        work_item_id,
+                        "ci_not_configured",
+                        {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
+                    )
+                )
+                return (
+                    "no CI configured for this repo (ci_checks: false); not waiting\n",
+                    "done",
+                    findings,
+                )
             # One check, not a wait. A pipeline that has not settled hands the
             # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
             # coroutine that sat here held an intake slot and could not be
@@ -963,6 +979,8 @@ async def run_task(
     #: The repository's `automated_review:` (Ruling 171); None names no
     #: reviewer. Read only by `mr.automated_review`.
     automated_review: AutomatedReview | None = None,
+    #: The repository's `ci_checks:`. Read only by `mr.ci`.
+    ci_checks: bool = True,
     head_sha: str | None = None,
     #: Whether this node declares `on_base_changed` -- see `_run_one`'s
     #: docstring. Defaults to False,
@@ -1205,6 +1223,7 @@ async def run_task(
                     meta=meta,
                     has_rebase_bounce=has_rebase_bounce,
                     automated_review=automated_review,
+                    ci_checks=ci_checks,
                     merge_requested=requested,
                     repo_row_id=row_id,
                     moved=moved if member else None,

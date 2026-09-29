@@ -516,6 +516,31 @@ async def test_the_repository_s_named_reviewer_reaches_the_review_task(
     assert asked == [AutomatedReview(bot="coderabbitai")]
 
 
+@pytest.mark.parametrize(
+    "extra, polled, status",
+    [({"ci_checks": False}, [], "completed"), ({}, [""], "waiting")],
+    ids=["no-ci", "absent-key"],
+)
+async def test_a_repo_with_no_ci_passes_the_ci_wait_at_once(
+    item_on, database, run_dirs, monkeypatch, extra, polled, status
+):
+    """Kraft-9efnk.12: gh reads a pull request with no checks as pending
+    forever. `ci_checks: false` on the repository passes the CI wait without
+    asking the forge, and records why; an absent key still waits."""
+    fake = forge.FakeForge(ci_states=["pending"])
+    monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
+    it = await item_on([forge_node("ci", "mr.ci")])
+    entry = entry_of({"setup_command": "", "forge": "github", **extra})
+
+    await executor.run(
+        database, run_dirs, work_item_id=it.id, launch=executor.LaunchContext(repo_entry=entry)
+    )
+
+    assert fake.pipeline_ids_requested == polled
+    assert it.status() == status
+    assert len(it.events("ci_not_configured")) == (0 if polled else 1)
+
+
 @pytest.mark.parametrize("key", ["webhook_event", "check_name", "comment_author", "command"])
 def test_a_template_cannot_configure_how_automated_review_is_read(key):
     """`automated-review-implementation-is-not-template-configuration`: a

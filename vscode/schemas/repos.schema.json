@@ -114,6 +114,11 @@
           ],
           "default": null
         },
+        "ci_checks": {
+          "default": true,
+          "title": "Ci Checks",
+          "type": "boolean"
+        },
         "default_chain_template": {
           "anyOf": [
             {
