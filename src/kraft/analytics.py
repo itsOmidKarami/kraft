@@ -105,7 +105,8 @@ def _completed_count_between(
         where.append("repo = ?")
         args.append(repo)
     if template:
-        where.append("chain_template = ?")
+        # An unchosen `default` is stored as NULL (Kraft-cd47).
+        where.append("COALESCE(chain_template, 'default') = ?")
         args.append(template)
     row = conn.execute(
         f"SELECT COUNT(*) AS n FROM work_items WHERE {' AND '.join(where)}", args
@@ -290,7 +291,8 @@ def compute(
         where.append("repo = ?")
         args.append(repo)
     if template:
-        where.append("chain_template = ?")
+        # An unchosen `default` is stored as NULL (Kraft-cd47).
+        where.append("COALESCE(chain_template, 'default') = ?")
         args.append(template)
 
     items = conn.execute(

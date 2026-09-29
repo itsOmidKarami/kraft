@@ -67,16 +67,27 @@ def test_probe_reads_the_repo_without_touching_it(tmp_path, client):
     assert client.post("/api/repos/probe", json={"path": str(plain)}).status_code == 400
 
 
-@pytest.mark.parametrize("route", ["/api/repos", "/api/repos/probe"])
+@pytest.mark.parametrize(
+    ("method", "route", "body", "status", "says"),
+    [
+        ("POST", "/api/repos", {"path": "."}, 422, "path must be absolute"),
+        ("POST", "/api/repos/probe", {"path": "."}, 422, "path must be absolute"),
+        ("PATCH", "/api/repos?path=.", {"name": "x"}, 404, "not connected"),
+        ("DELETE", "/api/repos?path=.", None, 404, "not connected"),
+        ("POST", "/api/work-items", {"title": "t", "repo": "."}, 422, "absolute path"),
+        ("POST", "/api/triggers", {"title": "t", "repo": "."}, 422, "absolute path"),
+    ],
+)
 def test_a_relative_path_is_refused_not_resolved_against_the_servers_cwd(
-    client, repo, monkeypatch, route
+    client, repo, monkeypatch, method, route, body, status, says
 ):
     """The server's cwd is not the caller's: resolving `.` here connected
-    whatever directory the daemon started in (Kraft-9efnk.32)."""
+    whatever directory the daemon started in (Kraft-9efnk.32), and matched
+    the connected repo there on every lookup (Kraft-9efnk.39)."""
+    assert client.post("/api/repos", json={"path": str(repo)}).status_code == 201
     monkeypatch.chdir(repo)
-    r = client.post(route, json={"path": "."})
-    assert r.status_code == 422
-    assert "path must be absolute" in r.text
+    r = client.request(method, route, json=body)
+    assert r.status_code == status and says in r.text, r.text
 
 
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
