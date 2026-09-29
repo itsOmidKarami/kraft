@@ -135,10 +135,10 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
     branch the item actually owns rather than committed onto whatever the
     agent happened to leave checked out.
 
-    Best effort throughout, like `commit_stragglers`: a `restore_branch`
-    that could not recover is a worktree already too broken for a log line
-    to fix, and the failure it hides here surfaces the same way it always
-    did -- the next node's own git command refuses on the same tree.
+    Best effort, except the checkout: an unreadable HEAD is left for the
+    next node's own git command to refuse, but a checkout that fails raises,
+    since the straggler commit after it would land on whatever branch HEAD
+    names (Kraft-xngty).
     """
     with base_ignore_args(worktree, base) as ignore_args:
 
@@ -159,8 +159,10 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
         git("merge", "--abort")  # no-op, exit nonzero, if no merge is in progress
         checked_out = git("checkout", "-f", branch)
         if checked_out.returncode != 0:
-            logger.warning(
-                "could not restore %s to %r: %s", worktree, branch, checked_out.stderr.strip()
+            # Raised, not logged: the straggler commit that follows would land
+            # on whatever branch HEAD names (Kraft-xngty).
+            raise RuntimeError(
+                f"could not restore {worktree} to {branch!r}: {checked_out.stderr.strip()}"
             )
 
 
@@ -943,10 +945,7 @@ async def refresh_worktree_base(
             f"{worktree} has a {operation} Kraft did not start; "
             "finish or abort it by hand, then retry"
         )
-    # `HEAD` is the worker's to write too; pointed at another branch, the
-    # rebase below would replay that one.
-    if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
-        raise RuntimeError(f"{worktree} is not on {branch}; check it out by hand, then retry")
+    git.assert_on_branch(worktree, branch)
     try:
         done = await asyncio.to_thread(
             subprocess.run,
@@ -1187,6 +1186,9 @@ async def _rebase_members(
             (work_item_id,),
         ).fetchall()
     )
+    if rows:
+        # The repoint below commits in the root, onto whatever its HEAD names.
+        git.assert_on_branch(root, branch)
     moved: list[tuple[str, str]] = []
     repoint: list[str] = []
     try:

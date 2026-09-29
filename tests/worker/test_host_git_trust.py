@@ -208,7 +208,7 @@ async def _every_host_call(wt: Path) -> None:
     review.read_change(wt, "HEAD")
     review.read_change(wt, "HEAD~1", head="HEAD")
     for call in (
-        forge.commit_stragglers(wt, base="main", message="wip"),
+        forge.commit_stragglers(wt, branch="kraft/w1", base="main", message="wip"),
         forge.assert_clean(wt, "main"),
         forge.git.push(wt, "kraft/w1"),
     ):

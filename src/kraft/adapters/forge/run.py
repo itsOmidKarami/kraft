@@ -1346,7 +1346,11 @@ async def _point_at_merged_members(
     whatever its origin's tip has become since: the item built neither.
 
     Read afresh, not off `run_task`'s rows: a member merged earlier in the
-    same pass is recorded merged only in the table."""
+    same pass is recorded merged only in the table.
+
+    The commit, and the direct push of `HEAD` that may follow it, both go
+    wherever the root's HEAD names, so it must name the item's branch."""
+    git.assert_on_branch(root_repo, branch)
     merged = db.read(
         lambda c: c.execute(
             "SELECT repo_path FROM work_item_repos WHERE work_item_id = ? "

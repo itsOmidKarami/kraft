@@ -58,6 +58,7 @@ async def _item(item_on, task: dict, sandboxed: bool):
     not, with `base_ref` stamped at the repo's HEAD the way env setup does."""
     policy = {"policy": {"sandbox": _SANDBOX}} if sandboxed else {}
     it = await item_on([{"id": "implementation", "kind": "exec", "tasks": [task], **policy}])
+    _git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
     head = _git(it.repo, "rev-parse", "HEAD")
     await it.database.write(lambda c: store.set_base_ref(c, it.id, head))
     return it

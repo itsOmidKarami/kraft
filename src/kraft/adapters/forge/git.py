@@ -13,6 +13,16 @@ from kraft.adapters.forge.models import ForgeError
 from kraft.config import base_ignore_args, git_read
 from kraft.worker import sandbox
 
+
+def assert_on_branch(worktree: Path, branch: str) -> None:
+    """Raise unless `worktree`'s HEAD is `refs/heads/<branch>` (Kraft-xngty).
+    A worktree's HEAD sits in a gitdir its worker can write; pointed at one of
+    the operator's branches, Kraft's next commit, rebase or push of HEAD would
+    move that branch instead of the item's."""
+    if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
+        raise ForgeError(f"{worktree} is not on {branch}; check it out by hand, then retry")
+
+
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
 #: outside that thread reaches into it.
@@ -176,7 +186,7 @@ async def assert_clean(repo: Path, base: str) -> None:
 
 
 async def commit_stragglers(
-    repo: Path, *, base: str, message: str, mounts: Collection[str] = ()
+    repo: Path, *, branch: str, base: str, message: str, mounts: Collection[str] = ()
 ) -> bool:
     """Commit whatever an agent left behind in the worktree. True if it did.
 
@@ -219,6 +229,7 @@ async def commit_stragglers(
         )
         if not status.strip():
             return False
+        assert_on_branch(repo, branch)
         await run_git(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
         try:
             await run_git(repo, ["git", "commit", "-m", message])

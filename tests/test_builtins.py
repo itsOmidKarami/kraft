@@ -12,7 +12,7 @@ from support.harness import (
     v1_chain,
     v1_resolved,
 )
-from support.workspace import workspace_target
+from support.workspace import workspace_item, workspace_target
 
 from kraft import builtins as kraft_builtins
 from kraft import store
@@ -700,3 +700,42 @@ async def test_a_planted_head_never_rebases_another_branch(database, run_dirs, r
 
     assert git_read(repo, "rev-parse", "side") == side
     assert f"is not on {branch}" in stopped
+
+
+def _plant_head(worktree: Path, ref: str) -> None:
+    """A worker pointing its worktree's HEAD at one of the operator's branches."""
+    Path(git_read(worktree, "rev-parse", "--absolute-git-dir"), "HEAD").write_text(f"ref: {ref}\n")
+
+
+async def test_a_planted_root_head_never_takes_the_members_repoint(database, run_dirs, tmp_path):
+    """`_rebase_members` commits the root's repoint onto whatever the root's
+    HEAD names; pointed at an operator branch, that branch took the commit."""
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    row, _, root = await workspace_item(database, run_dirs, tmp_path, [task])
+    branch = store.branch_for(row)
+    _commit(root / "repos" / "pkg", "calc.py", "x = 1\n", "member change")
+    _git(root, "add", "repos/pkg")
+    _git(root, "commit", "-qm", "wip: uncommitted work from t")
+    _commit(tmp_path / "pkg", "moved.txt", "landed\n", "the member's main moves")
+    _git(Path(row["repo"]), "branch", "side", git_read(root, "rev-parse", "HEAD"))
+    side = git_read(root, "rev-parse", "side")
+    _plant_head(root, "refs/heads/side")
+
+    try:
+        await kraft_builtins._rebase_members(
+            database, row["id"], root, branch, "main", lambda: None
+        )
+        stopped = ""
+    except RuntimeError as exc:
+        stopped = str(exc)
+
+    assert git_read(root, "rev-parse", "side") == side
+    assert f"is not on {branch}" in stopped
+
+
+def test_restore_branch_raises_when_it_cannot_restore(repo):
+    """The straggler commit that follows it would land on whatever HEAD names."""
+    _plant_head(repo, "refs/heads/main")
+
+    with pytest.raises(RuntimeError, match="could not restore"):
+        kraft_builtins.restore_branch(repo, "kraft/never-created", "main")
