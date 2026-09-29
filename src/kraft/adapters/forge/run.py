@@ -181,6 +181,20 @@ async def _rebase_conflict_away(
     return f"rebased {branch} onto {new_head} and re-pushed\n", "done"
 
 
+async def _skip_ci(db, work_item_id: str, node_id: str, hook_point: str, orig_repo: Path):
+    """A CI wait on a repo with `ci_checks: false` (Kraft-9efnk.12): passes at
+    once, before or after the merge, and records why."""
+    await db.write(
+        lambda c: events.append(
+            c,
+            work_item_id,
+            "ci_not_configured",
+            {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
+        )
+    )
+    return "no CI configured for this repo (ci_checks: false); not waiting\n", "done", None
+
+
 async def _run_one(
     forge: Forge,
     db,
@@ -200,7 +214,7 @@ async def _run_one(
     meta: mr_ops.MRMeta = _EMPTY_META,
     has_rebase_bounce: bool = False,
     automated_review: AutomatedReview | None = None,
-    #: The repository's `ci_checks:`; False skips the `mr.ci` wait.
+    #: The repository's `ci_checks:`; False skips both CI waits.
     ci_checks: bool = True,
     merge_requested: bool = False,
     #: This repo's `work_item_repos` row, for a multi-repo item: `open_mr`
@@ -318,19 +332,7 @@ async def _run_one(
             # branch is up to date, so this costs one git call.
             await forge.push(repo=repo, branch=branch)
             if not ci_checks:
-                await db.write(
-                    lambda c: events.append(
-                        c,
-                        work_item_id,
-                        "ci_not_configured",
-                        {"node_id": node_id, "task": hook_point, "repo": str(orig_repo)},
-                    )
-                )
-                return (
-                    "no CI configured for this repo (ci_checks: false); not waiting\n",
-                    "done",
-                    findings,
-                )
+                return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
             # One check, not a wait. A pipeline that has not settled hands the
             # wait back to the scheduler (Kraft-ru98, `kraft.waits`); a
             # coroutine that sat here held an intake slot and could not be
@@ -707,6 +709,8 @@ async def _run_one(
                         log += f"the merge request is {state}, not merged; nothing landed\n"
                         status = "failed"
         case "merge_watch":
+            if not ci_checks:
+                return await _skip_ci(db, work_item_id, node_id, hook_point, orig_repo)
             # Local imports, same as `ci_poll`'s own "infra" branch a few
             # cases up -- the infra counter below needs them.
             from kraft import policy as _policy
@@ -979,7 +983,7 @@ async def run_task(
     #: The repository's `automated_review:` (Ruling 171); None names no
     #: reviewer. Read only by `mr.automated_review`.
     automated_review: AutomatedReview | None = None,
-    #: The repository's `ci_checks:`. Read only by `mr.ci`.
+    #: The repository's `ci_checks:`. Read by `mr.ci` and `mr.post_merge_ci`.
     ci_checks: bool = True,
     head_sha: str | None = None,
     #: Whether this node declares `on_base_changed` -- see `_run_one`'s

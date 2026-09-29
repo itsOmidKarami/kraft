@@ -521,15 +521,17 @@ async def test_the_repository_s_named_reviewer_reaches_the_review_task(
     [({"ci_checks": False}, [], "completed"), ({}, [""], "waiting")],
     ids=["no-ci", "absent-key"],
 )
+@pytest.mark.parametrize("target", ["mr.ci", "mr.post_merge_ci"])
 async def test_a_repo_with_no_ci_passes_the_ci_wait_at_once(
-    item_on, database, run_dirs, monkeypatch, extra, polled, status
+    item_on, database, run_dirs, monkeypatch, extra, polled, status, target
 ):
     """Kraft-9efnk.12: gh reads a pull request with no checks as pending
-    forever. `ci_checks: false` on the repository passes the CI wait without
-    asking the forge, and records why; an absent key still waits."""
+    forever, and a merged head with no pipeline likewise. `ci_checks: false`
+    on the repository passes both CI waits without asking the forge, and
+    records why; an absent key still waits."""
     fake = forge.FakeForge(ci_states=["pending"])
     monkeypatch.setattr(forge.run, "resolve", lambda name: fake)
-    it = await item_on([forge_node("ci", "mr.ci")])
+    it = await item_on([forge_node("ci", target)])
     entry = entry_of({"setup_command": "", "forge": "github", **extra})
 
     await executor.run(
