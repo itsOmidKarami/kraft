@@ -41,7 +41,8 @@ findings:
   loop_severities: [critical, important]
 
 # Spend caps, in dollars. This file turns both on; delete a key to turn that
-# cap off (a missing key is no cap). A cap refuses to START the next agent task; it cannot interrupt one that is already running, because the agent
+# cap off (a missing key is no cap). A cap refuses to START the next agent
+# task; it cannot interrupt one that is already running, because the agent
 # CLI only reports its cost when the session exits. Overshoot is bounded by the
 # cost of one task, not by the cap.
 budget:
