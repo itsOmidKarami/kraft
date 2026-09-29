@@ -103,7 +103,7 @@
 | src/kraft/policy.py                          |      661 |       20 |     97% |251-252, 1011, 1167, 1401-1410, 1490, 1497, 1511, 1515-1519, 1524 |
 | src/kraft/progress.py                        |      113 |        0 |    100% |           |
 | src/kraft/rate\_limit\_retry.py              |       58 |        9 |     84% |155-157, 165-170 |
-| src/kraft/registration.py                    |       39 |        0 |    100% |           |
+| src/kraft/registration.py                    |       43 |        0 |    100% |           |
 | src/kraft/render.py                          |      220 |       23 |     90% |46-47, 76, 83, 312, 329, 342, 348-352, 390-397, 425, 437, 463 |
 | src/kraft/review.py                          |      111 |        6 |     95% |74, 204, 208, 242, 244, 256 |
 | src/kraft/review\_reply.py                   |       75 |        7 |     91% |75, 93-94, 122-123, 128, 142 |
@@ -150,7 +150,7 @@
 | src/kraft/worker/steering.py                 |       94 |        8 |     91% |152-153, 164-166, 192-193, 203 |
 | src/kraft/worker/worktree\_read.py           |       48 |        8 |     83% |82, 86-88, 91-95, 103-104 |
 | src/kraft/ws.py                              |       61 |        0 |    100% |           |
-| **TOTAL**                                    | **21312** | **1125** | **95%** |           |
+| **TOTAL**                                    | **21316** | **1125** | **95%** |           |
 
 
 ## Setup coverage badge
