@@ -476,6 +476,7 @@ async def open_egress(
     sandbox: dict,
     lists: PhaseLists,
     credentials: tuple[InjectRule, ...] = (),
+    repo: str | None = None,
 ) -> dict:
     """Open a session's egress under `sandbox['network']`: its channel, with
     the `credentials` its proxy injects, the lists (and those credentials,
@@ -499,6 +500,10 @@ async def open_egress(
         egress = {**lists.to_json(), "transport": transport}
         if credentials:
             egress["credentials"] = [r.to_json() for r in credentials]
+            # Whose `worker_env` the values came from, for a reattach to
+            # read them again; absent, the daemon's own (no repo entry).
+            if repo is not None:
+                egress["repo"] = repo
         await db.write(lambda c: store.set_session_egress(c, session_id, egress))
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:
@@ -671,7 +676,14 @@ async def run_task(
             lists = PhaseLists.of(sandbox["network"], "runtime", network_requires)
             try:
                 proxy_env = await open_egress(
-                    db, backend, session_id, work_item_id, sandbox, lists, rules
+                    db,
+                    backend,
+                    session_id,
+                    work_item_id,
+                    sandbox,
+                    lists,
+                    rules,
+                    repo_entry.path if repo_entry is not None else None,
                 )
             except BaseException as exc:
                 # Whatever part of the route did open, closed.
