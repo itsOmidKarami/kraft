@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from kraft import harness
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
@@ -133,6 +134,6 @@ def test_a_named_credential_is_launched_as_its_harness_declares_it(run, tmp_path
     all, and the launch hands it on to be managed."""
     sandbox = {**NETWORKED, "credentials": [{"env": "ANTHROPIC_API_KEY"}]}
     seen = run(harness="claude", command="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)
-    (credential,) = seen["credentials"]
+    (credential,) = harness.manage(harness.sandbox_credentials(sandbox), seen["declared"])
     assert credential.sentinel == "sk-ant-api03-kraft-proxy-managed"
     assert [(i.domain, i.header) for i in credential.inject] == [("api.anthropic.com", "x-api-key")]

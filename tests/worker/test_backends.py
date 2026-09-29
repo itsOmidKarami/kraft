@@ -18,7 +18,6 @@ from kraft.adapters import subprocess as sp
 from kraft.config import ConfigError
 from kraft.executor.context import LaunchContext
 from kraft.paths import RunDirs
-from kraft.policy import SandboxCredential
 from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.sandbox import SandboxNotReady
@@ -56,6 +55,7 @@ class Remote:
         return run_dirs.base / "remote-home" / work_item_id
 
     async def probe(self, sandbox, executable, env):
+        self.probed_env = env
         return None
 
     async def prepare(self, sandbox, *, kraft_ca=None):
@@ -329,7 +329,8 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     """Spec §6: read from the worker env into the session's proxy; the
     container gets the sentinel and a bundle with the Kraft CA, the row the
     rule and the repo whose env gave the value but not the value, and the
-    docker client not even the variable."""
+    docker client not even the variable. Read off the sandbox by `run_task`
+    itself: a caller that says nothing of credentials still strips them."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     entry = entry_of({"path": "/r", "env": {"ANTHROPIC_API_KEY": "sk-real-VALUE"}})
     remote.transport = "tls"
@@ -343,17 +344,14 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
         return ["sh", "-c", 'echo "key=${ANTHROPIC_API_KEY-unset}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
-    credential = SandboxCredential.model_validate(
-        {
-            "env": "ANTHROPIC_API_KEY",
-            "sentinel": "sk-sentinel",
-            "inject": [{"domain": "a.io", "header": "x-api-key"}],
-        }
-    )
+    credential = {
+        "env": "ANTHROPIC_API_KEY",
+        "sentinel": "sk-sentinel",
+        "inject": [{"domain": "a.io", "header": "x-api-key"}],
+    }
+    sandbox = {**_POLICED, "credentials": [credential]}
 
-    status = await _run_on_remote(
-        database, run_dirs, tmp_path, _POLICED, credentials=(credential,), repo_entry=entry
-    )
+    status = await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
 
     assert status == "done_with_concerns"
     assert seen["sentinels"] == {"ANTHROPIC_API_KEY": "sk-sentinel"}
@@ -367,6 +365,7 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     assert (recorded["credentials"], recorded["repo"]) == ([rule.to_json()], "/r")
     assert "sk-real-VALUE" not in row["egress"]
     assert "key=unset" in (run_dirs.logs / "s1.log").read_text()
+    assert remote.probed_env == {}  # the repo's `env:` literal, not even for the probe
 
 
 @pytest.mark.parametrize("missing", ["channel", "route"])

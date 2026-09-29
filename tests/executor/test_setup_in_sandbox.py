@@ -14,6 +14,9 @@ import subprocess
 import pytest
 from support.harness import entry_of, fake_docker_bin, v1_chain, v1_walk
 
+# The backend that shares no filesystem, and a channel registry for its egress.
+from worker.test_backends import Remote, channels  # noqa: F401
+
 from kraft import builtins as kraft_builtins
 from kraft import config as _config
 from kraft import executor
@@ -21,7 +24,7 @@ from kraft.api import deps
 from kraft.executor import dispatch
 from kraft.paths import RunDirs
 from kraft.policy import SandboxPolicy
-from kraft.worker import ca, refstore
+from kraft.worker import backends, ca, refstore
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.env import worker_env
 
@@ -453,3 +456,65 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
     assert seen["refstore"] is not None and seen["refstore"].branch is None
     assert list(seen["passthrough"]) == ["X_KEY"]
     assert published == []
+
+
+#: What a worker-written test would do with a managed credential's variable.
+_ECHO_KEY = "sh -c 'echo key=$E2E_KEY >> seen'"
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"id": "t", "kind": "subprocess", "command": _ECHO_KEY},
+        {"id": "t", "kind": "builtin", "ref": "kraft.verify_changed_test_scopes"},
+    ],
+    ids=["subprocess-task", "test-scope"],
+)
+async def test_a_managed_credential_reaches_a_sandboxed_command_as_its_sentinel(
+    item_on,
+    tmp_path,
+    monkeypatch,
+    channels,  # noqa: F811
+    task,
+):
+    """Spec §6 for code the worker wrote: a subprocess task and a test scope
+    see the sentinel, never the repository's value, though neither caller
+    names a credential (the client's env: `test_backends`)."""
+    monkeypatch.delenv("E2E_KEY", raising=False)
+    remote = Remote(tmp_path)
+    monkeypatch.setitem(backends._BACKENDS, "docker", remote)
+    inner_wrap = remote.wrap
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, sentinels, **kw):
+        # What `docker_argv` puts in the container: `env=`, then the sentinels.
+        crossing = [f"{k}={v}" for k, v in {**(env or {}), **sentinels}.items()]
+        return inner_wrap(["env", *crossing, *cmd], cwd, sandbox, results_dir, env, **kw)
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    sandbox = {
+        **_SANDBOX,
+        "network": {"runtime": {"allow": ["api.test"]}},
+        "credentials": [{"env": "E2E_KEY", "inject": [{"domain": "api.test", "header": "x-key"}]}],
+    }
+    it = await item_on([{"id": "verify", "kind": "exec", "tasks": [task]}])
+    entry = entry_of(
+        {
+            "setup_command": "",
+            "sandbox": sandbox,
+            "env": {"E2E_KEY": "sk-real-VALUE"},
+            "test_scopes": [{"paths": ["**"], "command": _ECHO_KEY}],
+        }
+    )
+    node = it.chain.chain.nodes[0]
+
+    await dispatch.dispatch_node(
+        it.database,
+        it.run_dirs,
+        node.steps[0].tasks[0],
+        node,
+        it.row(),
+        it.repo,
+        launch=executor.LaunchContext(repo_entry=entry),
+    )
+
+    assert (it.repo / "seen").read_text() == "key=kraft-proxy-managed\n"

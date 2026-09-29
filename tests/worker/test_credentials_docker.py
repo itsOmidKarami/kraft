@@ -205,7 +205,8 @@ async def test_the_real_cli_sends_the_sentinel_and_trusts_the_bundle(
         {"runtime": {"allow": [rule.domain]}},
         image=_cli_image(runtime.cli, harness_id),
         upstream=(rule.domain, port),
-        credentials=h.managed_credentials((SandboxCredential(env=declared.env),)),
+        credentials=(SandboxCredential(env=declared.env),),
+        declared=h.credentials,
         repo_entry=entry_of({"path": "/r", "env": {declared.env: REAL}}),
         network_requires=h.network_requires,
     )

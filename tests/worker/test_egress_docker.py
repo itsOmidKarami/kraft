@@ -195,7 +195,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
 
-    async def go(script: str, network: dict, *, image=IMAGE, upstream=None, **kw):
+    async def go(script: str, network: dict, *, image=IMAGE, upstream=None, credentials=(), **kw):
         routed[:] = upstream or ("allowed.test", port)
         status = await sp.run_task(
             database,
@@ -206,7 +206,12 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
             hook_point="on.test.run",
             cmd=["sh", "-c", script.format(gateway=_gateway(runtime.cli), port=port)],
             cwd=work,
-            sandbox={"kind": "docker", "image": image, "network": network},
+            sandbox={
+                "kind": "docker",
+                "image": image,
+                "network": network,
+                **({"credentials": [c.model_dump() for c in credentials]} if credentials else {}),
+            },
             **kw,
         )
         refused = [

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import psutil
 
 from kraft import caps, events, logs, store
+from kraft import harness as _harness
 from kraft import usage as _usage
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
@@ -584,9 +585,11 @@ async def run_task(
     #: The harness's own hosts (`Harness.network_requires`), allowed on top of
     #: a `network:` sandbox's runtime list. Only `run_agent_task` sets it.
     network_requires: tuple[str, ...] = (),
-    #: The sandbox's credentials as this launch manages them
-    #: (`harness.manage`), each with its sentinel. Under `network:` only.
-    credentials: tuple = (),
+    #: The credentials this launch's harness declares (`Harness.credentials`),
+    #: which fill a sandbox entry naming just `env` (`harness.manage`). Only
+    #: `run_agent_task` sets it; the sandbox's own `credentials` are managed
+    #: for every launch regardless.
+    declared: tuple = (),
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -622,8 +625,14 @@ async def run_task(
     full_env = worker_env(repo_entry, {**(env or {}), "KRAFT_RESULT_PATH": str(result_path)})
     # A managed credential's value goes to the egress proxy, read from the
     # worker env like any other; the container holds its sentinel, and the
-    # docker client does not hold the value either (spec §6).
-    credentials = credentials if network else ()
+    # docker client does not hold the value either (spec §6). Read off the
+    # sandbox here, for every caller: a subprocess task or a test scope runs
+    # code the worker wrote, as an agent does.
+    credentials = (
+        _harness.manage(_harness.sandbox_credentials(sandbox), declared)
+        if backend is not None
+        else ()
+    )
     sentinels = {c.env: c.sentinel for c in credentials}
     rules = _inject.rules(credentials, full_env)
     full_env = {k: v for k, v in full_env.items() if k not in sentinels}
@@ -657,7 +666,12 @@ async def run_task(
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
         if problem := await backend.probe(
-            sandbox, cmd[0], repo_entry.env if repo_entry is not None else None
+            sandbox,
+            cmd[0],
+            # A managed name never crosses, not even into the probe.
+            {k: v for k, v in repo_entry.env.items() if k not in sentinels}
+            if repo_entry is not None
+            else None,
         ):
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
