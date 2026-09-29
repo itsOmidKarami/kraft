@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_c1fa784957154a5e_context_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 20:57 +0000
+            created at 2026-09-29 21:18 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -355,8 +355,8 @@
     <p class="pln"><span class="n"><a id="t273" href="#t273">273</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t274" href="#t274">274</a></span><span class="t"><span class="key">async</span> <span class="key">def</span> <span class="nam">raise_budget</span><span class="op">(</span><span class="nam">budget_usd</span><span class="op">:</span> <span class="nam">float</span> <span class="op">|</span> <span class="key">None</span><span class="op">,</span> <span class="nam">work_item_id</span><span class="op">:</span> <span class="nam">str</span> <span class="op">|</span> <span class="key">None</span> <span class="op">=</span> <span class="key">None</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">dict</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t275" href="#t275">275</a></span><span class="t">    <span class="str">&quot;&quot;&quot;Raise a stopped item&#x27;s own dollar cap and retry it, the board&#x27;s Raise</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t276" href="#t276">276</a></span><span class="t"><span class="str">    budget button. `None` means no cap. The route takes it from `needs_human`</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t277" href="#t277">277</a></span><span class="t"><span class="str">    only.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t276" href="#t276">276</a></span><span class="t"><span class="str">    budget button. `None` means no cap. The route takes it only from a</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t277" href="#t277">277</a></span><span class="t"><span class="str">    `needs_human` stop the item&#x27;s own cap made.&quot;&quot;&quot;</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t278" href="#t278">278</a></span><span class="t">    <span class="nam">target</span> <span class="op">=</span> <span class="nam">context</span><span class="op">.</span><span class="nam">_forbid_self_action</span><span class="op">(</span><span class="nam">work_item_id</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t279" href="#t279">279</a></span><span class="t">    <span class="key">return</span> <span class="key">await</span> <span class="nam">transport</span><span class="op">.</span><span class="nam">_act</span><span class="op">(</span><span class="fst">f&quot;</span><span class="fst">/work-items/</span><span class="op">{</span><span class="nam">target</span><span class="op">}</span><span class="fst">/budget/raise</span><span class="fst">&quot;</span><span class="op">,</span> <span class="op">{</span><span class="str">&quot;budget_usd&quot;</span><span class="op">:</span> <span class="nam">budget_usd</span><span class="op">}</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t280" href="#t280">280</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -663,7 +663,7 @@
             <a class="nav" href="z_c1fa784957154a5e_context_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 20:57 +0000
+            created at 2026-09-29 21:18 +0000
         </p>
     </div>
 </footer>
