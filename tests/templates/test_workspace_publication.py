@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import _git, entry_of
-from support.workspace import workspace_item
+from support.workspace import ROOT_EMAIL, only_the_root_has_an_identity, workspace_item
 
 from kraft import events, store
 from kraft.adapters import forge
@@ -286,6 +286,8 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     )
     await _run(database, run_dirs, row, worktree, fake, monkeypatch, "open_mr")
     base_ref = _base_ref(database, row)
+    # J3: the rebase commits as the root, whose identity is the only one.
+    only_the_root_has_an_identity(monkeypatch, tmp_path, row)
 
     result = await _run(
         *(database, run_dirs, row, worktree, fake, monkeypatch, handler),
@@ -294,6 +296,7 @@ async def test_a_members_conflict_is_rebased_onto_its_own_origin(
     )
 
     assert _git_out(member, "merge-base", "--is-ancestor", moved, "HEAD") == ""
+    assert _git_out(member, "log", "-1", "--format=%ce") == ROOT_EMAIL
     assert (result, fake.merged) == (expected, [])
     assert _base_ref(database, row) == base_ref
 
