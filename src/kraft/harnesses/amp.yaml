@@ -92,3 +92,10 @@ capabilities:
 # - autocompact: no flag.
 # - rate_limit_signal: the stream schema has no rate-limit event, and the
 #   out-of-credits error text is unknown.
+
+# The host this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). UNVERIFIED, as is whether amp honours HTTP(S)_PROXY
+# (`proxy_aware` defaults to true): an e2e("amp") under `network:` settles
+# both.
+network:
+  requires: [ampcode.com]

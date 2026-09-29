@@ -22,9 +22,17 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, ConfigDict, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+)
 
 from kraft.paths import default_harnesses_dir
+from kraft.policy import host_pattern
 
 #: Harnesses that ship with Kraft. Read from the package, never from
 #: `$KRAFT_HOME/templates/`, because `cli.seed_home` copies templates once and
@@ -148,6 +156,12 @@ class Harness:
     #: a namespace under Docker's default seccomp profile, so every shell
     #: command it runs fails) is told to leave isolation to the container.
     container_permission_mode: str | None = None
+    #: The hosts the CLI itself must reach (its model API), added to a
+    #: `network:` launch's runtime allow list. A policy `deny` still wins.
+    network_requires: tuple[str, ...] = ()
+    #: False for a CLI that ignores HTTP(S)_PROXY: under `network:` it has no
+    #: route at all, so such a launch is refused by name instead.
+    proxy_aware: bool = True
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -297,6 +311,11 @@ class Harness:
                     "'permission_mode' capability accepts"
                 )
 
+        try:
+            requires = tuple(map(host_pattern, parsed.network.requires if parsed.network else ()))
+        except ValueError as exc:
+            raise HarnessError(f"{where}: network.requires: {exc}") from None
+
         config = parsed.config_dir
         if config is not None:
             if not config.env:
@@ -325,6 +344,8 @@ class Harness:
             permission_hook=parsed.permission_hook,
             permission_rules=parsed.permission_rules,
             container_permission_mode=parsed.container_permission_mode,
+            network_requires=requires,
+            proxy_aware=parsed.proxy_aware,
         )
 
     def supports(self, name: str) -> bool:
@@ -380,6 +401,15 @@ class ConfigDirInput(BaseModel):
     files: dict[StrictStr, dict[StrictStr, Any]] = {}
 
 
+class NetworkInput(BaseModel):
+    """`network:` as written. A new key, so unlike the rest of the file an
+    unknown one refuses: a misspelt `requires` must not load as no hosts."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    requires: list[StrictStr] = []
+
+
 class HarnessInput(BaseModel):
     """One harness file as written. Everything is defaulted so that a missing
     key reaches `Harness.from_input`, which refuses it in the same words as a
@@ -398,6 +428,8 @@ class HarnessInput(BaseModel):
     permission_hook: StrictStr | None = None
     permission_rules: StrictStr | None = None
     container_permission_mode: StrictStr | None = None
+    network: NetworkInput | None = None
+    proxy_aware: StrictBool = True
 
 
 #: What each capability key's shape is, in the words an operator reads.
@@ -431,6 +463,10 @@ def _shape_problem(exc: ValidationError) -> str:
             return "'unhooked_tools' must be a list of strings"
         case ("permission_hook" | "permission_rules" as key,):
             return f"{key!r} must be a string"
+        case ("network", *_):
+            return "'network' takes only 'requires', a list of network-policy@1 hosts"
+        case ("proxy_aware", *_):
+            return "'proxy_aware' must be true or false"
         case ("config_dir", *_):
             return "'config_dir' needs an 'env' string and 'files' mapping names to mappings"
     return "expected a top-level mapping"

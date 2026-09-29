@@ -13,6 +13,15 @@ def test_bundled_harnesses_all_load():
     assert sorted(hs.valid) == ["amp", "claude", "codex", "cursor", "gemini", "opencode"]
 
 
+def test_only_cursor_is_refused_under_a_network_policy():
+    """Spec §4: cursor-agent reportedly ignores HTTP(S)_PROXY, so it declares
+    `proxy_aware: false` and a `network:` launch refuses it by name rather
+    than fail closed mysteriously. Flipping it needs an e2e("cursor") proving
+    the CLI honours the proxy, not an edit to the YAML alone."""
+    hs = harness.load(None).valid
+    assert [name for name, h in hs.items() if not h.proxy_aware] == ["cursor"]
+
+
 def test_claude_declares_the_leaked_claude_isms():
     """Spec leaks 1 and 2: Monitor and the permission tool are claude's facts,
     not the chain's, so they must live in claude.yaml as `always:`."""
@@ -202,6 +211,16 @@ _HOOK_CAPS = (
             "id: x\nkind: cli\ncommand: [x]\npermission_rules: nosuch\ncapabilities:\n"
             + _HOOK_CAPS,
             "unknown permission_rules 'nosuch'",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\nnetwork: { requires: ['https://x.io'] }\n"
+            "capabilities:\n" + _HOOK_CAPS,
+            "'https://x.io' is not a network-policy@1 host",
+        ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\nnetwork: { require: [x.io] }\ncapabilities:\n"
+            + _HOOK_CAPS,
+            "'network' takes only 'requires', a list of network-policy@1 hosts",
         ),
     ],
 )

@@ -74,3 +74,9 @@ capabilities:
 
 # Absent, deliberately: approval_channel, autocompact. A binding naming one of those is rejected
 # at load, naming this file.
+
+# The hosts this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). api.openai.com is the model API; chatgpt.com (sign-in
+# with ChatGPT) is UNVERIFIED until an e2e("codex") runs under `network:`.
+network:
+  requires: [api.openai.com, chatgpt.com]

@@ -50,3 +50,10 @@ capabilities:
   autocompact:      { cli: ["--autocompact", "{value}"] }
   usage:            { source: envelope, reader: claude-stream-json }
   rate_limit_signal: { reader: claude-stream-json }
+
+# The hosts this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). api.anthropic.com is the model API. statsig is named
+# by the spec but UNVERIFIED: nothing here has probed it; an e2e("claude")
+# under `network:` is what confirms or removes it.
+network:
+  requires: [api.anthropic.com, statsig.anthropic.com]
