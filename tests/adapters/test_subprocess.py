@@ -792,3 +792,9 @@ async def test_run_task_nets_a_resumed_session_with_its_own_reader(run):
     _, row = await run(codex(160), "s-resumed", reader="codex-json")
 
     assert row["tokens_in"] == 60
+
+
+async def test_run_task_opens_the_session_log_private(run, run_dirs):
+    """Kraft-9efnk.18: a session log is a whole agent session."""
+    await run(["true"], "s-private")
+    assert (run_dirs.logs / "s-private.log").stat().st_mode & 0o777 == 0o600

@@ -138,3 +138,9 @@ def test_v2_index_migrates_forward_defaulting_origin_to_git_scan(tmp_path):
         assert row["origin"] == "git_scan"
     finally:
         conn.close()
+
+
+def test_open_index_creates_the_file_private(tmp_path):
+    """Kraft-9efnk.18: the index holds every indexed spec and plan."""
+    index_db.open_index(tmp_path / "index.db").close()
+    assert (tmp_path / "index.db").stat().st_mode & 0o777 == 0o600
