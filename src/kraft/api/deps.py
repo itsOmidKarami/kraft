@@ -430,6 +430,11 @@ def repos_path(st) -> Path:
     return st.templates_dir / "repos.yaml"
 
 
+def _absolute(path: str) -> bool:
+    """Absolute, or `~`-rooted. A string test, not a filesystem one."""
+    return os.path.isabs(path) or path.startswith("~")
+
+
 def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
     """Find a connected repo by path.
 
@@ -441,7 +446,7 @@ def _connected(repos: list[RepoEntry], path: str) -> RepoEntry | None:
     A relative path matches nothing: this process would resolve it against its
     own cwd, not the caller's, and find the wrong repo (Kraft-9efnk.39).
     """
-    if not Path(path).expanduser().is_absolute():
+    if not _absolute(path):
         return None
     entry = next((r for r in repos if r.path == path), None)
     if entry is not None:
@@ -460,7 +465,7 @@ def connected_or_422(st, repo: str) -> RepoEntry:
         repos = config_mod.load_repos(repos_path(st))
     except config_mod.ConfigError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if not Path(repo).expanduser().is_absolute():
+    if not _absolute(repo):
         raise HTTPException(422, f"repo must be an absolute path, not {repo!r}")
     entry = _connected(repos, repo)
     if entry is None:
