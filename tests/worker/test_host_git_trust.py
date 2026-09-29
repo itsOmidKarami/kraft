@@ -254,7 +254,10 @@ def test_no_host_call_runs_a_program_planted_in_a_nested_repository(
 # the member never reads. Each key below is planted at every one of those sites,
 # every host path Kraft takes in a member runs, and nothing fires. The control
 # plants the same key where git does read it, `M`'s own config, and shows it
-# is live there.
+# is live there. A site is planted only where the container's mounts let the
+# worker write (`_container_read_only`): with `extensions.worktreeConfig` on in
+# `M`, git also reads the admin dir's `config.worktree`, which only its
+# read-only mount keeps the worker's pen off (J6).
 
 import contextlib  # noqa: E402
 import inspect  # noqa: E402
@@ -267,6 +270,8 @@ from support.workspace import workspace_target  # noqa: E402
 from kraft.adapters.forge.run import _point_at_merged_members  # noqa: E402
 from kraft.api.routes import lifecycle  # noqa: E402
 from kraft.executor import read_only  # noqa: E402
+from kraft.worker import refstore  # noqa: E402
+from kraft.worker.backends import docker  # noqa: E402
 
 _REL = "repos/pkg"
 #: Same length at every step, so git has to read a changed file's content --
@@ -292,14 +297,19 @@ def _repo_with_origin(side: Path, name: str) -> tuple[Path, Path]:
     return repo, origin
 
 
-async def _workspace(database, run_dirs, side: Path, wid: str, setup: str = ""):
+async def _workspace(
+    database, run_dirs, side: Path, wid: str, setup: str = "", worktree_config: bool = False
+):
     """Item `wid`: a root with member `pkg` at `_REL`, its connected repository
-    `M` with its own origin, the checkout made by `ensure_worktree` (after
+    `M` with its own origin (`extensions.worktreeConfig` on when
+    `worktree_config`), the checkout made by `ensure_worktree` (after
     `setup`, the repository's setup command), and one commit in the member
     and one moving the root's gitlink, as a worker makes them. Both then
     carry an uncommitted edit."""
     side.mkdir()
     m, m_origin = _repo_with_origin(side, "pkg")
+    if worktree_config:
+        subprocess.run(["git", "config", "extensions.worktreeConfig", "true"], cwd=m, check=True)
     root, _ = _repo_with_origin(side, "ws")
     _w(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(m_origin), _REL)
     _w(root, "commit", "-q", "-m", "add the member")
@@ -434,11 +444,27 @@ PLANT_SITES = {
 }
 
 
+def _container_read_only(ws, run_dirs) -> set[Path]:
+    """What a sandboxed session in `ws` has mounted read-only, as
+    `docker_argv` mounts the root and the member from their ref stores."""
+    stores = refstore.prepare_stores(
+        run_dirs.base, ws.wt, ws.branch, members={_REL: sandbox.member_gitdirs(ws.m, ws.wt, _REL)}
+    )
+    argv = docker.docker_argv(
+        ["true"], ws.wt, {"kind": "docker", "image": "x"}, None, refstores=stores
+    )
+    return {
+        Path(argv[i + 1].split(":")[0])
+        for i, a in enumerate(argv)
+        if a == "-v" and argv[i + 1].endswith(":ro")
+    }
+
+
 def _plant(ws, site: str, key: str, config: dict[str, str], marker: Path, planted: Path) -> None:
-    """`config` into the site's config files; for the hooks key, the hooks
-    themselves into its hooks directory too."""
+    """`config` into the site's config files the container can write; for the
+    hooks key, the hooks themselves into its hooks directory too."""
     files, hooks = PLANT_SITES[site](ws)
-    _plant_config(files, config)
+    _plant_config([f for f in files if f not in ws.read_only], config)
     if hooks is not None and key == "hooks":
         _hooks(planted, marker)
         hooks.mkdir(parents=True, exist_ok=True)
@@ -563,7 +589,8 @@ def _trigger(cwd: Path, trigger) -> str:
 
 
 _CASES = [
-    pytest.param(key, site, id=f"{key}-{site}")
+    pytest.param(key, site, worktree_config, id=f"{key}-{site}{suffix}")
+    for worktree_config, suffix in ((False, ""), (True, "-worktree-config"))
     for key in PROGRAM_KEYS
     for site in PLANT_SITES
     # A hooks directory holds hooks, not config: only the hooks key plants there.
@@ -579,9 +606,9 @@ def no_env_programs(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-@pytest.mark.parametrize(("key", "site"), _CASES)
+@pytest.mark.parametrize(("key", "site", "worktree_config"), _CASES)
 async def test_no_host_path_runs_a_program_planted_for_a_member(
-    tmp_path, database, run_dirs, hardened, no_env_programs, monkeypatch, key, site
+    tmp_path, database, run_dirs, hardened, no_env_programs, monkeypatch, key, site, worktree_config
 ):
     """Kraft-ju36l, one key at one site, under an operator config that asks
     git to recurse every way it can: nothing runs, and the key is not even
@@ -592,7 +619,8 @@ async def test_no_host_path_runs_a_program_planted_for_a_member(
     operator.write_text(_OPERATOR_CONFIG)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(operator))
     kraft, control = tmp_path / "kraft", tmp_path / "control"
-    ws = await _workspace(database, run_dirs, kraft, "w1")
+    ws = await _workspace(database, run_dirs, kraft, "w1", worktree_config=worktree_config)
+    ws.read_only = _container_read_only(ws, run_dirs)
     (kraft / "planted").mkdir()
     planted = config(kraft / "PWNED", kraft / "planted")
     _plant(ws, site, key, planted, kraft / "PWNED", kraft / "planted")
