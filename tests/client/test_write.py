@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
+from support.harness import (
+    connect_repo,
+    connected_repo,
+    fake_templates_dir,
+    isolated_bd,
+    make_repo,
+)
 
 from client.test_read import run_with_app
 from kraft import client
@@ -117,3 +124,46 @@ def test_ensure_repo_reports_a_path_that_is_not_a_repo(wired, tmp_path):
 
     with pytest.raises(ValueError, match="400"):
         run_with_app(wired, scenario)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: client.ensure_repo("sub"),
+        lambda: client.disconnect_repo("sub"),
+        lambda: client.create_work_item("t", repo="sub"),
+        lambda: client.reindex("sub"),
+    ],
+    ids=["connect", "disconnect", "create", "reindex"],
+)
+def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch):
+    """The server resolves a relative path against its own cwd, so `kraft repo
+    connect .` connected the daemon's directory (Kraft-9efnk.32). Every verb
+    that sends a path makes it absolute where the caller stands."""
+    monkeypatch.chdir(tmp_path)
+    sent = []
+
+    async def send(method, path, **kwargs):
+        for fields in (kwargs.get("json") or {}, kwargs.get("params") or {}):
+            sent.extend(v for k, v in fields.items() if k in ("path", "repo"))
+        if path == "/repos/probe":
+            return httpx.Response(400, json={"detail": "not probed"})
+        return httpx.Response(201, json={"repos": [], "id": "w"})
+
+    monkeypatch.setattr(client.transport, "_send", send)
+    asyncio.run(call())
+    assert sent
+    assert set(sent) == {str(Path.cwd() / "sub")}
+
+
+def test_create_work_item_with_no_chain_takes_the_repos_default(wired, tmp_path):
+    """No `chain_template` means none is sent, so the repo's
+    `default_chain_template` applies -- not a client-side `default` that
+    would read as an explicit choice (Kraft-9efnk.11)."""
+    repo = connect_repo(make_repo(tmp_path), default_chain_template="quick-task")
+
+    async def scenario():
+        created = await client.create_work_item("t", repo=str(repo))
+        return await client.get_work_item(created["id"], full=True)
+
+    assert run_with_app(wired, scenario)["chain_template"] == "quick-task"

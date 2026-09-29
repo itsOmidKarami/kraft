@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from support.api import _await_gate, _poll_events, _post_default, _set_status
-from support.harness import make_repo, make_repo_with_engineering
+from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
 from kraft.api.routes.work_items import NewWorkItem
@@ -682,33 +682,33 @@ def test_intake_ignores_a_cwd_in_a_different_repo(client, repo, tmp_path):
     assert "not found" in r.text
 
 
-@pytest.mark.parametrize(
-    ("route", "status"),
-    [("work-items", None), ("triggers", "paused")],
-    ids=["work-items", "triggers"],
-)
-def test_no_chain_template_resolves_default_and_stays_distinguishable(client, repo, route, status):
-    """Kraft-cd47: an item created with no `chain_template` runs the `default`
-    template's chain like it always did, but its row stores that nothing was
-    chosen -- not the string "default", which an item that named that template
-    outright also stores. The two must not collide.
+@pytest.mark.parametrize("repo_default", [None, "quick-task"], ids=["no-repo-default", "repo"])
+@pytest.mark.parametrize("route", ["work-items", "triggers"])
+def test_no_chain_template_takes_the_repo_default_and_files_paused(
+    client, repo, route, repo_default
+):
+    """An item filed with no `chain_template` runs its repo's
+    `default_chain_template`, at every door (Kraft-9efnk.11); an explicit one
+    still wins. With no repo default it runs `default` and stores None, not
+    the string "default" an item naming it outright stores (Kraft-cd47).
 
-    POST /triggers is the HTTP twin of a policy.yaml cron trigger (Kraft-859):
-    it always files the item paused, regardless of policy or template --
-    fire_trigger never reads body.autostart because TriggerBody has no such
-    field."""
-    unset = client.post(f"/api/{route}", json={"title": "t", "repo": str(repo)})
-    named = client.post(
-        f"/api/{route}", json={"title": "t", "repo": str(repo), "chain_template": "default"}
-    )
-    assert (unset.status_code, named.status_code) == (201, 201), unset.text + named.text
-    unset = client.get(f"/api/work-items/{unset.json()['id']}").json()
-    named = client.get(f"/api/work-items/{named.json()['id']}").json()
-    assert unset["chain_template"] is None
+    Both doors file paused when the caller does not ask otherwise:
+    POST /work-items' `autostart` defaults off (Kraft-9efnk.17), and POST
+    /triggers has no such field at all."""
+    if repo_default:
+        connect_repo(repo, default_chain_template=repo_default)
+
+    def filed(**chain):
+        r = client.post(f"/api/{route}", json={"title": "t", "repo": str(repo), **chain})
+        assert r.status_code == 201, r.text
+        return client.get(f"/api/work-items/{r.json()['id']}").json()
+
+    unset, named = filed(), filed(chain_template="default")
+    expected = filed(chain_template=repo_default or "default")
+    assert unset["chain_template"] == repo_default
     assert named["chain_template"] == "default"
-    assert unset["chain_definition"]["nodes"] == named["chain_definition"]["nodes"]
-    if status:
-        assert (unset["status"], named["status"]) == (status, status)
+    assert unset["chain_definition"]["nodes"] == expected["chain_definition"]["nodes"]
+    assert (unset["status"], named["status"]) == ("paused", "paused")
 
 
 def test_trigger_refuses_with_503_when_policy_is_invalid(client, repo):

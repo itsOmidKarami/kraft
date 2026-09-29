@@ -229,6 +229,28 @@ describe("IntakeModal", () => {
     );
   });
 
+  // Kraft-9efnk.11: the server applies the repo's default when none is sent.
+  it.each([
+    ["left untouched, sends none", null, undefined],
+    ["switched to default, sends it", /^default/i, "default"],
+  ] as const)("on a repo defaulting to quick-task, the chain %s", async (_, pick, sent) => {
+    vi.spyOn(api, "getTemplates").mockResolvedValue([
+      { id: "default", nodes: [], gates: 0 },
+      { id: "quick-task", nodes: [], gates: 0 },
+    ]);
+    vi.spyOn(api, "getRepos").mockResolvedValue({
+      repos: [{ ...REPO_A, default_chain_template: "quick-task" }],
+    });
+    const create = vi.spyOn(api, "createWorkItem").mockResolvedValue({ id: "w9" });
+    renderModal();
+    await fillBasics();
+    expect(screen.getByRole("radio", { name: /quick-task/i })).toBeChecked();
+    if (pick) await userEvent.click(screen.getByRole("radio", { name: pick }));
+    await userEvent.click(screen.getByRole("button", { name: /create and start/i }));
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].chain_template).toBe(sent);
+  });
+
   it("clicking a chain-preview node toggles skip and sends it as skip_nodes", async () => {
     vi.spyOn(api, "getTemplates").mockResolvedValue([
       {

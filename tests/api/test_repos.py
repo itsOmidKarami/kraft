@@ -67,6 +67,18 @@ def test_probe_reads_the_repo_without_touching_it(tmp_path, client):
     assert client.post("/api/repos/probe", json={"path": str(plain)}).status_code == 400
 
 
+@pytest.mark.parametrize("route", ["/api/repos", "/api/repos/probe"])
+def test_a_relative_path_is_refused_not_resolved_against_the_servers_cwd(
+    client, repo, monkeypatch, route
+):
+    """The server's cwd is not the caller's: resolving `.` here connected
+    whatever directory the daemon started in (Kraft-9efnk.32)."""
+    monkeypatch.chdir(repo)
+    r = client.post(route, json={"path": "."})
+    assert r.status_code == 422
+    assert "path must be absolute" in r.text
+
+
 def test_probe_finds_submodules_and_a_test_command(tmp_path, client):
     repo = make_repo(tmp_path)
     (repo / "pyproject.toml").write_text("[project]\nname='x'\n")
