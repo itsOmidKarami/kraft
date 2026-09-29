@@ -1,6 +1,7 @@
 """`kraft.adapters.subprocess.run_task`'s commit identity for a session."""
 
 import os
+from pathlib import Path
 
 import pytest
 from support.harness import _git, fake_docker_bin, make_repo
@@ -9,6 +10,21 @@ from support.worktree import make_item
 from kraft.adapters import subprocess as sp
 from kraft.config import git_read
 from kraft.worker.sandbox import Checkout, member_gitdirs
+
+
+def _docker_passing_env(tmp_path) -> Path:
+    """`fake_docker_bin`'s docker, with each literal `-e NAME=VALUE` exported
+    to the command first, as the container's environment would carry it."""
+    inner = fake_docker_bin(tmp_path) / "docker"
+    outer = tmp_path / "env-docker-bin"
+    outer.mkdir()
+    (outer / "docker").write_text(
+        '#!/usr/bin/env bash\nprev=\nfor a in "$@"; do\n'
+        '  [ "$prev" != -e ] || case "$a" in *=*) export "$a" ;; esac; prev=$a\n'
+        f'done\nexec {inner} "$@"\n'
+    )
+    (outer / "docker").chmod(0o755)
+    return outer
 
 
 @pytest.mark.parametrize("sandboxed", [False, True], ids=["unsandboxed", "sandboxed"])
@@ -42,7 +58,7 @@ async def test_a_session_commits_in_a_member_as_the_root(
     await make_item(database, root)
     sandbox = {}
     if sandboxed:
-        monkeypatch.setenv("PATH", f"{fake_docker_bin(tmp_path, env=True)}:{os.environ['PATH']}")
+        monkeypatch.setenv("PATH", f"{_docker_passing_env(tmp_path)}:{os.environ['PATH']}")
         sandbox = {
             "sandbox": {"kind": "docker", "image": "kraft-worker:py"},
             "checkout": Checkout(root, {"m": member_gitdirs(member_repo, root, "m")}),

@@ -37,6 +37,13 @@ def repositories(tmp_path, *members: str) -> dict:
     return {m: entry_of({"id": m, "path": str(tmp_path / f"{m}-connected")}) for m in members}
 
 
+def nested_repositories(root: Path, mounts: dict[str, str]) -> dict:
+    """`launch.repositories` connecting each member at its submodule checkout
+    in the root: the auto-connected case, whose common gitdir lies inside the
+    root's (`.git/modules/<path>`)."""
+    return {m: entry_of({"id": m, "path": str(root / p)}) for m, p in mounts.items()}
+
+
 async def workspace_item(
     database,
     run_dirs,
@@ -48,12 +55,15 @@ async def workspace_item(
     legacy=False,
     nodes=None,
     base_branch=None,
+    nested=False,
     **materialize,
 ):
     """A root with one submodule `pkg` at `repos/pkg` (and `pkg2` at
     `repos/pkg2` when `second`), filed as a workspace item selecting them under
     root-pointer policy `pointer`, on one exec node of `tasks` (or the chain
-    `nodes`); its checkout assembled. Returns `(row, node, worktree)`."""
+    `nodes`); its checkout assembled. Each member's connected repository is a
+    clone of its own (`repositories`), or when `nested` the root's own
+    submodule checkout (`nested_repositories`). Returns `(row, node, worktree)`."""
     root, pkg = make_repo_with_submodule(tmp_path)
     mounts = {"pkg": "repos/pkg"}
     connected = {"pkg": pkg}
@@ -92,13 +102,11 @@ async def workspace_item(
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
     # Each member checked out of its connected repository, as the walk does
     # with `launch.repositories` (Kraft-ju36l); a legacy item has no ids.
-    for m, origin in ({} if legacy else connected).items():
+    for m, origin in ({} if legacy or nested else connected).items():
         _git(tmp_path, "clone", "-q", str(origin), str(tmp_path / f"{m}-connected"))
+    connect = nested_repositories(root, mounts) if nested else repositories(tmp_path, *connected)
     worktree = await wtree.ensure(
-        database,
-        run_dirs,
-        root,
-        repositories=None if legacy else repositories(tmp_path, *connected),
+        database, run_dirs, root, repositories=None if legacy else connect
     )
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     return row, chain.chain.nodes[0], worktree

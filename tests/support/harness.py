@@ -192,15 +192,13 @@ def isolated_bd(tmp_path: Path, name: str = "tracker") -> Path:
     return repo
 
 
-def fake_docker_bin(tmp_path: Path, *, env: bool = False) -> Path:
+def fake_docker_bin(tmp_path: Path) -> Path:
     """A directory holding a `docker` that unwraps `docker run [OPTIONS] IMAGE
     CMD...` back to `CMD...` and execs it in its `-w` — proves the wrap shape a
     real sandbox launch produces without a real daemon. `-u`/`-v`/`-w`/`-e`/
     `--name`/`--label` each take one following argument, so skipping
     flag+value pairs finds the image (the first survivor) and the command
-    (everything after it); with `env`, a literal `-e NAME=VALUE` reaches the
-    command as the container's env would. `--init` and `--flag=value`s are
-    dropped. `docker
+    (everything after it). `--init` and `--flag=value`s are dropped. `docker
     info` answers nothing: a rootful runtime. `--cidfile=PATH` gets a fake
     container id, as docker writes one once it has created the container.
     `docker ps` prints `$FAKE_DOCKER_PS` (container names) when set; `docker
@@ -214,7 +212,6 @@ def fake_docker_bin(tmp_path: Path, *, env: bool = False) -> Path:
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        f"export_env={'1' if env else ''}\n"
         '# Test seam: touch a sentinel if asked, so a test can tell "the real\n'
         '# command ran because it went through this fake docker" apart from\n'
         '# "the real command ran because nothing wrapped it at all" -- the two\n'
@@ -237,13 +234,7 @@ def fake_docker_bin(tmp_path: Path, *, env: bool = False) -> Path:
         "cmd=()\n"
         "skip=0\n"
         'for arg in "$@"; do\n'
-        '  if [ "$skip" != 0 ]; then\n'
-        '    [ "$skip" != -w ] || cd "$arg"\n'
-        '    if [ "$skip" = -e ] && [ -n "$export_env" ]; then\n'
-        '      case "$arg" in *=*) export "$arg" ;; esac\n'
-        "    fi\n"
-        "    skip=0; continue\n"
-        "  fi\n"
+        '  if [ "$skip" != 0 ]; then [ "$skip" != -w ] || cd "$arg"; skip=0; continue; fi\n'
         '  case "$arg" in\n'
         '    --cidfile=*) printf fake-container-id > "${arg#--cidfile=}"; continue ;;\n'
         '    --rm|--init|--*=*) [ -n "$image" ] && cmd+=("$arg"); continue ;;\n'
