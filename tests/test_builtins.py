@@ -12,10 +12,11 @@ from support.harness import (
     v1_chain,
     v1_resolved,
 )
-from support.workspace import workspace_target
+from support.workspace import workspace_item, workspace_target
 
 from kraft import builtins as kraft_builtins
 from kraft import store
+from kraft.adapters.forge import git as forge_git
 from kraft.config import git_read
 
 
@@ -623,3 +624,173 @@ async def test_worktree_preparation_reruns_the_setup_command_on_every_entry(
     for n in (1, 2):
         await kraft_builtins.prepare_runtime(run_dirs.worktrees / "w1", Path(repo), entry)
         assert marker.read_text().count("run") == before + n
+
+
+def _plant(gitdir: Path, kind: str, main: str, orig: str) -> None:
+    """What a sandboxed worker can write into its own worktree gitdir: the
+    state of a git operation that points at the operator's `main`."""
+    planted = gitdir / kind
+    if kind in ("rebase-merge", "rebase-apply", "sequencer"):
+        planted.mkdir()
+        for name, text in {
+            "head-name": "refs/heads/main",
+            "orig-head": orig,
+            "onto": main,
+            "interactive": "",
+            "git-rebase-todo": "",
+            "head": orig,
+        }.items():
+            (planted / name).write_text(f"{text}\n")
+    else:
+        planted.write_text(f"{orig}\n")
+
+
+def _refs(repo: Path) -> str:
+    """Every ref of the operator's repository, `refs/stash` included."""
+    return git_read(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+
+
+async def _item_behind_main(database, run_dirs, repo):
+    """An item worktree with a commit of its own, behind a `main` that moved,
+    so a refresh would rebase. Returns `(worktree, branch, gitdir)`."""
+    _commit(repo, "first.txt", "first\n", "first")
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    _commit(worktree, "work.txt", "work\n", "worktree work")
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    return worktree, wtree.branch(database), gitdir
+
+
+async def _door(door: str, worktree: Path, repo: Path, branch: str, gitdir: Path) -> None:
+    """Plant the state `door` acts on, then have Kraft walk through it."""
+    if door == "refresh":
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        return
+    # A stash of the worker's own making, which conflicts with the tree.
+    (worktree / "work.txt").write_text("the worker's stash\n")
+    stash = git_read(worktree, "stash", "create")
+    _git(worktree, "checkout", "--", "work.txt")
+    (gitdir / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
+    if door == "restore_branch":
+        _plant_head(worktree, "refs/heads/side")
+        kraft_builtins.restore_branch(worktree, branch, "main")
+    else:
+        (worktree / "work.txt").write_text("left behind\n")
+        await forge_git.commit_stragglers(worktree, branch=branch, base="main", message="wip")
+
+
+@pytest.mark.parametrize(
+    ("kind", "door"),
+    [
+        pytest.param("rebase-merge", "refresh", id="rebase-merge"),
+        pytest.param("rebase-apply", "refresh", id="rebase-apply"),
+        pytest.param("MERGE_AUTOSTASH", "restore_branch", id="MERGE_AUTOSTASH-restore_branch"),
+        pytest.param(
+            "MERGE_AUTOSTASH", "commit_stragglers", id="MERGE_AUTOSTASH-commit_stragglers"
+        ),
+    ],
+)
+async def test_planted_operation_state_never_moves_an_operator_ref(
+    kind, door, database, run_dirs, repo
+):
+    """Kraft-xngty: a worker planted `rebase-merge/` naming `main`, Kraft's
+    rebase failed on it, and its `git rebase --abort` reset the operator's
+    `main` to the planted `orig-head`. A planted `MERGE_AUTOSTASH` put the
+    worker's tree in the operator's `refs/stash` through a checkout or a
+    commit, for the next `git stash pop`."""
+    worktree, branch, gitdir = await _item_behind_main(database, run_dirs, repo)
+    if door == "refresh":
+        main, orig = git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1")
+        _plant(gitdir, kind, main, orig)
+    if door == "restore_branch":
+        _git(repo, "branch", "side", branch)  # the operator's own
+    refs = _refs(repo)
+
+    with pytest.raises(RuntimeError):
+        await _door(door, worktree, repo, branch, gitdir)
+
+    assert _refs(repo) == refs
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["rebase-merge", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"],
+)
+async def test_kraft_refuses_to_act_on_an_operation_in_progress(kind, database, run_dirs, repo):
+    """Defence in depth: only a rebase's abort was seen moving a ref, but Kraft
+    rebases over no operation in progress at all. It stops for a person and
+    leaves the state where it is."""
+    worktree, branch, gitdir = await _item_behind_main(database, run_dirs, repo)
+    head = git_read(worktree, "rev-parse", "HEAD")
+    _plant(gitdir, kind, git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1"))
+
+    with pytest.raises(RuntimeError) as stopped:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    assert f"has a {kind} in progress: inspect it, then delete {gitdir / kind} (do not run" in str(
+        stopped.value
+    )
+    assert git_read(worktree, "rev-parse", "HEAD") == head, "no rebase ran"
+    assert (gitdir / kind).exists(), "the state is left for a person"
+
+
+async def test_a_planted_head_never_rebases_another_branch(database, run_dirs, repo):
+    """The worktree's own `HEAD` is the worker's to write as well: pointed at
+    one of the operator's branches, Kraft's rebase replayed that branch."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    _git(repo, "branch", "side")
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    side = git_read(repo, "rev-parse", "side")
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    (gitdir / "HEAD").write_text("ref: refs/heads/side\n")
+
+    try:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        stopped = ""
+    except RuntimeError as exc:
+        stopped = str(exc)
+
+    assert git_read(repo, "rev-parse", "side") == side
+    assert f"is not on {branch}" in stopped
+
+
+def _plant_head(worktree: Path, ref: str) -> None:
+    """A worker pointing its worktree's HEAD at one of the operator's branches."""
+    Path(git_read(worktree, "rev-parse", "--absolute-git-dir"), "HEAD").write_text(f"ref: {ref}\n")
+
+
+async def test_a_planted_root_head_never_takes_the_members_repoint(database, run_dirs, tmp_path):
+    """`_rebase_members` commits the root's repoint onto whatever the root's
+    HEAD names; pointed at an operator branch, that branch took the commit."""
+    task = {"id": "t", "kind": "subprocess", "command": "true"}
+    row, _, root = await workspace_item(database, run_dirs, tmp_path, [task])
+    branch = store.branch_for(row)
+    _commit(root / "repos" / "pkg", "calc.py", "x = 1\n", "member change")
+    _git(root, "add", "repos/pkg")
+    _git(root, "commit", "-qm", "wip: uncommitted work from t")
+    _commit(tmp_path / "pkg", "moved.txt", "landed\n", "the member's main moves")
+    _git(Path(row["repo"]), "branch", "side", git_read(root, "rev-parse", "HEAD"))
+    side = git_read(root, "rev-parse", "side")
+    _plant_head(root, "refs/heads/side")
+
+    try:
+        await kraft_builtins._rebase_members(
+            database, row["id"], root, branch, "main", lambda: None
+        )
+        stopped = ""
+    except RuntimeError as exc:
+        stopped = str(exc)
+
+    assert git_read(root, "rev-parse", "side") == side
+    assert f"is not on {branch}" in stopped
+
+
+def test_restore_branch_raises_when_it_cannot_restore(repo):
+    """The straggler commit that follows it would land on whatever HEAD names."""
+    _plant_head(repo, "refs/heads/main")
+
+    with pytest.raises(RuntimeError, match="could not restore"):
+        kraft_builtins.restore_branch(repo, "kraft/never-created", "main")

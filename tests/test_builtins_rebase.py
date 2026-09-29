@@ -4,6 +4,7 @@ onto the base the merge request targets."""
 
 import asyncio
 import subprocess
+from pathlib import Path
 
 import pytest
 from support import worktree as wtree
@@ -387,6 +388,30 @@ async def test_mr_rebase_raises_on_conflict(database, run_dirs, repo):
             branch=branch,
         )
     assert wtree.base_ref(database) != git_read(repo, "rev-parse", "HEAD")
+
+
+async def test_mr_rebase_stops_for_a_person_on_an_operation_in_progress(database, run_dirs, repo):
+    """Kraft-xngty: refused state is no failure a fix loop may work on."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    _commit(worktree, "work.txt", "work\n", "worktree work")
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    (Path(git_read(worktree, "rev-parse", "--absolute-git-dir")) / "rebase-merge").mkdir()
+
+    status = await kraft_builtins.mr_rebase(
+        database,
+        run_dirs,
+        session_id="s1",
+        work_item_id="w1",
+        node_id="n",
+        hook_point="n.rebase",
+        round=0,
+        repo=str(repo),
+        worktree=str(worktree),
+        branch=wtree.branch(database),
+    )
+
+    assert status == "config_error"
 
 
 async def test_refresh_worktree_base_raises_rebase_conflict_a_runtimeerror_subclass(

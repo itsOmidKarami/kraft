@@ -230,7 +230,7 @@ def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
     (repo / "forgotten.py").write_text("never added\n")
 
     committed = asyncio.run(
-        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     assert committed is True
@@ -249,7 +249,7 @@ def test_commit_stragglers_leaves_a_clean_worktree_alone(tmp_path):
     before = _git(repo, "rev-parse", "HEAD")
 
     committed = asyncio.run(
-        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     assert committed is False
@@ -272,7 +272,9 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
 
     assert (
-        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        asyncio.run(
+            forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+        )
         is False
     )
     assert _git(repo, "rev-parse", "HEAD") == before
@@ -283,7 +285,9 @@ def test_kraft_session_notes_are_not_the_agents_work_product(tmp_path):
     (repo / ".engineering" / "specs" / "abc.md").write_text("the design\n")
 
     assert (
-        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        asyncio.run(
+            forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+        )
         is False
     )
     assert _git(repo, "rev-parse", "HEAD") == before
@@ -312,7 +316,9 @@ def test_a_repos_own_preexisting_engineering_doc_still_commits(tmp_path):
     (repo / ".engineering" / "sessions" / "abc.md").write_text("what I did today\n")
 
     assert (
-        asyncio.run(forge.commit_stragglers(repo, base="main", message="wip: implementation"))
+        asyncio.run(
+            forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
+        )
         is True
     )
     assert "preexisting.md" in _git(repo, "show", "--name-only", "--format=", "HEAD")
@@ -352,7 +358,7 @@ def test_commit_stragglers_ignores_a_root_main_gitignored_after_the_branch_forke
     doc.write_text("# the attached spec\n")
 
     committed = asyncio.run(
-        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     assert committed is False
@@ -375,7 +381,7 @@ def test_commit_stragglers_ignores_gitignored_paths(tmp_path):
     (repo / "junk" / "cache.txt").write_text("noise\n")
 
     committed = asyncio.run(
-        forge.commit_stragglers(repo, base="main", message="wip: implementation")
+        forge.commit_stragglers(repo, branch=BRANCH, base="main", message="wip: implementation")
     )
 
     assert committed is False
@@ -417,3 +423,36 @@ def test_a_hanging_cli_call_is_killed_and_raises(tmp_path):
 
     with pytest.raises(forge.ForgeError, match="timed out"):
         asyncio.run(forge_git.run_git(tmp_path, ["sleep", "30"], timeout=0.5))
+
+
+@pytest.mark.parametrize(
+    "site",
+    [
+        pytest.param(
+            lambda repo, db: forge.commit_stragglers(repo, branch=BRANCH, base="main", message="w"),
+            id="commit_stragglers",
+        ),
+        pytest.param(
+            lambda repo, db: forge.run._point_at_merged_members(None, db, repo, BRANCH, "w1"),
+            id="pointer_bump",
+        ),
+    ],
+)
+async def test_a_host_commit_never_lands_on_a_planted_head(tmp_path, database, site):
+    """Kraft-xngty: HEAD sits in a gitdir the worker writes. Pointed at the
+    operator's `main`, the straggler sweep's commit, or the root's pointer
+    bump (and the push of `HEAD` after it), moved `main`."""
+    repo = _repo_with_origin(tmp_path)
+    main = _git(repo, "rev-parse", "main").strip()
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (repo / "left.txt").write_text("left behind\n")
+    _git(repo, "add", "left.txt")
+
+    try:
+        await site(repo, database)
+        stopped = ""
+    except forge.ForgeError as exc:
+        stopped = str(exc)
+
+    assert _git(repo, "rev-parse", "main").strip() == main
+    assert f"is not on {BRANCH}" in stopped

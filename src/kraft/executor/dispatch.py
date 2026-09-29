@@ -1048,15 +1048,16 @@ async def _dispatch_task(
             )
         )
         return status
-    _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
     try:
+        _builtins.restore_branch(Path(worktree), store.branch_for(work_item_row), base)
         await _forge.commit_stragglers(
             Path(worktree),
+            branch=store.branch_for(work_item_row),
             base=base,
             message=f"wip: uncommitted work from {node.id}",
             mounts=_builtins.item_mounts(work_item_row),
         )
-    except _forge.ForgeError as exc:
+    except RuntimeError as exc:  # ForgeError included
         logger.warning("could not commit stragglers after %s: %r", task.path, exc)
         # A log line only reaches whoever is tailing the server at the
         # time. The failure it describes doesn't surface again until

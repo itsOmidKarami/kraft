@@ -167,6 +167,8 @@ async def _rebase_conflict_away(
     """
     try:
         new_head = await _builtins.mr_rebase_forced(repo, orig_repo, branch, base)
+    except git.UnsafeWorktree:
+        raise  # not a conflict: `run_task` stops the item for a person
     except RuntimeError as exc:
         return f"rebase onto {base} failed: {exc}\n", "conflict"
     if not new_head:
@@ -1251,6 +1253,9 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        if isinstance(exc, git.UnsafeWorktree):
+            # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
+            status = "config_error"
         unobserved = str(exc)
 
     if handler in _WAITS:
@@ -1346,7 +1351,11 @@ async def _point_at_merged_members(
     whatever its origin's tip has become since: the item built neither.
 
     Read afresh, not off `run_task`'s rows: a member merged earlier in the
-    same pass is recorded merged only in the table."""
+    same pass is recorded merged only in the table.
+
+    The commit, and the direct push of `HEAD` that may follow it, both go
+    wherever the root's HEAD names, so it must name the item's branch."""
+    git.assert_on_branch(root_repo, branch)
     merged = db.read(
         lambda c: c.execute(
             "SELECT repo_path FROM work_item_repos WHERE work_item_id = ? "
@@ -1365,6 +1374,7 @@ async def _point_at_merged_members(
             )
         default = await _builtins.base_branch(db, work_item_id, sub_path, member=True)
         await git.run_git(sub_path, ["git", "fetch", "origin", default])
+        git.assert_no_operation(sub_path)  # a checkout stores a planted autostash
         await git.run_git(sub_path, ["git", "checkout", landed.merged_sha])
         rel = str(sub_path.relative_to(root_repo))
         await git.run_git(root_repo, ["git", "add", "--", rel])

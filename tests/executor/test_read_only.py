@@ -90,6 +90,7 @@ async def test_a_read_only_step_whose_agent_edits_a_tracked_file_stops_naming_it
         "on_failure": {"tasks": [_sub("fix")]},
     }
     it = await item_on([_node([step])])
+    _git(it.repo, "checkout", "-qb", store.branch_for(it.row()))  # a worktree is on its branch
     launched = _launches(monkeypatch, _write("calc.py", "edited\n"))
 
     assert await _walk(it) == "needs_human"

@@ -277,7 +277,9 @@ def _sweep(repo: Path, monkeypatch, mounts=()):
     monkeypatch.setattr(forge_git, "run_git", recording)
     (repo / "work.txt").write_text("left behind\n")
     committed = asyncio.run(
-        forge_git.commit_stragglers(repo, base="main", message="sweep", mounts=mounts)
+        forge_git.commit_stragglers(
+            repo, branch="main", base="main", message="sweep", mounts=mounts
+        )
     )
     return committed, calls
 

@@ -5,6 +5,7 @@ which CLI talks to the remote.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from collections.abc import Collection
 from pathlib import Path
@@ -12,6 +13,60 @@ from pathlib import Path
 from kraft.adapters.forge.models import ForgeError
 from kraft.config import base_ignore_args, git_read
 from kraft.worker import sandbox
+
+
+class UnsafeWorktree(ForgeError):
+    """A worktree Kraft will not act on (Kraft-xngty): an operation in progress
+    or a HEAD off the item's branch, either of which a worker can plant. Never
+    a conflict, which an agent is sent to resolve: a person looks first."""
+
+
+#: What a git operation in progress leaves in a worktree's own gitdir. A worker
+#: can write any of it, naming any branch or commit: `git rebase --abort` over
+#: a planted `rebase-merge/` resets the branch it names, and a checkout or a
+#: commit over a planted `MERGE_AUTOSTASH` stores it in the repository's shared
+#: `refs/stash`, for the operator's next `git stash pop` (Kraft-xngty).
+OPERATION_STATE = (
+    "rebase-merge",
+    "rebase-apply",
+    "MERGE_HEAD",
+    "MERGE_AUTOSTASH",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "BISECT_LOG",
+    "sequencer",
+)
+
+
+def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
+    """Raise if `worktree`'s gitdir holds any of `OPERATION_STATE` but `allow`,
+    found by `lexists` so a planted symlink counts. Nothing to check when git
+    cannot name the gitdir: no git that would act on it can run either."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
+        return
+    for name in OPERATION_STATE:
+        planted = Path(gitdir, name)
+        if name not in allow and os.path.lexists(planted):
+            # Never "abort it": aborting a planted rebase is the attack. Nor
+            # "Kraft did not start it": Kraft's own timed-out abort can leave
+            # a `rebase-merge/` behind too.
+            raise UnsafeWorktree(
+                f"{worktree} has a {name} in progress: inspect it, then delete {planted} "
+                "(do not run git rebase/merge --abort or --continue) and retry"
+            )
+
+
+def assert_on_branch(worktree: Path, branch: str) -> None:
+    """Raise unless `worktree` has no operation in progress and its HEAD is
+    `refs/heads/<branch>` (Kraft-xngty). A worktree's HEAD sits in a gitdir
+    its worker can write; pointed at one of the operator's branches, Kraft's
+    next commit, rebase or push of HEAD would move that branch instead of the
+    item's."""
+    assert_no_operation(worktree)
+    if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
+        raise UnsafeWorktree(f"{worktree} is not on {branch}; check it out by hand, then retry")
+
 
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`
 #: with no timeout blocks its thread forever on a stalled `gh`, and no deadline
@@ -176,7 +231,7 @@ async def assert_clean(repo: Path, base: str) -> None:
 
 
 async def commit_stragglers(
-    repo: Path, *, base: str, message: str, mounts: Collection[str] = ()
+    repo: Path, *, branch: str, base: str, message: str, mounts: Collection[str] = ()
 ) -> bool:
     """Commit whatever an agent left behind in the worktree. True if it did.
 
@@ -219,6 +274,7 @@ async def commit_stragglers(
         )
         if not status.strip():
             return False
+        assert_on_branch(repo, branch)
         await run_git(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
         try:
             await run_git(repo, ["git", "commit", "-m", message])

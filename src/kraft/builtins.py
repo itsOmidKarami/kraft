@@ -122,7 +122,7 @@ def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> 
 
 def restore_branch(worktree: Path, branch: str, base: str) -> None:
     """Force the worktree back onto `branch` if an agent task left it
-    somewhere else, aborting any in-progress merge first (Kraft-v5qd).
+    somewhere else, clearing any in-progress merge with it (Kraft-v5qd).
 
     An agent has a real shell and can check out whatever it likes to
     investigate something -- a diagnostic test-merge against `main` to look
@@ -135,19 +135,20 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
     branch the item actually owns rather than committed onto whatever the
     agent happened to leave checked out.
 
-    Best effort throughout, like `commit_stragglers`: a `restore_branch`
-    that could not recover is a worktree already too broken for a log line
-    to fix, and the failure it hides here surfaces the same way it always
-    did -- the next node's own git command refuses on the same tree.
+    Best effort, except the checkout: an unreadable HEAD is left for the
+    next node's own git command to refuse, but a checkout that fails, or
+    that would act on operation state other than a merge, raises, since the
+    straggler commit after it would land on whatever branch HEAD names
+    (Kraft-xngty).
     """
     with base_ignore_args(worktree, base) as ignore_args:
 
-        def git(*args: str) -> subprocess.CompletedProcess:
+        def run(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
                 ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
             )
 
-        current = git("rev-parse", "--abbrev-ref", "HEAD")
+        current = run("rev-parse", "--abbrev-ref", "HEAD")
         if current.returncode != 0 or current.stdout.strip() == branch:
             return
         logger.warning(
@@ -156,11 +157,17 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
             current.stdout.strip(),
             branch,
         )
-        git("merge", "--abort")  # no-op, exit nonzero, if no merge is in progress
-        checked_out = git("checkout", "-f", branch)
+        # `checkout -f` clears an agent's half-done merge itself (Kraft-v5qd),
+        # so that state is allowed. Any other is refused: over a planted
+        # `MERGE_AUTOSTASH` the checkout would store the worker's tree in the
+        # repository's shared `refs/stash` (Kraft-xngty).
+        git.assert_no_operation(worktree, allow=("MERGE_HEAD",))
+        checked_out = run("checkout", "-f", branch)
         if checked_out.returncode != 0:
-            logger.warning(
-                "could not restore %s to %r: %s", worktree, branch, checked_out.stderr.strip()
+            # Raised, not logged: the straggler commit that follows would land
+            # on whatever branch HEAD names (Kraft-xngty).
+            raise RuntimeError(
+                f"could not restore {worktree} to {branch!r}: {checked_out.stderr.strip()}"
             )
 
 
@@ -934,6 +941,8 @@ async def refresh_worktree_base(
     if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
+    # Kraft never rebases over, or aborts, an operation it did not start.
+    git.assert_on_branch(worktree, branch)
     try:
         done = await asyncio.to_thread(
             subprocess.run,
@@ -1065,7 +1074,7 @@ async def mr_rebase(
                 new_head = None
         except RebaseConflict as exc:
             raise _explain_gitlink_conflict(exc, {rel for rel, _ in moved}, branch, base) from None
-    except BaseBranchMissing as exc:
+    except (BaseBranchMissing, git.UnsafeWorktree) as exc:
         # Nothing an agent could fix: `config_error` stops the item for a
         # person rather than sending a fix loop round against a missing base.
         return await _record_done(
@@ -1152,6 +1161,9 @@ async def _rebase_members(
             (work_item_id,),
         ).fetchall()
     )
+    if rows:
+        # The repoint below commits in the root, onto whatever its HEAD names.
+        git.assert_on_branch(root, branch)
     moved: list[tuple[str, str]] = []
     repoint: list[str] = []
     try:
