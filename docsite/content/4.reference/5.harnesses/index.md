@@ -37,7 +37,7 @@ Kraft ships six harnesses:
 A task's YAML never names a harness's actual CLI flags. It asks for a
 **capability** — `prompt`, `context`, `model`, `effort`, `permission_mode`,
 `deny_tools`, `allowed_tools`, `restrict_tools`, `approval_channel`, `resume`,
-`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `writable_dirs` — and each harness's own YAML
+`autocompact`, `structured_log`, `usage`, `rate_limit_signal`, `writable_dirs`, `mcp_config` — and each harness's own YAML
 (a YAML file per harness) maps that capability onto
 whatever its CLI actually calls it. `permission_mode` is `--permission-mode
 acceptEdits|auto|...` for Claude, `-c sandbox_mode=read-only|workspace-write|...`
@@ -79,6 +79,14 @@ and `/tmp`, so without the grant a codex worker on a default install
 directories outright, because Codex's automatic reviewer is not relied on for
 either one. A harness
 that doesn't declare `writable_dirs` gets nothing extra.
+
+Another is filled by Kraft only for a [sandboxed](/reference/configuration/repos#sandboxed-workers)
+launch with `network:`: `mcp_config`, the CLI's MCP servers as one JSON object,
+`{"mcpServers": {"kraft": {"type": "http", "url": "http://kraft/mcp"}}}`: Kraft's
+own server for that session, reached through the sandbox's route out, since the
+MCP server registered on your machine is out of the container's reach. Claude
+binds it to `--strict-mcp-config --mcp-config {value}`, so that server is its
+only one and its `approval_channel` tool is answered there.
 
 Some harnesses declare `values:` on a capability — a closed vocabulary the
 CLI itself would reject (Codex's `effort` is `minimal, low, medium, high, xhigh`,

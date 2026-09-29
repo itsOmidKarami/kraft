@@ -66,6 +66,10 @@ KNOWN = (
     # would otherwise refuse those writes (Kraft-rs9pk). `{value}` is one JSON
     # array of absolute paths, which is also a TOML inline array.
     "writable_dirs",
+    # Kraft fills it, never a task: a sandboxed launch under `network:`'s
+    # MCP servers, one JSON object `{"mcpServers": {...}}` naming the
+    # session's own at `http://kraft/mcp`, reached through its channel.
+    "mcp_config",
 )
 
 #: Without these three, no agent dispatch can be built at all.

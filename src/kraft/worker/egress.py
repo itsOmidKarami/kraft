@@ -31,13 +31,14 @@ import re
 import socket
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 import httpx
 
 from kraft import store
-from kraft.worker import callback
+from kraft.worker import callback, session_mcp
 
 #: What a connection a session's policy refused is recorded as.
 SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
@@ -51,7 +52,7 @@ CONNECT_TIMEOUT = 30.0
 #: Distinct hosts a session's refusals are recorded for; past this, one last
 #: event says the rest are not (they are still refused).
 MAX_REFUSAL_EVENTS = 100
-#: The most a worker API form may be: a permission hook's stdin carries the
+#: The most a worker API request may be: a permission hook's stdin carries the
 #: tool call's whole input, a file being written among it.
 MAX_WORKER_BODY = 16 * 1024 * 1024
 #: How much of a refused worker API route its event records.
@@ -208,7 +209,8 @@ def _with_embedded(addr) -> list:
 class EgressProxy:
     """One per daemon. `connect`, `getaddrinfo` and `environ` are seams for
     tests; the daemon takes the defaults. `app` is the daemon's own API,
-    which serves the worker API in-process; a proxy without one refuses
+    which serves the worker API in-process, beside the session MCP server
+    (`session_mcp`) this proxy serves at `/mcp`; a proxy without one refuses
     host `kraft`."""
 
     def __init__(
@@ -223,6 +225,13 @@ class EgressProxy:
         self._getaddrinfo = getaddrinfo
         self._environ = environ
         self._app = app
+        self._mcp = session_mcp.build(self._ask_permission) if app is not None else None
+        self._mcp_app = session_mcp.asgi_app(self._mcp) if self._mcp is not None else None
+
+    def serving(self):
+        """What must run, around the daemon's lifespan, while this proxy
+        serves: the session MCP server's session manager."""
+        return self._mcp.session_manager.run() if self._mcp is not None else nullcontext()
 
     async def _resolve(self, host: str, port: int) -> list[str]:
         if _address(host) is not None:
@@ -421,20 +430,19 @@ class EgressProxy:
         """One worker API call: a `kraft` shim verb's form fields, turned into
         the API call it names and made in-process as the channel's session.
         No header the client sent is read but the body's length: not its
-        `Authorization`, not an `X-Kraft-Session-Id`."""
+        `Authorization`, not an `X-Kraft-Session-Id`. `/mcp` is the session
+        MCP server's (`_mcp_call`)."""
         url = urlsplit(target)
+        if url.path == "/mcp":
+            return await self._mcp_call(reader, writer, session, method, headers, rest)
         verb = _VERBS.get(url.path.removeprefix("/w/")) if url.path.startswith("/w/") else None
         if method != "POST" or verb is None:
             return await self._refuse_route(
                 writer, session, f"{method} {url.path}", "not a worker API verb"
             )
-        length = _content_length(headers)
-        if isinstance(length, str):
-            return await _answer(writer, 400, "Bad Request", length)
-        if length > MAX_WORKER_BODY:
-            return await _answer(writer, 413, "Content Too Large", "the form is too large")
-        body = rest[:length]
-        body += await asyncio.wait_for(reader.readexactly(length - len(body)), HEAD_TIMEOUT)
+        body = await _read_body(reader, writer, headers, rest)
+        if body is None:
+            return
         form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
         scope = callback.scope_for_channel(session)
         call = verb(form, scope)
@@ -445,20 +453,9 @@ class EgressProxy:
             return await self._refuse_route(
                 writer, session, f"{api_method} {path}", "not this session's to call"
             )
-        state = self._app.state
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self._app), base_url="http://kraft"
-        ) as client:
-            reply = await client.request(
-                api_method,
-                path,
-                json=payload,
-                params=params,
-                headers={
-                    "Authorization": f"Bearer {state.mcp_token}",
-                    "X-Kraft-Session-Id": scope.session_id,
-                },
-            )
+        reply = await self._call(
+            self._app, api_method, path, scope.session_id, json=payload, params=params
+        )
         status, text = reply.status_code, reply.content
         kind = reply.headers.get("content-type", "application/json")
         if verb is _permission_hook:
@@ -473,6 +470,46 @@ class EgressProxy:
         elif verb is _threads and status == 200 and form.get("open"):
             text = json.dumps([t for t in reply.json() if t["state"] != "resolved"]).encode()
         await _respond(writer, status, reply.reason_phrase, kind, text)
+
+    async def _mcp_call(self, reader, writer, session: EgressSession, method, headers, rest):
+        """One request to the session MCP server, passed through as it came
+        but for who it comes from: the channel's session, whatever
+        `X-Kraft-Session-Id` or `Authorization` the worker sent. Only the
+        headers the MCP transport reads are passed."""
+        scope = callback.scope_for_channel(session)
+        if not callback.allowed(scope, method, "/mcp", thread_owner=self._thread_owner):
+            return await self._refuse_route(
+                writer, session, f"{method} /mcp", "not this session's to call"
+            )
+        body = await _read_body(reader, writer, headers, rest)
+        if body is None:
+            return
+        passed = {_name(h): h.split(":", 1)[1].strip() for h in headers if _name(h) in _MCP_HEADERS}
+        reply = await self._call(
+            self._mcp_app, method, "/mcp", scope.session_id, content=body, headers=passed
+        )
+        kind = reply.headers.get("content-type", "application/json")
+        await _respond(writer, reply.status_code, reply.reason_phrase, kind, reply.content)
+
+    async def _ask_permission(self, session_id: str, ask: dict) -> tuple[int, object]:
+        """The session MCP server's permission ask: the daemon's own
+        permission route, the gate the host's MCP tool asks."""
+        path = f"/api/worker-sessions/{session_id}/permission"
+        reply = await self._call(self._app, "POST", path, session_id, json=ask)
+        return reply.status_code, reply.json()
+
+    async def _call(self, asgi, method: str, path: str, session_id: str, **kw) -> httpx.Response:
+        """`method path` in-process on `asgi` as `session_id`, with the
+        daemon's own token: the one way a worker's callback reaches Kraft."""
+        headers = {
+            **kw.pop("headers", {}),
+            "Authorization": f"Bearer {self._app.state.mcp_token}",
+            "X-Kraft-Session-Id": session_id,
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=asgi), base_url="http://kraft"
+        ) as client:
+            return await client.request(method, path, headers=headers, **kw)
 
     def _thread_owner(self, tid: str) -> str | None:
         row = self._app.state.db.read(lambda c: store.thread_row(c, tid))
@@ -586,6 +623,24 @@ _VERBS: dict[str, Callable[[dict, callback.SessionScope], _Call | str]] = {
     "compare": _compare,
     "permission-hook": _permission_hook,
 }
+
+
+#: The request headers the MCP streamable HTTP transport reads; no other
+#: header a worker sends reaches the session MCP server.
+_MCP_HEADERS = ("content-type", "accept", "mcp-protocol-version", "mcp-session-id")
+
+
+async def _read_body(reader, writer, headers: list[str], rest: bytes) -> bytes | None:
+    """A worker API request's body, or None once a 400 or 413 has answered."""
+    length = _content_length(headers)
+    if isinstance(length, str):
+        await _answer(writer, 400, "Bad Request", length)
+        return None
+    if length > MAX_WORKER_BODY:
+        await _answer(writer, 413, "Content Too Large", "the request is too large")
+        return None
+    body = rest[:length]
+    return body + await asyncio.wait_for(reader.readexactly(length - len(body)), HEAD_TIMEOUT)
 
 
 async def _read_head(reader: asyncio.StreamReader) -> tuple[bytes | None, bytes]:

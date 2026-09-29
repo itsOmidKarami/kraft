@@ -66,10 +66,12 @@ async def lifespan(app: FastAPI):
     database = await Database.open(run_dirs.db)
     # Before reattach, which re-opens adopted sessions' egress channels: the
     # listeners run on this loop, the one every launch awaits on.
-    # The proxy serves the worker API (host `kraft`) out of this app.
-    app.state.egress_channels = channel_mod.ChannelRegistry(
-        run_dirs, database, EgressProxy(app=app)
-    )
+    # The proxy serves the worker API (host `kraft`) out of this app, and
+    # the session MCP server beside it, up before an adopted session asks.
+    proxy = EgressProxy(app=app)
+    app.state.egress_channels = channel_mod.ChannelRegistry(run_dirs, database, proxy)
+    proxy_serving = proxy.serving()
+    await proxy_serving.__aenter__()
     channel_mod.install(app.state.egress_channels)
     # Where a VM-backed runtime's relays reach the same registry: up before
     # reattach too, on the port those relays were started against.
@@ -295,5 +297,6 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*tasks, return_exceptions=True)
         await app.state.egress_tls.close()
         await app.state.egress_channels.close_all()
+        await proxy_serving.__aexit__(None, None, None)
         channel_mod.install(None)
         await database.close()

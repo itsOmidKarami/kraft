@@ -217,3 +217,13 @@ async def test_threads_open_leaves_out_the_resolved(worker_api):
     api.answers["/api/work-items/w-own/threads"] = (200, threads)
     _, body, _ = await ask("threads", {"open": "1"})
     assert [t["id"] for t in json.loads(body)] == ["a"]
+
+
+async def test_the_mcp_endpoint_takes_only_its_transport_methods(worker_api):
+    api, ask = worker_api
+    status, _, events = await ask(None, method="PUT", target="http://kraft/mcp")
+    assert status == 403
+    assert api.calls == []
+    assert [(e["route"], e["reason"]) for e in events] == [
+        ("PUT /mcp", "not this session's to call")
+    ]

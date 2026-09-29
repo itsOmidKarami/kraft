@@ -26,6 +26,7 @@ from kraft.config import RepoEntry, git_read
 from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import backends as _backends
+from kraft.worker import callback as _callback
 from kraft.worker import steering as _steering
 
 _CTX = (
@@ -864,6 +865,11 @@ async def run_agent_task(
     # Kraft's own value, not a task's, so the check above never sees it.
     if h.supports("writable_dirs"):
         options["writable_dirs"] = _writable_dirs(run_dirs, files or session_id, cwd)
+    if channel and h.supports("mcp_config"):
+        # Its only MCP server is the session's own, through the channel: the
+        # host's registration is not in the sandbox (spike 5.5).
+        url = f"{_callback.address(sandbox['kind'])}/mcp"
+        options["mcp_config"] = json.dumps({"mcpServers": {"kraft": {"type": "http", "url": url}}})
     cmd = _harness.build_argv(
         h,
         command=command or None,

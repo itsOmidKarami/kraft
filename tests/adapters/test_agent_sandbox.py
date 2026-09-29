@@ -1,12 +1,15 @@
 """`kraft.adapters.agent` launching into a docker sandbox: a tool policy is
 enforced in the container or the launch is refused, never run unenforced."""
 
+import json
+
 import pytest
 
 from kraft.adapters.agent import LaunchRefused
 from kraft.paths import RunDirs
 
 DOCKER = {"kind": "docker", "image": "x"}
+NETWORKED = {**DOCKER, "network": {"runtime": {"allow": ["x.io"]}}}
 
 
 @pytest.mark.parametrize("harness", ["codex", "cursor"])
@@ -93,3 +96,26 @@ def test_codex_leaves_isolation_to_the_container(run, tmp_path, sandbox, mode, e
         **({"permission_mode": mode} if mode else {}),
     )
     assert f"sandbox_mode={expected}" in seen["cmd"]
+
+
+@pytest.mark.parametrize(
+    ("sandbox", "servers"),
+    [
+        (NETWORKED, {"kraft": {"type": "http", "url": "http://kraft/mcp"}}),
+        (DOCKER, None),
+        (None, None),
+    ],
+    ids=["network", "no-network", "host"],
+)
+def test_claude_under_network_asks_its_session_mcp_server_alone(run, tmp_path, sandbox, servers):
+    """The host's registration of Kraft's MCP server is out of the
+    container's reach; its channel reaches the session's own. Elsewhere
+    the launch is as it was."""
+    cmd = run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)["cmd"]
+    assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
+    if servers is None:
+        assert "--mcp-config" not in cmd and "--strict-mcp-config" not in cmd
+    else:
+        at = cmd.index("--strict-mcp-config")
+        assert cmd[at + 1] == "--mcp-config"
+        assert json.loads(cmd[at + 2]) == {"mcpServers": servers}

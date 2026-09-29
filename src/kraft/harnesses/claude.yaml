@@ -46,6 +46,11 @@ capabilities:
   # where `kraft admin init` never registered it, the flag names a tool that
   # does not exist and the CLI completes normally (measured).
   approval_channel: { cli: ["--permission-prompt-tool", "{value}"], always: mcp__kraft__permission_request }
+  # Kraft sets it only in a sandbox under `network:`, where the host's
+  # registration of the tool above is out of reach: the session's own MCP
+  # server, and no other (spike 5.5, claude 2.1.281: without one the CLI
+  # exits 1 naming the missing tool; its HTTP MCP client honours the proxy).
+  mcp_config:       { cli: ["--strict-mcp-config", "--mcp-config", "{value}"] }
   resume:           { cli: ["--resume", "{value}"] }
   autocompact:      { cli: ["--autocompact", "{value}"] }
   usage:            { source: envelope, reader: claude-stream-json }
