@@ -6,8 +6,8 @@
 [![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
 
-**Your coding agent, from spec to pull request, on your machine. It stops only
-when a decision is yours.**
+**A local orchestrator that takes your coding agent from spec to pull request,
+stopping only when a decision is yours.**
 
 Hand Claude Code (or another coding agent) a spec and walk away. It's for
 developers tired of babysitting a session to the end of a task.

@@ -1,7 +1,7 @@
 [project]
 name = "kraft-sdlc"
 dynamic = ["version"]
-description = "Your coding agent, from spec to pull request, on your machine. It stops only when a decision is yours."
+description = "A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

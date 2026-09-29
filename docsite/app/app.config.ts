@@ -1,7 +1,7 @@
 export default defineAppConfig({
   seo: {
     title: 'Kraft',
-    description: 'Your coding agent, from spec to pull request, on your machine. It stops only when a decision is yours.',
+    description: 'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours.',
   },
   header: {
     title: 'Kraft',
