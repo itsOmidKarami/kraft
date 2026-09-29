@@ -40,9 +40,8 @@ def test_a_hook_enforced_policy_is_refused_in_a_sandbox_without_network(
 
 def test_a_proxy_unaware_harness_under_network_is_refused_before_launch(run, tmp_path):
     """Its only route out would be a proxy it ignores (spec §4)."""
-    networked = {**DOCKER, "network": {"runtime": {"allow": ["x.io"]}}}
     with pytest.raises(LaunchRefused, match=r"'cursor'.*`proxy_aware: false`"):
-        run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path), sandbox=networked)
+        run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path), sandbox=NETWORKED)
     assert run(harness="cursor", command="agent", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
 
 
