@@ -392,6 +392,12 @@ def _add_member(
             f"the connected repository {member_repo} for {rel} is missing; reconnect "
             "it, or fix its path in repos.yaml, then retry"
         )
+    if not _sandbox.repository_top(member_repo):
+        raise RuntimeError(
+            f"the connected repository {member_repo} for {rel} is not the top of a git "
+            "repository, so git there would act on the repository around it; fix its "
+            "path in repos.yaml, then retry"
+        )
     if name := _submodule_name(worktree, base, rel):
         _git_ok(worktree, "config", f"submodule.{name}.active", "true")
     sha = git_read(worktree, "rev-parse", f"HEAD:{rel}", expected_failure=True)

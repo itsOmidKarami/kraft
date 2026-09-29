@@ -173,6 +173,18 @@ def read_regular(path: Path, within: Path) -> str | None:
         os.close(fd)
 
 
+def repository_top(path: Path) -> bool:
+    """Whether `path` is the top of a git working tree. git in any directory
+    inside one answers for the enclosing repository instead, so a connected
+    path that is only such a directory is no repository of its own."""
+    if not path.is_dir():
+        return False
+    done = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=path, capture_output=True, text=True
+    )
+    return done.returncode == 0 and Path(done.stdout.strip()).resolve() == path.resolve()
+
+
 def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Path] | None:
     """The trusted `(common gitdir, admin dir)` of member `rel` of `worktree`,
     whose connected repository is `repo_path`, or None when it has none.
@@ -181,6 +193,8 @@ def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Pat
     worker writes (Kraft-ju36l, spec I3): the common gitdir is what git in
     `repo_path` says, and the admin dir is the `worktrees/*` entry of it whose
     `gitdir` file names this member's `.git`."""
+    if not repository_top(repo_path):
+        return None
     done = subprocess.run(
         ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
         cwd=repo_path,

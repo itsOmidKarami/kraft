@@ -165,3 +165,17 @@ async def test_a_gitmodules_the_setup_command_rewrote_never_reaches_the_roots_co
 
     config = (root / ".git" / "config").read_text()
     assert "attacker.invalid" not in config and '"evil"' not in config
+
+
+async def test_a_connected_path_inside_another_repository_is_refused(tmp_path, database, run_dirs):
+    """git in a plain directory answers for the repository around it:
+    `worktree add` there would make the member a worktree of that one."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    (sub / "empty").mkdir()
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
+
+    with pytest.raises(RuntimeError, match="is not the top of a git repository"):
+        await wtree.ensure(database, run_dirs, root, repositories=_members(sub / "empty"))
+
+    assert not (run_dirs.worktrees / "w1").exists()
+    assert git_read(sub, "worktree", "list").count("\n") == 0

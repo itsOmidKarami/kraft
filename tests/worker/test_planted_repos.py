@@ -428,3 +428,14 @@ async def test_a_repository_nested_inside_a_member_is_planted(tmp_path, database
     wt, _sub, _ = await _member_checkout(database, run_dirs, tmp_path)
     _nested(wt / _REL, "vendor/x")
     assert sandbox.planted_repos(wt / _REL, _git(wt, "rev-parse", f"HEAD:{_REL}")) == ["vendor/x"]
+
+
+async def test_a_connected_path_that_is_only_a_directory_in_another_repository_has_no_gitdirs(
+    tmp_path, database, run_dirs
+):
+    """git in an empty directory answers for the repository around it; that
+    repository is not the member's, so it is no trusted gitdir for one."""
+    wt, sub, _ = await _member_checkout(database, run_dirs, tmp_path)
+    (sub / "empty").mkdir()
+    assert sandbox.member_gitdirs(sub / "empty", wt, _REL) is None
+    assert sandbox.member_gitdirs(tmp_path / "gone", wt, _REL) is None
