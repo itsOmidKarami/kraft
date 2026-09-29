@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  actor You
+  participant API as HTTP API
+  participant DB as orchestrator.db
+  participant Ex as Executor
+  participant W as Worker session
+  participant F as gh or glab
+
+  You->>API: kraft item create
+  API->>DB: intake, status paused
+  You->>API: kraft item resume
+  API->>DB: claim, paused to active
+  API->>Ex: spawn the walk
+  Ex->>Ex: cut the worktree
+  Ex->>W: launch the spec author
+  W-->>Ex: exit code and result file
+  Ex->>DB: gate_requested, status needs_human
+  DB-->>You: event over the WebSocket
+  You->>API: kraft item approve
+  API->>DB: gate_approved, status active
+  API->>Ex: spawn the walk at the next node
+  Ex->>W: plan, implementation, their gates
+  Ex->>F: open a draft merge request
+  Ex->>DB: status waiting on CI
+  Note over Ex,DB: re-entered when CI settles
+  You->>API: approve final_review
+  Ex->>F: mark ready, merge
+  Ex->>DB: status completed, close beads
