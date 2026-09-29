@@ -310,8 +310,35 @@ def _prepare(
     with _locked(store.shadow):
         store = _refresh(store, session_id, set(live), work_item_id)
         for point in mount_points:
-            (store.shadow / point).mkdir(parents=True, exist_ok=True)
+            _mount_point(store.shadow, point)
     return store
+
+
+def _mount_point(shadow: Path, point: Path) -> None:
+    """Make `shadow/point` a directory, one component at a time and never
+    through a symlink: a store a live session mounted may hold whatever its
+    worker left there, and a planted `modules -> /elsewhere` would have Kraft
+    create directories anywhere it can write. Raises `RuntimeError` for a
+    component that is not a real directory."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(shadow, flags)
+    try:
+        for part in point.parts:
+            try:
+                os.mkdir(part, dir_fd=fd)
+            except FileExistsError:
+                pass
+            try:
+                inner = os.open(part, flags, dir_fd=fd)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"{shadow / point} cannot be made in the sandbox's ref store: {part} "
+                    f"there is not a directory Kraft made ({exc.strerror})"
+                ) from exc
+            os.close(fd)
+            fd = inner
+    finally:
+        os.close(fd)
 
 
 def _refresh(

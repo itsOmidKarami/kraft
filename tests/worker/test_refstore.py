@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import threading
 
@@ -306,6 +307,23 @@ def test_a_member_common_inside_the_root_common_gets_its_mount_point_from_kraft(
         tmp_path / "run", ws.wt, BRANCH, members=ws.checkout.members, session_id="s1"
     )
     assert (root.shadow / member.common.relative_to(root.common)).is_dir()
+
+
+def test_a_mount_point_is_never_made_through_what_a_worker_left_in_the_store(tmp_path):
+    """A live co-task keeps the root's store as it is, with anything its
+    worker put there: a symlink where the member's mount point goes must not
+    have Kraft make directories wherever it points."""
+    ws = member_checkout(tmp_path, BRANCH, nested=True)
+    kw = {"members": ws.checkout.members}
+    root, _ = refstore.prepare_stores(tmp_path / "run", ws.wt, BRANCH, session_id="s1", **kw)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shutil.rmtree(root.shadow / "modules")
+    (root.shadow / "modules").symlink_to(elsewhere)
+
+    with pytest.raises(RuntimeError, match="not a directory Kraft made"):
+        refstore.prepare_stores(tmp_path / "run", ws.wt, BRANCH, session_id="s2", live=["s1"], **kw)
+    assert list(elsewhere.iterdir()) == []
 
 
 def test_a_member_kraft_did_not_check_out_is_never_mounted(repo, worktree, tmp_path):
