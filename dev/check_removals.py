@@ -34,6 +34,7 @@ from pathlib import PurePosixPath
 
 _REQ = re.compile(r"^## REQ (\S+)", re.M)
 _HEADING = re.compile(r"^#+\s*(.*?)\s*$")
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
 _SECTIONS = {"removed tests": "tests", "removed requirements": "requirements"}
 #: ponytail: frontend tests count per file, not per `it(...)` -- parsing TS
 #: is not worth it until a frontend-only revert slips through.
@@ -73,10 +74,11 @@ def req_ids(text: str | None) -> set[str]:
 
 def declared(body: str) -> dict[str, set[str]]:
     """The ids listed under each `Removed ...` heading: the first word of each
-    line, bullets and backticks stripped."""
+    line, bullets and backticks stripped. An HTML comment says nothing: the PR
+    template's example sections sit in one, and a reviewer never sees it."""
     out: dict[str, set[str]] = {"tests": set(), "requirements": set()}
     section = None
-    for line in body.splitlines():
+    for line in _COMMENT.sub("", body).splitlines():
         if heading := _HEADING.match(line):
             section = _SECTIONS.get(heading.group(1).lower())
         elif section and (words := line.strip().lstrip("-*+ ").split()):
