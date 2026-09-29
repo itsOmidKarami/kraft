@@ -303,7 +303,8 @@ def templates_dir(tmp_path, monkeypatch):
 def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body, caller, refused):
     """`deps.forbid_self_action`, the server's twin of the CLI's guard (design
     §6 rule 2): a consistency check, not a boundary, as a caller can omit the
-    header. An escalation turn is not a worker, so it may."""
+    header. An escalation turn is not a worker, so it may, except approve or
+    reject its own item's gate."""
     permissions.seed_session(sid="s-escalation", wid="w1", hook_point="escalation")
     permissions.seed_session(sid="s-other", wid="w2")
     with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
@@ -317,6 +318,8 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body,
             result_path="/tmp/kraft-test.json",
         )
     headers = {"X-Kraft-Session-Id": caller} if caller else {}
+    if caller == "s-escalation" and path.endswith(("/approve", "/reject")):
+        refused = True  # Kraft-9efnk.16: a gate is a human's, not the escalation agent's
     r = client.request(method, path, json=body, headers=headers)
     assert (r.status_code == 403) is refused, r.text
     if refused:
