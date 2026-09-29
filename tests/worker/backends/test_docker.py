@@ -7,7 +7,8 @@ import pytest
 from support.harness import fake_docker_bin
 
 from kraft.config import ConfigError
-from kraft.worker import sandbox
+from kraft.paths import RunDirs
+from kraft.worker import refstore, sandbox
 from kraft.worker.backends import docker
 from kraft.worker.refstore import RefStore
 
@@ -505,31 +506,42 @@ def test_an_enforcing_host_nobody_configured_refuses_the_launch(monkeypatch):
         _argv_on(monkeypatch, docker.Runtime(selinux="refuse"))
 
 
-@pytest.mark.parametrize("rootless", [True, False])
-async def test_a_rootless_runtime_refuses_a_path_someone_else_owns(monkeypatch, tmp_path, rootless):
+@pytest.mark.parametrize(
+    ("rootless", "theirs"),
+    [(True, "home"), (True, "refs"), (True, "result"), (False, "home")],
+    ids=["home", "ref-store", "result-file", "rootful"],
+)
+async def test_a_rootless_runtime_refuses_a_path_someone_else_owns(
+    monkeypatch, tmp_path, rootless, theirs
+):
     """Its container writes as the operator, so a HOME, ref store or result
     file another runtime left behind would fail it mid-session. Spec §3."""
     monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(rootless=rootless))
-    monkeypatch.setattr(docker, "missing_executable", lambda *a: asyncio.sleep(0, False))
-    mine, theirs = tmp_path / "mine", tmp_path / "theirs"
-    mine.mkdir()
-    theirs.mkdir()
+    run_dirs = RunDirs(base=tmp_path / "run")
+    monkeypatch.setattr(docker, "linked_gitdirs", lambda cwd: (tmp_path, tmp_path / "wt"))
+    paths = {
+        "home": docker.sandbox_home(run_dirs, "w1"),
+        "refs": refstore.shadow_dir(run_dirs.base, tmp_path / "wt"),
+        "result": tmp_path / "s1.json",
+    }
+    # A first launch has no HOME or result file yet: neither is refused.
+    mine = [p for k, p in paths.items() if k not in (theirs, "home", "result")]
+    for path in [*mine, paths[theirs]]:
+        path.mkdir(parents=True, exist_ok=True)
     uid = os.getuid() + 1  # a root test run would hide a uid bug
     monkeypatch.setattr(docker.os, "getuid", lambda: uid)
-    os_stat = Path.stat
+    real_stat = Path.stat
     monkeypatch.setattr(
         Path,
         "stat",
         lambda p, **kw: (
-            os.stat_result((0, 0, 0, 0, uid, 0, 0, 0, 0, 0)) if p == mine else os_stat(p, **kw)
+            os.stat_result((0, 0, 0, 0, uid, 0, 0, 0, 0, 0)) if p in mine else real_stat(p, **kw)
         ),
     )
-    paths = (tmp_path / "gone", mine, theirs)
-    reason = await docker.DockerBackend().probe(
-        {"kind": "docker", "image": "i"}, "x", None, paths=paths
-    )
+    reason = await docker.DockerBackend().owner_refusal(run_dirs, tmp_path, "w1", paths["result"])
     if rootless:
-        assert f"{theirs} is owned by uid" in reason and f"chown -R {uid} {theirs}" in reason
+        path = paths[theirs]
+        assert f"{path} is owned by uid" in reason and f"chown -R {uid} {path}" in reason
     else:
         assert reason is None
 

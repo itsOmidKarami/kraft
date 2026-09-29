@@ -1228,16 +1228,25 @@ class DockerBackend:
     def home(self, run_dirs, work_item_id: str) -> Path:
         return sandbox_home(run_dirs, work_item_id)
 
-    async def probe(
-        self, sandbox: dict, executable: str, env: dict | None, *, paths: tuple[Path, ...] = ()
+    async def owner_refusal(
+        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
     ) -> str | None:
+        try:
+            host = await asyncio.to_thread(runtime)
+        except ConfigError:
+            return None  # `probe` says why
+        if not host.rootless:
+            return None
+        dirs = linked_gitdirs(Path(cwd))
+        shadow = (_refstore.shadow_dir(run_dirs.base, dirs[1]),) if dirs is not None else ()
+        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadow, result_path), host)
+
+    async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:
             host = await asyncio.to_thread(runtime)
         except ConfigError as exc:
             return str(exc)
         if problem := host.refusal() or host.limits_refusal(sandbox.get("resources")):
-            return problem
-        if host.rootless and (problem := foreign_owned(paths, host)):
             return problem
         if await missing_executable(sandbox["image"], executable, env):
             return (

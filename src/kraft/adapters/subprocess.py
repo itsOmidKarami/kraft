@@ -638,6 +638,11 @@ async def run_task(
     full_env = {k: v for k, v in full_env.items() if k not in sentinels}
     refs = None
     if backend is not None:
+        # Before anything below writes one of them.
+        if problem := await backend.owner_refusal(run_dirs, Path(cwd), work_item_id, result_path):
+            log_path.write_text(f"kraft: {problem}\n")
+            await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+            return "config_error"
         # The container writes its result here, and `result_path` is mounted
         # read-write into it by name -- docker can only bind-mount a file
         # that already exists, so create it now (empty) rather than letting
@@ -672,11 +677,6 @@ async def run_task(
             {k: v for k, v in repo_entry.env.items() if k not in sentinels}
             if repo_entry is not None
             else None,
-            paths=(
-                backend.home(run_dirs, work_item_id),
-                *((refs.shadow,) if refs is not None else ()),
-                result_path,
-            ),
         ):
             log_path.write_text(f"kraft: {problem}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
