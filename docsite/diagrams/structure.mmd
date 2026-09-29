@@ -7,7 +7,7 @@ flowchart TD
   session["Worker session<br/>one run of one task: its status,<br/>log, result file and usage"]
   recovery["on_failure recovery<br/>once per entry, then measure again"]
   fix["fix_loop<br/>repair, then measure again<br/>a judge from the second attempt<br/>bounded by attempts and wall clock"]
-  esc["escalation task<br/>can earn the node a fresh entry"]
+  esc["escalation task<br/>can give the node a fresh entry"]
   stop(["needs_human"])
   next(["next node"])
 

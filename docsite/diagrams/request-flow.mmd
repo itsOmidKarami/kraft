@@ -20,7 +20,7 @@ sequenceDiagram
   You->>API: kraft item approve
   API->>DB: gate_approved, status active
   API->>Ex: spawn the walk at the next node
-  Ex->>W: plan, implementation, verification
+  Ex->>W: plan, implementation, their gates
   Ex->>F: open a draft merge request
   Ex->>DB: status waiting on CI
   Note over Ex,DB: re-entered when CI settles
