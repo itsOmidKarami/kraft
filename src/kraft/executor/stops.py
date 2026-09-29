@@ -343,7 +343,10 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
     if any(f is None for f in found):
         raise RuntimeError(f"work item {row['id']} runs sandboxed, and git cannot read its index")
     planted = [p for f in found for p in f or []]
-    raise RuntimeError(_sandbox.planted_refusal(f"work item {row['id']}", foreign + planted))
+    who = f"work item {row['id']}"
+    if foreign:
+        raise RuntimeError(_sandbox.foreign_member_refusal(who, foreign, planted))
+    raise RuntimeError(_sandbox.planted_refusal(who, planted))
 
 
 def refuse_live_sandboxed_session(db, row, launch: LaunchContext | None, *, what: str) -> None:

@@ -234,7 +234,7 @@ _NODES = [
         "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}],
     }
 ]
-_DRIFT = "git repositories Kraft did not create"
+_DRIFT = "runs sandboxed, and its workspace members"
 
 
 def _sandboxed_policy() -> dict:
@@ -287,7 +287,7 @@ async def test_a_member_drift_stops_the_next_task_before_it_launches(
                 "SELECT log_path FROM worker_sessions WHERE status = ?", (CONFIG_ERROR,)
             ).fetchone()
         )
-        assert f"{_DRIFT}: {_REL}" in Path(log).read_text()
+        assert f"{_DRIFT} {_REL} are not" in Path(log).read_text()
     else:
         assert (status, launched, scans) == ("done", ["n.main.t"], [])
 
@@ -356,7 +356,7 @@ async def test_an_old_layout_member_stops_the_walk_before_host_git_runs(
     )
 
     assert status == "needs_human"
-    assert f"{_DRIFT}: libs/a" in _reason(evts)
+    assert f"{_DRIFT} libs/a are not" in _reason(evts)
     assert sessions == [] and pushed == []
 
 
@@ -405,7 +405,7 @@ def test_an_old_layout_member_stops_a_door_before_it_refreshes_the_worktree(
 
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "needs_human"
-    assert f"{_DRIFT}: libs/a" in _reason(client.get(f"/api/work-items/{wid}/events").json())
+    assert f"{_DRIFT} libs/a are not" in _reason(client.get(f"/api/work-items/{wid}/events").json())
     assert refreshed == []
 
 
@@ -432,5 +432,5 @@ async def test_an_old_layout_member_stops_an_escalations_self_retry_before_the_r
     )
 
     assert status == "needs_human"
-    assert f"{_DRIFT}: libs/a" in _reason(it.events())
+    assert f"{_DRIFT} libs/a are not" in _reason(it.events())
     assert refreshed == [] and not it.events("work_item_retried")

@@ -450,3 +450,20 @@ def planted_refusal(who: str, paths: list[str]) -> str:
         "person looks. Remove them (or `git rm --cached` the gitlinks) and retry, "
         "or abandon the item"
     )
+
+
+def foreign_member_refusal(who: str, members: list[str], planted: list[str]) -> str:
+    """Why a sandboxed item whose member checkout Kraft did not make stops
+    (`foreign_members`, Kraft-ju36l), with any planted repository too."""
+    also = (
+        f" It also holds git repositories Kraft did not create: {', '.join(planted)}."
+        if planted
+        else ""
+    )
+    return (
+        f"{who} runs sandboxed, and its workspace members {', '.join(members)} are not "
+        "the checkouts Kraft made from their connected repositories, so host git would "
+        "read config a sandboxed worker could write. Kraft runs no git there until a "
+        f"person looks.{also} An item started before Kraft checked members out this "
+        "way stops here too. Abandon the item and file it again"
+    )
