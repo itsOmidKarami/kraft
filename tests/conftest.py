@@ -304,7 +304,7 @@ def _rootful_docker(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_kraft_home(tmp_path, monkeypatch):
+def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
     """No test may reach the operator's real `~/.kraft`.
 
     `kraft_home()` falls back to `~/.kraft` (paths.py:16). Only KRAFT_RUN_DIR and
@@ -332,7 +332,16 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     # Every throwaway repo the suite builds sets its own local git user config
     # (make_repo, _bd_template), so bd's `--actor` default never needs the real
     # `$HOME`'s global one.
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    #
+    # Outside `tmp_path`, which several tests list or build a `home/` in. It
+    # holds what `kraft admin init` registers: a Claude launch with no `kraft`
+    # MCP server is refused (`registration.permission_tool`), and an empty home
+    # would refuse every one. A test of that refusal removes it.
+    home = tmp_path_factory.mktemp("home")
+    (home / ".claude.json").write_text(
+        '{"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}'
+    )
+    monkeypatch.setenv("HOME", str(home))
     # `_serve()` dup2s real fds 1/2 to server.log unless told not to -- fine for
     # a real process, but it would stomp pytest's own fd-level capture (and
     # every test after it, in-process) if a `_serve()` call reached that far.

@@ -16,11 +16,11 @@ _REPO_COLUMNS = [
     ("PATH", "path"),
 ]
 
-#: Printed by `kraft path --shell`. A subprocess cannot change its parent's
+#: Printed by `kraft repo path --shell`. A subprocess cannot change its parent's
 #: directory, so the real `cd` has to be a function in the user's shell.
 SHELL_WRAPPER = """\
 # Add to ~/.zshrc or ~/.bashrc:
-kcd() { cd "$(kraft path "$@")" || return; }
+kcd() { cd "$(kraft repo path "$@")" || return; }
 """
 
 
@@ -70,10 +70,20 @@ def _cmd_connect(ns: argparse.Namespace) -> None:
         return
     verb = "already connected" if result.get("already_connected") else "connected"
     print(f"{verb}: {result['path']}")
-    if not result.get("already_connected") and result.get("test_command"):
+    if result.get("already_connected"):
+        return
+    if result.get("test_command"):
         markers = result.get("test_markers")
         source = f" (from {', '.join(markers)})" if markers else ""
         print(f"test command: {result['test_command']}{source}")
+    if result.get("setup_command"):
+        print(f"setup command: {result['setup_command']}")
+    if result.get("enabled") is False:
+        print(
+            "saved disabled: no test command found (it looks for a justfile `test` recipe, "
+            "pyproject.toml, package.json, Cargo.toml or go.mod); set `test_command` in "
+            "its repos.yaml entry, then `enabled: true`"
+        )
 
 
 def _cmd_disconnect(ns: argparse.Namespace) -> None:
@@ -87,14 +97,14 @@ def _cmd_disconnect(ns: argparse.Namespace) -> None:
 def _cmd_path(ns: argparse.Namespace) -> None:
     if ns.json:
         # Inherited from the shared parent parser, and meaningless here: one bare
-        # line is the contract that makes `cd "$(kraft path ID)"` work. Rejected
+        # line is the contract that makes `cd "$(kraft repo path ID)"` work. Rejected
         # rather than ignored, the way `watch` rejects it.
-        raise ValueError("path has no --json; it prints one line — use `kraft show --json`")
+        raise ValueError("path has no --json; it prints one line — use `kraft view show --json`")
     if ns.shell:
         print(SHELL_WRAPPER, end="")
         return
     item = asyncio.run(client.get_work_item(ns.id))
-    # exactly one line: this is consumed by cd "$(kraft path ID)"
+    # exactly one line: this is consumed by cd "$(kraft repo path ID)"
     print(item["worktree_path"])
 
 

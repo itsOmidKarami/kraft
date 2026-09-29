@@ -89,6 +89,23 @@ def test_connect_names_the_test_command_and_the_marker_it_came_from(app, capsys,
     assert "test command: just test (from justfile)" in capsys.readouterr().out
 
 
+def test_connect_says_when_it_saved_the_repo_disabled(app, capsys, repo):
+    """No marker, no test command: the repo lands disabled, and connect says
+    why rather than leaving the first work item to find out."""
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "saved disabled: no test command found" in out
+    assert "setup command" not in out
+
+
+def test_connect_names_the_setup_command_it_proposed(app, capsys, repo):
+    (repo / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    cli.main(["repo", "connect", str(repo)])
+    out = capsys.readouterr().out
+    assert "setup command: uv sync" in out
+    assert "saved disabled" not in out
+
+
 def test_connect_a_non_git_directory_surfaces_the_api_error(app, tmp_path, capsys):
     plain = tmp_path / "plain"
     plain.mkdir()
@@ -127,7 +144,7 @@ def test_path_shell_prints_a_function(capsys):
     cli.main(["repo", "path", "--shell"])
     out = capsys.readouterr().out
     assert "kcd()" in out or "function" in out
-    assert "kraft path" in out
+    assert "kraft repo path" in out
 
 
 def test_open_on_a_headless_server_is_a_kraft_message(app, monkeypatch, capsys, make_item, repo):
@@ -162,7 +179,7 @@ def test_path_rejects_json_rather_than_ignoring_it(app, capsys, make_item, repo)
         cli.main(["repo", "path", wid, "--json"])
     assert caught.value.code == 1
     captured = capsys.readouterr()
-    assert "kraft show --json" in captured.err
+    assert "kraft view show --json" in captured.err
     # nothing on stdout: a caller that piped this must not get a path anyway
     assert captured.out == ""
 

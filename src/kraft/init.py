@@ -128,7 +128,8 @@ def install(
         # A missing agent CLI is a thing to report, not to work around by
         # rewriting user state we do not own.
         raise SystemExit(
-            "kraft init: could not register the MCP server automatically. Run this yourself:\n"
+            "kraft admin init: could not register the MCP server automatically. "
+            "Run this yourself:\n"
             f"  {' '.join(command)}"
         )
     return _write_plugin(Path.home() / ".claude")

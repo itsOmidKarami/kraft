@@ -34,7 +34,8 @@ paused unless they were created with `--autostart`. If both checks pass, run
 | Edited the template library or `policy.yaml` | `kraft admin reload`: rereads from disk, no restart |
 | Server wedged or running old code | `kraft admin restart`: stops, then starts it the way it was running |
 | Install is out of date | `kraft admin update [--restart]` |
-| MCP server or a repo row not `ok` | `kraft admin init --repo`, then doctor again |
+| `mcp server` not `ok` | Install the Kraft plugin, or `kraft admin init` for a terminal-only setup; then doctor again |
+| A repo row not `ok` | Do what its line names (often `kraft repo connect`), then doctor again |
 
 `reload` is safe to run. `restart` and `update` interrupt whatever the server is
 running, so say that and ask first. `update` also replaces the installed

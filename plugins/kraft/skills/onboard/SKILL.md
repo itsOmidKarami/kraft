@@ -10,7 +10,7 @@ connection error.
 
 # Onboarding a repo
 
-Four mechanical steps, each followed by a check against the repo itself — a
+Four steps, each followed by a check against the repo itself — a
 zero exit code says the command ran, not that what it did was right.
 
 1. **Connect.** `ensure_repo()` (or `kraft repo connect [PATH]` from a
@@ -51,11 +51,12 @@ zero exit code says the command ran, not that what it did was right.
    parent's, and its own `enabled: true` (set in its `repos.yaml` entry, as with `test_command`) before any item can
    be scoped to it — connecting the parent does not turn any of them on.
 
-2. **Register.** `kraft admin init --repo` - registers Kraft's MCP server and
-   skills for this repo's agent. It prints every path it wrote
-   (`kraft: wrote <path>`); read those lines rather than assuming — the flag
-   means repo-scope (a `.mcp.json` under the repo root), so a run that prints
-   a path outside the repo means something is off before you go further.
+2. **Register.** Nothing to run when this skill came with the Kraft plugin:
+   the plugin registers Kraft's MCP server itself, and workers find it there
+   (`kraft admin doctor`'s `mcp server` row names the tool they use). Do not
+   run `kraft admin init` on top of it. Only a session without the plugin -
+   Kraft's tools unreachable, or the skills installed by hand - needs `kraft
+   admin init` (user scope); say so and let the person run it.
 
 3. **Rehearse.** A worktree is a fresh checkout of HEAD: nothing untracked
    comes with it. Find out now, while you can still ask, rather than on the
@@ -137,10 +138,12 @@ zero exit code says the command ran, not that what it did was right.
    Do not put a directory or a glob in `local_files`; it takes literal file
    paths, and the list is validated on load.
 
-4. **Verify.** `kraft admin doctor` - confirm `mcp server` and the `repo
-   <name>` row both read `ok`. If either doesn't, stop and report the exact
-   line rather than declaring onboarding done with a known problem still
-   open.
+4. **Verify.** First `kraft admin health`: it exits 1 when the server is not
+   up, and every check after it needs the server. If it fails, report that
+   and stop - `kraft admin start` (or the service) comes first. Then `kraft
+   admin doctor` - confirm `mcp server` and the `repo <name>` row both read
+   `ok`. If either doesn't, stop and report the exact line rather than
+   declaring onboarding done with a known problem still open.
 
 Finish by handing off into `kraft:check` for the full drift report
 against this install's library and chains — that skill already owns the diff, no need to
