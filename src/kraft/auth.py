@@ -132,29 +132,31 @@ def revoke_all(conn: sqlite3.Connection) -> int:
 
 
 MCP_TOKEN_FILE = "mcp-token"
+#: Authenticates `POST /api/triggers` and nothing else, for CI and webhooks.
+TRIGGER_TOKEN_FILE = "trigger-token"
 
 
-def read_mcp_token(run_dir: str | Path) -> str | None:
+def read_mcp_token(run_dir: str | Path, name: str = MCP_TOKEN_FILE) -> str | None:
     """The token on disk, or None. Whitespace-only counts as absent."""
     try:
-        token = (Path(run_dir) / MCP_TOKEN_FILE).read_text().strip()
+        token = (Path(run_dir) / name).read_text().strip()
     except OSError:
         return None
     return token or None
 
 
-def ensure_mcp_token(run_dir: str | Path) -> str:
+def ensure_mcp_token(run_dir: str | Path, name: str = MCP_TOKEN_FILE) -> str:
     """The bearer credential for non-browser clients (design §5).
 
     Created once and kept: regenerating per serve would silently break an MCP
     client registered against the old value. Opened 0600 rather than chmod'd
     after the write, so the secret is never briefly world-readable.
     """
-    existing = read_mcp_token(run_dir)
+    existing = read_mcp_token(run_dir, name)
     if existing:
         return existing
     token = new_token()
-    path = Path(run_dir) / MCP_TOKEN_FILE
+    path = Path(run_dir) / name
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
         handle.write(token)

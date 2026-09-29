@@ -61,9 +61,10 @@ def test_doctor_flags_a_dead_pidfile(app, tmp_path):
     assert "not running" in row["detail"]
 
 
-def test_a_world_readable_mcp_token_fails(app, tmp_path):
-    _prime(tmp_path).chmod(0o644)
-    row = _by_name(asyncio.run(doctor.run_checks()), "mcp token")
+@pytest.mark.parametrize("file", [auth.MCP_TOKEN_FILE, auth.TRIGGER_TOKEN_FILE])
+def test_a_world_readable_token_fails(app, tmp_path, file):
+    (_prime(tmp_path).parent / file).chmod(0o644)
+    row = _by_name(asyncio.run(doctor.run_checks()), file.replace("-", " "))
     assert not row["ok"]
     assert "0644" in row["detail"]
 
