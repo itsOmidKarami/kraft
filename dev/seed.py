@@ -44,6 +44,11 @@ def git(*args: str) -> None:
 def build_repo() -> None:
     """A throwaway repo with the bug fake-claude.sh knows how to fix."""
     if REPO.exists():
+        # A dev repo built before the seed committed its own registration.
+        if not (REPO / ".mcp.json").exists():
+            (REPO / ".mcp.json").write_text(MCP_JSON)
+            git("add", ".mcp.json")
+            git("commit", "-qm", "register kraft for the fake agent")
         print(f"seed: reusing {REPO}")
         return
     REPO.mkdir(parents=True)
