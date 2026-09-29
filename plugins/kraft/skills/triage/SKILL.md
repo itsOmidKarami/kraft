@@ -22,8 +22,10 @@ kraft view events ID --type work_item_needs_human   # the stop's `reason`
 kraft view logs ID -n 60           # the last session's tail
 ```
 
-The stop event's `reason` is the cause. A `budget` or `capped` tag on it means a
-spend or time cap, not a defect. `needs_context:` means an agent asked a
+The stop event's `reason` is the cause. A `budget` tag on it means a spend cap
+stopped it, and a reason naming a time cap means that cap ran out: neither is a
+defect. A `capped` tag means a fix loop spent its attempts
+(`{cycles, attempts}`). `needs_context:` means an agent asked a
 question and nobody answered. A status that is only a pending gate is not a
 stop: hand it to `kraft:gates`.
 
