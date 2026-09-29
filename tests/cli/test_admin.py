@@ -474,6 +474,31 @@ def test_restart_with_no_server_is_not_an_error(tmp_path, monkeypatch, capsys):
     assert "no server running" in capsys.readouterr().out
 
 
+def test_start_detached_waits_for_health_not_just_the_pidfile(tmp_path, monkeypatch, capsys):
+    """Kraft-9efnk.22 / #260: the pidfile lands before uvicorn binds."""
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(fake_templates_dir(tmp_path, "true")))
+    run_dirs = RunDirs(tmp_path / "run").ensure()
+    FakeProc = type("FakeProc", (), {"poll": lambda self: None})
+
+    def fake_popen(*a, **k):  # pidfile before health, like a real child; own pid reads "alive"
+        run_dirs.pid.write_text(str(os.getpid()))
+        return FakeProc()
+
+    monkeypatch.setattr(cli.admin.subprocess, "Popen", fake_popen)
+    healthy_after, calls = time.monotonic() + 0.3, []
+
+    async def fake_health():
+        calls.append(time.monotonic())
+        assert calls[-1] >= healthy_after, "not up yet"
+        return {"status": "ok"}
+
+    monkeypatch.setattr(cli.admin.client, "health", fake_health)
+    cli.admin._start_detached()
+    assert calls and calls[-1] >= healthy_after, "must poll health, not just the pidfile"
+    assert "kraft: http://" in capsys.readouterr().out
+
+
 def test_restart_brings_a_detached_server_back_detached(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     run_dirs = RunDirs(tmp_path / "run")

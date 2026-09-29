@@ -666,15 +666,23 @@ def _start_detached() -> None:
             env={**os.environ, "KRAFT_LOG_REDIRECTED": "1", "KRAFT_DETACHED": "1"},
         )
 
-    # Wait for the child to actually bind, not just fork: a bad config or a
-    # port already in use both exit within the first second, and returning
-    # before that would report success for a server that's already dead.
+    # Wait for the child to actually answer, not just fork or write its
+    # pidfile: the pidfile lands before uvicorn binds, so returning on it
+    # alone raced `kraft repo connect` against a server not yet listening
+    # (#260's smoke test; Kraft-9efnk.22). A bad config or a port already in
+    # use both exit within the first second, and returning before that would
+    # report success for a server that's already dead.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         pid = _read_pid(pid_path)
         if pid is not None:
-            print(f"kraft: http://{host}:{port} (pid {pid}, detached - kraft admin stop)")
-            return
+            try:
+                asyncio.run(client.health())
+            except Exception:
+                pass
+            else:
+                print(f"kraft: http://{host}:{port} (pid {pid}, detached - kraft admin stop)")
+                return
         if proc.poll() is not None:
             tail = log_path.read_text()[-2000:]
             print(f"kraft: detached start failed:\n{tail}", file=sys.stderr)
