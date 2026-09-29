@@ -1,5 +1,6 @@
 /* Nocturne — design-system tokens and component classes. This file is the source of truth for the system's look; retune it here and see readme.md. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Inter, self-hosted from npm (woff2, one variable file per subset) rather than fetched from Google Fonts. */
+@import '@fontsource-variable/inter/wght.css';
 
 :root {
   --density-row-pad: 8px;
@@ -63,9 +64,9 @@
   --color-section-glow: #353b80;
   --color-section-ghost: #4c5397;
 
-  --font-heading: "Inter", system-ui, sans-serif;
+  --font-heading: "Inter Variable", system-ui, sans-serif;
   --font-heading-weight: 500;
-  --font-body: "Inter", system-ui, sans-serif;
+  --font-body: "Inter Variable", system-ui, sans-serif;
 
   --space-1: 2.8px;
   --space-2: 5.6px;
