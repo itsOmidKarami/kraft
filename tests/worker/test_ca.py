@@ -7,6 +7,7 @@ import asyncio
 import os
 import ssl
 import stat
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -139,3 +140,18 @@ def test_a_host_leaf_is_only_for_an_exact_host(run_dirs, host):
     """Injection is always to an exact domain, and the name is a directory."""
     with pytest.raises(ValueError, match="exact host"):
         ca.mint_host_leaf(run_dirs, host)
+
+
+def test_a_host_leaf_minted_by_many_connections_at_once_is_one_usable_pair(run_dirs):
+    """The proxy mints on each CONNECT's thread, and a CLI opens several at
+    once: every one must get a certificate and key that belong together."""
+    ca.ensure_ca(run_dirs)
+
+    def load(_):
+        pair = ca.mint_host_leaf(run_dirs, "api.example.com")
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(*pair)
+        return pair
+
+    with ThreadPoolExecutor(8) as pool:
+        pairs = list(pool.map(load, range(8)))
+    assert len(set(pairs)) == 1

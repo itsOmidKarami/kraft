@@ -26,6 +26,7 @@ import ipaddress
 import os
 import re
 import shutil
+import threading
 from pathlib import Path
 
 from cryptography import x509
@@ -217,10 +218,21 @@ def mint_host_leaf(run_dirs, host: str) -> tuple[Path, Path]:
     Keyed by the host as DNS compares it (case, a trailing dot), cached
     like `server_cert`: minted again only when missing or older than the
     CA. `ValueError` for anything but an exact host -- the name is a
-    directory."""
+    directory. One at a time: the proxy mints on each CONNECT's thread, and
+    a CLI opens several connections at once."""
     name = host.lower().rstrip(".")
     if not _EXACT_HOST.fullmatch(name):
         raise ValueError(f"{host!r} is not an exact host name to mint a certificate for")
+    # ponytail: one lock for every host; per-host locks if minting ever shows up.
+    with _HOST_LEAF_LOCK:
+        return _host_leaf(run_dirs, name)
+
+
+#: Held while a host leaf is checked and minted (`mint_host_leaf`).
+_HOST_LEAF_LOCK = threading.Lock()
+
+
+def _host_leaf(run_dirs, name: str) -> tuple[Path, Path]:
     ca_cert_path, _ = ensure_ca(run_dirs)
     directory = _dir(run_dirs) / "hosts" / name
     for d in (directory.parent, directory):
