@@ -21,6 +21,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -374,19 +375,28 @@ def detect_runtime() -> Runtime:
 
 
 _RUNTIME: Runtime | None = None
+#: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
+_UNSURE_UNTIL = 0.0
+#: ponytail: fixed; a hung daemon costs one ~30s `info` per this many seconds
+#: instead of one per `docker_call`. Make it a sandbox.yaml knob if it bites.
+UNSURE_TTL = 30.0
 
 
 def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
-    runtime that did not say what limits it enforces is not kept: the next
-    launch asks again rather than refusing every limit until a restart."""
-    global _RUNTIME
-    if _RUNTIME is None or refresh:
-        detected = detect_runtime()
-        _RUNTIME = detected if detected.limits_known else None
-        return detected
+    runtime that did not say what limits it enforces is kept only
+    `UNSURE_TTL` seconds: a launch after that asks again rather than refusing
+    every limit until a restart, and a hung daemon is not asked on every call."""
+    global _RUNTIME, _UNSURE_UNTIL
+    if (
+        refresh
+        or _RUNTIME is None
+        or (not _RUNTIME.limits_known and time.monotonic() >= _UNSURE_UNTIL)
+    ):
+        _RUNTIME = detect_runtime()
+        _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
     return _RUNTIME
 
 
@@ -1153,6 +1163,25 @@ async def missing_executable(
     return answer == ["kraft-probe-no"]
 
 
+def foreign_owned(paths: Iterable[Path], host: Runtime) -> str | None:
+    """Why a rootless container cannot use one of `paths`: it writes as the
+    operator, and a path someone else owns (left by another runtime, before
+    a switch) fails it mid-session instead. Spec §3."""
+    uid = os.getuid()
+    for path in paths:
+        try:
+            owner = path.stat().st_uid
+        except FileNotFoundError:
+            continue
+        if owner != uid:
+            return (
+                f"{path} is owned by uid {owner}, not by you (uid {uid}), and a "
+                f"{host.describe()} container writes as you, so it cannot use it "
+                f"(left by another runtime?); `sudo chown -R {uid} {path}`, or remove it"
+            )
+    return None
+
+
 def sandbox_home(run_dirs, work_item_id: str) -> Path:
     """The `HOME` a sandboxed item's containers share, kept across its
     sessions so an agent CLI can resume one: the same directory for every
@@ -1198,6 +1227,19 @@ class DockerBackend:
 
     def home(self, run_dirs, work_item_id: str) -> Path:
         return sandbox_home(run_dirs, work_item_id)
+
+    async def owner_refusal(
+        self, run_dirs, cwd: Path, work_item_id: str, result_path: Path
+    ) -> str | None:
+        try:
+            host = await asyncio.to_thread(runtime)
+        except ConfigError:
+            return None  # `probe` says why
+        if not host.rootless:
+            return None
+        dirs = linked_gitdirs(Path(cwd))
+        shadow = (_refstore.shadow_dir(run_dirs.base, dirs[1]),) if dirs is not None else ()
+        return foreign_owned((sandbox_home(run_dirs, work_item_id), *shadow, result_path), host)
 
     async def probe(self, sandbox: dict, executable: str, env: dict | None) -> str | None:
         try:

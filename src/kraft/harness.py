@@ -171,6 +171,9 @@ class Harness:
     #: opts in to by naming its `env` under `sandbox.credentials` (ruling E2);
     #: nothing is managed unless it does.
     credentials: tuple[SandboxCredential, ...] = ()
+    #: The oldest CLI release whose `--version` a launch accepts, for a CLI
+    #: whose older releases refuse this file's argv. None: no check.
+    min_version: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object, *, where: str, path: Path | None = None) -> Harness:
@@ -320,6 +323,9 @@ class Harness:
                     "'permission_mode' capability accepts"
                 )
 
+        if parsed.min_version is not None and not _VERSION.fullmatch(parsed.min_version):
+            raise HarnessError(f"{where}: min_version {parsed.min_version!r} is not N.N.N")
+
         try:
             requires = tuple(map(host_pattern, parsed.network.requires if parsed.network else ()))
         except ValueError as exc:
@@ -369,6 +375,7 @@ class Harness:
             network_requires=requires,
             proxy_aware=parsed.proxy_aware,
             credentials=tuple(parsed.credentials),
+            min_version=parsed.min_version,
         )
 
     def managed_credentials(
@@ -489,6 +496,28 @@ class HarnessInput(BaseModel):
     network: NetworkInput | None = None
     proxy_aware: StrictBool = True
     credentials: list[SandboxCredential] = []
+    min_version: StrictStr | None = None
+
+
+_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+
+
+def find_version(text: str, name: str) -> str | None:
+    """The version in a CLI's `--version` output (`opencode v2.0.15`): the
+    first on a line naming the CLI, else the first at all -- a wrapper may
+    print its runtime's version first. None when there is none."""
+    lines = text.splitlines()
+    for line in [x for x in lines if name in x] + lines:
+        if found := _VERSION.search(line):
+            return found[0]
+    return None
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    """`version` for comparing: a pre-release sorts below its release
+    (`2.0.0-beta.1` < `2.0.0` < `2.0.1-rc`)."""
+    core, _, pre = version.partition("-")
+    return (*map(int, core.split(".")), 0 if pre else 1)
 
 
 #: What each capability key's shape is, in the words an operator reads.

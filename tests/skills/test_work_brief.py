@@ -41,3 +41,8 @@ def test_the_skill_leaves_out_the_diff_and_the_final_review_brief(text):
     leaves_out = text.split("## What it leaves out", 1)[1]
     assert "**The diff.**" in leaves_out
     assert "review brief" in leaves_out
+
+
+def test_the_skill_sizes_the_change_with_git_not_kraft(text):
+    """A sandboxed worker's `kraft` has no `view diff` (D16); git works anywhere."""
+    assert "kraft view diff" not in text and "git diff --stat" in text

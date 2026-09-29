@@ -50,9 +50,14 @@ class Remote:
         self.route = {"HTTPS_PROXY": "http://127.0.0.1:3128"}
         self.transport = "unix"
         self.wrapped_env: list[dict] = []
+        #: What `owner_refusal` answers.
+        self.foreign: str | None = None
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
+
+    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path):
+        return self.foreign
 
     async def probe(self, sandbox, executable, env):
         self.probed_env = env
@@ -182,6 +187,18 @@ async def test_a_result_reaches_kraft_only_through_collect(database, run_dirs, t
         lambda c: c.execute("SELECT sandbox FROM worker_sessions WHERE id = 's1'").fetchone()
     )
     assert (row["sandbox"], remote.closed) == ("remote", ["s1"])
+
+
+async def test_a_path_someone_else_owns_stops_the_session_before_kraft_writes_it(
+    database, run_dirs, tmp_path, remote, monkeypatch
+):
+    """Not a `PermissionError` from touching it, nor a ref store half built
+    over it: the refusal, before either (spec §3)."""
+    remote.foreign = "/x is owned by uid 7"
+    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: pytest.fail("code_in ran"))
+    assert await _run_on_remote(database, run_dirs, tmp_path) == "config_error"
+    assert not sp.result_path_for(run_dirs, "s1").exists()
+    assert "/x is owned by uid 7" in (run_dirs.logs / "s1.log").read_text()
 
 
 async def test_reattach_closes_a_dead_session_in_the_backend_it_ran_in(

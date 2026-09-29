@@ -22,8 +22,10 @@ Read these first:
   the review found, each round), `fix_cycle_started` and `judge_verdict` (the
   repair attempts, and what the fix-loop judge said about them), and
   `node_recovery_started`.
-- The size of the change: `kraft view diff --stat`. Read files where you need
-  to, but do not paste the diff.
+- The size of the change: `git diff --stat origin/<base>...HEAD`, where
+  `<base>` is the branch the work goes into (the repository's default unless
+  the work item names another). Read files where you need to, but do not
+  paste the diff.
 
 ## What the brief contains
 
