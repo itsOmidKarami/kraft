@@ -771,11 +771,69 @@ class SandboxResources(BaseModel):
         return _without_unset(handler, self)
 
 
+#: A network-policy@1 host: exact, `host:port`, `*.example.com` (the `*`
+#: stands for one label), `*` or `**` (everything). No CIDRs, no URLs.
+_HOST_PATTERN = re.compile(
+    r"(\*\*|\*|(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*)(?::\d{1,5})?"
+)
+
+
+def host_pattern(value: str) -> str:
+    """`value` as a network-policy@1 host, or `ValueError` saying what one is.
+    Shared by `sandbox.network` and a harness's `network.requires`."""
+    value = value.strip()
+    if not _HOST_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{value!r} is not a network-policy@1 host: an exact host, "
+            "'host:port', '*.example.com' (one label), '*' or '**'"
+        )
+    return value
+
+
+HostPattern = Annotated[StrictStr, AfterValidator(host_pattern)]
+
+
+class NetworkPhase(BaseModel):
+    """One phase's allow and deny lists. Deny wins; an empty allow grants
+    nothing."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    # Written as YAML lists, held as tuples so the policy hashes.
+    allow: tuple[HostPattern, ...] = Field(default=(), strict=False)
+    deny: tuple[HostPattern, ...] = Field(default=(), strict=False)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        """As written: lists (YAML's safe dumper refuses a tuple), empty
+        ones left out."""
+        return {k: list(v) for k, v in handler(self).items() if v}
+
+
+class SandboxNetwork(BaseModel):
+    """`network:`: deny-by-default egress for a sandboxed launch.
+    `install` binds the setup command, `runtime` an agent session, which also
+    gets its harness's own `network.requires` hosts (unioned at launch, never
+    stored here). A phase left out grants nothing. Frozen, with tuples, like
+    `SandboxResources`: `SandboxPolicy` is hashed and locked whole."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    install: NetworkPhase = NetworkPhase()
+    runtime: NetworkPhase = NetworkPhase()
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        return {k: v for k, v in handler(self).items() if v}
+
+
 class SandboxPolicy(BaseModel):
     """Where a task's process runs: `kind: docker` in `image`, within
-    `resources` (`kraft.worker.backends`). A permission-shaped safety field
-    (Ruling 105): once a layer sets one, no narrower layer may change or
-    remove it -- the whole value, `resources` included."""
+    `resources` and reaching only what `network` allows
+    (`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):
+    once a layer sets one, no narrower layer may change or remove it -- the
+    whole value, `resources` and `network` included."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -784,13 +842,16 @@ class SandboxPolicy(BaseModel):
     #: CPU, memory and process limits on every sandboxed run, the setup
     #: command's included.
     resources: SandboxResources | None = None
+    #: Egress, deny-by-default once set. Unset: open, as it always was.
+    network: SandboxNetwork | None = None
 
-    @field_validator("resources")
+    @field_validator("resources", "network")
     @classmethod
-    def _no_empty_resources(cls, value: SandboxResources | None) -> SandboxResources | None:
-        """`resources: {}` sets no limit, so it is the same sandbox as none:
-        equal under the equality lock, and dumped without the key."""
-        return None if value == SandboxResources() else value
+    def _no_empty(cls, value: BaseModel | None) -> BaseModel | None:
+        """`resources: {}` sets no limit and `network: {}` no list, so each is
+        the same sandbox as none: equal under the equality lock, and dumped
+        without the key."""
+        return None if value is not None and value == type(value)() else value
 
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:

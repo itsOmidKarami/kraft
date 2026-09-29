@@ -757,6 +757,30 @@
       "title": "GateNode",
       "type": "object"
     },
+    "NetworkPhase": {
+      "additionalProperties": false,
+      "description": "One phase's allow and deny lists. Deny wins; an empty allow grants\nnothing.",
+      "properties": {
+        "allow": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow",
+          "type": "array"
+        },
+        "deny": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny",
+          "type": "array"
+        }
+      },
+      "title": "NetworkPhase",
+      "type": "object"
+    },
     "PollingPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -841,9 +865,25 @@
       "title": "RecoveryPlan",
       "type": "object"
     },
+    "SandboxNetwork": {
+      "additionalProperties": false,
+      "description": "`network:`: deny-by-default egress for a sandboxed launch.\n`install` binds the setup command, `runtime` an agent session, which also\ngets its harness's own `network.requires` hosts (unioned at launch, never\nstored here). A phase left out grants nothing. Frozen, with tuples, like\n`SandboxResources`: `SandboxPolicy` is hashed and locked whole.",
+      "properties": {
+        "install": {
+          "$ref": "#/$defs/NetworkPhase",
+          "default": {}
+        },
+        "runtime": {
+          "$ref": "#/$defs/NetworkPhase",
+          "default": {}
+        }
+      },
+      "title": "SandboxNetwork",
+      "type": "object"
+    },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` (`kraft.worker.backends`). A permission-shaped safety field\n(Ruling 105): once a layer sets one, no narrower layer may change or\nremove it -- the whole value, `resources` included.",
+      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):\nonce a layer sets one, no narrower layer may change or remove it -- the\nwhole value, `resources` and `network` included.",
       "properties": {
         "image": {
           "minLength": 1,
@@ -854,6 +894,17 @@
           "const": "docker",
           "title": "Kind",
           "type": "string"
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SandboxNetwork"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "resources": {
           "anyOf": [
