@@ -16,6 +16,7 @@ from support.workspace import workspace_item, workspace_target
 
 from kraft import builtins as kraft_builtins
 from kraft import store
+from kraft.adapters.forge import git as forge_git
 from kraft.config import git_read
 
 
@@ -661,17 +662,53 @@ async def _item_behind_main(database, run_dirs, repo):
     return worktree, wtree.branch(database), gitdir
 
 
-@pytest.mark.parametrize("kind", ["rebase-merge", "rebase-apply"])
-async def test_planted_operation_state_never_moves_an_operator_ref(kind, database, run_dirs, repo):
+async def _door(door: str, worktree: Path, repo: Path, branch: str, gitdir: Path) -> None:
+    """Plant the state `door` acts on, then have Kraft walk through it."""
+    if door == "refresh":
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        return
+    # A stash of the worker's own making, which conflicts with the tree.
+    (worktree / "work.txt").write_text("the worker's stash\n")
+    stash = git_read(worktree, "stash", "create")
+    _git(worktree, "checkout", "--", "work.txt")
+    (gitdir / "MERGE_AUTOSTASH").write_text(f"{stash}\n")
+    if door == "restore_branch":
+        _plant_head(worktree, "refs/heads/side")
+        kraft_builtins.restore_branch(worktree, branch, "main")
+    else:
+        (worktree / "work.txt").write_text("left behind\n")
+        await forge_git.commit_stragglers(worktree, branch=branch, base="main", message="wip")
+
+
+@pytest.mark.parametrize(
+    ("kind", "door"),
+    [
+        pytest.param("rebase-merge", "refresh", id="rebase-merge"),
+        pytest.param("rebase-apply", "refresh", id="rebase-apply"),
+        pytest.param("MERGE_AUTOSTASH", "restore_branch", id="MERGE_AUTOSTASH-restore_branch"),
+        pytest.param(
+            "MERGE_AUTOSTASH", "commit_stragglers", id="MERGE_AUTOSTASH-commit_stragglers"
+        ),
+    ],
+)
+async def test_planted_operation_state_never_moves_an_operator_ref(
+    kind, door, database, run_dirs, repo
+):
     """Kraft-xngty: a worker planted `rebase-merge/` naming `main`, Kraft's
     rebase failed on it, and its `git rebase --abort` reset the operator's
-    `main` to the planted `orig-head`."""
+    `main` to the planted `orig-head`. A planted `MERGE_AUTOSTASH` put the
+    worker's tree in the operator's `refs/stash` through a checkout or a
+    commit, for the next `git stash pop`."""
     worktree, branch, gitdir = await _item_behind_main(database, run_dirs, repo)
-    _plant(gitdir, kind, git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1"))
+    if door == "refresh":
+        main, orig = git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1")
+        _plant(gitdir, kind, main, orig)
+    if door == "restore_branch":
+        _git(repo, "branch", "side", branch)  # the operator's own
     refs = _refs(repo)
 
     with pytest.raises(RuntimeError):
-        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        await _door(door, worktree, repo, branch, gitdir)
 
     assert _refs(repo) == refs
 

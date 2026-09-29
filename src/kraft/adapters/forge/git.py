@@ -5,6 +5,7 @@ which CLI talks to the remote.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from collections.abc import Collection
 from pathlib import Path
@@ -13,12 +14,45 @@ from kraft.adapters.forge.models import ForgeError
 from kraft.config import base_ignore_args, git_read
 from kraft.worker import sandbox
 
+#: What a git operation in progress leaves in a worktree's own gitdir. A worker
+#: can write any of it, naming any branch or commit: `git rebase --abort` over
+#: a planted `rebase-merge/` resets the branch it names, and a checkout or a
+#: commit over a planted `MERGE_AUTOSTASH` stores it in the repository's shared
+#: `refs/stash`, for the operator's next `git stash pop` (Kraft-xngty).
+OPERATION_STATE = (
+    "rebase-merge",
+    "rebase-apply",
+    "MERGE_HEAD",
+    "MERGE_AUTOSTASH",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "BISECT_LOG",
+    "sequencer",
+)
+
+
+def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
+    """Raise if `worktree`'s gitdir holds any of `OPERATION_STATE` but `allow`,
+    found by `lexists` so a planted symlink counts. Nothing to check when git
+    cannot name the gitdir: no git that would act on it can run either."""
+    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
+    if gitdir is None:
+        return
+    for name in OPERATION_STATE:
+        if name not in allow and os.path.lexists(Path(gitdir, name)):
+            raise ForgeError(
+                f"{worktree} has a {name} Kraft did not start; "
+                "finish or abort it by hand, then retry"
+            )
+
 
 def assert_on_branch(worktree: Path, branch: str) -> None:
-    """Raise unless `worktree`'s HEAD is `refs/heads/<branch>` (Kraft-xngty).
-    A worktree's HEAD sits in a gitdir its worker can write; pointed at one of
-    the operator's branches, Kraft's next commit, rebase or push of HEAD would
-    move that branch instead of the item's."""
+    """Raise unless `worktree` has no operation in progress and its HEAD is
+    `refs/heads/<branch>` (Kraft-xngty). A worktree's HEAD sits in a gitdir
+    its worker can write; pointed at one of the operator's branches, Kraft's
+    next commit, rebase or push of HEAD would move that branch instead of the
+    item's."""
+    assert_no_operation(worktree)
     if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
         raise ForgeError(f"{worktree} is not on {branch}; check it out by hand, then retry")
 

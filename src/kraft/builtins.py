@@ -122,7 +122,7 @@ def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> 
 
 def restore_branch(worktree: Path, branch: str, base: str) -> None:
     """Force the worktree back onto `branch` if an agent task left it
-    somewhere else, aborting any in-progress merge first (Kraft-v5qd).
+    somewhere else, clearing any in-progress merge with it (Kraft-v5qd).
 
     An agent has a real shell and can check out whatever it likes to
     investigate something -- a diagnostic test-merge against `main` to look
@@ -136,18 +136,19 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
     agent happened to leave checked out.
 
     Best effort, except the checkout: an unreadable HEAD is left for the
-    next node's own git command to refuse, but a checkout that fails raises,
-    since the straggler commit after it would land on whatever branch HEAD
-    names (Kraft-xngty).
+    next node's own git command to refuse, but a checkout that fails, or
+    that would act on operation state other than a merge, raises, since the
+    straggler commit after it would land on whatever branch HEAD names
+    (Kraft-xngty).
     """
     with base_ignore_args(worktree, base) as ignore_args:
 
-        def git(*args: str) -> subprocess.CompletedProcess:
+        def run(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run(
                 ["git", *ignore_args, *args], cwd=str(worktree), capture_output=True, text=True
             )
 
-        current = git("rev-parse", "--abbrev-ref", "HEAD")
+        current = run("rev-parse", "--abbrev-ref", "HEAD")
         if current.returncode != 0 or current.stdout.strip() == branch:
             return
         logger.warning(
@@ -156,8 +157,12 @@ def restore_branch(worktree: Path, branch: str, base: str) -> None:
             current.stdout.strip(),
             branch,
         )
-        git("merge", "--abort")  # no-op, exit nonzero, if no merge is in progress
-        checked_out = git("checkout", "-f", branch)
+        # `checkout -f` clears an agent's half-done merge itself (Kraft-v5qd),
+        # so that state is allowed. Any other is refused: over a planted
+        # `MERGE_AUTOSTASH` the checkout would store the worker's tree in the
+        # repository's shared `refs/stash` (Kraft-xngty).
+        git.assert_no_operation(worktree, allow=("MERGE_HEAD",))
+        checked_out = run("checkout", "-f", branch)
         if checked_out.returncode != 0:
             # Raised, not logged: the straggler commit that follows would land
             # on whatever branch HEAD names (Kraft-xngty).
@@ -936,15 +941,7 @@ async def refresh_worktree_base(
     if git_read(worktree, "status", _sandbox.SUBMODULES_UNENTERED, "--porcelain"):
         logger.warning("refresh_worktree_base: %s has uncommitted changes, skipping", worktree)
         return None
-    if operation := _operation_in_progress(worktree):
-        # Kraft-xngty: a worker can write this state into its own gitdir,
-        # naming any branch, and `git rebase --abort` would then reset that
-        # branch to the planted `orig-head`. Kraft never rebases over, or
-        # aborts, an operation it did not start.
-        raise RuntimeError(
-            f"{worktree} has a {operation} Kraft did not start; "
-            "finish or abort it by hand, then retry"
-        )
+    # Kraft never rebases over, or aborts, an operation it did not start.
     git.assert_on_branch(worktree, branch)
     try:
         done = await asyncio.to_thread(
@@ -976,28 +973,6 @@ async def refresh_worktree_base(
             ),
         )
     return head
-
-
-#: What a git operation in progress leaves in a worktree's own gitdir.
-_OPERATION_STATE = (
-    "rebase-merge",
-    "rebase-apply",
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "BISECT_LOG",
-    "sequencer",
-)
-
-
-def _operation_in_progress(worktree: Path) -> str | None:
-    """The first of `_OPERATION_STATE` present in `worktree`'s gitdir, found by
-    `lexists` so a planted symlink counts, or None. None too when git cannot
-    name the gitdir, since `git rebase` then cannot run either."""
-    gitdir = git_read(worktree, "rev-parse", "--absolute-git-dir")
-    if gitdir is None:
-        return None
-    return next((n for n in _OPERATION_STATE if os.path.lexists(Path(gitdir, n))), None)
 
 
 #: Seconds `git rebase --abort` gets (Kraft-ujep9). Fixed, not the item's time
