@@ -34,6 +34,8 @@ from kraft.worker import backends as _backends
 from kraft.worker import channel as _channel
 from kraft.worker import sandbox as _sandbox
 from kraft.worker.egress import PhaseLists
+from kraft.worker.env import worker_env
+from kraft.worker.inject import InjectRule
 
 logger = logging.getLogger(__name__)
 
@@ -518,11 +520,16 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> Non
         row = json.loads(egress)
         # A TLS session's relay B dials the listener again, on the port it
         # persisted: registered, with no socket nothing would use.
+        # The values from the daemon's own env, through the worker
+        # allowlist: without the session's repo entry, one only its
+        # `env:` or `env_passthrough` supplied is refused, never guessed.
+        environ = worker_env(None)
         await channels.open(
             session_id,
             work_item_id,
             PhaseLists.from_json(row),
             transport=row.get("transport", "unix"),
+            credentials=tuple(InjectRule.from_json(r, environ) for r in row.get("credentials", ())),
         )
     except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
         logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)

@@ -126,3 +126,13 @@ def test_claude_in_a_sandbox_without_network_is_refused_before_launch(run, tmp_p
     at start naming the missing tool (spike 5.5). Refused, naming the fix."""
     with pytest.raises(LaunchRefused, match=r"'claude'.*give the sandbox a `network:`"):
         run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)
+
+
+def test_a_named_credential_is_launched_as_its_harness_declares_it(run, tmp_path):
+    """Ruling E2: `- env: NAME` takes the harness's declaration, sentinel and
+    all, and the launch hands it on to be managed."""
+    sandbox = {**NETWORKED, "credentials": [{"env": "ANTHROPIC_API_KEY"}]}
+    seen = run(harness="claude", command="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)
+    (credential,) = seen["credentials"]
+    assert credential.sentinel == "sk-ant-api03-kraft-proxy-managed"
+    assert [(i.domain, i.header) for i in credential.inject] == [("api.anthropic.com", "x-api-key")]

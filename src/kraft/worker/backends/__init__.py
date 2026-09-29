@@ -38,11 +38,13 @@ class SandboxBackend(Protocol):
         a session that could never start is `config_error`, not a task
         failure."""
 
-    async def prepare(self, sandbox: dict) -> Path | None:
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """Ready what a launch in `sandbox` needs on the host side, after a
         successful `probe`: the CA bundle to hand `wrap` as `ca_bundle`, or
-        None for none. Raises `worker.sandbox.SandboxNotReady` saying why the
-        launch cannot go ahead (`config_error`)."""
+        None for none -- with `kraft_ca` (the Kraft CA's certificate, when
+        the launch has a proxy-managed credential) trusted too. Raises
+        `worker.sandbox.SandboxNotReady` saying why the launch cannot go
+        ahead (`config_error`)."""
 
     def code_in(self, run_base: Path, cwd: Path, branch: str | None, **kw) -> RefStore | None:
         """Put the worktree's code where the session will see it. `branch`
@@ -50,7 +52,8 @@ class SandboxBackend(Protocol):
 
     def wrap(self, cmd: list[str], cwd, sandbox: dict, results_dir, env=None, **kw) -> list[str]:
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
-        what `prepare` returned."""
+        what `prepare` returned, `sentinels=` each proxy-managed
+        credential's variable and what it holds in the value's place."""
 
     def oneshot(self, sandbox: dict, cwd, home):
         """Short commands in the session's image, asked as its session would

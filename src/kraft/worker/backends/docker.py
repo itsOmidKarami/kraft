@@ -588,6 +588,7 @@ def docker_argv(
     ro_paths: Iterable[str | Path] = (),
     ca_bundle: str | Path | None = None,
     relay: str | None = None,
+    sentinels: dict[str, str] | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -652,6 +653,10 @@ def docker_argv(
     copied from the docker client's own process env: `FORWARDED_ENV` and
     `passthrough`, which is where a repository's `env:` and
     `env_passthrough` go -- `ps` never shows their values.
+
+    `sentinels`: each proxy-managed credential's variable and the sentinel
+    it holds instead of its value (spec §6), literal and last, so no bare
+    `-e NAME` and no `env` can carry the real one in.
 
     `cidfile`: docker writes the container's id there once it has created
     the container, and leaves no file when it never got that far -- the one
@@ -742,7 +747,7 @@ def docker_argv(
     proxies = () if network else _forward.forwarded_proxies()
     pins: dict[str, str] = {}
     _pin(pins, _HARDENED_GIT_CONFIG)
-    literal = {**pins, **ca_env, **(env or {})}
+    literal = {**pins, **ca_env, **(env or {}), **(sentinels or {})}
     # A name given both ways crosses once, literal: which of two `-e` wins
     # is the runtime's business, not something to leave to it.
     for env_name in dict.fromkeys((*FORWARDED_ENV, *proxies, *passthrough)):
@@ -1209,11 +1214,12 @@ class DockerBackend:
             )
         return None
 
-    async def prepare(self, sandbox: dict) -> Path | None:
+    async def prepare(self, sandbox: dict, *, kraft_ca: Path | None = None) -> Path | None:
         """The image's combined CA bundle, built when there is an extra CA
-        (`docker_forward.prepare`), for `wrap`'s `ca_bundle`."""
+        or a `kraft_ca` (`docker_forward.prepare`), for `wrap`'s
+        `ca_bundle`."""
         try:
-            return await _forward.prepare(sandbox["image"])
+            return await _forward.prepare(sandbox["image"], kraft_ca=kraft_ca)
         except ConfigError as exc:
             raise SandboxNotReady(str(exc)) from exc
         except OSError as exc:
@@ -1238,6 +1244,7 @@ class DockerBackend:
         passthrough: Iterable[str] = (),
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,
+        sentinels: dict[str, str] | None = None,
     ) -> list[str]:
         network = sandbox.get("network") and session_id is not None
         return docker_argv(
@@ -1255,6 +1262,7 @@ class DockerBackend:
             ro_paths=ro_paths,
             ca_bundle=ca_bundle,
             relay=relay_name(session_id) if network else None,
+            sentinels=sentinels,
         )
 
     def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:

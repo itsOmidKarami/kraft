@@ -19,8 +19,9 @@ from kraft import config as _config
 from kraft import executor
 from kraft.api import deps
 from kraft.executor import dispatch
+from kraft.paths import RunDirs
 from kraft.policy import SandboxPolicy
-from kraft.worker import refstore
+from kraft.worker import ca, refstore
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.env import worker_env
 
@@ -62,6 +63,51 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     name = argv[argv.index("--name") + 1]
     assert call["cwd"] == docker_backend.client_dir(name.removeprefix("kraft-"))
     assert call["env"] == worker_env(entry)
+
+
+async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path, monkeypatch):
+    """Spec §6 in the install phase: each listed variable holds a sentinel
+    (no harness says more), the docker client holds no value, the bundle
+    trusts the Kraft CA, and a repository's own credential is injected
+    where `install` names its host."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
+    monkeypatch.setenv("REG_TOKEN", "reg-real-VALUE")
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    opened, bundled = [], []
+
+    async def open_egress(db, backend, sid, wid, sandbox, lists, credentials=()):
+        opened.append(credentials)
+        return {"HTTPS_PROXY": "http://127.0.0.1:3128"}
+
+    async def close_egress(backend, sid):
+        pass
+
+    async def prepare(image, *, kraft_ca=None):
+        bundled.append(kraft_ca)
+
+    monkeypatch.setattr(kraft_builtins._subprocess, "open_egress", open_egress)
+    monkeypatch.setattr(kraft_builtins._subprocess, "close_egress", close_egress)
+    monkeypatch.setattr(docker_backend._forward, "prepare", prepare)
+    calls = _record_run(monkeypatch)
+    registry = {"domain": "registry.corp", "header": "authorization", "format": "Bearer %s"}
+    sandbox = {
+        **_SANDBOX,
+        "network": {"install": {"allow": ["registry.corp"]}},
+        "credentials": [{"env": "ANTHROPIC_API_KEY"}, {"env": "REG_TOKEN", "inject": [registry]}],
+    }
+    entry = entry_of({"setup_command": _SETUP, "env_passthrough": ["REG_TOKEN"]})
+
+    await kraft_builtins.run_setup_command(tmp_path, tmp_path, entry, sandbox=sandbox)
+
+    [call] = calls
+    assert [a for a in call["args"] if a.startswith(("ANTHROPIC_API_KEY", "REG_TOKEN"))] == [
+        "ANTHROPIC_API_KEY=kraft-proxy-managed",
+        "REG_TOKEN=kraft-proxy-managed",
+    ]
+    assert not {"ANTHROPIC_API_KEY", "REG_TOKEN"} & set(call["env"])
+    [(rule,)] = opened
+    assert (rule.domain, rule.carrying(rule.value)) == ("registry.corp", "Bearer reg-real-VALUE")
+    assert bundled == [ca.ensure_ca(RunDirs(tmp_path / "run"))[0]]
 
 
 async def test_an_unsandboxed_setup_command_still_runs_on_the_host(tmp_path, monkeypatch):

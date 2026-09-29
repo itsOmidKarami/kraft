@@ -316,6 +316,26 @@ def test_a_name_given_both_bare_and_literal_crosses_once_as_the_literal():
     assert [a for a in argv if a.startswith("HTTPS_PROXY")] == ["HTTPS_PROXY=http://127.0.0.1:3128"]
 
 
+def test_a_managed_credential_crosses_as_its_sentinel_and_nothing_else(monkeypatch):
+    """Spec §6: the variable holds the sentinel, literal, over its bare
+    `FORWARDED_ENV` name, a passthrough name and the caller's own `env`;
+    the daemon's value is on no argument."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real-VALUE")
+    argv = docker.docker_argv(
+        ["claude"],
+        "/w",
+        {"kind": "docker", "image": "x"},
+        None,
+        env={"ANTHROPIC_API_KEY": "from-the-caller"},
+        passthrough=["ANTHROPIC_API_KEY"],
+        sentinels={"ANTHROPIC_API_KEY": "sk-ant-api03-kraft-proxy-managed"},
+    )
+    assert [a for a in argv if "ANTHROPIC_API_KEY" in a] == [
+        "ANTHROPIC_API_KEY=sk-ant-api03-kraft-proxy-managed"
+    ]
+    assert not [a for a in argv if "real-VALUE" in a]
+
+
 def test_docker_argv_pins_hooks_off_for_git_in_the_container():
     """A hook manager's hook points at a host interpreter, so it fails every
     commit in the container; and a hook is the worker's code anyway."""

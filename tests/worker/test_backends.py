@@ -16,7 +16,8 @@ from kraft import builtins as kraft_builtins
 from kraft import events, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import RunDirs
-from kraft.worker import backends, channel, reattach
+from kraft.policy import SandboxCredential
+from kraft.worker import backends, ca, channel, reattach
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -55,7 +56,8 @@ class Remote:
     async def probe(self, sandbox, executable, env):
         return None
 
-    async def prepare(self, sandbox):
+    async def prepare(self, sandbox, *, kraft_ca=None):
+        self.kraft_ca = kraft_ca
         if isinstance(self.prepared, str):
             raise SandboxNotReady(self.prepared)
         return self.prepared
@@ -305,6 +307,7 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     assert status == "done_with_concerns"
     assert remote.calls == ["open_session", "wrap", "close", "close_session"]
     assert remote.wrapped_env[0]["HTTPS_PROXY"] == "http://127.0.0.1:3128"
+    assert remote.kraft_ca is None
     row = database.read(
         lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
     )
@@ -316,6 +319,47 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     }
     assert (remote.sock_path is None) == (transport == "tls")
     assert not channels.socket_path("s1").exists()
+
+
+async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch
+):
+    """Spec §6: read from the worker env into the session's proxy; the
+    container gets the sentinel and a bundle with the Kraft CA, the row the
+    rule but not the value, and the docker client not even the variable."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
+    remote.transport = "tls"
+    seen = {}
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+        seen["sentinels"] = kw["sentinels"]
+        seen["rules"] = channels.tls_session(session_id).credentials
+        seen["mints_in"] = channels.tls_session(session_id).run_dirs
+        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        return ["sh", "-c", 'echo "key=${ANTHROPIC_API_KEY-unset}"; exec "$@"', "sh", *inner]
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    credential = SandboxCredential.model_validate(
+        {
+            "env": "ANTHROPIC_API_KEY",
+            "sentinel": "sk-sentinel",
+            "inject": [{"domain": "a.io", "header": "x-api-key"}],
+        }
+    )
+
+    status = await _run_on_remote(database, run_dirs, tmp_path, _POLICED, credentials=(credential,))
+
+    assert status == "done_with_concerns"
+    assert seen["sentinels"] == {"ANTHROPIC_API_KEY": "sk-sentinel"}
+    (rule,) = seen["rules"]
+    assert (rule.domain, rule.header, rule.value) == ("a.io", "x-api-key", "sk-real-VALUE")
+    assert remote.kraft_ca == ca.ensure_ca(run_dirs)[0] and seen["mints_in"] is not None
+    row = database.read(
+        lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    assert json.loads(row["egress"])["credentials"] == [rule.to_json()]
+    assert "sk-real-VALUE" not in row["egress"]
+    assert "key=unset" in (run_dirs.logs / "s1.log").read_text()
 
 
 @pytest.mark.parametrize("missing", ["channel", "route"])
@@ -395,7 +439,8 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     item_on, database, run_dirs, remote, channels, monkeypatch
 ):
     """Its relay B dials the listener again with the certificate it holds:
-    the session must be registered for it, and no socket made."""
+    the session must be registered for it, with the credentials it
+    launched with, and no socket made."""
     release = asyncio.Event()
 
     async def adopt(*args, **kw):
@@ -405,12 +450,19 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     item = await item_on(_CHAIN, "implementation")
     live = (os.getpid(), psutil.Process().create_time())
     await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
+    rule = {"env": "ANTHROPIC_API_KEY", "domain": "a.io", "header": "x-api-key"}
+    rule |= {"sentinel": "sk-sentinel", "format": "%s"}
     egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
-    await database.write(lambda c: store.set_session_egress(c, "s1", egress))
+    await database.write(
+        lambda c: store.set_session_egress(c, "s1", {**egress, "credentials": [rule]})
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
 
     _, tasks = await reattach.reattach(database, run_dirs)
 
-    assert channels.tls_session("s1") is not None
+    # Its credentials again, their values from the daemon's own env.
+    (injected,) = channels.tls_session("s1").credentials
+    assert (injected.to_json(), injected.value) == (rule, "sk-real-VALUE")
     assert not channels.socket_path("s1").parent.exists()
     release.set()
     await tasks["s1"]

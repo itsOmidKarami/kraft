@@ -17,8 +17,10 @@ daemon's values cannot cross as they are, either:
   and doctor says so (`loopback_proxies`); `network:` (a later part) is the fix.
 
 The proxy variables are forwarded whenever the daemon has them. The CA side
-only acts when there is an extra CA: without one there is no probe, no mount
-and no CA variable, as before. The bundle `prepare` builds is handed to the
+only acts when there is an extra CA, or a launch whose credentials the
+egress proxy manages (P6), whose bundle also holds the Kraft CA the proxy
+terminates their TLS with: otherwise there is no probe, no mount and no CA
+variable, as before. The bundle `prepare` builds is handed to the
 launch explicitly (`DockerBackend.wrap(..., ca_bundle=)`), never remembered.
 """
 
@@ -254,20 +256,26 @@ def ca_dir(environ: Mapping[str, str] | None = None) -> Path:
     return Path(environ.get("KRAFT_RUN_DIR") or default_run_dir()) / "sandbox-ca"
 
 
-async def prepare(image: str) -> Path | None:
+async def prepare(image: str, *, kraft_ca: Path | None = None) -> Path | None:
     """`image`'s combined CA bundle on the host, built now, or None when there
-    is no extra CA. Raises `ConfigError` for a `ca_bundle` that cannot be used
-    (`extra_ca`) and for an image whose own roots could not be read: a bundle
-    of the extra CA alone would replace the store and fail TLS to every
-    public host.
+    is neither an extra CA nor a `kraft_ca`: the Kraft CA's certificate,
+    given when the launch has a proxy-managed credential (spec §7), whose
+    bundle is a file of its own -- a launch without one never trusts it,
+    and never has its bundle rewritten under it. Raises `ConfigError` for a
+    `ca_bundle` that cannot be used (`extra_ca`) and for an image whose own
+    roots could not be read: a bundle of the extra CA alone would replace
+    the store and fail TLS to every public host.
 
     One bundle per image id under `run/sandbox-ca/`: `<id>.roots.pem`, the
     image's own roots, read once per image id (an id is immutable); `<id>.pem`,
-    those plus the extra CA, rewritten when the extra CA changes."""
+    those plus the extra CA, rewritten when the extra CA changes;
+    `<id>.kraft.pem`, those plus the Kraft CA."""
     extra = extra_ca()
-    if extra is None:
+    if extra is None and kraft_ca is None:
         return None
-    _, extra_certs = extra
+    extra_certs = extra[1] if extra is not None else []
+    if kraft_ca is not None:
+        extra_certs = [*extra_certs, *certificates(kraft_ca.read_text())]
     base = ca_dir()
     base.mkdir(parents=True, exist_ok=True)
     image_id = await _image_id(image)
@@ -289,7 +297,7 @@ async def prepare(image: str) -> Path | None:
         if image_id:
             _write(base / f"{image_id}.roots.pem", "".join(f"{c}\n" for c in roots))
     name = image_id or "image-" + hashlib.sha256(image.encode()).hexdigest()[:32]
-    bundle = base / f"{name}.pem"
+    bundle = base / f"{name}{'.kraft' if kraft_ca is not None else ''}.pem"
     _write(bundle, "".join(f"{c}\n" for c in dict.fromkeys([*roots, *extra_certs])))
     return bundle
 
