@@ -492,9 +492,10 @@ async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
     tmp_path, monkeypatch, database, run_dirs
 ):
     """Global constraint: only the selected members' mount paths, never every
-    submodule in .gitmodules (design §3 step 2) -- and never `submodule
-    update`, which would clone a member's gitdir under the root's worktree
-    gitdir (Kraft-ju36l)."""
+    submodule in .gitmodules (design §3 step 2) -- and no `submodule` command
+    at all: `update` would clone a member's gitdir under the root's worktree
+    gitdir, and `init` copies the worktree's `.gitmodules` into the root
+    repository's config (Kraft-ju36l)."""
     root, sub = make_repo_with_submodule(tmp_path)
     calls: list[list[str]] = []
     real_run = subprocess.run
@@ -508,7 +509,7 @@ async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
 
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
     await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
-    assert calls == [["git", "submodule", "init", "--", "repos/pkg"]]
+    assert calls == []
 
 
 async def test_ensure_worktree_raises_when_git_fails(tmp_path, database, run_dirs):

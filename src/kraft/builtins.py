@@ -349,7 +349,31 @@ def _git_ok(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
-def _add_member(worktree: Path, rel: str, member_repo: Path, branch: str) -> None:
+def _submodule_name(worktree: Path, base: str | None, rel: str) -> str | None:
+    """The name `.gitmodules` gives the submodule at `rel`, read from the
+    `base` commit, never the worktree's copy, which a worker or a setup
+    command can rewrite (Kraft-ju36l)."""
+    if not base:
+        return None
+    listed = git_read(
+        worktree,
+        "config",
+        "--blob",
+        f"{base}:.gitmodules",
+        "--get-regexp",
+        r"^submodule\..*\.path$",
+        expected_failure=True,
+    )
+    for line in (listed or "").splitlines():
+        key, _, path = line.partition(" ")
+        if path == rel:
+            return key.removeprefix("submodule.").removesuffix(".path")
+    return None
+
+
+def _add_member(
+    worktree: Path, rel: str, member_repo: Path, branch: str, base: str | None = None
+) -> None:
     """Check member `rel` out as a linked worktree of its connected
     repository `member_repo` (Kraft-ju36l, spec 3.1), on `branch` at the
     commit the root's gitlink records.
@@ -358,16 +382,18 @@ def _add_member(worktree: Path, rel: str, member_repo: Path, branch: str) -> Non
     and hooks under the root's worktree gitdir, which a sandboxed worker
     writes. A linked worktree of `member_repo` reads config, hooks and
     attributes only from `member_repo`'s common gitdir, the operator's.
-    `submodule init` enters nothing: it writes the url and `active` that
-    `submodule status` needs to count the member as initialized."""
+    `submodule status` needs `submodule.<name>.active` to count the member
+    as initialized. Kraft sets that alone, with the name from the base
+    commit's `.gitmodules`: `submodule init` would copy a name and URL out of
+    the worktree's copy into the root repository's config, where a worker's
+    rewrite would outlive the item."""
     if not member_repo.is_dir():
         raise RuntimeError(
             f"the connected repository {member_repo} for {rel} is missing; reconnect "
             "it, or fix its path in repos.yaml, then retry"
         )
-    init = _git_ok(worktree, "submodule", "init", "--", rel)
-    if init.returncode != 0:
-        raise RuntimeError(f"git submodule init failed for {rel}: {init.stderr.strip()}")
+    if name := _submodule_name(worktree, base, rel):
+        _git_ok(worktree, "config", f"submodule.{name}.active", "true")
     sha = git_read(worktree, "rev-parse", f"HEAD:{rel}", expected_failure=True)
     if not sha:
         raise RuntimeError(f"{rel} is not a gitlink in the root's HEAD")
@@ -401,6 +427,7 @@ async def _setup_submodules(
     repositories: Mapping[str, RepoEntry],
     *,
     sandboxed: bool,
+    base: str | None = None,
 ) -> None:
     """Check out only the declared members (design 3 step 2 -- never
     blanket), each on the item's branch, and write one `work_item_repos` row
@@ -467,7 +494,7 @@ async def _setup_submodules(
         else:
             member_repo = Path(repositories[ids[rel]].path)
             try:
-                await asyncio.to_thread(_add_member, worktree, rel, member_repo, branch)
+                await asyncio.to_thread(_add_member, worktree, rel, member_repo, branch, base)
             except RuntimeError as exc:
                 raise RuntimeError(f"member {rel} of {work_item_id}: {exc}") from exc
 
@@ -666,6 +693,7 @@ async def ensure_worktree(
                 members,
                 repositories or {},
                 sandboxed=sandbox is not None,
+                base=(row["base_ref"] if row is not None else None) or head,
             )
         except (RuntimeError, OSError) as exc:
             # As for a failed setup command: a retry must find no worktree, or

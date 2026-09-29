@@ -40,6 +40,8 @@ async def test_a_workspace_member_is_a_linked_worktree_of_its_connected_reposito
     on the item's branch at the commit the root records, that branch lives in
     the member's repository, and the root still counts it initialized."""
     root, sub = make_repo_with_submodule(tmp_path)
+    # As in a clone that never ran `submodule init`: Kraft makes it active.
+    _git(root, "config", "--remove-section", "submodule.repos/pkg")
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
     gitlink = git_read(root, "rev-parse", "HEAD:repos/pkg")
 
@@ -137,3 +139,29 @@ async def test_a_retry_after_a_later_member_failed_records_each_member_once(
 
     repos = database.read(lambda c: store.repos_for(c, "w1"))
     assert sorted(r["role"] for r in repos) == ["root", "submodule", "submodule"]
+
+
+async def test_a_gitmodules_the_setup_command_rewrote_never_reaches_the_roots_config(
+    tmp_path, database, run_dirs
+):
+    """The worktree's `.gitmodules` is the worker's to write, and a setup
+    command runs before the members are checked out. Renamed, with an
+    attacker's URL, it must not reach the operator's root repository config,
+    where it would outlive the item."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
+    plant = (
+        "git config -f .gitmodules --rename-section submodule.repos/pkg submodule.evil && "
+        "git config -f .gitmodules submodule.evil.url https://attacker.invalid/x"
+    )
+
+    await wtree.ensure(
+        database,
+        run_dirs,
+        root,
+        repo_entry=entry_of({"setup_command": plant}),
+        repositories=_members(sub),
+    )
+
+    config = (root / ".git" / "config").read_text()
+    assert "attacker.invalid" not in config and '"evil"' not in config
