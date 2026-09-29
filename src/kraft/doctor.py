@@ -439,13 +439,25 @@ async def _mcp_check(server_up: bool) -> dict:
     would make Kraft write the operator's agent config.
     """
     found = registration.permission_tool(None)
-    if found is None:
-        if not server_up:
-            # The repo-scope half needs `GET /repos`, like every other
-            # server-dependent check here.
-            return _check("mcp server", True, "skipped: no server", skipped=True)
+    if server_up:
+        # Each connected repo on its own: its committed settings can switch
+        # the plugin off for its workers, and its local scope or `.mcp.json`
+        # can register the server where the user scope does not.
         repos = [Path(r["path"]) for r in await client.repos()]
-        found = next(filter(None, map(registration.permission_tool, repos)), None)
+        per_repo = {repo: registration.permission_tool(repo) for repo in repos}
+        refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
+        if refused:
+            return _check(
+                "mcp server",
+                False,
+                f"no kraft MCP server registered for Claude workers in {', '.join(refused)}, "
+                f"so they are refused; {registration.FIX}",
+            )
+        found = found or next(iter(per_repo.values()), None)
+    elif found is None:
+        # The repo-scope half needs `GET /repos`, like every other
+        # server-dependent check here.
+        return _check("mcp server", True, "skipped: no server", skipped=True)
     if found:
         return _check("mcp server", True, f"{found[0]}, registered in {found[1]}")
     return _check(

@@ -16,8 +16,11 @@ def test_a_plugin_only_install_launches_with_the_plugins_tool_name(run):
     direct name would fail the first permission ask: the 0-token stop."""
     home = Path.home()
     (home / ".claude.json").unlink()
-    (home / ".claude").mkdir()
+    (home / ".claude" / "plugins").mkdir(parents=True)
     (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"kraft@kraft": true}}')
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(
+        '{"version": 2, "plugins": {"kraft@kraft": [{"scope": "user"}]}}'
+    )
     cmd = run()["cmd"]
     assert cmd[cmd.index("--permission-prompt-tool") + 1] == (
         "mcp__plugin_kraft_kraft__permission_request"

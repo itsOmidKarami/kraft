@@ -342,6 +342,8 @@ def _isolated_kraft_home(tmp_path, tmp_path_factory, monkeypatch):
         '{"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}}'
     )
     monkeypatch.setenv("HOME", str(home))
+    # Nor this machine's managed MCP config, which overrides every other one.
+    monkeypatch.setattr("kraft.registration.MANAGED_MCP", home / "managed-mcp.json")
     # `_serve()` dup2s real fds 1/2 to server.log unless told not to -- fine for
     # a real process, but it would stomp pytest's own fd-level capture (and
     # every test after it, in-process) if a `_serve()` call reached that far.
