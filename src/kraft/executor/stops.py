@@ -298,19 +298,25 @@ def sandbox_checkout(row, launch: LaunchContext | None, worktree: Path) -> _sand
     """`row`'s checkout at `worktree` as a sandbox mounts it: each declared
     member's `(common gitdir, admin dir)`, derived from its connected
     repository in repos.yaml and never from the member's own `.git`
-    (`sandbox.member_gitdirs`, Kraft-ju36l). What `refuse_planted_repos`
-    checks a member against is exactly what every launch then mounts."""
+    (`sandbox.member_gitdirs`, Kraft-ju36l). A member whose checkout is not
+    the one Kraft made (`sandbox.foreign_members`) -- swapped, or reached
+    through a symlink -- is None, which no launch mounts
+    (`refstore.prepare_stores` refuses it): a caller with no drift check of its
+    own still never mounts what it did not check."""
     connected = _builtins.member_repositories(row, launch.repositories if launch else {})
+    found = {
+        rel: _sandbox.member_gitdirs(m, worktree, rel) if m is not None else None
+        for rel, m in connected.items()
+    }
+    foreign = set(_sandbox.foreign_members(worktree, found))
     return _sandbox.Checkout(
-        worktree,
-        {
-            rel: _sandbox.member_gitdirs(m, worktree, rel) if m is not None else None
-            for rel, m in connected.items()
-        },
+        worktree, {rel: None if rel in foreign else dirs for rel, dirs in found.items()}
     )
 
 
-def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | None) -> None:
+def refuse_planted_repos(
+    row, launch: LaunchContext | None, worktree: Path | None
+) -> _sandbox.Checkout | None:
     """Raise `RuntimeError` naming the paths when `row`'s item runs sandboxed
     and its `worktree` holds a git repository Kraft did not create: a
     declared member whose checkout is not the one Kraft made
@@ -325,20 +331,24 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
     a `RuntimeError` into a stop for a human.
 
     An unsandboxed item costs no git at all; one whose sandbox cannot be
-    resolved stops only if its worktree holds something it could matter to."""
+    resolved stops only if its worktree holds something it could matter to.
+
+    Returns the checkout it checked (`sandbox_checkout`), for the launch to
+    mount exactly that; None for an item it did not check."""
     if worktree is None or not worktree.is_dir():
-        return
+        return None
     unresolved = None
     try:
         sandbox = _item_sandbox(row, launch)
     except RuntimeError as exc:
         sandbox, unresolved = None, exc
     if sandbox is None and unresolved is None:
-        return
+        return None
     # None is foreign, so every way of not knowing a member's repository --
     # a missing `launch` included -- fails closed.
-    expected = sandbox_checkout(row, launch, worktree).members
-    foreign = _sandbox.foreign_members(worktree, expected)
+    checkout = sandbox_checkout(row, launch, worktree)
+    expected = checkout.members
+    foreign = sorted(rel for rel, dirs in expected.items() if dirs is None)
     found = [_sandbox.planted_repos(worktree, row["base_ref"], mounts=list(expected))]
     for rel in [r for r in expected if r not in foreign]:
         # The member's base is the gitlink the root's base records, read
@@ -349,7 +359,7 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
         inner = _sandbox.planted_repos(worktree / rel, base or None)
         found.append(None if inner is None else [f"{rel}/{p}" for p in inner])
     if not foreign and all(f == [] for f in found):
-        return
+        return checkout
     if unresolved is not None:
         raise unresolved
     if any(f is None for f in found):

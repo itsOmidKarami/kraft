@@ -193,8 +193,11 @@ def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Pat
     Derived from the operator's repository, never from `rel/.git`, which the
     worker writes (Kraft-ju36l, spec I3): the common gitdir is what git in
     `repo_path` says, and the admin dir is the `worktrees/*` entry of it whose
-    `gitdir` file names this member's `.git`."""
-    if not repository_top(repo_path):
+    `gitdir` file names this member's `.git`. Only the worktree's own path is
+    resolved: `rel` is the worker's to write, and a symlink there would name
+    another worktree's admin dir. A member not genuinely inside the worktree
+    (`inside`) has none."""
+    if not repository_top(repo_path) or not inside(worktree, rel):
         return None
     done = subprocess.run(
         ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -205,10 +208,10 @@ def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Pat
     if done.returncode != 0:
         return None
     common = Path(done.stdout.strip()).resolve()
-    want = os.path.realpath(worktree / rel / ".git")
+    want = os.path.normpath(os.path.join(os.path.realpath(worktree), rel, ".git"))
     for admin in sorted((common / "worktrees").glob("*")):
         named = read_regular(admin / "gitdir", common)
-        if named is not None and os.path.realpath(named.strip()) == want:
+        if named is not None and os.path.normpath(named.strip()) == want:
             return common, admin
     return None
 

@@ -657,7 +657,8 @@ async def _dispatch_task(
     # walk may have left a repository of its own in the worktree (Kraft-nx4id).
     # `rev-parse` above reads HEAD alone and never looks at a gitlink.
     try:
-        stops.refuse_planted_repos(
+        # What it checked is what a sandboxed launch below mounts (Kraft-ju36l).
+        verified = stops.refuse_planted_repos(
             work_item_row, launch, _item_root(work_item_row, worktree, repository)
         )
     except RuntimeError as exc:
@@ -677,15 +678,9 @@ async def _dispatch_task(
             sandbox = item_sandbox(work_item_row, launch)
         except SandboxUnresolved as exc:
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
-        # The whole checkout a sandboxed launch mounts, members included,
-        # from what the check above just passed (Kraft-ju36l).
-        checkout = (
-            stops.sandbox_checkout(
-                work_item_row, launch, _item_root(work_item_row, worktree, repository)
-            )
-            if sandbox
-            else None
-        )
+        # The whole checkout a sandboxed launch mounts, members included:
+        # exactly the one the drift check above passed, not a second reading.
+        checkout = verified if sandbox else None
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
