@@ -82,6 +82,16 @@ def test_a_plugin_enabled_in_committed_project_settings(home, tmp_path):
     assert registration.permission_tool(repo)[0] == PLUGIN
 
 
+def test_a_repo_that_turns_the_plugin_off_overrides_the_user(home, tmp_path):
+    """Project settings win over user settings in Claude Code: the worker in
+    this repo has no plugin, so no tool, whatever the user enabled."""
+    _write(home / ".claude" / "settings.json", {"enabledPlugins": {"kraft@kraft": True}})
+    repo = make_repo(tmp_path)
+    _commit(repo, ".claude/settings.json", {"enabledPlugins": {"kraft@kraft": False}})
+    assert registration.permission_tool(repo) is None
+    assert registration.permission_tool(None)[0] == PLUGIN
+
+
 @pytest.mark.e2e("claude")
 def test_a_marketplace_install_is_found_and_names_the_tool_as_expected(home, tmp_path):
     """The two Claude Code facts the resolver rests on: installing the plugin

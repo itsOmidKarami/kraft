@@ -56,11 +56,14 @@ def _names_kraft(config: dict) -> bool:
     return isinstance(servers, dict) and "kraft" in servers
 
 
-def _enables_kraft(settings: dict) -> bool:
+def _kraft_plugin(settings: dict) -> bool | None:
+    """Whether `settings` turns the Kraft plugin on (True) or off (False), or
+    None when it says nothing about it."""
     plugins = settings.get("enabledPlugins")
-    return isinstance(plugins, dict) and any(
-        key.split("@")[0] == "kraft" and on is True for key, on in plugins.items()
-    )
+    if not isinstance(plugins, dict):
+        return None
+    said = [on for key, on in plugins.items() if key.split("@")[0] == "kraft"]
+    return any(on is True for on in said) if said else None
 
 
 def permission_tool(repo: Path | None) -> tuple[str, str] | None:
@@ -73,9 +76,12 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
         return DIRECT, str(user)
     if repo is not None and _names_kraft(_committed(repo, ".mcp.json")):
         return DIRECT, str(repo / ".mcp.json")
-    settings = home / ".claude" / "settings.json"
-    if _enables_kraft(_read(settings)):
-        return PLUGIN, str(settings)
-    if repo is not None and _enables_kraft(_committed(repo, ".claude/settings.json")):
-        return PLUGIN, str(repo / ".claude" / "settings.json")
+    # Project settings override user settings in Claude Code, so a repo that
+    # turns the plugin off wins over a user who turned it on, and the reverse.
+    user_settings = home / ".claude" / "settings.json"
+    project = _kraft_plugin(_committed(repo, ".claude/settings.json")) if repo else None
+    if project is not None:
+        return (PLUGIN, str(repo / ".claude" / "settings.json")) if project else None
+    if _kraft_plugin(_read(user_settings)):
+        return PLUGIN, str(user_settings)
     return None
