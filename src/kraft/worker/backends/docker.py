@@ -21,6 +21,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -374,19 +375,28 @@ def detect_runtime() -> Runtime:
 
 
 _RUNTIME: Runtime | None = None
+#: Until when (`time.monotonic`) an inconclusive `_RUNTIME` is kept.
+_UNSURE_UNTIL = 0.0
+#: ponytail: fixed; a hung daemon costs one ~30s `info` per this many seconds
+#: instead of one per `docker_call`. Make it a sandbox.yaml knob if it bites.
+UNSURE_TTL = 30.0
 
 
 def runtime(*, refresh: bool = False) -> Runtime:
     """This machine's `Runtime`, detected on first use and kept for the
     process: `docker info` is a round trip every launch would otherwise pay.
     Doctor refreshes it, so a changed `sandbox.yaml` is picked up there. A
-    runtime that did not say what limits it enforces is not kept: the next
-    launch asks again rather than refusing every limit until a restart."""
-    global _RUNTIME
-    if _RUNTIME is None or refresh:
-        detected = detect_runtime()
-        _RUNTIME = detected if detected.limits_known else None
-        return detected
+    runtime that did not say what limits it enforces is kept only
+    `UNSURE_TTL` seconds: a launch after that asks again rather than refusing
+    every limit until a restart, and a hung daemon is not asked on every call."""
+    global _RUNTIME, _UNSURE_UNTIL
+    if (
+        refresh
+        or _RUNTIME is None
+        or (not _RUNTIME.limits_known and time.monotonic() >= _UNSURE_UNTIL)
+    ):
+        _RUNTIME = detect_runtime()
+        _UNSURE_UNTIL = time.monotonic() + UNSURE_TTL
     return _RUNTIME
 
 
