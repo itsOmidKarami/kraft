@@ -39,7 +39,8 @@ def cache_dir() -> Path:
 
 
 _MISSING = (
-    "the 'vector' extra is not installed — `uv sync --extra vector` to enable semantic search"
+    "the 'vector' extra is not installed — "
+    "`uv tool install --force 'kraft-sdlc[vector]'` to enable semantic search"
 )
 
 

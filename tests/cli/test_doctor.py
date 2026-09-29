@@ -300,7 +300,7 @@ def test_a_missing_vector_extra_is_advice_not_a_failure():
 
     assert all(row["ok"] for row in rows)
     assert _by_name(rows, "health")["detail"] == "ok"
-    assert "uv sync --extra vector" in _by_name(rows, "embeddings")["detail"]
+    assert "kraft-sdlc[vector]" in _by_name(rows, "embeddings")["detail"]
 
 
 def test_an_installed_but_broken_embedder_fails():
