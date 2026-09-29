@@ -1026,10 +1026,12 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     the same way `POST .../retry` does.
 
     Refuses a worker's own item before the write: the retry below would
-    refuse it anyway, but only after the cap had already moved.
+    refuse it anyway, but only after the cap had already moved. An
+    escalation turn is refused too: a spending cap is a person's call,
+    like a gate (Kraft-9efnk.29).
     """
     st = request.app.state
-    deps.forbid_self_action(st, request, wid)
+    deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")

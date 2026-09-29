@@ -627,11 +627,14 @@ async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     # The fields `kraft` guards with `_forbid_self_action`, plus the budget: a
     # worker raising its own dollar cap is the same self-action. Title and
     # description stay open; a chain template is fixed once the item starts.
-    if "budget_usd" in body.model_fields_set or any(
-        f is not None
-        for f in (body.attachments, body.agent_overrides, body.node_overrides, body.policy)
+    # The budget and the policy (which can raise `budget_usd` and the time
+    # caps item-wide) are a person's call, so an escalation turn is refused
+    # them too, like a gate (Kraft-9efnk.29).
+    spending = "budget_usd" in body.model_fields_set or body.policy is not None
+    if spending or any(
+        f is not None for f in (body.attachments, body.agent_overrides, body.node_overrides)
     ):
-        deps.forbid_self_action(st, request, wid)
+        deps.forbid_self_action(st, request, wid, escalation_may=not spending)
     # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
     row = deps._live_work_item_row(st, wid)
     fields_set = body.model_fields_set
