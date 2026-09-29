@@ -710,6 +710,11 @@ async def reattach(
             )
             summary.unknown.append(sid)
 
+    # Every adopted session's channel is open again by now; any other socket
+    # directory is a dead session's.
+    if (channels := _channel.current()) is not None and (stale := channels.sweep()):
+        logger.warning("removed egress socket directories no live session owns: %s", stale)
+
     active = db.read(
         lambda c: c.execute("SELECT id FROM work_items WHERE status = 'active'").fetchall()
     )

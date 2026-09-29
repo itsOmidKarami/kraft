@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 
@@ -58,6 +59,11 @@ async def test_a_sessions_socket_serves_the_proxy_and_records_against_its_item(
 ):
     path = await registry.open("0123456789abcdef0123", "w1", _DENY_ALL)
     assert path == short_run.base / "sn" / "0123456789abcdef" / "s.sock"
+    # Only the daemon's user may reach a session's socket, or its directory.
+    assert [stat.S_IMODE(d.stat().st_mode) for d in (short_run.sockets, path.parent)] == [
+        0o700,
+        0o700,
+    ]
 
     answer = await _ask(path, b"CONNECT api.example.com:443 HTTP/1.1\r\n\r\n")
 
@@ -76,6 +82,20 @@ async def test_close_stops_the_listener_and_removes_its_directory(registry):
         await asyncio.open_unix_connection(str(path))
     # Closing what is not open is a no-op, as every teardown path expects.
     await registry.close("0123456789abcdef0123")
+
+
+async def test_shutdown_keeps_the_directory_a_live_relay_mounts(registry):
+    """A graceful restart: the relay bind-mounts the socket's directory, so a
+    new directory (a new inode) would cut an adopted session off for good.
+    Only the socket goes; the next `open` listens in the same directory."""
+    path = await registry.open("0123456789abcdef0123", "w1", _DENY_ALL)
+    inode = path.parent.stat().st_ino
+    await registry.close_all()
+
+    assert path.parent.stat().st_ino == inode and not path.exists()
+    assert await registry.open("0123456789abcdef0123", "w1", _DENY_ALL) == path
+    assert path.parent.stat().st_ino == inode
+    assert (await _ask(path, b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")).startswith(b"HTTP/1.1 403 ")
 
 
 async def test_a_socket_path_too_long_for_a_unix_socket_is_refused_by_name(database, tmp_path):

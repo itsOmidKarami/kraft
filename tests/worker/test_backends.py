@@ -342,9 +342,13 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
     deny_all = {"phase": "runtime", "allow": [], "deny": ["**"]}
     await database.write(lambda c: store.set_session_egress(c, "s1", deny_all))
+    # A dead session's directory, which no adopted session owns.
+    dead = channels.socket_path("gone-session").parent
+    dead.mkdir(parents=True)
 
     _, tasks = await reattach.reattach(database, run_dirs)
     await adopted.wait()
+    assert not dead.exists()
     reader, writer = await asyncio.open_unix_connection(str(channels.socket_path("s1")))
     writer.write(b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
     answer = await asyncio.wait_for(reader.read(), 5)

@@ -67,7 +67,11 @@ class ChannelRegistry:
         path = self.socket_path(session_id)
         if any(c.path == path for c in self._open.values()):
             raise SandboxNotReady(f"another session's egress socket is already at {path}")
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Only the daemon's user may reach a session's socket. An existing
+        # directory is reused, never replaced: a live relay mounts it.
+        for directory in (self._run_dirs.sockets, path.parent):
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            directory.chmod(0o700)
         path.unlink(missing_ok=True)
 
         async def record(payload: dict) -> None:
@@ -82,10 +86,11 @@ class ChannelRegistry:
         self._open[session_id] = _Channel(path, server)
         return path
 
-    async def close(self, session_id: str) -> None:
-        """Stop the listener and remove its directory. Best-effort and
-        bounded, like a sandbox's `close`: nothing here may hold up the rest
-        of a session's teardown. A no-op for a session with no channel."""
+    async def close(self, session_id: str, *, keep_dir: bool = False) -> None:
+        """Stop the listener and remove its directory (with `keep_dir`, only
+        its socket). Best-effort and bounded, like a sandbox's `close`:
+        nothing here may hold up the rest of a session's teardown. A no-op
+        for a session with no channel."""
         channel = self._open.pop(session_id, None)
         if channel is None:
             return
@@ -94,11 +99,29 @@ class ChannelRegistry:
             await asyncio.wait_for(channel.server.wait_closed(), 5)
         except TimeoutError:
             pass
-        shutil.rmtree(channel.path.parent, ignore_errors=True)
+        if keep_dir:
+            channel.path.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(channel.path.parent, ignore_errors=True)
 
     async def close_all(self) -> None:
+        """At shutdown: every listener stops, but its directory stays. The
+        session may outlive the daemon, and its relay bind-mounts that
+        directory; a new one after a restart would be an inode it never
+        sees."""
         for session_id in list(self._open):
-            await self.close(session_id)
+            await self.close(session_id, keep_dir=True)
+
+    def sweep(self) -> list[str]:
+        """Remove every socket directory no open channel owns: what dead
+        sessions left behind. Run once reattach has re-opened the adopted
+        sessions' channels. The names removed."""
+        keep = {c.path.parent for c in self._open.values()}
+        base = self._run_dirs.sockets
+        stale = [d for d in base.iterdir() if d.is_dir() and d not in keep] if base.is_dir() else []
+        for directory in stale:
+            shutil.rmtree(directory, ignore_errors=True)
+        return [d.name for d in stale]
 
 
 _CURRENT: ChannelRegistry | None = None
