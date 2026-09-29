@@ -4,6 +4,7 @@ that file one."""
 import dataclasses
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from support import worktree as wtree
 from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
@@ -117,3 +118,21 @@ def only_the_root_has_an_identity(monkeypatch, tmp_path, row) -> None:
     (tmp_path / "no-identity.gitconfig").write_text("[user]\n\tuseConfigOnly = true\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-identity.gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def member_checkout(tmp_path, branch: str, *, nested: bool = False) -> SimpleNamespace:
+    """A root worktree `wt` on `branch`, and its member `repos/pkg` laid out
+    as `ensure_worktree` lays one out: a linked worktree, on `branch`, of the
+    member's connected repository `m` -- a repository of its own, or when
+    `nested` the root's own submodule checkout, whose common gitdir lies
+    inside the root's. `checkout` is what `stops.sandbox_checkout` hands a
+    sandboxed launch of it (Kraft-ju36l)."""
+    from kraft.worker.sandbox import Checkout, member_gitdirs
+
+    root, sub = make_repo_with_submodule(tmp_path)
+    wt = tmp_path / "wt"
+    _git(root, "worktree", "add", "-q", "-b", branch, str(wt))
+    m = root / "repos" / "pkg" if nested else sub
+    _git(m, "worktree", "add", "-q", "-b", branch, str(wt / "repos" / "pkg"))
+    members = {"repos/pkg": member_gitdirs(m, wt, "repos/pkg")}
+    return SimpleNamespace(root=root, m=m, wt=wt, checkout=Checkout(wt, members))

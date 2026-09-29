@@ -77,7 +77,7 @@ def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image)
             "GIT_COMMITTER_NAME": "w",
             "GIT_COMMITTER_EMAIL": "w@x",
         },
-        refstore=store,
+        refstores=(store,),
     )
     ran = subprocess.run(argv, capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr

@@ -25,6 +25,10 @@ publish onto `main`.
 in one worktree and commit onto one branch, and sharing one ref store keeps
 their commits serialised exactly as a shared gitdir did. It is rebuilt from
 the repository whenever none of the sessions that mounted it is still live.
+
+A workspace item's members are linked worktrees of their own connected
+repositories, so each gets a store of its own over that repository's common
+gitdir (`prepare_stores`), publishing the same item branch there (Kraft-ju36l).
 """
 
 from __future__ import annotations
@@ -37,9 +41,9 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from kraft.worker import sandbox as _sandbox
@@ -63,6 +67,9 @@ class RefStore:
     #: Why a commit a previous session left could not be published when this
     #: store was rebuilt, for the caller to record; None when nothing was lost.
     carried: str | None = None
+    #: A member's checkout, whose `.git` names `worktree_gitdir`; None for
+    #: the launch's own worktree.
+    checkout: Path | None = None
 
 
 def shadow_dir(base: Path, worktree_gitdir: Path) -> Path:
@@ -148,7 +155,10 @@ def _publish(store: RefStore) -> str | None:
     if new is None or new == synced:
         return None
     if not _is_commit(store.common, new):
-        return f"the sandbox left {store.branch} at {new}, which is not a commit in the repository"
+        return (
+            f"the sandbox left {store.branch} at {new}, which is not a commit in the "
+            f"repository at {store.common}"
+        )
     moved = _git(
         store.common,
         "update-ref",
@@ -160,7 +170,8 @@ def _publish(store: RefStore) -> str | None:
     )
     if moved.returncode != 0:
         return (
-            f"{store.branch} moved in the repository since its sandboxed session started, "
+            f"{store.branch} moved in the repository at {store.common} since its sandboxed "
+            "session started, "
             f"so Kraft did not overwrite it with {new}: {moved.stderr.strip()}"
         )
     _write_meta(store.shadow, {**meta, "synced": new})
@@ -211,6 +222,7 @@ def prepare(
     session_id: str | None = None,
     live: Iterable[str] = (),
     work_item_id: str | None = None,
+    mount_points: Iterable[Path] = (),
 ) -> RefStore | None:
     """The ref store a sandboxed launch in `cwd` mounts, or None when `cwd` is
     not a linked worktree (its `.git` is then inside the mounted worktree).
@@ -222,49 +234,127 @@ def prepare(
     `UNSYNCED_PREFIX` -- and the store is rebuilt from the repository, so the
     worker sees today's refs. A launch with no session (a sandboxed setup
     command, `branch` None) mounts the store as it is, or a fresh one, and
-    publishes nothing."""
+    publishes nothing.
+
+    `mount_points`: directories, relative to the common gitdir, where another
+    store mounts inside this one; made in `S` by Kraft, so docker never
+    creates one as root."""
     dirs = _sandbox.linked_gitdirs(Path(cwd))
     if dirs is None:
         return None
-    common, worktree_gitdir = dirs
-    storage = _git(common, "config", "--get", "extensions.refStorage").stdout.strip()
+    return _prepare(
+        base,
+        RefStore(shadow_dir(base, dirs[1]), *dirs, branch),
+        session_id=session_id,
+        live=live,
+        work_item_id=work_item_id,
+        mount_points=mount_points,
+    )
+
+
+def prepare_stores(
+    base: Path,
+    cwd: Path,
+    branch: str | None,
+    *,
+    members: Mapping[str, tuple[Path, Path] | None] = {},
+    **kw,
+) -> tuple[RefStore, ...]:
+    """Every ref store a sandboxed launch in the worktree `cwd` mounts: its
+    own (`prepare`), then one per workspace member (Kraft-ju36l).
+
+    `members` is each member's `(common gitdir, admin dir)` by mount path, as
+    `sandbox.member_gitdirs` derives them from the operator's repository --
+    never read out of the member's `.git`, which the worker writes (spec I3).
+    None there is a member with no checkout Kraft made: it is refused, since
+    there is nothing trusted to mount. A member's common gitdir inside the
+    root's (a submodule checkout connected as its own repository) gets its
+    mount point inside the root's store."""
+    root = Path(cwd).resolve()
+    trusted: dict[str, tuple[Path, Path]] = {}
+    for rel, dirs in members.items():
+        if dirs is None:
+            raise RuntimeError(
+                f"workspace member {rel} of {root} has no checkout Kraft made from its "
+                "connected repository, so it cannot be mounted into a sandbox"
+            )
+        trusted[rel] = dirs
+    root_dirs = _sandbox.linked_gitdirs(root)
+    nested = [
+        common.relative_to(root_dirs[0])
+        for common, _ in trusted.values()
+        if root_dirs is not None and common.is_relative_to(root_dirs[0])
+    ]
+    stores = [s] if (s := prepare(base, root, branch, mount_points=nested, **kw)) else []
+    for rel, (common, admin) in sorted(trusted.items()):
+        member = RefStore(shadow_dir(base, admin), common, admin, branch, checkout=root / rel)
+        stores.append(_prepare(base, member, **kw))
+    return tuple(stores)
+
+
+def _prepare(
+    base: Path,
+    store: RefStore,
+    *,
+    session_id: str | None = None,
+    live: Iterable[str] = (),
+    work_item_id: str | None = None,
+    mount_points: Iterable[Path] = (),
+) -> RefStore:
+    storage = _git(store.common, "config", "--get", "extensions.refStorage").stdout.strip()
     if storage not in ("", "files"):
         raise RuntimeError(
-            f"{common} keeps its refs in {storage!r} storage, and a sandbox's ref store "
+            f"{store.common} keeps its refs in {storage!r} storage, and a sandbox's ref store "
             "supports only git's default files storage"
         )
-    store = RefStore(shadow_dir(base, worktree_gitdir), common, worktree_gitdir, branch)
-    carried = None
     with _locked(store.shadow):
-        meta = _read_meta(store.shadow)
-        mounted = set(meta.get("sessions", ())) & set(live)
-        if session_id is None and store.shadow.exists():
-            return store
-        if store.shadow.exists() and mounted and meta.get("branch") == branch:
-            _write_meta(store.shadow, {**meta, "sessions": sorted({*mounted, session_id})})
-            return store
-        if store.shadow.exists():
-            previous = RefStore(store.shadow, common, worktree_gitdir, meta.get("branch") or branch)
-            if problem := _publish(previous):
-                kept = _keep_unpublished(previous)
-                carried = problem + (f"; the commit is kept at {kept}" if kept else "")
-                logger.warning("%s", carried)
-            shutil.rmtree(store.shadow)
-        _meta_path(store.shadow).unlink(missing_ok=True)
-        _build(store)
-        if branch is not None and session_id is not None:
-            _write_meta(
-                store.shadow,
-                {
-                    "work_item_id": work_item_id,
-                    "common": str(common),
-                    "worktree_gitdir": str(worktree_gitdir),
-                    "branch": branch,
-                    "synced": _real_branch(common, branch),
-                    "sessions": [session_id],
-                },
-            )
-    return RefStore(store.shadow, common, worktree_gitdir, branch, carried)
+        store = _refresh(store, session_id, set(live), work_item_id)
+        for point in mount_points:
+            (store.shadow / point).mkdir(parents=True, exist_ok=True)
+    return store
+
+
+def _refresh(
+    store: RefStore, session_id: str | None, live: set[str], work_item_id: str | None
+) -> RefStore:
+    """`prepare`'s body, under the store's lock."""
+    common, worktree_gitdir, branch = store.common, store.worktree_gitdir, store.branch
+    carried = None
+    meta = _read_meta(store.shadow)
+    mounted = set(meta.get("sessions", ())) & live
+    if session_id is None and store.shadow.exists():
+        return store
+    if store.shadow.exists() and mounted and meta.get("branch") == branch:
+        _write_meta(store.shadow, {**meta, "sessions": sorted({*mounted, session_id})})
+        return store
+    if store.shadow.exists():
+        previous = replace(store, branch=meta.get("branch") or branch)
+        if problem := _publish(previous):
+            kept = _keep_unpublished(previous)
+            carried = problem + (f"; the commit is kept at {kept}" if kept else "")
+            logger.warning("%s", carried)
+        shutil.rmtree(store.shadow)
+    _meta_path(store.shadow).unlink(missing_ok=True)
+    _build(store)
+    recorded = {
+        "work_item_id": work_item_id,
+        "common": str(common),
+        "worktree_gitdir": str(worktree_gitdir),
+    }
+    if branch is not None and session_id is not None:
+        _write_meta(
+            store.shadow,
+            {
+                **recorded,
+                "branch": branch,
+                "synced": _real_branch(common, branch),
+                "sessions": [session_id],
+            },
+        )
+    elif work_item_id is not None:
+        # Publishes nothing, but `discard_item` still finds it.
+        _write_meta(store.shadow, recorded)
+    return replace(store, carried=carried)
 
 
 def sync(store: RefStore, session_id: str | None = None) -> str | None:
@@ -275,13 +365,18 @@ def sync(store: RefStore, session_id: str | None = None) -> str | None:
         try:
             return _publish(store)
         except OSError as exc:
-            return f"could not read {store.branch} back from its sandbox: {exc}"
+            return f"could not read {store.branch} back from its sandbox of {store.common}: {exc}"
         finally:
             if session_id is not None:
                 meta = _read_meta(store.shadow)
                 if session_id in meta.get("sessions", ()):
                     sessions = [s for s in meta["sessions"] if s != session_id]
                     _write_meta(store.shadow, {**meta, "sessions": sessions})
+
+
+def sync_all(stores: Iterable[RefStore], session_id: str | None = None) -> list[str]:
+    """`sync` each of a launch's stores; why each one that could not publish."""
+    return [p for store in stores if (p := sync(store, session_id))]
 
 
 def sync_item(base: Path, work_item_id: str) -> list[str]:
@@ -313,3 +408,16 @@ def discard(base: Path, cwd: Path) -> None:
         shutil.rmtree(shadow, ignore_errors=True)
         _meta_path(shadow).unlink(missing_ok=True)
     (shadow.parent / f"{shadow.name}.lock").unlink(missing_ok=True)
+
+
+def discard_item(base: Path, work_item_id: str) -> None:
+    """Forget every ref store of `work_item_id`, members' included, by the
+    record beside each: a member's store is not found through the worktree."""
+    for meta_path in sorted((base / "sandbox-git").glob("*.json")):
+        shadow = meta_path.with_suffix("")
+        if _read_meta(shadow).get("work_item_id") != work_item_id:
+            continue
+        with _locked(shadow):
+            shutil.rmtree(shadow, ignore_errors=True)
+            meta_path.unlink(missing_ok=True)
+        (shadow.parent / f"{shadow.name}.lock").unlink(missing_ok=True)

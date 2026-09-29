@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from support.harness import fake_docker_bin
+from support.workspace import member_checkout
 
 from kraft.config import ConfigError
 from kraft.paths import RunDirs
@@ -82,7 +83,7 @@ def test_docker_argv_mounts_the_ref_store_over_the_repo_gitdir(tmp_path):
         worktree,
         {"kind": "docker", "image": "x"},
         "/run/results",
-        refstore=store,
+        refstores=(store,),
     )
     assert f"{store.shadow}:{git}" in argv
     assert f"{git / 'objects'}:{git / 'objects'}" in argv
@@ -96,6 +97,89 @@ def test_docker_argv_mounts_the_ref_store_over_the_repo_gitdir(tmp_path):
     ]
     assert git not in rw_sources
     assert not [p for p in rw_sources if p.is_relative_to(git / "refs")]
+
+
+def _member_launch(tmp_path, nested=False):
+    """A root worktree with member `repos/pkg`, the stores a session there
+    mounts, and its argv's `-v` specs."""
+    ws = member_checkout(tmp_path, "kraft/x", nested=nested)
+    ws.stores = refstore.prepare_stores(
+        tmp_path / "run", ws.wt, "kraft/x", members=ws.checkout.members, session_id="s1"
+    )
+    return ws
+
+
+def _volumes(argv):
+    return [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["own-repository", "inside-the-roots-gitdir"])
+def test_docker_argv_mounts_each_member_like_the_root(tmp_path, nested):
+    """Kraft-ju36l, J6: the member's gitdirs are mounted exactly as the root's
+    -- its store over its repository's common gitdir, the admin dir
+    read-write, and `commondir`, `gitdir`, `config.worktree` and the member's
+    `.git` read-only, so host git reads back only what the container could
+    not rewrite."""
+    ws = _member_launch(tmp_path, nested)
+    root, member = ws.stores
+    volumes = _volumes(
+        docker.docker_argv(
+            ["git"], ws.wt, {"kind": "docker", "image": "x"}, None, refstores=ws.stores
+        )
+    )
+    member_git = ws.wt / "repos" / "pkg" / ".git"
+    at = volumes.index(f"{member_git}:{member_git}:ro")
+    root_block = volumes[volumes.index(f"{ws.wt / '.git'}:{ws.wt / '.git'}:ro") : at]
+
+    def shape(block, store, git_file):
+        # Innermost first: the admin dir lies inside the common gitdir.
+        named = [(git_file, "G"), (store.worktree_gitdir, "W"), (store.shadow, "S")]
+        named.append((store.common, "C"))
+        out = []
+        for spec in block:
+            for path, name in named:
+                spec = spec.replace(str(path), name)
+            out.append(spec)
+        return out
+
+    assert shape(volumes[at : at + len(root_block)], member, member_git) == shape(
+        root_block, root, ws.wt / ".git"
+    )
+    admin = member.worktree_gitdir
+    for path in (member_git, admin / "commondir", admin / "gitdir", admin / "config.worktree"):
+        assert f"{path}:{path}:ro" in volumes
+    assert f"{member.shadow}:{member.common}" in volumes
+    assert f"{admin}:{admin}" in volumes
+
+
+def test_member_mounts_come_from_the_store_not_the_gitfile(tmp_path):
+    """The worker writes `<member>/.git`: repointed at a gitdir of its choosing
+    after the drift check, it must not get that directory mounted read-write
+    (spec I3)."""
+    ws = _member_launch(tmp_path)
+    elsewhere = tmp_path / "x" / "worktrees" / "y"
+    elsewhere.mkdir(parents=True)
+    (ws.wt / "repos" / "pkg" / ".git").write_text(f"gitdir: {elsewhere}\n")
+    volumes = _volumes(
+        docker.docker_argv(
+            ["git"], ws.wt, {"kind": "docker", "image": "x"}, None, refstores=ws.stores
+        )
+    )
+    assert not [v for v in volumes if str(tmp_path / "x") in v]
+
+
+def test_release_discards_every_store_of_the_item(tmp_path):
+    ws = member_checkout(tmp_path, "kraft/x")
+    stores = refstore.prepare_stores(
+        tmp_path / "run",
+        ws.wt,
+        "kraft/x",
+        members=ws.checkout.members,
+        session_id="s1",
+        work_item_id="w1",
+    )
+    docker.DockerBackend().release(RunDirs(tmp_path / "run"), ws.wt, "w1")
+    assert [s for s in stores if s.shadow.exists()] == []
 
 
 def test_docker_argv_mounts_every_alternate_object_dir_read_only(tmp_path):
@@ -112,7 +196,7 @@ def test_docker_argv_mounts_every_alternate_object_dir_read_only(tmp_path):
         worktree,
         {"kind": "docker", "image": "x"},
         "/run/results",
-        refstore=store,
+        refstores=(store,),
     )
     assert f"{borrowed}:{borrowed}:ro" in argv
 
@@ -409,7 +493,7 @@ def test_docker_argv_keeps_objects_info_read_only(tmp_path):
     info.mkdir()
     store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
     argv = docker.docker_argv(
-        ["git"], worktree, {"kind": "docker", "image": "x"}, None, refstore=store
+        ["git"], worktree, {"kind": "docker", "image": "x"}, None, refstores=(store,)
     )
     assert f"{info}:{info}:ro" in argv
 

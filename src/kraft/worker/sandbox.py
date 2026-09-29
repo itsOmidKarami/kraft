@@ -25,8 +25,9 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
-from collections.abc import Collection, MutableMapping
+from collections.abc import Collection, Mapping, MutableMapping
 from pathlib import Path
+from typing import NamedTuple
 
 #: Kraft's own vars, plus whichever auth var this install's `claude` CLI
 #: actually uses, forwarded bare (`-e NAME`, no value) so docker copies each
@@ -210,6 +211,16 @@ def member_gitdirs(repo_path: Path, worktree: Path, rel: str) -> tuple[Path, Pat
         if named is not None and os.path.realpath(named.strip()) == want:
             return common, admin
     return None
+
+
+class Checkout(NamedTuple):
+    """A sandboxed item's checkout as its containers mount it (Kraft-ju36l):
+    the item's root worktree, and each declared workspace member's trusted
+    `(common gitdir, admin dir)` by mount path (`member_gitdirs`), None for a
+    member Kraft did not check out."""
+
+    root: Path
+    members: Mapping[str, tuple[Path, Path] | None]
 
 
 def _names(path: Path, within: Path, target: Path, *, prefix: str = "") -> bool:
