@@ -230,6 +230,7 @@ def tls_listener_problem(run_dirs) -> str | None:
         return f"no egress TLS listener has started under {run_dirs.ca}"
     try:
         context = ssl.create_default_context(cafile=ca_cert)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with (
             socket.create_connection(("127.0.0.1", port), timeout=5) as raw,
             context.wrap_socket(raw, server_hostname="127.0.0.1"),

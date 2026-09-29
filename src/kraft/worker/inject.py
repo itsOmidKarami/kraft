@@ -158,6 +158,7 @@ def _client_context(environ: Mapping[str, str]) -> ssl.SSLContext:
     from kraft.worker.backends.docker_forward import extra_ca
 
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     if (extra := extra_ca(environ)) is not None:
         context.load_verify_locations(cadata="\n".join(extra[1]))
     context.set_alpn_protocols(["http/1.1"])
