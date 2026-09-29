@@ -111,6 +111,8 @@ _MIGRATIONS: dict[int, list[str]] = {
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
+    # 0600 on creation; SQLite gives the -wal and -shm files the same mode.
+    Path(path).touch(mode=0o600, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     # vec0 DDL fails unless the extension is loaded on this very connection —

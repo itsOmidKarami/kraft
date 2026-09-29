@@ -16,6 +16,12 @@ def kraft_home() -> Path:
     return Path(os.environ.get("KRAFT_HOME") or Path.home() / ".kraft").expanduser()
 
 
+def private(path: str, flags: int) -> int:
+    """An `opener=` for `open()` that creates the file 0600: a log under the
+    run dir holds a whole agent session."""
+    return os.open(path, flags, 0o600)
+
+
 def default_run_dir() -> Path:
     return kraft_home() / "run"
 
@@ -121,6 +127,13 @@ class RunDirs:
         return self.base / "ca"
 
     def ensure(self) -> RunDirs:
+        """Also makes the run dir private (Kraft-9efnk.18): it holds whole
+        agent sessions. The chmod tightens an install made before this, and
+        only the directory itself, so nothing under it is walked. Worktrees
+        stay reachable: every sandbox runs as the operator's own uid
+        (`docker.Host.user_args`)."""
+        self.base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.base.chmod(0o700)
         for d in (self.logs, self.results, self.worktrees, self.attachments):
             d.mkdir(parents=True, exist_ok=True)
         return self

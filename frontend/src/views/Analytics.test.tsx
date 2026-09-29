@@ -136,16 +136,17 @@ describe("AnalyticsView", () => {
     );
   });
 
-  it("W8.4: the chart is empty exactly when the range completed nothing, like the tiles", async () => {
+  it("Kraft-9efnk.27: the chart counts merges, so a range that completed items but merged none says so", async () => {
     vi.spyOn(api, "getAnalytics").mockResolvedValue({
       ...report,
-      totals: { ...report.totals, completed: 0, completed_prev: 0 },
+      totals: { ...report.totals, completed: 2, mrs_merged: 0 },
+      weekly_merged: [],
     });
     const { container } = renderView();
-    expect(await screen.findByText("nothing completed in this range")).toBeInTheDocument();
+    expect(await screen.findByText("nothing merged in this range")).toBeInTheDocument();
+    expect(container.querySelector(".chart-note")).toHaveTextContent("merged items");
     expect(container.querySelectorAll(".bar-col")).toHaveLength(0);
-    expect(container.querySelector(".kpi-value")).toHaveTextContent("0");
-    expect(container.querySelector(".kpi-sub")).toHaveTextContent(/^\+0 vs previous$/);
+    expect(container.querySelector(".kpi-value")).toHaveTextContent("2");
   });
 
   it("sizes the by-node and by-repo name columns to their names, the share bar gives (W12.4)", () => {

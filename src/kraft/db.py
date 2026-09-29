@@ -1044,6 +1044,8 @@ class Database:
     ) -> Database:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # 0600 on creation; SQLite gives the -wal and -shm files the same mode.
+        path.touch(mode=0o600, exist_ok=True)
         writer = _connect(path)
         migrate(writer)
         reader = _connect(path)

@@ -22,6 +22,7 @@ import psutil
 from kraft import caps, events, logs, store
 from kraft import harness as _harness
 from kraft import usage as _usage
+from kraft.paths import private
 from kraft.worker import backends as _backends
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
@@ -766,7 +767,7 @@ async def run_task(
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = backend.client_cwd(session_id) if backend is not None else None
-        log = open(log_path, "w")
+        log = open(log_path, "w", opener=private)
         try:
             try:
                 # A missing cwd still raises from `Popen` below and is unaffected;

@@ -281,3 +281,20 @@ def test_raising_rollback_still_informs_caller_and_next_db_works(tmp_path, monke
             await fresh.close()
 
     asyncio.run(scenario())
+
+
+def test_the_orchestrator_db_and_its_wal_are_created_private(tmp_path):
+    """Kraft-9efnk.18: the database holds whole agent sessions."""
+
+    async def scenario():
+        database = await db.Database.open(tmp_path / "orchestrator.db")
+        try:
+            # Before close: the last connection out deletes the -wal file.
+            return {
+                name: (tmp_path / name).stat().st_mode & 0o777
+                for name in ("orchestrator.db", "orchestrator.db-wal")
+            }
+        finally:
+            await database.close()
+
+    assert asyncio.run(scenario()) == {"orchestrator.db": 0o600, "orchestrator.db-wal": 0o600}
