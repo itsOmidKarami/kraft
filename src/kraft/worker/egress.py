@@ -38,7 +38,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 import httpx
 
 from kraft import store
-from kraft.worker import callback, session_mcp
+from kraft.worker import callback, inject, session_mcp
 
 #: What a connection a session's policy refused is recorded as.
 SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
@@ -146,6 +146,11 @@ class EgressSession:
     refused: set[str] = field(default_factory=set)
     #: Set once the cap is reached and the one "suppressed" event is recorded.
     suppressed: bool = False
+    #: The proxy-managed credentials this session's requests get (spec §6),
+    #: each holding the daemon's real value in memory only.
+    credentials: tuple[inject.InjectRule, ...] = ()
+    #: Where the Kraft CA mints the leaf shown when TLS is terminated.
+    run_dirs: object = None
 
 
 def _split(pattern: str) -> tuple[str, int | None]:
@@ -356,10 +361,34 @@ class EgressProxy:
         if not verdict.allowed:
             return await self._refuse(writer, session, host, port, verdict.reason)
 
-        tunnel = method == "CONNECT"
-        upstream = self._upstream("https" if tunnel else "http", _norm(host))
+        if rules := inject.rules_for(session, host, port):
+            if method != "CONNECT":
+                return await self._refuse(
+                    writer, session, host, port, "credentials are only injected over TLS"
+                )
+            return await inject.terminate(
+                self, reader, writer, session, host, port, verdict.addresses, rules, rest
+            )
+
+        if method == "CONNECT":
+            try:
+                out_reader, out_writer, early = await self._tunnel(host, port, verdict.addresses)
+            except (OSError, TimeoutError) as exc:
+                return await _answer(writer, 502, "Bad Gateway", f"{host}:{port}: {exc}")
+            try:
+                writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n" + early)
+                if rest:
+                    out_writer.write(rest)
+                await asyncio.gather(
+                    _pump(reader, out_writer), _pump(out_reader, writer), return_exceptions=True
+                )
+            finally:
+                out_writer.close()
+            return
+
+        upstream = self._upstream("http", _norm(host))
         length = 0
-        if not tunnel and upstream is not None:
+        if upstream is not None:
             length = _content_length(headers)
             if isinstance(length, str):
                 return await _answer(writer, 400, "Bad Request", length)
@@ -377,40 +406,21 @@ class EgressProxy:
         try:
             auth = upstream[2] if upstream is not None else None
             auth_line = f"Proxy-Authorization: {auth}\r\n" if auth else ""
-            if tunnel and upstream is not None:
-                authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
-                out_writer.write(
-                    f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode()
-                )
-                await out_writer.drain()
-                reply, early = await asyncio.wait_for(_read_head(out_reader), CONNECT_TIMEOUT)
-                status = (reply or b"").split(b"\r\n", 1)[0].split()
-                if len(status) < 2 or status[1] != b"200":
-                    return await _answer(
-                        writer, 502, "Bad Gateway", "the upstream proxy refused the tunnel"
-                    )
-            if tunnel:
-                writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                if upstream is not None:
-                    writer.write(early)
-            else:
-                # Rebuilt from what was checked, never the client's own target
-                # or Host: an upstream parsing either differently would reach
-                # a host the policy never saw.
-                authority = f"[{host}]" if ":" in host else host
-                if port != 80:
-                    authority += f":{port}"
-                line = _origin_form(target)
-                if upstream is not None:
-                    line = f"http://{authority}{line}"
-                kept = "".join(
-                    f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"}
-                )
-                out_writer.write(
-                    f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
-                    "Connection: close\r\n\r\n".encode()
-                )
-            if not tunnel and upstream is not None:
+            # Rebuilt from what was checked, never the client's own target
+            # or Host: an upstream parsing either differently would reach
+            # a host the policy never saw.
+            authority = f"[{host}]" if ":" in host else host
+            if port != 80:
+                authority += f":{port}"
+            line = _origin_form(target)
+            if upstream is not None:
+                line = f"http://{authority}{line}"
+            kept = "".join(f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"})
+            out_writer.write(
+                f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
+                "Connection: close\r\n\r\n".encode()
+            )
+            if upstream is not None:
                 # One request's bytes and no more: whatever else the client
                 # sends (a pipelined request) must never reach the upstream.
                 out_writer.write(rest[:length])
@@ -427,6 +437,35 @@ class EgressProxy:
             )
         finally:
             out_writer.close()
+
+    async def _tunnel(self, host: str, port: int, addresses: tuple[str, ...]):
+        """A byte stream to `host:port`: the checked `addresses` dialled, or
+        a CONNECT through the daemon's own upstream proxy. `(reader, writer,
+        bytes the upstream sent past its 200)`; `OSError` or `TimeoutError`
+        when there is none."""
+        upstream = self._upstream("https", _norm(host))
+        if upstream is None:
+            out_reader, out_writer = await self._dial(addresses, port)
+            return out_reader, out_writer, b""
+        proxy_host, proxy_port, auth = upstream
+        out_reader, out_writer = await asyncio.wait_for(
+            self._connect(proxy_host, proxy_port), CONNECT_TIMEOUT
+        )
+        try:
+            auth_line = f"Proxy-Authorization: {auth}\r\n" if auth else ""
+            authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+            out_writer.write(
+                f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode()
+            )
+            await out_writer.drain()
+            reply, early = await asyncio.wait_for(_read_head(out_reader), CONNECT_TIMEOUT)
+            status = (reply or b"").split(b"\r\n", 1)[0].split()
+            if len(status) < 2 or status[1] != b"200":
+                raise OSError("the upstream proxy refused the tunnel")
+        except BaseException:
+            out_writer.close()
+            raise
+        return out_reader, out_writer, early
 
     async def _worker_api(
         self, reader, writer, session: EgressSession, method, target, headers, rest
@@ -555,6 +594,13 @@ class EgressProxy:
     ):
         """403, and one event per host -- per route, for the worker API --
         up to the session's cap."""
+        await self.record(session, host, port, reason, route=route)
+        await _answer(writer, 403, "Forbidden", reason)
+
+    async def record(
+        self, session: EgressSession, host: str, port: int, reason: str, *, route=None
+    ) -> None:
+        """`_refuse`'s event, for a refusal with no HTTP left to answer in."""
         host = _norm(host)
         key = route or host
         if key in session.refused or session.suppressed:
@@ -582,7 +628,6 @@ class EgressProxy:
                     "reason": reason,
                 }
             )
-        await _answer(writer, 403, "Forbidden", reason)
 
 
 # The worker API's verbs, one per `kraft` shim verb (spec §5): its form
