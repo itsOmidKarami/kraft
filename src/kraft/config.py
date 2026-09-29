@@ -232,6 +232,11 @@ class RepoEntry(BaseModel):
     policy: TemplatePolicyOverride | None = None
     #: The automated reviewer `mr.automated_review` waits for (Ruling 171).
     automated_review: AutomatedReview | None = None
+    #: `false`: this repository runs no CI, so both CI waits, `mr.ci` before
+    #: the merge and `mr.post_merge_ci` after it, pass at once instead of
+    #: waiting on checks that never come (Kraft-9efnk.12). Opt-in: an absent
+    #: key waits, as before.
+    ci_checks: bool = True
     #: An absent key is enabled (Ruling 212): every existing entry that
     #: predates this field connected a repo a human meant to run against.
     enabled: bool = True

@@ -747,6 +747,7 @@ async def _dispatch_task(
             backend="auto",
             repo_forge=launch.repo_entry.forge if launch and launch.repo_entry else None,
             automated_review=_automated_review(launch),
+            ci_checks=launch.repo_entry.ci_checks if launch and launch.repo_entry else True,
             # The worktree, not the repo: every forge CLI resolves the merge
             # request from the *current branch*, and the repo is on whatever
             # the human has checked out.

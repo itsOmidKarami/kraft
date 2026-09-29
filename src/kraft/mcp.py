@@ -194,6 +194,15 @@ def build() -> MCPServer:
         return await client.retry(steer, work_item_id, path=path, restart=restart)
 
     @server.tool()
+    async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
+        """Raise a stopped Kraft work item's own dollar cap and retry it, the
+        board's Raise budget button. `budget_usd` is the new cap in dollars,
+        or null for no cap. Only for an item stopped for a human. This is
+        not the policy's per-scope `budget_usd`, which set_work_item_policy
+        sets. Only a human should decide this — ask first."""
+        return await client.raise_budget(budget_usd, work_item_id)
+
+    @server.tool()
     async def skip_work_item(
         note: str | None = None, work_item_id: str | None = None, path: str | None = None
     ) -> dict:
@@ -318,16 +327,20 @@ def build() -> MCPServer:
         item-wide fields (`max_attempts`, `timeout_minutes`,
         `allowed_harnesses`, `escalation_harness` -- the harnesses.yaml
         profile an escalation turn runs on, or "item" for the one the item's
-        own work ran on -- and the fields that can only tighten: the time
-        caps `time_cap_minutes` and `total_time_cap_minutes` -- a wait's total
-        cap is its timeout -- and `allowed_tools`, `deny_tools`,
-        `token_budget`, `budget_usd`, `sandbox`) and `paths`, a map from a canonical path
+        own work ran on -- the caps `time_cap_minutes`,
+        `total_time_cap_minutes` (a wait's total cap is its timeout),
+        `token_budget` and `budget_usd`, which item-wide may exceed the
+        chain's up to the work-item maximum and on a path only tighten, and
+        the fields that only tighten: `allowed_tools`, `deny_tools`,
+        `sandbox`) and `paths`, a map from a canonical path
         (`node`, `node.step` or `node.step.task`) to the same fields for that
         scope: `{"paths": {"merge_request_feedback.ci.await_ci":
         {"total_time_cap_minutes": 60}}}`. It replaces the whole stored
         override; `clear` removes it. Refused, naming the field, past an
-        administrator maximum. On a running or waiting item it binds from the
-        next node entered and the next observation of a wait."""
+        administrator maximum. The item's own dollar cap, which stands in for
+        `budget.work_item_usd`, is `raise_budget`'s, not this. On a running or
+        waiting item it binds from the next node entered and the next
+        observation of a wait."""
         return await client.set_work_item_policy(policy, clear=clear, work_item_id=work_item_id)
 
     @server.tool()

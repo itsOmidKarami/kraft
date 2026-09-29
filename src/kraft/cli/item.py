@@ -138,6 +138,10 @@ def _cmd_retry(ns: argparse.Namespace) -> None:
     )
 
 
+def _cmd_raise_budget(ns: argparse.Namespace) -> None:
+    common.emit(asyncio.run(client.raise_budget(ns.usd, ns.id)), common._render_action, ns.json)
+
+
 def _cmd_skip(ns: argparse.Namespace) -> None:
     common.emit(
         asyncio.run(client.skip(ns.note, ns.id, path=ns.path)), common._render_action, ns.json
@@ -407,6 +411,17 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         "--restart", action="store_true", help="rerun the whole chain from its first node"
     )
     retry.set_defaults(func=_cmd_retry)
+
+    raise_budget = subs.add_parser(
+        "raise-budget",
+        parents=[common],
+        help="raise a stopped item's dollar cap and retry it (the board's Raise budget)",
+    )
+    raise_budget.add_argument("id", nargs="?")
+    raise_budget.add_argument(
+        "--usd", type=_budget, required=True, help="the new cap in dollars, or `none` for no cap"
+    )
+    raise_budget.set_defaults(func=_cmd_raise_budget)
 
     skip = subs.add_parser(
         "skip", parents=[common], help="advance past the current node or gate without running it"

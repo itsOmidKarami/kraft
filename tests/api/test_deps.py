@@ -278,6 +278,7 @@ def templates_dir(tmp_path, monkeypatch):
         ("PATCH", "/api/work-items/w1", {"node_overrides": {"implementation": {}}}),
         ("PATCH", "/api/work-items/w1", {"policy": {}}),
         ("PATCH", "/api/work-items/w1", {"budget_usd": 100}),
+        ("POST", "/api/work-items/w1/budget/raise", {"budget_usd": 50.0}),
     ],
     ids=[
         "approve",
@@ -295,6 +296,7 @@ def templates_dir(tmp_path, monkeypatch):
         "node-overrides",
         "policy",
         "budget",
+        "raise-budget",
     ],
 )
 @pytest.mark.parametrize(

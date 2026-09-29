@@ -1024,8 +1024,12 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     (`store.raise_budget`, its own `budget_raised` event so the timeline
     reads "raised the cap", not a generic PATCH) and retries the stopped node
     the same way `POST .../retry` does.
+
+    Refuses a worker's own item before the write: the retry below would
+    refuse it anyway, but only after the cap had already moved.
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")

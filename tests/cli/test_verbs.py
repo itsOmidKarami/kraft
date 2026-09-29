@@ -505,6 +505,16 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
             {"steer": None, "work_item_id": "w1", "path": None, "restart": True},
         ),
         (
+            ["item", "raise-budget", "w1", "--usd", "25"],
+            "raise_budget",
+            {"budget_usd": 25.0, "work_item_id": "w1"},
+        ),
+        (
+            ["item", "raise-budget", "w1", "--usd", "none"],
+            "raise_budget",
+            {"budget_usd": None, "work_item_id": "w1"},
+        ),
+        (
             ["item", "skip", "w1", "--note", "known flake"],
             "skip",
             {"note": "known flake", "work_item_id": "w1", "path": None},
@@ -555,6 +565,8 @@ def test_pause_on_a_paused_item_surfaces_the_api_error(app, capsys, make_item, r
         "retry-steer",
         "retry-path",
         "retry-restart",
+        "raise-budget",
+        "raise-budget-no-cap",
         "skip-note",
         "skip-path",
         "resume-steer-task",

@@ -52,6 +52,7 @@ kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a 
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
+kraft item raise-budget [ID] --usd N|none   # raise a stopped item's dollar cap and retry it
 kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
