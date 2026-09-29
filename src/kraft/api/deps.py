@@ -234,24 +234,21 @@ def _live_work_item_row(st, wid):
 
 def forbid_self_action(st, request, wid: str) -> None:
     """403 when the caller names a worker session of `wid` itself: design §6
-    rule 2, a worker does not approve, reject, pause, resume, skip or abandon
-    its own item.
+    rule 2, a worker does not approve, reject, pause, resume, skip, abandon
+    or retry its own item.
 
     The server-side twin of `client.context._forbid_self_action`, for a
     client other than `kraft` or the MCP server that honestly sends
     `X-Kraft-Session-Id`. Consistency, not a security boundary: a caller
-    that leaves the header off passes, and an unsandboxed worker can. A
-    sandboxed one never reaches these routes (`worker.callback.ROUTES`).
-    An escalation turn is no worker (`identify_as_worker=False`), so it may.
+    that leaves the header off passes, and an unsandboxed worker can.
 
-    Not on `/retry`, which the client guard also covers. The client refuses
-    it by `KRAFT_WORK_ITEM_ID`, which an escalation turn lacks, so only a
-    worker is refused there and an escalation's `kraft item retry` goes
-    through. The sandbox channel lists `/retry` for that same self-retry,
-    and sets this header on every call it makes. The channel does not tell
-    an escalation session from a worker, so a sandboxed worker may reach
-    `/retry` on its own item too; the route answers 409 unless the item is
-    `needs_human`, which it is not while a worker of it runs (Kraft-9efnk.14).
+    An escalation turn is no worker (`identify_as_worker=False`), so it may:
+    the client lets its `kraft item retry` through (it has no
+    `KRAFT_WORK_ITEM_ID`), and so does this. A sandboxed session reaches
+    only `/retry` of these, through its channel (`worker.callback.ROUTES`),
+    which sets this header on every call: this is what refuses a sandboxed
+    worker's retry of its own item while its escalation's self-retry passes,
+    since the channel does not tell the two apart (Kraft-9efnk.14).
     """
     sid = request.headers.get("x-kraft-session-id")
     if not sid:

@@ -269,8 +269,9 @@ def templates_dir(tmp_path, monkeypatch):
         ("/api/work-items/w1/resume", {}),
         ("/api/work-items/w1/skip", {}),
         ("/api/work-items/w1/abandon", None),
+        ("/api/work-items/w1/retry", {}),
     ],
-    ids=["approve", "reject", "pause", "resume", "skip", "abandon"],
+    ids=["approve", "reject", "pause", "resume", "skip", "abandon", "retry"],
 )
 @pytest.mark.parametrize(
     ("caller", "refused"),

@@ -707,6 +707,7 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
     from kraft.api.routes.gates import _decided_by  # local: it imports this module
 
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["current_node_id"] not in store.chain_node_ids(row):
         raise HTTPException(409, "work item has no current node to retry")
