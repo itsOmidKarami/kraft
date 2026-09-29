@@ -309,6 +309,7 @@ async def pause_work_item(wid: str, request: Request):
     one mechanism: kill this attempt, carry new context into the next one.
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
     # 'waiting' as well as 'active': a node parked on a pipeline is exactly the
     # thing a human most wants to stop, and it used to 409 (Kraft-tnak). There
@@ -475,6 +476,7 @@ async def steer_work_item(wid: str, body: Steer, request: Request):
 async def resume_work_item(wid: str, body: Resume, request: Request):
     """Relaunch the paused node, carrying the steer into the next agent launch."""
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     from_statuses = ["paused"]
     if row["status"] == "needs_human" and board._needs_context_stop(st, wid):

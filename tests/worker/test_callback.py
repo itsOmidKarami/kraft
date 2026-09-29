@@ -61,7 +61,13 @@ def test_the_mcp_endpoint_is_the_channel_session_own(method):
         ("DELETE", "/api/work-items/w-own/threads"),
         # Routes not on the list at all, even for the session's own item.
         ("POST", "/api/work-items/w-own/skip"),
+        # Design §6 rule 2: never a person's decision on its own item, nor
+        # work it files (Kraft-9efnk.14).
         ("POST", "/api/work-items/w-own/gates/review/approve"),
+        ("POST", "/api/work-items/w-own/gates/review/reject"),
+        ("POST", "/api/work-items/w-own/pause"),
+        ("POST", "/api/work-items/w-own/resume"),
+        ("POST", "/api/work-items"),
         ("GET", "/api/work-items"),
         ("GET", "/api/worker-sessions/s-own/log"),
         ("POST", "/api/threads/t-own/comments"),

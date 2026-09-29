@@ -232,6 +232,37 @@ def _live_work_item_row(st, wid):
     return row
 
 
+def forbid_self_action(st, request, wid: str) -> None:
+    """403 when the caller names a worker session of `wid` itself: design §6
+    rule 2, a worker does not approve, reject, pause or resume its own item.
+
+    The server-side twin of `client.context._forbid_self_action`, for a
+    client other than `kraft` or the MCP server that honestly sends
+    `X-Kraft-Session-Id`. Consistency, not a security boundary: a caller
+    that leaves the header off passes, and an unsandboxed worker can. A
+    sandboxed one never reaches these routes (`worker.callback.ROUTES`).
+    An escalation turn is no worker (`identify_as_worker=False`), so it may.
+    """
+    sid = request.headers.get("x-kraft-session-id")
+    if not sid:
+        return
+    session = st.db.read(
+        lambda c: c.execute(
+            "SELECT work_item_id, hook_point FROM worker_sessions WHERE id = ?", (sid,)
+        ).fetchone()
+    )
+    if (
+        session is not None
+        and session["work_item_id"] == wid
+        and session["hook_point"] != executor.ESCALATION_HOOK
+    ):
+        raise HTTPException(
+            403,
+            f"a worker session cannot act on its own work item ({wid}). "
+            "Gates are where a human decides; report what you found instead.",
+        )
+
+
 def _reload_templates(st) -> None:
     st.library, st.invalid_library = load_library(st.templates_dir, st.skills_dir)
     lint_loaded(st)
