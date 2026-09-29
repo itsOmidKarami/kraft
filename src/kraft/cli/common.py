@@ -46,5 +46,5 @@ def repo_scope(ns: argparse.Namespace) -> str | None:
     if getattr(ns, "all", False):
         return None
     if getattr(ns, "repo", None):
-        return ns.repo
+        return client.absolute_path(ns.repo)
     return asyncio.run(client.resolve_repo())

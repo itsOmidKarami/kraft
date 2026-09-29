@@ -120,7 +120,7 @@ async def _start(app, repo: config_mod.RepoEntry, row: dict) -> str | None:
             "; ".join(getattr(st, "invalid_library", None) or ["templates/library.yaml"]),
         )
         return None
-    chain = deps.resolve_chain(st, repo.default_chain_template or "default")
+    chain = deps.resolve_chain(st, deps.chain_template_for(repo, None))
     if chain is None:
         logger.warning("auto-intake: %s has no valid chain template, skipping", repo.path)
         return None

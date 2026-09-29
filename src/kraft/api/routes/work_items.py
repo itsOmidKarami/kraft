@@ -38,9 +38,10 @@ class NewWorkItem(BaseModel):
     #: only a label.
     description: str = ""
     repo: str
-    #: None means no explicit template was chosen (Kraft-cd47) -- resolved to
-    #: the `default` template below, at lookup time, and stored as None so it
-    #: stays distinguishable from an item that named `chain_template:
+    #: None means no explicit template was chosen: the repo's
+    #: `default_chain_template` applies, else `default`
+    #: (`deps.chain_template_for`). Unchosen `default` is stored as None
+    #: (Kraft-cd47), distinguishable from an item that named `chain_template:
     #: "default"` outright.
     chain_template: str | None = None
     #: A workspace item (design 1g "Advanced · cross-repo"): the workspace
@@ -62,9 +63,11 @@ class NewWorkItem(BaseModel):
     #: `repo` — for a Kraft worker, always — and that is where the document it
     #: wants to hand over actually is (Kraft-85wk). The browser sends nothing.
     cwd: str | None = None
-    #: False creates the item without running it (design §6 rule 1). An agent
-    #: cannot spend tokens unattended; a human starts it from the board.
-    autostart: bool = True
+    #: False (the default) creates the item without running it (design §6
+    #: rule 1). An agent cannot spend tokens unattended, and neither does a
+    #: raw API caller that did not ask to (Kraft-9efnk.17); the board sends
+    #: it explicitly.
+    autostart: bool = False
     #: Arms agent gate review for this item's `auto_escalate` gates
     #: (Kraft-zr3s). On by default; `--no-auto-gate` opts out per item.
     auto_gate: bool = True
@@ -197,7 +200,10 @@ async def create_work_item(body: NewWorkItem, request: Request):
             "an agent cannot start the work it files: file it paused (no autostart) "
             "and a human starts it from the board",
         )
-    chain = deps.resolve_chain_or_422(st, body.chain_template)
+    chain_template = deps.chain_template_for(
+        deps.connected_or_422(st, body.repo), body.chain_template
+    )
+    chain = deps.resolve_chain_or_422(st, chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -208,7 +214,6 @@ async def create_work_item(body: NewWorkItem, request: Request):
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
-    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     attachments = _validated_attachments(body.repo, body.attachments, body.cwd)
@@ -275,12 +280,12 @@ async def create_work_item(body: NewWorkItem, request: Request):
             repo=body.repo,
             chain=chain,
             effective_policy=policy,
-            # The raw request value, not the resolved template's id (Kraft-cd47):
-            # None here means no explicit template was chosen, and must stay
-            # None in the row -- `intake`'s own default would otherwise store
-            # `template.id`, indistinguishable from an item that named
+            # `chain_template_for`'s value, not the resolved template's id
+            # (Kraft-cd47): None here means nothing chose a template, and must
+            # stay None in the row -- `intake`'s own default would otherwise
+            # store `template.id`, indistinguishable from an item that named
             # `chain_template: "default"` outright.
-            chain_template=body.chain_template,
+            chain_template=chain_template,
             bd_cwd=deps.bd_cwd(),
             target=target,
             repository_policies=per_repository,
@@ -391,13 +396,15 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    chain = deps.resolve_chain_or_422(st, body.chain_template)
+    chain_template = deps.chain_template_for(
+        deps.connected_or_422(st, body.repo), body.chain_template
+    )
+    chain = deps.resolve_chain_or_422(st, chain_template)
     if len(body.title) > beads_mod.MAX_TITLE:
         raise HTTPException(
             422,
             f"title is {len(body.title)} characters; the tracker's limit is {beads_mod.MAX_TITLE}",
         )
-    deps.connected_or_422(st, body.repo)
     if not Path(body.repo).is_dir():
         raise HTTPException(422, f"repo path does not exist: {body.repo}")
     policy = deps.item_policy_or_422(st, body.repo)
@@ -412,7 +419,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
             chain=chain,
             effective_policy=policy,
             repository_steering=repo_steering,
-            chain_template=body.chain_template,
+            chain_template=chain_template,
             bd_cwd=deps.bd_cwd(),
             status="paused",
         )

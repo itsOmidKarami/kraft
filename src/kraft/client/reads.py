@@ -443,7 +443,7 @@ async def reindex(repo: str | None = None) -> dict:
     `_post` only sends JSON bodies.
     """
     response = await transport._send(
-        "POST", "/index/rescan", params={"repo": repo} if repo else None
+        "POST", "/index/rescan", params={"repo": context.absolute_path(repo)} if repo else None
     )
     if response.status_code >= 400:
         raise ValueError(f"kraft {response.status_code}: {transport._detail(response)}")

@@ -309,7 +309,10 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
         help="the brief: what the work actually is, which the spec is written from",
     )
     create.add_argument("--repo", help="default: the repo you are standing in")
-    create.add_argument("--chain", default="default", help="chain template (default `default`)")
+    create.add_argument(
+        "--chain",
+        help="chain template (default: the repo's default_chain_template, else `default`)",
+    )
     create.add_argument(
         "--base-branch",
         metavar="BRANCH",

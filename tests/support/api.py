@@ -197,6 +197,7 @@ def _post_default(client, repo):
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "default",
+            "autostart": True,
         },
     ).json()["id"]
 
