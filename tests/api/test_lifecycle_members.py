@@ -22,7 +22,9 @@ def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
     r = client.post("/api/repos", json={"path": str(root), "setup_command": ""})
     assert r.status_code == 201, r.text
     item = {"title": "t", "repo": str(root), "workspace": "ws", "members": ["a"]}
-    wid = client.post("/api/work-items", json=item | {"chain_template": "default"}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json=item | {"chain_template": "default", "autostart": True}
+    ).json()["id"]
     _poll_events(client, wid, "gate_requested")
     branch = client.get(f"/api/work-items/{wid}").json()["branch"]
     worktree = Path(os.environ["KRAFT_RUN_DIR"]) / "worktrees" / wid
