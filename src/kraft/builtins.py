@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
@@ -75,7 +76,7 @@ def _commit_paths(worktree: Path, paths: list[str], message: str, base: str) -> 
     same failure seen from the other side), and the content is a file Kraft
     copied unmodified — there is nothing here for the hook to catch. No `-c
     user.email` override either: `ensure_worktree` pins identity into the
-    worktree (and its submodules) via `_pin_identity` at creation (Kraft-cppp),
+    worktree via `_pin_identity` at creation (Kraft-cppp),
     which is where every other commit on this branch gets its author.
 
     Best effort. A failure logs a warning and returns: a document that did not
@@ -314,7 +315,7 @@ def _uncarried_local_files(repo: Path, worktree: Path) -> list[str]:
 
 def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     """Resolve `user.name`/`user.email` from `repo` and write them into
-    `worktree`'s own git config, plus every submodule's separate gitdir.
+    `worktree`'s own git config.
 
     `ensure_worktree` otherwise never establishes a commit identity, relying
     on the worktree inheriting the repo's config -- true until it isn't: a
@@ -327,102 +328,143 @@ def _pin_identity(repo: Path, worktree: Path, work_item_id: str) -> None:
     is about to either fail or fabricate one, so failing worktree creation
     with the missing key named beats a push rejection eight nodes later.
 
-    A submodule's gitdir lives separately (under
-    `.git/worktrees/<id>/modules/...`) and does not inherit config the way
-    the main worktree does, so it needs the same pin repeated into it.
+    Never a member made by `_setup_submodules`: its config is the operator's
+    member repository's own, and Kraft writes nothing there (Kraft-ju36l, J3).
+    A session gets the root's identity as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
+    instead (`adapters.subprocess.run_task`). An old-layout member's separate
+    gitdir (`modules/<rel>`) is still pinned this way.
     """
     name = git_read(repo, "config", "--get", "user.name", expected_failure=True)
     email = git_read(repo, "config", "--get", "user.email", expected_failure=True)
     if not name or not email:
         missing = "user.name" if not name else "user.email"
         raise RuntimeError(f"no {missing} configured in {repo}; set it before Kraft can commit")
-
-    def pin(target: Path) -> None:
+    for key, value in (("user.name", name), ("user.email", email)):
         subprocess.run(
-            ["git", "-C", str(target), "config", "user.name", name],
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(target), "config", "user.email", email],
-            capture_output=True,
-            text=True,
+            ["git", "-C", str(worktree), "config", key, value], capture_output=True, text=True
         )
 
-    pin(worktree)
-    submodules = git_read(
-        worktree,
-        "submodule",
-        "foreach",
-        "--quiet",
-        "--recursive",
-        "echo $sm_path",
-        expected_failure=True,
-    )
-    for line in (submodules or "").splitlines():
-        line = line.strip()
-        if line:
-            pin(worktree / line)
+
+def _git_ok(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def _add_member(worktree: Path, rel: str, member_repo: Path, branch: str) -> None:
+    """Check member `rel` out as a linked worktree of its connected
+    repository `member_repo` (Kraft-ju36l, spec 3.1), on `branch` at the
+    commit the root's gitlink records.
+
+    Never `submodule update --init`: that puts the member's gitdir, config
+    and hooks under the root's worktree gitdir, which a sandboxed worker
+    writes. A linked worktree of `member_repo` reads config, hooks and
+    attributes only from `member_repo`'s common gitdir, the operator's.
+    `submodule init` enters nothing: it writes the url and `active` that
+    `submodule status` needs to count the member as initialized."""
+    init = _git_ok(worktree, "submodule", "init", "--", rel)
+    if init.returncode != 0:
+        raise RuntimeError(f"git submodule init failed for {rel}: {init.stderr.strip()}")
+    sha = git_read(worktree, "rev-parse", f"HEAD:{rel}", expected_failure=True)
+    if not sha:
+        raise RuntimeError(f"{rel} is not a gitlink in the root's HEAD")
+    have = ("cat-file", "-e", f"{sha}^{{commit}}")
+    for fetch in ((), ("fetch", "-q", "origin"), ("fetch", "-q", "origin", sha)):
+        if fetch:
+            _git_ok(member_repo, *fetch)
+        if _git_ok(member_repo, *have).returncode == 0:
+            break
+    else:
+        raise RuntimeError(
+            f"{member_repo} does not have {sha}, the commit {rel} points at, "
+            "and its origin would not give it"
+        )
+    target = worktree / rel
+    if not _sandbox.inside(worktree, rel) or not target.is_dir() or any(target.iterdir()):
+        raise RuntimeError(
+            f"{rel} in {worktree} is not the empty directory the checkout made; "
+            "Kraft checks a member out only into that"
+        )
+    _add_worktree(member_repo, target, branch, sha)
 
 
 async def _setup_submodules(
-    db, repo: Path, worktree: Path, branch: str, work_item_id: str, paths: list[str]
+    db,
+    repo: Path,
+    worktree: Path,
+    branch: str,
+    work_item_id: str,
+    members: list[tuple[str, str | None]],
+    repositories: Mapping[str, RepoEntry],
+    *,
+    sandboxed: bool,
 ) -> None:
-    """`git submodule update --init` only the declared paths (design 3 step 2
-    -- never blanket), check the item's branch out inside each one, and write
-    one `work_item_repos` row per repo -- deepest submodule first, root last
-    (3a) -- so the forge nodes later know what to open a merge request
-    against and in what order.
+    """Check out only the declared members (design 3 step 2 -- never
+    blanket), each on the item's branch, and write one `work_item_repos` row
+    per repo -- deepest submodule first, root last (3a) -- so the forge nodes
+    later know what to open a merge request against and in what order.
 
-    A submodule is a regular working copy once initialized, not a bare repo,
-    so getting the item's branch into it is a plain `checkout`/`checkout -b`
-    -- design 06's "git worktree add inside each submodule" is shorthand for
-    "this submodule ends up on the item's branch", not a second linked
-    worktree, which a submodule path does not support the way the root does.
+    A member naming a connected repository is a linked worktree of it
+    (`_add_member`), for every item, sandboxed or not. One with none -- an
+    item filed before workspaces (Kraft-zvqwl), or a member whose repository
+    is no longer connected -- keeps `submodule update --init` and a checkout
+    inside it, which leaves its gitdir in the root's worktree gitdir. A
+    sandboxed worker writes that, so a sandboxed item refuses the old way.
     """
-    ordered = store.merge_rank_order(paths)
-    init = await asyncio.to_thread(
-        subprocess.run,
-        # `-c protocol.file.allow=always`: git 2.38+ refuses a `file://`
-        # submodule URL by default (a supply-chain hardening default, not
-        # something specific to this repo's own submodules). A real remote is
-        # https/ssh and is unaffected; the fixtures this plan's own tests
-        # build (`make_repo_with_submodule`) use plain filesystem paths.
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-            "--",
-            *ordered,
-        ],
-        cwd=str(worktree),
-        capture_output=True,
-        text=True,
-    )
-    if init.returncode != 0:
-        detail = init.stderr.strip() or init.stdout.strip()
-        raise RuntimeError(f"git submodule update --init failed for {work_item_id}: {detail}")
-    for rank, rel in enumerate(ordered, start=1):
-        sub = worktree / rel
-        exists = git_read(
-            sub, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
+    ids = dict(members)
+    ordered = store.merge_rank_order(list(ids))
+    legacy = [rel for rel in ordered if ids[rel] is None or ids[rel] not in repositories]
+    if legacy and sandboxed:
+        raise RuntimeError(
+            f"{work_item_id} runs sandboxed, and no connected repository is known for "
+            f"{', '.join(legacy)}: Kraft checks a sandboxed item's members out only "
+            "from their connected repositories. Connect them and retry"
         )
-        checkout = await asyncio.to_thread(
+    if legacy:
+        init = await asyncio.to_thread(
             subprocess.run,
-            ["git", "checkout", branch] if exists else ["git", "checkout", "-b", branch],
-            cwd=str(sub),
+            # `-c protocol.file.allow=always`: git 2.38+ refuses a `file://`
+            # submodule URL by default (a supply-chain hardening default, not
+            # something specific to this repo's own submodules). A real remote is
+            # https/ssh and is unaffected; the fixtures this plan's own tests
+            # build (`make_repo_with_submodule`) use plain filesystem paths.
+            ["git", "-c", "protocol.file.allow=always", "submodule", "update", "--init"]
+            + ["--", *legacy],
+            cwd=str(worktree),
             capture_output=True,
             text=True,
         )
-        if checkout.returncode != 0:
-            detail = checkout.stderr.strip() or checkout.stdout.strip()
-            raise RuntimeError(
-                f"checkout of {branch!r} failed in submodule {rel} for {work_item_id}: {detail}"
+        if init.returncode != 0:
+            detail = init.stderr.strip() or init.stdout.strip()
+            raise RuntimeError(f"git submodule update --init failed for {work_item_id}: {detail}")
+    for rank, rel in enumerate(ordered, start=1):
+        sub = worktree / rel
+        if rel in legacy:
+            exists = git_read(
+                sub,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+                expected_failure=True,
             )
-        await asyncio.to_thread(_pin_identity, repo, sub, work_item_id)
+            checkout = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "checkout", branch] if exists else ["git", "checkout", "-b", branch],
+                cwd=str(sub),
+                capture_output=True,
+                text=True,
+            )
+            if checkout.returncode != 0:
+                detail = checkout.stderr.strip() or checkout.stdout.strip()
+                raise RuntimeError(
+                    f"checkout of {branch!r} failed in submodule {rel} for {work_item_id}: {detail}"
+                )
+            await asyncio.to_thread(_pin_identity, repo, sub, work_item_id)
+        else:
+            member_repo = Path(repositories[ids[rel]].path)
+            try:
+                await asyncio.to_thread(_add_member, worktree, rel, member_repo, branch)
+            except RuntimeError as exc:
+                raise RuntimeError(f"member {rel} of {work_item_id}: {exc}") from exc
         await db.write(
             lambda c, p=str(sub), r=rel, rk=rank: store.add_repo(
                 c,
@@ -460,6 +502,27 @@ async def _discard_worktree(repo: Path, worktree: Path) -> str | None:
     return None if not worktree.exists() else f"{worktree} still present"
 
 
+def _add_worktree(repo: Path, path: Path, branch: str, start: str | None) -> None:
+    """`git worktree add` of `branch` at `path` in `repo`: the branch checked
+    out if `repo` already has it (a rejected gate removes a worktree and keeps
+    its branch), else created at `start`. Raises `RuntimeError` with git's
+    stderr. The root and every workspace member are made by this one call.
+
+    A sha for `start`, not `origin/<default>`: a remote-tracking start point
+    would make git set it as the new branch's upstream. The prune first: a
+    worktree directory deleted out from under git leaves a stale
+    administrative entry that makes `worktree add` refuse the same path."""
+    exists = git_read(
+        repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", expected_failure=True
+    )
+    subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True)
+    args = ["git", "worktree", "add", str(path)]
+    args += [branch] if exists else ["-b", branch, *([start] if start else [])]
+    done = subprocess.run(args, cwd=repo, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.strip() or done.stdout.strip())
+
+
 async def ensure_worktree(
     db,
     run_dirs,
@@ -469,6 +532,7 @@ async def ensure_worktree(
     repo_entry: RepoEntry | None,
     attachments: list[dict] | None = None,
     sandbox: dict | None = None,
+    repositories: Mapping[str, RepoEntry] | None = None,
 ) -> Path:
     """The item's worktree, created if it is not there yet, with intake
     attachments copied in.
@@ -528,19 +592,6 @@ async def ensure_worktree(
     # before intake committed the row — tests do, and `env_setup` is reachable
     # that way — and then the id is all there is to name a branch with.
     branch = store.branch_for(row) if row is not None else f"kraft/{work_item_id}"
-    exists = git_read(
-        Path(repo),
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"refs/heads/{branch}",
-        expected_failure=True,
-    )
-    # A worktree directory deleted out from under git leaves a stale
-    # administrative entry that makes `worktree add` refuse the same path.
-    await asyncio.to_thread(
-        subprocess.run, ["git", "worktree", "prune"], cwd=repo, capture_output=True, text=True
-    )
     # Not a skip, and before `worktree add`: `source` is Kraft's own copy since
     # Kraft-eqgn, so a missing one means Kraft lost it, and the gate it justified
     # is trimmed. A worktree made anyway would take the early return above on a
@@ -553,20 +604,13 @@ async def ensure_worktree(
                 f"storage at {src}; its gate was trimmed at intake, so put the "
                 f"{a['kind']} back at {src} and retry the work item"
             )
-    args = ["git", "worktree", "add"]
-    # A sha, not `origin/<default>`: a remote-tracking start point would make
-    # git set it as the new branch's upstream.
-    if exists:
-        args += [str(worktree), branch]
-    else:
-        args += [str(worktree), "-b", branch] + ([head] if head else [])
-    done = await asyncio.to_thread(subprocess.run, args, cwd=repo, capture_output=True, text=True)
-    if done.returncode != 0:
+    try:
+        await asyncio.to_thread(_add_worktree, Path(repo), worktree, branch, head)
+    except RuntimeError as exc:
         # Raised, not returned: this runs outside a session, so there is no
         # session status to carry the failure. `kraft.api.deps.guard` turns it into
         # needs_human with the git stderr in the reason.
-        detail = done.stderr.strip() or done.stdout.strip()
-        raise RuntimeError(f"git worktree add failed for {work_item_id}: {detail}")
+        raise RuntimeError(f"git worktree add failed for {work_item_id}: {exc}") from exc
     await asyncio.to_thread(_pin_identity, Path(repo), worktree, work_item_id)
     await asyncio.to_thread(
         _copy_attachments, Path(repo), worktree, attachments or [], work_item_id, base
@@ -596,30 +640,48 @@ async def ensure_worktree(
         left = await _discard_worktree(Path(repo), worktree)
         suffix = f" (and its worktree could not be removed: {left})" if left else ""
         raise RuntimeError(f"{exc}{suffix}") from exc
-    mounts = item_mounts(row) if row is not None else []
-    if mounts:
-        await _setup_submodules(db, Path(repo), worktree, branch, work_item_id, mounts)
+    members = item_members(row) if row is not None else []
+    if members:
+        await _setup_submodules(
+            db,
+            Path(repo),
+            worktree,
+            branch,
+            work_item_id,
+            members,
+            repositories or {},
+            sandboxed=sandbox is not None,
+        )
     return worktree
 
 
-def item_mounts(row) -> list[str]:
-    """The submodule paths `row`'s checkout assembles: exactly the members its
-    frozen target selected, at their frozen mount paths (`workspace-tasks-
-    have-an-assembled-checkout`) -- typed membership, never whatever
-    `.gitmodules` lists or the agent later touches. `row` carries
-    `materialized_chain` and `submodules`.
+def item_members(row) -> list[tuple[str, str | None]]:
+    """`(mount path, repository id)` for each submodule `row`'s checkout
+    assembles: exactly the members its frozen target selected, at their
+    frozen mount paths (`workspace-tasks-have-an-assembled-checkout`) --
+    typed membership, never whatever `.gitmodules` lists or the agent later
+    touches. `row` carries `materialized_chain` and `submodules`.
 
     Kraft-zvqwl: an item keeps the checkout shape it was born with. One filed
     before workspaces has a single-repository target and its submodules in the
-    `submodules` column; a worktree rebuilt for it after the upgrade (a retry,
-    a rejected gate re-entering) assembles them still. A V1 repository target
-    never writes the column."""
+    `submodules` column, with no repository id; a worktree rebuilt for it
+    after the upgrade (a retry, a rejected gate re-entering) assembles them
+    still. A V1 repository target never writes the column."""
     snapshot = store.materialized_chain_of(row)
-    mounts = [m.path for m in snapshot.target.mounts.values()] if snapshot is not None else []
+    members: list[tuple[str, str | None]] = (
+        [(m.path, m.repository) for m in snapshot.target.mounts.values()]
+        if snapshot is not None
+        else []
+    )
     if row["submodules"] and (snapshot is None or snapshot.target.kind == "repository"):
-        mounts = json.loads(row["submodules"])
-        logger.info("%s: filed before workspaces; its submodules are %s", row["id"], mounts)
-    return mounts
+        members = [(p, None) for p in json.loads(row["submodules"])]
+        logger.info("%s: filed before workspaces; its submodules are %s", row["id"], members)
+    return members
+
+
+def item_mounts(row) -> list[str]:
+    """The mount paths of `item_members(row)`."""
+    return [p for p, _ in item_members(row)]
 
 
 async def run_setup_command(

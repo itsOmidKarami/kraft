@@ -1766,6 +1766,7 @@ async def run_once(
             attachments=entry.attachments_of(row),
             repo_entry=launch.repo_entry if launch else None,
             sandbox=sandbox,
+            repositories=launch.repositories if launch else None,
         )
         # What the deleted `env_setup` node used to do, as implicit runtime
         # preparation: V1 has no builtin action for it, and every node from the

@@ -4,7 +4,7 @@ that file one."""
 import dataclasses
 
 from support import worktree as wtree
-from support.harness import _git, make_repo, make_repo_with_submodule, v1_chain
+from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
 
 
 def workspace_target(
@@ -44,13 +44,15 @@ async def workspace_item(
     `repos/pkg2` when `second`), filed as a workspace item selecting them under
     root-pointer policy `pointer`, on one exec node of `tasks` (or the chain
     `nodes`); its checkout assembled. Returns `(row, node, worktree)`."""
-    root, _ = make_repo_with_submodule(tmp_path)
+    root, pkg = make_repo_with_submodule(tmp_path)
     mounts = {"pkg": "repos/pkg"}
+    connected = {"pkg": pkg}
     if second:
         pkg2 = make_repo(tmp_path, name="pkg2")
         _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(pkg2), "repos/pkg2")
         _git(root, "commit", "-qm", "add a second submodule")
         mounts["pkg2"] = "repos/pkg2"
+        connected["pkg2"] = pkg2
     chain = v1_chain(
         nodes or [{"id": "n", "kind": "exec", "tasks": tasks}],
         repo=root,
@@ -78,6 +80,17 @@ async def workspace_item(
         _git(tmp_path, "clone", "-q", "--bare", str(root), str(tmp_path / "root-origin.git"))
         _git(root, "remote", "add", "origin", str(tmp_path / "root-origin.git"))
     await wtree.make_item(database, root, materialized_chain=chain.to_json(), **columns)
-    worktree = await wtree.ensure(database, run_dirs, root)
+    # Each member checked out of its connected repository, as the walk does
+    # with `launch.repositories` (Kraft-ju36l); a legacy item has no ids. The
+    # operator's clone of each, whose `origin` is the repository the root's
+    # `.gitmodules` names -- what a member's pushes and fetches reach.
+    repositories = {}
+    for m, origin in connected.items():
+        clone = tmp_path / f"{m}-connected"
+        _git(tmp_path, "clone", "-q", str(origin), str(clone))
+        repositories[m] = entry_of({"id": m, "path": str(clone)})
+    worktree = await wtree.ensure(
+        database, run_dirs, root, repositories=None if legacy else repositories
+    )
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     return row, chain.chain.nodes[0], worktree

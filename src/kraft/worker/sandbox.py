@@ -135,6 +135,18 @@ def linked_gitdirs(cwd: Path) -> tuple[Path, Path] | None:
     return gitdir.parent.parent, gitdir
 
 
+def inside(worktree: Path, rel: str) -> bool:
+    """Whether `worktree/rel` is genuinely inside `worktree`: it resolves
+    under it, and no component from `worktree` down to `rel` is a symlink a
+    worker could have swapped in to point Kraft somewhere else."""
+    path = worktree
+    for part in Path(rel).parts:
+        path = path / part
+        if os.path.islink(path):
+            return False
+    return (worktree / rel).resolve().is_relative_to(worktree.resolve())
+
+
 #: What a ref store mounts from the real common gitdir, read-only: files
 #: and directories git reads but a worker has no business writing.
 SHADOW_FILES = ("HEAD", "config", "shallow")

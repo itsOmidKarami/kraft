@@ -763,6 +763,13 @@ async def run_task(
         current_status = await db.write(lambda c: store.session_status(c, session_id))
         if current_status != "pending":
             return current_status
+        if backend is None:
+            # The root's commit identity, under everything the repository and
+            # caller set. A workspace member is a worktree of its connected
+            # repository, where Kraft writes no identity (Kraft-ju36l), so a
+            # commit there gets the root's from here, as the sandbox does.
+            identity = await asyncio.to_thread(_sandbox.git_identity, Path(cwd))
+            full_env = {**identity, **full_env}
         # A sandbox's client may run somewhere of the backend's own, not in the
         # worktree: nothing it leaves behind lands where a worker commits.
         client_cwd = backend.client_cwd(session_id) if backend is not None else None
