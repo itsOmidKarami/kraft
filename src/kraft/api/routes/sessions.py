@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from kraft import auth as auth_mod
-from kraft import escalate, events, store
+from kraft import escalate, events, permission_hooks, store
+from kraft import harness as harness_mod
 from kraft import logs as logs_mod
 from kraft.adapters import agent as _agent
 from kraft.api import api_router, deps, perimeter
@@ -255,6 +256,54 @@ async def permission_request(sid: str, body: PermissionAsk, request: Request):
     if decision == "allow":
         return {"behavior": "allow", "updatedInput": body.input}
     return {"behavior": "deny", "message": reason}
+
+
+class HookCall(BaseModel):
+    #: A `permission_hooks.TRANSLATORS` key.
+    harness: str
+    #: What the harness piped to its hook, as it was.
+    stdin: str
+
+
+@api_router.post("/worker-sessions/{sid}/permission-hook")
+async def permission_hook(sid: str, body: HookCall, request: Request):
+    """`kraft admin permission-hook`, run by the daemon for a session whose
+    hook cannot run Kraft itself: a sandboxed one, through the worker API's
+    `kraft` shim (sandbox part 2, P5). The same `permission_hooks.answer`
+    the host's hook runs, asking this server's gate in-process; the reply
+    is its `(body, code)` pair.
+
+    Fail-closed is the session's, never the caller's: its task's policy
+    holds an allowlist (what sets `KRAFT_PERMISSION_FAIL_CLOSED` on a host
+    launch), or cannot be resolved at all -- not knowing is not a grant."""
+    if body.harness not in permission_hooks.TRANSLATORS:
+        raise HTTPException(422, f"no permission hook for harness {body.harness!r}")
+    st = request.app.state
+    row = st.db.read(
+        lambda c: c.execute(
+            "SELECT work_item_id, node_id, hook_point FROM worker_sessions WHERE id = ?", (sid,)
+        ).fetchone()
+    )
+    if row is None:
+        raise HTTPException(404, "unknown session")
+    try:
+        fail_closed = _resolved_tools(st, row)[0] is not None
+    except Exception:  # noqa: BLE001 -- the gate logs why when it is asked
+        fail_closed = True
+    provider = harness_mod.load(None).valid.get(body.harness)
+
+    async def ask(tool, input, tool_use_id, **kw) -> dict:
+        asked = PermissionAsk(tool_name=tool, input=input, tool_use_id=tool_use_id, **kw)
+        return await permission_request(sid, asked, request)
+
+    out, code = await permission_hooks.answer(
+        body.harness,
+        body.stdin,
+        provider.tool_names if provider is not None else {},
+        fail_closed=fail_closed,
+        ask=ask,
+    )
+    return {"body": out, "code": code}
 
 
 @api_router.websocket("/ws/events")

@@ -94,18 +94,20 @@ TRANSLATORS: dict[str, Translator] = {
 Ask = Callable[..., Awaitable[dict]]
 
 
-def answer_hook(
+async def answer(
     harness: str,
     stdin: str,
     tool_names: Mapping[str, tuple[str, ...]],
     *,
     fail_closed: bool,
-    ask: Ask | None = None,
+    ask: Ask,
 ) -> tuple[str, int]:
-    """Answer one hook call. `unresolved` (the gate could not read the
-    task's policy, and was not told `fail_closed`) is no opinion; a Kraft
-    that cannot be reached (`unavailable`), an unreadable payload or any
-    other failure is deny when `fail_closed`, else no opinion."""
+    """Answer one hook call, asking the gate through `ask`. `unresolved` (the
+    gate could not read the task's policy, and was not told `fail_closed`)
+    is no opinion; a Kraft that cannot be reached (`unavailable`), an
+    unreadable payload or any other failure is deny when `fail_closed`, else
+    no opinion. The daemon's own entry point (a sandboxed session's hook,
+    through the worker API); `answer_hook` is the host's."""
     t = TRANSLATORS[harness]
     failed: Answer = "deny" if fail_closed else "no_opinion"
     try:
@@ -116,23 +118,17 @@ def answer_hook(
     if call is None:
         return t.render("no_opinion", "")
     cli_tool, input, tool_use_id = call
-    if ask is None:
-        from kraft.client import reads
-
-        ask = reads.permission_request
     tool, *also = tool_names.get(cli_tool, (cli_tool,))
     try:
-        got = asyncio.run(
-            ask(
-                tool,
-                input,
-                tool_use_id,
-                also=tuple(also),
-                mode="enforce",
-                harness=harness,
-                cli_tool=cli_tool,
-                fail_closed=fail_closed,
-            )
+        got = await ask(
+            tool,
+            input,
+            tool_use_id,
+            also=tuple(also),
+            mode="enforce",
+            harness=harness,
+            cli_tool=cli_tool,
+            fail_closed=fail_closed,
         )
         behavior, reason = got.get("behavior"), got.get("message", "")
     except Exception as exc:  # noqa: BLE001
@@ -145,3 +141,21 @@ def answer_hook(
         "no_opinion" if behavior == "unresolved" else failed,
         f"Kraft's permission gate is {behavior}",
     )
+
+
+def answer_hook(
+    harness: str,
+    stdin: str,
+    tool_names: Mapping[str, tuple[str, ...]],
+    *,
+    fail_closed: bool,
+    ask: Ask | None = None,
+) -> tuple[str, int]:
+    """`answer`, run to completion, asking the server over HTTP as this
+    session (`KRAFT_SESSION_ID`) unless given `ask`: what `kraft admin
+    permission-hook` runs on the host."""
+    if ask is None:
+        from kraft.client import reads
+
+        ask = reads.permission_request
+    return asyncio.run(answer(harness, stdin, tool_names, fail_closed=fail_closed, ask=ask))
