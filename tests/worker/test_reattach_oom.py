@@ -11,6 +11,7 @@ import pytest
 from support.harness import fake_docker_bin
 
 from kraft.worker import reattach
+from kraft.worker.backends import docker
 
 _CHAIN = """
 - id: implementation
@@ -52,12 +53,27 @@ async def test_a_session_found_dead_after_its_limit_killed_it_stops_naming_the_l
 
     assert summary.resolved_from_file == ["s1"]
     assert [r["status"] for r in item.sessions()] == ["config_error"]
-    assert _killed(item) == [{"session_id": "s1", "memory": "32m"}]
+    assert _killed(item) == [{"session_id": "s1", "memory": "32m", "confirmed": True}]
 
 
+@pytest.mark.parametrize(
+    ("inspect", "paused", "confirmed"),
+    [
+        ("true 33554432 137", False, True),
+        ("false 33554432 137", False, False),
+        ("false 33554432 137", True, None),
+        ("true 33554432 137", True, True),
+    ],
+    ids=["confirmed", "unconfirmed", "kraft-stopped-it", "kraft-stopped-it-but-flagged"],
+)
 async def test_an_adopted_session_its_limit_killed_stops_naming_the_limit(
-    item_on, database, run_dirs, oom_killed
+    item_on, database, run_dirs, oom_killed, tmp_path, monkeypatch, inspect, paused, confirmed
 ):
+    """Docker can drop its OOM flag, so exit 137 under a limit counts
+    unconfirmed -- unless Kraft stopped the session itself, which marks the
+    row `paused` before it signals: then 137 may be Kraft's own doing."""
+    monkeypatch.setattr(docker, "OOM_FLAG_GRACE_S", 0)
+    (tmp_path / "inspect").write_text(inspect + "\n")
     item = await item_on(_CHAIN, "implementation")
     # Lives until its stdin closes, so it is still there to adopt.
     proc = subprocess.Popen(
@@ -74,10 +90,15 @@ async def test_an_adopted_session_its_limit_killed_stops_naming_the_limit(
         )
         _, adopted = await reattach.reattach(database, run_dirs)
         assert list(adopted) == ["s1"]
+        if paused:
+            await database.write(
+                lambda c: c.execute("UPDATE worker_sessions SET status = 'paused'")
+            )
     finally:
         proc.stdin.close()
         proc.wait()
     await adopted["s1"]
 
-    assert [r["status"] for r in item.sessions()] == ["config_error"]
-    assert _killed(item) == [{"session_id": "s1", "memory": "32m"}]
+    recorded = {"session_id": "s1", "memory": "32m", "confirmed": confirmed}
+    assert _killed(item) == ([] if confirmed is None else [recorded])
+    assert item.sessions()[0]["status"] == ("paused" if paused else "config_error")

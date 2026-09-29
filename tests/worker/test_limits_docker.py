@@ -87,7 +87,12 @@ async def test_a_memory_hog_is_killed_by_its_limit_and_recorded(
         for e in database.read(lambda c: events.read_after(c, 0, "w1"))
         if e["type"] == sp.SANDBOX_OOM_KILLED
     ]
-    assert killed == [{"session_id": "s-hog", "memory": "32m"}]
+    # Docker on cgroup v2 can drop its OOM flag (moby#41929): then the kill
+    # is recorded unconfirmed, the stop the same.
+    assert killed in (
+        [{"session_id": "s-hog", "memory": "32m", "confirmed": confirmed}]
+        for confirmed in (True, False)
+    )
     # Asked, then removed by name: nothing is left behind without `--rm`.
     gone = subprocess.run(
         [runtime.cli, "inspect", docker.container_name("s-hog")], capture_output=True

@@ -750,10 +750,11 @@ async def run_setup_command(
                 finally:
                     if network:
                         await _subprocess.close_egress(backend, setup_id)
+    # Kraft never stops a setup command itself, so an unconfirmed kill counts.
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
             f"setup command for {worktree.name} failed: a process in the sandbox was killed "
-            f"by its memory limit ({oom}): {cmd!r}; raise the sandbox's resources.memory"
+            f"{_subprocess.oom_cause(oom)}: {cmd!r}; raise the sandbox's resources.memory"
         )
     if done.returncode != 0:
         detail = done.stderr.strip() or done.stdout.strip()
