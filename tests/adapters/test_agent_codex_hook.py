@@ -43,7 +43,7 @@ def test_a_codex_launch_with_deny_tools_carries_its_trusted_hook(run, tmp_path):
     seen = _codex(run, tmp_path, deny_tools=("Bash",))
     cmd = seen["cmd"]
     hook, state = _hook_flags(cmd)
-    assert cmd[2:7] == ["exec", "-c", hook, "-c", state]
+    assert cmd[2:9] == ["exec", "-c", hook, "-c", "features.hooks=true", "-c", state]
     assert hook.startswith("hooks.PreToolUse=") and "permission-hook codex" in hook
     assert state.startswith("hooks.state=") and "trusted_hash=" in state
     assert "Bash" not in cmd
@@ -59,7 +59,17 @@ def test_a_codex_launch_under_an_allowlist_runs_fail_closed(run, tmp_path):
 def test_a_codex_resume_keeps_the_hook(run, tmp_path):
     cmd = _codex(run, tmp_path, deny_tools=("Bash",), resume_session_id="thread-1")["cmd"]
     hook, state = _hook_flags(cmd)
-    assert cmd[2:9] == ["exec", "resume", "thread-1", "-c", hook, "-c", state]
+    assert cmd[2:11] == [
+        "exec",
+        "resume",
+        "thread-1",
+        "-c",
+        hook,
+        "-c",
+        "features.hooks=true",
+        "-c",
+        state,
+    ]
 
 
 def test_a_codex_launch_with_nothing_to_enforce_gets_no_hook(run, tmp_path, monkeypatch):

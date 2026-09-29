@@ -130,12 +130,27 @@ def test_codex_flags_install_kraft_hook_trusted_by_the_hash_codex_lists(fake_cod
         'hooks.PreToolUse=[{hooks=[{type="command",'
         'command="/py -m kraft admin permission-hook codex",timeout=10}]}]',
         "-c",
+        "features.hooks=true",
+        "-c",
         'hooks.state={"/<session-flags>/config.toml:pre_tool_use:0:0"='
-        f'{{trusted_hash="{digest}"}}}}',
+        f'{{trusted_hash="{digest}",enabled=true}}}}',
     )
     # Listed once for the hash, once more to see codex trusts it.
     first, check = fake_codex()
-    assert first == ["app-server", *flags[:2]] and check == ["app-server", *flags]
+    assert first == ["app-server", *flags[:4]] and check == ["app-server", *flags]
+
+
+@pytest.mark.parametrize("planted", ["disabled", "hooks-off"])
+def test_a_worker_planted_codex_config_cannot_switch_the_hook_off(
+    fake_codex, monkeypatch, tmp_path, planted
+):
+    """The config under a worker's HOME is a layer below `-c`: the launch's
+    own flags list the hook enabled and trusted whatever it says, and the
+    launch carries the same flags, so an edit after the check changes
+    nothing."""
+    monkeypatch.setenv("FAKE_CODEX_PLANTED", planted)
+    flags = asyncio.run(hi.codex_hook_flags(FAKE_CODEX, CODEX_ARGV, tmp_path))
+    assert "features.hooks=true" in flags and flags[-1].endswith(",enabled=true}}")
 
 
 def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
@@ -153,6 +168,7 @@ def test_codex_flags_are_cached_per_binary_and_command(fake_codex, tmp_path):
         ("hang", "no hooks/list within 2s"),
         ("unlisted", "did not list"),
         ("distrust", "did not trust"),
+        ("stuck-disabled", "not enabled"),
     ],
 )
 def test_codex_that_cannot_trust_the_hook_is_an_error(

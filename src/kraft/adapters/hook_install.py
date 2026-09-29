@@ -111,6 +111,8 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
 # the image's, asked in a container (`runner`), never the host's.
 
 CODEX_TRUST_TIMEOUT = 15.0
+#: `features.hooks = false` in a lower config layer lists no hook at all.
+_HOOKS_ON = "features.hooks=true"
 _codex_flags: dict[tuple, tuple[str, ...]] = {}
 
 
@@ -198,13 +200,19 @@ async def codex_hook_flags(
         return _codex_flags[key]
     runner = runner or []
     try:
-        found = await _codex_hook(exe, [hook], cwd, command, runner)
+        found = await _codex_hook(exe, [hook, _HOOKS_ON], cwd, command, runner)
+        # `enabled` too: a `[hooks.state."<key>"] enabled = false` in the
+        # config under a worker-writable HOME is a lower layer than `-c`,
+        # and would switch the hook off with its trust intact (measured).
         state = (
-            f"hooks.state={{{_toml(found['key'])}={{trusted_hash={_toml(found['currentHash'])}}}}}"
+            f"hooks.state={{{_toml(found['key'])}="
+            f"{{trusted_hash={_toml(found['currentHash'])},enabled=true}}}}"
         )
-        listed = await _codex_hook(exe, [hook, state], cwd, command, runner)
+        listed = await _codex_hook(exe, [hook, _HOOKS_ON, state], cwd, command, runner)
         if listed.get("trustStatus") != "trusted":
             raise CodexTrustError("codex did not trust Kraft's hook with the hash it listed")
+        if listed.get("enabled") is not True:
+            raise CodexTrustError("codex listed Kraft's hook as not enabled")
     except CodexTrustError:
         raise
     except TimeoutError as exc:
@@ -213,7 +221,9 @@ async def codex_hook_flags(
         ) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise CodexTrustError(f"`{shlex.join(exe)} app-server`: {exc!r}") from exc
-    flags = ("-c", hook, "-c", state)
+    # The launch carries exactly the flags checked: a sibling session editing
+    # the shared HOME after the check cannot turn the hook off.
+    flags = ("-c", hook, "-c", _HOOKS_ON, "-c", state)
     if key is not None:
         _codex_flags[key] = flags
     return flags
