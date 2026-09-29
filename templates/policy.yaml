@@ -40,8 +40,8 @@ default:             { attempts: 3, wall_clock_s: 3600 }
 findings:
   loop_severities: [critical, important]
 
-# Spend caps, in dollars, both off by default. A cap refuses to START the next
-# agent task; it cannot interrupt one that is already running, because the agent
+# Spend caps, in dollars. This file turns both on; delete a key to turn that
+# cap off (a missing key is no cap). A cap refuses to START the next agent task; it cannot interrupt one that is already running, because the agent
 # CLI only reports its cost when the session exits. Overshoot is bounded by the
 # cost of one task, not by the cap.
 budget:
@@ -64,7 +64,7 @@ archive:
   after_days: 30
 
 # Fire a work item from a schedule instead of typing into `kraft item create`
-# (Kraft-859) -- always files the item paused, same as manual intake. Off by
+# -- always files the item paused, same as manual intake. Off by
 # default (no triggers below means no timer, no tick); uncomment and edit to
 # add one.
 # triggers:
@@ -166,7 +166,6 @@ archive:
 #   tasks:     { time_cap_minutes: 90 }   # the shipped implementer sets 120
 # maxima:
 #   timeout_minutes: 180
-#   allowed_tools: [git, shell, editor]
 #   allowed_harnesses: [codex, claude]
 #   work_item: { time_cap_minutes: 1440, token_budget: 2000000, budget_usd: 25 }
 #   tasks:     { time_cap_minutes: 240, total_time_cap_minutes: 10080 }  # a week: the seeded approval wait's 7d

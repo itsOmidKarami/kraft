@@ -3,6 +3,7 @@
   "name": "kraft-lite",
   "version": "1.1.0",
   "description": "Run a Kraft chain in this session: ordered nodes, human gates, capped fix loops. No orchestrator.",
+  "license": "Apache-2.0",
   "author": {
     "name": "Omid Karami",
     "url": "https://github.com/itsOmidKarami"
