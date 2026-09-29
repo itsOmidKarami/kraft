@@ -466,7 +466,17 @@ async def _every_member_host_call(ws, database) -> None:
     _w(ws.m.parent, "clone", "-q", str(ws.m_origin), str(moved))
     (moved / "upstream.txt").write_text("landed meanwhile\n")
     _w(moved, "add", "upstream.txt")
-    _w(moved, "commit", "-q", "-m", "origin main moves on")
+    _w(
+        moved,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "-m",
+        "origin main moves on",
+    )
     _w(moved, "push", "-q", "origin", "main")
     await database.write(
         lambda c: c.execute(
