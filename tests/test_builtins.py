@@ -419,6 +419,11 @@ _ONE_NODE = [
 ]
 
 
+def _members(sub):
+    """`repositories` connecting member `pkg` at `sub`, as `LaunchContext` has them."""
+    return {"pkg": entry_of({"id": "pkg", "path": str(sub)})}
+
+
 async def test_a_workspace_item_assembles_its_selected_members_each_on_the_items_branch(
     tmp_path, database, run_dirs
 ):
@@ -427,15 +432,14 @@ async def test_a_workspace_item_assembles_its_selected_members_each_on_the_items
     selected member at its frozen mount path, and every selected repository
     -- members and the root -- is on the item's branch, one row each so the
     forge nodes know what to publish and in what order."""
-    root, _sub = make_repo_with_submodule(tmp_path)
+    root, sub = make_repo_with_submodule(tmp_path)
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
 
-    worktree = await wtree.ensure(database, run_dirs, root)
+    worktree = await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
 
     branch = wtree.branch(database)
     for checkout in (worktree, worktree / "repos" / "pkg"):
         assert git_read(checkout, "branch", "--show-current") == branch
-    assert (worktree / "repos" / "pkg" / ".git").exists(), "the member is initialized"
     repos = database.read(lambda c: store.repos_for(c, "w1"))
     assert [(r["role"], r["path"]) for r in repos] == [
         ("submodule", str(worktree / "repos" / "pkg")),
@@ -488,32 +492,24 @@ async def test_ensure_worktree_never_runs_a_blanket_submodule_init(
     tmp_path, monkeypatch, database, run_dirs
 ):
     """Global constraint: only the selected members' mount paths, never every
-    submodule in .gitmodules (design §3 step 2)."""
-    root, _sub = make_repo_with_submodule(tmp_path)
+    submodule in .gitmodules (design §3 step 2) -- and no `submodule` command
+    at all: `update` would clone a member's gitdir under the root's worktree
+    gitdir, and `init` copies the worktree's `.gitmodules` into the root
+    repository's config (Kraft-ju36l)."""
+    root, sub = make_repo_with_submodule(tmp_path)
     calls: list[list[str]] = []
     real_run = subprocess.run
 
     def spy(args, **kw):
-        if "submodule" in args and "update" in args:
+        if "submodule" in args:
             calls.append(args)
         return real_run(args, **kw)
 
     monkeypatch.setattr(kraft_builtins.subprocess, "run", spy)
 
     await _workspace_item(database, root, {"pkg": "repos/pkg"})
-    await wtree.ensure(database, run_dirs, root)
-    assert calls == [
-        [
-            "git",
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-            "--",
-            "repos/pkg",
-        ]
-    ]
+    await wtree.ensure(database, run_dirs, root, repositories=_members(sub))
+    assert calls == []
 
 
 async def test_ensure_worktree_raises_when_git_fails(tmp_path, database, run_dirs):

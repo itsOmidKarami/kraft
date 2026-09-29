@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from kraft.adapters.forge.models import ForgeError
@@ -231,7 +231,13 @@ async def assert_clean(repo: Path, base: str) -> None:
 
 
 async def commit_stragglers(
-    repo: Path, *, branch: str, base: str, message: str, mounts: Collection[str] = ()
+    repo: Path,
+    *,
+    branch: str,
+    base: str,
+    message: str,
+    mounts: Collection[str] = (),
+    identity: Mapping[str, str] | None = None,
 ) -> bool:
     """Commit whatever an agent left behind in the worktree. True if it did.
 
@@ -254,6 +260,9 @@ async def commit_stragglers(
     agent moved in a submodule nobody declared is left uncommitted for
     `assert_clean` to name, rather than swept into the merge request.
     """
+    # The commit is Kraft's, as `identity` (the root's): a member's connected
+    # repository may have none, and Kraft writes none there (Kraft-ju36l).
+    env = {**os.environ, **identity} if identity else None
     nested = await asyncio.to_thread(sandbox.nested_repos, repo) or {}
     pathspec = [
         *await work_product_pathspec(repo, base),
@@ -277,7 +286,7 @@ async def commit_stragglers(
         assert_on_branch(repo, branch)
         await run_git(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
         try:
-            await run_git(repo, ["git", "commit", "-m", message])
+            await run_git(repo, ["git", "commit", "-m", message], env=env)
         except ForgeError:
             # A commit hook that reformats what it is given exits non-zero with the
             # files rewritten under it. Re-adding takes its edits; --no-verify then
@@ -285,7 +294,7 @@ async def commit_stragglers(
             # point of this function. A hook that fails for any other reason loses
             # nothing either -- the commit is what keeps the work reachable.
             await run_git(repo, ["git", *ignore_args, "add", "-A", "--", *pathspec])
-            await run_git(repo, ["git", "commit", "--no-verify", "-m", message])
+            await run_git(repo, ["git", "commit", "--no-verify", "-m", message], env=env)
     return True
 
 

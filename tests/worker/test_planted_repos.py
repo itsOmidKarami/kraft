@@ -243,13 +243,18 @@ def test_an_unsandboxed_item_never_even_looks(repo, monkeypatch):
     assert calls == []
 
 
-def test_the_walk_entry_guard_delegates_a_plain_item_to_the_planted_scan(repo):
-    """With no declared submodules, `refuse_sandboxed_submodules` (the walk
-    and the doors) stops on a planted repository exactly as dispatch does."""
-    base = _git(repo, "rev-parse", "HEAD")
-    _nested(repo, "vendor/x")
-    with pytest.raises(RuntimeError, match="vendor/x"):
-        stops.refuse_sandboxed_submodules(_row(repo, base), _launch(repo, _SANDBOX), repo)
+def test_an_unreadable_repos_yaml_stops_an_item_with_members_rather_than_reads_as_no_sandbox(
+    repo,
+):
+    """A poisoned entry (`deps._PoisonedRepoEntry`) must not read as "no
+    sandbox" and wave an item with members through."""
+    from kraft import config
+    from kraft.api import deps
+
+    row = _row(repo, _git(repo, "rev-parse", "HEAD")) | {"submodules": '["repos/pkg"]'}
+    launch = LaunchContext(repo_entry=deps._PoisonedRepoEntry(config.ConfigError("broken")))
+    with pytest.raises(RuntimeError, match="cannot tell whether w1 runs sandboxed"):
+        stops.refuse_planted_repos(row, launch, repo)
 
 
 def test_an_unreadable_index_stops_rather_than_reads_as_clean(repo, monkeypatch):
@@ -333,3 +338,104 @@ def test_host_git_waits_only_for_a_live_sandboxed_session(repo, live, sandboxed,
             stops.refuse_live_sandboxed_session(_Db(live), row, launch, what="the diff")
     else:
         assert stops.refuse_live_sandboxed_session(_Db(live), row, launch, what="the diff") is None
+
+
+# -- Kraft-ju36l: a declared member is Kraft's only in the checkout Kraft made --
+
+from support import worktree as wtree  # noqa: E402
+from support.harness import make_repo_with_submodule  # noqa: E402
+from support.workspace import workspace_target  # noqa: E402
+
+_REL = "repos/pkg"
+
+
+async def _member_checkout(database, run_dirs, tmp_path, *, connected=True):
+    """Item w1's worktree with member `pkg` at `_REL`, made by `ensure_worktree`
+    from its connected repository (or, not `connected`, the old way). Returns
+    `(worktree, connected repository, what foreign_members expects)`."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    chain = v1_chain(_NODES, repo=root, target=workspace_target({"pkg": _REL}))
+    await wtree.make_item(database, root, materialized_chain=chain.to_json())
+    repositories = {"pkg": entry_of({"id": "pkg", "path": str(sub)})} if connected else None
+    wt = await wtree.ensure(database, run_dirs, root, repositories=repositories)
+    return wt, sub, {_REL: sandbox.member_gitdirs(sub, wt, _REL)}
+
+
+async def test_kraft_created_members_pass_and_their_pointer_moves_are_not_planted(
+    tmp_path, database, run_dirs
+):
+    wt, _sub, expected = await _member_checkout(database, run_dirs, tmp_path)
+    base = _git(wt, "rev-parse", "HEAD")
+    (wt / _REL / "work.txt").write_text("member work\n")
+    _git(wt / _REL, "add", "work.txt")
+    _commit(wt / _REL)
+    _git(wt, "add", _REL)
+    _commit(wt, "move the member's pointer")
+
+    assert sandbox.foreign_members(wt, expected) == []
+    assert sandbox.planted_repos(wt, base, mounts=[_REL]) == []
+
+
+async def test_a_member_whose_gitfile_names_another_gitdir_is_foreign(tmp_path, database, run_dirs):
+    """The worker moves the member aside and puts a `.git` of its own at the
+    mount path, naming a repository it built. The connected repository's
+    admin dir still names the mount path, so only the gitfile tells."""
+    wt, _sub, _ = await _member_checkout(database, run_dirs, tmp_path)
+    (wt / "repos").rename(wt / "repos-moved")
+    evil, _ = _nested(wt, "evil")
+    (wt / _REL).mkdir(parents=True)
+    (wt / _REL / ".git").write_text(f"gitdir: {evil / '.git'}\n")
+
+    expected = {_REL: sandbox.member_gitdirs(_sub, wt, _REL)}
+    assert expected[_REL] is not None
+    assert sandbox.foreign_members(wt, expected) == [_REL]
+
+
+async def test_a_member_whose_admin_dir_leads_to_another_common_gitdir_is_foreign(
+    tmp_path, database, run_dirs
+):
+    """The gitfile is Kraft's, but `commondir` in the admin dir -- which the
+    worker writes when it is not mounted read-only -- names a repository the
+    worker built, whose config host git would then read."""
+    wt, _sub, expected = await _member_checkout(database, run_dirs, tmp_path)
+    evil, _ = _nested(tmp_path, "evil")
+    (expected[_REL][1] / "commondir").write_text(f"{evil / '.git'}\n")
+
+    assert sandbox.foreign_members(wt, expected) == [_REL]
+
+
+async def test_a_member_reached_through_a_symlinked_parent_is_foreign(tmp_path, database, run_dirs):
+    """A symlink a worker can repoint between the check and the next git.
+    Here it still lands on the real member, inside the worktree, so nothing
+    but the symlink itself is wrong with it."""
+    wt, _sub, expected = await _member_checkout(database, run_dirs, tmp_path)
+    (wt / "repos").rename(wt / "repos-real")
+    (wt / "repos").symlink_to("repos-real")
+
+    assert sandbox.foreign_members(wt, expected) == [_REL]
+
+
+async def test_an_old_layout_member_is_foreign(tmp_path, database, run_dirs):
+    """`submodule update --init` put its gitdir under the root's worktree
+    gitdir, which a sandboxed worker writes; no connected repository knows it."""
+    wt, sub, expected = await _member_checkout(database, run_dirs, tmp_path, connected=False)
+    assert (wt / _REL / ".git").is_file()
+    assert expected == {_REL: None}
+    assert sandbox.foreign_members(wt, expected) == [_REL]
+
+
+async def test_a_repository_nested_inside_a_member_is_planted(tmp_path, database, run_dirs):
+    wt, _sub, _ = await _member_checkout(database, run_dirs, tmp_path)
+    _nested(wt / _REL, "vendor/x")
+    assert sandbox.planted_repos(wt / _REL, _git(wt, "rev-parse", f"HEAD:{_REL}")) == ["vendor/x"]
+
+
+async def test_a_connected_path_that_is_only_a_directory_in_another_repository_has_no_gitdirs(
+    tmp_path, database, run_dirs
+):
+    """git in an empty directory answers for the repository around it; that
+    repository is not the member's, so it is no trusted gitdir for one."""
+    wt, sub, _ = await _member_checkout(database, run_dirs, tmp_path)
+    (sub / "empty").mkdir()
+    assert sandbox.member_gitdirs(sub / "empty", wt, _REL) is None
+    assert sandbox.member_gitdirs(tmp_path / "gone", wt, _REL) is None

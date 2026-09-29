@@ -36,7 +36,6 @@ import logging
 import os
 import re
 import shutil
-import stat
 import subprocess
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -48,9 +47,6 @@ from kraft.worker import sandbox as _sandbox
 logger = logging.getLogger(__name__)
 
 _OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
-#: The most of one file in `S` Kraft reads: `packed-refs` of a very large
-#: repository fits many times over, and a worker cannot make Kraft read more.
-_MAX_READ = 64 * 1024 * 1024
 #: Where a commit the worker left on its branch, but Kraft could not publish,
 #: is kept when its store is rebuilt, so rebuilding never loses it.
 UNSYNCED_PREFIX = "refs/kraft/unsynced/"
@@ -113,35 +109,15 @@ def _write_meta(shadow: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _read_regular(path: Path, shadow: Path) -> str | None:
-    """`path`'s text, only if it is a regular file genuinely inside `shadow`:
-    the worker writes `S`, so a symlink there could point Kraft at any host
-    file, and a FIFO would block the read (and the lock around it) forever."""
-    try:
-        if not path.resolve().is_relative_to(shadow.resolve()):
-            return None
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
-        return None
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        return os.read(fd, _MAX_READ).decode(errors="replace")
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
-
-
 def read_branch(shadow: Path, branch: str) -> str | None:
     """The object id `branch` holds in `shadow`, or None. A loose ref wins
     over `packed-refs`, as in git; anything but a bare object id is None."""
     loose_path = shadow / "refs" / "heads" / branch
     if os.path.lexists(loose_path):
-        loose = _read_regular(loose_path, shadow)
+        loose = _sandbox.read_regular(loose_path, shadow)
         value = loose.strip() if loose is not None else ""
         return value if _OID.fullmatch(value) else None
-    packed = _read_regular(shadow / "packed-refs", shadow)
+    packed = _sandbox.read_regular(shadow / "packed-refs", shadow)
     if packed is None:
         return None
     want = f"refs/heads/{branch}"
