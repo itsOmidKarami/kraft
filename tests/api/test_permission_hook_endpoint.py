@@ -10,7 +10,7 @@ import json
 from urllib.parse import urlencode
 
 import pytest
-from support.permissions import events_of, seed_session, templates
+from support.permissions import PATH, events_of, seed_session, templates
 
 from kraft.worker.egress import EgressSession, PhaseLists
 
@@ -55,14 +55,19 @@ def test_the_hook_is_answered_in_the_harness_own_shape_from_the_session_policy(
 
 
 @pytest.mark.parametrize(
-    ("policy", "expected"),
-    [({"allowed_tools": ["Read"]}, {"permission": "deny"}), ({}, {})],
-    ids=["allowlist-fails-closed", "unbounded-is-no-opinion"],
+    ("policy", "hook_point", "expected"),
+    [
+        ({"allowed_tools": ["Read"]}, PATH, {"permission": "deny"}),
+        ({}, PATH, {}),
+        ({}, "nowhere.main.gone", {"permission": "deny"}),
+    ],
+    ids=["allowlist-fails-closed", "unbounded-is-no-opinion", "unresolvable-fails-closed"],
 )
-def test_fail_closed_comes_from_the_session_not_the_caller(client, policy, expected):
+def test_fail_closed_comes_from_the_session_not_the_caller(client, policy, hook_point, expected):
     """An unreadable payload is a deny exactly when the session's task holds
-    an allowlist, as `KRAFT_PERMISSION_FAIL_CLOSED` is on the host."""
-    seed_session(policy=policy)
+    an allowlist, as `KRAFT_PERMISSION_FAIL_CLOSED` is on the host, or its
+    policy cannot be resolved at all: not knowing is not a grant."""
+    seed_session(policy=policy, hook_point=hook_point)
     out = json.loads(_hook(client, "cursor", "not json").json()["body"])
     assert {k: v for k, v in out.items() if k == "permission"} == expected
 
