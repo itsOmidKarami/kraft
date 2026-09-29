@@ -1,5 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
+/* violet-500 on white is 4.4:1, under WCAG AA's 4.5:1 for link text;
+   violet-600 is about 5.9:1. Dark mode keeps Nuxt UI's violet-400. */
+:root:not(.dark) {
+  --ui-primary: var(--ui-color-primary-600);
+}
+
 .hero-mono {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }

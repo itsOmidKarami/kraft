@@ -1,5 +1,7 @@
 ---
 title: Reference
+navigation:
+  title: Overview
 description: Look-up pages for the CLI, configuration files, chain nodes, permissions, harnesses, and triggers.
 ---
 

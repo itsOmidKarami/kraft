@@ -1,5 +1,7 @@
 ---
 title: Repos
+navigation:
+  title: Overview
 description: Every field in repos.yaml, and how kraft repo connect fills it in.
 ---
 

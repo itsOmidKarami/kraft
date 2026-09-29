@@ -1,5 +1,7 @@
 ---
 title: Configuration
+navigation:
+  title: Overview
 description: Where Kraft's configuration files live and which file controls what.
 ---
 

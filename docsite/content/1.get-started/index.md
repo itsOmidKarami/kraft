@@ -1,5 +1,7 @@
 ---
 title: Get started
+navigation:
+  title: Overview
 description: Install Kraft and run your first work item.
 ---
 

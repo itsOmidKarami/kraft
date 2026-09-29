@@ -1,5 +1,7 @@
 ---
 title: Agent harnesses
+navigation:
+  title: Overview
 description: Which agent CLIs Kraft runs, what each supports, and how a task picks one.
 ---
 

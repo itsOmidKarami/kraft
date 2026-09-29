@@ -1,5 +1,7 @@
 ---
 title: Concepts
+navigation:
+  title: Overview
 description: The vocabulary, limits, and permission model behind Kraft.
 ---
 

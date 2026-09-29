@@ -1,5 +1,7 @@
 ---
 title: Project
+navigation:
+  title: Overview
 description: Architecture, contributing, and security.
 ---
 
