@@ -80,3 +80,12 @@ capabilities:
 # with ChatGPT) is UNVERIFIED until an e2e("codex") runs under `network:`.
 network:
   requires: [api.openai.com, chatgpt.com]
+
+# How the egress proxy can hold this CLI's API key (spec §6); see claude.yaml.
+# Sign-in with ChatGPT keeps a file, not a variable, and stays passthrough.
+# UNVERIFIED until an e2e("codex") runs one through the proxy.
+credentials:
+  - service: openai
+    env: OPENAI_API_KEY
+    sentinel: sk-kraft-proxy-managed
+    inject: [{domain: api.openai.com, header: authorization, format: "Bearer %s"}]

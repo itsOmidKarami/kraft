@@ -830,12 +830,98 @@ class SandboxNetwork(BaseModel):
         return {k: v for k, v in handler(self).items() if v or k in self.model_fields_set}
 
 
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: An HTTP header name (RFC 9110 token).
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+
+
+def _env_name(value: str) -> str:
+    if not _ENV_NAME.fullmatch(value):
+        raise ValueError(f"{value!r} is not an environment variable name")
+    return value
+
+
+def _header_name(value: str) -> str:
+    if not _HEADER_NAME.fullmatch(value):
+        raise ValueError(f"{value!r} is not an HTTP header name")
+    return value
+
+
+def _exact_host(value: str) -> str:
+    value = host_pattern(value)
+    if "*" in value or ":" in value:
+        raise ValueError(f"{value!r} is not an exact host: a credential goes to one host by name")
+    return value
+
+
+def _header_format(value: str) -> str:
+    if value.count("%s") != 1:
+        raise ValueError(f"{value!r} must hold '%s' once, where the credential goes")
+    return value
+
+
+class CredentialInject(BaseModel):
+    """Where the egress proxy puts a credential: `header` on every request
+    to exactly `domain`, set to `format` with the value at its `%s`
+    (`Bearer %s` for `Authorization`; unset, the value alone)."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    domain: Annotated[StrictStr, AfterValidator(_exact_host)]
+    header: Annotated[StrictStr, AfterValidator(_header_name)]
+    format: Annotated[StrictStr, AfterValidator(_header_format)] | None = None
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        return _without_unset(handler, self)
+
+
+class SandboxCredential(BaseModel):
+    """One proxy-managed credential (credential@1's apiKey subset, spec §6):
+    the container's `env` holds `sentinel`, and the egress proxy puts the
+    daemon's own value where `inject` says. Just `env:` names one a harness
+    declares, which supplies the rest; a repository's own credential says
+    it all. A name left out of `credentials` passes through as it always did."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    env: Annotated[StrictStr, AfterValidator(_env_name)]
+    service: StrictStr | None = Field(default=None, min_length=1)
+    #: What the container's `env` holds instead of the value. Unset: the
+    #: harness's, else `DEFAULT_SENTINEL`.
+    sentinel: StrictStr | None = Field(default=None, min_length=1)
+    inject: tuple[CredentialInject, ...] = Field(default=(), strict=False)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler) -> dict:
+        return {
+            k: list(v) if isinstance(v, tuple) else v
+            for k, v in _without_unset(handler, self).items()
+            if v != ()
+        }
+
+
+#: The sentinel a credential that names none of its own is given.
+DEFAULT_SENTINEL = "kraft-proxy-managed"
+
+
+def _allows(phase: NetworkPhase, domain: str) -> bool:
+    """`domain` is written in `phase`'s allow list by name (any port), not
+    only reached through a wildcard, and not written in its deny list."""
+
+    def named(hosts: tuple[str, ...]) -> bool:
+        return any(h.lower().split(":")[0] == domain.lower() for h in hosts)
+
+    return named(phase.allow) and not named(phase.deny)
+
+
 class SandboxPolicy(BaseModel):
     """Where a task's process runs: `kind: docker` in `image`, within
     `resources` and reaching only what `network` allows
-    (`kraft.worker.backends`). A permission-shaped safety field (Ruling 105):
-    once a layer sets one, no narrower layer may change or remove it -- the
-    whole value, `resources` and `network` included."""
+    (`kraft.worker.backends`), with `credentials` managed by the egress
+    proxy. A permission-shaped safety field (Ruling 105): once a layer sets
+    one, no narrower layer may change or remove it -- the whole value,
+    `resources`, `network` and `credentials` included."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -846,6 +932,10 @@ class SandboxPolicy(BaseModel):
     resources: SandboxResources | None = None
     #: Egress, deny-by-default once set. Unset: open, as it always was.
     network: SandboxNetwork | None = None
+    #: Credentials the container holds only as a sentinel, the egress proxy
+    #: injecting the real value (spec §6). Needs `network`: without it
+    #: there is no proxy to inject them.
+    credentials: tuple[SandboxCredential, ...] | None = Field(default=None, strict=False)
 
     @field_validator("resources")
     @classmethod
@@ -861,12 +951,54 @@ class SandboxPolicy(BaseModel):
         phase written out, even with empty lists, denies everything."""
         return None if value == {} else value
 
+    @field_validator("credentials")
+    @classmethod
+    def _no_empty_credentials(cls, value: tuple | None) -> tuple | None:
+        """`credentials: []` manages none: the same sandbox as no key."""
+        return value or None
+
+    @model_validator(mode="after")
+    def _credentials_are_reachable(self) -> SandboxPolicy:
+        """credential@1's rule (spec §6, ruling E1): a repository's own
+        credential goes only to a host this policy itself names, in a phase
+        it allows, never one reached through a wildcard or a harness's hosts
+        alone. One named by `env:` alone relies on its harness instead."""
+        if not self.credentials:
+            return self
+        if self.network is None:
+            raise ValueError("'credentials' needs 'network': only the egress proxy injects one")
+        seen: set[str] = set()
+        targets: set[tuple[str, str]] = set()
+        for cred in self.credentials:
+            if cred.env in seen:
+                raise ValueError(f"credential {cred.env!r} is listed twice")
+            seen.add(cred.env)
+            for rule in cred.inject:
+                if not any(
+                    _allows(p, rule.domain) for p in (self.network.install, self.network.runtime)
+                ):
+                    raise ValueError(
+                        f"credential {cred.env!r} goes to {rule.domain!r}, which 'network' "
+                        "does not allow by name in either phase"
+                    )
+                target = (rule.domain.lower(), rule.header.lower())
+                if target in targets:
+                    raise ValueError(
+                        f"two credentials set header {rule.header!r} on {rule.domain!r}"
+                    )
+                targets.add(target)
+        return self
+
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:
         """Unset fields are left out, so a sandbox with no `resources` dumps
         (and is frozen into a snapshot, and saved back to repos.yaml) as it
-        always did."""
-        return _without_unset(handler, self)
+        always did. `credentials` as a list: YAML's safe dumper refuses a
+        tuple."""
+        dumped = _without_unset(handler, self)
+        if "credentials" in dumped:
+            dumped["credentials"] = list(dumped["credentials"])
+        return dumped
 
     @model_validator(mode="before")
     @classmethod

@@ -64,3 +64,18 @@ capabilities:
 # under `network:` is what confirms or removes it.
 network:
   requires: [api.anthropic.com, statsig.anthropic.com]
+
+# How the egress proxy can hold this CLI's credentials (spec §6): the
+# container gets the sentinel, shaped like the real key, and the proxy puts
+# the daemon's own value in the header on requests to the host. Only for a
+# repository that names the `env` under `sandbox.credentials`. UNVERIFIED
+# until an e2e("claude") runs one through the proxy.
+credentials:
+  - service: anthropic
+    env: ANTHROPIC_API_KEY
+    sentinel: sk-ant-api03-kraft-proxy-managed
+    inject: [{domain: api.anthropic.com, header: x-api-key}]
+  - service: anthropic
+    env: CLAUDE_CODE_OAUTH_TOKEN
+    sentinel: sk-ant-oat01-kraft-proxy-managed
+    inject: [{domain: api.anthropic.com, header: authorization, format: "Bearer %s"}]

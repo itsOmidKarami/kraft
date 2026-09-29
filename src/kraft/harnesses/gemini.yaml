@@ -26,3 +26,12 @@ capabilities:
 # probed; an e2e("gemini") under `network:` confirms it.
 network:
   requires: [generativelanguage.googleapis.com]
+
+# How the egress proxy can hold this CLI's API key (spec §6); see claude.yaml.
+# The sentinel has a real key's shape: AIza and 39 characters in all.
+# UNVERIFIED until an e2e("gemini") runs one through the proxy.
+credentials:
+  - service: google
+    env: GEMINI_API_KEY
+    sentinel: AIzaKraftProxyManaged000000000000000000
+    inject: [{domain: generativelanguage.googleapis.com, header: x-goog-api-key}]

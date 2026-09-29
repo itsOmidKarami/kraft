@@ -163,6 +163,28 @@ Kraft checks the address a name resolves to, resolving it once on the host, and 
 - **Docker Desktop and Podman machine: seven days per session.** A session's client certificate expires after seven days; a session that runs longer loses its route and fails closed. The listener keeps its port across a daemon restart. If another program has taken that port by then, the listener moves to a new one, and sessions started before the restart have no route until they are retried.
 - **Domain fronting.** The allow list is enforced on the name the client asks for and on the address Kraft dials. It does not see what travels inside the TLS connection. An allowed name on a shared CDN address can reach other names that address serves, by TLS SNI or the HTTP `Host` header. Kraft does not terminate TLS per host.
 
+### Credentials
+
+```yaml
+sandbox:
+  kind: docker
+  image: ghcr.io/acme/agent@sha256:...
+  network:
+    runtime: {allow: [registry.example.com]}
+  credentials:
+    - env: ANTHROPIC_API_KEY          # its harness says how
+    - env: REGISTRY_TOKEN             # the repository's own, in full
+      service: registry
+      inject: [{domain: registry.example.com, header: authorization, format: "Bearer %s"}]
+```
+
+A variable listed under `credentials` never reaches the container. The container gets a sentinel in its place, and Kraft's egress proxy puts the daemon's own value into the named header on requests to the named host. A variable not listed passes through as the Credentials row above describes. Nothing is managed unless the repository lists it.
+
+- `env: NAME` alone takes the rest from the harness file of the session's CLI. Claude declares `ANTHROPIC_API_KEY` (`x-api-key`) and `CLAUDE_CODE_OAUTH_TOKEN` (`Authorization: Bearer`) on `api.anthropic.com`, Codex `OPENAI_API_KEY` (`Authorization: Bearer`) on `api.openai.com`, and Gemini `GEMINI_API_KEY` (`x-goog-api-key`) on `generativelanguage.googleapis.com`. None of these has been verified against its CLI yet. A CLI whose harness does not declare the name gets the sentinel and nothing injected.
+- A repository's own credential gives `service`, and `inject`: a list of an exact `domain`, a `header`, and optionally a `format` holding `%s` where the value goes. `sentinel` sets what the container sees, `kraft-proxy-managed` unless the harness says otherwise.
+- `credentials` needs `network`. A repository's own credential's `domain` must be named in the `allow` list of `install` or `runtime`, not only covered by a wildcard or a harness's hosts, and not denied there. A variable can be listed once, and one header on one host set by one credential. Anything else fails when repos.yaml loads.
+- `credentials` is part of the sandbox, so a chain, node or task cannot change it.
+
 ## Automated review
 
 `automated_review` names exactly one reviewer, one of two ways. It is the reviewer a chain's `mr.automated_review` task waits for.
