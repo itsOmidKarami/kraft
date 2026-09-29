@@ -58,3 +58,10 @@ needs the `digest` from `get_gate_artifact()`: see `kraft:gates`.
 ## If you are a Kraft worker session
 
 You cannot approve or reject your own item. Report the recommendation.
+
+In a sandbox the only `kraft view` verbs are `show` and `threads`; the others
+in step 1 answer `not available in a sandbox`. Read the change with git
+instead: `git diff --stat origin/<base>...HEAD` first, then `git diff
+origin/<base>...HEAD` where the stat looks risky, where `<base>` is the branch
+the work goes into (the repository's default unless the work item names
+another). The spec and plan are files in your worktree.
