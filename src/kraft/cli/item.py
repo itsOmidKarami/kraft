@@ -415,7 +415,7 @@ def _add_item(subs, common: argparse.ArgumentParser) -> None:
     raise_budget = subs.add_parser(
         "raise-budget",
         parents=[common],
-        help="raise a stopped item's dollar cap and retry it (the board's Raise budget)",
+        help="raise the dollar cap that stopped an item, its own, and retry it (Raise budget)",
     )
     raise_budget.add_argument("id", nargs="?")
     raise_budget.add_argument(

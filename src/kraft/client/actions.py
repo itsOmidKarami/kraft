@@ -273,8 +273,8 @@ async def retry(
 
 async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
     """Raise a stopped item's own dollar cap and retry it, the board's Raise
-    budget button. `None` means no cap. The route takes it from `needs_human`
-    only."""
+    budget button. `None` means no cap. The route takes it only from a
+    `needs_human` stop the item's own cap made."""
     target = context._forbid_self_action(work_item_id)
     return await transport._act(f"/work-items/{target}/budget/raise", {"budget_usd": budget_usd})
 
