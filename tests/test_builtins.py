@@ -644,40 +644,56 @@ def _plant(gitdir: Path, kind: str, main: str, orig: str) -> None:
         planted.write_text(f"{orig}\n")
 
 
-@pytest.mark.parametrize(
-    "kind",
-    [
-        "rebase-merge",
-        "rebase-apply",
-        "MERGE_HEAD",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-        "BISECT_LOG",
-        "sequencer",
-    ],
-)
-async def test_a_planted_operation_never_moves_a_branch(kind, database, run_dirs, repo):
-    """Kraft-xngty: a worker planted `rebase-merge/` naming `main`, Kraft's
-    rebase failed on it, and its `git rebase --abort` reset the operator's
-    `main` to the planted `orig-head`. Kraft continues or aborts only an
-    operation it started, so any other one stops the item for a person."""
+def _refs(repo: Path) -> str:
+    """Every ref of the operator's repository, `refs/stash` included."""
+    return git_read(repo, "for-each-ref", "--format=%(refname) %(objectname)")
+
+
+async def _item_behind_main(database, run_dirs, repo):
+    """An item worktree with a commit of its own, behind a `main` that moved,
+    so a refresh would rebase. Returns `(worktree, branch, gitdir)`."""
     _commit(repo, "first.txt", "first\n", "first")
     await wtree.make_item(database, repo)
     worktree = await wtree.ensure(database, run_dirs, repo)
-    branch = wtree.branch(database)
-    worktree_head = _commit(worktree, "work.txt", "work\n", "worktree work")
-    main = _commit(repo, "moved.txt", "moved on\n", "moved on")
+    _commit(worktree, "work.txt", "work\n", "worktree work")
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
     gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
-    _plant(gitdir, kind, main, git_read(repo, "rev-parse", "main~1"))
+    return worktree, wtree.branch(database), gitdir
+
+
+@pytest.mark.parametrize("kind", ["rebase-merge", "rebase-apply"])
+async def test_planted_operation_state_never_moves_an_operator_ref(kind, database, run_dirs, repo):
+    """Kraft-xngty: a worker planted `rebase-merge/` naming `main`, Kraft's
+    rebase failed on it, and its `git rebase --abort` reset the operator's
+    `main` to the planted `orig-head`."""
+    worktree, branch, gitdir = await _item_behind_main(database, run_dirs, repo)
+    _plant(gitdir, kind, git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1"))
+    refs = _refs(repo)
+
+    with pytest.raises(RuntimeError):
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+
+    assert _refs(repo) == refs
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["rebase-merge", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"],
+)
+async def test_kraft_refuses_to_act_on_an_operation_in_progress(kind, database, run_dirs, repo):
+    """Defence in depth: only a rebase's abort was seen moving a ref, but Kraft
+    rebases over no operation in progress at all. It stops for a person and
+    leaves the state where it is."""
+    worktree, branch, gitdir = await _item_behind_main(database, run_dirs, repo)
+    head = git_read(worktree, "rev-parse", "HEAD")
+    _plant(gitdir, kind, git_read(repo, "rev-parse", "main"), git_read(repo, "rev-parse", "main~1"))
 
     with pytest.raises(RuntimeError) as stopped:
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
-    assert git_read(repo, "rev-parse", "main") == main
-    assert git_read(worktree, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
-    assert git_read(worktree, "rev-parse", "HEAD") == worktree_head
     assert f"has a {kind} Kraft did not start" in str(stopped.value)
-    assert (gitdir / kind).exists(), "the planted state is left for a person"
+    assert git_read(worktree, "rev-parse", "HEAD") == head, "no rebase ran"
+    assert (gitdir / kind).exists(), "the state is left for a person"
 
 
 async def test_a_planted_head_never_rebases_another_branch(database, run_dirs, repo):
