@@ -142,6 +142,7 @@ def _config_checks() -> list[dict]:
             _check("chains", True, "skipped: no templates dir", skipped=True),
             _capabilities_check(),
             _token_check(),
+            _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
     checks = [_check("templates", True, str(templates))]
     try:
@@ -153,6 +154,7 @@ def _config_checks() -> list[dict]:
     checks.append(_chains_check(templates))
     checks.append(_capabilities_check())
     checks.append(_token_check())
+    checks.append(_token_check("trigger token", auth.TRIGGER_TOKEN_FILE))
     return checks
 
 
@@ -287,24 +289,21 @@ def _capabilities_check() -> dict:
     return _check("capabilities", True, "\n".join(lines))
 
 
-def _token_check() -> dict:
+def _token_check(name: str = "mcp token", file: str = auth.MCP_TOKEN_FILE) -> dict:
     """The MCP bearer is a local credential: every other user on the machine can
-    drive Kraft with a copy of it, so its mode is part of whether Kraft is well."""
+    drive Kraft with a copy of it, so its mode is part of whether Kraft is well.
+    The trigger token only files work, and gets the same check."""
     run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
-    path = run_dir / auth.MCP_TOKEN_FILE
-    if not auth.read_mcp_token(run_dir):
-        return _check(
-            "mcp token", False, f"missing or empty at {path} — the server writes it on start"
-        )
+    path = run_dir / file
+    if not auth.read_mcp_token(run_dir, file):
+        return _check(name, False, f"missing or empty at {path} — the server writes it on start")
     try:
         mode = stat.S_IMODE(path.stat().st_mode)
     except OSError as exc:
-        return _check("mcp token", False, f"{path}: {exc}")
+        return _check(name, False, f"{path}: {exc}")
     if mode & 0o077:
-        return _check(
-            "mcp token", False, f"{path} is {mode:04o}, not 0600 — any local user can read it"
-        )
-    return _check("mcp token", True, f"{path} ({mode:04o})")
+        return _check(name, False, f"{path} is {mode:04o}, not 0600 — any local user can read it")
+    return _check(name, True, f"{path} ({mode:04o})")
 
 
 def _agent_checks() -> list[dict]:

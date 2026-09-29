@@ -63,6 +63,9 @@ async def lifespan(app: FastAPI):
     # auth is on at all. Created once and kept, so a registered MCP client keeps
     # working across restarts.
     app.state.mcp_token = auth_mod.ensure_mcp_token(run_dirs.base)
+    # The same kind of file, good for `POST /api/triggers` only (`_authenticate`).
+    app.state.trigger_token = auth_mod.ensure_mcp_token(run_dirs.base, auth_mod.TRIGGER_TOKEN_FILE)
+    app.state.login_failures = {}
     database = await Database.open(run_dirs.db)
     # Before reattach, which re-opens adopted sessions' egress channels: the
     # listeners run on this loop, the one every launch awaits on.

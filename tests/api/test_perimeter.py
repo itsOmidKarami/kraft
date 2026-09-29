@@ -366,6 +366,29 @@ def test_a_bearer_token_authenticates_where_a_cookie_would(client, tmp_path):
     assert client.get("/api/work-items", headers={"Authorization": token}).status_code == 401
 
 
+@_LAN
+def test_the_trigger_token_files_work_and_does_nothing_else(client, monkeypatch, repo, tmp_path):
+    """CI and webhooks get a credential that cannot approve or reconfigure; the
+    admin token keeps working on both."""
+    _set_password(client, monkeypatch)
+    run = tmp_path / "run"
+    assert (run / auth.TRIGGER_TOKEN_FILE).stat().st_mode & 0o777 == 0o600
+    trigger = auth.read_mcp_token(run, auth.TRIGGER_TOKEN_FILE)
+    admin = auth.read_mcp_token(run)
+    assert trigger and trigger != admin
+    approve = "/api/work-items/nope/gates/spec/approve"
+    for token in (trigger, admin):
+        r = client.post(
+            "/api/triggers",
+            json={"repo": str(repo), "title": "t"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 201, r.text
+    r = client.post(approve, headers={"Authorization": f"Bearer {trigger}"})
+    assert r.status_code == 401
+    assert client.post(approve, headers={"Authorization": f"Bearer {admin}"}).status_code != 401
+
+
 @pytest.mark.api_client(host="0.0.0.0")
 def test_a_document_navigation_cannot_slip_past_the_bearer_check(client):
     """The SPA-shell branch runs first, so it must not become an auth bypass for

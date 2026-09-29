@@ -147,8 +147,20 @@ async def _authenticate(request: Request, call_next):
     # GET, so a bearer check ahead of it would leave that path reachable, and
     # one inside it would hand an MCP client HTML not JSON.
     bearer = request.headers.get("authorization", "")
+    presented = bearer[7:] if bearer.startswith("Bearer ") else ""
     expected = getattr(app.state, "mcp_token", None)
-    if expected and bearer.startswith("Bearer ") and hmac.compare_digest(bearer[7:], expected):
+    if presented and expected and hmac.compare_digest(presented, expected):
+        return await call_next(request)
+    # The trigger token files work and nothing else; anywhere else it falls
+    # through to the cookie check like no credential at all.
+    trigger = getattr(app.state, "trigger_token", None)
+    if (
+        presented
+        and trigger
+        and request.method == "POST"
+        and request.url.path == "/api/triggers"
+        and hmac.compare_digest(presented, trigger)
+    ):
         return await call_next(request)
     token = request.cookies.get(auth_mod.COOKIE)
     if not token or not await app.state.db.write(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import os
+import time
 from dataclasses import asdict
 
 from fastapi import HTTPException, Request, Response
@@ -11,6 +13,11 @@ from kraft import auth as auth_mod
 from kraft import update as update_mod
 from kraft.api import api_router, deps
 
+#: Failed logins one address may make within `LOGIN_WINDOW_S` before it is
+#: refused with 429 until `LOGIN_WINDOW_S` has passed since the last of them.
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_S = 15 * 60
+
 
 class Login(BaseModel):
     password: str
@@ -20,8 +27,24 @@ class Login(BaseModel):
 @api_router.post("/login")
 async def login(body: Login, request: Request):
     st = request.app.state
+    # Keyed on the same peer `_perimeter` judges: uvicorn trusts
+    # `X-Forwarded-For` only from 127.0.0.1, so a remote caller cannot pick
+    # its own key. Everything behind one proxy that forwards no address
+    # shares a count.
+    # ponytail: in memory, one list per address that ever failed; lost on
+    # restart and never swept. A sweep if addresses ever pile up.
+    addr = request.client.host if request.client else ""
+    now = time.monotonic()
+    fails = st.login_failures.get(addr, [])
+    if len(fails) >= LOGIN_MAX_FAILURES and now - fails[-1] < LOGIN_WINDOW_S:
+        retry_after = math.ceil(LOGIN_WINDOW_S - (now - fails[-1]))
+        raise HTTPException(
+            429, "Too many failed logins. Try again later.", {"Retry-After": str(retry_after)}
+        )
     if not auth_mod.verify_password(body.password, st.access["password_hash"]):
+        st.login_failures[addr] = [t for t in fails if now - t < LOGIN_WINDOW_S] + [now]
         raise HTTPException(401, "Wrong password.")
+    st.login_failures.pop(addr, None)
     token = auth_mod.new_token()
     await st.db.write(
         lambda c: auth_mod.create_session(
@@ -38,6 +61,10 @@ async def login(body: Login, request: Request):
         token,
         httponly=True,
         samesite="lax",
+        # Over the tunnel's https URL the scheme reaching us may be http, with
+        # the tunnel's `X-Forwarded-Proto` saying otherwise. Believing a forged
+        # one only adds `Secure`, which costs a plain-HTTP caller its cookie.
+        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
         # `stay_signed_in=False` drops the cookie's Max-Age, making it a
         # session cookie the browser clears on close. The DB-side session
         # (and its real expiry_days) is unchanged either way -- unchecking
