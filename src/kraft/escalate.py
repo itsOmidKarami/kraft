@@ -93,6 +93,15 @@ _HANDS_OFF = (
 )
 
 
+#: The one push the turn's `git-push` grant covers (`kraft.grants`,
+#: Kraft-9efnk.15): to this item's branch, named, never a plain `--force`.
+_PUSH = (
+    "If you push, push only this item's branch and name it: `git push "
+    "--force-with-lease origin HEAD:{branch}`. A push that names no branch "
+    "or uses a plain `--force` is not pre-approved.\n"
+)
+
+
 def _action_line(status: str, sandbox: dict | None) -> str:
     if status != "needs_human":
         return _PAUSED_ACTION
@@ -109,6 +118,7 @@ _STATE = (
     "\n"
     "{action_line}"
     "{hands_off}"
+    "{push_line}"
     "\n"
     "The human's message:\n{message}"
 )
@@ -476,6 +486,7 @@ async def dispatch(
         description_line=_description_line(row),
         action_line=_action_line(row["status"], sandbox),
         hands_off=_HANDS_OFF.format(work_item_id=work_item_id),
+        push_line=_PUSH.format(branch=store.branch_for(row)),
         message=message,
     )
     try:

@@ -79,6 +79,15 @@ async def test_an_escalation_turn_is_told_the_stop_s_suggestion(
     assert f"What Kraft suggests a person do: skip -- {SKIP['reason']}" in instruction
 
 
+async def test_an_escalation_turn_is_told_the_one_push_its_grant_covers(
+    monkeypatch, tmp_path, database, run_dirs
+):
+    """Kraft-9efnk.15: `git-push` covers a named push of the item's own branch
+    only, so the turn is handed that command with the branch filled in."""
+    instruction = await _instruction(monkeypatch, tmp_path, database, run_dirs)
+    assert "`git push --force-with-lease origin HEAD:kraft/t-w1`" in instruction
+
+
 @pytest.mark.parametrize(
     ("auto", "paused"),
     [(False, False), (True, False), (False, True)],
