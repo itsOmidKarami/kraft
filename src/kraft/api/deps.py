@@ -234,7 +234,8 @@ def _live_work_item_row(st, wid):
 
 def forbid_self_action(st, request, wid: str) -> None:
     """403 when the caller names a worker session of `wid` itself: design §6
-    rule 2, a worker does not approve, reject, pause or resume its own item.
+    rule 2, a worker does not approve, reject, pause, resume, skip or abandon
+    its own item.
 
     The server-side twin of `client.context._forbid_self_action`, for a
     client other than `kraft` or the MCP server that honestly sends
@@ -242,6 +243,15 @@ def forbid_self_action(st, request, wid: str) -> None:
     that leaves the header off passes, and an unsandboxed worker can. A
     sandboxed one never reaches these routes (`worker.callback.ROUTES`).
     An escalation turn is no worker (`identify_as_worker=False`), so it may.
+
+    Not on `/retry`, which the client guard also covers. The client refuses
+    it by `KRAFT_WORK_ITEM_ID`, which an escalation turn lacks, so only a
+    worker is refused there and an escalation's `kraft item retry` goes
+    through. The sandbox channel lists `/retry` for that same self-retry,
+    and sets this header on every call it makes. The channel does not tell
+    an escalation session from a worker, so a sandboxed worker may reach
+    `/retry` on its own item too; the route answers 409 unless the item is
+    `needs_human`, which it is not while a worker of it runs (Kraft-9efnk.14).
     """
     sid = request.headers.get("x-kraft-session-id")
     if not sid:

@@ -235,6 +235,7 @@ async def abandon_work_item(wid: str, request: Request):
     worktree is reaped separately, right before the worktree goes (Kraft-ugm6).
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
     if row["status"] == "active":
         raise HTTPException(409, "work item is active; pause it before abandoning")
@@ -1042,6 +1043,7 @@ async def skip_work_item(wid: str, body: Skip, request: Request):
     skip does not care what state stopped the item, only what node is current.
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     # /skip has no live task to gate a race the way spawn does for every other
     # door: paused/needs_human have none yet, and claim_for_run's to_status
     # ("active") is also one of skip's own from_statuses, so two concurrent
