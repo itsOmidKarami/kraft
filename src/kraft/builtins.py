@@ -943,6 +943,10 @@ async def refresh_worktree_base(
             f"{worktree} has a {operation} Kraft did not start; "
             "finish or abort it by hand, then retry"
         )
+    # `HEAD` is the worker's to write too; pointed at another branch, the
+    # rebase below would replay that one.
+    if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
+        raise RuntimeError(f"{worktree} is not on {branch}; check it out by hand, then retry")
     try:
         done = await asyncio.to_thread(
             subprocess.run,

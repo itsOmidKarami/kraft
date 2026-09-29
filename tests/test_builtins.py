@@ -678,3 +678,25 @@ async def test_a_planted_operation_never_moves_a_branch(kind, database, run_dirs
     assert git_read(worktree, "rev-parse", "HEAD") == worktree_head
     assert f"has a {kind} Kraft did not start" in str(stopped.value)
     assert (gitdir / kind).exists(), "the planted state is left for a person"
+
+
+async def test_a_planted_head_never_rebases_another_branch(database, run_dirs, repo):
+    """The worktree's own `HEAD` is the worker's to write as well: pointed at
+    one of the operator's branches, Kraft's rebase replayed that branch."""
+    await wtree.make_item(database, repo)
+    worktree = await wtree.ensure(database, run_dirs, repo)
+    branch = wtree.branch(database)
+    _git(repo, "branch", "side")
+    _commit(repo, "moved.txt", "moved on\n", "moved on")
+    side = git_read(repo, "rev-parse", "side")
+    gitdir = Path(git_read(worktree, "rev-parse", "--absolute-git-dir"))
+    (gitdir / "HEAD").write_text("ref: refs/heads/side\n")
+
+    try:
+        await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
+        stopped = ""
+    except RuntimeError as exc:
+        stopped = str(exc)
+
+    assert git_read(repo, "rev-parse", "side") == side
+    assert f"is not on {branch}" in stopped
