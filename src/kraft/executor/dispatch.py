@@ -63,6 +63,7 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
 )
+from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,7 @@ async def _run_changed_test_scopes(
     launch: LaunchContext | None,
     round: int,
     sandbox: dict | None,
+    checkout: _sandbox.Checkout | None = None,
     time_cap: _caps.Deadline | None = None,
 ) -> str:
     """`kraft.verify_changed_test_scopes`: run the repo's own test scopes that
@@ -468,6 +470,7 @@ async def _run_changed_test_scopes(
             # never see the fix. Never writing bytecode keeps every cycle honest.
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             sandbox=sandbox,
+            checkout=checkout,
             time_cap=time_cap,
             **{**common, "session_id": uuid.uuid4().hex},
         )
@@ -654,7 +657,8 @@ async def _dispatch_task(
     # walk may have left a repository of its own in the worktree (Kraft-nx4id).
     # `rev-parse` above reads HEAD alone and never looks at a gitlink.
     try:
-        stops.refuse_planted_repos(
+        # What it checked is what a sandboxed launch below mounts (Kraft-ju36l).
+        verified = stops.refuse_planted_repos(
             work_item_row, launch, _item_root(work_item_row, worktree, repository)
         )
     except RuntimeError as exc:
@@ -674,6 +678,9 @@ async def _dispatch_task(
             sandbox = item_sandbox(work_item_row, launch)
         except SandboxUnresolved as exc:
             return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+        # The whole checkout a sandboxed launch mounts, members included:
+        # exactly the one the drift check above passed, not a second reading.
+        checkout = verified if sandbox else None
     if isinstance(t, BuiltinTask):
         # Exhaustive on purpose (`builtin-task-references-code-owned-actions`:
         # Kraft owns this vocabulary): a third `BuiltinAction` member added
@@ -720,6 +727,7 @@ async def _dispatch_task(
                     launch=launch,
                     round=round,
                     sandbox=sandbox,
+                    checkout=checkout,
                     time_cap=time_cap,
                 )
             case _:  # pragma: no cover -- the type already refuses this
@@ -742,6 +750,7 @@ async def _dispatch_task(
             repo_entry=launch.repo_entry if launch else None,
             env={"PYTHONDONTWRITEBYTECODE": "1"},
             sandbox=sandbox,
+            checkout=checkout,
             time_cap=time_cap,
             **common,
         )
@@ -956,6 +965,7 @@ async def _dispatch_task(
             harness_id=cand.harness,
             harnesses=harnesses,
             sandbox=sandbox,
+            checkout=checkout,
             launch=launch,
             common=common,
             # A resumed provider session is the task's own launch's, never a
@@ -1108,6 +1118,7 @@ async def _launch_agent(
     harness_id: str,
     harnesses,
     sandbox,
+    checkout,
     launch,
     common: dict,
     resumable: bool,
@@ -1168,6 +1179,7 @@ async def _launch_agent(
             grants=inv.grants,
             permission_mode=inv.permission_mode,
             sandbox=sandbox,
+            checkout=checkout,
             steering_texts=inv.steering_texts,
             artifact=t.produces,
             method_text=inv.method_text,

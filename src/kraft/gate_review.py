@@ -296,6 +296,9 @@ async def review(
         method_text=inv.method_text,
         steering_texts=inv.steering_texts,
         sandbox=sandbox,
+        checkout=executor.sandbox_checkout(row, launch, run_dirs.worktrees / work_item_id)
+        if sandbox
+        else None,
         task_instruction=task_instruction,
         title=row["title"],
         repo_path=row["repo"],

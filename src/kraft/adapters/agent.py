@@ -724,6 +724,8 @@ async def run_agent_task(
     grants: tuple[str, ...] = (),
     permission_mode: str | None = None,
     sandbox: dict | None = None,
+    #: The sandbox's whole checkout (`subprocess.run_task`'s `checkout`).
+    checkout=None,
     steering_texts: tuple[str, ...] = (),
     #: PARKED: see `build_context`'s own note on this parameter.
     review_package: str | None = None,
@@ -1006,6 +1008,7 @@ async def run_agent_task(
         head_sha=head_sha,
         thread=thread,
         sandbox=sandbox,
+        checkout=checkout,
         require_result_file=True,
         repo_entry=repo_entry,
         reader=reader,
