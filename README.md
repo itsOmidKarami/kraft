@@ -6,10 +6,11 @@
 [![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
 
-Hand Claude Code (or another coding agent) a spec and walk away. Kraft runs
-the work in its own git worktree, opens the pull request, and only interrupts
-you when a decision is actually yours — for developers tired of babysitting a
-session to the end of a task.
+**A local orchestrator that takes your coding agent from spec to pull request,
+stopping only when a decision is yours.**
+
+Hand Claude Code (or another coding agent) a spec and walk away. It's for
+developers tired of babysitting a session to the end of a task.
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; reject with a note and the step that wrote it
