@@ -618,6 +618,7 @@ name = "kraft-sdlc"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
@@ -649,6 +650,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fastembed", marker = "extra == 'vector'", specifier = ">=0.8" },
     { name = "httpx", specifier = ">=0.28.1" },

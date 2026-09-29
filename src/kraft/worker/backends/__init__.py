@@ -82,10 +82,17 @@ class SandboxBackend(Protocol):
         """Stop and remove the session's sandbox, best-effort and bounded. A
         no-op for a session this backend never ran."""
 
-    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path) -> dict:
+    async def egress_transport(self) -> str:
+        """How this backend's sessions reach the egress channel, asked before
+        it opens: "unix", a socket per session, or "tls", the daemon's one
+        mTLS listener (a runtime in a VM cannot connect to a host socket).
+        Raises `worker.sandbox.SandboxNotReady` when it cannot tell."""
+
+    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path | None) -> dict:
         """Ready the session's egress route under `sandbox['network']`
         before it starts, to the channel listening at `sock_path`
-        (`worker.channel`): docker starts a relay the worker joins. Returns
+        (`worker.channel`), None under the "tls" transport: docker starts a
+        relay the worker joins. Returns
         the environment the launch must add (its proxy); `{}` for a sandbox
         with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
         route cannot be made (`config_error`), never opens egress instead."""

@@ -46,6 +46,7 @@ class Remote:
         #: Every session call, in order, and what `open_session` answers.
         self.calls: list[str] = []
         self.route = {"HTTPS_PROXY": "http://127.0.0.1:3128"}
+        self.transport = "unix"
         self.wrapped_env: list[dict] = []
 
     def home(self, run_dirs, work_item_id):
@@ -91,6 +92,9 @@ class Remote:
     async def close(self, session_id):
         self.closed.append(session_id)
         self.calls.append("close")
+
+    async def egress_transport(self):
+        return self.transport
 
     async def open_session(self, session_id, sandbox, sock_path):
         self.calls.append("open_session")
@@ -280,12 +284,15 @@ async def channels(database):
     shutil.rmtree(base, ignore_errors=True)
 
 
+@pytest.mark.parametrize("transport", ["unix", "tls"])
 async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
-    database, run_dirs, tmp_path, remote, channels
+    database, run_dirs, tmp_path, remote, channels, transport
 ):
     """Opened before the worker exists, closed after it (the worker, then
     its route); the proxy env wins over the task's own; the row keeps the
-    lists a reattach re-opens with, the harness's hosts allowed too."""
+    lists a reattach re-opens with, the harness's hosts allowed too, and the
+    transport the backend asked for (no socket for "tls")."""
+    remote.transport = transport
     status = await _run_on_remote(
         database,
         run_dirs,
@@ -305,7 +312,9 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
         "phase": "runtime",
         "allow": ["a.io", "api.anthropic.com"],
         "deny": ["b.io"],
+        "transport": transport,
     }
+    assert (remote.sock_path is None) == (transport == "tls")
     assert not channels.socket_path("s1").exists()
 
 
@@ -380,6 +389,31 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     assert b"a.io is on the deny list" in answer
     assert remote.calls[-2:] == ["close", "close_session"]
     assert not channels.socket_path("s1").exists()
+
+
+async def test_reattach_re_registers_a_tls_session_with_no_socket(
+    item_on, database, run_dirs, remote, channels, monkeypatch
+):
+    """Its relay B dials the listener again with the certificate it holds:
+    the session must be registered for it, and no socket made."""
+    release = asyncio.Event()
+
+    async def adopt(*args, **kw):
+        await release.wait()
+
+    monkeypatch.setattr(reattach, "_adopt", adopt)
+    item = await item_on(_CHAIN, "implementation")
+    live = (os.getpid(), psutil.Process().create_time())
+    await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
+    egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
+    await database.write(lambda c: store.set_session_egress(c, "s1", egress))
+
+    _, tasks = await reattach.reattach(database, run_dirs)
+
+    assert channels.tls_session("s1") is not None
+    assert not channels.socket_path("s1").parent.exists()
+    release.set()
+    await tasks["s1"]
 
 
 async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(

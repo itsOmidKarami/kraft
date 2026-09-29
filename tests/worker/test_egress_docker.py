@@ -3,9 +3,18 @@ worker launched by `run_task` shares a network-less relay's namespace, so it
 has loopback and nothing else, and reaches out only through the daemon's
 egress proxy (`sandbox-egress-is-deny-by-default-when-declared`).
 
-Linux-native runtimes only: Docker Desktop and podman machine cannot carry
-the unix-socket channel (spike 4.5a), so there these skip -- or fail, where
-KRAFT_E2E_REQUIRE names the runtime.
+Each runs over the transport the runtime's probe picks: a socket per session
+on Linux-native docker and podman, the two-hop mTLS relay on Docker Desktop
+and podman machine, where a container cannot connect to a host socket (spike
+4.5a). The documented manual run, on a Mac with both:
+
+    KRAFT_E2E_REQUIRE=docker,podman just test tests/worker/test_egress_docker.py --no-testmon
+
+A Linux runner also forces the two-hop transport (`forced-tls`), with the
+listener on every address instead of loopback and, for docker, relay B's
+gateway name mapped to the bridge's gateway: Linux containers cannot reach
+the host's loopback. Only the test does that; the daemon listens on
+127.0.0.1.
 
 The container side is all real: the relay, the worker, the proxy env Kraft
 gives it, the socket into this process. Only the proxy's last hop is a
@@ -13,10 +22,14 @@ seam: `allowed.test` resolves to a private address its exact allow entry
 admits, and dialling that address reaches the fake server on this host."""
 
 import asyncio
+import json
 import os
+import pwd
 import shutil
 import subprocess
+import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -54,7 +67,8 @@ def _pulled(cli: str, image: str) -> None:
 def short_run(monkeypatch):
     """A run dir short enough for a unix socket path, for the probe
     (`KRAFT_RUN_DIR`) and the channels alike."""
-    base = Path(tempfile.mkdtemp(prefix="kraft-e2e-", dir="/tmp"))
+    # Resolved: podman machine shares macOS's /private/tmp, not /tmp.
+    base = Path(tempfile.mkdtemp(prefix="kraft-e2e-", dir="/tmp")).resolve()
     monkeypatch.setenv("KRAFT_RUN_DIR", str(base))
     yield RunDirs(base).ensure()
     shutil.rmtree(base, ignore_errors=True)
@@ -66,10 +80,14 @@ def short_run(monkeypatch):
         pytest.param("podman", marks=pytest.mark.e2e("podman")),
     ]
 )
-def runtime(request, monkeypatch, short_run) -> docker.Runtime:
+def probed(request, monkeypatch, short_run) -> docker.Runtime:
     """The runtime under test made this machine's through `sandbox.yaml`,
-    with alpine and the relay image pulled, and able to carry the channel."""
+    with alpine and the relay image pulled, and its socket probe answered."""
     cli = request.param
+    if cli == "podman" and sys.platform == "darwin":
+        # podman on macOS is a client of podman machine, whose connection is
+        # under the operator's real HOME; KRAFT_HOME still isolates Kraft.
+        monkeypatch.setenv("HOME", pwd.getpwuid(os.getuid()).pw_dir)
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
@@ -77,12 +95,31 @@ def runtime(request, monkeypatch, short_run) -> docker.Runtime:
     _pulled(cli, IMAGE)
     _pulled(cli, relay)
     monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())
-    reachable = docker.socket_channel(relay)
-    if reachable is not True:
-        why = "runs in a VM" if reachable is False else "could not be probed"
-        _unavailable(
-            cli, f"e2e: {docker.runtime().describe()} {why}, so it cannot carry the egress channel"
-        )
+    if docker.socket_channel(relay) is None:
+        _unavailable(cli, f"e2e: {docker.runtime().describe()} could not be probed")
+    return docker.runtime()
+
+
+@pytest.fixture(params=["probed", "forced-tls"])
+def runtime(request, probed, monkeypatch) -> docker.Runtime:
+    """`probed`, over its own transport or forced onto the two-hop one."""
+    if request.param == "probed":
+        return probed
+    if probed.socket_channel is False:
+        pytest.skip("the probe already takes the two-hop transport here")
+    # The seam, in the test only: a refused socket, and the runtime saying
+    # it runs in a VM, which a Linux runner never does.
+    monkeypatch.setattr(docker, "_RUNTIME", replace(probed, socket_channel=False))
+    monkeypatch.setattr(docker, "_vm_evidence", lambda host: "forced by the test")
+    if not probed.podman:
+        # Podman adds host.containers.internal, the host's address, itself.
+        real = docker.relay_b_argv
+
+        def relay_b_argv(*args):
+            argv = real(*args)
+            return [*argv[:2], "--add-host=host.docker.internal:host-gateway", *argv[2:]]
+
+        monkeypatch.setattr(docker, "relay_b_argv", relay_b_argv)
     return docker.runtime()
 
 
@@ -95,11 +132,12 @@ def _gateway(cli: str) -> str:
 
 
 @pytest.fixture
-async def launch(runtime, database, short_run, tmp_path, monkeypatch):
+async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     """`launch(script, network)`: `script` run by `run_task` in a sandbox
     with `network`, beside a host server listening on every address. Returns
-    `(what the script wrote to ./out, the refusal events, the relay's
-    NetworkMode while it ran)`; a launch that never ran fails with its log."""
+    `(what the script wrote to ./out, the refusal events, the NetworkMode
+    of the relay and of relay B while it ran, and the transport)`; a launch
+    that never ran fails with its log."""
 
     async def serve(reader, writer):
         await reader.read(1024)
@@ -124,13 +162,19 @@ async def launch(runtime, database, short_run, tmp_path, monkeypatch):
         short_run, database, EgressProxy(getaddrinfo=resolve, connect=connect)
     )
     channel.install(registry)
-    modes: list[str] = []
+    # Forced on a Linux host, whose containers reach the host at the
+    # bridge's gateway, never its loopback.
+    forced = probed.socket_channel and not runtime.socket_channel
+    listener = channel.TLSListener(registry, short_run, host="0.0.0.0" if forced else "127.0.0.1")
+    await listener.start()
+    modes: list[tuple[str, ...]] = []
     real_close = docker.DockerBackend.close_session
 
     async def close_session(self, session_id):
         inspect = [runtime.cli, "inspect", "-f", "{{.HostConfig.NetworkMode}}"]
-        done = subprocess.run([*inspect, docker.relay_name(session_id)], capture_output=True)
-        modes.append(done.stdout.decode().strip())
+        relays = (docker.relay_name(session_id), docker.relay_b_name(session_id))
+        done = [subprocess.run([*inspect, r], capture_output=True) for r in relays]
+        modes.append(tuple(d.stdout.decode().strip() for d in done))
         await real_close(self, session_id)
 
     monkeypatch.setattr(docker.DockerBackend, "close_session", close_session)
@@ -168,11 +212,14 @@ async def launch(runtime, database, short_run, tmp_path, monkeypatch):
         out = work / "out"
         log = short_run.logs / f"s{os.getpid()}.log"
         assert status != "config_error", log.read_text() if log.exists() else status
-        return out.read_text() if out.exists() else "", refused, modes
+        (row,) = database.read(lambda c: c.execute("SELECT egress FROM worker_sessions").fetchall())
+        transport = json.loads(row["egress"])["transport"]
+        return out.read_text() if out.exists() else "", refused, modes, transport
 
     try:
         yield go
     finally:
+        await listener.close()
         await registry.close_all()
         channel.install(None)
         server.close()
@@ -189,13 +236,16 @@ done
 
 async def test_a_worker_under_network_has_loopback_and_no_route_out(launch):
     """Only `lo`; the metadata address, a public address and the host's
-    gateway unreachable directly; the relay itself on no network."""
-    out, _, modes = await launch(_ISOLATION, {"runtime": {"allow": ["**"]}})
+    gateway unreachable directly; the relay itself on no network, and relay
+    B, only under the TLS transport, on the default one."""
+    out, _, modes, transport = await launch(_ISOLATION, {"runtime": {"allow": ["**"]}})
 
     lines = out.splitlines()
     assert lines[0] == "up: lo", out
     assert [line.split()[0] for line in lines[1:]] == ["blocked"] * 3, out
-    assert modes == ["none"]
+    ((relay, relay_b),) = modes
+    assert relay == "none"
+    assert relay_b not in ("", "none") if transport == "tls" else relay_b == ""
 
 
 _THROUGH_PROXY = """
@@ -207,7 +257,7 @@ for i in 1 2; do wget -q -T 10 -O - http://denied.test/ >> out 2>&1; echo " rc=$
 async def test_a_worker_under_network_reaches_only_its_allowed_hosts(launch):
     """The allowed host through the proxy Kraft set in its environment; a
     host off the list answered 403, refused once however often it is asked."""
-    out, refused, _ = await launch(_THROUGH_PROXY, {"runtime": {"allow": ["allowed.test"]}})
+    out, refused, *_ = await launch(_THROUGH_PROXY, {"runtime": {"allow": ["allowed.test"]}})
 
     assert out.startswith("hello-from-host rc=0\n"), out
     assert "403" in out and out.count("rc=1") == 2, out

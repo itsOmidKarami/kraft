@@ -9,6 +9,7 @@ only thing that stops a doctor command from growing output nobody reads
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ from kraft.paths import (
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
-from kraft.worker import backends, sandbox
+from kraft.worker import backends, channel, sandbox
 from kraft.worker import steering as steering_mod
 from kraft.worker.backends import docker_forward
 
@@ -627,6 +628,15 @@ def _forge_check(repo: config.RepoEntry) -> dict:
     return _check(name, True, f"{repo.forge} · {cli}")
 
 
+async def _tls_listener_check() -> dict:
+    """The server's egress TLS listener, which a sandbox's relay dials on a
+    runtime in a VM, answering as Kraft's own on the port it persisted."""
+    run_dirs = RunDirs(Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()))
+    problem = await asyncio.to_thread(channel.tls_listener_problem, run_dirs)
+    detail = problem or f"answers on 127.0.0.1:{channel.tls_port(run_dirs)}"
+    return _check("egress listener", problem is None, detail)
+
+
 def _label(repo: config.RepoEntry) -> str:
     return repo.name or repo.path
 
@@ -658,6 +668,7 @@ async def _repo_checks() -> list[dict]:
         for ws_id, ws in (await client.workspaces()).items()
         for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
     }
+    networked = False
     for repo in repos:
         path = Path(repo.path)
         name = f"repo {_label(repo)}"
@@ -708,6 +719,7 @@ async def _repo_checks() -> list[dict]:
             )
         elif (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
+            networked = networked or policy.network is not None
             for extra in (
                 _egress_check(repo, policy),
                 _proxy_check(repo, policy),
@@ -719,6 +731,8 @@ async def _repo_checks() -> list[dict]:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:
             checks.append(_steering_check(repo, profiles))
+    if networked:
+        checks.append(await _tls_listener_check())
     return checks or [_check("repos", True, "none connected")]
 
 

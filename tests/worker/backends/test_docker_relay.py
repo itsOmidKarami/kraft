@@ -1,6 +1,7 @@
 """`network:` on the docker backend: the relay a session's worker joins, the
-proxy environment it gets instead of the daemon's, and the probe that
-refuses a runtime whose containers cannot reach a host unix socket."""
+proxy environment it gets instead of the daemon's, the probe that picks a
+socket per session or, on a runtime in a VM, the TLS transport's two relays,
+and refuses when it cannot tell."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kraft.worker import ca
 from kraft.worker.backends import docker
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -98,34 +100,117 @@ async def test_open_session_starts_the_relay_and_close_session_removes_it(calls,
     assert env["HTTPS_PROXY"] == env["http_proxy"] == "http://127.0.0.1:3128"
     assert env["NO_PROXY"] == env["no_proxy"] == ""
     assert calls.made[0][:4] == ("run", "-d", "--name", "kraft-relay-s1")
-    assert calls.made[1] == ("rm", "-f", "kraft-relay-s1")
+    assert calls.made[1:] == [
+        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
+        ("volume", "rm", "-f", "kraft-egress-s1"),
+    ]
 
 
 @pytest.mark.parametrize(
-    ("reachable", "said"),
-    [(False, "runs its containers in a VM"), (None, "could not tell")],
-    ids=["vm-runtime", "probe-inconclusive"],
+    ("reachable", "said", "transport"),
+    [
+        (True, "", "unix"),
+        (False, "OperatingSystem: Docker Desktop", "tls"),
+        (False, "", "does not say it runs in a VM"),
+        (None, "", "could not tell"),
+    ],
+    ids=["linux-native", "vm", "socket-refused-off-a-vm", "inconclusive"],
 )
-async def test_a_runtime_that_cannot_carry_the_channel_refuses_network(
-    calls, monkeypatch, reachable, said
+async def test_the_probe_picks_the_transport_and_refuses_when_it_cannot_tell(
+    monkeypatch, reachable, said, transport
 ):
+    """The two-hop transport only where the runtime says it runs in a VM:
+    a socket refused anywhere else (SELinux, permissions) is a problem to
+    fix, and a relay B there could not reach the loopback listener."""
     monkeypatch.setattr(docker, "socket_channel", lambda image: reachable)
-    with pytest.raises(SandboxNotReady, match=said):
-        await docker.DockerBackend().open_session("s1", POLICED, SOCK)
+    monkeypatch.setattr(docker, "_vm_evidence", lambda host: said)
+    if transport in ("unix", "tls"):
+        assert await docker.DockerBackend().egress_transport() == transport
+    else:
+        with pytest.raises(SandboxNotReady, match=transport):
+            await docker.DockerBackend().egress_transport()
+
+
+@pytest.mark.parametrize(
+    ("engine", "gateway"), list(zip(("docker", "podman"), ca.GATEWAY_HOSTS, strict=True))
+)
+async def test_the_tls_transport_joins_two_relays_through_a_volume(
+    calls, monkeypatch, engine, gateway
+):
+    """Relay B: the default network, the session's volume and its own
+    certificate directory read-only, nothing else; dialling the listener's
+    persisted port by the runtime's gateway name, verifying it. The relay
+    the worker joins: no network, the same volume. All of it gone at close."""
+    monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(engine, engine=engine))
+    run_dirs = docker._run_dirs()
+    run_dirs.ca.mkdir(parents=True)
+    (run_dirs.ca / "tls-port").write_text("40123\n")
+    certs = ca.session_dir(run_dirs, "s1")
+    backend = docker.DockerBackend()
+
+    assert await backend.open_session("s1", POLICED, None) == docker.RELAY_PROXY_ENV
+
+    create, relay_b, relay = calls.made
+    assert create == (
+        "volume", "create", "--label", docker.home_label(),
+        "--label", docker.VOLUME_LABEL, "kraft-egress-s1",
+    )  # fmt: skip
+    assert relay_b[:4] == ("run", "-d", "--name", "kraft-relay-b-s1")
+    assert not any(a.startswith("--network") for a in relay_b)
+    assert [relay_b[i + 1] for i, a in enumerate(relay_b) if a == "-v"] == [
+        "kraft-egress-s1:/tmp",
+        f"{certs}:/c:ro",
+    ]
+    assert relay_b[-2:] == (
+        "UNIX-LISTEN:/tmp/s.sock,fork,mode=600,unlink-early",
+        f"OPENSSL:{gateway}:40123,cert=/c/client.pem,key=/c/key.pem,cafile=/c/ca.pem,verify=1",
+    )
+    assert (certs / "client.pem").is_file()
+    assert relay[:4] == ("run", "-d", "--name", "kraft-relay-s1")
+    assert "--network=none" in relay
+    assert relay[relay.index("-v") + 1] == "kraft-egress-s1:/tmp"
+    assert relay[-1] == "UNIX-CONNECT:/tmp/s.sock"
+
+    await backend.close_session("s1")
+    assert calls.made[3:] == [
+        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
+        ("volume", "rm", "-f", "kraft-egress-s1"),
+    ]
+    assert not certs.exists()
+
+
+async def test_the_tls_transport_refuses_before_the_listener_ever_started(calls):
+    with pytest.raises(SandboxNotReady, match="TLS listener has not started"):
+        await docker.DockerBackend().open_session("s1", POLICED, None)
     assert calls.made == []
 
 
-async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, monkeypatch):
-    monkeypatch.setattr(docker, "socket_channel", lambda image: True)
+@pytest.mark.parametrize("sock", [SOCK, None], ids=["unix", "tls"])
+async def test_a_relay_that_did_not_start_is_refused_and_removed(calls, sock):
+    run_dirs = docker._run_dirs()
+    run_dirs.ca.mkdir(parents=True)
+    (run_dirs.ca / "tls-port").write_text("40123\n")
     calls.answers["run"] = (125, "")
     with pytest.raises(SandboxNotReady, match="could not start the sandbox's egress relay"):
-        await docker.DockerBackend().open_session("s1", POLICED, SOCK)
-    assert calls.made[-1] == ("rm", "-f", "kraft-relay-s1")
+        await docker.DockerBackend().open_session("s1", POLICED, sock)
+    assert calls.made[-2:] == [
+        ("rm", "-f", "kraft-relay-s1", "kraft-relay-b-s1"),
+        ("volume", "rm", "-f", "kraft-egress-s1"),
+    ]
+    assert not ca.session_dir(run_dirs, "s1").exists()
 
 
-async def test_sweep_keeps_a_live_sessions_relay(calls):
-    calls.answers["ps"] = (0, "kraft-live\nkraft-relay-live\nkraft-relay-gone\n")
-    assert await docker.DockerBackend().sweep(["live"]) == ["kraft-relay-gone"]
+async def test_sweep_keeps_a_live_sessions_relays_volume_and_certificate(calls):
+    listed = ("kraft-live", "kraft-relay-live", "kraft-relay-b-live", "kraft-relay-gone")
+    calls.answers["ps"] = (0, "\n".join(listed))
+    calls.answers["volume"] = (0, "kraft-egress-live\nkraft-egress-gone\n")
+    run_dirs = docker._run_dirs()
+    for sid in ("live", "gone"):
+        ca.mint_session_cert(run_dirs, sid)
+
+    assert await docker.DockerBackend().sweep(["live"]) == ["kraft-relay-gone", "kraft-egress-gone"]
+    assert calls.made[-1] == ("volume", "rm", "-f", "kraft-egress-gone")
+    assert [d.name for d in (run_dirs.ca / "sessions").iterdir()] == ["live"]
 
 
 def test_the_socket_probe_is_kept_until_doctor_refreshes(monkeypatch):
@@ -223,14 +308,18 @@ async def test_doctor_fails_when_the_relay_image_is_not_pulled(healthy_but_relay
     [
         ("docker", "Docker Desktop", "OperatingSystem: Docker Desktop"),
         ("podman", "true", "ServiceIsRemote: true"),
+        ("docker", "Ubuntu 24.04", None),
+        ("podman", "false", None),
     ],
-    ids=["docker-desktop", "podman-machine"],
+    ids=["docker-desktop", "podman-machine", "docker-not-a-vm", "podman-not-a-vm"],
 )
-async def test_doctor_fails_naming_the_vm_runtime_when_network_is_set(
+async def test_doctor_names_the_two_hop_transport_on_a_vm_runtime(
     healthy_but_relay, monkeypatch, engine, info, said
 ):
-    """Doctor asks the probe again (a launch's cached answer may be from
-    before the runtime changed) and names the VM in the runtime's words."""
+    """Not a failure since P4b: doctor asks the probe again (a launch's
+    cached answer may be from before the runtime changed) and says which
+    transport egress takes, naming the VM in the runtime's words. Where
+    the runtime says no VM, the refused socket is a failure."""
     monkeypatch.setattr(docker, "_RUNTIME", docker.Runtime(socket_channel=True))
     monkeypatch.setattr(docker, "detect_runtime", lambda: docker.Runtime(engine, engine=engine))
     monkeypatch.setattr(docker, "_probe_socket_channel", lambda host, image: False)
@@ -238,5 +327,5 @@ async def test_doctor_fails_naming_the_vm_runtime_when_network_is_set(
 
     ok, detail = await docker.DockerBackend().health(POLICED)
 
-    assert not ok
-    assert f"({said})" in detail and "VM transport is not available yet" in detail
+    assert ok is (said is not None)
+    assert f"two-hop TLS transport ({said})" in detail if said else "SELinux" in detail

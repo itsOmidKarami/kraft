@@ -111,6 +111,8 @@ Without `network`, a sandboxed task has the runtime's default network and can re
 
 **How it works.** Each session gets a relay container with no network of its own, from `relay_image` in [sandbox.yaml](/reference/configuration/sandbox). The worker joins the relay's network namespace, so loopback is its only interface. The relay forwards `127.0.0.1:3128` there to a unix socket that belongs to that session alone, and Kraft's daemon serves the proxy on it. The worker gets `HTTP_PROXY` and `HTTPS_PROXY`, in both cases, set to `http://127.0.0.1:3128`, an empty `NO_PROXY`, and `NODE_USE_ENV_PROXY=1`. The daemon makes each allowed connection itself, through its own `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` when it has them, so a proxy on the host's loopback works here. After a daemon restart, a running session's channel is reopened with the lists it launched under, not the current configuration.
 
+**Docker Desktop and Podman machine.** These run containers in a VM, where a container cannot connect to a host unix socket. Kraft checks once per runtime whether a container can connect to a host socket. When it cannot, and the runtime reports that it runs in a VM (Docker Desktop's `OperatingSystem`, Podman's `ServiceIsRemote`), Kraft carries the channel in two hops instead. The relay the worker joins, still with no network, forwards to a socket in a volume made for that session. A second relay, on the runtime's default network, forwards that socket to one mutual-TLS listener the daemon keeps on `127.0.0.1`, which it reaches as `host.docker.internal` (Docker) or `host.containers.internal` (Podman). Both relays run `relay_image`. The listener trusts only a client certificate from Kraft's own CA, kept under `run/ca/`, and takes the session from that certificate, one per session, which only the second relay mounts. The worker shares no network, volume or mount with it. `kraft admin doctor` names the transport in the repository's sandbox row and checks that the listener answers.
+
 | Field | Applies to |
 |---|---|
 | `install` | The repository's `setup_command`. |
@@ -140,11 +142,11 @@ Kraft checks the address a name resolves to, resolving it once on the host, and 
 
 **Clients that ignore the proxy.** Anything that does not use `HTTP(S)_PROXY`, such as git over SSH or a raw socket, has no route at all. A harness whose file declares `proxy_aware: false` (Cursor) is refused under a network policy as a configuration error before it starts.
 
-**It fails closed.** A session that cannot get its route stops as a configuration error and runs nothing. This happens when the runtime cannot carry the channel (below), when the relay image is not pulled, or when the relay does not start. `kraft admin doctor` fails the repository's sandbox row for the first two, naming `docker pull <relay_image>` for a missing image, so pull it before filing work.
+**It fails closed.** A session that cannot get its route stops as a configuration error and runs nothing. This happens when the socket check does not run, when a container cannot connect to the socket on a runtime that does not report a VM (an SELinux denial, or the permissions on `run/sn/`), when the relay image is not pulled, or when a relay does not start. `kraft admin doctor` fails the repository's sandbox row for the first three, naming `docker pull <relay_image>` for a missing image, so pull it before filing work.
 
 **Limits.**
 
-- **Linux-native Docker and Podman only**, rootful or rootless. Docker Desktop and Podman machine run containers in a VM, where a container cannot connect to a host unix socket. Kraft probes for this and refuses `network` there, naming the runtime, and doctor does the same. A transport for those runtimes is not available yet.
+- **Docker Desktop and Podman machine: seven days per session.** A session's client certificate expires after seven days; a session that runs longer loses its route and fails closed. The listener keeps its port across a daemon restart. If another program has taken that port by then, the listener moves to a new one, and sessions started before the restart have no route until they are retried.
 - **Domain fronting.** The allow list is enforced on the name the client asks for and on the address Kraft dials. It does not see what travels inside the TLS connection. An allowed name on a shared CDN address can reach other names that address serves, by TLS SNI or the HTTP `Host` header. Kraft does not terminate TLS per host.
 
 ## Automated review

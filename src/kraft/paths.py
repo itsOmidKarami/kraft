@@ -114,6 +114,12 @@ class RunDirs:
         most 104 bytes on macOS and 108 on Linux."""
         return self.base / "sn"
 
+    @property
+    def ca(self) -> Path:
+        """The Kraft CA, its key (0600) and the certificates it signed
+        (`worker.ca`); the egress TLS listener's persisted port."""
+        return self.base / "ca"
+
     def ensure(self) -> RunDirs:
         for d in (self.logs, self.results, self.worktrees, self.attachments):
             d.mkdir(parents=True, exist_ok=True)

@@ -67,6 +67,10 @@ async def lifespan(app: FastAPI):
     # listeners run on this loop, the one every launch awaits on.
     app.state.egress_channels = channel_mod.ChannelRegistry(run_dirs, database)
     channel_mod.install(app.state.egress_channels)
+    # Where a VM-backed runtime's relays reach the same registry: up before
+    # reattach too, on the port those relays were started against.
+    app.state.egress_tls = channel_mod.TLSListener(app.state.egress_channels, run_dirs)
+    await app.state.egress_tls.start()
     # Read the templates dir at startup, not import time, so tests (and reloads)
     # that set KRAFT_TEMPLATES_DIR after import still take effect.
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
@@ -285,6 +289,7 @@ async def lifespan(app: FastAPI):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await app.state.egress_tls.close()
         await app.state.egress_channels.close_all()
         channel_mod.install(None)
         await database.close()
