@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 from support.harness import entry_of
+from support.sandbox_image import build_git_image
 from support.workspace import nested_repositories, repositories, workspace_item
 
 from kraft import builtins
 from kraft.adapters import forge
 from kraft.executor import stops
 from kraft.executor.context import LaunchContext
-from kraft.paths import default_templates_dir
 from kraft.policy import InstancePolicy, InstancePolicyInput, SandboxPolicy, TemplatePolicyOverride
 from kraft.worker import refstore, sandbox
 from kraft.worker.backends import docker
@@ -23,7 +23,6 @@ from kraft.worker.backends import docker
 from .test_host_git_trust import PROGRAM_KEYS
 
 BRANCH = "kraft/item-1"
-IMAGE = "kraft-test-git:latest"
 
 
 def _git(cwd, *args):
@@ -39,29 +38,7 @@ def _git(cwd, *args):
     ]
 )
 def git_image(request, tmp_path, monkeypatch):
-    """`alpine/git` with its `git` entrypoint cleared, so a command runs as
-    itself, built with the runtime under test and made this machine's
-    runtime through `sandbox.yaml`, rootless or not as it really is. Skips
-    where the runtime cannot build it, unless KRAFT_E2E_REQUIRE names it."""
-    cli = request.param
-    context = tmp_path / "image"
-    context.mkdir()
-    (context / "Dockerfile").write_text("FROM docker.io/alpine/git:latest\nENTRYPOINT []\n")
-    built = subprocess.run(
-        [cli, "build", "-q", "-t", IMAGE, str(context)], capture_output=True, text=True
-    )
-    if built.returncode != 0:
-        why = f"e2e: {cli} could not build {IMAGE}: {built.stderr.strip()}"
-        # Where the runtime is required, an unreachable daemon or registry is
-        # a failure, never a quiet skip past KRAFT_E2E_REQUIRE.
-        if cli in os.environ.get("KRAFT_E2E_REQUIRE", "").split(","):
-            pytest.fail(why)
-        pytest.skip(why)
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    templates.mkdir(parents=True, exist_ok=True)
-    (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
-    monkeypatch.setattr(docker, "_RUNTIME", docker.detect_runtime())
-    return IMAGE
+    return build_git_image(request.param, tmp_path, monkeypatch)
 
 
 def test_a_sandboxed_worker_moves_only_its_own_branch(repo, tmp_path, git_image):
