@@ -773,7 +773,12 @@ def item_mounts(row) -> list[str]:
 
 
 async def run_setup_command(
-    worktree: Path, repo: Path, repo_entry: RepoEntry | None, *, sandbox: dict | None = None
+    worktree: Path,
+    repo: Path,
+    repo_entry: RepoEntry | None,
+    *,
+    sandbox: dict | None = None,
+    checkout: _sandbox.Checkout | None = None,
 ) -> str:
     """Prepare `worktree` the way its repo declares, and say what happened.
 
@@ -823,7 +828,16 @@ async def run_setup_command(
             ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
         except _sandbox.SandboxNotReady as exc:
             raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
-        refs = await asyncio.to_thread(backend.code_in, run_base, worktree, None)
+        # Every member it can see is mounted like the root (Kraft-ju36l):
+        # `checkout`, once the members exist.
+        refs = await asyncio.to_thread(
+            backend.code_in,
+            run_base,
+            worktree,
+            None,
+            members=checkout.members if checkout is not None else {},
+            work_item_id=worktree.name,
+        )
         # Named like a session, so the sandbox can be asked whether its
         # memory limit killed the command, and closed after.
         setup_id = f"setup-{uuid.uuid4().hex[:12]}"
@@ -1548,7 +1562,12 @@ async def _record_done(
 
 
 async def prepare_runtime(
-    worktree: Path, repo: Path, repo_entry: RepoEntry | None, *, sandbox: dict | None = None
+    worktree: Path,
+    repo: Path,
+    repo_entry: RepoEntry | None,
+    *,
+    sandbox: dict | None = None,
+    checkout: _sandbox.Checkout | None = None,
 ) -> str:
     """Re-prepare an existing worktree and say what happened.
 
@@ -1568,7 +1587,7 @@ async def prepare_runtime(
     # No entry, nothing declared to re-run: `ensure_worktree` already refused a
     # repo without a `setup_command` when it cut this worktree.
     setup_log = (
-        await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox)
+        await run_setup_command(worktree, repo, repo_entry, sandbox=sandbox, checkout=checkout)
         if repo_entry is not None
         else ""
     )

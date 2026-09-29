@@ -294,6 +294,22 @@ def _item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     return item_sandbox(row, launch)
 
 
+def sandbox_checkout(row, launch: LaunchContext | None, worktree: Path) -> _sandbox.Checkout:
+    """`row`'s checkout at `worktree` as a sandbox mounts it: each declared
+    member's `(common gitdir, admin dir)`, derived from its connected
+    repository in repos.yaml and never from the member's own `.git`
+    (`sandbox.member_gitdirs`, Kraft-ju36l). What `refuse_planted_repos`
+    checks a member against is exactly what every launch then mounts."""
+    connected = _builtins.member_repositories(row, launch.repositories if launch else {})
+    return _sandbox.Checkout(
+        worktree,
+        {
+            rel: _sandbox.member_gitdirs(m, worktree, rel) if m is not None else None
+            for rel, m in connected.items()
+        },
+    )
+
+
 def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | None) -> None:
     """Raise `RuntimeError` naming the paths when `row`'s item runs sandboxed
     and its `worktree` holds a git repository Kraft did not create: a
@@ -321,11 +337,7 @@ def refuse_planted_repos(row, launch: LaunchContext | None, worktree: Path | Non
         return
     # None is foreign, so every way of not knowing a member's repository --
     # a missing `launch` included -- fails closed.
-    connected = _builtins.member_repositories(row, launch.repositories if launch else {})
-    expected = {
-        rel: _sandbox.member_gitdirs(m, worktree, rel) if m is not None else None
-        for rel, m in connected.items()
-    }
+    expected = sandbox_checkout(row, launch, worktree).members
     foreign = _sandbox.foreign_members(worktree, expected)
     found = [_sandbox.planted_repos(worktree, row["base_ref"], mounts=list(expected))]
     for rel in [r for r in expected if r not in foreign]:

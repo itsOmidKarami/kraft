@@ -1786,7 +1786,12 @@ async def run_once(
         # its whole stdout to the events table each time.
         report = (
             await _builtins.prepare_runtime(
-                worktree, Path(row["repo"]), launch.repo_entry if launch else None, sandbox=sandbox
+                worktree,
+                Path(row["repo"]),
+                launch.repo_entry if launch else None,
+                sandbox=sandbox,
+                # Its members now exist, checked out by Kraft just above.
+                checkout=stops.sandbox_checkout(row, launch, worktree) if sandbox else None,
             )
             if start_index == 0
             else None

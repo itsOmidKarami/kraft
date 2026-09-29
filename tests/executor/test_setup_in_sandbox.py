@@ -312,11 +312,12 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
     tmp_path, repo, monkeypatch, entry, expected
 ):
     """`ensure_worktree` at creation and `prepare_runtime` at walk entry: each
-    a `run_setup_command`, each handed the item's sandbox."""
+    a `run_setup_command`, each handed the item's sandbox -- and the second,
+    run once the members exist, the checkout the sandbox mounts (Kraft-ju36l)."""
     seen = []
 
-    async def run_setup_command(worktree, repo, repo_entry, *, sandbox=None):
-        seen.append(sandbox)
+    async def run_setup_command(worktree, repo, repo_entry, *, sandbox=None, checkout=None):
+        seen.append((sandbox, checkout and checkout.root == worktree))
         return ""
 
     async def run_task(*_a, **_kw):
@@ -333,7 +334,7 @@ async def test_the_walk_runs_both_setups_in_the_items_sandbox(
     )
 
     assert status == "completed"
-    assert seen == [expected, expected]
+    assert seen == [(expected, None), (expected, bool(expected) or None)]
 
 
 async def test_a_sandboxed_item_without_docker_stops_for_a_human(tmp_path, repo, monkeypatch):
@@ -453,7 +454,7 @@ async def test_a_sandboxed_setup_command_mounts_the_ref_store_and_publishes_noth
         sandbox=_SANDBOX,
     )
 
-    assert seen["refstore"] is not None and seen["refstore"].branch is None
+    assert [s.branch for s in seen["refstores"]] == [None]
     assert list(seen["passthrough"]) == ["X_KEY"]
     assert published == []
 

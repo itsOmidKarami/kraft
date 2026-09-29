@@ -56,7 +56,7 @@ class Remote:
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
 
-    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path):
+    async def owner_refusal(self, run_dirs, cwd, work_item_id, result_path, **kw):
         return self.foreign
 
     async def probe(self, sandbox, executable, env):
@@ -85,7 +85,7 @@ class Remote:
         return False
 
     def code_out(self, refs, session_id):
-        return None
+        return []
 
     def code_out_item(self, run_base, work_item_id):
         return []
@@ -234,8 +234,10 @@ async def test_a_collect_that_fails_still_publishes_the_sessions_commits(
     async def fail(session_id, result_path):
         raise OSError("copy-out failed")
 
-    monkeypatch.setattr(remote, "code_in", lambda *a, **kw: SimpleNamespace(carried=None))
-    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid))
+    monkeypatch.setattr(
+        remote, "code_in", lambda *a, **kw: (SimpleNamespace(carried=None, branch=None),)
+    )
+    monkeypatch.setattr(remote, "code_out", lambda refs, sid: published.append(sid) or [])
     monkeypatch.setattr(remote, "collect", fail)
     await database.write(
         lambda c: store.create_work_item(
