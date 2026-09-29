@@ -75,19 +75,14 @@ def test_the_ca_is_generated_once_and_its_key_is_the_daemons_alone(run_dirs):
     assert stat.S_IMODE(run_dirs.ca.stat().st_mode) == 0o700
 
 
-async def test_a_session_certificate_passes_a_strict_handshake_as_its_session_id(run_dirs):
+@pytest.mark.parametrize("hostname", ["127.0.0.1", *ca.GATEWAY_HOSTS])
+async def test_the_listener_verifies_as_each_name_a_relay_dials_it_by(run_dirs, hostname):
+    """A session certificate passes a strict handshake as its session id.
+    Relay B reaches the daemon as its runtime's gateway name, never as
+    127.0.0.1, and socat checks the certificate against that name."""
     client = ca.mint_session_cert(run_dirs, "01JSESSION0000000000000001")
 
-    assert await _handshake(run_dirs, client) == "01JSESSION0000000000000001"
-
-
-@pytest.mark.parametrize("hostname", ca.GATEWAY_HOSTS)
-async def test_the_listener_verifies_as_each_name_a_relay_dials_it_by(run_dirs, hostname):
-    """Relay B reaches the daemon as its runtime's gateway name, never as
-    127.0.0.1, and socat checks the certificate against that name."""
-    client = ca.mint_session_cert(run_dirs, "s1")
-
-    assert await _handshake(run_dirs, client, hostname) == "s1"
+    assert await _handshake(run_dirs, client, hostname) == "01JSESSION0000000000000001"
 
 
 async def test_a_certificate_from_another_ca_is_refused(run_dirs, tmp_path):
