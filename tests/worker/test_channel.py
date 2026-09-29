@@ -1,10 +1,13 @@
 """`kraft.worker.channel`: one unix-socket listener per session under
-`run/sn/<short>/s.sock`, serving `egress.EgressProxy` on the daemon's loop."""
+`run/sn/<short>/s.sock`, or the one loopback mTLS listener for sessions on
+the TLS transport, serving `egress.EgressProxy` on the daemon's loop."""
 
 from __future__ import annotations
 
 import asyncio
 import shutil
+import socket
+import ssl
 import stat
 import tempfile
 from pathlib import Path
@@ -13,7 +16,7 @@ import pytest
 
 from kraft import events, store
 from kraft.paths import RunDirs
-from kraft.worker import channel, egress
+from kraft.worker import ca, channel, egress
 from kraft.worker.sandbox import SandboxNotReady
 
 _DENY_ALL = egress.PhaseLists("runtime", (), ("**",))
@@ -103,3 +106,99 @@ async def test_a_socket_path_too_long_for_a_unix_socket_is_refused_by_name(datab
     reg = channel.ChannelRegistry(deep, database)
     with pytest.raises(SandboxNotReady, match="too long for a unix socket"):
         await reg.open("0123456789abcdef0123", "w1", _DENY_ALL)
+
+
+@pytest.fixture
+async def listener(registry, short_run):
+    tls = channel.TLSListener(registry, short_run)
+    await tls.start()
+    yield tls
+    await tls.close()
+
+
+async def _ask_tls(run_dirs, session_id: str | None, request: bytes) -> bytes:
+    """Dial the listener as a relay B would, presenting `session_id`'s
+    certificate (none for None), and send `request` if any: sending into a
+    refused connection races its alert with a reset. A blocking socket, in a thread: asyncio's
+    streams read the server's refusal alert as a plain EOF."""
+    context = ssl.create_default_context(cafile=ca.ensure_ca(run_dirs)[0])
+    if session_id is not None:
+        context.load_cert_chain(*ca.mint_session_cert(run_dirs, session_id))
+    port = int((run_dirs.ca / "tls-port").read_text())
+
+    def ask() -> bytes:
+        with (
+            socket.create_connection(("127.0.0.1", port), timeout=5) as raw,
+            context.wrap_socket(
+                raw, server_hostname="127.0.0.1", suppress_ragged_eofs=False
+            ) as tls,
+        ):
+            if request:
+                tls.sendall(request)
+            return b"".join(iter(lambda: tls.recv(65536), b""))
+
+    return await asyncio.to_thread(ask)
+
+
+async def test_a_session_certificate_reaches_its_own_session_over_tls(
+    registry, listener, database, short_run
+):
+    for sid in ("01JSESSION0000000000000001", "01JSESSION0000000000000002"):
+        # Registered for the TLS transport: no socket made for it.
+        assert await registry.open(sid, "w1", _DENY_ALL, transport="tls") is None
+    assert not short_run.sockets.exists()
+    assert listener._server.sockets[0].getsockname()[0] == "127.0.0.1"
+
+    answer = await _ask_tls(
+        short_run, "01JSESSION0000000000000002", b"CONNECT a.io:443 HTTP/1.1\r\n\r\n"
+    )
+
+    assert answer.startswith(b"HTTP/1.1 403 ")
+    rows = database.read(lambda c: events.read_after(c, 0, "w1"))
+    refused = [r for r in rows if r["type"] == egress.SANDBOX_EGRESS_REFUSED]
+    assert [r["payload"]["session_id"] for r in refused] == ["01JSESSION0000000000000002"]
+
+
+@pytest.mark.parametrize("state", ["never-opened", "closed", "unix-channel"])
+async def test_a_certificate_naming_no_open_tls_session_gets_nothing(
+    registry, listener, short_run, state
+):
+    """The certificate chains to the CA, so the handshake succeeds; then the
+    connection closes with not one byte, not even a 403."""
+    sid = "0123456789abcdef0123"
+    if state != "never-opened":
+        await registry.open(
+            sid, "w1", _DENY_ALL, transport="unix" if state == "unix-channel" else "tls"
+        )
+    if state == "closed":
+        await registry.close(sid)
+
+    assert await _ask_tls(short_run, sid, b"CONNECT a.io:443 HTTP/1.1\r\n\r\n") == b""
+
+
+async def test_a_client_without_a_certificate_is_refused_at_the_handshake(
+    registry, listener, short_run
+):
+    await registry.open("0123456789abcdef0123", "w1", _DENY_ALL, transport="tls")
+
+    # asyncio drops a refused handshake without sending its alert: an EOF
+    # mid-protocol, where an accepted connection is closed cleanly.
+    with pytest.raises(ssl.SSLEOFError):
+        await _ask_tls(short_run, None, b"")
+
+
+async def test_the_tls_port_survives_a_restart_and_a_taken_one_is_replaced(registry, short_run):
+    tls = channel.TLSListener(registry, short_run)
+    port = await tls.start()
+    await tls.close()
+    assert await tls.start() == port
+    await tls.close()
+
+    with socket.socket() as squatter:
+        squatter.bind(("127.0.0.1", port))
+        squatter.listen()
+        moved = await tls.start()
+        await tls.close()
+
+    assert moved != port
+    assert int((short_run.ca / "tls-port").read_text()) == moved

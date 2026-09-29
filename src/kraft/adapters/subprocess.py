@@ -481,7 +481,9 @@ async def open_egress(
         )
     sock_path = await channels.open(session_id, work_item_id, lists)
     if db is not None:
-        await db.write(lambda c: store.set_session_egress(c, session_id, lists.to_json()))
+        # Which transport, for a reattach to re-register it the same way.
+        egress = {**lists.to_json(), "transport": "unix"}
+        await db.write(lambda c: store.set_session_egress(c, session_id, egress))
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:
         raise _sandbox.SandboxNotReady(

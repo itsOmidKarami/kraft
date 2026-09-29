@@ -705,8 +705,9 @@ def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None 
 
 
 def set_session_egress(conn: sqlite3.Connection, session_id: str, egress: dict) -> None:
-    """The egress lists a session under `network:` launched with, for
-    reattach to re-open its channel with (`worker_sessions.egress`)."""
+    """The egress lists a session under `network:` launched with, and its
+    channel's `transport` ("unix" or "tls"), for reattach to re-open its
+    channel with (`worker_sessions.egress`)."""
     conn.execute(
         "UPDATE worker_sessions SET egress = ? WHERE id = ?", (json.dumps(egress), session_id)
     )

@@ -12,17 +12,25 @@ One registry per daemon, installed by the API's lifespan (`install`). A
 process with none -- a CLI, a test that did not install one -- has no
 channel, and a launch under `network:` there stops (`config_error`), never
 runs with open egress.
+
+On a VM-backed runtime (P4b) a bind-mounted host socket cannot be connected
+to, so a session registered with `transport="tls"` gets no socket: its relay
+B dials the daemon's one `TLSListener` instead, and the session is the
+subject of the client certificate it presents (`worker.ca`).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
+import ssl
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from kraft import events
+from kraft.worker import ca
 from kraft.worker.egress import SANDBOX_EGRESS_REFUSED, EgressProxy, EgressSession, PhaseLists
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -32,12 +40,18 @@ _SUN_PATH_MAX = (104 if sys.platform == "darwin" else 108) - 1
 #: least (fewer would make two live sessions' sockets likely to collide).
 _SHORT_MAX, _SHORT_MIN = 16, 8
 _SOCKET = "s.sock"
+#: Under `run/ca/`: the port the TLS listener last bound, tried first again.
+_PORT_FILE = "tls-port"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class _Channel:
-    path: Path
-    server: asyncio.Server
+    session: EgressSession
+    #: The unix socket and its listener; both None under the TLS transport.
+    path: Path | None = None
+    server: asyncio.Server | None = None
 
 
 class ChannelRegistry:
@@ -48,6 +62,18 @@ class ChannelRegistry:
         self._db = db
         self._proxy = proxy or EgressProxy()
         self._open: dict[str, _Channel] = {}
+
+    @property
+    def proxy(self) -> EgressProxy:
+        """The one proxy every session's connections are handed to, over
+        either transport."""
+        return self._proxy
+
+    def tls_session(self, session_id: str) -> EgressSession | None:
+        """The session a client certificate's subject names, if it is open
+        and registered for the TLS transport; None refuses the connection."""
+        channel = self._open.get(session_id)
+        return channel.session if channel is not None and channel.path is None else None
 
     def socket_path(self, session_id: str) -> Path:
         """`run/sn/<short>/s.sock`, or `SandboxNotReady` naming the path when
@@ -61,9 +87,25 @@ class ChannelRegistry:
             )
         return base / session_id[:room] / _SOCKET
 
-    async def open(self, session_id: str, work_item_id: str, lists: PhaseLists) -> Path:
+    async def open(
+        self, session_id: str, work_item_id: str, lists: PhaseLists, *, transport: str = "unix"
+    ) -> Path | None:
         """Listen on the session's socket; the path to mount into its relay.
-        A stale socket left by a daemon that died is replaced."""
+        A stale socket left by a daemon that died is replaced. Under
+        `transport="tls"`, only register the session for the `TLSListener`:
+        no socket, and None."""
+
+        async def record(payload: dict) -> None:
+            await self._db.write(
+                lambda c: events.append(c, work_item_id, SANDBOX_EGRESS_REFUSED, payload)
+            )
+
+        session = EgressSession(session_id, lists, record)
+        if transport == "tls":
+            if session_id in self._open:
+                raise SandboxNotReady(f"session {session_id} already has an egress channel")
+            self._open[session_id] = _Channel(session)
+            return None
         path = self.socket_path(session_id)
         if any(c.path == path for c in self._open.values()):
             raise SandboxNotReady(f"another session's egress socket is already at {path}")
@@ -73,17 +115,10 @@ class ChannelRegistry:
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             directory.chmod(0o700)
         path.unlink(missing_ok=True)
-
-        async def record(payload: dict) -> None:
-            await self._db.write(
-                lambda c: events.append(c, work_item_id, SANDBOX_EGRESS_REFUSED, payload)
-            )
-
-        session = EgressSession(session_id, lists, record)
         server = await asyncio.start_unix_server(
             lambda r, w: self._proxy.handle(r, w, session), path=str(path)
         )
-        self._open[session_id] = _Channel(path, server)
+        self._open[session_id] = _Channel(session, path, server)
         return path
 
     async def close(self, session_id: str, *, keep_dir: bool = False) -> None:
@@ -92,7 +127,7 @@ class ChannelRegistry:
         nothing here may hold up the rest of a session's teardown. A no-op
         for a session with no channel."""
         channel = self._open.pop(session_id, None)
-        if channel is None:
+        if channel is None or channel.server is None:
             return
         channel.server.close()
         try:
@@ -118,7 +153,7 @@ class ChannelRegistry:
         sessions' channels. A socket probe's `probe-*` directory is not a
         session's: a doctor in another process may be using it. The names
         removed."""
-        keep = {c.path.parent for c in self._open.values()}
+        keep = {c.path.parent for c in self._open.values() if c.path is not None}
         base = self._run_dirs.sockets
         stale = (
             [
@@ -132,6 +167,79 @@ class ChannelRegistry:
         for directory in stale:
             shutil.rmtree(directory, ignore_errors=True)
         return [d.name for d in stale]
+
+
+class TLSListener:
+    """One per daemon: the loopback mTLS port every TLS-transport session's
+    relay B dials. The session is the client certificate's subject CN, never
+    the peer address (every relay B arrives from 127.0.0.1, spike 4.5a).
+
+    `host` is a test-only seam: a Linux CI runner's containers reach the
+    host through the bridge gateway, not its loopback. The daemon always
+    listens on 127.0.0.1."""
+
+    def __init__(self, registry: ChannelRegistry, run_dirs, *, host: str = "127.0.0.1"):
+        self._registry, self._run_dirs, self._host = registry, run_dirs, host
+        self._server: asyncio.Server | None = None
+
+    def _context(self) -> ssl.SSLContext:
+        ca_cert, _ = ca.ensure_ca(self._run_dirs)
+        # The default context: VERIFY_X509_STRICT stays on.
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert)
+        context.load_cert_chain(*ca.server_cert(self._run_dirs))
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        return context
+
+    async def start(self) -> int:
+        """Listen, on the port persisted under `run/ca/` when there is one: a
+        restarted daemon must keep the port a live relay B already dials.
+        When that port is taken, any free one, persisted in its place -- and
+        every live TLS session's relay B is cut off until it is reopened."""
+        context = self._context()
+        port_file = self._run_dirs.ca / _PORT_FILE
+        try:
+            wanted = int(port_file.read_text())
+        except OSError, ValueError:
+            wanted = 0
+        try:
+            self._server = await asyncio.start_server(self._handle, self._host, wanted, ssl=context)
+        except OSError as exc:
+            if not wanted:
+                raise
+            logger.warning(
+                "egress TLS port %d is taken (%s): listening on another; relays of "
+                "sessions adopted from before this restart can no longer reach it",
+                wanted,
+                exc,
+            )
+            self._server = await asyncio.start_server(self._handle, self._host, 0, ssl=context)
+        port = self._server.sockets[0].getsockname()[1]
+        port_file.write_text(f"{port}\n")
+        return port
+
+    async def _handle(self, reader, writer) -> None:
+        """No certificate never gets here (`CERT_REQUIRED` refuses the
+        handshake). A certificate naming no open TLS session is closed on
+        with nothing written: no HTTP framing is owed to a stale relay."""
+        subject = dict(rdn[0] for rdn in writer.get_extra_info("peercert")["subject"])
+        session = self._registry.tls_session(subject.get("commonName", ""))
+        if session is None:
+            writer.close()
+            return
+        await self._registry.proxy.handle(reader, writer, session)
+
+    async def close(self) -> None:
+        """Stop listening, at shutdown; the port file stays for the next
+        start."""
+        if self._server is None:
+            return
+        self._server.close()
+        try:
+            await asyncio.wait_for(self._server.wait_closed(), 5)
+        except TimeoutError:
+            pass
+        self._server = None
 
 
 _CURRENT: ChannelRegistry | None = None

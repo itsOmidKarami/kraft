@@ -305,6 +305,7 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
         "phase": "runtime",
         "allow": ["a.io", "api.anthropic.com"],
         "deny": ["b.io"],
+        "transport": "unix",
     }
     assert not channels.socket_path("s1").exists()
 
