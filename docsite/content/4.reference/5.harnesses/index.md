@@ -26,6 +26,7 @@ spec_author: { kind: agent, harness: claude, prompt: "...", produces: spec }
 Every agent task Kraft ships names `claude`. To run a task on another
 harness, make sure `harnesses.yaml` has a profile for it (the shipped file has
 `claude` and `codex`) and change the task's `harness:` to that profile's id.
+[Switch a task to another harness](/guides/switch-harness) walks through it.
 
 Kraft ships six harnesses:
 
