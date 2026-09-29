@@ -479,10 +479,11 @@ async def open_egress(
             "a sandbox with `network:` reaches out only through the Kraft server's egress "
             "channel, and this process has none"
         )
-    sock_path = await channels.open(session_id, work_item_id, lists)
+    transport = await backend.egress_transport()
+    sock_path = await channels.open(session_id, work_item_id, lists, transport=transport)
     if db is not None:
         # Which transport, for a reattach to re-register it the same way.
-        egress = {**lists.to_json(), "transport": "unix"}
+        egress = {**lists.to_json(), "transport": transport}
         await db.write(lambda c: store.set_session_egress(c, session_id, egress))
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:

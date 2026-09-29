@@ -169,6 +169,15 @@ class ChannelRegistry:
         return [d.name for d in stale]
 
 
+def tls_port(run_dirs) -> int | None:
+    """The port the TLS listener last bound, which a relay B dials; None
+    before it has ever started."""
+    try:
+        return int((run_dirs.ca / _PORT_FILE).read_text())
+    except OSError, ValueError:
+        return None
+
+
 class TLSListener:
     """One per daemon: the loopback mTLS port every TLS-transport session's
     relay B dials. The session is the client certificate's subject CN, never
@@ -197,11 +206,7 @@ class TLSListener:
         When that port is taken, any free one, persisted in its place -- and
         every live TLS session's relay B is cut off until it is reopened."""
         context = self._context()
-        port_file = self._run_dirs.ca / _PORT_FILE
-        try:
-            wanted = int(port_file.read_text())
-        except OSError, ValueError:
-            wanted = 0
+        wanted = tls_port(self._run_dirs) or 0
         try:
             self._server = await asyncio.start_server(self._handle, self._host, wanted, ssl=context)
         except OSError as exc:
@@ -215,7 +220,7 @@ class TLSListener:
             )
             self._server = await asyncio.start_server(self._handle, self._host, 0, ssl=context)
         port = self._server.sockets[0].getsockname()[1]
-        port_file.write_text(f"{port}\n")
+        (self._run_dirs.ca / _PORT_FILE).write_text(f"{port}\n")
         return port
 
     async def _handle(self, reader, writer) -> None:

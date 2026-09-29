@@ -506,8 +506,8 @@ async def _close_sandbox(kind: str | None, session_id: str, *, egress: bool = Fa
 
 
 async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> None:
-    """Listen again on an adopted session's socket, with the lists it
-    launched under -- never today's config. Its relay outlived the restart
+    """Listen again for an adopted session, over the transport and with the
+    lists it launched under -- never today's config. Its relay outlived the restart
     and reconnects per connection. Without a channel the worker keeps no
     route out: it fails closed, and this says why."""
     channels = _channel.current()
@@ -515,7 +515,15 @@ async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> Non
         logger.warning("adopted session %s: no egress channel to re-open", session_id)
         return
     try:
-        await channels.open(session_id, work_item_id, PhaseLists.from_json(json.loads(egress)))
+        row = json.loads(egress)
+        # A TLS session's relay B dials the listener again, on the port it
+        # persisted: registered, with no socket nothing would use.
+        await channels.open(
+            session_id,
+            work_item_id,
+            PhaseLists.from_json(row),
+            transport=row.get("transport", "unix"),
+        )
     except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
         logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)
 
