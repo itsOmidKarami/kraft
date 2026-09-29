@@ -261,27 +261,52 @@ def templates_dir(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("path", "body"),
+    ("method", "path", "body"),
     [
-        ("/api/work-items/w1/gates/review/approve", {}),
-        ("/api/work-items/w1/gates/review/reject", {"note": "no"}),
-        ("/api/work-items/w1/pause", None),
-        ("/api/work-items/w1/resume", {}),
-        ("/api/work-items/w1/skip", {}),
-        ("/api/work-items/w1/abandon", None),
-        ("/api/work-items/w1/retry", {}),
+        ("POST", "/api/work-items/w1/gates/review/approve", {}),
+        ("POST", "/api/work-items/w1/gates/review/reject", {"note": "no"}),
+        ("POST", "/api/work-items/w1/pause", None),
+        ("POST", "/api/work-items/w1/resume", {}),
+        ("POST", "/api/work-items/w1/skip", {}),
+        ("POST", "/api/work-items/w1/abandon", None),
+        ("POST", "/api/work-items/w1/retry", {}),
+        ("POST", "/api/work-items/w1/complete", {"reason": "done"}),
+        ("POST", "/api/work-items/w1/cancel", {"reason": "no"}),
+        ("POST", "/api/work-items/w1/escalate", {"message": "help"}),
+        ("PATCH", "/api/work-items/w1", {"attachments": {"spec": None}}),
+        ("PATCH", "/api/work-items/w1", {"agent_overrides": {}}),
+        ("PATCH", "/api/work-items/w1", {"node_overrides": {"implementation": {}}}),
+        ("PATCH", "/api/work-items/w1", {"policy": {}}),
+        ("PATCH", "/api/work-items/w1", {"budget_usd": 100}),
     ],
-    ids=["approve", "reject", "pause", "resume", "skip", "abandon", "retry"],
+    ids=[
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "skip",
+        "abandon",
+        "retry",
+        "complete",
+        "cancel",
+        "escalate",
+        "set-attachments",
+        "agent-overrides",
+        "node-overrides",
+        "policy",
+        "budget",
+    ],
 )
 @pytest.mark.parametrize(
     ("caller", "refused"),
     [("s-own", True), ("s-escalation", False), ("s-other", False), (None, False)],
     ids=["own-worker", "own-escalation", "other-items-worker", "no-header"],
 )
-def test_a_worker_session_cannot_act_on_its_own_item(client, path, body, caller, refused):
+def test_a_worker_session_cannot_act_on_its_own_item(client, method, path, body, caller, refused):
     """`deps.forbid_self_action`, the server's twin of the CLI's guard (design
     §6 rule 2): a consistency check, not a boundary, as a caller can omit the
-    header. An escalation turn is not a worker, so it may."""
+    header. An escalation turn is not a worker, so it may, except approve or
+    reject its own item's gate."""
     permissions.seed_session(sid="s-escalation", wid="w1", hook_point="escalation")
     permissions.seed_session(sid="s-other", wid="w2")
     with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
@@ -295,7 +320,9 @@ def test_a_worker_session_cannot_act_on_its_own_item(client, path, body, caller,
             result_path="/tmp/kraft-test.json",
         )
     headers = {"X-Kraft-Session-Id": caller} if caller else {}
-    r = client.post(path, json=body, headers=headers)
+    if caller == "s-escalation" and path.endswith(("/approve", "/reject")):
+        refused = True  # Kraft-9efnk.16: a gate is a human's, not the escalation agent's
+    r = client.request(method, path, json=body, headers=headers)
     assert (r.status_code == 403) is refused, r.text
     if refused:
         assert "cannot act on its own work item (w1)" in r.json()["detail"]

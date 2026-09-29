@@ -624,6 +624,14 @@ def _retrimmed(row, filed_kinds: frozenset[str], kinds: frozenset[str]) -> str:
 @api_router.patch("/work-items/{wid}")
 async def update_work_item(wid: str, body: WorkItemPatch, request: Request):
     st = request.app.state
+    # The fields `kraft` guards with `_forbid_self_action`, plus the budget: a
+    # worker raising its own dollar cap is the same self-action. Title and
+    # description stay open; a chain template is fixed once the item starts.
+    if "budget_usd" in body.model_fields_set or any(
+        f is not None
+        for f in (body.attachments, body.agent_overrides, body.node_overrides, body.policy)
+    ):
+        deps.forbid_self_action(st, request, wid)
     # 404s on an unknown item and 409s on an ended one (Kraft-6vni1), before any 422
     row = deps._live_work_item_row(st, wid)
     fields_set = body.model_fields_set

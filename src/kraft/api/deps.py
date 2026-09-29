@@ -232,10 +232,13 @@ def _live_work_item_row(st, wid):
     return row
 
 
-def forbid_self_action(st, request, wid: str) -> None:
+def forbid_self_action(st, request, wid: str, *, escalation_may: bool = True) -> None:
     """403 when the caller names a worker session of `wid` itself: design §6
-    rule 2, a worker does not approve, reject, pause, resume, skip, abandon
-    or retry its own item.
+    rule 2, a worker does not approve, reject, pause, resume, skip, abandon,
+    retry, complete, cancel or escalate its own item, nor revise its
+    attachments, agent or node overrides or policy. Review comments and
+    submit-review need no call here: `routes.review._refuse_agents` refuses
+    any session header there outright.
 
     The server-side twin of `client.context._forbid_self_action`, for a
     client other than `kraft` or the MCP server that honestly sends
@@ -244,7 +247,11 @@ def forbid_self_action(st, request, wid: str) -> None:
 
     An escalation turn is no worker (`identify_as_worker=False`), so it may:
     the client lets its `kraft item retry` through (it has no
-    `KRAFT_WORK_ITEM_ID`), and so does this. A sandboxed session reaches
+    `KRAFT_WORK_ITEM_ID`), and so does this -- except where `escalation_may`
+    is False, approve and reject (Kraft-9efnk.16): a gate is a human's call,
+    and the escalation agent is not the human. The client cannot refuse
+    those itself, as nothing in an escalation's environment names its item,
+    so this is the only refusal. A sandboxed session reaches
     only `/retry` of these, through its channel (`worker.callback.ROUTES`),
     which sets this header on every call: this is what refuses a sandboxed
     worker's retry of its own item while its escalation's self-retry passes,
@@ -261,7 +268,7 @@ def forbid_self_action(st, request, wid: str) -> None:
     if (
         session is not None
         and session["work_item_id"] == wid
-        and session["hook_point"] != executor.ESCALATION_HOOK
+        and (not escalation_may or session["hook_point"] != executor.ESCALATION_HOOK)
     ):
         raise HTTPException(
             403,

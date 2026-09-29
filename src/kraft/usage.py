@@ -11,13 +11,13 @@ task produce them:
 * a ``usage`` block in the result file any adapter may write at
   ``$KRAFT_RESULT_PATH``.
 
-**A finished session's cost is only ever the agent's own number.** Kraft used
-to carry a per-model rate table and multiply tokens by it when an agent
-reported no cost at exit. That is still refused: the agent knows what it was
-billed and Kraft does not, so a computed figure standing in for a finished
-session's true cost would be a guess wearing the same font as a fact. A
-finished session with tokens and no reported cost stores ``cost_usd = NULL``
-forever, and the rollups say so rather than counting it as zero.
+**A finished session's settled cost is only ever the agent's own number.**
+The agent knows what it was billed and Kraft does not, so a computed figure
+must never pass for a finished session's true cost: that would be a guess
+wearing the same font as a fact. A finished session with tokens and no
+reported cost therefore keeps an estimate flagged ``cost_estimated`` when its
+model can be priced (see `_settle_cost` below), and ``cost_usd = NULL`` when it
+cannot, which the rollups report as unknown rather than counting as zero.
 
 **A running session is a different question.** Its own true cost does not
 exist yet -- the agent has not been billed -- so there is nothing for Kraft to

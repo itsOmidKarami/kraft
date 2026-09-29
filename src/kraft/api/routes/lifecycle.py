@@ -1294,6 +1294,7 @@ async def _end_work_item(request: Request, wid: str, action: str, reason: str):
     reason, stops whatever runs -- sessions, an escalation turn, the walk --
     and leaves the item where no door leads back onto its chain."""
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._work_item_row(st, wid)
     reason = reason.strip()
     if not reason:
@@ -1319,6 +1320,7 @@ async def escalate_work_item(wid: str, body: Escalate, request: Request):
     docs/superpowers/specs/2026-09-10-escalate-to-kraft-agent-design.md).
     """
     st = request.app.state
+    deps.forbid_self_action(st, request, wid)
     row = deps._live_work_item_row(st, wid)
     if row["status"] not in ("needs_human", "paused"):
         raise HTTPException(409, "work item is not needs_human or paused")
