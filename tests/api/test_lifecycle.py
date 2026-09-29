@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pytest
 from support.api import _force_node, _poll_events, _post_default, _set_status
+from support.harness import make_repo_with_submodule
+
+from kraft.config import git_read
 
 
 def test_happy_path_via_api(client, repo, monkeypatch):
@@ -453,31 +456,23 @@ def test_abandon_prunes_each_members_worktree_and_branch(client, tmp_path):
     """Kraft-ju36l: a workspace member is a worktree of its connected
     repository, on the item's branch there. Abandon reclaims both, as it does
     the root's, so the operator's member repository keeps nothing of it."""
-    from support.harness import make_repo_with_submodule
-
-    from kraft.config import git_read
-
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    connect = {"path": str(root.resolve()), "setup_command": ""}
-    assert client.post("/api/repos", json=connect).status_code == 201
-    member_repo = root.resolve() / "libs" / "a"
-    wid = client.post(
-        "/api/work-items",
-        json={"title": "t", "repo": str(root.resolve()), "workspace": "ws", "members": ["a"]}
-        | {"chain_template": "default"},
-    ).json()["id"]
+    root = make_repo_with_submodule(tmp_path, submodule_path="libs/a")[0].resolve()
+    client.post("/api/repos", json={"path": str(root), "setup_command": ""})
+    item = {"title": "t", "repo": str(root), "workspace": "ws", "members": ["a"]}
+    wid = client.post("/api/work-items", json=item | {"chain_template": "default"}).json()["id"]
     _poll_events(client, wid, "gate_requested")
     branch = client.get(f"/api/work-items/{wid}").json()["branch"]
-    worktrees = git_read(member_repo, "worktree", "list", "--porcelain")
-    assert worktrees.count("worktree ") == 2, "fixture never made a member worktree"
+
+    def worktrees():
+        return len(git_read(root / "libs" / "a", "worktree", "list").splitlines())
+
+    assert worktrees() == 2, "fixture never made a member worktree"
     _set_status(wid, "paused")
 
-    r = client.post(f"/api/work-items/{wid}/abandon")
+    assert client.post(f"/api/work-items/{wid}/abandon").status_code == 200
 
-    assert r.status_code == 200, r.text
-    worktrees = git_read(member_repo, "worktree", "list", "--porcelain")
-    assert worktrees.count("worktree ") == 1
-    assert not git_read(member_repo, "branch", "--list", branch)
+    assert worktrees() == 1
+    assert not git_read(root / "libs" / "a", "branch", "--list", branch)
 
 
 def test_abandon_refuses_an_active_item(client, repo):
