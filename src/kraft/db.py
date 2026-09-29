@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 44
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -178,7 +178,12 @@ CREATE TABLE worker_sessions (
   -- session is cleaned up by the one it used whatever the config says now.
   -- NULL for an unsandboxed session and every row older than this column:
   -- read as "ask every backend", each a no-op for a session it never ran
-  sandbox        TEXT
+  sandbox        TEXT,
+  -- a sandboxed session's egress lists under `network:` as it launched with
+  -- them, JSON {"phase", "allow", "deny"} (harness hosts included), so a
+  -- reattach re-opens its channel with them, never with today's config.
+  -- NULL: no `network`, and every row older than this column
+  egress         TEXT
 );
 
 CREATE INDEX idx_worker_sessions_status ON worker_sessions(status);
@@ -946,6 +951,7 @@ FROM worker_sessions""",
         "CREATE INDEX idx_review_threads_item ON review_threads(work_item_id, gate)",
     ],
     42: ["ALTER TABLE worker_sessions ADD COLUMN sandbox TEXT"],
+    43: ["ALTER TABLE worker_sessions ADD COLUMN egress TEXT"],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins

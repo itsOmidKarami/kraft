@@ -1,12 +1,18 @@
+import asyncio
+import json
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import psutil
 import pytest
 
 from kraft import store
 from kraft.adapters import subprocess as sp
-from kraft.worker import backends, reattach
+from kraft.paths import RunDirs
+from kraft.worker import backends, channel, reattach
 from kraft.worker.backends import docker as docker_backend
 from kraft.worker.sandbox import SandboxNotReady
 
@@ -33,6 +39,10 @@ class Remote:
         #: the `ca_bundle` each `wrap` was given.
         self.prepared: Path | str | None = None
         self.wrapped_with: list = []
+        #: Every session call, in order, and what `open_session` answers.
+        self.calls: list[str] = []
+        self.route = {"HTTPS_PROXY": "http://127.0.0.1:3128"}
+        self.wrapped_env: list[dict] = []
 
     def home(self, run_dirs, work_item_id):
         return run_dirs.base / "remote-home" / work_item_id
@@ -50,6 +60,8 @@ class Remote:
 
     def wrap(self, cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
         self.wrapped_with.append(kw.get("ca_bundle"))
+        self.wrapped_env.append(env)
+        self.calls.append("wrap")
         return ["env", f"KRAFT_RESULT_PATH={self.outbox / f'{session_id}.json'}", *cmd]
 
     def client_cwd(self, session_id):
@@ -74,6 +86,14 @@ class Remote:
 
     async def close(self, session_id):
         self.closed.append(session_id)
+        self.calls.append("close")
+
+    async def open_session(self, session_id, sandbox, sock_path):
+        self.calls.append("open_session")
+        return self.route if sandbox.get("network") else {}
+
+    async def close_session(self, session_id):
+        self.calls.append("close_session")
 
     async def sweep(self, keep_sessions):
         return []
@@ -112,7 +132,7 @@ def test_a_session_is_closed_by_the_backend_it_recorded_else_by_every_one(remote
     assert [b.kind for b in backends.for_session(kind)] == asked
 
 
-async def _run_on_remote(database, run_dirs, tmp_path) -> str:
+async def _run_on_remote(database, run_dirs, tmp_path, sandbox=None, **kw) -> str:
     await database.write(
         lambda c: store.create_work_item(
             c,
@@ -133,7 +153,8 @@ async def _run_on_remote(database, run_dirs, tmp_path) -> str:
         node_id="verify",
         hook_point="on.test.run",
         cwd=tmp_path,
-        sandbox={"kind": "remote"},
+        sandbox=sandbox or {"kind": "remote"},
+        **kw,
     )
 
 
@@ -234,3 +255,113 @@ async def test_a_session_whose_backend_is_not_ready_stops_before_it_launches(
     assert remote.wrapped_with == []
     log = (run_dirs.logs / "s1.log").read_text()
     assert "roots could not be read" in log
+
+
+# --- network: the session's egress route -------------------------------------------------
+
+_POLICED = {"kind": "remote", "network": {"runtime": {"allow": ["a.io"], "deny": ["b.io"]}}}
+
+
+@pytest.fixture
+async def channels(database):
+    """A channel registry installed as the daemon's, on a run dir short
+    enough for a unix socket path."""
+    base = Path(tempfile.mkdtemp(prefix="kraft-sn-", dir="/tmp"))
+    registry = channel.ChannelRegistry(RunDirs(base).ensure(), database)
+    channel.install(registry)
+    yield registry
+    await registry.close_all()
+    channel.install(None)
+    shutil.rmtree(base, ignore_errors=True)
+
+
+async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
+    database, run_dirs, tmp_path, remote, channels
+):
+    """Opened before the worker exists, closed after it (the worker, then
+    its route); the proxy env wins over the task's own; the row keeps the
+    lists a reattach re-opens with, the harness's hosts allowed too."""
+    status = await _run_on_remote(
+        database,
+        run_dirs,
+        tmp_path,
+        _POLICED,
+        env={"HTTPS_PROXY": "http://elsewhere:1"},
+        network_requires=("api.anthropic.com",),
+    )
+
+    assert status == "done_with_concerns"
+    assert remote.calls == ["open_session", "wrap", "close", "close_session"]
+    assert remote.wrapped_env[0]["HTTPS_PROXY"] == "http://127.0.0.1:3128"
+    row = database.read(
+        lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    assert json.loads(row["egress"]) == {
+        "phase": "runtime",
+        "allow": ["a.io", "api.anthropic.com"],
+        "deny": ["b.io"],
+    }
+    assert not channels.socket_path("s1").exists()
+
+
+@pytest.mark.parametrize("missing", ["channel", "route"])
+async def test_network_without_a_channel_or_a_route_never_launches(
+    database, run_dirs, tmp_path, remote, channels, missing
+):
+    """R3: fail closed. A process with no egress channel, or a backend that
+    made no route, is a `config_error` -- never a launch with open egress."""
+    if missing == "channel":
+        channel.install(None)
+    else:
+        remote.route = {}
+    assert await _run_on_remote(database, run_dirs, tmp_path, _POLICED) == "config_error"
+    assert "wrap" not in remote.calls
+    assert "egress" in (run_dirs.logs / "s1.log").read_text()
+
+
+async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
+    item_on, database, run_dirs, remote, channels, monkeypatch
+):
+    """The lists come off the row the session launched with, and the
+    channel and route close when the adopted session ends."""
+    adopted = asyncio.Event()
+    release = asyncio.Event()
+
+    async def adopt(db, session_id, pid, **kw):
+        adopted.set()
+        await release.wait()
+
+    monkeypatch.setattr(reattach, "_adopt", adopt)
+    item = await item_on(_CHAIN, "implementation")
+    live = (os.getpid(), psutil.Process().create_time())
+    await item.session("s1", "implementation.main.implement", running=live, sandbox="remote")
+    deny_all = {"phase": "runtime", "allow": [], "deny": ["**"]}
+    await database.write(lambda c: store.set_session_egress(c, "s1", deny_all))
+
+    _, tasks = await reattach.reattach(database, run_dirs)
+    await adopted.wait()
+    reader, writer = await asyncio.open_unix_connection(str(channels.socket_path("s1")))
+    writer.write(b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
+    answer = await asyncio.wait_for(reader.read(), 5)
+    writer.close()
+    release.set()
+    await tasks["s1"]
+
+    assert b"a.io is on the deny list" in answer
+    assert remote.calls[-2:] == ["close", "close_session"]
+    assert not channels.socket_path("s1").exists()
+
+
+async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(
+    item_on, database, run_dirs, remote, docker_closed
+):
+    item = await item_on(_CHAIN, "implementation")
+    await item.session("s1", "implementation.main.implement", running=DEAD, sandbox="remote")
+    await item.session("s2", "implementation.main.implement", running=DEAD, sandbox="remote")
+    await database.write(
+        lambda c: store.set_session_egress(c, "s1", {"phase": "runtime", "allow": [], "deny": []})
+    )
+
+    await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
+
+    assert remote.calls == ["close", "close_session", "close"]

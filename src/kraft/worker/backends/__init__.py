@@ -82,6 +82,19 @@ class SandboxBackend(Protocol):
         """Stop and remove the session's sandbox, best-effort and bounded. A
         no-op for a session this backend never ran."""
 
+    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path) -> dict:
+        """Ready the session's egress route under `sandbox['network']`
+        before it starts, to the channel listening at `sock_path`
+        (`worker.channel`): docker starts a relay the worker joins. Returns
+        the environment the launch must add (its proxy); `{}` for a sandbox
+        with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
+        route cannot be made (`config_error`), never opens egress instead."""
+
+    async def close_session(self, session_id: str) -> None:
+        """Undo `open_session`, best-effort and bounded like `close`, and a
+        no-op for a session with no route. The channel itself is closed by
+        whoever opened it (`run_task`, reattach), not by the backend."""
+
     async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
         """Remove what this Kraft home started that no session in
         `keep_sessions` owns, returning what went."""

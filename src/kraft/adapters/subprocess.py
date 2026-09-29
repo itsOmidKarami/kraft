@@ -22,7 +22,9 @@ import psutil
 from kraft import caps, events, logs, store
 from kraft import usage as _usage
 from kraft.worker import backends as _backends
+from kraft.worker import channel as _channel
 from kraft.worker import sandbox as _sandbox
+from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
 
 if TYPE_CHECKING:
@@ -463,6 +465,38 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
         pass
 
 
+async def _open_egress(
+    db, backend, session_id: str, work_item_id: str, sandbox: dict, lists: PhaseLists
+) -> dict:
+    """Open a session's egress under `sandbox['network']`: its channel, the
+    lists recorded on its row for a reattach, and the backend's route to the
+    channel. The proxy environment the launch adds; `SandboxNotReady`
+    whenever any of it is missing -- never a launch with open egress."""
+    channels = _channel.current()
+    if channels is None:
+        raise _sandbox.SandboxNotReady(
+            "a sandbox with `network:` reaches out only through the Kraft server's egress "
+            "channel, and this process has none"
+        )
+    sock_path = await channels.open(session_id, work_item_id, lists)
+    await db.write(lambda c: store.set_session_egress(c, session_id, lists.to_json()))
+    proxy_env = await backend.open_session(session_id, sandbox, sock_path)
+    if not proxy_env:
+        raise _sandbox.SandboxNotReady(
+            f"the {backend.kind} sandbox gave its session no egress route for `network:`"
+        )
+    return proxy_env
+
+
+async def close_egress(backend, session_id: str) -> None:
+    """Undo `_open_egress`: the backend's route, then the channel."""
+    try:
+        await backend.close_session(session_id)
+    finally:
+        if (channels := _channel.current()) is not None:
+            await channels.close(session_id)
+
+
 async def run_task(
     db,
     run_dirs,
@@ -522,6 +556,9 @@ async def run_task(
     #: Host paths a sandboxed launch also mounts read-only at the same path (a
     #: rules file its CLI must read and never rewrite). Ignored unsandboxed.
     ro_paths: tuple[str, ...] = (),
+    #: The harness's own hosts (`Harness.network_requires`), allowed on top of
+    #: a `network:` sandbox's runtime list. Only `run_agent_task` sets it.
+    network_requires: tuple[str, ...] = (),
 ) -> str:
     log_path = run_dirs.logs / f"{session_id}.log"
     result_path = result_path_for(run_dirs, files or session_id)
@@ -534,6 +571,7 @@ async def run_task(
     # this must read as what actually ran, never a docker-wrapped invocation.
     command_ran = shlex.join(cmd)
     backend = _backends.for_sandbox(sandbox) if sandbox else None
+    network = backend is not None and bool(sandbox.get("network"))
 
     await db.write(
         lambda c: store.create_session(
@@ -595,6 +633,19 @@ async def run_task(
             log_path.write_text(f"kraft: {exc}\n")
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             return "config_error"
+        proxy_env: dict[str, str] = {}
+        if network:
+            # Before the worker exists: it has no route but this one.
+            lists = PhaseLists.of(sandbox["network"], "runtime", network_requires)
+            try:
+                proxy_env = await _open_egress(
+                    db, backend, session_id, work_item_id, sandbox, lists
+                )
+            except _sandbox.SandboxNotReady as exc:
+                await close_egress(backend, session_id)
+                log_path.write_text(f"kraft: {exc}\n")
+                await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
+                return "config_error"
         if refs is not None:
             await _record_unsynced(db, refs, work_item_id, session_id, refs.carried)
         home = backend.home(run_dirs, work_item_id)
@@ -608,6 +659,8 @@ async def run_task(
                 **await asyncio.to_thread(_sandbox.git_identity, Path(cwd)),
                 **(repo_entry.env if repo_entry is not None else {}),
                 **(env or {}),
+                # Last: the relay is the only route, whatever else says.
+                **proxy_env,
             },
             session_id=session_id,
             result_path=result_path,
@@ -628,6 +681,8 @@ async def run_task(
     # marks a row stopped: no log file is opened and no process is started.
     current_status = await db.write(lambda c: store.session_status(c, session_id))
     if current_status != "pending":
+        if network:
+            await close_egress(backend, session_id)
         return current_status
     # A sandbox's client may run somewhere of the backend's own, not in the
     # worktree: nothing it leaves behind lands where a worker commits.
@@ -672,6 +727,8 @@ async def run_task(
             await db.write(lambda c: store.session_exited(c, session_id, "config_error"))
             if backend is not None:
                 await backend.close(session_id)
+            if network:
+                await close_egress(backend, session_id)
             return "config_error"
     finally:
         log.close()  # the child holds its own dup'd fd
@@ -782,7 +839,12 @@ async def run_task(
                         await backend.collect(session_id, result_path)
                         oom = await backend.oom_killed(session_id)
                     finally:
-                        await backend.close(session_id)
+                        # The worker, then its route out (spec §4).
+                        try:
+                            await backend.close(session_id)
+                        finally:
+                            if network:
+                                await close_egress(backend, session_id)
             finally:
                 if refs is not None:
                     await _sync_refs(db, backend, refs, work_item_id, session_id)

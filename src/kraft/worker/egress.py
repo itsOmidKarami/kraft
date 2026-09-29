@@ -84,6 +84,25 @@ class PhaseLists:
     allow: tuple[str, ...]
     deny: tuple[str, ...]
 
+    @classmethod
+    def of(cls, network: dict, phase: str, requires: tuple[str, ...] = ()) -> PhaseLists:
+        """`phase`'s lists out of a dumped `sandbox.network`. The `runtime`
+        phase also allows `requires`, the harness's own hosts (spec §1); its
+        `deny` still wins over them."""
+        lists = network.get(phase) or {}
+        allow = tuple(lists.get("allow", ()))
+        if phase == "runtime":
+            allow = tuple(dict.fromkeys((*allow, *requires)))
+        return cls(phase, allow, tuple(lists.get("deny", ())))
+
+    def to_json(self) -> dict:
+        """As `worker_sessions.egress` holds it."""
+        return {"phase": self.phase, "allow": list(self.allow), "deny": list(self.deny)}
+
+    @classmethod
+    def from_json(cls, data: dict) -> PhaseLists:
+        return cls(data["phase"], tuple(data["allow"]), tuple(data["deny"]))
+
 
 @dataclass
 class EgressSession:
