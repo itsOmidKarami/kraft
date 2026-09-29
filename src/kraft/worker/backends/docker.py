@@ -240,6 +240,13 @@ class Runtime:
         ]
         return "limits " + ", ".join(said)
 
+    def security_args(self) -> list[str]:
+        """The privilege drop every container Kraft starts runs under: no
+        setuid gain, no capabilities, and SELinux separation off only where
+        sandbox.yaml says `selinux: disable`."""
+        label = ["--security-opt=label=disable"] if self.selinux == "disable" else []
+        return ["--security-opt=no-new-privileges", *label, "--cap-drop=ALL"]
+
     def user_args(self) -> list[str]:
         """Who the container runs as, so what it writes into the worktree is
         the operator's. Rootless docker maps container root to the operator
@@ -427,9 +434,7 @@ def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
                 "--label",
                 home_label(),
                 *host.user_args(),
-                "--security-opt=no-new-privileges",
-                *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
-                "--cap-drop=ALL",
+                *host.security_args(),
                 "-v",
                 f"{where}:{where}",
                 "--entrypoint",
@@ -527,9 +532,7 @@ def _relay_argv(name: str, relay_image: str, network: list[str], mounts: list[st
         "--label",
         RELAY_LABEL,
         *host.user_args(),
-        "--security-opt=no-new-privileges",
-        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
-        "--cap-drop=ALL",
+        *host.security_args(),
         "--read-only",
         "--log-driver=none",
         *host.limit_args(limits),
@@ -724,9 +727,7 @@ def docker_argv(
         "--label",
         home_label(),
         *host.user_args(),
-        "--security-opt=no-new-privileges",
-        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
-        "--cap-drop=ALL",
+        *host.security_args(),
         *host.limit_args(sandbox.get("resources")),
         *([f"--network=container:{relay}"] if network else []),
         "-v",
@@ -827,9 +828,7 @@ def oneshot(sandbox: dict, cwd: str | Path, home: str | Path) -> Oneshot:
         "--label",
         home_label(),
         *host.user_args(),
-        "--security-opt=no-new-privileges",
-        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
-        "--cap-drop=ALL",
+        *host.security_args(),
         *host.limit_args(sandbox.get("resources")),
         "--network=none",
         "-v",
@@ -1137,6 +1136,10 @@ async def missing_executable(
     key = (image, executable)
     if key in _HAS_EXECUTABLE:
         return False
+    try:
+        host = await asyncio.to_thread(runtime)
+    except ConfigError, OSError:
+        return False
     env_args = [a for name in (env or {}) for a in ("-e", name)]
     probed = await docker_call(
         "run",
@@ -1144,7 +1147,7 @@ async def missing_executable(
         "--label",
         home_label(),
         "--network=none",
-        "--cap-drop=ALL",
+        *host.security_args(),
         *env_args,
         image,
         "sh",

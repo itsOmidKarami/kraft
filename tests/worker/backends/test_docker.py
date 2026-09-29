@@ -443,6 +443,7 @@ async def test_the_image_check_asks_through_the_entrypoint_with_the_repo_env(tmp
     line, client_path = log.read_text().splitlines()
     argv = line.split()
     assert not [a for a in argv if a.startswith("--entrypoint")]
+    assert {"--security-opt=no-new-privileges", "--cap-drop=ALL"} <= set(argv)
     # By name, like the launch: the value rides in the client's env.
     assert argv[argv.index("PATH") - 1] == "-e"
     assert "PATH=/opt/bin" not in argv
