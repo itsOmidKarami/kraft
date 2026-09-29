@@ -172,8 +172,7 @@ async def list_repos(request: Request):
         "repos": [r.model_dump_repo(mode="json") for r in config_mod.load_repos(path)],
         "workspaces": {
             ws_id: ws.model_dump(mode="json")
-            # Unrefused, so doctor can fail a sandboxed workspace's row by name.
-            for ws_id, ws in config_mod.load_workspaces(path, refuse_sandboxed=False).items()
+            for ws_id, ws in config_mod.load_workspaces(path).items()
         },
     }
 

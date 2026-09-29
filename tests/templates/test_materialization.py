@@ -593,6 +593,38 @@ def test_a_task_fanned_out_to_a_repository_runs_under_that_repositorys_policy():
         materialized.policy_for(task, repository="nope")
 
 
+_SANDBOX = {"kind": "docker", "image": "img"}
+
+
+@pytest.mark.parametrize("layer", ["chain", "item-policy", "retry"])
+def test_a_sandboxed_chain_materializes_onto_member_mounts(layer):
+    """Kraft-ju36l: a sandbox over a workspace's members is no longer refused,
+    whichever layer sets it -- the chain's own policy at intake, the item's
+    policy override, or a retry's -- and every task runs under it."""
+    from support.harness import v1_resolved
+
+    from kraft.policy import SandboxPolicy, TemplatePolicyOverride
+    from kraft.templates.models import ResolvedChain
+    from kraft.templates.retry import validate_retry_override
+
+    authored = {"id": "t", "kind": "subprocess", "command": "true"}
+    chain = v1_resolved([{"id": "n", "kind": "exec", "tasks": [authored]}])
+    if layer == "chain":
+        layered = TemplatePolicyOverride(sandbox=_SANDBOX)
+        chain = ResolvedChain.from_chain(chain.chain.model_copy(update={"policy": layered}))
+    materialized = chain.materialize(target=workspace_target(), effective_policy=policy())
+    if layer == "item-policy":
+        materialized = materialized.with_item_policy({"sandbox": _SANDBOX})
+    if layer == "retry":
+        materialized = validate_retry_override(
+            materialized, "n.main.t", policy={"sandbox": _SANDBOX}
+        ).chain
+
+    (task,) = materialized.chain.nodes[0].tasks()
+    assert materialized.target.mounts
+    assert materialized.policy_for(task).sandbox == SandboxPolicy(**_SANDBOX)
+
+
 def test_the_design_documents_repos_yaml_is_what_the_daemon_reads(tmp_path):
     """Kraft-iep21 (Ruling 177): the doc's `repos.yaml` is loaded by the one
     reader the daemon uses, `config.load_repos`/`load_workspaces` -- a file

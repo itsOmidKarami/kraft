@@ -1,13 +1,19 @@
 """A workspace work item's target, and a filed workspace item, for tests
 that file one."""
 
-import dataclasses
 import os
 from pathlib import Path
 from types import SimpleNamespace
 
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
+from support.harness import (
+    _git,
+    entry_of,
+    make_repo,
+    make_repo_with_submodule,
+    v1_chain,
+    v1_resolved,
+)
 
 
 def workspace_target(
@@ -63,7 +69,9 @@ async def workspace_item(
     root-pointer policy `pointer`, on one exec node of `tasks` (or the chain
     `nodes`); its checkout assembled. Each member's connected repository is a
     clone of its own (`repositories`), or when `nested` the root's own
-    submodule checkout (`nested_repositories`). Returns `(row, node, worktree)`."""
+    submodule checkout (`nested_repositories`). `materialize` (an
+    `effective_policy`, `repository_policies`) goes to `materialize`, as intake
+    passes them. Returns `(row, node, worktree)`."""
     root, pkg = make_repo_with_submodule(tmp_path)
     mounts = {"pkg": "repos/pkg"}
     connected = {"pkg": pkg}
@@ -73,23 +81,17 @@ async def workspace_item(
         _git(root, "commit", "-qm", "add a second submodule")
         mounts["pkg2"] = "repos/pkg2"
         connected["pkg2"] = pkg2
-    chain = v1_chain(
-        nodes or [{"id": "n", "kind": "exec", "tasks": tasks}],
-        repo=root,
-        target=None
+    target = (
+        None
         if legacy
-        else workspace_target(mounts, root_pointer_policy=pointer, base_branch=base_branch),
+        else workspace_target(mounts, root_pointer_policy=pointer, base_branch=base_branch)
     )
-    if materialize:
-        # Built past `materialize`, as an item filed before Ruling 180 froze
-        # it: `materialize` now refuses a sandbox over submodule mounts
-        # (Kraft-dshto), and dispatch's per-repository resolution is what
-        # this pins. The chain declares no policy, so no layer is skipped.
-        chain = dataclasses.replace(
-            chain,
-            policy=materialize["effective_policy"],
-            repository_policies=materialize["repository_policies"],
-        )
+    nodes = nodes or [{"id": "n", "kind": "exec", "tasks": tasks}]
+    chain = (
+        v1_resolved(nodes).materialize(target=target, **materialize)
+        if materialize
+        else v1_chain(nodes, repo=root, target=target)
+    )
     # `legacy`: the shape every item filed before Task 10 has -- a
     # single-repository target, its submodules and pointer policy in columns.
     columns = {"submodules": list(mounts.values()), "root_merge_policy": pointer} if legacy else {}

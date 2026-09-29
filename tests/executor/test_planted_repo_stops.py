@@ -307,8 +307,8 @@ def _reason(evts) -> str:
 
 
 def _sandboxed(materialized):
-    """`materialized` as an item filed sandboxed, which `materialize` still
-    refuses to build over members (Ruling 180)."""
+    """`materialized` with a sandbox on its item-wide policy, as an item
+    filed sandboxed."""
     layer = TemplatePolicyOverride(sandbox=SandboxPolicy(**_PLAIN_SANDBOX))
     return dataclasses.replace(
         materialized, policy=materialized.policy.apply_template_override(layer)

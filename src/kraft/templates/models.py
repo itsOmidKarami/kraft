@@ -1181,12 +1181,6 @@ class ResolvedChain:
             untrimmed=self.without_nodes(skip_nodes).chain if attachment_kinds else None,
             repository_steering=repository_steering,
         )
-        # Every door that builds a snapshot comes through here -- intake by
-        # any route, a trigger, a chain template switch -- so the refusal is
-        # made once, before anything is filed.
-        refusal = materialized.sandbox_refusal()
-        if refusal is not None:
-            raise PolicyError(refusal, field="sandbox")
         return materialized
 
     def chain_policy(self, effective_policy: InstancePolicy) -> InstancePolicy:
@@ -1584,27 +1578,6 @@ class MaterializedChain:
             )
         return next(iter(found), None)
 
-    def sandbox_refusal(self) -> str | None:
-        """Why this snapshot cannot run, when it mounts submodules and any task
-        it runs is sandboxed, whichever layer set the sandbox (Kraft-dshto):
-        a repository, the work item, the chain, a node, a step or a task.
-        None when the pairing is absent. A check rather than a construction
-        invariant: an item already in flight rehydrates its snapshot to be
-        stopped for a human, and that must not raise."""
-        if not self.target.mounts:
-            return None
-        if self.policy.sandbox is None and not any(
-            self.policy_for(t).sandbox is not None for n in self.chain.nodes for t in n.tasks()
-        ):
-            return None
-        named = [r for r, p in self.repository_policies.items() if p.sandbox is not None]
-        who = f"repository {', '.join(map(repr, named))}" if named else "the chain"
-        who = f"workspace {self.target.workspace!r}: {who}"
-        # Here, not at the top: `kraft.worker` is below `kraft.templates`.
-        from kraft.worker.sandbox import submodule_refusal
-
-        return submodule_refusal(who)
-
     def policy_for(
         self,
         scope: ResolvedNode | ResolvedStep | ResolvedTask,
@@ -1701,9 +1674,6 @@ class MaterializedChain:
             )
             where = f"{where}.{exc.field}"
             raise PolicyError(f"{where}: {exc}", field=where, path=exc.path) from exc
-        refusal = layered.sandbox_refusal()
-        if refusal is not None:
-            raise PolicyError(f"policy.sandbox: {refusal}", field="policy.sandbox")
         return layered
 
     def policy_at(self, path: str) -> InstancePolicy:

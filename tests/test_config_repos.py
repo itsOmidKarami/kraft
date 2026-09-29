@@ -693,6 +693,20 @@ def test_a_workspace_that_cannot_assemble_is_refused_at_load(tmp_path, repos, wo
         config.load_workspaces(_write(tmp_path, repos, workspaces))
 
 
+@pytest.mark.parametrize("sandboxed", ["ws", "lib-a"], ids=["root", "member"])
+def test_a_sandboxed_workspace_with_members_loads(tmp_path, sandboxed):
+    """Kraft-ju36l: members are checked out from their connected repositories,
+    so a sandbox on the root or on a member no longer refuses the workspace,
+    and the entry keeps its sandbox."""
+    sandbox = {"kind": "docker", "image": "img"}
+    repos = [{**r, "sandbox": sandbox} if r["id"] == sandboxed else r for r in _WS_REPOS]
+    workspaces = {"ws": {"root": "ws", "members": {"a": {"repository": "lib-a", "path": "libs/a"}}}}
+    path = _write(tmp_path, repos, workspaces)
+    assert set(config.load_workspaces(path)) == {"ws"}
+    (entry,) = [r for r in config.load_repos(path) if r.id == sandboxed]
+    assert entry.sandbox.model_dump() == sandbox
+
+
 def test_save_repos_keeps_the_workspaces_section(tmp_path):
     """Every Settings write goes through `save_repos` with the repository list
     alone; it must not drop the workspaces declared beside it."""

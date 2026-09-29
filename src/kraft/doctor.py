@@ -28,10 +28,10 @@ from kraft.paths import (
     default_skills_dir,
     default_templates_dir,
 )
-from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError, Workspace
+from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
-from kraft.worker import backends, channel, sandbox
+from kraft.worker import backends, channel
 from kraft.worker import steering as steering_mod
 from kraft.worker.backends import docker_forward
 from kraft.worker.env import worker_env
@@ -695,13 +695,6 @@ async def _repo_checks() -> list[dict]:
         config.RepoEntry.model_validate(r, context={"unrecognised_keys_reported": True})
         for r in await client.repos()
     ]
-    # Kraft-dshto: `GET /repos` lists a sandboxed workspace rather than
-    # refusing it, so the repository that sets the sandbox fails its own row.
-    sandboxed = {
-        rid: ws_id
-        for ws_id, ws in (await client.workspaces()).items()
-        for rid in config.sandboxed_members(Workspace.model_validate(ws), repos)
-    }
     networked = False
     for repo in repos:
         path = Path(repo.path)
@@ -741,17 +734,7 @@ async def _repo_checks() -> list[dict]:
                     f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
                 )
             )
-        if repo.id in sandboxed:
-            checks.append(
-                _check(
-                    f"sandbox {_label(repo)}",
-                    False,
-                    sandbox.submodule_refusal(
-                        f"workspaces.{sandboxed[repo.id]}: repository {repo.id!r}"
-                    ),
-                )
-            )
-        elif (policy := repo.effective_sandbox) is not None:
+        if (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
             networked = networked or policy.network is not None
             for extra in (

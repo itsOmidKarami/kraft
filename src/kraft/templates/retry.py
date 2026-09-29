@@ -160,11 +160,6 @@ def validate_retry_override(
         item_policy=chain.item_policy,
         repository_steering=chain.repository_steering,
     )
-    # A retry is a door onto a new snapshot too: a `sandbox` it adds to a
-    # workspace item's task is refused as intake would refuse it (Kraft-dshto).
-    refusal = forked.sandbox_refusal()
-    if refusal is not None:
-        raise RetryOverrideError(refusal, field="policy.sandbox")
     return RetryOverride(
         path=path,
         task_config=task_config,
