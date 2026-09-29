@@ -462,7 +462,7 @@ async def _every_member_host_call(ws, database) -> None:
     """Each host git Kraft runs with its cwd in a member, or in the root on
     the member's behalf -- one call per row of spec 2b's map -- then teardown.
     A git failure is swallowed: what is asserted is what ran, not what worked."""
-    branch = ws.branch
+    branch, identity = ws.branch, builtins.item_identity(database, ws.wid)
     moved = ws.m.parent / "mover"
     _w(ws.m.parent, "clone", "-q", str(ws.m_origin), str(moved))
     (moved / "upstream.txt").write_text("landed meanwhile\n")
@@ -478,9 +478,13 @@ async def _every_member_host_call(ws, database) -> None:
     )
     calls = [
         # M3: the straggler sweep and the clean check, member then root.
-        lambda: forge.commit_stragglers(ws.member, base="main", message="wip"),
+        lambda: forge.commit_stragglers(
+            ws.member, branch=branch, base="main", message="wip", identity=identity
+        ),
         lambda: forge.assert_clean(ws.member, "main"),
-        lambda: forge.commit_stragglers(ws.wt, base="main", message="wip", mounts=[_REL]),
+        lambda: forge.commit_stragglers(
+            ws.wt, branch=branch, base="main", message="wip", mounts=[_REL], identity=identity
+        ),
         lambda: forge.assert_clean(ws.wt, "main"),
         # M2: publication's reads of the member's branch.
         lambda: forge.git.commits_ahead(ws.member, branch, "main"),
@@ -494,7 +498,9 @@ async def _every_member_host_call(ws, database) -> None:
         lambda: forge.git.push(ws.wt, branch),
         # M5/M6: the member rebased onto its moved origin; forced, as
         # `mr_rebase_forced` is, since the push above published the branch.
-        lambda: builtins.refresh_worktree_base(ws.member, ws.m, branch, base="main", force=True),
+        lambda: builtins.refresh_worktree_base(
+            ws.member, ws.m, branch, base="main", force=True, identity=identity
+        ),
         # M4: the root pointed at the member's merge, landed on origin's main.
         lambda: _point_at_merged_members(
             _MergedForge(_w(ws.m_origin, "rev-parse", "main")), database, ws.wt, branch, ws.wid

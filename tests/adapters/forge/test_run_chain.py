@@ -479,7 +479,7 @@ async def test_a_ci_poll_conflict_rebase_is_never_a_green_check(
     declared, the node itself waits and reads that head's CI next time."""
     it = await item_on(back_half(), repo=repo)
 
-    async def rebased(*_):
+    async def rebased(*_, **__):
         return "0ddba11"
 
     monkeypatch.setattr(forge.run._builtins, "mr_rebase_forced", rebased)

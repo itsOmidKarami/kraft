@@ -944,6 +944,26 @@ async def upstream_head(repo: Path, branch: str) -> str | None:
     return git_read(repo, "rev-parse", "HEAD")
 
 
+def item_identity(db, work_item_id: str) -> dict[str, str]:
+    """The identity Kraft's own host commits for `work_item_id` are made as:
+    its root's (`sandbox.git_identity` of the item's repository). A member is
+    a worktree of its connected repository, whose config Kraft never writes
+    an identity into (Kraft-ju36l, J3), so every host commit or rebase in a
+    member is handed this, per command."""
+    row = db.read(
+        lambda c: c.execute("SELECT repo FROM work_items WHERE id = ?", (work_item_id,)).fetchone()
+    )
+    return _sandbox.git_identity(Path(row["repo"])) if row is not None else {}
+
+
+def _committer_env(identity: Mapping[str, str] | None) -> dict[str, str] | None:
+    """The process env with `identity`'s committer half: a rebase replays each
+    commit under its own author, and only the committer is Kraft's."""
+    if not identity:
+        return None
+    return {**os.environ, **{k: v for k, v in identity.items() if k.startswith("GIT_COMMITTER_")}}
+
+
 async def refresh_worktree_base(
     worktree: Path,
     repo: Path,
@@ -952,6 +972,7 @@ async def refresh_worktree_base(
     base: str,
     force: bool = False,
     timeout: float | None = None,
+    identity: Mapping[str, str] | None = None,
 ) -> str | None:
     """Rebase `worktree`'s branch onto origin's `base` (`upstream_head`) -- the
     item's `base_branch` -- so a paused or retried item's next commit lands on
@@ -1039,6 +1060,7 @@ async def refresh_worktree_base(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=_committer_env(identity),
         )
     except subprocess.TimeoutExpired:
         # `subprocess.run` already killed the `git rebase` process on the
@@ -1262,7 +1284,14 @@ async def _rebase_members(
             if await git.commits_ahead(sub, branch, sub_base) == 0:
                 continue
             old = git_read(sub, "rev-parse", "HEAD")
-            head = await refresh_worktree_base(sub, sub, branch, base=sub_base, timeout=remaining())
+            head = await refresh_worktree_base(
+                sub,
+                sub,
+                branch,
+                base=sub_base,
+                timeout=remaining(),
+                identity=item_identity(db, work_item_id),
+            )
             # `refresh_worktree_base` now reports `sub_base`'s head even when
             # the member's branch already contained it as an ancestor
             # (Kraft-jypzx) -- that is not a move (`old` unchanged), and must
@@ -1299,12 +1328,20 @@ def _explain_gitlink_conflict(
     return RebaseConflict(f"{exc}\n{how}", exc.paths)
 
 
-async def mr_rebase_forced(worktree: Path, repo: Path, branch: str, base: str) -> str | None:
+async def mr_rebase_forced(
+    worktree: Path,
+    repo: Path,
+    branch: str,
+    base: str,
+    identity: Mapping[str, str] | None = None,
+) -> str | None:
     """`refresh_worktree_base` with the pushed-branch guard off, for
     `ci_poll`'s conflict path (Kraft-9h7v) -- the one caller that has already
     confirmed, from the forge's own re-fetched read, that this branch cannot
     land as it stands."""
-    return await refresh_worktree_base(worktree, repo, branch, base=base, force=True)
+    return await refresh_worktree_base(
+        worktree, repo, branch, base=base, force=True, identity=identity
+    )
 
 
 async def start_session(

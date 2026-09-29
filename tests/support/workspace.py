@@ -2,6 +2,8 @@
 that file one."""
 
 import dataclasses
+import os
+from pathlib import Path
 
 from support import worktree as wtree
 from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
@@ -99,3 +101,19 @@ async def workspace_item(
     )
     row = database.read(lambda c: c.execute("SELECT * FROM work_items").fetchone())
     return row, chain.chain.nodes[0], worktree
+
+
+#: What `only_the_root_has_an_identity` sets the root's email to.
+ROOT_EMAIL = "root@example.com"
+
+
+def only_the_root_has_an_identity(monkeypatch, tmp_path, row) -> None:
+    """No commit identity anywhere git would look -- environment, global or
+    system config, a member's connected repository -- but in the item's root
+    repository, whose email becomes `ROOT_EMAIL` (Kraft-ju36l, J3)."""
+    _git(Path(row["repo"]), "config", "user.email", ROOT_EMAIL)
+    for name in [k for k in os.environ if k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))]:
+        monkeypatch.delenv(name)
+    (tmp_path / "no-identity.gitconfig").write_text("[user]\n\tuseConfigOnly = true\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-identity.gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")

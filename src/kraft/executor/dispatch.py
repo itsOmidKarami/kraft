@@ -1074,6 +1074,7 @@ async def _dispatch_task(
             base=base,
             message=f"wip: uncommitted work from {node.id}",
             mounts=_builtins.item_mounts(work_item_row),
+            identity=_builtins.item_identity(db, work_item_row["id"]),
         )
     except RuntimeError as exc:  # ForgeError included
         logger.warning("could not commit stragglers after %s: %r", task.path, exc)
