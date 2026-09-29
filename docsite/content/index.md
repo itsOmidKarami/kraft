@@ -6,7 +6,7 @@ description: 'A local orchestrator that runs your coding agent from spec to pull
 ::u-page-hero
 ---
 headline: '$ uv tool install kraft-sdlc && kraft'
-title: 'Hand your coding agent a spec and walk away. Kraft only interrupts you when a decision is yours.'
+title: 'Run your coding agent from spec to pull request.'
 description: 'A local orchestrator that runs your coding agent from spec to pull request, each task in its own git worktree, and stops only when a decision is yours. Retries and spend are capped.'
 links:
   - label: Get started
