@@ -36,13 +36,19 @@ def build_git_image(cli: str, tmp_path: Path, monkeypatch) -> str:
         # launches `podman run` with the worker's allowlisted environment,
         # which drops it, and the test's own HOME holds no connection. Name it
         # there, in the one file that podman reads from HOME.
-        conf = Path(os.environ["HOME"]) / ".config" / "containers" / "containers.conf"
+        # Only ever the suite's throwaway HOME, a sibling of `tmp_path` under
+        # pytest's basetemp, and never over a file already there.
+        home = Path(os.environ["HOME"]).resolve()
+        if not home.is_relative_to(tmp_path.resolve().parent):
+            pytest.fail(f"e2e: HOME {home} is not the suite's own; not writing podman config")
+        conf = home / ".config" / "containers" / "containers.conf"
         conf.parent.mkdir(parents=True, exist_ok=True)
         key = os.environ.get("CONTAINER_SSHKEY", "")
-        conf.write_text(
-            '[engine]\nactive_service = "e2e"\n[engine.service_destinations.e2e]\n'
-            f'uri = "{host}"\nidentity = "{key}"\n'
-        )
+        with conf.open("x") as out:
+            out.write(
+                '[engine]\nactive_service = "e2e"\n[engine.service_destinations.e2e]\n'
+                f'uri = "{host}"\nidentity = "{key}"\n'
+            )
     templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "sandbox.yaml").write_text(f"cli: {cli}\n")
