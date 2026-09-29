@@ -86,11 +86,10 @@ class ChannelRegistry:
         """A TLS connection whose certificate names `session_id`: served if
         that is an open TLS-transport session, else closed with nothing
         written (no HTTP framing is owed to a stale relay)."""
-        channel = self._open.get(session_id)
-        if channel is None or channel.path is not None:
+        if self.tls_session(session_id) is None:
             writer.close()
             return
-        await self._serve(channel, reader, writer)
+        await self._serve(self._open[session_id], reader, writer)
 
     def tls_session(self, session_id: str) -> EgressSession | None:
         """The session a client certificate's subject names, if it is open
