@@ -55,6 +55,15 @@ def test_declared_reads_only_the_lines_under_each_removed_heading(cr):
     }
 
 
+def test_a_removal_inside_an_html_comment_is_not_declared(cr):
+    """The PR template's example sections sit in a comment a reviewer never
+    sees; left there, they must not count."""
+    template = (_SCRIPT.parents[1] / ".github" / "PULL_REQUEST_TEMPLATE.md").read_text()
+    assert cr.declared(template) == {"tests": set(), "requirements": set()}
+    body = "<!--\n## Removed tests\n- tests/test_x.py::test_a\n-->\n## Removed tests\n- t/b.py\n"
+    assert cr.declared(body)["tests"] == {"t/b.py"}
+
+
 @pytest.mark.parametrize(
     ("body", "missing"),
     [

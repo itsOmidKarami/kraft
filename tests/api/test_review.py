@@ -361,9 +361,17 @@ def test_a_comment_review_gets_answers_and_leaves_the_gate_pending(client, gated
         f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"}
     )
     assert r.status_code == 200 and r.json()["reply_agent"] is True
-    body = client.get(f"/api/work-items/{gated}").json()
+    # The reply agent is spawned in the background and records its session
+    # only once its process starts, after the launch's own awaits (the
+    # permission-tool lookup among them), so wait for it rather than race it.
+    deadline = time.monotonic() + 30
+    while True:
+        body = client.get(f"/api/work-items/{gated}").json()
+        sessions = [s for s in body["worker_sessions"] if s["hook_point"] == "chain_review.reply"]
+        if sessions or time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
     assert body["pending_gate"] == "chain_review" and body["status"] == "needs_human"
-    sessions = [s for s in body["worker_sessions"] if s["hook_point"] == "chain_review.reply"]
     assert sessions and sessions[0]["node_id"] == "chain_review"
 
 

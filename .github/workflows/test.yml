@@ -208,10 +208,6 @@ jobs:
         working-directory: vscode
       - run: npm test
         working-directory: vscode
-      # The integration daemon launches the fake claude; see the playwright
-      # job's step of the same name.
-      - name: register kraft with claude code
-        run: echo '{"mcpServers":{"kraft":{"command":"kraft","args":["admin","mcp"]}}}' > ~/.claude.json
       - run: xvfb-run -a npm run test:integration
         working-directory: vscode
 

@@ -56,11 +56,13 @@ def _names_kraft(config: dict) -> bool:
     return isinstance(servers, dict) and "kraft" in servers
 
 
-def _enables_kraft(settings: dict) -> bool:
+def _plugins(settings: dict) -> dict:
     plugins = settings.get("enabledPlugins")
-    return isinstance(plugins, dict) and any(
-        key.split("@")[0] == "kraft" and on is True for key, on in plugins.items()
-    )
+    return plugins if isinstance(plugins, dict) else {}
+
+
+def _kraft_on(plugins: dict) -> bool:
+    return any(key.split("@")[0] == "kraft" and on is True for key, on in plugins.items())
 
 
 def permission_tool(repo: Path | None) -> tuple[str, str] | None:
@@ -73,9 +75,15 @@ def permission_tool(repo: Path | None) -> tuple[str, str] | None:
         return DIRECT, str(user)
     if repo is not None and _names_kraft(_committed(repo, ".mcp.json")):
         return DIRECT, str(repo / ".mcp.json")
-    settings = home / ".claude" / "settings.json"
-    if _enables_kraft(_read(settings)):
-        return PLUGIN, str(settings)
-    if repo is not None and _enables_kraft(_committed(repo, ".claude/settings.json")):
+    # Claude Code merges `enabledPlugins` key by key (`plugin@marketplace`),
+    # a project's value overriding the user's: a repo that turns
+    # `kraft@kraft` off wins over a user who turned it on, while a repo that
+    # only mentions another marketplace's copy leaves the user's alone.
+    user_settings = home / ".claude" / "settings.json"
+    user_plugins = _plugins(_read(user_settings))
+    project_plugins = _plugins(_committed(repo, ".claude/settings.json")) if repo else {}
+    if not _kraft_on(user_plugins | project_plugins):
+        return None
+    if _kraft_on(project_plugins):
         return PLUGIN, str(repo / ".claude" / "settings.json")
-    return None
+    return PLUGIN, str(user_settings)

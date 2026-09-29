@@ -54,7 +54,7 @@ kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped 
 kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
 kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
 kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
-kraft item abandon [ID]                     # drop an item and reclaim its worktree
+kraft item abandon [ID] --yes               # drop an item and reclaim its worktree
 kraft item set-chain [ID] --template T      # a not-yet-started item's chain
 kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
 kraft item set-policy [ID] --policy KEY=VALUE [--clear]
