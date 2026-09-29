@@ -99,7 +99,7 @@ _RELAY_B_CERTS = "/c"
 #: Where the relay listens in the network namespace it shares with its
 #: worker, and so the proxy every worker under `network:` is told to use.
 RELAY_PORT = 3128
-#: The worker's proxy environment under `network:`, both spellings (R7), and
+#: The worker's proxy environment under `network:`, both spellings, and
 #: `NODE_USE_ENV_PROXY` for Node's own fetch. `NO_PROXY` is empty: the
 #: worker has no route but this one.
 RELAY_PROXY_ENV = {

@@ -43,7 +43,7 @@ from kraft.worker import callback, inject, session_mcp
 #: What a connection a session's policy refused is recorded as.
 SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
 
-#: The most a request line plus its headers may be (R9).
+#: The most a request line plus its headers may be.
 MAX_HEAD = 64 * 1024
 #: Seconds a connection may sit before its request head is complete.
 HEAD_TIMEOUT = 30.0

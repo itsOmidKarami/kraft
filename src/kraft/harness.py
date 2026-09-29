@@ -168,7 +168,7 @@ class Harness:
     proxy_aware: bool = True
     #: How the egress proxy can manage each credential this CLI reads (spec
     #: §6): complete, each to a host of `network_requires`. What a repository
-    #: opts in to by naming its `env` under `sandbox.credentials` (ruling E2);
+    #: opts in to by naming its `env` under `sandbox.credentials`;
     #: nothing is managed unless it does.
     credentials: tuple[SandboxCredential, ...] = ()
     #: The oldest CLI release whose `--version` a launch accepts, for a CLI

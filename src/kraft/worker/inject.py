@@ -11,7 +11,7 @@ stays a blind tunnel (`egress`).
 
 What holds, and why:
 
-- **Only where the phase names the host (ruling E5).** A rule applies when
+- **Only where the phase names the host.** A rule applies when
   the session's allow list names its host exactly for this port; one
   reached only through a wildcard stays a blind tunnel, so the worker's
   sentinel is all that host ever sees. A plain `http://` request to such a
@@ -20,7 +20,7 @@ What holds, and why:
   name (SNI) is anything else, or none, is refused; so is a request whose
   one `Host` is not that host. Dial address and `server_hostname` come from
   the checked CONNECT target alone, never from what the worker sends inside.
-- **Sentinel or nothing (E4).** Every instance of a rule's header must be
+- **Sentinel or nothing.** Every instance of a rule's header must be
   exactly the sentinel in the rule's `format`, and at least one rule's
   header must be there; else 403, an event, and the connection closes --
   the request never reaches the host, so the worker cannot authenticate
@@ -38,7 +38,7 @@ What holds, and why:
   further, so whatever follows is the next request -- checked and swapped
   like the first (keep-alive and pipelining both). Responses stream back,
   chunked or by length; one delimited by close ends the connection.
-- **HTTP/1.1 only (E3).** ALPN offers `http/1.1` on both hops; a CLI that
+- **HTTP/1.1 only.** ALPN offers `http/1.1` on both hops; a CLI that
   needs HTTP/2 or an upgrade (a 101 ends the connection) does not get it
   here. The upstream is verified against the daemon's own roots plus the
   sandbox extra CA (`docker_forward.extra_ca`), never the Kraft CA, never
@@ -48,7 +48,7 @@ What holds, and why:
   argv, the container's env, an event, a log line or the session's egress
   row (`InjectRule.to_json` leaves it out, and its `repr` hides it).
   Response headers pass back unmodified: an upstream that echoed the value
-  would reach the worker, a limit this does not defend against (E4).
+  would reach the worker, a limit this does not defend against.
 - **Bounded.** A connection idle between requests closes after
   `IDLE_TIMEOUT`; any one read of a body or response waits `READ_TIMEOUT`.
 """
@@ -128,7 +128,7 @@ def rules(credentials: Iterable, environ: Mapping[str, str]) -> tuple[InjectRule
 
 def rules_for(session, host: str, port: int) -> tuple[InjectRule, ...]:
     """The session's rules for `host:port`, when its phase's allow list
-    names that host exactly (E5); none leaves it a blind tunnel."""
+    names that host exactly; none leaves it a blind tunnel."""
     host = egress._norm(host)
     found = tuple(r for r in session.credentials if r.domain == host)
     if found and any(egress._exact(p, host, port) for p in session.lists.allow):

@@ -961,7 +961,7 @@ class SandboxPolicy(BaseModel):
 
     @model_validator(mode="after")
     def _credentials_are_reachable(self) -> SandboxPolicy:
-        """credential@1's rule (spec §6, ruling E1): a repository's own
+        """credential@1's rule (spec §6): a repository's own
         credential goes only to a host this policy itself names, in a phase
         it allows, never one reached through a wildcard or a harness's hosts
         alone. One named by `env:` alone relies on its harness instead."""
