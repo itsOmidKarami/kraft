@@ -147,6 +147,21 @@ def test_the_socket_probe_is_kept_until_doctor_refreshes(monkeypatch):
     assert docker.socket_channel("r") is True and len(asked) == 3
 
 
+def test_a_probe_answer_does_not_clobber_a_runtime_refreshed_meanwhile(monkeypatch):
+    """A doctor refresh landing mid-probe wins: the answer was about the
+    runtime that was probed, and is kept only on that one."""
+    monkeypatch.setattr(docker, "detect_runtime", docker.Runtime)
+    monkeypatch.setattr(docker, "_RUNTIME", None)
+
+    def probe(host, image):
+        docker.runtime(refresh=True)
+        return False
+
+    monkeypatch.setattr(docker, "_probe_socket_channel", probe)
+    assert docker.socket_channel("r") is False
+    assert docker._RUNTIME.socket_channel is None
+
+
 @pytest.mark.parametrize(
     ("returncode", "answer"),
     [(0, True), (1, False), (125, None), (127, None)],

@@ -412,16 +412,16 @@ def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
 
 def socket_channel(relay_image: str) -> bool | None:
     """`Runtime.socket_channel`, probed once and kept on the cached runtime
-    (a doctor refresh forgets it); an inconclusive answer is asked again."""
+    (a doctor refresh forgets it); an inconclusive answer is asked again.
+    Kept only if the cached runtime is still the one probed: a refresh that
+    landed meanwhile wins."""
     global _RUNTIME
     host = runtime()
     if host.socket_channel is None:
         answer = _probe_socket_channel(host, relay_image)
-        if answer is None:
-            return None
-        host = replace(host, socket_channel=answer)
-        if _RUNTIME is not None:
-            _RUNTIME = host
+        if answer is not None and _RUNTIME is host:
+            _RUNTIME = replace(host, socket_channel=answer)
+        return answer
     return host.socket_channel
 
 
