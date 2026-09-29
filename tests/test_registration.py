@@ -80,3 +80,27 @@ def test_a_plugin_enabled_in_committed_project_settings(home, tmp_path):
     repo = make_repo(tmp_path)
     _commit(repo, ".claude/settings.json", {"enabledPlugins": {"kraft@kraft": True}})
     assert registration.permission_tool(repo)[0] == PLUGIN
+
+
+@pytest.mark.e2e("claude")
+def test_a_marketplace_install_is_found_and_names_the_tool_as_expected(home, tmp_path):
+    """The two Claude Code facts the resolver rests on: installing the plugin
+    records it in `~/.claude/settings.json` `enabledPlugins`, and a headless
+    session then offers `mcp__plugin_kraft_kraft__permission_request`. Read
+    from the session's `init` line, stopped before it asks the model anything."""
+    root = Path(__file__).resolve().parents[1]
+    for args in (["marketplace", "add", str(root)], ["install", "kraft@kraft"]):
+        subprocess.run(["claude", "plugin", *args], check=True, capture_output=True)
+    assert registration.permission_tool(None)[0] == PLUGIN
+
+    with subprocess.Popen(
+        ["claude", "-p", "ok", "--output-format", "stream-json", "--verbose"],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as session:
+        init = next(
+            json.loads(line) for line in session.stdout if json.loads(line).get("subtype") == "init"
+        )
+        session.kill()
+    assert PLUGIN in init["tools"]
