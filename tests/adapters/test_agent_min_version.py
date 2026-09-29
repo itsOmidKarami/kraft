@@ -10,7 +10,7 @@ from kraft.paths import RunDirs
 
 def _opencode(run, tmp_path, answer, **kw):
     cli = tmp_path / "opencode"
-    cli.write_text(f"#!/bin/sh\necho '{answer}'\n")
+    cli.write_text(f"#!/bin/sh\ncat <<'EOF'\n{answer}\nEOF\n")
     cli.chmod(0o755)
     return run(
         harness="opencode",
@@ -21,9 +21,19 @@ def _opencode(run, tmp_path, answer, **kw):
     )
 
 
-def test_an_opencode_older_than_its_minimum_is_refused(run, tmp_path):
-    with pytest.raises(LaunchRefused, match=r"2\.0\.0 or newer.*machine has 1\.18\.33"):
-        _opencode(run, tmp_path, "1.18.33")
+@pytest.mark.parametrize(
+    ("answer", "read"),
+    [
+        ("1.18.33", "1.18.33"),
+        ("opencode v2.0.0-beta.1", "2.0.0-beta.1"),
+        # A wrapper printing its runtime's version first: the CLI's line wins.
+        ("node v22.1.0\nopencode-ai 1.18.33", "1.18.33"),
+    ],
+    ids=["older", "pre-release", "runtime-first"],
+)
+def test_an_opencode_older_than_its_minimum_is_refused(run, tmp_path, answer, read):
+    with pytest.raises(LaunchRefused, match=rf"2\.0\.0 or newer.*machine has {read};"):
+        _opencode(run, tmp_path, answer)
 
 
 @pytest.mark.parametrize("answer", ["opencode v2.0.0", "no version here"])

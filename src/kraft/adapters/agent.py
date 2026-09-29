@@ -646,7 +646,7 @@ def _restricted(
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
-async def _cli_version(exe: list[str], cwd: str | Path, runner=None) -> tuple[int, ...] | None:
+async def _cli_version(exe: list[str], name: str, cwd: str | Path, runner=None) -> str | None:
     """`exe --version`, parsed; None when it cannot be told -- not installed,
     no answer, no version in it -- and the launch goes ahead as ever. `runner`
     is a sandbox backend's `oneshot`, asking the image's own CLI."""
@@ -671,7 +671,7 @@ async def _cli_version(exe: list[str], cwd: str | Path, runner=None) -> tuple[in
     finally:
         if runner is not None:
             await runner.close()
-    return _harness.version(out.decode(errors="replace"))
+    return _harness.find_version(out.decode(errors="replace"), name)
 
 
 def _install_hook(
@@ -880,13 +880,12 @@ async def run_agent_task(
         except _sandbox.SandboxNotReady:
             found = None  # the backend's own probe refuses this launch, by name
         else:
-            found = await _cli_version(exe, cwd, runner)
-        if found is not None and found < h.min_version:
-            need = ".".join(map(str, h.min_version))
+            found = await _cli_version(exe, h.id, cwd, runner)
+        if found is not None and _harness.version_key(found) < _harness.version_key(h.min_version):
             raise LaunchRefused(
-                f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {need} or newer, "
+                f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {h.min_version} or newer, "
                 f"and {'the sandbox image has' if sandbox else 'this machine has'} "
-                f"{'.'.join(map(str, found))}; older releases refuse its command line"
+                f"{found}; older releases refuse its command line"
             )
     if sandbox and h.container_permission_mode is not None:
         default = h.capabilities["permission_mode"].always
