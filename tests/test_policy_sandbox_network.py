@@ -46,6 +46,22 @@ def test_a_sandbox_without_network_dumps_as_it_always_did():
 
 @pytest.mark.parametrize(
     "network",
+    [{"runtime": {"allow": []}}, {"install": {}, "runtime": {"deny": []}}],
+    ids=["empty-allow", "empty-phases"],
+)
+def test_an_explicit_empty_phase_is_a_policy_that_denies_everything(network):
+    """Only a literal `network: {}` is no policy. A phase written out, even
+    empty, is deny-everything, and must survive a dump and reload (a snapshot,
+    repos.yaml) rather than collapse to open egress."""
+    sandbox = policy.SandboxPolicy.model_validate({**_PLAIN, "network": network})
+    assert sandbox.network is not None
+    dumped = sandbox.model_dump()
+    assert dumped["network"]
+    assert policy.SandboxPolicy.model_validate(dumped).network is not None
+
+
+@pytest.mark.parametrize(
+    "network",
     [{"runtime": {"allow": ["**"]}}, None],
     ids=["loosened", "dropped"],
 )

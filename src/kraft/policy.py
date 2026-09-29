@@ -825,7 +825,9 @@ class SandboxNetwork(BaseModel):
 
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:
-        return {k: v for k, v in handler(self).items() if v}
+        """A phase written out stays, even empty: `network: {runtime: {}}`
+        denies everything, and must not reload as `network: {}` (open)."""
+        return {k: v for k, v in handler(self).items() if v or k in self.model_fields_set}
 
 
 class SandboxPolicy(BaseModel):
@@ -845,13 +847,19 @@ class SandboxPolicy(BaseModel):
     #: Egress, deny-by-default once set. Unset: open, as it always was.
     network: SandboxNetwork | None = None
 
-    @field_validator("resources", "network")
+    @field_validator("resources")
     @classmethod
-    def _no_empty(cls, value: BaseModel | None) -> BaseModel | None:
-        """`resources: {}` sets no limit and `network: {}` no list, so each is
-        the same sandbox as none: equal under the equality lock, and dumped
-        without the key."""
-        return None if value is not None and value == type(value)() else value
+    def _no_empty_resources(cls, value: SandboxResources | None) -> SandboxResources | None:
+        """`resources: {}` sets no limit, so it is the same sandbox as none:
+        equal under the equality lock, and dumped without the key."""
+        return None if value == SandboxResources() else value
+
+    @field_validator("network", mode="before")
+    @classmethod
+    def _no_empty_network(cls, value: object) -> object:
+        """Only a literal `network: {}` is no policy (open, as if unset). A
+        phase written out, even with empty lists, denies everything."""
+        return None if value == {} else value
 
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:

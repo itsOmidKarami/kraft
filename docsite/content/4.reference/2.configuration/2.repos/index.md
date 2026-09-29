@@ -123,7 +123,7 @@ Each phase takes `allow` and `deny`, lists of hosts:
 - `*` and `**` cover everything.
 - CIDRs are not accepted.
 
-Deny wins over allow. A phase that is missing allows nothing, and `network: {}` is the same as no `network`: open. The lists are part of the sandbox, so a chain, node or task cannot change them.
+Deny wins over allow. A phase that is missing or has empty lists allows nothing, so `network: {runtime: {}}` denies everything. Only `network: {}` with no phase at all is the same as no `network`: open. The lists are part of the sandbox, so a chain, node or task cannot change them.
 
 **Harness hosts.** An agent session's `runtime` allow list also gets the hosts its harness file declares under `network.requires`, and a `deny` still wins over them. Only `api.anthropic.com` (Claude) and `api.openai.com` (Codex) have been checked. The rest are unverified: if a CLI needs a host its harness does not list, allow it in `runtime`. OpenCode declares none, because its hosts depend on its provider.
 
