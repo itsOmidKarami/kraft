@@ -463,7 +463,7 @@ async def test_a_sandboxed_launch_skips_the_host_path_check(
     the host's PATH is not unavailable, so the task's own launch runs and no
     skip is logged. The fake `docker` puts `inner/` on the command's PATH, as
     an image would; the host never has it."""
-    from support.harness import entry_of, fake_docker_bin
+    from support.harness import entry_of, fake_docker_bin, fake_harness_home
 
     inner = tmp_path / "inner"
     inner.mkdir()
@@ -478,7 +478,9 @@ async def test_a_sandboxed_launch_skips_the_host_path_check(
     )
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{outer}:{os.environ['PATH']}")
-    _profiles(fake_agent, {"boxed": {"provider": "fake", "executable": "kraft-in-container"}})
+    # Not the claude-shaped `fake`: claude is sandboxed only under `network:`.
+    fake_harness_home(tmp_path, ["kraft-in-container"], harness_id="boxfake")
+    _profiles(fake_agent, {"boxed": {"provider": "boxfake", "executable": "kraft-in-container"}})
     sandboxed = entry_of(
         {"setup_command": "", "sandbox": {"kind": "docker", "image": "kraft-worker:py"}}
     )

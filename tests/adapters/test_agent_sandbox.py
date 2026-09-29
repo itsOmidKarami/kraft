@@ -102,14 +102,13 @@ def test_codex_leaves_isolation_to_the_container(run, tmp_path, sandbox, mode, e
     ("sandbox", "servers"),
     [
         (NETWORKED, {"kraft": {"type": "http", "url": "http://kraft/mcp"}}),
-        (DOCKER, None),
         (None, None),
     ],
-    ids=["network", "no-network", "host"],
+    ids=["network", "host"],
 )
 def test_claude_under_network_asks_its_session_mcp_server_alone(run, tmp_path, sandbox, servers):
     """The host's registration of Kraft's MCP server is out of the
-    container's reach; its channel reaches the session's own. Elsewhere
+    container's reach; its channel reaches the session's own. On the host
     the launch is as it was."""
     cmd = run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=sandbox)["cmd"]
     assert cmd[cmd.index("--permission-prompt-tool") + 1] == "mcp__kraft__permission_request"
@@ -119,3 +118,11 @@ def test_claude_under_network_asks_its_session_mcp_server_alone(run, tmp_path, s
         at = cmd.index("--strict-mcp-config")
         assert cmd[at + 1] == "--mcp-config"
         assert json.loads(cmd[at + 2]) == {"mcpServers": servers}
+
+
+def test_claude_in_a_sandbox_without_network_is_refused_before_launch(run, tmp_path):
+    """Every claude launch names Kraft's MCP permission tool, and a sandbox
+    without `network:` has no route to any Kraft MCP server: the CLI exits 1
+    at start naming the missing tool (spike 5.5). Refused, naming the fix."""
+    with pytest.raises(LaunchRefused, match=r"'claude'.*give the sandbox a `network:`"):
+        run(harness="claude", run_dirs=RunDirs(base=tmp_path), sandbox=DOCKER)

@@ -796,6 +796,16 @@ async def run_agent_task(
             f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
         )
     channel = bool(sandbox and sandbox.get("network"))
+    asks = h.capabilities.get("approval_channel")
+    if sandbox and not channel and asks is not None and asks.always:
+        # Every launch names Kraft's MCP permission tool, and only a channel
+        # reaches a Kraft MCP server from a sandbox: without one the CLI exits
+        # at start naming the missing tool (spike 5.5).
+        raise LaunchRefused(
+            f"harness {harness!r} asks Kraft's permission gate through an MCP tool on every "
+            f"launch, which a sandbox without `network:` cannot reach (the CLI would exit at "
+            f"start); give the sandbox a `network:`, or run this task unsandboxed"
+        )
     if (
         sandbox
         and not channel
