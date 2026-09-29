@@ -209,7 +209,7 @@ def inspect(tmp_path, monkeypatch):
         ("true 0\n", None),
         (None, None),
     ],
-    ids=["killed-32m", "killed-4g", "killed-odd-size", "exit-137-alone", "host-oom", "gone"],
+    ids=["killed-32m", "killed-4g", "killed-odd-size", "not-flagged", "host-oom", "gone"],
 )
 async def test_an_oom_kill_is_read_off_the_runtime_never_the_exit_code(inspect, answer, memory):
     """Exit 137 is also Kraft's own SIGKILL, so only `State.OOMKilled` says the
