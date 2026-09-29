@@ -35,6 +35,7 @@ from kraft.templates.models import AgentTask, ForgeTask
 from kraft.worker import backends, channel, sandbox
 from kraft.worker import steering as steering_mod
 from kraft.worker.backends import docker_forward
+from kraft.worker.env import worker_env
 
 #: The work-graph CLI. Optional by design (Kraft-7gy): intake files a work item
 #: with no bead when it is absent, and nothing else about an item needs one.
@@ -607,6 +608,35 @@ def _ignored_ca_check(repo: config.RepoEntry) -> dict | None:
     )
 
 
+def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
+    """Ruling E2: which names this sandbox's egress proxy holds, on which
+    hosts (as each harness resolves them), and which
+    names a harness declares still pass through. A managed name with no value
+    fails: the proxy refuses every request that should carry it. The value is
+    looked for as a launch reads it, `worker_env` of this entry, in doctor's
+    own environment, which is the daemon's when both were started from the
+    same shell."""
+    if not policy.credentials:
+        return None
+    harnesses = harness.load(None).valid.values()
+    hosts: dict[str, set[str]] = {c.env: set() for c in policy.credentials}
+    for h in harnesses:
+        for cred in h.managed_credentials(policy.credentials):
+            hosts[cred.env].update(rule.domain for rule in cred.inject)
+    passing = sorted({c.env for h in harnesses for c in h.credentials} - hosts.keys())
+    environ = worker_env(repo)
+    missing = [name for name in hosts if name not in environ]
+    detail = "proxy-managed: " + "; ".join(
+        f"{name} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
+        for name, on in hosts.items()
+    )
+    if passing:
+        detail += f"; passes through: {', '.join(passing)}"
+    if missing:
+        detail = f"no value for {', '.join(missing)} here, so its requests are refused; {detail}"
+    return _check(f"credentials {_label(repo)}", not missing, detail)
+
+
 def _forge_check(repo: config.RepoEntry) -> dict:
     """Can this repo's `backend: auto` forge nodes actually run?
 
@@ -724,6 +754,7 @@ async def _repo_checks() -> list[dict]:
                 _egress_check(repo, policy),
                 _proxy_check(repo, policy),
                 _ignored_ca_check(repo),
+                _credential_check(repo, policy),
             ):
                 if extra is not None:
                     checks.append(extra)

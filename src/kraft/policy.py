@@ -897,7 +897,9 @@ class SandboxCredential(BaseModel):
         return {
             k: list(v) if isinstance(v, tuple) else v
             for k, v in _without_unset(handler, self).items()
-            if v != ()
+            # () in Python mode, [] in JSON mode (`GET /repos`, which the
+            # Settings screen saves back): unset either way.
+            if v not in ((), [])
         }
 
 

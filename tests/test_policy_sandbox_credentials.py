@@ -33,7 +33,7 @@ def test_a_credential_by_name_or_in_full_loads_and_round_trips():
     by `meet`."""
     sandbox = policy.SandboxPolicy.model_validate(_SANDBOX)
 
-    assert sandbox.model_dump() == _SANDBOX
+    assert sandbox.model_dump() == sandbox.model_dump(mode="json") == _SANDBOX
     assert policy.SandboxPolicy.model_validate(yaml.safe_load(yaml.safe_dump(_SANDBOX))) == sandbox
     assert len({sandbox, policy.SandboxPolicy.model_validate(_SANDBOX)}) == 1
     without = policy.SandboxPolicy.model_validate(_with(credentials=[]))
