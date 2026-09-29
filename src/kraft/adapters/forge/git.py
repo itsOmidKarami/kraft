@@ -14,6 +14,13 @@ from kraft.adapters.forge.models import ForgeError
 from kraft.config import base_ignore_args, git_read
 from kraft.worker import sandbox
 
+
+class UnsafeWorktree(ForgeError):
+    """A worktree Kraft will not act on (Kraft-xngty): an operation in progress
+    or a HEAD off the item's branch, either of which a worker can plant. Never
+    a conflict, which an agent is sent to resolve: a person looks first."""
+
+
 #: What a git operation in progress leaves in a worktree's own gitdir. A worker
 #: can write any of it, naming any branch or commit: `git rebase --abort` over
 #: a planted `rebase-merge/` resets the branch it names, and a checkout or a
@@ -44,7 +51,7 @@ def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
             # Never "abort it": aborting a planted rebase is the attack. Nor
             # "Kraft did not start it": Kraft's own timed-out abort can leave
             # a `rebase-merge/` behind too.
-            raise ForgeError(
+            raise UnsafeWorktree(
                 f"{worktree} has a {name} in progress: inspect it, then delete {planted} "
                 "(do not run git rebase/merge --abort or --continue) and retry"
             )
@@ -58,7 +65,7 @@ def assert_on_branch(worktree: Path, branch: str) -> None:
     item's."""
     assert_no_operation(worktree)
     if git_read(worktree, "symbolic-ref", "--quiet", "HEAD") != f"refs/heads/{branch}":
-        raise ForgeError(f"{worktree} is not on {branch}; check it out by hand, then retry")
+        raise UnsafeWorktree(f"{worktree} is not on {branch}; check it out by hand, then retry")
 
 
 #: Per-call cap, set from `policy.forge_cli_timeout_s` at startup. `subprocess.run`

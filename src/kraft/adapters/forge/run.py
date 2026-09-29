@@ -167,6 +167,8 @@ async def _rebase_conflict_away(
     """
     try:
         new_head = await _builtins.mr_rebase_forced(repo, orig_repo, branch, base)
+    except git.UnsafeWorktree:
+        raise  # not a conflict: `run_task` stops the item for a person
     except RuntimeError as exc:
         return f"rebase onto {base} failed: {exc}\n", "conflict"
     if not new_head:
@@ -1251,6 +1253,9 @@ async def run_task(
             status = "done"
     except ForgeError as exc:
         log, status, findings = f"{hook_point} failed: {exc}\n", "failed", None
+        if isinstance(exc, git.UnsafeWorktree):
+            # Nothing a fix loop may touch: a person looks first (Kraft-xngty).
+            status = "config_error"
         unobserved = str(exc)
 
     if handler in _WAITS:

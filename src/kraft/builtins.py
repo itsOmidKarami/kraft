@@ -1074,7 +1074,7 @@ async def mr_rebase(
                 new_head = None
         except RebaseConflict as exc:
             raise _explain_gitlink_conflict(exc, {rel for rel, _ in moved}, branch, base) from None
-    except BaseBranchMissing as exc:
+    except (BaseBranchMissing, git.UnsafeWorktree) as exc:
         # Nothing an agent could fix: `config_error` stops the item for a
         # person rather than sending a fix loop round against a missing base.
         return await _record_done(

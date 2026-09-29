@@ -274,6 +274,37 @@ async def test_ci_poll_stops_for_a_human_on_a_real_rebase_conflict(
     assert "rebase" in log and "failed" in log
 
 
+@pytest.mark.parametrize("handler", ["mr.ci", "mr.merge"])
+async def test_planted_operation_state_at_a_conflict_rebase_stops_for_a_person(
+    walk, item_on, database, run_dirs, repo, tmp_path, monkeypatch, handler
+):
+    """Kraft-xngty: the forced rebase a conflict gets refuses a worktree
+    holding a planted `rebase-merge/`. That refusal is no conflict, so no fix
+    loop runs in that worktree: the item stops for a person, naming it."""
+    monkeypatch.delenv("KRAFT_FAKE_AGENT", raising=False)
+    node = forge_node("mr_checks", handler)
+    node["fix_loop"] = {"tasks": [{"id": "fix", "kind": "subprocess", "command": "true"}]}
+    it = await item_on([node])
+    worktree = await _builtins.ensure_worktree(
+        database, run_dirs, repo=str(repo), work_item_id=it.id, repo_entry=NO_SETUP
+    )
+    _commit(worktree, "calc.py", "one\n")
+    _commit(repo, "calc.py", "two\n")
+    gitdir = subprocess.run(
+        ["git", "rev-parse", "--absolute-git-dir"], cwd=worktree, capture_output=True, text=True
+    ).stdout.strip()
+    (Path(gitdir) / "rebase-merge").mkdir()
+    fake = forge.FakeForge(ci_states=["success"], mergeable=False, merge_detail="conflict")
+    branch = store.branch_for(it.row())
+    await fake.open_mr(repo=worktree, branch=branch, base="main", title="t", body="b")
+    pol = _policy(tmp_path, "default: { attempts: 3, wall_clock_s: 3600 }\n")
+
+    assert await walk(fake, it, pol=pol) == "needs_human"
+
+    assert [s["status"] for s in it.sessions("mr_checks")] == ["config_error"]
+    assert not it.events("fix_cycle_started")
+
+
 async def test_merge_completes_the_merge_after_a_rebase_when_no_bounce_is_configured(
     walk, item_on, database, run_dirs, repo, monkeypatch
 ):
