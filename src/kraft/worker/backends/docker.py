@@ -1002,23 +1002,37 @@ async def oom_killed(session_id: str) -> str | None:
     also Kraft's own SIGKILL (a cap, a teardown). A container with no memory
     limit that the host's OOM killer hit is None too: that is the host
     running short, not a limit a retry would hit again."""
-    got = await docker_call(
-        "inspect",
-        "--format",
-        "{{.State.OOMKilled}} {{.HostConfig.Memory}}",
-        container_name(session_id),
-    )
-    if got is None or got[0] != 0:
-        return None
-    killed, _, memory = got[1].strip().partition(" ")
-    # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
-    # conmon writes an `oom` file into the client's directory instead.
-    if killed != "true" and not (runtime().podman and (client_dir(session_id) / "oom").exists()):
-        return None
+    # The daemon learns of the kill from the runtime's OOM event, which can
+    # land after the exit that let the attached client return: a container
+    # SIGKILLed under a memory limit gets a moment for its flag to catch up,
+    # while any other exit is answered at once.
+    deadline = time.monotonic() + OOM_FLAG_GRACE_S
+    while True:
+        got = await docker_call(
+            "inspect",
+            "--format",
+            "{{.State.OOMKilled}} {{.HostConfig.Memory}} {{.State.ExitCode}}",
+            container_name(session_id),
+        )
+        if got is None or got[0] != 0:
+            return None
+        killed, memory, code = (got[1].split() + ["", "", ""])[:3]
+        # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
+        # conmon writes an `oom` file into the client's directory instead.
+        if killed == "true" or (runtime().podman and (client_dir(session_id) / "oom").exists()):
+            break
+        limited = memory.isdigit() and int(memory) > 0
+        if code != "137" or not limited or time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.1)
     if not memory.isdigit() or int(memory) <= 0:
         return None
     return _size(int(memory))
 
+
+#: How long `oom_killed` waits for a SIGKILLed, memory-limited container's
+#: `State.OOMKilled` to catch up with its exit.
+OOM_FLAG_GRACE_S = 2.0
 
 #: How long any one best-effort `docker` call Kraft makes on its own account
 #: (teardown, the orphan sweep, the image check) may take.
