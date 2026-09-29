@@ -242,3 +242,390 @@ def test_no_host_call_runs_a_program_planted_in_a_nested_repository(
 
     assert not (kraft / "PWNED").exists()
     assert (control / "PWNED").exists(), f"control: {trigger} never ran the planted {family}"
+
+
+# -- Kraft-ju36l: a workspace member's host git reads only its connected repository --
+#
+# A member is a linked worktree of its connected repository `M`, so every git
+# Kraft runs in it resolves config, hooks and attributes from `M`'s common
+# gitdir, which the container mounts read-only. What a sandboxed worker can
+# write -- the member's admin dir in `M`, the root's worktree gitdir, and the
+# `modules/<rel>` where the old layout kept a member's gitdir -- git in the
+# member never reads. Each key below is planted at every one of those sites,
+# every host path Kraft takes in a member runs, and nothing fires. The control
+# plants the same key where git does read it, `M`'s own config, and shows it
+# is live there.
+
+import contextlib  # noqa: E402
+import inspect  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from support import worktree as wtree  # noqa: E402
+from support.harness import entry_of, v1_chain  # noqa: E402
+from support.workspace import workspace_target  # noqa: E402
+
+from kraft.adapters.forge.run import _point_at_merged_members  # noqa: E402
+from kraft.api.routes import lifecycle  # noqa: E402
+from kraft.executor import read_only  # noqa: E402
+
+_REL = "repos/pkg"
+#: Same length at every step, so git has to read a changed file's content --
+#: running its clean filter -- rather than calling it changed by its size.
+_BASE, _WORK, _DIRT = "aaaa\n", "bbbb\n", "cccc\n"
+_MEMBER_NODES = [
+    {"id": "n", "kind": "exec", "tasks": [{"id": "t", "kind": "subprocess", "command": "true"}]}
+]
+
+
+def _repo_with_origin(side: Path, name: str) -> tuple[Path, Path]:
+    """A repository whose `.gitattributes` selects driver `evil` for filter
+    and diff, as a worker could commit it, pushed to a bare `origin`."""
+    repo = make_repo(side, name)
+    (repo / ".gitattributes").write_text("* filter=evil diff=evil\n")
+    (repo / "payload.txt").write_text(_BASE)
+    _w(repo, "add", "-A")
+    _w(repo, "commit", "-q", "-m", "attributes")
+    origin = side / f"{name}-origin.git"
+    _w(side, "init", "--bare", "-q", "-b", "main", str(origin))
+    _w(repo, "remote", "add", "origin", str(origin))
+    _w(repo, "push", "-q", "origin", "main")
+    return repo, origin
+
+
+async def _workspace(database, run_dirs, side: Path, wid: str, setup: str = ""):
+    """Item `wid`: a root with member `pkg` at `_REL`, its connected repository
+    `M` with its own origin, the checkout made by `ensure_worktree` (after
+    `setup`, the repository's setup command), and one commit in the member
+    and one moving the root's gitlink, as a worker makes them. Both then
+    carry an uncommitted edit."""
+    side.mkdir()
+    m, m_origin = _repo_with_origin(side, "pkg")
+    root, _ = _repo_with_origin(side, "ws")
+    _w(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(m_origin), _REL)
+    _w(root, "commit", "-q", "-m", "add the member")
+    _w(root, "push", "-q", "origin", "main")
+    chain = v1_chain(_MEMBER_NODES, repo=root, target=workspace_target({"pkg": _REL}))
+    await wtree.make_item(database, root, wid=wid, materialized_chain=chain.to_json())
+    wt = await builtins.ensure_worktree(
+        database,
+        run_dirs,
+        repo=str(root),
+        work_item_id=wid,
+        repo_entry=entry_of({"setup_command": setup}),
+        repositories={"pkg": entry_of({"id": "pkg", "path": str(m)})},
+    )
+    member = wt / _REL
+    for repo, add in ((member, "payload.txt"), (wt, ".")):
+        (repo / "payload.txt").write_text(_WORK)
+        _w(repo, "add", add)
+        _w(repo, "commit", "-q", "-m", "the worker's work")
+        (repo / "payload.txt").write_text(_DIRT)
+    gitdirs = sandbox.member_gitdirs(m, wt, _REL)
+    return SimpleNamespace(
+        wid=wid,
+        root=root,
+        wt=wt,
+        member=member,
+        m=m,
+        m_origin=m_origin,
+        branch=_w(wt, "branch", "--show-current"),
+        admin=gitdirs[1] if gitdirs else None,
+        root_gitdir=Path(_w(wt, "rev-parse", "--path-format=absolute", "--git-dir")),
+    )
+
+
+def _program(planted: Path, marker: Path) -> str:
+    """An executable for keys git runs without a shell: it leaves `marker`."""
+    path = planted / "program"
+    path.write_text(f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\ncat >/dev/null\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def _hooks(planted: Path, marker: Path) -> str:
+    hooks = planted / "hooks"
+    hooks.mkdir(exist_ok=True)
+    for name in _HOOK_NAMES:
+        (hooks / name).write_text(f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\n")
+        (hooks / name).chmod(0o755)
+    return str(hooks)
+
+
+def _include_file(planted: Path, marker: Path) -> str:
+    extra = planted / "include"
+    extra.write_text(f'[filter "evil"]\n\tclean = {_run(marker)}\n')
+    return str(extra)
+
+
+_HOOK_NAMES = ("pre-push", "pre-commit", "post-checkout", "reference-transaction")
+_STATUS_M = ["status", "--porcelain"]
+_CHECKOUT_M = ["checkout", "-q", "-f", "HEAD~1"]
+_DIFF_M = ["diff", "HEAD~1"]
+_FETCH_M = ["fetch", "-q", "origin"]
+_SSH = "ssh://kraft.invalid/x"
+
+#: Every program-valued key the bead names: its config, given the marker and a
+#: directory for what it points at, and what runs it -- a git command, or for
+#: a key nothing non-interactive runs, `("var", NAME)`/`("get", KEY)`: whether
+#: git in the member resolves it at all.
+PROGRAM_KEYS = {
+    "hooks": (lambda m, p: {"core.hooksPath": _hooks(p, m)}, _CHECKOUT_M),
+    "ssh-command": (
+        lambda m, p: {"remote.origin.url": _SSH, "core.sshCommand": _run(m)},
+        _FETCH_M,
+    ),
+    "ssh-variant": (
+        lambda m, p: {"remote.origin.url": _SSH, "ssh.variant": "ssh", "core.sshCommand": _run(m)},
+        _FETCH_M,
+    ),
+    "filter-clean": (lambda m, p: {"filter.evil.clean": _run(m)}, _STATUS_M),
+    "filter-smudge": (lambda m, p: {"filter.evil.smudge": _run(m)}, _CHECKOUT_M),
+    "filter-process": (lambda m, p: {"filter.evil.process": _run(m)}, _STATUS_M),
+    "diff-external": (lambda m, p: {"diff.external": _run(m)}, _DIFF_M),
+    "diff-command": (lambda m, p: {"diff.evil.command": _run(m)}, _DIFF_M),
+    "textconv": (lambda m, p: {"diff.evil.textconv": _run(m)}, _DIFF_M),
+    "pager": (lambda m, p: {"core.pager": _run(m)}, ("var", "GIT_PAGER")),
+    "editor": (lambda m, p: {"core.editor": _run(m)}, ("var", "GIT_EDITOR")),
+    "sequence-editor": (lambda m, p: {"sequence.editor": _run(m)}, ("var", "GIT_SEQUENCE_EDITOR")),
+    "gpg": (
+        lambda m, p: {"gpg.program": _program(p, m), "commit.gpgsign": "true"},
+        ["commit", "-q", "--allow-empty", "-m", "signed"],
+    ),
+    "credential-helper": (
+        lambda m, p: {
+            "remote.origin.url": "https://kraft.invalid/x",
+            "credential.helper": f"!{_run(m)}",
+        },
+        ["credential", "fill"],
+    ),
+    "alternate-refs-command": (
+        lambda m, p: {"core.alternateRefsCommand": _program(p, m)},
+        ("get", "core.alternateRefsCommand"),
+    ),
+    "pack-objects-hook": (
+        lambda m, p: {"uploadpack.packObjectsHook": _program(p, m)},
+        ("get", "uploadpack.packObjectsHook"),
+    ),
+    "fsmonitor": (lambda m, p: {"core.fsmonitor": _run(m)}, _STATUS_M),
+    "include-path": (lambda m, p: {"include.path": _include_file(p, m)}, _STATUS_M),
+    "include-if": (lambda m, p: {"includeIf.gitdir:/.path": _include_file(p, m)}, _STATUS_M),
+}
+
+
+def _plant_config(files: list[Path], config: dict[str, str]) -> None:
+    for file in files:
+        file.parent.mkdir(parents=True, exist_ok=True)
+        for key, value in config.items():
+            _w(file.parent, "config", "--file", str(file), key, value)
+
+
+#: Every place a sandboxed worker can write that git could mistake for a
+#: member's config: `(config files, hooks directory)`. The admin dir's
+#: `config.worktree` is mounted read-only in the container; it is planted
+#: anyway. `old-modules` is where the old layout kept the member's gitdir,
+#: made by the worker.
+PLANT_SITES = {
+    "admin-config": lambda ws: ([ws.admin / "config", ws.admin / "config.worktree"], None),
+    "admin-hooks": lambda ws: ([], ws.admin / "hooks"),
+    "old-modules": lambda ws: (
+        [ws.root_gitdir / "modules" / _REL / "config"],
+        ws.root_gitdir / "modules" / _REL / "hooks",
+    ),
+    "root-admin-config": lambda ws: ([ws.root_gitdir / "config"], None),
+}
+
+
+def _plant(ws, site: str, key: str, config: dict[str, str], marker: Path, planted: Path) -> None:
+    """`config` into the site's config files; for the hooks key, the hooks
+    themselves into its hooks directory too."""
+    files, hooks = PLANT_SITES[site](ws)
+    _plant_config(files, config)
+    if hooks is not None and key == "hooks":
+        _hooks(planted, marker)
+        hooks.mkdir(parents=True, exist_ok=True)
+        for name in _HOOK_NAMES:
+            (hooks / name).write_bytes((planted / "hooks" / name).read_bytes())
+            (hooks / name).chmod(0o755)
+
+
+class _MergedForge:
+    """`find_mr` for `_point_at_merged_members`: the member's branch merged at `sha`."""
+
+    def __init__(self, sha: str):
+        self.sha = sha
+
+    async def find_mr(self, *, repo: Path, branch: str):
+        return SimpleNamespace(state="merged", merged_sha=self.sha)
+
+
+async def _every_member_host_call(ws, database) -> None:
+    """Each host git Kraft runs with its cwd in a member, or in the root on
+    the member's behalf -- one call per row of spec 2b's map -- then teardown.
+    A git failure is swallowed: what is asserted is what ran, not what worked."""
+    branch = ws.branch
+    moved = ws.m.parent / "mover"
+    _w(ws.m.parent, "clone", "-q", str(ws.m_origin), str(moved))
+    (moved / "upstream.txt").write_text("landed meanwhile\n")
+    _w(moved, "add", "upstream.txt")
+    _w(moved, "commit", "-q", "-m", "origin main moves on")
+    _w(moved, "push", "-q", "origin", "main")
+    await database.write(
+        lambda c: c.execute(
+            "UPDATE work_item_repos SET merge_state = 'merged' "
+            "WHERE work_item_id = ? AND role = 'submodule'",
+            (ws.wid,),
+        )
+    )
+    calls = [
+        # M3: the straggler sweep and the clean check, member then root.
+        lambda: forge.commit_stragglers(ws.member, base="main", message="wip"),
+        lambda: forge.assert_clean(ws.member, "main"),
+        lambda: forge.commit_stragglers(ws.wt, base="main", message="wip", mounts=[_REL]),
+        lambda: forge.assert_clean(ws.wt, "main"),
+        # M2: publication's reads of the member's branch.
+        lambda: forge.git.commits_ahead(ws.member, branch, "main"),
+        lambda: forge.git.commits_on(ws.member, branch, "main"),
+        lambda: forge.git.source_changed(ws.member, branch, base="main", exclude=set()),
+        lambda: forge.git._head_sha(ws.member),
+        # M9: the root's coverage check, which describes each member.
+        lambda: forge.git._assert_submodules_covered(ws.wt, {ws.member.resolve()}),
+        # M1: the push, unhardened, member and root.
+        lambda: forge.git.push(ws.member, branch),
+        lambda: forge.git.push(ws.wt, branch),
+        # M5/M6: the member rebased onto its moved origin; forced, as
+        # `mr_rebase_forced` is, since the push above published the branch.
+        lambda: builtins.refresh_worktree_base(ws.member, ws.m, branch, base="main", force=True),
+        # M4: the root pointed at the member's merge, landed on origin's main.
+        lambda: _point_at_merged_members(
+            _MergedForge(_w(ws.m_origin, "rev-parse", "main")), database, ws.wt, branch, ws.wid
+        ),
+        # M10: the read-only check's reads.
+        lambda: read_only._read(ws.wt),
+        lambda: read_only._read(ws.member),
+        # M7: identity, root only now.
+        lambda: builtins._pin_identity(ws.root, ws.wt, ws.wid),
+        lambda: review.read_change(ws.wt, "HEAD~1"),
+        lambda: builtins.restore_branch(ws.wt, branch, "main"),
+        lambda: builtins.restore_branch(ws.member, branch, "main"),
+        # Teardown last.
+        lambda: lifecycle._remove_worktree(ws.root, ws.wt, branch, ws.wid, [ws.m]),
+    ]
+    for call in calls:
+        with contextlib.suppress(forge.ForgeError, RuntimeError):
+            done = call()
+            if inspect.isawaitable(done):
+                await done
+
+
+def _visible(cwd: Path, config: dict[str, str], env: dict[str, str] | None = None) -> list[str]:
+    """Which of `config` git in `cwd` resolves, as `config --show-origin` lists it."""
+    listed = subprocess.run(
+        ["git", "config", "--show-origin", "--get-regexp", "."],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout
+    return [k for k, v in config.items() if f"{k.lower()} {v}" in listed]
+
+
+def _trigger(cwd: Path, trigger) -> str:
+    """Run `trigger` as the worker would, outside Kraft's reach; its stdout."""
+    env = {**_worker_env(), "GIT_TERMINAL_PROMPT": "0"}
+    if trigger[0] in ("var", "get"):
+        argv = ["var", trigger[1]] if trigger[0] == "var" else ["config", "--get", trigger[1]]
+    else:
+        argv = trigger
+    return subprocess.run(
+        ["git", *argv],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
+        input="url=https://kraft.invalid/x\n\n",
+        timeout=60,
+    ).stdout.strip()
+
+
+_CASES = [
+    pytest.param(key, site, id=f"{key}-{site}")
+    for key in PROGRAM_KEYS
+    for site in PLANT_SITES
+    # A hooks directory holds hooks, not config: only the hooks key plants there.
+    if site != "admin-hooks" or key == "hooks"
+]
+
+
+@pytest.fixture
+def no_env_programs(monkeypatch):
+    """No pager, editor or sequence editor from the environment, which would
+    outrank any config and make the control say nothing about it."""
+    for name in ("GIT_PAGER", "PAGER", "GIT_EDITOR", "VISUAL", "EDITOR", "GIT_SEQUENCE_EDITOR"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(("key", "site"), _CASES)
+async def test_no_host_path_runs_a_program_planted_for_a_member(
+    tmp_path, database, run_dirs, hardened, no_env_programs, monkeypatch, key, site
+):
+    """Kraft-ju36l, one key at one site, under an operator config that asks
+    git to recurse every way it can: nothing runs, and the key is not even
+    visible to git in the member or the root. Drift -- a member swapped for
+    one that does read the site -- is `refuse_planted_repos`', not this."""
+    config, trigger = PROGRAM_KEYS[key]
+    operator = tmp_path / "operator.gitconfig"
+    operator.write_text(_OPERATOR_CONFIG)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(operator))
+    kraft, control = tmp_path / "kraft", tmp_path / "control"
+    ws = await _workspace(database, run_dirs, kraft, "w1")
+    (kraft / "planted").mkdir()
+    planted = config(kraft / "PWNED", kraft / "planted")
+    _plant(ws, site, key, planted, kraft / "PWNED", kraft / "planted")
+
+    seen = [_visible(cwd, planted) for cwd in (ws.member, ws.wt)]
+    await _every_member_host_call(ws, database)
+
+    assert not (kraft / "PWNED").exists()
+    assert seen == [[], []]
+
+    # The control: the same key in `M`'s own config, where git does read it.
+    cws = await _workspace(database, run_dirs, control, "w2")
+    (control / "planted").mkdir()
+    live = config(control / "PWNED", control / "planted")
+    _plant_config([cws.m / ".git" / "config"], live)
+    out = _trigger(cws.member, trigger)
+    if trigger[0] in ("var", "get"):
+        assert out == next(iter(live.values())), f"control: {key} is not live"
+    else:
+        assert (control / "PWNED").exists(), f"control: {key} is not live"
+
+
+async def test_a_setup_command_cannot_seed_a_members_gitdir(tmp_path, database, run_dirs, hardened):
+    """M8: a sandboxed setup command runs before the members are checked out,
+    with the root's worktree gitdir writable. It builds a complete gitdir
+    where the old layout put the member's -- smudge filter, include, and a
+    post-checkout hook -- which `submodule update --init` would have reused,
+    running them on the host. The member is a worktree of `M` instead.
+    (Run on the host here, writing only what the container could.)"""
+    marker = tmp_path / "PWNED"
+    include = tmp_path / "planted-include"
+    include.write_text(f'[filter "evil"]\n\tsmudge = {_run(marker)}\n')
+    seed = tmp_path / "seed.sh"
+    seed.write_text(
+        f"""set -e
+g="$(git rev-parse --path-format=absolute --git-dir)/modules/{_REL}"
+git clone -q --bare {shlex.quote(str(tmp_path / "side" / "pkg"))} "$g"
+git --git-dir="$g" config core.bare false
+git --git-dir="$g" config filter.evil.smudge {shlex.quote(_run(marker))}
+git --git-dir="$g" config include.path {shlex.quote(str(include))}
+mkdir -p "$g/hooks"
+printf '#!/bin/sh\\ntouch %s\\n' {shlex.quote(str(marker))} > "$g/hooks/post-checkout"
+chmod +x "$g/hooks/post-checkout"
+"""
+    )
+    ws = await _workspace(database, run_dirs, tmp_path / "side", "w1", setup=f"sh {seed}")
+
+    assert (ws.root_gitdir / "modules" / _REL / "config").is_file(), "the seed never landed"
+    assert not marker.exists()
+    common = _w(ws.member, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    assert common == str((ws.m / ".git").resolve())
