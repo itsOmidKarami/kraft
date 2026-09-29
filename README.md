@@ -152,8 +152,7 @@ with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraf
 
 ## Project status
 
-Kraft is young: the first commit was on 2026-09-01, it is at 1.x, and it has
-one maintainer. Expect rough edges and frequent releases. Report bugs and ask
+Kraft is young. Expect rough edges and frequent releases. Report bugs and ask
 questions in [GitHub issues](https://github.com/itsOmidKarami/kraft/issues).
 Report security problems as [SECURITY.md](SECURITY.md) describes.
 
