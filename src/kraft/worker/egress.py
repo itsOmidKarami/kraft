@@ -69,6 +69,11 @@ _METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
 #: Request headers the proxy consumes rather than passes on.
 _HOP_HEADERS = frozenset({"proxy-authorization", "proxy-connection", "connection", "keep-alive"})
 _CONNECT_TARGET = re.compile(r"\[?([^\[\]]+?)\]?:(\d{1,5})")
+#: RFC 9110: a token name, a colon, and a value of visible characters,
+#: spaces, tabs and obs-text. No CR, LF, NUL or other control character, so
+#: nothing forwarded can split into a second request.
+_HEADER_LINE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7e\x80-\xff]*")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 @dataclass(frozen=True)
@@ -164,6 +169,7 @@ def match(host: str, port: int, allow: tuple[str, ...], deny: tuple[str, ...]) -
 
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_TRANSLATED = ipaddress.ip_network("::ffff:0:0:0/96")
 
 
 def _address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -175,12 +181,12 @@ def _address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None
 
 def _with_embedded(addr) -> list:
     """`addr` and any IPv4 address an IPv6 one carries (mapped, compatible
-    `::a.b.c.d`, 6to4, NAT64), every one of which is checked: a route to the
-    embedded address is a route to it."""
+    `::a.b.c.d`, translated `::ffff:0:a.b.c.d`, 6to4, NAT64), every one of
+    which is checked: a route to the embedded address is a route to it."""
     if addr.version == 4:
         return [addr]
     embedded = [addr.ipv4_mapped, addr.sixtofour]
-    if int(addr) >> 32 == 0 or addr in _NAT64:
+    if int(addr) >> 32 == 0 or addr in _NAT64 or addr in _TRANSLATED:
         embedded.append(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
     return [addr, *(e for e in embedded if e is not None)]
 
@@ -438,6 +444,10 @@ def _parse(head: bytes) -> tuple[str, str, int, str, list[str]] | str:
     if len(head) > MAX_HEAD:
         return f"the request head is over {MAX_HEAD} bytes"
     line, *headers = head.decode("latin-1").split("\r\n")
+    if _CONTROL.search(line):
+        return "a control character in the request line"
+    if not all(_HEADER_LINE.fullmatch(h) for h in headers):
+        return "a header line that is not `name: value`, or holds a control character"
     parts = line.split(" ")
     if len(parts) != 3 or not parts[2].startswith("HTTP/1."):
         return "not an HTTP/1 request line"

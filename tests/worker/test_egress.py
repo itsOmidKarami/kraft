@@ -192,6 +192,7 @@ def test_match(host, port, allow, deny, allowed):
         "::7f00:1",
         "2002:7f00:1::",
         "64:ff9b::a9fe:a9fe",
+        "::ffff:0:7f00:1",
     ],
     ids=[
         "loopback",
@@ -206,6 +207,7 @@ def test_match(host, port, allow, deny, allowed):
         "v4-compatible-loopback",
         "6to4-loopback",
         "nat64-metadata",
+        "v4-translated-loopback",
     ],
 )
 async def test_always_denied_addresses_even_under_an_exact_allow(host):
@@ -364,6 +366,20 @@ async def test_an_upstream_proxy_gets_exactly_the_one_request_that_was_checked(
     assert internet.dialled == [("proxy.corp", 3128)]
 
 
+async def test_a_request_sent_later_never_reaches_the_upstream(proxy, internet):
+    """Once the one request is on its way, nothing more is read from the
+    client: a second request written after the first was forwarded stays put."""
+    p = await proxy(allow=["api.example.com"], env={"HTTP_PROXY": "http://proxy.corp:3128"})
+    reader, writer = await p.send(b"GET http://api.example.com/a HTTP/1.1\r\n\r\n")
+    first = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+    writer.write(b"GET http://evil.example/ HTTP/1.1\r\n\r\n")
+    await writer.drain()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 0.3)
+    writer.close()
+    assert b"".join(internet.received) == first
+
+
 async def test_a_chunked_request_is_refused_before_an_upstream_proxy(proxy, internet):
     p = await proxy(allow=["api.example.com"], env={"HTTP_PROXY": "http://proxy.corp:3128"})
     answer = await p.ask(
@@ -383,6 +399,10 @@ async def test_a_chunked_request_is_refused_before_an_upstream_proxy(proxy, inte
         b"CONNECT api.example.com:99999 HTTP/1.1\r\n\r\n",
         b"CONNECT api.example.com HTTP/1.1\r\n\r\n",
         b"GET http://api.example.com/ HTTP/1.1\r\nX: " + b"a" * egress.MAX_HEAD + b"\r\n\r\n",
+        b"GET http://a.io/ HTTP/1.1\r\nX: a\n\nGET http://evil.com/lf HTTP/1.1\nHost: evil.com\n"
+        b"Y: z\r\n\r\n",
+        b"GET http://api.example.com/ HTTP/1.1\r\nno colon here\r\n\r\n",
+        b"GET http://api.example.com/\x00 HTTP/1.1\r\n\r\n",
     ],
     ids=[
         "garbage",
@@ -392,6 +412,9 @@ async def test_a_chunked_request_is_refused_before_an_upstream_proxy(proxy, inte
         "port-out-of-range",
         "connect-without-port",
         "oversized-head",
+        "bare-lf-smuggles-a-request",
+        "header-without-a-name",
+        "nul-in-request-line",
     ],
 )
 async def test_a_malformed_request_gets_400(proxy, internet, head):
