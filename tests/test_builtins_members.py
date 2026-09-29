@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 from support import worktree as wtree
-from support.harness import _git, entry_of, make_repo_with_submodule, v1_chain
+from support.harness import _git, entry_of, make_repo, make_repo_with_submodule, v1_chain
 from support.workspace import workspace_target
 
+from kraft import store
 from kraft.config import git_read
 
 _ONE_NODE = [
@@ -105,3 +106,34 @@ async def test_a_missing_member_repository_stops_setup_and_leaves_no_worktree(
         await wtree.ensure(database, run_dirs, root, repositories=_members(tmp_path / "gone"))
 
     assert not (run_dirs.worktrees / "w1").exists()
+
+
+async def test_a_retry_after_a_later_member_failed_records_each_member_once(
+    tmp_path, database, run_dirs
+):
+    """An earlier member that checked out fine must leave no `work_item_repos`
+    row behind when a later one fails: the discard removes the worktree, and
+    the retry would record the earlier member a second time."""
+    root, sub = make_repo_with_submodule(tmp_path)
+    pkg2 = make_repo(tmp_path, name="pkg2")
+    _git(root, "-c", "protocol.file.allow=always", "submodule", "add", str(pkg2), "repos/pkg2")
+    _git(root, "commit", "-qm", "a second member")
+    await _workspace_item(database, root, {"pkg": "repos/pkg", "pkg2": "repos/pkg2"})
+    paths = {"repos/pkg": sub, "repos/pkg2": pkg2}
+    first, later = store.merge_rank_order(list(paths))
+    ids = {"repos/pkg": "pkg", "repos/pkg2": "pkg2"}
+
+    def connected(broken):
+        return {
+            ids[rel]: entry_of(
+                {"id": ids[rel], "path": str(tmp_path / "gone" if broken == rel else p)}
+            )
+            for rel, p in paths.items()
+        }
+
+    with pytest.raises(RuntimeError):
+        await wtree.ensure(database, run_dirs, root, repositories=connected(later))
+    await wtree.ensure(database, run_dirs, root, repositories=connected(None))
+
+    repos = database.read(lambda c: store.repos_for(c, "w1"))
+    assert sorted(r["role"] for r in repos) == ["root", "submodule", "submodule"]

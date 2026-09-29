@@ -440,7 +440,7 @@ async def _setup_submodules(
         if init.returncode != 0:
             detail = init.stderr.strip() or init.stdout.strip()
             raise RuntimeError(f"git submodule update --init failed for {work_item_id}: {detail}")
-    for rank, rel in enumerate(ordered, start=1):
+    for rel in ordered:
         sub = worktree / rel
         if rel in legacy:
             exists = git_read(
@@ -470,22 +470,28 @@ async def _setup_submodules(
                 await asyncio.to_thread(_add_member, worktree, rel, member_repo, branch)
             except RuntimeError as exc:
                 raise RuntimeError(f"member {rel} of {work_item_id}: {exc}") from exc
-        await db.write(
-            lambda c, p=str(sub), r=rel, rk=rank: store.add_repo(
+
+    # Only once every member is checked out: a failure above discards the
+    # worktree, and its retry must not record an earlier member twice.
+    def record(c) -> None:
+        for rank, rel in enumerate(ordered, start=1):
+            store.add_repo(
                 c,
                 work_item_id=work_item_id,
-                repo_path=p,
+                repo_path=str(worktree / rel),
                 role="submodule",
-                submodule_path=r,
-                merge_rank=rk,
+                submodule_path=rel,
+                merge_rank=rank,
             )
+        store.add_repo(
+            c,
+            work_item_id=work_item_id,
+            repo_path=str(worktree),
+            role="root",
+            merge_rank=len(ordered) + 1,
         )
-    root_rank = len(ordered) + 1
-    await db.write(
-        lambda c, p=str(worktree), rk=root_rank: store.add_repo(
-            c, work_item_id=work_item_id, repo_path=p, role="root", merge_rank=rk
-        )
-    )
+
+    await db.write(record)
 
 
 async def _discard_worktree(repo: Path, worktree: Path, members=()) -> str | None:
