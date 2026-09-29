@@ -524,8 +524,9 @@ async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
 # --- point 5: raise budget and continue, via the API ------------------------
 
 
-def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, client, repo):
-    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+def _budget_stopped_item(client, repo, breach: dict) -> str:
+    """An item stopped at `implementation` by the spend cap `breach` names,
+    the way `executor.stops.stop_for_budget` records one."""
     wid = client.post(
         "/api/work-items",
         json={
@@ -535,14 +536,19 @@ def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, clie
             "autostart": False,
         },
     ).json()["id"]
-    conn = sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db")
-    conn.execute(
-        "UPDATE work_items SET status = 'needs_human', current_node_id = 'implementation' "
-        "WHERE id = ?",
-        (wid,),
+    with sqlite3.connect(Path(os.environ["KRAFT_RUN_DIR"]) / "orchestrator.db") as conn:
+        conn.execute(
+            "UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,)
+        )
+        store.mark_needs_human(conn, wid, "implementation", "budget cap reached", None, breach)
+    return wid
+
+
+def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, client, repo):
+    monkeypatch.setenv("KRAFT_FAKE_AGENT", "fix")
+    wid = _budget_stopped_item(
+        client, repo, {"scope": "work_item", "spent_usd": 5.0, "cap_usd": 5.0}
     )
-    conn.commit()
-    conn.close()
 
     r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0})
     assert r.status_code == 200, r.text
@@ -551,6 +557,29 @@ def test_raise_budget_endpoint_continues_a_budget_stopped_item(monkeypatch, clie
     assert detail["budget_cap"] == {"cap_usd": 50.0, "source": "item", "spent_usd": 0.0}
     evts = client.get(f"/api/work-items/{wid}/events").json()
     assert any(e["type"] == "budget_raised" and e["payload"]["budget_usd"] == 50.0 for e in evts)
+
+
+@pytest.mark.parametrize(
+    ("breach", "names"),
+    [
+        (
+            {"scope": "usd", "path": "", "spent_usd": 5.0, "cap_usd": 5.0, "unknown_launches": 0},
+            "budget_usd",
+        ),
+        ({"scope": "tokens", "path": "", "spent_tokens": 9, "cap_tokens": 9}, "token_budget"),
+        ({"scope": "daily", "spent_usd": 5.0, "cap_usd": 5.0}, "budget.daily_usd"),
+    ],
+    ids=["budget_usd", "token_budget", "daily"],
+)
+def test_raise_budget_endpoint_409s_when_another_cap_stopped_the_item(client, repo, breach, names):
+    """Kraft-9efnk.28: raising the item's own cap cannot unstick a stop some
+    other cap made, so the route refuses it and writes nothing."""
+    wid = _budget_stopped_item(client, repo, breach)
+    r = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0})
+    assert r.status_code == 409 and names in r.json()["detail"], r.text
+    evts = client.get(f"/api/work-items/{wid}/events").json()
+    assert not any(e["type"] == "budget_raised" for e in evts)
+    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
 
 def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):

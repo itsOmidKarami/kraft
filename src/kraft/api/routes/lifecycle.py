@@ -1016,6 +1016,26 @@ class RaiseBudget(BaseModel):
     budget_usd: float | None
 
 
+#: Why raising the item's own cap would not help, per breach scope
+#: (`kraft.caps.Breach`), and what does (docs: caps-and-budgets).
+_NOT_ITEM_CAP = {
+    "usd": (
+        "a policy budget_usd stopped this item, not its own cap: raise it with "
+        "`kraft item set-policy ID --policy budget_usd=N` (item-wide, up to "
+        "maxima.work_item) or in policy.yaml, then retry"
+    ),
+    "tokens": (
+        "a token_budget stopped this item, not its own cap: raise it with "
+        "`kraft item set-policy ID --policy token_budget=N` (item-wide, up to "
+        "maxima.work_item) or in policy.yaml, then retry"
+    ),
+    "daily": (
+        "the daily cap stopped this item, not its own cap: raise budget.daily_usd "
+        "in policy.yaml, or wait for local midnight, then retry"
+    ),
+}
+
+
 @api_router.post("/work-items/{wid}/budget/raise")
 async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     """Raise a work item's spend cap and continue it from wherever its budget
@@ -1029,12 +1049,21 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     refuse it anyway, but only after the cap had already moved. An
     escalation turn is refused too: a spending cap is a person's call,
     like a gate (Kraft-9efnk.29).
+
+    Refuses, before the write, a stop that was not the item's own cap
+    (Kraft-9efnk.28): a per-scope `budget_usd` or `token_budget`, or
+    `budget.daily_usd`, would stop the item again right after.
     """
     st = request.app.state
     deps.forbid_self_action(st, request, wid, escalation_may=False)
     row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
+    scope = ((board._current_stop(st, wid) or {}).get("budget") or {}).get("scope")
+    if scope != "work_item":
+        raise HTTPException(
+            409, _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap")
+        )
     await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
     return await retry_work_item(wid, Retry(steer=None), request)
 
