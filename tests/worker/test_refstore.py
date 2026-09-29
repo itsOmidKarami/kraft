@@ -41,7 +41,20 @@ def _commit_object(repo, parent, message="work"):
     """A commit in the repository's object store that no ref points at: what a
     sandboxed worker's `git commit` leaves behind in the shared objects."""
     tree = _git(repo, "rev-parse", f"{parent}^{{tree}}")
-    return _git(repo, "commit-tree", tree, "-p", parent, "-m", message)
+    # An identity of its own: a member repository in a test has none, and CI no global one.
+    return _git(
+        repo,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit-tree",
+        tree,
+        "-p",
+        parent,
+        "-m",
+        message,
+    )
 
 
 def _move_in_store(store, ref, oid):
