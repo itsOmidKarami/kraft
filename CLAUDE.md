@@ -1,15 +1,11 @@
 # Project Instructions for AI Agents
 
-This file provides instructions and context for AI coding agents working on this project.
-
-
-
 ## Build & Test
 
 Everything goes through `just` — run `just` for the list.
 
 ```bash
-just setup      # uv sync + npm install
+just setup      # uv sync + npm ci
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend unit tests
 just lint       # ruff check + format check
@@ -55,6 +51,14 @@ kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a 
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
 kraft item retry [ID] [--steer "..."]       # the only door back onto a stopped item
+kraft item skip [ID] [--note "..."]         # advance past the current node or gate without running it
+kraft item escalate [ID] --message "..."    # ask an agent to help with a needs_human stop
+kraft item complete [ID] --reason "..." / kraft item cancel [ID] --reason "..."
+kraft item abandon [ID]                     # drop an item and reclaim its worktree
+kraft item set-chain [ID] --template T      # a not-yet-started item's chain
+kraft item set-overrides [ID] [--model M] [--effort E] / kraft item set-node-override [ID] --node N [...]
+kraft item set-policy [ID] --policy KEY=VALUE [--clear]
+kraft item mr-label LABEL...                # label this item's merge request
 kraft item progress K [ID]                  # a worker saying it started plan task K
 kraft item reply THREAD --body "..." [--claim fixed|answered|should_fix]  # a worker answering a review thread
 kraft view threads [ID] [--open]              # review threads, drafts marked
@@ -76,14 +80,18 @@ kraft repo path [ID] (alias cd) / kraft repo open [ID]
 kraft admin start [--host H] [--port P]      # same as bare `kraft`
 kraft admin stop                             # SIGTERM to run/kraft.pid
 kraft admin restart                          # stop, then start again the same way it was running
+kraft admin install-service / kraft admin uninstall-service  # launchd or systemd --user unit
 kraft admin health                           # exit 1 when degraded
 kraft admin doctor                           # every check at once; exit 1 on any
-kraft admin update [--restart] [-y] [--channel rc|beta|alpha]  # install the newest release; --restart also restarts
+kraft admin update [--restart] [-y] [--channel stable|rc|beta|alpha]  # install the newest release; --restart also restarts
 kraft admin reindex [--repo PATH]
 kraft admin reload                           # reread the template library and policy.yaml from disk, no restart
 kraft admin templates lint                   # check every chain in the library; exit 1 on any error
 kraft admin templates show ID [--resolved]   # a chain file as written, or expanded
+kraft admin templates library [ID]           # the library's components
+kraft admin harnesses [ID]                   # harness profiles and the tasks that select each
 kraft admin init [--repo] / kraft admin mcp  # register Kraft with an agent
+kraft admin permission-hook codex|cursor     # run by a harness's pre-tool hook, not by hand
 ```
 
 Verbs live in four groups: `item` acts, `view` reads, `repo` is repositories and
@@ -131,7 +139,14 @@ kraft item set-attachments [ID] --drop spec   # removes it and puts its gate bac
 Once the item has started, its documents are fixed (the call answers 409): its
 worktree already holds them, committed on its branch. `kraft item create` warns
 when an open item in the same repo has the same title or implements a bead you
-named; read that warning before filing twice.
+named (a bead is an issue in [beads](https://github.com/gastownhall/beads), the
+optional `bd` issue tracker); read that warning before filing twice.
+
+### Pull requests
+
+The release label, the `## Changelog` section, the docs page a change must
+update, and the `## Removed tests` block are all in
+[CONTRIBUTING.md](CONTRIBUTING.md). Read it before opening one.
 
 ### The test tree mirrors the source tree
 
@@ -141,16 +156,14 @@ layout drifted the first time. A module with no package mirrors nothing and
 stays at `tests/test_<mod>.py`.
 
 **Every `tests/` subdirectory needs an empty `__init__.py`.** This is
-load-bearing, not tidiness. The mirrored tree has eleven duplicate basenames
-(`test_gates.py` exists under `api/`, `executor/` and the root, and so on for
-`test_db`, `test_auth`, `test_budget`, `test_escalate`, `test_progress`,
-`test_reattach`, `test_repos`, `test_service`, `test_triggers`,
-`test_work_items`), which pytest's default prepend import mode rejects as a
-hard collection error. Packages fix it with no config change, and they keep
-`tests/` on `sys.path` — which the 87 files doing `from support.harness import
-...` depend on. Do not "simplify" this by switching to
-`--import-mode=importlib`; that drops `tests/` off `sys.path` and breaks every
-one of them.
+load-bearing, not tidiness. The mirrored tree has duplicate basenames (19 at
+the last count: `test_gates.py` exists under `api/`, `executor/` and the root,
+and so on for `test_db`, `test_auth`, `test_review`, `test_run` and more),
+which pytest's default prepend import mode rejects as a hard collection error.
+Packages fix it with no config change, and they keep `tests/` on `sys.path` —
+which the ~150 files doing `from support.harness import ...` depend on. Do not
+"simplify" this by switching to `--import-mode=importlib`; that drops `tests/`
+off `sys.path` and breaks every one of them.
 
 Two things bite when you move or add a nested test:
 
@@ -180,9 +193,10 @@ running work item.
 A session with `$KRAFT_WORK_ITEM_ID` set is a Kraft worker, running in a
 throwaway git worktree on its own branch. It commits everything it changes
 before it exits — uncommitted work never reaches the merge request and is
-destroyed with the worktree. This overrides the Conservative profile's
-"do not run git commits" for commits only: a worker still does not push,
-merge, sync Dolt, or close beads. Kraft does those itself.
+destroyed with the worktree. This overrides any standing instruction not to
+run `git commit` (the maintainer's own agent profile has one), for commits
+only: a worker still does not push, merge, sync Dolt (the versioned database
+beads stores its issues in), or close beads. Kraft does those itself.
 
 A worker's environment is built from an allowlist, not inherited from whatever
 shell started the Kraft daemon: `PATH`, `HOME`, the usual locale and proxy
