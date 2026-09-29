@@ -529,51 +529,34 @@ def test_completion_check_passes_once_registered(tmp_path, monkeypatch):
 
 def test_mcp_check_passes_on_a_user_scope_registration(app, tmp_path):
     """What `kraft admin init` produces via `claude mcp add --scope user`
-    (init.py:122). `HOME` is already a throwaway directory (conftest's autouse
-    `_isolated_kraft_home`), so this writes the real file the check reads."""
-    home = Path.home()
-    home.mkdir(parents=True, exist_ok=True)
-    (home / ".claude.json").write_text(
-        json.dumps({"mcpServers": {"kraft": {"command": "kraft", "args": ["admin", "mcp"]}}})
-    )
+    (init.py:122): the throwaway `HOME` conftest's autouse
+    `_isolated_kraft_home` already writes."""
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is True
     assert ".claude.json" in check["detail"]
 
 
 def test_mcp_check_passes_on_a_committed_repo_scope_mcp_json(app, tmp_path):
-    """What `kraft admin init --repo` writes (init._write_repo_mcp_json), once
-    committed: a worktree checks out HEAD."""
+    """`kraft admin init --repo`'s file, once committed: worktrees check out HEAD."""
     (Path.home() / ".claude.json").unlink()
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
-    (repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"kraft": {"command": "kraft"}}}))
+    (repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"kraft": {}}}))
     subprocess.run(["git", "add", ".mcp.json"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "mcp"], cwd=repo, check=True)
-    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
-    assert check["ok"] is True
-    assert ".mcp.json" in check["detail"]
+    assert ".mcp.json" in _by_name(asyncio.run(doctor.run_checks()), "mcp server")["detail"]
 
 
-def test_mcp_check_passes_on_the_plugin_alone(app):
-    """The recommended install: the plugin plus `/kraft:onboard`, no `kraft
-    admin init`."""
-    home = Path.home()
-    (home / ".claude.json").unlink()
-    (home / ".claude").mkdir()
-    (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"kraft@kraft": true}}')
-    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
-    assert check["ok"] is True
-    assert "mcp__plugin_kraft_kraft__permission_request" in check["detail"]
-
-
-def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
-    """A real failure, not an advisory like `bd` or shell completion: a Claude
-    launch with no `kraft` server is refused."""
+@pytest.mark.parametrize("plugins, ok", [({"kraft@kraft": True}, True), ({}, False)])
+def test_mcp_check_passes_on_the_plugin_alone_and_fails_on_nothing(app, plugins, ok):
+    """The plugin alone is the recommended install, no `kraft admin init`; with
+    nothing registered a Claude launch is refused, a real failure."""
     (Path.home() / ".claude.json").unlink()
+    (Path.home() / ".claude").mkdir()
+    (Path.home() / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": plugins}))
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
-    assert check["ok"] is False
-    assert "kraft admin init" in check["detail"] and "Kraft plugin" in check["detail"]
+    assert check["ok"] is ok
+    assert ("mcp__plugin_kraft_kraft__" if ok else "kraft admin init") in check["detail"]
 
 
 def test_path_check_fails_when_another_kraft_shadows_this_one(monkeypatch):

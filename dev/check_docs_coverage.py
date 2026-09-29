@@ -157,15 +157,11 @@ def unknown_gates() -> list[str]:
     shipped chain has -- the reverse direction of CHECKS: a doc naming a gate
     that does not exist sends a reader looking for it."""
     from kraft.templates.library import TemplateLibrary
-    from kraft.templates.models import GateNode
 
     library = TemplateLibrary.from_yaml_dir(ROOT / "templates")
-    gates = {
-        n.id
-        for id in library.chain_ids
-        for n in library.resolve_chain(id).nodes
-        if isinstance(n.node, GateNode)
-    }
+    # Every node, not only gates: `external_approval` is an exec node, and a
+    # real one.
+    gates = {n.id for id in library.chain_ids for n in library.resolve_chain(id).nodes}
     return [
         f"{page.relative_to(DOCSITE)}: {name}"
         for page in sorted(DOCSITE.glob("**/*.md"))
