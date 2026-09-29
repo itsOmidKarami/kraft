@@ -39,9 +39,11 @@ def calls(monkeypatch):
     return SimpleNamespace(made=made, answers=answers)
 
 
-def test_network_set_replaces_forwarded_proxies_with_the_relay(monkeypatch):
+def test_a_launch_under_network_joins_its_relay_and_mounts_the_shim(monkeypatch):
     """The daemon's own proxy is where the *proxy* goes out, never the
-    worker: under `network:` the worker's only route is its relay."""
+    worker: under `network:` the worker's only route is its relay. And every
+    such launch, whatever its policy, mounts its hook's command: a missing
+    one runs the call (codex treats an unrunnable hook as allow)."""
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:3128")
     backend = docker.DockerBackend()
 
@@ -50,18 +52,9 @@ def test_network_set_replaces_forwarded_proxies_with_the_relay(monkeypatch):
 
     assert "--network=container:kraft-relay-s1" in policed
     assert "HTTPS_PROXY" not in policed
+    assert policed[policed.index(f"{shim.HOST_DIR}:/opt/kraft/bin:ro") - 1] == "-v"
     assert not any(a.startswith("--network") for a in open_)
     assert open_[open_.index("HTTPS_PROXY") - 1] == "-e"
-
-
-def test_every_launch_under_network_mounts_the_shim_read_only():
-    """Whatever this launch's policy: its hook's command, and a missing one
-    runs the call (codex treats an unrunnable hook as allow)."""
-    backend = docker.DockerBackend()
-    policed = backend.wrap(["true"], "/w", POLICED, None, session_id="s1")
-    open_ = backend.wrap(["true"], "/w", {"kind": "docker", "image": "img"}, None, session_id="s1")
-
-    assert policed[policed.index(f"{shim.HOST_DIR}:/opt/kraft/bin:ro") - 1] == "-v"
     assert not any("/opt/kraft/bin" in a for a in open_)
 
 
