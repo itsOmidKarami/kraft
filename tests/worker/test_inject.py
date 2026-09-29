@@ -8,8 +8,11 @@ worker trusts the session's Kraft CA, as its bundle does."""
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 import ssl
+import threading
+import time
 
 import pytest
 
@@ -355,3 +358,38 @@ async def test_through_the_daemons_upstream_proxy_tls_goes_inside_its_tunnel(
     assert internet.tunnels[0].startswith(b"CONNECT api.example.com:443 HTTP/1.1\r\n")
     (request,) = internet.requests
     assert b"x-api-key: sk-real-VALUE\r\n" in request
+
+
+def test_a_host_leaf_is_loaded_whole_while_another_connect_re_mints_it(run_dirs, monkeypatch):
+    """A CA newer than the leaf re-mints it on the next CONNECT, one file at
+    a time. A CONNECT that minted must load its pair before another re-mint
+    gets between the two files: forced here by starting that re-mint right
+    after the mint returns and letting it write the key only. Loaded torn,
+    the certificate and key would not match (an `SSLError`)."""
+    cert, _ = ca.ensure_ca(run_dirs)
+    future = time.time() + 3600
+    os.utime(cert, (future, future))  # every mint below re-mints
+    key_written, finish = threading.Event(), threading.Event()
+    real_mint, real_write_cert = ca.mint_host_leaf, ca._write_cert
+    other = []
+
+    def write_cert(path, cert):
+        if threading.current_thread().name == "other":
+            key_written.set()
+            finish.wait(5)
+        real_write_cert(path, cert)
+
+    def mint_then_race(*args):
+        pair = real_mint(*args)
+        other.append(threading.Thread(target=real_mint, args=args, name="other"))
+        other[0].start()
+        key_written.wait(0.5)  # never, while the load holds the pair
+        return pair
+
+    monkeypatch.setattr(ca, "_write_cert", write_cert)
+    monkeypatch.setattr(ca, "mint_host_leaf", mint_then_race)
+    try:
+        inject._server_context(run_dirs, "api.example.com", [])
+    finally:
+        finish.set()
+        other[0].join()

@@ -56,22 +56,32 @@ def _dir(run_dirs) -> Path:
     return directory
 
 
+def _write(path: Path, data: bytes, mode: int) -> None:
+    """`data` at `path` whole or not at all: written to a file of its own,
+    created `mode` (a key's 0600 never readable by anyone else even for an
+    instant), then renamed over `path`. A reader never sees half a file,
+    and a crash never leaves one where the next mint would reuse it."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}")
+    tmp.unlink(missing_ok=True)  # one a crash left, perhaps not `mode`
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _write_key(path: Path, key: ec.EllipticCurvePrivateKey) -> None:
-    """Created 0600, never readable by anyone else even for an instant."""
-    path.unlink(missing_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as out:
-        out.write(
-            key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
-        )
+    pem = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    _write(path, pem, 0o600)
 
 
 def _write_cert(path: Path, cert: x509.Certificate) -> None:
-    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    _write(path, cert.public_bytes(serialization.Encoding.PEM), 0o666)
 
 
 def _name(cn: str) -> x509.Name:
@@ -219,17 +229,19 @@ def mint_host_leaf(run_dirs, host: str) -> tuple[Path, Path]:
     like `server_cert`: minted again only when missing or older than the
     CA. `ValueError` for anything but an exact host -- the name is a
     directory. One at a time: the proxy mints on each CONNECT's thread, and
-    a CLI opens several connections at once."""
+    a CLI opens several connections at once; hold `HOST_LEAF_LOCK` around
+    this and the load too, or another re-mint can land between the files."""
     name = host.lower().rstrip(".")
     if not _EXACT_HOST.fullmatch(name):
         raise ValueError(f"{host!r} is not an exact host name to mint a certificate for")
     # ponytail: one lock for every host; per-host locks if minting ever shows up.
-    with _HOST_LEAF_LOCK:
+    with HOST_LEAF_LOCK:
         return _host_leaf(run_dirs, name)
 
 
-#: Held while a host leaf is checked and minted (`mint_host_leaf`).
-_HOST_LEAF_LOCK = threading.Lock()
+#: Held while a host leaf is checked and minted (`mint_host_leaf`), and by
+#: the proxy while it loads the pair: a re-mint rewrites both files.
+HOST_LEAF_LOCK = threading.RLock()
 
 
 def _host_leaf(run_dirs, name: str) -> tuple[Path, Path]:

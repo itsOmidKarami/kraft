@@ -139,7 +139,8 @@ def rules_for(session, host: str, port: int) -> tuple[InjectRule, ...]:
 def _server_context(run_dirs, host: str, seen: list) -> ssl.SSLContext:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(*ca.mint_host_leaf(run_dirs, host))
+    with ca.HOST_LEAF_LOCK:  # loaded whole: a re-mint rewrites the pair
+        context.load_cert_chain(*ca.mint_host_leaf(run_dirs, host))
     context.set_alpn_protocols(["http/1.1"])
 
     def check(_sslobj, name, _context):

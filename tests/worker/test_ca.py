@@ -155,3 +155,34 @@ def test_a_host_leaf_minted_by_many_connections_at_once_is_one_usable_pair(run_d
     with ThreadPoolExecutor(8) as pool:
         pairs = list(pool.map(load, range(8)))
     assert len(set(pairs)) == 1
+
+
+def test_a_re_mint_that_fails_mid_write_leaves_the_pair_it_would_replace(run_dirs, monkeypatch):
+    """Each file is written aside and renamed over: a write that dies
+    halfway leaves the old pair whole and nothing half-written beside it."""
+    ca_cert, _ = ca.ensure_ca(run_dirs)
+    pair = ca.mint_host_leaf(run_dirs, "api.example.com")
+    before = [p.read_bytes() for p in pair]
+    os.utime(ca_cert, (ca_cert.stat().st_mtime + 60,) * 2)  # the next call re-mints
+    real_fdopen = os.fdopen
+
+    class Dies:
+        def __init__(self, fd, mode):
+            self.out = real_fdopen(fd, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.out.close()
+
+        def write(self, data):
+            self.out.write(data[: len(data) // 2])
+            raise OSError("disk full")
+
+    monkeypatch.setattr(ca.os, "fdopen", Dies)
+    with pytest.raises(OSError, match="disk full"):
+        ca.mint_host_leaf(run_dirs, "api.example.com")
+
+    assert [p.read_bytes() for p in pair] == before
+    assert sorted(p.name for p in pair[0].parent.iterdir()) == ["leaf.key", "leaf.pem"]
