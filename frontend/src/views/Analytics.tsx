@@ -151,12 +151,12 @@ export function AnalyticsView() {
           <section className="chart">
             <div className="chart-head">
               <span className="chart-title">Throughput by week</span>
-              <span className="chart-note">completed items · current week partial</span>
+              <span className="chart-note">merged items · current week partial</span>
             </div>
-            {/* W8.4: empty only when the range's own total is 0 -- the KPI row
-                above and this chart read the same range. */}
-            {t.completed === 0 ? (
-              <p className="empty chart-empty">nothing completed in this range</p>
+            {/* The bars count merges, not completions: a chain with no merge
+                node (quick-task) completes without ever showing up here. */}
+            {t.mrs_merged === 0 ? (
+              <p className="empty chart-empty">nothing merged in this range</p>
             ) : (
               <>
                 <div className="bars" style={{ gridTemplateColumns: `repeat(${WEEKS}, 1fr)` }}>
