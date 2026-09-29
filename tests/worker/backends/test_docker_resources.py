@@ -202,22 +202,23 @@ def inspect(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("answer", "memory"),
     [
-        ("true 33554432\n", "32m"),
-        ("true 4294967296\n", "4g"),
-        ("true 6292480\n", "6145k"),
-        ("false 33554432\n", None),
-        ("true 0\n", None),
+        ("true 33554432 137\n", "32m"),
+        ("true 4294967296 137\n", "4g"),
+        ("true 6292480 137\n", "6145k"),
+        ("false 33554432 1\n", None),
+        ("true 0 137\n", None),
         (None, None),
     ],
     ids=["killed-32m", "killed-4g", "killed-odd-size", "not-flagged", "host-oom", "gone"],
 )
 async def test_an_oom_kill_is_read_off_the_runtime_never_the_exit_code(inspect, answer, memory):
-    """Exit 137 is also Kraft's own SIGKILL, so only `State.OOMKilled` says the
-    limit did it; a container with no memory limit the host's OOM killer hit
-    is the host running short, not a limit a retry would hit again."""
+    """`State.OOMKilled` under a limit is a confirmed kill; a container with no
+    memory limit the host's OOM killer hit is the host running short, not a
+    limit a retry would hit again."""
     if answer is not None:
         inspect(answer)
-    assert await docker.DockerBackend().oom_killed("s1") == memory
+    got = await docker.DockerBackend().oom_killed("s1")
+    assert got == (None if memory is None else docker.OomKill(memory, True))
 
 
 @pytest.mark.parametrize("engine", ["podman", "docker"])
@@ -231,28 +232,31 @@ async def test_podmans_oom_file_is_its_word_on_cgroup_v1(inspect, monkeypatch, e
     backend = docker.DockerBackend()
     (backend.client_cwd("s1") / "oom").touch()
 
-    assert await backend.oom_killed("s1") == ("32m" if engine == "podman" else None)
+    assert await backend.oom_killed("s1") == (
+        docker.OomKill("32m", True) if engine == "podman" else None
+    )
     await backend.close("s1")
     assert not docker.client_dir("s1").exists()
 
 
 @pytest.mark.parametrize(
-    ("answers", "memory", "asked"),
+    ("answers", "oom", "asked"),
     [
-        (["false 33554432 137", "true 33554432 137"], "32m", 2),
-        (["false 33554432 137"] * 50, None, None),
+        (["false 33554432 137", "true 33554432 137"], docker.OomKill("32m", True), 2),
+        (["false 33554432 137"] * 50, docker.OomKill("32m", False), None),
         (["false 33554432 1"], None, 1),
         (["false 0 137"], None, 1),
     ],
-    ids=["flag-catches-up", "sigkill-never-flagged", "other-exit", "no-limit"],
+    ids=["flag-catches-up", "never-flagged-is-unconfirmed", "other-exit", "no-limit"],
 )
 async def test_a_sigkilled_limited_container_gets_a_moment_for_its_oom_flag(
-    monkeypatch, answers, memory, asked
+    monkeypatch, answers, oom, asked
 ):
     """The daemon sets `State.OOMKilled` from the runtime's OOM event, which
-    can land after the exit the attached client returned on: read at once, a
-    real limit kill looked like a plain failure. Only a SIGKILL (137) under a
-    limit is asked again, and exit 137 alone still never counts."""
+    can land after the exit the attached client returned on, or never: Docker
+    on cgroup v2 drops it (moby#41929; 7 of 120 real kills on CI). Only a
+    SIGKILL (137) under a limit is asked again, and one the flag never
+    reaches is an unconfirmed kill. Exit 137 with no limit never counts."""
     monkeypatch.setattr(docker, "OOM_FLAG_GRACE_S", 0.3)
     calls = []
 
@@ -261,6 +265,6 @@ async def test_a_sigkilled_limited_container_gets_a_moment_for_its_oom_flag(
         return 0, answers[min(len(calls), len(answers)) - 1] + "\n"
 
     monkeypatch.setattr(docker, "docker_call", fake_call)
-    assert await docker.oom_killed("s1") == memory
+    assert await docker.oom_killed("s1") == oom
     if asked is not None:
         assert len(calls) == asked

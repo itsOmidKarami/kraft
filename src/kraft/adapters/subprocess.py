@@ -327,29 +327,49 @@ async def _record_unsynced(
 #: What a sandboxed session its memory limit killed is recorded as.
 SANDBOX_OOM_KILLED = "sandbox_oom_killed"
 #: How the log line `record_oom_kill` appends starts: the stop's cause.
-OOM_LINE = "kraft: a process in the sandbox was killed by its memory limit"
+OOM_LINE = "kraft: a process in the sandbox was killed"
+
+
+def oom_cause(oom: _backends.OomKill) -> str:
+    """How a stop names the kill, honest about one the runtime never confirmed."""
+    if oom.confirmed:
+        return f"by its memory limit ({oom.memory})"
+    return f"under its {oom.memory} memory limit (the runtime did not confirm it was the limit)"
 
 
 async def record_oom_kill(
-    db, work_item_id: str, session_id: str, log_path: Path, memory: str, status: str | None
-) -> str:
+    db,
+    work_item_id: str,
+    session_id: str,
+    log_path: Path,
+    oom: _backends.OomKill,
+    status: str | None,
+) -> str | None:
     """The status a session its sandbox's memory limit killed ends with, and
     the record of it: `sandbox_oom_killed` and a `kraft:` line naming the
     limit, the stop's cause. A session that failed (or left no word at all)
     ends `config_error`, not `failed`: the same limit kills a retry the same
     way, so no fix loop runs and the item stops for a person. One that still
     reported a result of its own (something it ran was killed, and it got
-    past it) keeps it; the event is recorded all the same."""
+    past it) keeps it; the event is recorded all the same.
+
+    An unconfirmed kill (exit 137 under the limit, no word from the runtime)
+    counts only when Kraft did not stop the session itself. Every stop of
+    Kraft's own that can reach here marks the row `paused` before it signals
+    (a pause, an escalation turn a retry stops); a time cap and a cancel
+    leave their callers before any of them asks. Such a session keeps
+    `status`, and nothing is recorded."""
+    if not oom.confirmed and await db.write(
+        lambda c: store.session_status(c, session_id) == "paused"
+    ):
+        return status
     with open(log_path, "a") as fh:
         fh.write(
-            f"\n{OOM_LINE} ({memory}): raise the sandbox's resources.memory, or make "
+            f"\n{OOM_LINE} {oom_cause(oom)}: raise the sandbox's resources.memory, or make "
             "the task need less\n"
         )
-    await db.write(
-        lambda c: events.append(
-            c, work_item_id, SANDBOX_OOM_KILLED, {"session_id": session_id, "memory": memory}
-        )
-    )
+    payload = {"session_id": session_id, "memory": oom.memory, "confirmed": oom.confirmed}
+    await db.write(lambda c: events.append(c, work_item_id, SANDBOX_OOM_KILLED, payload))
     return "config_error" if status in (None, "failed", "unknown") else status
 
 
@@ -828,7 +848,7 @@ async def run_task(
         daemon=True,
     )
     watcher.start()
-    oom: str | None = None
+    oom: _backends.OomKill | None = None
 
     try:
         try:

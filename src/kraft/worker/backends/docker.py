@@ -27,7 +27,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from kraft.config import ConfigError
 from kraft.paths import RunDirs, default_run_dir, default_templates_dir, kraft_home
@@ -993,19 +993,31 @@ def _size(n: int) -> str:
     return str(n)
 
 
-async def oom_killed(session_id: str) -> str | None:
-    """The memory limit this session's container was killed at, read off
-    `State.OOMKilled` before `teardown` removes the container; None when it
-    was not, or cannot be told (already gone, no daemon).
+class OomKill(NamedTuple):
+    """A session's memory limit, `_size`d, and whether the runtime itself
+    said the limit killed it (`State.OOMKilled`, podman's `oom` file) or it
+    only exited 137 under the limit with no word (`confirmed=False`)."""
 
-    Only the runtime's own OOM flag counts, never exit 137 alone: that is
-    also Kraft's own SIGKILL (a cap, a teardown). A container with no memory
-    limit that the host's OOM killer hit is None too: that is the host
-    running short, not a limit a retry would hit again."""
+    memory: str
+    confirmed: bool
+
+
+async def oom_killed(session_id: str) -> OomKill | None:
+    """Whether this session's container was killed under its memory limit,
+    read before `teardown` removes the container; None when it was not, or
+    cannot be told (already gone, no daemon).
+
+    The runtime's own OOM flag is a confirmed kill. Exit 137 under a limit
+    with no flag after `OOM_FLAG_GRACE_S` is an unconfirmed one: Docker on
+    cgroup v2 can drop the flag altogether (moby#41929), and the caller that
+    knows Kraft did not SIGKILL the container itself decides whether it
+    counts (`record_oom_kill`). A container with no memory limit is None
+    whatever it exited with: that is the host running short, or Kraft's
+    own kill, not a limit a retry would hit again."""
     # The daemon learns of the kill from the runtime's OOM event, which can
-    # land after the exit that let the attached client return: a container
-    # SIGKILLed under a memory limit gets a moment for its flag to catch up,
-    # while any other exit is answered at once.
+    # land after the exit that let the attached client return, or never: a
+    # container SIGKILLed under a memory limit gets a moment for its flag to
+    # catch up, while any other exit is answered at once.
     deadline = time.monotonic() + OOM_FLAG_GRACE_S
     while True:
         got = await docker_call(
@@ -1017,17 +1029,17 @@ async def oom_killed(session_id: str) -> str | None:
         if got is None or got[0] != 0:
             return None
         killed, memory, code = (got[1].split() + ["", "", ""])[:3]
+        if not memory.isdigit() or int(memory) <= 0:
+            return None
         # Podman on cgroup v1 never sets the flag (4.9.3, conmon 2.1.10): its
         # conmon writes an `oom` file into the client's directory instead.
         if killed == "true" or (runtime().podman and (client_dir(session_id) / "oom").exists()):
-            break
-        limited = memory.isdigit() and int(memory) > 0
-        if code != "137" or not limited or time.monotonic() >= deadline:
+            return OomKill(_size(int(memory)), True)
+        if code != "137":
             return None
+        if time.monotonic() >= deadline:
+            return OomKill(_size(int(memory)), False)
         await asyncio.sleep(0.1)
-    if not memory.isdigit() or int(memory) <= 0:
-        return None
-    return _size(int(memory))
 
 
 #: How long `oom_killed` waits for a SIGKILLed, memory-limited container's
@@ -1348,7 +1360,7 @@ class DockerBackend:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    async def oom_killed(self, session_id: str) -> str | None:
+    async def oom_killed(self, session_id: str) -> OomKill | None:
         return await oom_killed(session_id)
 
     async def close(self, session_id: str) -> None:

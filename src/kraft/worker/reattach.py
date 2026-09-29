@@ -489,11 +489,11 @@ async def _guarded_adopt(
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
 
 
-async def _oom_killed(kind: str | None, session_id: str) -> str | None:
-    """The memory limit a session row's sandbox killed it at, or None."""
+async def _oom_killed(kind: str | None, session_id: str) -> _backends.OomKill | None:
+    """Whether a session row's sandbox was killed under its memory limit, or None."""
     for backend in _backends.for_session(kind):
-        if (memory := await backend.oom_killed(session_id)) is not None:
-            return memory
+        if (oom := await backend.oom_killed(session_id)) is not None:
+            return oom
     return None
 
 

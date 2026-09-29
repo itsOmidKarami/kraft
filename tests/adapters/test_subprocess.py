@@ -601,41 +601,36 @@ async def test_an_image_without_the_command_stops_as_config_error(run, docker):
 
 
 @pytest.mark.parametrize(
-    ("cmd", "inspect", "status"),
+    ("cmd", "inspect", "status", "confirmed"),
     [
-        (["sh", "-c", "exit 137"], "true 33554432", "config_error"),
-        (["sh", "-c", "exit 137"], "false 33554432", "failed"),
-        (_writes_result({"status": "done"}), "true 33554432", "done"),
+        (["sh", "-c", "exit 137"], "true 33554432 137", "config_error", True),
+        (["sh", "-c", "exit 137"], "false 33554432 137", "config_error", False),
+        (["sh", "-c", "exit 137"], "false 0 137", "failed", None),
+        (_writes_result({"status": "done"}), "true 33554432 0", "done", True),
     ],
-    ids=["oom-killed", "exit-137-alone", "survived-a-killed-child"],
+    ids=["oom-killed", "unconfirmed", "exit-137-without-a-limit", "survived-a-killed-child"],
 )
 async def test_a_session_its_memory_limit_killed_stops_naming_the_limit(
-    run, docker, database, tmp_path, monkeypatch, cmd, inspect, status
+    run, docker, database, tmp_path, monkeypatch, cmd, inspect, status, confirmed
 ):
-    """The same limit kills a retry the same way, so it is a stop for a
-    person, not a failure for a fix loop. Asked before the container is
-    removed (the fake's `rm` removes its `inspect` answer), and asked of the
-    runtime: exit 137 alone is also Kraft's own SIGKILL."""
-    answer = tmp_path / "inspect"
-    answer.write_text(inspect + "\n")
+    """The same limit kills a retry the same way: a stop for a person, not a fix loop.
+    Docker on cgroup v2 can drop its flag, so 137 under a limit is an unconfirmed kill."""
+    monkeypatch.setattr(docker_backend, "OOM_FLAG_GRACE_S", 0)
+    (answer := tmp_path / "inspect").write_text(inspect + "\n")
     monkeypatch.setenv("FAKE_DOCKER_INSPECT", str(answer))
-    sandbox = {**DOCKER, "resources": {"memory": "32m"}}
 
-    got, row = await run(cmd, "s-oom", sandbox=sandbox)
+    got, row = await run(cmd, "s-oom", sandbox={**DOCKER, "resources": {"memory": "32m"}})
 
     assert (got, row["status"]) == (status, status)
-    killed = [
-        e["payload"]
-        for e in database.read(lambda c: events.read_after(c, 0, "w1"))
-        if e["type"] == "sandbox_oom_killed"
-    ]
-    recorded = {"session_id": "s-oom", "memory": "32m"}
-    assert killed == ([] if inspect.startswith("false") else [recorded])
+    logged = database.read(lambda c: events.read_after(c, 0, "w1"))
+    recorded = {"session_id": "s-oom", "memory": "32m", "confirmed": confirmed}
+    oom = [e["payload"] for e in logged if e["type"] == "sandbox_oom_killed"]
+    assert oom == ([] if confirmed is None else [recorded])
     if status == "config_error":
         last = Path(row["log_path"]).read_text().strip().splitlines()[-1]
-        assert last.startswith(
-            "kraft: a process in the sandbox was killed by its memory limit (32m)"
-        )
+        said = "by its memory limit (32m)" if confirmed else "under its 32m memory limit (the"
+        assert last.startswith(f"kraft: a process in the sandbox was killed {said}")
+        assert confirmed or "the runtime did not confirm it was the limit)" in last
 
 
 @pytest.mark.parametrize(
@@ -654,7 +649,12 @@ async def test_an_oom_kill_overrides_only_a_session_without_a_result(
     """`run` files work item `w1`. A session that reported a result keeps it."""
     log = tmp_path / "s.log"
     log.touch()
-    assert await sp.record_oom_kill(database, "w1", "s", log, "32m", status) == ends
+    assert (
+        await sp.record_oom_kill(
+            database, "w1", "s", log, docker_backend.OomKill("32m", True), status
+        )
+        == ends
+    )
 
 
 async def test_a_sandbox_client_runs_outside_the_worktree(run, docker, tmp_path, monkeypatch):

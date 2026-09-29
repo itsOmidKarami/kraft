@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from kraft.worker.backends.docker import DockerBackend
+from kraft.worker.backends.docker import DockerBackend, OomKill
 
 if TYPE_CHECKING:
     from kraft.worker.refstore import RefStore
@@ -88,11 +88,13 @@ class SandboxBackend(Protocol):
         """Bring the session's result file back to `result_path`. A no-op
         for a session this backend never ran."""
 
-    async def oom_killed(self, session_id: str) -> str | None:
-        """The memory limit the session's sandbox killed it at, or None: it
-        was not, or this backend cannot tell (a session it never ran). Asked
+    async def oom_killed(self, session_id: str) -> OomKill | None:
+        """Whether the session's sandbox was killed under its memory limit,
+        and whether the runtime confirmed the limit did it; None when it was
+        not, or this backend cannot tell (a session it never ran). Asked
         after the command exits and before `close`, which removes the
-        evidence; the runtime's own word only, never an exit code."""
+        evidence. An exit code alone never counts: an unconfirmed kill needs
+        a memory limit, and `record_oom_kill` drops one Kraft stopped itself."""
 
     async def close(self, session_id: str) -> None:
         """Stop and remove the session's sandbox, best-effort and bounded. A
