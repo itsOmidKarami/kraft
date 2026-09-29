@@ -721,31 +721,20 @@ async def test_run_task_passes_env_through_to_docker_argv(run, docker, monkeypat
 
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Daemon")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "Daemon")
-    # Done only if the value reached the command: the fake docker runs it in
-    # the client's own env, which is where a bare `-e MY_REPO` copies from.
+    # Done only if the fake docker, run in the client's own env (what a bare
+    # `-e MY_REPO` copies from), handed the value on.
     writes = _writes_result({"status": "done"})
     writes[-1] = '[ "$MY_REPO" = 1 ] && ' + writes[-1]
+    repo = {"env": {"MY_REPO": "1", "GIT_AUTHOR_NAME": "R"}, "env_passthrough": ["OPENAI_API_KEY"]}
     status, _ = await run(
-        writes,
-        sandbox=DOCKER,
-        env={"PYTHONDONTWRITEBYTECODE": "1"},
-        repo_entry=entry_of(
-            {
-                "env": {"MY_REPO": "1", "GIT_AUTHOR_NAME": "Repo"},
-                "env_passthrough": ["OPENAI_API_KEY"],
-            }
-        ),
+        writes, sandbox=DOCKER, env={"PYTHONDONTWRITEBYTECODE": "1"}, repo_entry=entry_of(repo)
     )
 
     assert status == "done"
-    assert seen["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
-    # The container has no ~/.gitconfig: the identity crosses as env, but a
-    # repository's own `env:` still outranks it.
-    assert seen["env"]["GIT_COMMITTER_NAME"] == "Daemon"
-    assert "GIT_AUTHOR_NAME" not in seen["env"]
-    # A credential, and a repository's `env:`, cross by name only (Kraft-1u0hp);
-    # the CLI gets a home that outlives --rm.
-    assert "MY_REPO" not in seen["env"]
+    # The container has no ~/.gitconfig: the identity crosses as env, under a
+    # repository's own `env:`. That, and a credential, cross by name only
+    # (Kraft-1u0hp); the CLI gets a home that outlives --rm.
+    assert seen["env"] == {"GIT_COMMITTER_NAME": "Daemon", "PYTHONDONTWRITEBYTECODE": "1"}
     assert list(seen["passthrough"]) == ["OPENAI_API_KEY", "MY_REPO", "GIT_AUTHOR_NAME"]
     assert seen["home"] == run_dirs.base / "sandbox-home" / "w1"
 
