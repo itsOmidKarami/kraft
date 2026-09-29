@@ -360,6 +360,11 @@ def _add_member(worktree: Path, rel: str, member_repo: Path, branch: str) -> Non
     attributes only from `member_repo`'s common gitdir, the operator's.
     `submodule init` enters nothing: it writes the url and `active` that
     `submodule status` needs to count the member as initialized."""
+    if not member_repo.is_dir():
+        raise RuntimeError(
+            f"the connected repository {member_repo} for {rel} is missing; reconnect "
+            "it, or fix its path in repos.yaml, then retry"
+        )
     init = _git_ok(worktree, "submodule", "init", "--", rel)
     if init.returncode != 0:
         raise RuntimeError(f"git submodule init failed for {rel}: {init.stderr.strip()}")
@@ -499,7 +504,7 @@ async def _discard_worktree(repo: Path, worktree: Path, members=()) -> str | Non
     for cwd, args in (
         (repo, ["git", "worktree", "remove", "--force", str(worktree)]),
         (repo, ["git", "worktree", "prune"]),
-        *((m, ["git", "worktree", "prune"]) for m in members),
+        *((m, ["git", "worktree", "prune"]) for m in members if m.is_dir()),
     ):
         await asyncio.to_thread(subprocess.run, args, cwd=cwd, capture_output=True, text=True)
     return None if not worktree.exists() else f"{worktree} still present"
@@ -656,7 +661,7 @@ async def ensure_worktree(
                 repositories or {},
                 sandboxed=sandbox is not None,
             )
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             # As for a failed setup command: a retry must find no worktree, or
             # it would skip the members entirely.
             connected = [m for m in member_repositories(row, repositories or {}).values() if m]

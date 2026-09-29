@@ -90,3 +90,18 @@ async def test_a_sandboxed_member_with_no_connected_repository_is_never_cloned_u
 
     assert not list((root / ".git" / "worktrees").glob("*/modules"))
     assert not (run_dirs.worktrees / "w1").exists()
+
+
+async def test_a_missing_member_repository_stops_setup_and_leaves_no_worktree(
+    tmp_path, database, run_dirs
+):
+    """A connected member whose path is gone is a stop, and the worktree goes
+    with it: a retry would otherwise take the early return and run with an
+    empty member directory."""
+    root, _sub = make_repo_with_submodule(tmp_path)
+    await _workspace_item(database, root, {"pkg": "repos/pkg"})
+
+    with pytest.raises(RuntimeError, match="connected repository .* is missing"):
+        await wtree.ensure(database, run_dirs, root, repositories=_members(tmp_path / "gone"))
+
+    assert not (run_dirs.worktrees / "w1").exists()
