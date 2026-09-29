@@ -28,6 +28,7 @@ from kraft.db import Database
 from kraft.index import db as index_db
 from kraft.index.service import Indexer
 from kraft.paths import BUNDLED, RunDirs, default_run_dir, default_skills_dir, default_templates_dir
+from kraft.worker import channel as channel_mod
 from kraft.worker import reattach, sandbox
 from kraft.worker import steering as steering_mod
 from kraft.ws import Broadcaster
@@ -62,6 +63,10 @@ async def lifespan(app: FastAPI):
     # working across restarts.
     app.state.mcp_token = auth_mod.ensure_mcp_token(run_dirs.base)
     database = await Database.open(run_dirs.db)
+    # Before reattach, which re-opens adopted sessions' egress channels: the
+    # listeners run on this loop, the one every launch awaits on.
+    app.state.egress_channels = channel_mod.ChannelRegistry(run_dirs, database)
+    channel_mod.install(app.state.egress_channels)
     # Read the templates dir at startup, not import time, so tests (and reloads)
     # that set KRAFT_TEMPLATES_DIR after import still take effect.
     templates_dir = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
@@ -280,4 +285,6 @@ async def lifespan(app: FastAPI):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await app.state.egress_channels.close_all()
+        channel_mod.install(None)
         await database.close()

@@ -18,9 +18,11 @@ import asyncio
 import json
 import os
 import shutil
+import socket
 import subprocess
+import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -57,6 +59,33 @@ def container_name(session_id: str) -> str:
     obviously this tool's to clean up.
     """
     return f"kraft-{session_id}"
+
+
+def relay_name(session_id: str) -> str:
+    """The `--name` of a session's relay under `network:`, which its worker
+    joins (`--network container:<this>`)."""
+    return f"kraft-relay-{session_id}"
+
+
+#: What a relay is labelled besides `home_label`, so it reads as one.
+RELAY_LABEL = "kraft.role=relay"
+#: Where the relay listens in the network namespace it shares with its
+#: worker, and so the proxy every worker under `network:` is told to use.
+RELAY_PORT = 3128
+#: The worker's proxy environment under `network:`, both spellings (R7), and
+#: `NODE_USE_ENV_PROXY` for Node's own fetch. `NO_PROXY` is empty: the
+#: worker has no route but this one.
+RELAY_PROXY_ENV = {
+    **{
+        name: f"http://127.0.0.1:{RELAY_PORT}"
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    },
+    "NO_PROXY": "",
+    "no_proxy": "",
+    "NODE_USE_ENV_PROXY": "1",
+}
+#: The relay's own limits: socat forks one small process per connection.
+_RELAY_LIMITS = {"memory": "64m", "pids": 256}
 
 
 #: The label every Kraft container carries, valued with the resolved
@@ -109,6 +138,13 @@ class Runtime:
     #: daemon, an old CLI): `limits` is then empty, a requested limit is
     #: refused, and `runtime()` asks again next time instead of keeping it.
     limits_known: bool = True
+    #: Whether a container with no network can `connect()` to a host unix
+    #: socket bind-mounted into it: True on Linux-native docker and podman,
+    #: False where the runtime runs in a VM (Docker Desktop, podman machine:
+    #: the socket is there, `connect` fails ENOTSUP -- spike 4.5a). None
+    #: until a launch under `network:` asks (`socket_channel`); doctor's
+    #: refresh forgets it.
+    socket_channel: bool | None = None
 
     def limit_args(self, resources: dict | None) -> list[str]:
         """`--cpus`, `--memory` and `--pids-limit` for a sandbox's
@@ -322,6 +358,154 @@ def runtime(*, refresh: bool = False) -> Runtime:
     return _RUNTIME
 
 
+def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
+    """Can a `--network none` container reach a host unix socket here? Binds
+    one under the run dir and has the relay image connect to it. True or
+    False only on the relay's own answer (socat exits 1 when `connect`
+    fails); None when the probe did not get that far -- no daemon, the
+    image not pulled (never pulled here: that could outlast the timeout)."""
+    base = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir()) / "sn"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        where = Path(tempfile.mkdtemp(prefix="probe-", dir=base))
+    except OSError:
+        return None
+    try:
+        path = where / "s.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(path))
+            # Never accepted: a connection the backlog holds is an answer.
+            listener.listen(1)
+            argv = [
+                host.cli,
+                "run",
+                "--rm",
+                "--pull=never",
+                "--network=none",
+                "--label",
+                home_label(),
+                *host.user_args(),
+                "--security-opt=no-new-privileges",
+                *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
+                "--cap-drop=ALL",
+                "-v",
+                f"{where}:{where}",
+                "--entrypoint",
+                "socat",
+                relay_image,
+                "-u",
+                "OPEN:/dev/null",
+                f"UNIX-CONNECT:{path}",
+            ]
+            if host.selinux == "relabel":
+                argv = _relabelled(argv)
+            try:
+                done = subprocess.run(argv, capture_output=True, timeout=30)
+            except OSError, subprocess.TimeoutExpired:
+                return None
+    except OSError:
+        return None
+    finally:
+        shutil.rmtree(where, ignore_errors=True)
+    return {0: True, 1: False}.get(done.returncode)
+
+
+def socket_channel(relay_image: str) -> bool | None:
+    """`Runtime.socket_channel`, probed once and kept on the cached runtime
+    (a doctor refresh forgets it); an inconclusive answer is asked again.
+    Kept only if the cached runtime is still the one probed: a refresh that
+    landed meanwhile wins."""
+    global _RUNTIME
+    host = runtime()
+    if host.socket_channel is None:
+        answer = _probe_socket_channel(host, relay_image)
+        if answer is not None and _RUNTIME is host:
+            _RUNTIME = replace(host, socket_channel=answer)
+        return answer
+    return host.socket_channel
+
+
+def _vm_evidence(host: Runtime) -> str:
+    """What the runtime says about running in a VM, in its own words (spike
+    4.5a's detection): docker's `OperatingSystem` (`Docker Desktop`),
+    podman's `ServiceIsRemote` (podman machine). Empty when it says
+    nothing: the probe's answer stands on its own."""
+    if host.podman:
+        remote = (_run(host.cli, "info", "--format", "{{.Host.ServiceIsRemote}}") or "").strip()
+        return f"ServiceIsRemote: {remote}" if remote == "true" else ""
+    system = (_run(host.cli, "info", "--format", "{{.OperatingSystem}}") or "").strip()
+    return f"OperatingSystem: {system}" if system else ""
+
+
+def channel_refusal(
+    host: Runtime, relay_image: str, reachable: bool | None, said: str = ""
+) -> str | None:
+    """Why a sandbox with `network:` cannot run here, given `socket_channel`'s
+    answer; None when it can. Shared by a launch and doctor, which also
+    passes what the runtime `said` about itself (`_vm_evidence`)."""
+    if reachable is False:
+        return (
+            f"{host.describe()}{f' ({said})' if said else ''} runs its containers in a VM "
+            "(Docker Desktop, podman machine), where a container cannot connect to a host "
+            "unix socket, so a sandbox with `network:` has no route out. The VM transport "
+            "is not available yet: run Kraft on Linux-native docker or podman, or remove "
+            "the sandbox's `network`"
+        )
+    if reachable is None:
+        return (
+            f"could not tell whether {host.describe()} lets a container reach a host "
+            f"unix socket, which a sandbox with `network:` needs: the probe did not "
+            f"run. Pull the relay image ({host.cli} pull {relay_image}) and check "
+            "`kraft admin doctor`"
+        )
+    return None
+
+
+def relay_argv(session_id: str, sock_path: Path, relay_image: str) -> list[str]:
+    """`docker run -d` for a session's relay: no network of its own,
+    forwarding 127.0.0.1:3128 in its namespace -- which the worker joins --
+    to the session's socket, whose directory is mounted (a file mount would
+    miss a socket the daemon re-creates after a restart). As locked down as
+    a worker, read-only, small, and named (no `--rm`: `close_session`
+    removes it; `sweep_orphans` whatever a crash left)."""
+    host = runtime()
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
+    limits = {n: v for n, v in _RELAY_LIMITS.items() if n in host.limits}
+    where = sock_path.parent
+    argv = [
+        host.cli,
+        "run",
+        "-d",
+        "--name",
+        relay_name(session_id),
+        "--network=none",
+        "--label",
+        home_label(),
+        "--label",
+        RELAY_LABEL,
+        *host.user_args(),
+        "--security-opt=no-new-privileges",
+        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
+        "--cap-drop=ALL",
+        "--read-only",
+        "--log-driver=none",
+        *host.limit_args(limits),
+        "-v",
+        f"{where}:{where}",
+        "--entrypoint",
+        "socat",
+    ]
+    if host.selinux == "relabel":
+        argv = _relabelled(argv)
+    return [
+        *argv,
+        relay_image,
+        f"TCP-LISTEN:{RELAY_PORT},bind=127.0.0.1,fork,reuseaddr",
+        f"UNIX-CONNECT:{sock_path}",
+    ]
+
+
 def docker_argv(
     cmd: list[str],
     cwd: str | Path,
@@ -337,6 +521,7 @@ def docker_argv(
     passthrough: Iterable[str] = (),
     ro_paths: Iterable[str | Path] = (),
     ca_bundle: str | Path | None = None,
+    relay: str | None = None,
 ) -> list[str]:
     """Wrap `cmd` to run inside `sandbox['image']` instead of directly on the host.
 
@@ -425,6 +610,12 @@ def docker_argv(
     A `name`d container runs without `--rm`: removed on exit, it could not be
     asked whether its memory limit killed it (`oom_killed`), so `teardown`
     removes it by name instead, and `sweep_orphans` whatever a crash left.
+
+    `sandbox['network']` set: the container joins `relay`'s network
+    namespace (`relay_argv`), where loopback is its only interface, and
+    none of the daemon's proxy variables is forwarded -- its proxy is the
+    relay, set by the caller from `open_session`. Without a `relay` it is
+    refused, never run on the default bridge.
     """
     try:
         host = runtime()
@@ -432,6 +623,9 @@ def docker_argv(
         raise SandboxRefused(str(exc)) from exc
     if problem := host.refusal():
         raise SandboxRefused(problem)
+    network = bool(sandbox.get("network"))
+    if network and relay is None:
+        raise SandboxRefused("a sandbox under `network:` runs only beside its session's relay")
     cwd = str(Path(cwd).resolve())
     argv = [
         host.cli,
@@ -450,6 +644,7 @@ def docker_argv(
         *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
         "--cap-drop=ALL",
         *host.limit_args(sandbox.get("resources")),
+        *([f"--network=container:{relay}"] if network else []),
         "-v",
         f"{cwd}:{cwd}",
         "-w",
@@ -470,7 +665,8 @@ def docker_argv(
         argv.append(f"--cidfile={cidfile}")
     ca_mount, ca_env = _forward.ca_args(ca_bundle)
     argv += ca_mount
-    for env_name in dict.fromkeys((*FORWARDED_ENV, *_forward.forwarded_proxies(), *passthrough)):
+    proxies = () if network else _forward.forwarded_proxies()
+    for env_name in dict.fromkeys((*FORWARDED_ENV, *proxies, *passthrough)):
         argv += ["-e", env_name]
     pins: dict[str, str] = {}
     _pin(pins, _HARDENED_GIT_CONFIG)
@@ -840,6 +1036,7 @@ class DockerBackend:
         ro_paths: Iterable[str | Path] = (),
         ca_bundle: str | Path | None = None,
     ) -> list[str]:
+        network = sandbox.get("network") and session_id is not None
         return docker_argv(
             cmd,
             cwd,
@@ -854,6 +1051,7 @@ class DockerBackend:
             passthrough=passthrough,
             ro_paths=ro_paths,
             ca_bundle=ca_bundle,
+            relay=relay_name(session_id) if network else None,
         )
 
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
@@ -880,8 +1078,44 @@ class DockerBackend:
     async def close(self, session_id: str) -> None:
         await teardown(session_id)
 
+    async def open_session(self, session_id: str, sandbox: dict, sock_path: Path) -> dict:
+        """Start the session's relay (`relay_argv`) and return the worker's
+        proxy environment; `{}` for a sandbox with no `network`. Refuses
+        (`SandboxNotReady`, a `config_error`) on a runtime whose containers
+        cannot reach a host unix socket, or one that could not be asked."""
+        if not sandbox.get("network"):
+            return {}
+        try:
+            image = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            reachable = await asyncio.to_thread(socket_channel, image)
+            host = await asyncio.to_thread(runtime)
+        except ConfigError as exc:
+            raise SandboxNotReady(str(exc)) from exc
+        if problem := channel_refusal(host, image, reachable):
+            raise SandboxNotReady(problem)
+        try:
+            argv = relay_argv(session_id, sock_path, image)
+        except SandboxRefused as exc:
+            raise SandboxNotReady(str(exc)) from exc
+        started = await docker_call(*argv[1:])
+        if started is None or started[0] != 0:
+            await docker_call("rm", "-f", relay_name(session_id))
+            raise SandboxNotReady(
+                f"could not start the sandbox's egress relay from {image!r}: "
+                f"`{host.cli} run` {'did not answer' if started is None else 'failed'}"
+            )
+        return dict(RELAY_PROXY_ENV)
+
+    async def close_session(self, session_id: str) -> None:
+        """`docker rm -f` the session's relay, bounded like `teardown`; a
+        no-op for a session that had none. The socket is the channel's to
+        close (`ChannelRegistry.close`), not this backend's."""
+        await docker_call("rm", "-f", relay_name(session_id))
+
     async def sweep(self, keep_sessions: Iterable[str]) -> list[str]:
-        return await sweep_orphans({container_name(sid) for sid in keep_sessions})
+        return await sweep_orphans(
+            {name for sid in keep_sessions for name in (container_name(sid), relay_name(sid))}
+        )
 
     def release(self, run_dirs, worktree: Path, work_item_id: str) -> None:
         # The ref store is found through the worktree's `.git`, so this runs
@@ -911,9 +1145,28 @@ class DockerBackend:
         pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", image)
         if pulled is None or pulled[0] != 0:
             return False, f"image {image!r} is not pulled -- run: {host.cli} pull {image}"
+        egress = ""
+        if sandbox.get("network"):
+            # A launch never pulls it (`--pull=never` in the probe), and the
+            # refreshed runtime above forgot the probe's last answer.
+            try:
+                relay = (await asyncio.to_thread(_forward._sandbox_host, os.environ)).relay_image
+            except ConfigError as exc:
+                return False, str(exc)
+            pulled = await docker_call("image", "inspect", "--format", "{{.Id}}", relay)
+            if pulled is None or pulled[0] != 0:
+                return False, (
+                    f"the egress relay image {relay!r} is not pulled -- "
+                    f"run: {host.cli} pull {relay}"
+                )
+            reachable = await asyncio.to_thread(socket_channel, relay)
+            said = await asyncio.to_thread(_vm_evidence, host) if reachable is False else ""
+            if problem := channel_refusal(host, relay, reachable, said):
+                return False, problem
+            egress = f", egress relay {relay}"
         trusts = f", extra CA from {extra[0]}" if extra is not None else ""
         return (
             True,
             f"{host.describe()} {daemon[1].strip()}, image {image}{trusts}, "
-            f"{host.describe_limits()}",
+            f"{host.describe_limits()}{egress}",
         )

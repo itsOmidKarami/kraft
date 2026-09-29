@@ -31,6 +31,12 @@
       "default": null,
       "title": "Cli"
     },
+    "relay_image": {
+      "default": "docker.io/alpine/socat@sha256:5ffbd6ae916cbad86a58fabe0d6d5a6fd5c2b47ddf031e82996baac9300e732f",
+      "minLength": 1,
+      "title": "Relay Image",
+      "type": "string"
+    },
     "selinux": {
       "default": "auto",
       "enum": [

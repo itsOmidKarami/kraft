@@ -920,6 +920,14 @@ class SandboxHost(_Model):
     #: daemon's `SSL_CERT_FILE`, if it has one. Read at each launch; a path
     #: that cannot be read stops the launch (`worker.backends.docker_forward`).
     ca_bundle: Path | None = None
+    #: The image of the relay a session under `network:` gets: `--network
+    #: none`, forwarding its 127.0.0.1:3128 to the session's proxy socket.
+    #: Default: upstream socat 1.8.1.3, pinned by its multi-arch index digest.
+    relay_image: str = Field(
+        default="docker.io/alpine/socat@sha256:"
+        "5ffbd6ae916cbad86a58fabe0d6d5a6fd5c2b47ddf031e82996baac9300e732f",
+        min_length=1,
+    )
 
     @field_validator("ca_bundle")
     @classmethod

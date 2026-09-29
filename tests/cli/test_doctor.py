@@ -771,14 +771,30 @@ def test_doctor_warns_that_an_unusable_ssl_cert_file_is_ignored_by_sandboxes(
     assert usable or ("holds no PEM certificate" in rows[0]["detail"])
 
 
-def _sandboxed_doctor_rows(app, tmp_path, prefix: str) -> list[dict]:
+@pytest.mark.parametrize("network", [None, {"runtime": {"allow": ["a.io"]}}], ids=["open", "set"])
+def test_doctor_warns_about_open_egress_on_a_sandboxed_repo(app, tmp_path, monkeypatch, network):
+    """Spec §1: open stays the default, and doctor says so. Under `network:`
+    Kraft's own proxy reaches a loopback one, so that warning goes too."""
+
+    async def healthy(self, sandbox):
+        return True, "ready"
+
+    monkeypatch.setattr("kraft.worker.backends.docker.DockerBackend.health", healthy)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:3128")
+    rows = _sandboxed_doctor_rows(app, tmp_path, ("egress ", "proxy "), network=network)
+    warned = [(r["name"].split()[0], r["ok"], r["warn"]) for r in rows]
+    assert warned == ([] if network else [("egress", True, True), ("proxy", True, True)])
+    assert network or "open egress" in rows[0]["detail"]
+
+
+def _sandboxed_doctor_rows(app, tmp_path, prefix, **sandbox) -> list[dict]:
     """Doctor's rows starting with `prefix`, for one repository sandboxed
-    in `img`."""
+    in `img` (plus `sandbox`'s fields)."""
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
     repos_yaml = tmp_path / "templates" / "repos.yaml"
     data = yaml.safe_load(repos_yaml.read_text())
-    data["repos"][0]["sandbox"] = {"kind": "docker", "image": "img"}
-    repos_yaml.write_text(yaml.safe_dump(data))
+    data["repos"][0]["sandbox"] = {"kind": "docker", "image": "img", **sandbox}
+    repos_yaml.write_text(yaml.safe_dump(data))  # `network: None` is no network
 
     return [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith(prefix)]

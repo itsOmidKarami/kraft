@@ -547,12 +547,30 @@ async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
     return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
-def _proxy_check(repo: config.RepoEntry) -> dict | None:
-    """A warning when this machine's proxy is on its loopback: a container
-    has a loopback of its own, so the proxy is not forwarded and a sandboxed
-    task goes direct, which fails wherever only the proxy gets out. Read from
-    doctor's own environment, which is the daemon's when both were started
-    from the same shell."""
+def _egress_check(repo: config.RepoEntry, policy) -> dict | None:
+    """A warning when a sandbox sets no `network:`: its tasks can reach
+    anywhere, the cloud metadata address included (spec §1: open stays the
+    default for now, and doctor says so)."""
+    if policy.network is not None:
+        return None
+    return _check(
+        f"egress {_label(repo)}",
+        True,
+        "sandboxed tasks here have open egress: set `network:` in the sandbox policy "
+        "to allow only the hosts they need",
+        warn=True,
+    )
+
+
+def _proxy_check(repo: config.RepoEntry, policy) -> dict | None:
+    """A warning when this machine's proxy is on its loopback and the sandbox
+    sets no `network:`: a container has a loopback of its own, so the proxy
+    is not forwarded and a sandboxed task goes direct, which fails wherever
+    only the proxy gets out. Under `network:` Kraft's own proxy chains to it
+    from the host. Read from doctor's own environment, which is the daemon's
+    when both were started from the same shell."""
+    if policy.network is not None:
+        return None
     loopback = docker_forward.loopback_proxies()
     if not loopback:
         return None
@@ -561,8 +579,8 @@ def _proxy_check(repo: config.RepoEntry) -> dict | None:
         f"proxy {_label(repo)}",
         True,
         f"{named} is on this machine's loopback, which a container cannot reach, so "
-        "sandboxed tasks run without it; `network:` in the sandbox policy (coming) "
-        "routes them through Kraft's own proxy instead",
+        "sandboxed tasks run without it; `network:` in the sandbox policy routes them "
+        "through Kraft's own proxy instead",
         warn=True,
     )
 
@@ -690,7 +708,11 @@ async def _repo_checks() -> list[dict]:
             )
         elif (policy := repo.effective_sandbox) is not None:
             checks.append(await _sandbox_check(repo, policy))
-            for extra in (_proxy_check(repo), _ignored_ca_check(repo)):
+            for extra in (
+                _egress_check(repo, policy),
+                _proxy_check(repo, policy),
+                _ignored_ca_check(repo),
+            ):
                 if extra is not None:
                     checks.append(extra)
         if auto:

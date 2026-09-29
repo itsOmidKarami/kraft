@@ -73,3 +73,7 @@ capabilities:
 # the model id, `-m provider/model#high`), restrict_tools and approval_channel
 # (tool permissions are config rules, not `run` flags; see permission_rules
 # above), autocompact (config `compaction`, not a flag).
+
+# No `network.requires`: opencode talks to whichever model provider it is
+# configured for, so a repository running it under `network:` must allow that
+# provider's API host in its own runtime list. Proxy awareness is UNVERIFIED.

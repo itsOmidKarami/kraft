@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -701,6 +702,14 @@ def session_unknown(conn: sqlite3.Connection, session_id, *, reason: str | None 
     ).fetchone()
     payload = {"session_id": session_id, **({"reason": reason} if reason else {})}
     events.append(conn, row["work_item_id"], "session_unknown", payload)
+
+
+def set_session_egress(conn: sqlite3.Connection, session_id: str, egress: dict) -> None:
+    """The egress lists a session under `network:` launched with, for
+    reattach to re-open its channel with (`worker_sessions.egress`)."""
+    conn.execute(
+        "UPDATE worker_sessions SET egress = ? WHERE id = ?", (json.dumps(egress), session_id)
+    )
 
 
 def session_reattached(conn: sqlite3.Connection, session_id) -> None:

@@ -1,0 +1,529 @@
+"""The egress proxy a sandboxed session under `network:` reaches the world
+through (sandbox part 2, P4; spec §1 and §4).
+
+Policy and tunnelling only: one call to `EgressProxy.handle` is one accepted
+connection from one session's channel, and everything it needs about that
+session -- its phase's lists, where a refusal is recorded, which hosts it was
+already refused -- arrives as an `EgressSession`. The listener, and so the
+session's lifetime, is the channel's (`kraft.worker.channel`).
+
+Per connection: parse `CONNECT host:port` or an absolute-form `http://`
+request; refuse host `kraft` (the worker API, not yet available); match the
+host against the lists (deny wins); resolve it once on the host and refuse
+an always-denied address or a non-public one the allow list does not name
+exactly; then dial the address that was checked -- never the name again, so
+a DNS answer that changes between check and dial (rebinding) cannot slip a
+different address through. Outbound connections chain through the daemon's
+own `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` covers the host; then the
+name is still checked, but the upstream resolves it again and dials what it
+gets, so the dialled-address guarantee holds only without one.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import ipaddress
+import os
+import re
+import socket
+import urllib.request
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from urllib.parse import unquote, urlsplit
+
+#: What a connection a session's policy refused is recorded as.
+SANDBOX_EGRESS_REFUSED = "sandbox_egress_refused"
+
+#: The most a request line plus its headers may be (R9).
+MAX_HEAD = 64 * 1024
+#: Seconds a connection may sit before its request head is complete.
+HEAD_TIMEOUT = 30.0
+#: Seconds a dial to an origin or the upstream proxy may take.
+CONNECT_TIMEOUT = 30.0
+#: Distinct hosts a session's refusals are recorded for; past this, one last
+#: event says the rest are not (they are still refused).
+MAX_REFUSAL_EVENTS = 100
+
+#: Cloud metadata names, refused whatever they resolve to. Their usual
+#: address (169.254.169.254) is link-local, and refused by address as well.
+_METADATA_NAMES = frozenset(
+    {
+        "metadata",
+        "metadata.google.internal",
+        "metadata.goog",
+        "metadata.azure.com",
+        "instance-data",
+        "instance-data.ec2.internal",
+    }
+)
+#: Metadata addresses that are neither link-local nor loopback: AWS's IPv6
+#: endpoint (ULA, so private anyway, but never reachable by an exact entry
+#: either) and Alibaba's (shared address space, not "private").
+_METADATA_ADDRESSES = frozenset(
+    {ipaddress.ip_address("fd00:ec2::254"), ipaddress.ip_address("100.100.100.200")}
+)
+
+#: Methods forwarded in absolute form. Anything else, bar CONNECT, is a 400.
+_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
+#: Request headers the proxy consumes rather than passes on.
+_HOP_HEADERS = frozenset({"proxy-authorization", "proxy-connection", "connection", "keep-alive"})
+_CONNECT_TARGET = re.compile(r"\[?([^\[\]]+?)\]?:(\d{1,5})")
+#: RFC 9110: a token name, a colon, and a value of visible characters,
+#: spaces, tabs and obs-text. No CR, LF, NUL or other control character, so
+#: nothing forwarded can split into a second request.
+_HEADER_LINE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7e\x80-\xff]*")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+@dataclass(frozen=True)
+class Verdict:
+    allowed: bool
+    #: Why not, for the 403 body and the event; empty when allowed.
+    reason: str = ""
+    #: The addresses checked and allowed, in the resolver's order: what to dial.
+    addresses: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PhaseLists:
+    """One phase's lists as a session runs under them, its harness's hosts
+    already in `allow` for `runtime`."""
+
+    phase: str
+    allow: tuple[str, ...]
+    deny: tuple[str, ...]
+
+    @classmethod
+    def of(cls, network: dict, phase: str, requires: tuple[str, ...] = ()) -> PhaseLists:
+        """`phase`'s lists out of a dumped `sandbox.network`. The `runtime`
+        phase also allows `requires`, the harness's own hosts (spec §1); its
+        `deny` still wins over them."""
+        lists = network.get(phase) or {}
+        allow = tuple(lists.get("allow", ()))
+        if phase == "runtime":
+            allow = tuple(dict.fromkeys((*allow, *requires)))
+        return cls(phase, allow, tuple(lists.get("deny", ())))
+
+    def to_json(self) -> dict:
+        """As `worker_sessions.egress` holds it."""
+        return {"phase": self.phase, "allow": list(self.allow), "deny": list(self.deny)}
+
+    @classmethod
+    def from_json(cls, data: dict) -> PhaseLists:
+        return cls(data["phase"], tuple(data["allow"]), tuple(data["deny"]))
+
+
+@dataclass
+class EgressSession:
+    """What `handle` knows of the session a connection came from."""
+
+    session_id: str
+    lists: PhaseLists
+    #: Records one refusal; gets the event payload. Called once per host.
+    record_refusal: Callable[[dict], Awaitable[None]]
+    #: Hosts already recorded, so a client's retry loop cannot flood events.
+    #: At most `MAX_REFUSAL_EVENTS` of them.
+    refused: set[str] = field(default_factory=set)
+    #: Set once the cap is reached and the one "suppressed" event is recorded.
+    suppressed: bool = False
+
+
+def _split(pattern: str) -> tuple[str, int | None]:
+    host, sep, port = pattern.rpartition(":")
+    return (host, int(port)) if sep and port.isdigit() else (pattern, None)
+
+
+def _norm(host: str) -> str:
+    return host.lower().rstrip(".")
+
+
+def _matches(pattern: str, host: str, port: int) -> bool:
+    name, want = _split(pattern)
+    if want is not None and want != port:
+        return False
+    name = _norm(name)
+    if name in ("*", "**"):
+        return True
+    if name.startswith("*."):
+        label, _, rest = host.partition(".")
+        return bool(label) and rest == name[2:]
+    return host == name
+
+
+def _exact(pattern: str, host: str, port: int) -> bool:
+    name, want = _split(pattern)
+    return "*" not in name and _norm(name) == host and want in (None, port)
+
+
+def match(host: str, port: int, allow: tuple[str, ...], deny: tuple[str, ...]) -> Verdict:
+    """`host:port` against network-policy@1 lists: deny wins, and nothing is
+    allowed that no allow entry names. `*.example.com` covers exactly one
+    label in front of `example.com`; `*` and `**` cover everything."""
+    host = _norm(host)
+    if any(_matches(p, host, port) for p in deny):
+        return Verdict(False, f"{host} is on the deny list")
+    if any(_matches(p, host, port) for p in allow):
+        return Verdict(True)
+    return Verdict(False, f"{host}:{port} is not on the allow list")
+
+
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_TRANSLATED = ipaddress.ip_network("::ffff:0:0:0/96")
+
+
+def _address(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+
+
+def _with_embedded(addr) -> list:
+    """`addr` and any IPv4 address an IPv6 one carries (mapped, compatible
+    `::a.b.c.d`, translated `::ffff:0:a.b.c.d`, 6to4, NAT64), every one of
+    which is checked: a route to the embedded address is a route to it."""
+    if addr.version == 4:
+        return [addr]
+    embedded = [addr.ipv4_mapped, addr.sixtofour]
+    if int(addr) >> 32 == 0 or addr in _NAT64 or addr in _TRANSLATED:
+        embedded.append(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
+    return [addr, *(e for e in embedded if e is not None)]
+
+
+class EgressProxy:
+    """One per daemon. `connect`, `getaddrinfo` and `environ` are seams for
+    tests; the daemon takes the defaults."""
+
+    def __init__(
+        self,
+        *,
+        connect=asyncio.open_connection,
+        getaddrinfo=None,
+        environ: Mapping[str, str] = os.environ,
+    ):
+        self._connect = connect
+        self._getaddrinfo = getaddrinfo
+        self._environ = environ
+
+    async def _resolve(self, host: str, port: int) -> list[str]:
+        if _address(host) is not None:
+            return [host]
+        lookup = self._getaddrinfo or asyncio.get_running_loop().getaddrinfo
+        infos = await lookup(host, port, type=socket.SOCK_STREAM)
+        return list(dict.fromkeys(info[4][0] for info in infos))
+
+    async def _own_addresses(self) -> set:
+        # ponytail: the host's own addresses are loopback (refused anyway)
+        # plus what its hostname resolves to. No interface enumeration, so a
+        # second NIC's address is caught only by the non-public-address rule.
+        try:
+            names = await self._resolve(socket.gethostname(), 0)
+        except OSError:
+            return set()
+        return {e for n in names if (a := _address(n)) is not None for e in _with_embedded(a)}
+
+    async def resolve_and_check(self, host: str, port: int, *, allow: tuple[str, ...]) -> Verdict:
+        """Resolve `host` once, on the host, and check every address it
+        answers: loopback, link-local, unspecified, a metadata address or the
+        host's own refuse outright (any one of them refuses the lot: a
+        rebinding answer mixes a public address with a private one); any
+        other non-global address (RFC 1918, ULA, shared, reserved) needs an
+        allow entry naming `host` exactly, never a wildcard. An IPv4 address
+        embedded in an IPv6 one is checked too. Allowed: the addresses to
+        dial."""
+        host = _norm(host)
+        if host in _METADATA_NAMES:
+            return Verdict(False, f"{host} is a cloud metadata name, which is always denied")
+        try:
+            addresses = await self._resolve(host, port)
+        except OSError as exc:
+            return Verdict(False, f"{host} does not resolve: {exc}")
+        own = await self._own_addresses()
+        exact = any(_exact(p, host, port) for p in allow)
+        for raw in addresses:
+            found = _address(raw)
+            if found is None:
+                return Verdict(False, f"{host} resolves to {raw!r}, not an address")
+            for addr in _with_embedded(found):
+                if (
+                    addr.is_loopback
+                    or addr.is_link_local
+                    or addr.is_unspecified
+                    or addr.is_multicast
+                    or addr in _METADATA_ADDRESSES
+                    or addr in own
+                ):
+                    return Verdict(False, f"{host} resolves to {addr}, which is always denied")
+                if not addr.is_global and not exact:
+                    return Verdict(
+                        False,
+                        f"{host} resolves to non-public address {addr}; only an allow entry "
+                        f"naming {host} exactly reaches it",
+                    )
+        return Verdict(True, addresses=tuple(addresses))
+
+    def _upstream(self, scheme: str, host: str) -> tuple[str, int, str | None] | None:
+        """The daemon's own proxy for `scheme`, unless `NO_PROXY` covers
+        `host`: (host, port, Proxy-Authorization value or None)."""
+        env = self._environ
+        url = env.get(f"{scheme}_proxy") or env.get(f"{scheme.upper()}_PROXY")
+        if not url:
+            return None
+        no_proxy = env.get("no_proxy") or env.get("NO_PROXY") or ""
+        if no_proxy and urllib.request.proxy_bypass_environment(host, {"no": no_proxy}):
+            return None
+        parts = urlsplit(url if "://" in url else f"http://{url}")
+        auth = None
+        if parts.username is not None:
+            creds = f"{unquote(parts.username)}:{unquote(parts.password or '')}"
+            auth = "Basic " + base64.b64encode(creds.encode()).decode()
+        return parts.hostname or "", parts.port or 80, auth
+
+    async def _dial(self, addresses: tuple[str, ...], port: int):
+        error: OSError | None = None
+        for address in addresses:
+            try:
+                return await asyncio.wait_for(self._connect(address, port), CONNECT_TIMEOUT)
+            except (OSError, TimeoutError) as exc:
+                error = OSError(str(exc) or type(exc).__name__)
+        raise error or OSError("nothing to dial")
+
+    async def handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, session: EgressSession
+    ) -> None:
+        """One accepted connection, start to finish; always closes `writer`."""
+        try:
+            await self._handle(reader, writer, session)
+        except OSError, asyncio.IncompleteReadError, TimeoutError:
+            pass
+        finally:
+            writer.close()
+
+    async def _handle(self, reader, writer, session: EgressSession) -> None:
+        try:
+            head, rest = await asyncio.wait_for(_read_head(reader), HEAD_TIMEOUT)
+        except TimeoutError:
+            return
+        if head is None:
+            return
+        request = _parse(head)
+        if isinstance(request, str):
+            return await _answer(writer, 400, "Bad Request", request)
+        method, host, port, target, headers = request
+
+        if _norm(host) == "kraft":
+            return await self._refuse(
+                writer, session, host, port, "the worker API (host 'kraft') is not available yet"
+            )
+        verdict = match(host, port, session.lists.allow, session.lists.deny)
+        if verdict.allowed:
+            verdict = await self.resolve_and_check(host, port, allow=session.lists.allow)
+        if not verdict.allowed:
+            return await self._refuse(writer, session, host, port, verdict.reason)
+
+        tunnel = method == "CONNECT"
+        upstream = self._upstream("https" if tunnel else "http", _norm(host))
+        length = 0
+        if not tunnel and upstream is not None:
+            length = _content_length(headers)
+            if isinstance(length, str):
+                return await _answer(writer, 400, "Bad Request", length)
+        try:
+            if upstream is None:
+                out_reader, out_writer = await self._dial(verdict.addresses, port)
+            else:
+                proxy_host, proxy_port, _ = upstream
+                out_reader, out_writer = await asyncio.wait_for(
+                    self._connect(proxy_host, proxy_port), CONNECT_TIMEOUT
+                )
+        except (OSError, TimeoutError) as exc:
+            return await _answer(writer, 502, "Bad Gateway", f"{host}:{port}: {exc}")
+
+        try:
+            auth = upstream[2] if upstream is not None else None
+            auth_line = f"Proxy-Authorization: {auth}\r\n" if auth else ""
+            if tunnel and upstream is not None:
+                authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+                out_writer.write(
+                    f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{auth_line}\r\n".encode()
+                )
+                await out_writer.drain()
+                reply, early = await asyncio.wait_for(_read_head(out_reader), CONNECT_TIMEOUT)
+                status = (reply or b"").split(b"\r\n", 1)[0].split()
+                if len(status) < 2 or status[1] != b"200":
+                    return await _answer(
+                        writer, 502, "Bad Gateway", "the upstream proxy refused the tunnel"
+                    )
+            if tunnel:
+                writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                if upstream is not None:
+                    writer.write(early)
+            else:
+                # Rebuilt from what was checked, never the client's own target
+                # or Host: an upstream parsing either differently would reach
+                # a host the policy never saw.
+                authority = f"[{host}]" if ":" in host else host
+                if port != 80:
+                    authority += f":{port}"
+                line = _origin_form(target)
+                if upstream is not None:
+                    line = f"http://{authority}{line}"
+                kept = "".join(
+                    f"{h}\r\n" for h in headers if _name(h) not in _HOP_HEADERS | {"host"}
+                )
+                out_writer.write(
+                    f"{method} {line} HTTP/1.1\r\nHost: {authority}\r\n{kept}{auth_line}"
+                    "Connection: close\r\n\r\n".encode()
+                )
+            if not tunnel and upstream is not None:
+                # One request's bytes and no more: whatever else the client
+                # sends (a pipelined request) must never reach the upstream.
+                out_writer.write(rest[:length])
+                await asyncio.gather(
+                    _copy(reader, out_writer, length - len(rest[:length])),
+                    _pump(out_reader, writer),
+                    return_exceptions=True,
+                )
+                return
+            if rest:
+                out_writer.write(rest)
+            await asyncio.gather(
+                _pump(reader, out_writer), _pump(out_reader, writer), return_exceptions=True
+            )
+        finally:
+            out_writer.close()
+
+    async def _refuse(self, writer, session: EgressSession, host: str, port: int, reason: str):
+        host = _norm(host)
+        if host in session.refused or session.suppressed:
+            pass
+        elif len(session.refused) >= MAX_REFUSAL_EVENTS:
+            session.suppressed = True
+            await session.record_refusal(
+                {
+                    "session_id": session.session_id,
+                    "phase": session.lists.phase,
+                    "suppressed": True,
+                    "reason": f"over {MAX_REFUSAL_EVENTS} hosts refused; "
+                    "later refusals are not recorded",
+                }
+            )
+        else:
+            session.refused.add(host)
+            await session.record_refusal(
+                {
+                    "session_id": session.session_id,
+                    "host": host,
+                    "port": port,
+                    "phase": session.lists.phase,
+                    "reason": reason,
+                }
+            )
+        await _answer(writer, 403, "Forbidden", reason)
+
+
+async def _read_head(reader: asyncio.StreamReader) -> tuple[bytes | None, bytes]:
+    """The request (or response) head, and whatever arrived after it. None
+    for a peer that closed first; a head past `MAX_HEAD` comes back whole so
+    `_parse` refuses it."""
+    head = b""
+    while b"\r\n\r\n" not in head:
+        if len(head) > MAX_HEAD:
+            return head, b""
+        chunk = await reader.read(8192)
+        if not chunk:
+            return None, b""
+        head += chunk
+    head, _, rest = head.partition(b"\r\n\r\n")
+    return head, rest
+
+
+def _parse(head: bytes) -> tuple[str, str, int, str, list[str]] | str:
+    """(method, host, port, target, header lines), or why it is a 400."""
+    if len(head) > MAX_HEAD:
+        return f"the request head is over {MAX_HEAD} bytes"
+    line, *headers = head.decode("latin-1").split("\r\n")
+    if _CONTROL.search(line):
+        return "a control character in the request line"
+    if not all(_HEADER_LINE.fullmatch(h) for h in headers):
+        return "a header line that is not `name: value`, or holds a control character"
+    parts = line.split(" ")
+    if len(parts) != 3 or not parts[2].startswith("HTTP/1."):
+        return "not an HTTP/1 request line"
+    method, target, _ = parts
+    if method == "CONNECT":
+        found = _CONNECT_TARGET.fullmatch(target)
+        if not found:
+            return "CONNECT needs host:port"
+        host, port = found.group(1), int(found.group(2))
+    elif method in _METHODS:
+        url = urlsplit(target)
+        if url.scheme != "http" or not url.hostname:
+            return "a proxied request needs an absolute http:// URL (https goes by CONNECT)"
+        try:
+            host, port = url.hostname, url.port or 80
+        except ValueError:
+            return "the URL's port is not a port"
+    else:
+        return f"method {method!r} is not proxied"
+    if not 0 < port < 65536:
+        return f"port {port} is out of range"
+    return method, host, port, target, [h for h in headers if h]
+
+
+def _origin_form(target: str) -> str:
+    url = urlsplit(target)
+    return (url.path or "/") + (f"?{url.query}" if url.query else "")
+
+
+def _content_length(headers: list[str]) -> int | str:
+    """The request body's length for a request forwarded upstream, or why it
+    is a 400. A chunked body is refused: its end is where the upstream says,
+    so one request cannot be forwarded and nothing after it."""
+    if any(_name(h) == "transfer-encoding" for h in headers):
+        return "Transfer-Encoding is not forwarded to an upstream proxy; send Content-Length"
+    values = {h.split(":", 1)[1].strip() for h in headers if _name(h) == "content-length"}
+    if not values:
+        return 0
+    value = values.pop()
+    if values or not (value.isascii() and value.isdigit()):
+        return "Content-Length must be one number"
+    return int(value)
+
+
+def _name(header: str) -> str:
+    return header.split(":", 1)[0].strip().lower()
+
+
+async def _answer(writer: asyncio.StreamWriter, code: int, phrase: str, reason: str) -> None:
+    body = f"kraft: {reason}\n".encode()
+    writer.write(
+        f"HTTP/1.1 {code} {phrase}\r\nContent-Type: text/plain\r\n"
+        f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+        + body
+    )
+    await writer.drain()
+
+
+async def _copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, remaining: int) -> None:
+    """Copy exactly `remaining` bytes, then stop reading `src`."""
+    while remaining > 0:
+        data = await src.read(min(remaining, 65536))
+        if not data:
+            return
+        dst.write(data)
+        await dst.drain()
+        remaining -= len(data)
+
+
+async def _pump(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+    """Copy until `src` ends, then half-close `dst` so the far side sees EOF
+    while the other direction finishes."""
+    try:
+        while data := await src.read(65536):
+            dst.write(data)
+            await dst.drain()
+    finally:
+        if dst.can_write_eof():
+            dst.write_eof()

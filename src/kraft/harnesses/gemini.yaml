@@ -20,3 +20,9 @@ capabilities:
 
 # Absent: effort, deny_tools, allowed_tools, approval_channel, resume,
 # autocompact, rate_limit_signal.
+
+# The host this CLI reaches itself, added to a `network:` launch's runtime
+# allow list (spec §1). UNVERIFIED: taken from the Gemini API docs, not
+# probed; an e2e("gemini") under `network:` confirms it.
+network:
+  requires: [generativelanguage.googleapis.com]

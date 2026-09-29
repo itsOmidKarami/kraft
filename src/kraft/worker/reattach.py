@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from kraft.adapters.subprocess import (
     _progress_usage,
     _resolve_exit_file,
     _resolve_result_file,
+    close_egress,
     fail_abandoned_jobs,
     read_result_fields,
     record_oom_kill,
@@ -29,6 +31,9 @@ from kraft.executor.dispatch import ESCALATION_HOOK
 from kraft.store._common import _now, _span_ms
 from kraft.templates.models import AgentTask
 from kraft.worker import backends as _backends
+from kraft.worker import channel as _channel
+from kraft.worker import sandbox as _sandbox
+from kraft.worker.egress import PhaseLists
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +440,9 @@ async def _guarded_adopt(
     on_approve: OnApprove | None = None,
     #: The row's `worker_sessions.sandbox`: which backend to close it in.
     sandbox: str | None = None,
+    #: Whether the row ran under `network:` (`worker_sessions.egress`), so
+    #: its relay and channel close with it.
+    egress: bool = False,
 ) -> None:
     """`_adopt`, but a crash marks the work item needs_human instead of
     vanishing. `reattach` hands its tasks to the caller directly rather than
@@ -473,7 +481,7 @@ async def _guarded_adopt(
         # that was never sandboxed, which is why this does not first work out
         # whether this one was: deciding that per call path is how the third
         # path got missed twice.
-        await asyncio.shield(_close_sandbox(sandbox, session_id))
+        await asyncio.shield(_close_sandbox(sandbox, session_id, egress=egress))
         if run_dirs is not None:
             await asyncio.shield(_sync_item_refs(db, run_dirs, work_item_id))
 
@@ -486,10 +494,30 @@ async def _oom_killed(kind: str | None, session_id: str) -> str | None:
     return None
 
 
-async def _close_sandbox(kind: str | None, session_id: str) -> None:
-    """Close the sandbox a session row ran in (`worker_sessions.sandbox`)."""
+async def _close_sandbox(kind: str | None, session_id: str, *, egress: bool = False) -> None:
+    """Close the sandbox a session row ran in (`worker_sessions.sandbox`),
+    and under `network:` its route out after it: relay, then channel."""
     for backend in _backends.for_session(kind):
-        await backend.close(session_id)
+        try:
+            await backend.close(session_id)
+        finally:
+            if egress:
+                await close_egress(backend, session_id)
+
+
+async def _reopen_egress(session_id: str, work_item_id: str, egress: str) -> None:
+    """Listen again on an adopted session's socket, with the lists it
+    launched under -- never today's config. Its relay outlived the restart
+    and reconnects per connection. Without a channel the worker keeps no
+    route out: it fails closed, and this says why."""
+    channels = _channel.current()
+    if channels is None:
+        logger.warning("adopted session %s: no egress channel to re-open", session_id)
+        return
+    try:
+        await channels.open(session_id, work_item_id, PhaseLists.from_json(json.loads(egress)))
+    except (_sandbox.SandboxNotReady, OSError, ValueError, KeyError) as exc:
+        logger.warning("adopted session %s: egress channel not re-opened: %s", session_id, exc)
 
 
 async def _sync_item_refs(db, run_dirs, work_item_id: str) -> None:
@@ -603,7 +631,7 @@ async def reattach(
             # Asked before the close below removes the evidence.
             if r["status"] != "pending":
                 oom = await _oom_killed(r["sandbox"], sid)
-            await _close_sandbox(r["sandbox"], sid)
+            await _close_sandbox(r["sandbox"], sid, egress=r["egress"] is not None)
             await _sync_item_refs(db, run_dirs, r["work_item_id"])
         if r["status"] == "pending":
             await db.write(lambda c, sid=sid: store.session_unknown(c, sid))
@@ -620,6 +648,8 @@ async def reattach(
 
         pid = r["pid"]
         if adopting:
+            if r["egress"] is not None:
+                await _reopen_egress(sid, r["work_item_id"], r["egress"])
             await db.write(lambda c, sid=sid: store.session_reattached(c, sid))
             adopted_tasks[sid] = asyncio.create_task(
                 _guarded_adopt(
@@ -634,6 +664,7 @@ async def reattach(
                     bd_cwd=bd_cwd,
                     on_approve=on_approve,
                     sandbox=r["sandbox"],
+                    egress=r["egress"] is not None,
                 )
             )
             summary.adopted.append(sid)
@@ -678,6 +709,11 @@ async def reattach(
                 )
             )
             summary.unknown.append(sid)
+
+    # Every adopted session's channel is open again by now; any other socket
+    # directory is a dead session's.
+    if (channels := _channel.current()) is not None and (stale := channels.sweep()):
+        logger.warning("removed egress socket directories no live session owns: %s", stale)
 
     active = db.read(
         lambda c: c.execute("SELECT id FROM work_items WHERE status = 'active'").fetchall()

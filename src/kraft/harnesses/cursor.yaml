@@ -108,3 +108,10 @@ config_dir:
 # Unbound though they exist: --sandbox (Cursor's own command sandbox, off in
 # the config above), --approve-mcps (Kraft registers no MCP server with
 # Cursor), --mode plan|ask (read-only modes no Kraft task asks for).
+
+# A deliberate refusal, not a gap: cursor-agent reportedly ignores
+# HTTP(S)_PROXY (spec §4), and under `network:` a worker has no route but the
+# proxy, so Kraft refuses cursor there by name instead of letting it fail
+# closed mysteriously. What flips this: an e2e("cursor") proving the CLI
+# reaches its API through HTTPS_PROXY. Its hosts are then declared here too.
+proxy_aware: false
