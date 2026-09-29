@@ -91,6 +91,11 @@ _CONNECT_TARGET = re.compile(r"\[?([^\[\]]+?)\]?:(\d{1,5})")
 #: nothing forwarded can split into a second request.
 _HEADER_LINE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7e\x80-\xff]*")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+#: A host name as the policy may match it: ASCII letters, digits and hyphens
+#: in dot-separated labels, the last starting with a letter. Anything else
+#: (a soft hyphen IDNA drops, `0x7f.1`, `16909060`) could reach the resolver
+#: as a name the lists never saw.
+_HOSTNAME = re.compile(r"([A-Za-z0-9-]+\.)*[A-Za-z][A-Za-z0-9-]*\.?")
 
 
 @dataclass(frozen=True)
@@ -748,6 +753,8 @@ def _parse(head: bytes) -> tuple[str, str, int, str, list[str]] | str:
         return f"method {method!r} is not proxied"
     if not 0 < port < 65536:
         return f"port {port} is out of range"
+    if len(host) > 253 or (_address(host) is None and not _HOSTNAME.fullmatch(host)):
+        return f"{host!r} is neither an IP address nor an ASCII host name"
     return method, host, port, target, [h for h in headers if h]
 
 
