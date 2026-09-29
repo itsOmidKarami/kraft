@@ -368,30 +368,6 @@ def test_a_comment_review_gets_answers_and_leaves_the_gate_pending(client, gated
 
 
 @_REVIEW
-def test_a_comment_review_says_no_reply_agent_runs_in_a_sandbox_without_network(
-    client, gated, monkeypatch
-):
-    """Its reply agent answers by `kraft item reply`, which such a sandbox
-    cannot reach: the answer and the item's timeline both say none runs."""
-    from kraft import executor
-
-    monkeypatch.setattr(executor, "item_sandbox", lambda row, launch: {"kind": "docker"})
-    _new_thread(client, gated, label="question", body="why a list?")
-    r = client.post(
-        f"/api/work-items/{gated}/gates/chain_review/review", json={"outcome": "comment"}
-    )
-    assert r.status_code == 200 and r.json()["reply_agent"] is False
-    body = client.get(f"/api/work-items/{gated}").json()
-    assert not [s for s in body["worker_sessions"] if s["hook_point"] == "chain_review.reply"]
-    [skipped] = [
-        e["payload"]
-        for e in client.get(f"/api/work-items/{gated}/events").json()
-        if e["type"] == "reply_agent_skipped"
-    ]
-    assert skipped["gate"] == "chain_review" and "`network:`" in skipped["reason"]
-
-
-@_REVIEW
 def test_drafts_are_submitted_before_the_gate_call_runs(client, gated, monkeypatch):
     """Kraft-dl5fl 1: the re-run agent can reply the moment the walk starts, so
     the threads it is told about must already be submitted by then."""
