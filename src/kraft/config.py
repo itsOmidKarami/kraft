@@ -38,7 +38,6 @@ from pydantic import (
 
 from kraft.automated_review import AutomatedReview
 from kraft.policy import SandboxPolicy, TemplatePolicyOverride, ToolNames
-from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 if TYPE_CHECKING:
@@ -518,30 +517,12 @@ def load_repos(path: str | Path, *, steering: Mapping[str, str] | None = None) -
     return out
 
 
-def sandboxed_members(ws: Workspace, repos: list[RepoEntry]) -> list[str]:
-    """The repository ids in `ws` whose entry sets a sandbox, when `ws` mounts
-    members at all (Kraft-dshto): a sandbox on the root or on any member binds
-    the item's whole checkout, submodules included. Empty when the pairing is
-    safe. `load_workspaces` refuses on it and `kraft admin doctor` fails a
-    row on it; one definition serves both."""
-    if not ws.members:
-        return []
-    by_id = {r.id: r for r in repos if r.id}
-    ids = dict.fromkeys([ws.root, *(m.repository for m in ws.members.values())])
-    return [i for i in ids if i in by_id and by_id[i].effective_sandbox is not None]
-
-
-def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[str, Workspace]:
+def load_workspaces(path: str | Path) -> dict[str, Workspace]:
     """`repos.yaml`'s `workspaces:`, in the V1 shape: a root repository and
     each member mounted at its path, both naming a connected entry by `id`
     (`workspace-declares-root-and-members`). Both ends of every reference are
     resolved here, when the file is read: a workspace naming no connected
-    repository would otherwise assemble an empty checkout hours later.
-
-    A workspace one of whose repositories sets a sandbox is refused too
-    (`sandboxed_members`). `refuse_sandboxed=False` is for `GET /repos`
-    alone, the same carve-out every reader of `load_repos` makes: the listing doctor
-    reads to fail that repository's row must still answer."""
+    repository would otherwise assemble an empty checkout hours later."""
     # Here, not at the top: `kraft.templates` imports this module.
     from kraft.templates.environment import Workspace
 
@@ -566,13 +547,6 @@ def load_workspaces(path: str | Path, *, refuse_sandboxed: bool = True) -> dict[
                     f"repos.yaml: workspaces.{ws_id}.members.{name}: {member.repository!r} "
                     "is no connected repository id"
                 )
-        sandboxed = sandboxed_members(ws, repos) if refuse_sandboxed else []
-        if sandboxed:
-            raise ConfigError(
-                _sandbox.submodule_refusal(
-                    f"repos.yaml: workspaces.{ws_id}: repository {', '.join(map(repr, sandboxed))}"
-                )
-            )
         out[ws_id] = ws
     return out
 

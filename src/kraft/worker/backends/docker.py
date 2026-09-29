@@ -982,9 +982,11 @@ def _linked_mounts(
         # `objects/info` is where `alternates` lives: read-write, a worker
         # names any host directory there and every later sandboxed launch on
         # this repository mounts it (and host git reads objects from it).
+        # Made first when the repository has none: absent, the worker would
+        # create it inside the read-write `objects/`, alternates and all.
         info = common / "objects" / "info"
-        if info.is_dir():
-            mounts += ["-v", f"{info}:{info}:ro"]
+        info.mkdir(exist_ok=True)
+        mounts += ["-v", f"{info}:{info}:ro"]
         for alternate in _alternates(common / "objects"):
             mounts += ["-v", f"{alternate}:{alternate}:ro"]
     mounts += ["-v", f"{worktree_gitdir}:{worktree_gitdir}"]

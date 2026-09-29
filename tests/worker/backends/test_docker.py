@@ -502,12 +502,17 @@ async def test_an_inconclusive_image_check_never_blocks_a_launch(tmp_path, monke
     assert await docker.missing_executable("img", "kraft-no-such-cli") is False
 
 
-def test_docker_argv_keeps_objects_info_read_only(tmp_path):
+@pytest.mark.parametrize("present", [True, False], ids=["present", "missing"])
+def test_docker_argv_keeps_objects_info_read_only(tmp_path, present):
     """`objects/info/alternates` names directories every later launch on the
-    repository mounts: writable, it let a worker mount any host directory."""
+    repository mounts: writable, it let a worker mount any host directory.
+    A repository without `objects/info` gets one made, or the worker would
+    create it in the read-write `objects/`."""
     repo, worktree, gitdir = _worktree(tmp_path)
     info = repo / ".git" / "objects" / "info"
-    info.mkdir()
+    assert not info.exists()
+    if present:
+        info.mkdir()
     store = RefStore(tmp_path / "store", repo / ".git", gitdir, "kraft/x")
     argv = docker.docker_argv(
         ["git"], worktree, {"kind": "docker", "image": "x"}, None, refstores=(store,)

@@ -324,8 +324,6 @@ def revise(
             revised.chain.check_scopes(base, revised.item_policy)
     except PolicyError as exc:
         raise RevisionError(f"the revised chain's policy does not resolve: {exc}") from exc
-    if (refusal := revised.sandbox_refusal()) is not None:
-        raise RevisionError(refusal)
     if chain.untrimmed is not None:
         # The chain before its attachment trim (Kraft-s7c04.29) gets the same
         # change set: a revision is not a trim, so the one invariant that copy
