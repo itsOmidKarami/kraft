@@ -324,6 +324,24 @@ async def test_network_without_a_channel_or_a_route_never_launches(
     assert "egress" in (run_dirs.logs / "s1.log").read_text()
 
 
+@pytest.mark.parametrize("broken", ["open_session", "wrap"])
+async def test_a_launch_that_raises_after_its_channel_opened_still_closes_it(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch, broken
+):
+    """Any failure between opening the channel and the process taking it
+    over closes relay and channel; nothing is left listening."""
+
+    def fail(*args, **kwargs):
+        remote.calls.append(broken)
+        raise RuntimeError(f"{broken} broke")
+
+    monkeypatch.setattr(remote, broken, fail)
+    with pytest.raises(RuntimeError, match=f"{broken} broke"):
+        await _run_on_remote(database, run_dirs, tmp_path, _POLICED)
+    assert remote.calls[-1] == "close_session"
+    assert not channels.socket_path("s1").exists()
+
+
 async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     item_on, database, run_dirs, remote, channels, monkeypatch
 ):
