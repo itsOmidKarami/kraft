@@ -48,7 +48,7 @@ def test_autostart_create_lands_paused_when_all_slots_are_busy(client, repo):
 
     r = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     )
 
     assert r.status_code == 201, r.text
@@ -413,7 +413,9 @@ def test_get_work_item_reports_the_worktree_head(client, repo, monkeypatch):
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
+    ).json()["id"]
     body = client.get(f"/api/work-items/{wid}").json()
     assert "head_sha" in body
 
@@ -427,7 +429,9 @@ def test_get_work_item_head_sha_is_none_before_the_worktree_exists(client, repo,
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
+    ).json()["id"]
     body = client.get(f"/api/work-items/{wid}").json()
     assert body["head_sha"] is None
 
@@ -440,7 +444,7 @@ def _invalid_policy(tdir):
 def test_post_refused_when_policy_invalid(client, repo):
     r = client.post(
         "/api/work-items",
-        json={"title": "x", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "x", "repo": str(repo), "chain_template": "default"},
     )
     assert r.status_code != 201
     assert "policy" in r.json()["detail"].lower()
@@ -450,6 +454,7 @@ def test_post_materializes_chain(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "quick-task",
@@ -481,7 +486,12 @@ def _linked_worktree(repo, tmp_path, name="wt"):
 def test_a_single_repo_item_has_no_repos_panel(client, repo):
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "solo", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "solo",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["repos"] == []
 
@@ -491,6 +501,7 @@ def test_intake_with_a_plan_attachment_trims_the_chain_and_reports_it(client, tm
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
@@ -528,6 +539,7 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(client, tmp_path
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
@@ -583,7 +595,8 @@ def _twice(repo, tmp_path):
 def test_intake_rejects_an_attachment(client, repo, tmp_path, paths, detail):
     attachments = [{"kind": "plan", "path": path} for path in paths(repo, tmp_path)]
     r = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "attachments": attachments}
+        "/api/work-items",
+        json={"autostart": True, "title": "t", "repo": str(repo), "attachments": attachments},
     )
     assert r.status_code == 422
     if detail:
@@ -597,6 +610,7 @@ def test_intake_accepts_an_uncommitted_attachment(client, repo):
     r = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "t",
             "repo": str(repo),
             "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],

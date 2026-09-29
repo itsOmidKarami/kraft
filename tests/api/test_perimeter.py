@@ -280,7 +280,9 @@ def test_the_event_stream_needs_a_session_too(client, tmp_path):
     client.post("/api/login", json={"password": "hunter2"})
     # a fresh item's events arrive on the stream once the session is real
     with client.websocket_connect("/api/ws/events") as ws:
-        client.post("/api/work-items", json={"title": "hello", "repo": str(tmp_path)})
+        client.post(
+            "/api/work-items", json={"autostart": True, "title": "hello", "repo": str(tmp_path)}
+        )
         assert ws.receive_json()["type"] == "work_item_created"
 
 

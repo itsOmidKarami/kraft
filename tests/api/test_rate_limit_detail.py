@@ -9,7 +9,12 @@ import sqlite3
 def test_rate_limit_field_is_null_off_a_rate_limited_item(client, repo):
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "fine", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "fine",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     assert client.get(f"/api/work-items/{wid}").json()["rate_limit"] is None
 
@@ -17,7 +22,7 @@ def test_rate_limit_field_is_null_off_a_rate_limited_item(client, repo):
 def test_rate_limit_field_reports_the_bumped_counter(client, repo, tmp_path):
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "rl", "chain_template": "quick-task"},
+        json={"autostart": True, "repo": str(repo), "title": "rl", "chain_template": "quick-task"},
     ).json()["id"]
     node_id = client.get(f"/api/work-items/{wid}").json()["current_node_id"]
     conn = sqlite3.connect(tmp_path / "run" / "orchestrator.db")

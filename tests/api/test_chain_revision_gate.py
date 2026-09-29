@@ -71,7 +71,12 @@ pytestmark = pytest.mark.api_client(edit_templates=_revising)
 def _filed(client, repo) -> str:
     wid = client.post(
         "/api/work-items",
-        json={"title": "revise me", "repo": str(repo), "chain_template": "revising"},
+        json={
+            "autostart": True,
+            "title": "revise me",
+            "repo": str(repo),
+            "chain_template": "revising",
+        },
     ).json()["id"]
     _await_gate(client, wid, "revision_approval")
     return wid

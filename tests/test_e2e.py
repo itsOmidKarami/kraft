@@ -33,7 +33,8 @@ def test_e2e_happy_path(tmp_path):
 
     with running_server(run_dir=run_dir, templates_dir=templates, bd_cwd=tracker) as srv:
         wid = srv.client.post(
-            "/api/work-items", json={"title": "make the failing test pass", "repo": str(repo)}
+            "/api/work-items",
+            json={"autostart": True, "title": "make the failing test pass", "repo": str(repo)},
         ).json()["id"]
         _poll(srv.client, wid, "work_item_completed")
 

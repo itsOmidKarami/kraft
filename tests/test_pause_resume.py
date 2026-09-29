@@ -70,7 +70,12 @@ def test_pause_then_resume_with_a_steer_relaunches_the_task(
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "pause me",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     session = _running_agent(client, wid)
 
@@ -144,7 +149,12 @@ def test_steer_and_resume_are_refused_while_the_item_is_running(monkeypatch, rep
     monkeypatch.setenv("KRAFT_FAKE_CLAUDE_DELAY", "10")
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "busy", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "busy",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     for verb, body in (("steer", {"text": "x"}), ("resume", {"steer": "x"})):
@@ -229,7 +239,12 @@ def test_resume_rebases_the_worktree_onto_a_moved_head(monkeypatch, repo, client
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "refresh me", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "refresh me",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
@@ -277,7 +292,12 @@ def test_resume_records_a_mismatch_if_the_worktree_moved_after_rebase(monkeypatc
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "raced rebase", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "raced rebase",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
@@ -326,7 +346,12 @@ def test_resume_skips_rebase_when_worktree_is_dirty(monkeypatch, repo, client):
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "dirty resume", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "dirty resume",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
@@ -382,7 +407,12 @@ def test_resume_marks_needs_human_on_a_rebase_conflict(monkeypatch, repo, client
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "conflict resume", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "conflict resume",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
@@ -463,7 +493,12 @@ def test_resume_skips_rebase_when_branch_already_pushed(tmp_path, monkeypatch, r
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "pushed resume", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "pushed resume",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
     assert client.post(f"/api/work-items/{wid}/pause", json={}).status_code == 200
@@ -584,7 +619,12 @@ def test_pause_cancels_the_walk_task_not_just_the_session(monkeypatch, repo, cli
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "pause me", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "pause me",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     _running_agent(client, wid)
 

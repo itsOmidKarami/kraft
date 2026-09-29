@@ -13,6 +13,8 @@ FIELDS = json.loads(
 
 
 def test_the_board_carries_every_field_the_extension_reads(client, tmp_path):
-    client.post("/api/work-items", json={"title": "contract", "repo": str(tmp_path)})
+    client.post(
+        "/api/work-items", json={"autostart": True, "title": "contract", "repo": str(tmp_path)}
+    )
     [item] = client.get("/api/work-items").json()["items"]
     assert set(FIELDS) <= set(item), sorted(set(FIELDS) - set(item))

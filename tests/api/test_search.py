@@ -121,7 +121,9 @@ def test_work_item_documents_endpoint(tmp_path, monkeypatch):
     repo = make_repo_with_engineering(tmp_path, {".engineering/specs/a.md": "# A\nx\n"})
     with _indexing(tmp_path, monkeypatch, repo) as client:
         assert client.get("/api/work-items/nope/documents").status_code == 404
-        wid = client.post("/api/work-items", json={"title": "t", "repo": str(repo)}).json()["id"]
+        wid = client.post(
+            "/api/work-items", json={"autostart": True, "title": "t", "repo": str(repo)}
+        ).json()["id"]
         r = client.get(f"/api/work-items/{wid}/documents")
         assert r.status_code == 200
         assert r.json() == {"work_item_id": wid, "documents": []}

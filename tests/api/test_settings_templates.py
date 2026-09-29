@@ -191,7 +191,7 @@ def test_one_unparseable_chain_file_degrades_the_instance_instead_of_lying(clien
 
     r = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     )
     assert r.status_code == 503, r.text
     assert "broken.yaml" in r.json()["detail"]
@@ -228,7 +228,7 @@ def test_every_door_names_the_broken_file_rather_than_the_chain_id(client, repo,
     # The create door.
     created = client.post(
         "/api/work-items",
-        json={"title": "t", "repo": str(repo), "chain_template": "default"},
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "default"},
     )
     assert created.status_code == 503 and "broken.yaml" in created.json()["detail"]
 
@@ -290,7 +290,8 @@ def test_a_chain_that_does_not_resolve_is_visible_everywhere(client, repo):
 
     connect_repo(repo)
     r = client.post(
-        "/api/work-items", json={"title": "t", "repo": str(repo), "chain_template": "broken"}
+        "/api/work-items",
+        json={"autostart": True, "title": "t", "repo": str(repo), "chain_template": "broken"},
     )
     assert r.status_code == 422, r.text
     assert "no_such_node" in r.json()["detail"]

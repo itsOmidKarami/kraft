@@ -12,7 +12,12 @@ def _completed_item(client, repo):
 
     wid = client.post(
         "/api/work-items",
-        json={"repo": str(repo), "title": "make it pass", "chain_template": "quick-task"},
+        json={
+            "autostart": True,
+            "repo": str(repo),
+            "title": "make it pass",
+            "chain_template": "quick-task",
+        },
     ).json()["id"]
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:

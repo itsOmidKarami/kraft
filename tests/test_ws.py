@@ -171,7 +171,7 @@ def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch, client):
     with client.websocket_connect("/api/ws/events?after_seq=0") as ws:
         r = client.post(
             "/api/work-items",
-            json={"title": "make the failing test pass", "repo": str(tmp_path)},
+            json={"autostart": True, "title": "make the failing test pass", "repo": str(tmp_path)},
         )
         assert r.status_code == 201
         types = set()
@@ -183,7 +183,7 @@ def test_ws_streams_live_events_after_connect(tmp_path, monkeypatch, client):
 def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeypatch, client):
     wid = client.post(
         "/api/work-items",
-        json={"title": "make the failing test pass", "repo": str(tmp_path)},
+        json={"autostart": True, "title": "make the failing test pass", "repo": str(tmp_path)},
     ).json()["id"]
     # let a few events accrue
     _wait_events(client, wid, "chain_loaded")
@@ -197,7 +197,10 @@ def test_ws_replays_history_then_reconnect_resumes_without_gap(tmp_path, monkeyp
     # reconnect from the last seq we saw: no duplicate, no gap
     last_seq = all_ev[-1]["seq"]
     with client.websocket_connect(f"/api/ws/events?after_seq={last_seq}") as ws:
-        client.post("/api/work-items", json={"title": "another one", "repo": str(tmp_path)})
+        client.post(
+            "/api/work-items",
+            json={"autostart": True, "title": "another one", "repo": str(tmp_path)},
+        )
         nxt = ws.receive_json()
         assert nxt["seq"] > last_seq
 
@@ -263,7 +266,7 @@ def test_ws_no_gap_or_dup_when_events_land_in_register_window(tmp_path, monkeypa
     monkeypatched WebSocket.accept()."""
     wid = client.post(
         "/api/work-items",
-        json={"title": "make the failing test pass", "repo": str(tmp_path)},
+        json={"autostart": True, "title": "make the failing test pass", "repo": str(tmp_path)},
     ).json()["id"]
     _wait_events(client, wid, "chain_loaded")
 
@@ -320,7 +323,7 @@ def test_ws_events_delivered_under_real_uvicorn(tmp_path, repo):
         with connect(f"ws://127.0.0.1:{srv.port}/api/ws/events?after_seq=0") as ws:
             r = srv.client.post(
                 "/api/work-items",
-                json={"title": "make the failing test pass", "repo": str(repo)},
+                json={"autostart": True, "title": "make the failing test pass", "repo": str(repo)},
             )
             assert r.status_code == 201, r.text
             ev = json.loads(ws.recv(timeout=15))

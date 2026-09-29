@@ -605,7 +605,12 @@ def test_connected_repos_model_for_its_profile_reaches_the_agent_launch(tmp_path
 
         wid = client.post(
             "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "impl-only"},
+            json={
+                "autostart": True,
+                "title": "x",
+                "repo": str(repo),
+                "chain_template": "impl-only",
+            },
         ).json()["id"]
 
         deadline = time.monotonic() + 30
@@ -653,7 +658,12 @@ def test_connected_repos_steering_reaches_the_agent_launch(tmp_path, monkeypatch
         # here), so no agent would ever launch to inspect.
         wid = client.post(
             "/api/work-items",
-            json={"title": "x", "repo": str(repo), "chain_template": "quick-task"},
+            json={
+                "autostart": True,
+                "title": "x",
+                "repo": str(repo),
+                "chain_template": "quick-task",
+            },
         ).json()["id"]
 
         deadline = time.monotonic() + 30

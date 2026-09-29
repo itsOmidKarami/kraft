@@ -64,6 +64,7 @@ def _post(client, repo, chain_template):
     return client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": chain_template,
@@ -453,6 +454,7 @@ def test_a_rework_run_is_not_told_to_report_plan_progress(client, repo, tmp_path
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "review-early",

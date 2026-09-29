@@ -19,6 +19,7 @@ def test_happy_path_via_api(client, repo, monkeypatch):
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "make the failing test pass",
             "repo": str(repo),
             "chain_template": "quick-task",
@@ -70,7 +71,9 @@ def test_executor_crash_marks_needs_human(client, repo, monkeypatch):
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(executor, "run", boom)
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
+    ).json()["id"]
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         status = client.get(f"/api/work-items/{wid}").json()["status"]
@@ -190,7 +193,8 @@ def _completed_quick_task(client, repo):
     to `gates.pending_gate` as a still-open gate, which makes
     `auto_escalate_stuck` no-op regardless of whether it is armed."""
     wid = client.post(
-        "/api/work-items", json={"title": "x", "repo": str(repo), "chain_template": "quick-task"}
+        "/api/work-items",
+        json={"autostart": True, "title": "x", "repo": str(repo), "chain_template": "quick-task"},
     ).json()["id"]
     _poll_events(client, wid, "work_item_completed")
     return wid
@@ -415,6 +419,7 @@ def test_abandon_reclaims_the_attachment_storage(client, repo):
     wid = client.post(
         "/api/work-items",
         json={
+            "autostart": True,
             "title": "x",
             "repo": str(repo),
             "attachments": [{"kind": "spec", "path": ".engineering/specs/s.md"}],
@@ -435,7 +440,9 @@ def test_abandon_reclaims_what_a_sandbox_kept_beside_the_worktree(client, repo):
     would otherwise outlive it in $KRAFT_HOME."""
     from kraft.worker import refstore
 
-    wid = client.post("/api/work-items", json={"title": "x", "repo": str(repo)}).json()["id"]
+    wid = client.post(
+        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
+    ).json()["id"]
     _poll_events(client, wid, "gate_requested")
     _set_status(wid, "paused")
     run_dirs = client.app.state.run_dirs
