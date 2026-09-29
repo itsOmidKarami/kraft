@@ -13,11 +13,13 @@ from typing import NoReturn
 
 from kraft import caps as _caps
 from kraft import events, logs, store
+from kraft.adapters import subprocess as _subprocess
 from kraft.adapters.forge import git
 from kraft.config import RepoEntry, base_ignore_args, git_read
 from kraft.paths import default_run_dir
 from kraft.worker import backends as _backends
 from kraft.worker import sandbox as _sandbox
+from kraft.worker.egress import PhaseLists
 from kraft.worker.env import worker_env
 
 logger = logging.getLogger(__name__)
@@ -657,17 +659,40 @@ async def run_setup_command(
         # Named like a session, so the sandbox can be asked whether its
         # memory limit killed the command, and closed after.
         setup_id = f"setup-{uuid.uuid4().hex[:12]}"
-        argv = backend.wrap(
-            ["sh", "-c", cmd],
-            worktree,
-            sandbox,
-            None,
-            env=repo_entry.env if repo_entry is not None else {},
-            session_id=setup_id,
-            refs=refs,
-            passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
-            ca_bundle=ca_bundle,
-        )
+        network = bool(sandbox.get("network"))
+        try:
+            # The install phase's lists, never the runtime's or the harness's
+            # hosts (spec §1). No session row: nothing reattaches a setup
+            # command. Its worktree is named for its work item.
+            proxy_env = (
+                await _subprocess.open_egress(
+                    None,
+                    backend,
+                    setup_id,
+                    worktree.name,
+                    sandbox,
+                    PhaseLists.of(sandbox["network"], "install"),
+                )
+                if network
+                else {}
+            )
+            argv = backend.wrap(
+                ["sh", "-c", cmd],
+                worktree,
+                sandbox,
+                None,
+                env={**(repo_entry.env if repo_entry is not None else {}), **proxy_env},
+                session_id=setup_id,
+                refs=refs,
+                passthrough=repo_entry.env_passthrough if repo_entry is not None else (),
+                ca_bundle=ca_bundle,
+            )
+        except BaseException as exc:
+            if network:
+                await _subprocess.close_egress(backend, setup_id)
+            if isinstance(exc, _sandbox.SandboxNotReady):
+                raise RuntimeError(f"setup command for {worktree.name} cannot run: {exc}") from exc
+            raise
         run = dict(args=argv, cwd=backend.client_cwd(setup_id) or worktree)
     else:
         run = dict(args=cmd, shell=True, cwd=worktree)
@@ -693,7 +718,12 @@ async def run_setup_command(
             try:
                 oom = await backend.oom_killed(setup_id)
             finally:
-                await backend.close(setup_id)
+                # The command, then its route out (spec §4).
+                try:
+                    await backend.close(setup_id)
+                finally:
+                    if network:
+                        await _subprocess.close_egress(backend, setup_id)
     if oom is not None and done.returncode != 0:
         raise RuntimeError(
             f"setup command for {worktree.name} failed: a process in the sandbox was killed "

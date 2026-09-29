@@ -2,14 +2,18 @@ import asyncio
 import json
 import os
 import shutil
+import socket
+import subprocess
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import psutil
 import pytest
+from support.harness import entry_of
 
-from kraft import store
+from kraft import builtins as kraft_builtins
+from kraft import events, store
 from kraft.adapters import subprocess as sp
 from kraft.paths import RunDirs
 from kraft.worker import backends, channel, reattach
@@ -90,6 +94,7 @@ class Remote:
 
     async def open_session(self, session_id, sandbox, sock_path):
         self.calls.append("open_session")
+        self.sock_path = sock_path
         return self.route if sandbox.get("network") else {}
 
     async def close_session(self, session_id):
@@ -365,3 +370,71 @@ async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(
     await reattach.reattach(database, run_dirs, grace_retry_delay_s=0)
 
     assert remote.calls == ["close", "close_session", "close"]
+
+
+# --- network: the setup command's install phase ------------------------------------------
+
+_SETUP_POLICED = {
+    "kind": "remote",
+    "network": {"install": {"allow": ["i.invalid"]}, "runtime": {"allow": ["r.invalid"]}},
+}
+
+
+async def test_a_setup_command_under_network_uses_the_install_list_not_runtime(
+    database, remote, channels, tmp_path, monkeypatch
+):
+    """Spec §1: `install` applies to setup runs. The channel refuses a host
+    only the runtime list allows, recorded against the item the worktree is
+    named for; the route closes after the command."""
+    await database.write(
+        lambda c: store.create_work_item(
+            c, id="w1", bead_id="B", title="t", repo="/r", chain_template="q", chain_definition="{}"
+        )
+    )
+    worktree = tmp_path / "w1"
+    worktree.mkdir()
+    answers = []
+
+    def run(args, **kwargs):
+        with socket.socket(socket.AF_UNIX) as s:
+            s.connect(str(remote.sock_path))
+            s.sendall(b"CONNECT r.invalid:443 HTTP/1.1\r\n\r\n")
+            answers.append(s.makefile("rb").read())
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", run)
+
+    await kraft_builtins.run_setup_command(
+        worktree, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+    )
+
+    assert answers[0].startswith(b"HTTP/1.1 403") and b"not on the allow list" in answers[0]
+    evts = database.read(lambda c: events.read_after(c, 0, "w1"))
+    assert [e["payload"]["phase"] for e in evts if e["type"] == "sandbox_egress_refused"] == [
+        "install"
+    ]
+    assert remote.calls == ["open_session", "wrap", "close", "close_session"]
+    assert remote.wrapped_env[0]["HTTPS_PROXY"] == "http://127.0.0.1:3128"
+    assert not remote.sock_path.exists()
+
+
+@pytest.mark.parametrize("missing", ["channel", "route"])
+async def test_a_setup_command_under_network_without_a_channel_or_route_never_runs(
+    remote, channels, tmp_path, monkeypatch, missing
+):
+    """R3 for the setup command: fail closed, and close whatever was opened."""
+    if missing == "channel":
+        channel.install(None)
+    else:
+        remote.route = {}
+    ran = []
+    monkeypatch.setattr(kraft_builtins.subprocess, "run", lambda *a, **kw: ran.append(a))
+
+    with pytest.raises(RuntimeError, match="cannot run: .*egress"):
+        await kraft_builtins.run_setup_command(
+            tmp_path, tmp_path, entry_of({"setup_command": "true"}), sandbox=_SETUP_POLICED
+        )
+
+    assert ran == [] and "wrap" not in remote.calls
+    if missing == "route":
+        assert remote.calls[-1] == "close_session" and not remote.sock_path.exists()

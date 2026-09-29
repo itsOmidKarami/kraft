@@ -465,12 +465,13 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
         pass
 
 
-async def _open_egress(
+async def open_egress(
     db, backend, session_id: str, work_item_id: str, sandbox: dict, lists: PhaseLists
 ) -> dict:
     """Open a session's egress under `sandbox['network']`: its channel, the
-    lists recorded on its row for a reattach, and the backend's route to the
-    channel. The proxy environment the launch adds; `SandboxNotReady`
+    lists recorded on its row for a reattach (no `db` for a setup command,
+    which has no row and is never reattached), and the backend's route to
+    the channel. The proxy environment the launch adds; `SandboxNotReady`
     whenever any of it is missing -- never a launch with open egress."""
     channels = _channel.current()
     if channels is None:
@@ -479,7 +480,8 @@ async def _open_egress(
             "channel, and this process has none"
         )
     sock_path = await channels.open(session_id, work_item_id, lists)
-    await db.write(lambda c: store.set_session_egress(c, session_id, lists.to_json()))
+    if db is not None:
+        await db.write(lambda c: store.set_session_egress(c, session_id, lists.to_json()))
     proxy_env = await backend.open_session(session_id, sandbox, sock_path)
     if not proxy_env:
         raise _sandbox.SandboxNotReady(
@@ -489,7 +491,7 @@ async def _open_egress(
 
 
 async def close_egress(backend, session_id: str) -> None:
-    """Undo `_open_egress`: the backend's route, then the channel."""
+    """Undo `open_egress`: the backend's route, then the channel."""
     try:
         await backend.close_session(session_id)
     finally:
@@ -638,9 +640,7 @@ async def run_task(
             # Before the worker exists: it has no route but this one.
             lists = PhaseLists.of(sandbox["network"], "runtime", network_requires)
             try:
-                proxy_env = await _open_egress(
-                    db, backend, session_id, work_item_id, sandbox, lists
-                )
+                proxy_env = await open_egress(db, backend, session_id, work_item_id, sandbox, lists)
             except _sandbox.SandboxNotReady as exc:
                 await close_egress(backend, session_id)
                 log_path.write_text(f"kraft: {exc}\n")
