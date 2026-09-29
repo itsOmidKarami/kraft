@@ -646,6 +646,34 @@ def _restricted(
     return {"restrict_tools": names, **({"permission_mode": asking} if asking else {})}
 
 
+async def _cli_version(exe: list[str], cwd: str | Path, runner=None) -> tuple[int, ...] | None:
+    """`exe --version`, parsed; None when it cannot be told -- not installed,
+    no answer, no version in it -- and the launch goes ahead as ever. `runner`
+    is a sandbox backend's `oneshot`, asking the image's own CLI."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *(runner.argv() if runner is not None else ()),
+            *exe,
+            "--version",
+            cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), 60)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return None
+    except OSError:
+        return None
+    finally:
+        if runner is not None:
+            await runner.close()
+    return _harness.version(out.decode(errors="replace"))
+
+
 def _install_hook(
     h: _harness.Harness,
     cwd: Path,
@@ -834,6 +862,32 @@ async def run_agent_task(
             f"HTTP(S)_PROXY, and a sandbox with `network:` has no other route out; use "
             f"another harness, or remove the sandbox's `network`"
         )
+    if h.min_version is not None:
+        exe = shlex.split(command) if command else [h.command[0]]
+        # ponytail: a sandboxed launch asks its image on every launch (one short
+        # container); cache on the image id if that shows.
+        try:
+            runner = (
+                await asyncio.to_thread(
+                    _backends.for_sandbox(sandbox).oneshot,
+                    sandbox,
+                    cwd,
+                    _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
+                )
+                if sandbox
+                else None
+            )
+        except _sandbox.SandboxNotReady:
+            found = None  # the backend's own probe refuses this launch, by name
+        else:
+            found = await _cli_version(exe, cwd, runner)
+        if found is not None and found < h.min_version:
+            need = ".".join(map(str, h.min_version))
+            raise LaunchRefused(
+                f"harness {harness!r} ({h.path}) needs {shlex.join(exe)} {need} or newer, "
+                f"and {'the sandbox image has' if sandbox else 'this machine has'} "
+                f"{'.'.join(map(str, found))}; older releases refuse its command line"
+            )
     if sandbox and h.container_permission_mode is not None:
         default = h.capabilities["permission_mode"].always
         defaults = (default,) if isinstance(default, str) else tuple(default or ())

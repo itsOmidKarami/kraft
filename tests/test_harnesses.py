@@ -305,6 +305,10 @@ _HOOK_CAPS = (
             "capabilities:\n" + _HOOK_CAPS,
             "credential 'K' goes to 'y.io', which is not one of its 'network.requires'",
         ),
+        (
+            "id: x\nkind: cli\ncommand: [x]\nmin_version: '2.0'\ncapabilities:\n" + _HOOK_CAPS,
+            "min_version '2.0' is not N.N.N",
+        ),
     ],
 )
 def test_malformed_harness_is_quarantined_with_its_reason(tmp_path, body, expect):
