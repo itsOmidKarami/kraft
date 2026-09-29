@@ -103,6 +103,12 @@ def install_cursor_hook(worktree: Path, argv: list[str]) -> None:
 # names the hook's key and hash, both read off `codex app-server`'s
 # `hooks/list`. Never `--dangerously-bypass-hook-trust`: that trusts every
 # hook a repo ships as well (probe, codex-cli 0.155.0, Kraft-4in7z.3).
+#
+# Skipped means the call runs: `codex exec` with an untrusted hook, or one
+# whose trusted_hash does not match, ran the tool call, never ran the hook
+# and printed nothing (measured, 0.155.0, a fake model server). So the hash
+# is always asked of the binary the session runs: a sandboxed session's is
+# the image's, asked in a container (`runner`), never the host's.
 
 CODEX_TRUST_TIMEOUT = 15.0
 _codex_flags: dict[tuple, tuple[str, ...]] = {}
@@ -117,11 +123,14 @@ def _toml(s: str) -> str:
     return json.dumps(s)
 
 
-async def _codex_hook(exe: list[str], flags: list[str], cwd: Path, command: str) -> dict:
+async def _codex_hook(
+    exe: list[str], flags: list[str], cwd: Path, command: str, runner: list[str]
+) -> dict:
     """Kraft's own entry in `codex app-server -c <flags>`'s `hooks/list`."""
     import asyncio
 
     proc = await asyncio.create_subprocess_exec(
+        *runner,
         *exe,
         "app-server",
         *(a for f in flags for a in ("-c", f)),
@@ -170,23 +179,31 @@ def _exe_identity(exe: list[str]) -> tuple:
     return (real, os.stat(real).st_mtime_ns if found else None, *exe[1:])
 
 
-async def codex_hook_flags(exe: list[str], argv: list[str], cwd: Path) -> tuple[str, ...]:
+async def codex_hook_flags(
+    exe: list[str], argv: list[str], cwd: Path, runner: list[str] | None = None
+) -> tuple[str, ...]:
     """The `-c` flags that install Kraft's preToolUse hook in one codex
     launch, trusted: checked by listing them once more, since an untrusted
-    hook is skipped without a word. Cached per codex binary and command.
-    Raises `CodexTrustError` on anything else -- the caller refuses the
-    launch rather than run it unenforced."""
+    hook is skipped without a word. `runner` prefixes `exe` to run the
+    session's own codex (a sandbox's `oneshot`); None is the host's, cached
+    per codex binary and command. Raises `CodexTrustError` on anything else
+    -- the caller refuses the launch rather than run it unenforced."""
     command = command_of(argv)
     hook = f'hooks.PreToolUse=[{{hooks=[{{type="command",command={_toml(command)},timeout=10}}]}}]'
-    key = (_exe_identity(exe), hook)
+    # ponytail: an image's codex is asked on every launch (two short
+    # containers): its tag can be rebuilt with another codex under it, and a
+    # stale hash is a silently skipped hook. Key on the image id if it shows.
+    key = None if runner is not None else (_exe_identity(exe), hook)
     if key in _codex_flags:
         return _codex_flags[key]
+    runner = runner or []
     try:
-        found = await _codex_hook(exe, [hook], cwd, command)
+        found = await _codex_hook(exe, [hook], cwd, command, runner)
         state = (
             f"hooks.state={{{_toml(found['key'])}={{trusted_hash={_toml(found['currentHash'])}}}}}"
         )
-        if (await _codex_hook(exe, [hook, state], cwd, command)).get("trustStatus") != "trusted":
+        listed = await _codex_hook(exe, [hook, state], cwd, command, runner)
+        if listed.get("trustStatus") != "trusted":
             raise CodexTrustError("codex did not trust Kraft's hook with the hash it listed")
     except CodexTrustError:
         raise
@@ -196,5 +213,7 @@ async def codex_hook_flags(exe: list[str], argv: list[str], cwd: Path) -> tuple[
         ) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise CodexTrustError(f"`{shlex.join(exe)} app-server`: {exc!r}") from exc
-    _codex_flags[key] = flags = ("-c", hook, "-c", state)
+    flags = ("-c", hook, "-c", state)
+    if key is not None:
+        _codex_flags[key] = flags
     return flags

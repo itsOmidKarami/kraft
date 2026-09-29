@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shlex
@@ -27,6 +28,7 @@ from kraft.policy import InstancePolicy
 from kraft.templates.models import AgentTask
 from kraft.worker import backends as _backends
 from kraft.worker import callback as _callback
+from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
 _CTX = (
@@ -843,10 +845,22 @@ async def run_agent_task(
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
         try:
-            hook_argv = await _hook_install.codex_hook_flags(
-                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd)
+            # The session's own codex vouches for the hook: a sandbox's is the
+            # image's, and another version may hash it otherwise (skipped).
+            runner = (
+                await asyncio.to_thread(
+                    _backends.for_sandbox(sandbox).oneshot,
+                    sandbox,
+                    cwd,
+                    _backends.for_sandbox(sandbox).home(run_dirs, work_item_id),
+                )
+                if sandbox
+                else None
             )
-        except _hook_install.CodexTrustError as exc:
+            hook_argv = await _hook_install.codex_hook_flags(
+                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd), runner
+            )
+        except (_hook_install.CodexTrustError, _sandbox.SandboxNotReady) as exc:
             # Never launched unenforced, never with every hook trusted.
             raise LaunchRefused(
                 f"harness {harness!r} cannot run Kraft's permission hook, which this "

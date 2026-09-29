@@ -52,6 +52,11 @@ class SandboxBackend(Protocol):
         """The argv that runs `cmd` inside the sandbox; `ca_bundle=` is
         what `prepare` returned."""
 
+    def oneshot(self, sandbox: dict, cwd, home) -> list[str]:
+        """The argv, up to the command, running one short command in the
+        session's image as its session would but with no network, stdin
+        attached; `worker.sandbox.SandboxNotReady` where it cannot."""
+
     def client_cwd(self, session_id: str) -> Path | None:
         """The directory to start the wrapped command's client in, made for
         the session and gone after `close`; None for the task's own `cwd`."""

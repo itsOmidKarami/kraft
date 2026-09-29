@@ -751,6 +751,48 @@ def docker_argv(
     return argv
 
 
+def oneshot_argv(sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
+    """`docker run` up to and including the image, for one short command
+    asked the way a session of `sandbox` would ask it -- its user, its
+    worktree (read-only), its HOME, the shim at `shim.CONTAINER_DIR` -- but
+    with no network and stdin attached. For what only the image's own
+    binaries can answer: codex's hook trust hash (`hook_install`).
+    `SandboxRefused` where the runtime cannot run one."""
+    try:
+        host = runtime()
+    except ConfigError as exc:
+        raise SandboxRefused(str(exc)) from exc
+    if problem := host.refusal():
+        raise SandboxRefused(problem)
+    cwd = str(Path(cwd).resolve())
+    argv = [
+        host.cli,
+        "run",
+        "--rm",
+        "--interactive=true",
+        "--label",
+        home_label(),
+        *host.user_args(),
+        "--security-opt=no-new-privileges",
+        *(["--security-opt=label=disable"] if host.selinux == "disable" else []),
+        "--cap-drop=ALL",
+        "--network=none",
+        "-v",
+        f"{cwd}:{cwd}:ro",
+        "-w",
+        cwd,
+        "-v",
+        f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro",
+        "-v",
+        f"{home}:{home}",
+        "-e",
+        f"HOME={home}",
+    ]
+    if host.selinux == "relabel":
+        argv = _relabelled(argv)
+    return [*argv, sandbox["image"]]
+
+
 def _relabelled(argv: list[str]) -> list[str]:
     """Every `-v` shared-labelled (`z`) for SELinux. Never `Z`: that label is
     private to one container, and would lock the operator out of their own
@@ -1167,6 +1209,12 @@ class DockerBackend:
             ca_bundle=ca_bundle,
             relay=relay_name(session_id) if network else None,
         )
+
+    def oneshot(self, sandbox: dict, cwd: str | Path, home: str | Path) -> list[str]:
+        try:
+            return oneshot_argv(sandbox, cwd, home)
+        except SandboxRefused as exc:
+            raise SandboxNotReady(str(exc)) from exc
 
     def launch_failed(self, cidfile: Path, returncode: int | None = None) -> bool:
         return launch_failed(cidfile, returncode)
