@@ -226,23 +226,36 @@ async def _remove_worktree(
             logger.warning("abandon %s: %s failed: %s", branch, args[1], done.stderr.strip())
             ok = False
     for member in members or []:
-        await asyncio.to_thread(
-            subprocess.run, ["git", "worktree", "prune"], cwd=member, capture_output=True
-        )
-        ref = f"refs/heads/{branch}"
-        if git_read(member, "rev-parse", "--verify", "--quiet", ref, expected_failure=True):
-            done = await asyncio.to_thread(
-                subprocess.run,
-                ["git", "branch", "-D", branch],
-                cwd=member,
-                capture_output=True,
-                text=True,
-            )
-            if done.returncode != 0:
-                logger.warning("abandon %s in %s: %s", branch, member, done.stderr.strip())
+        # Best-effort per member, like the rest: a member repository moved or
+        # deleted since must not keep the refs and attachments below alive.
+        if not member.is_dir():
+            logger.warning("abandon %s: member repository %s is gone", branch, member)
+            continue
+        try:
+            await _remove_member_branch(member, branch)
+        except OSError as exc:
+            logger.warning("abandon %s in %s: %s", branch, member, exc)
     # The review flow's per-attempt refs (node_runs.pin_ref) die with the branch.
     await asyncio.to_thread(node_runs.drop_refs, repo, wid)
     return ok
+
+
+async def _remove_member_branch(member: Path, branch: str) -> None:
+    """Prune `member`'s stale worktree entry and delete `branch` there."""
+    await asyncio.to_thread(
+        subprocess.run, ["git", "worktree", "prune"], cwd=member, capture_output=True
+    )
+    ref = f"refs/heads/{branch}"
+    if git_read(member, "rev-parse", "--verify", "--quiet", ref, expected_failure=True):
+        done = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "branch", "-D", branch],
+            cwd=member,
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            logger.warning("abandon %s in %s: %s", branch, member, done.stderr.strip())
 
 
 def _connected_members(st, row) -> list[Path]:
