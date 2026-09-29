@@ -8,13 +8,14 @@ _default:
 # Install backend + frontend deps
 setup:
     uv sync
-    cd frontend && npm install
+    cd frontend && npm ci
 
 # Install deps including semantic search (downloads a ~130MB model on first
 # search). Without this, /search still works in fts mode.
+[doc("Install deps plus semantic search (a ~130MB model on first search)")]
 setup-vector:
     uv sync --extra vector
-    cd frontend && npm install
+    cd frontend && npm ci
 
 # The dev instance's port, in one place (Kraft-y0g2). It used to be written out
 # three times -- here, in `ui`, and as `vite.config.ts`'s fallback -- and the
@@ -83,6 +84,7 @@ dev-reset:
 #
 # Build the SPA and default config into the package tree. `install` and the
 # release pipeline both call this, so the two cannot drift.
+[doc("Build the SPA and default config into the package tree")]
 bundle:
     cd frontend && npm run build
     rm -rf src/kraft/_bundled
@@ -102,6 +104,7 @@ bundle:
 
 # Install `kraft` as a real command (then just run `kraft` from anywhere).
 # State lands in ~/.kraft, seeded from templates/ on first run.
+[doc("Install `kraft` as a real command; state in ~/.kraft")]
 install: bundle
     uv tool install --from . kraft-sdlc --force
     @echo "installed. run: kraft"
@@ -128,6 +131,7 @@ install: bundle
 # that found nothing wrong, so we grep the one line pytest emits only for a
 # truly empty collection and fail on it ourselves, when args were given.
 [positional-arguments]
+[doc("Backend tests affected by your changes (testmon); --no-testmon for all")]
 test *ARGS:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -148,12 +152,14 @@ intent:
 # Refresh src/kraft/prices.json from models.dev (Kraft-wz83s). Never fetched at
 # runtime -- this is the only thing that ever hits the network for it. Review the
 # diff before committing: a price change is worth a look, not a rubber stamp.
+[doc("Refresh src/kraft/prices.json from models.dev")]
 refresh-prices:
     uv run python dev/refresh_prices.py
 
 # Check the test suite against docs/testing.md's mechanical rules: e2e markers
 # name a CLI, no unit test reaches a real bd/claude/gh/glab, the per-file line
 # budget, every test has an expectation.
+[doc("Check the test suite against docs/testing.md's mechanical rules")]
 check-tests:
     uv run python dev/check_tests.py
 
@@ -165,6 +171,7 @@ check-tests:
 # has none, and `npx tsc` would silently fetch an unrelated `tsc` package from
 # the registry instead of failing. Install first; the cost is only on the first
 # run in a worktree.
+[doc("Frontend typecheck + unit tests")]
 test-ui:
     cd frontend && [ -d node_modules ] || npm ci
     cd frontend && npx tsc -b
@@ -175,12 +182,14 @@ test-ui:
 # a `claude login` is invisible to them: export ANTHROPIC_API_KEY or
 # CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) first. The pre-commit hook
 # runs this when a commit touches templates/ or the bundled harnesses.
+[doc("Launch every shipped (harness, model, effort) on the real CLI; spends a few cents")]
 smoke-models:
     @[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "smoke-models: export ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) -- tests use a temp HOME, so claude login is not seen" >&2; exit 1; }
     KRAFT_E2E=1 KRAFT_E2E_REQUIRE=claude just test tests/test_shipped_models.py -k real_cli --no-testmon
 
 # The pre-commit hook's door to smoke-models: a Kraft worker or a shell with no
 # credential skips it loudly instead of blocking the commit. smoke-models stays strict.
+[doc("smoke-models for the pre-commit hook: skips without a credential")]
 smoke-models-hook:
     #!/usr/bin/env bash
     if [ -n "${KRAFT_WORK_ITEM_ID:-}" ]; then
@@ -193,7 +202,7 @@ smoke-models-hook:
     fi
     exec just smoke-models
 
-# Playwright e2e
+# Playwright e2e against a fixture server you started (frontend/e2e/README.md)
 e2e:
     cd frontend && npm run e2e
 
@@ -203,6 +212,7 @@ e2e:
 # points Playwright at it, and tears the server down on exit either way.
 # Mirrors the `playwright` job in .github/workflows/test.yml; that job is the
 # proof this sequence works, run on every frontend-touching PR.
+[doc("Playwright e2e with its fixture server: what CI's playwright job runs")]
 e2e-ci:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -231,6 +241,7 @@ schemas:
 
 # vscode/ checks: the committed schemas match the pydantic models, and the
 # extension typechecks and passes its unit tests.
+[doc("VS Code extension: schemas current, typecheck, unit tests")]
 test-vscode: schemas
     git diff --exit-code -- vscode/schemas
     cd vscode && [ -d node_modules ] || npm ci
@@ -257,11 +268,21 @@ fix:
 # is 5, which `adapters/subprocess.py`'s `_resolve` already reads as failed
 # (Kraft-44t0) -- nothing here needs to special-case that, and nothing should.
 #
-# Keep this in step with .github/workflows/test.yml's `test` job by hand --
-# there's no test enforcing it since GitLab CI's config (and the test that
-# checked it) was retired.
+# Keep this in step with .github/workflows/test.yml's `lint` and `test` jobs
+# by hand -- there's no test enforcing it since GitLab CI's config (and the
+# test that checked it) was retired. It covers those two jobs only: the e2e,
+# frontend, vscode, playwright and kraft-lite jobs have recipes of their own
+# (CONTRIBUTING.md, "What CI checks").
+[doc("CI's lint and test jobs, in order, on the full suite (no testmon)")]
 ci-test:
     uv run ruff check .
     uv run ruff format --check .
+    uv run python dev/check_docs_coverage.py
+    uv run python dev/check_tests.py
     uv run pytest -m "not e2e" -n auto
     uv run python -m kraft.intent
+
+# Preview the docs site with live reload at http://localhost:3000/kraft/
+docs:
+    cd docsite && [ -d node_modules ] || npm ci
+    cd docsite && npm run dev
