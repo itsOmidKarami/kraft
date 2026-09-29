@@ -115,10 +115,20 @@ class ChannelRegistry:
     def sweep(self) -> list[str]:
         """Remove every socket directory no open channel owns: what dead
         sessions left behind. Run once reattach has re-opened the adopted
-        sessions' channels. The names removed."""
+        sessions' channels. A socket probe's `probe-*` directory is not a
+        session's: a doctor in another process may be using it. The names
+        removed."""
         keep = {c.path.parent for c in self._open.values()}
         base = self._run_dirs.sockets
-        stale = [d for d in base.iterdir() if d.is_dir() and d not in keep] if base.is_dir() else []
+        stale = (
+            [
+                d
+                for d in base.iterdir()
+                if d.is_dir() and d not in keep and not d.name.startswith("probe-")
+            ]
+            if base.is_dir()
+            else []
+        )
         for directory in stale:
             shutil.rmtree(directory, ignore_errors=True)
         return [d.name for d in stale]

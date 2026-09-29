@@ -363,10 +363,13 @@ async def test_reattach_reopens_an_adopted_sessions_channel_from_its_row(
     # A dead session's directory, which no adopted session owns.
     dead = channels.socket_path("gone-session").parent
     dead.mkdir(parents=True)
+    # A doctor in another process may be mid-probe in here.
+    probing = dead.with_name("probe-x")
+    probing.mkdir()
 
     _, tasks = await reattach.reattach(database, run_dirs)
     await adopted.wait()
-    assert not dead.exists()
+    assert not dead.exists() and probing.exists()
     reader, writer = await asyncio.open_unix_connection(str(channels.socket_path("s1")))
     writer.write(b"CONNECT a.io:443 HTTP/1.1\r\n\r\n")
     answer = await asyncio.wait_for(reader.read(), 5)
