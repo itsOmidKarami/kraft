@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from support.api import _await_gate, _poll_events, _post_default, _set_status
+from support.api import _await_gate, _poll_events, _post_default, _set_status, _started
 from support.harness import connect_repo, make_repo, make_repo_with_engineering
 
 from kraft.adapters import beads
@@ -413,9 +413,7 @@ def test_get_work_item_reports_the_worktree_head(client, repo, monkeypatch):
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post(
-        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
-    ).json()["id"]
+    wid = _started(client, {"title": "x", "repo": str(repo)})
     body = client.get(f"/api/work-items/{wid}").json()
     assert "head_sha" in body
 
@@ -429,9 +427,7 @@ def test_get_work_item_head_sha_is_none_before_the_worktree_exists(client, repo,
         return "completed"
 
     monkeypatch.setattr(executor, "run", noop)
-    wid = client.post(
-        "/api/work-items", json={"autostart": True, "title": "x", "repo": str(repo)}
-    ).json()["id"]
+    wid = _started(client, {"title": "x", "repo": str(repo)})
     body = client.get(f"/api/work-items/{wid}").json()
     assert body["head_sha"] is None
 
@@ -484,15 +480,7 @@ def _linked_worktree(repo, tmp_path, name="wt"):
 
 
 def test_a_single_repo_item_has_no_repos_panel(client, repo):
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "autostart": True,
-            "repo": str(repo),
-            "title": "solo",
-            "chain_template": "quick-task",
-        },
-    ).json()["id"]
+    wid = _started(client, {"repo": str(repo), "title": "solo", "chain_template": "quick-task"})
     assert client.get(f"/api/work-items/{wid}").json()["repos"] == []
 
 
@@ -536,16 +524,15 @@ def test_intake_with_a_plan_attachment_never_runs_the_plan_node(client, tmp_path
     so the node after the spec gate is the chain revision, which reads the
     attached plan."""
     repo = make_repo_with_engineering(tmp_path, {".engineering/plans/p.md": "# plan\n"})
-    wid = client.post(
-        "/api/work-items",
-        json={
-            "autostart": True,
+    wid = _started(
+        client,
+        {
             "title": "t",
             "repo": str(repo),
             "chain_template": "default",
             "attachments": [{"kind": "plan", "path": ".engineering/plans/p.md"}],
         },
-    ).json()["id"]
+    )
     _await_gate(client, wid, "spec_approval")
     client.post(f"/api/work-items/{wid}/gates/spec_approval/approve")
     # spec, then spec_approval (a V1 gate is a node that starts too), then

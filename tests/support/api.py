@@ -190,6 +190,14 @@ def _review_early(tdir):
     (tdir / "chains" / "review-early.yaml").write_text(_REVIEW_EARLY)
 
 
+def _started(client, body: dict) -> str:
+    """POST /work-items with `autostart: true`, which is off by default; the
+    new item's id."""
+    r = client.post("/api/work-items", json={**body, "autostart": True})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 def _post_default(client, repo):
     return client.post(
         "/api/work-items",
