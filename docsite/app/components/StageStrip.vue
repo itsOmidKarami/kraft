@@ -14,7 +14,7 @@ const stages: { name: string, stop?: string }[] = [
   { name: 'local_review', stop: 'you approve' },
   { name: 'draft_merge_request' },
   { name: 'final_review', stop: 'you approve' },
-  { name: 'external_approval', stop: 'a reviewer approves on the forge' },
+  { name: 'external_approval', stop: 'waits only if your forge requires a review' },
   { name: 'merge' },
 ]
 </script>
