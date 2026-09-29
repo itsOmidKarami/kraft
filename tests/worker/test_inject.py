@@ -371,7 +371,7 @@ def test_a_host_leaf_is_loaded_whole_while_another_connect_re_mints_it(run_dirs,
     os.utime(cert, (future, future))  # every mint below re-mints
     key_written, finish = threading.Event(), threading.Event()
     real_mint, real_write_cert = ca.mint_host_leaf, ca._write_cert
-    other = []
+    other, got_in = [], []
 
     def write_cert(path, cert):
         if threading.current_thread().name == "other":
@@ -383,7 +383,7 @@ def test_a_host_leaf_is_loaded_whole_while_another_connect_re_mints_it(run_dirs,
         pair = real_mint(*args)
         other.append(threading.Thread(target=real_mint, args=args, name="other"))
         other[0].start()
-        key_written.wait(0.5)  # never, while the load holds the pair
+        got_in.append(key_written.wait(0.5))  # never, while the load holds the pair
         return pair
 
     monkeypatch.setattr(ca, "_write_cert", write_cert)
@@ -393,3 +393,4 @@ def test_a_host_leaf_is_loaded_whole_while_another_connect_re_mints_it(run_dirs,
     finally:
         finish.set()
         other[0].join()
+    assert got_in == [False]
