@@ -374,3 +374,12 @@ def test_a_document_navigation_cannot_slip_past_the_bearer_check(client):
     client.cookies.clear()
     r = client.get("/api/work-items", headers={"sec-fetch-dest": "document"})
     assert r.status_code == 401
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+def test_a_browser_navigation_to_fastapis_docs_gets_them_not_the_board(dist, client, path):
+    """Kraft-9efnk.24: the SPA-shell fast path answered every non-/api
+    navigation, so a browser opening /docs or /redoc got the board."""
+    r = client.get(path, headers={"sec-fetch-dest": "document"})
+    assert r.status_code == 200, r.text
+    assert "/openapi.json" in r.text

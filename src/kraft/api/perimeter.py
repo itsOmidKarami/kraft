@@ -27,6 +27,14 @@ def _is_api_path(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
+def _is_fastapi_docs_path(app: FastAPI, path: str) -> bool:
+    """FastAPI's own pages: Swagger UI (and its OAuth redirect), ReDoc and the
+    schema. Their JS and CSS come from a CDN, so these paths are all a browser
+    fetches from us for them."""
+    own = {app.docs_url, app.redoc_url, app.openapi_url, app.swagger_ui_oauth2_redirect_url}
+    return path in own - {None}
+
+
 async def _spa_navigation(request: Request, call_next):
     # A browser deep-link / refresh on a client-side route (e.g. /work-items/<id>)
     # would otherwise reach the same catch-all any GET falls through to anyway
@@ -35,13 +43,15 @@ async def _spa_navigation(request: Request, call_next):
     # skip routing. Static assets are dest=script/style, XHR is dest=empty, so
     # only real navigations are caught. Excluded for /api/: that prefix is
     # unambiguously JSON, so a forged header there must not stand in for a
-    # real 401/404/200.
+    # real 401/404/200. Nor for FastAPI's /docs and /redoc, which a browser
+    # would otherwise never see.
     dist = getattr(request.app.state, "frontend_dist", None)
     if (
         dist is not None
         and request.method == "GET"
         and request.headers.get("sec-fetch-dest") == "document"
         and not _is_api_path(request.url.path)
+        and not _is_fastapi_docs_path(request.app, request.url.path)
     ):
         # The browser caches by URL, so without no-store a refresh could answer
         # from a stale cached shell. `vary` says the same thing to caches that
