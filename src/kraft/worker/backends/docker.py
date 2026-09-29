@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import time
@@ -903,11 +904,35 @@ def _gitdir_mounts(cwd: Path, refstores: Sequence[RefStore] = ()) -> list[str]:
     """
     own = next((s for s in refstores if s.checkout is None), None)
     mounts = _worktree_mounts(cwd, own)
+    pinned: set[Path] = set()
     for store in refstores:
         if store.checkout is not None:
+            mounts += _pin_path(cwd, store.checkout, pinned)
             mounts += _linked_mounts(
                 store.checkout / ".git", store.common, store.worktree_gitdir, store
             )
+    return mounts
+
+
+def _pin_path(cwd: Path, checkout: Path, pinned: set[Path]) -> list[str]:
+    """Every directory from `cwd` down to `checkout`, bound onto itself, top
+    first. The member's `.git` is read-only, but it sits in the read-write
+    worktree: a worker that renamed any directory above it (`mv repos
+    repos.x`) and rebuilt the path would hand host git a `.git` of its own.
+    A mount point cannot be renamed or removed (EBUSY), so the path to the
+    member stays the one Kraft checked, for as long as any container has it
+    mounted (Kraft-ju36l, J6).
+
+    Each must be a real directory when the launch is built: a symlink there
+    would have docker mount whatever it names."""
+    path, mounts = cwd, []
+    for part in checkout.relative_to(cwd).parts:
+        path = path / part
+        if not stat.S_ISDIR(os.lstat(path).st_mode):
+            raise SandboxRefused(f"{path} is not a directory; the member under it is not mounted")
+        if path not in pinned:
+            pinned.add(path)
+            mounts += ["-v", f"{path}:{path}"]
     return mounts
 
 

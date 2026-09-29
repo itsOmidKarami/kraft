@@ -118,6 +118,11 @@ def _bare_origin(repo: Path, origin: Path) -> None:
     _git(repo, "push", "-q", "origin", "main")
 
 
+def _parents(rel: Path) -> list[Path]:
+    """`repos/pkg` -> `repos`, `repos/pkg`."""
+    return [Path(*rel.parts[: i + 1]) for i in range(len(rel.parts))]
+
+
 def _script(
     root_wt: Path,
     member: Path,
@@ -129,8 +134,10 @@ def _script(
 ) -> str:
     """The worker's session: a commit in the member and one in the root taking
     its gitlink, `main` moved in both, then every program-valued key planted
-    wherever the container lets it write, and a write tried on each path that
-    must be read-only -- `WROTE <path>` for any that took."""
+    wherever the container lets it write, then a write and a rename tried on
+    each path that must stay put -- `WROTE`/`RENAMED <path>` for any that
+    took -- and every directory on the way to the member renamed aside, the
+    way a worker would swap the member for one of its own."""
     q = shlex.quote
     lines = [
         "set -e",
@@ -161,6 +168,10 @@ def _script(
     lines += [
         f"printf '' >> {q(str(path))} 2>/dev/null && echo WROTE {q(str(path))}"
         for path in read_only
+    ]
+    lines += [
+        f"mv {q(str(path))} {q(str(path))}.x 2>/dev/null && echo RENAMED {q(str(path))}"
+        for path in [*read_only, *[root_wt / p for p in _parents(member.relative_to(root_wt))]]
     ]
     lines.append(
         f"printf 'gitdir: /tmp/x\\n' > {q(str(member / '.git'))} 2>/dev/null && echo SWAPPED"

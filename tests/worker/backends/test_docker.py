@@ -129,7 +129,12 @@ def test_docker_argv_mounts_each_member_like_the_root(tmp_path, nested):
     )
     member_git = ws.wt / "repos" / "pkg" / ".git"
     at = volumes.index(f"{member_git}:{member_git}:ro")
-    root_block = volumes[volumes.index(f"{ws.wt / '.git'}:{ws.wt / '.git'}:ro") : at]
+    # Every directory on the way to the member is a mount point, top first:
+    # no rename above its `.git` can swap in another.
+    path = [ws.wt / "repos", ws.wt / "repos" / "pkg"]
+    pinned = volumes.index(f"{path[0]}:{path[0]}")
+    assert volumes[pinned:at] == [f"{p}:{p}" for p in path]
+    root_block = volumes[volumes.index(f"{ws.wt / '.git'}:{ws.wt / '.git'}:ro") : pinned]
 
     def shape(block, store, git_file):
         # Innermost first: the admin dir lies inside the common gitdir.
@@ -150,6 +155,18 @@ def test_docker_argv_mounts_each_member_like_the_root(tmp_path, nested):
         assert f"{path}:{path}:ro" in volumes
     assert f"{member.shadow}:{member.common}" in volumes
     assert f"{admin}:{admin}" in volumes
+
+
+def test_a_member_reached_through_a_symlink_is_never_mounted(tmp_path):
+    """A directory on the way to the member swapped for a symlink would have
+    docker mount wherever it points."""
+    ws = _member_launch(tmp_path)
+    (ws.wt / "repos").rename(tmp_path / "moved")
+    (ws.wt / "repos").symlink_to(tmp_path / "moved")
+    with pytest.raises(docker.SandboxRefused, match="repos"):
+        docker.docker_argv(
+            ["git"], ws.wt, {"kind": "docker", "image": "x"}, None, refstores=ws.stores
+        )
 
 
 def test_member_mounts_come_from_the_store_not_the_gitfile(tmp_path):
