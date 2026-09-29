@@ -8,13 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from support.harness import (
-    connect_repo,
-    connected_repo,
-    fake_templates_dir,
-    isolated_bd,
-    make_repo,
-)
+from support.harness import connected_repo, fake_templates_dir, isolated_bd, make_repo
 
 from client.test_read import run_with_app
 from kraft import client
@@ -154,16 +148,3 @@ def test_a_relative_path_reaches_the_server_absolute(call, tmp_path, monkeypatch
     asyncio.run(call())
     assert sent
     assert set(sent) == {str(Path.cwd() / "sub")}
-
-
-def test_create_work_item_with_no_chain_takes_the_repos_default(wired, tmp_path):
-    """No `chain_template` means none is sent, so the repo's
-    `default_chain_template` applies -- not a client-side `default` that
-    would read as an explicit choice (Kraft-9efnk.11)."""
-    repo = connect_repo(make_repo(tmp_path), default_chain_template="quick-task")
-
-    async def scenario():
-        created = await client.create_work_item("t", repo=str(repo))
-        return await client.get_work_item(created["id"], full=True)
-
-    assert run_with_app(wired, scenario)["chain_template"] == "quick-task"

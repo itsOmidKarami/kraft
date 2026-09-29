@@ -14,7 +14,7 @@ import re
 import subprocess
 
 import pytest
-from support.harness import make_repo
+from support.harness import connect_repo, make_repo
 
 from kraft import cli, client
 
@@ -151,14 +151,19 @@ def test_an_operation_failure_is_a_kraft_message_on_stderr(app, capsys):
     assert "404" in captured.err
 
 
-def test_create_uses_the_cwd_repo_and_lands_paused(app, monkeypatch, capsys, repo):
-    _connect(repo)
+def test_create_uses_the_cwd_repo_and_its_default_chain_and_lands_paused(
+    app, monkeypatch, capsys, repo
+):
+    connect_repo(repo, default_chain_template="quick-task")
     monkeypatch.chdir(repo)
     cli.main(["item", "create", "filed from a terminal", "--json"])
     created = json.loads(capsys.readouterr().out)
     assert created["title"] == "filed from a terminal"
     # an agent (or a human) files work; a human starts it from the board
     assert created["status"] == "paused"
+    # no --chain: the repo's default, not a `default` the CLI chose (Kraft-9efnk.11)
+    shown = asyncio.run(client.transport._get(f"/work-items/{created['id']}"))
+    assert shown["chain_template"] == "quick-task"
 
 
 def test_create_carries_the_description(app, monkeypatch, capsys, repo):
