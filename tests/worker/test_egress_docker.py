@@ -135,7 +135,7 @@ def _gateway(cli: str) -> str:
 async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     """`launch(script, network)`: `script` run by `run_task` in a sandbox
     with `network`, beside a host server listening on every address
-    (`upstream=` names another port on this host for `allowed.test`, and
+    (`upstream=(host, port)` sends `host` to that port on this host instead, and
     `image=` and the rest are `run_task`'s). Returns
     `(what the script wrote to ./out, the refusal events, the NetworkMode
     of the relay and of relay B while it ran, and the transport)`; a launch
@@ -149,16 +149,16 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
 
     server = await asyncio.start_server(serve, "0.0.0.0", 0)
     port = server.sockets[0].getsockname()[1]
-    dialled = [port]
+    routed = ["allowed.test", port]
 
     async def resolve(host, port_, **kw):
-        if host == "allowed.test":
+        if host == routed[0]:
             return [(0, 0, 0, "", (ALLOWED_ADDRESS, port_))]
         return await asyncio.get_running_loop().getaddrinfo(host, port_, **kw)
 
     async def connect(address, port_):
         if address == ALLOWED_ADDRESS:
-            return await asyncio.open_connection("127.0.0.1", dialled[0])
+            return await asyncio.open_connection("127.0.0.1", routed[1])
         return await asyncio.open_connection(address, port_)
 
     registry = channel.ChannelRegistry(
@@ -196,7 +196,7 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     work.mkdir()
 
     async def go(script: str, network: dict, *, image=IMAGE, upstream=None, **kw):
-        dialled[0] = upstream or port
+        routed[:] = upstream or ("allowed.test", port)
         status = await sp.run_task(
             database,
             short_run,
