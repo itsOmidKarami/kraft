@@ -197,9 +197,10 @@ def build() -> MCPServer:
     async def raise_budget(budget_usd: float | None, work_item_id: str | None = None) -> dict:
         """Raise a stopped Kraft work item's own dollar cap and retry it, the
         board's Raise budget button. `budget_usd` is the new cap in dollars,
-        or null for no cap. Only for an item stopped for a human. This is
-        not the policy's per-scope `budget_usd`, which set_work_item_policy
-        sets. Only a human should decide this — ask first."""
+        or null for no cap. Only for an item its own cap stopped: a stop on
+        the policy's per-scope `budget_usd` or `token_budget` (which
+        set_work_item_policy sets) or on `budget.daily_usd` is refused.
+        Only a human should decide this — ask first."""
         return await client.raise_budget(budget_usd, work_item_id)
 
     @server.tool()

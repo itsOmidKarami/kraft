@@ -621,7 +621,8 @@ function RowAction({
       control = button("Steer & retry", () => onPeek("steerRetry"));
       break;
     case "budget":
-      control = button("Raise budget", () => onPeek("budget"));
+      // Only the item's own cap is one Raise budget lifts (Kraft-9efnk.28).
+      if (item.budget?.scope === "work_item") control = button("Raise budget", () => onPeek("budget"));
       break;
     case "question":
       control = button("Answer", () => onPeek("answer"));

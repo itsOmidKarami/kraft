@@ -101,6 +101,13 @@ export interface WorkItemAttachment {
   path: string;
 }
 
+/** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
+ *  `scope`. Only `work_item` is the item's own cap, the one Raise budget raises. */
+export type BudgetStop =
+  | { scope: "work_item" | "daily"; spent_usd: number; cap_usd: number }
+  | { scope: "usd"; path: string; spent_usd: number; cap_usd: number; unknown_launches: number }
+  | { scope: "tokens"; path: string; spent_tokens: number; cap_tokens: number };
+
 export interface EscalationThread {
   thread: number;
   session_id: string;
@@ -149,7 +156,7 @@ export interface WorkItem {
   /** Set when a loop cap is what stopped the item — the board shows "capped n/n". */
   cappedOut?: { cycles: number; attempts: number } | null;
   /** Set when a spend cap is what stopped the item (sub-project E §3). */
-  budget?: { scope: "work_item" | "daily"; spent_usd: number; cap_usd: number } | null;
+  budget?: BudgetStop | null;
   /** Only on the detail endpoint, not the list. */
   usage?: WorkItemUsage;
   /** Empty on a single-repo item; ordered deepest submodule first. */

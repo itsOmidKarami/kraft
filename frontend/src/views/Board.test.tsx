@@ -274,6 +274,10 @@ describe("Board", () => {
     ["capped", { status: "needs_human", cappedOut: { cycles: 3, attempts: 3 } }, /verify hit its cap · 3 attempts$/, "Steer & retry"],
     ["question", { status: "needs_human", needs_context_question: "x".repeat(80) }, /agent asks: x{60}…$/, "Answer"],
     ["budget", { status: "needs_human", budget: { scope: "work_item", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, "Raise budget"],
+    // Raise budget lifts only the item's own cap (Kraft-9efnk.28).
+    ["budget_usd stop", { status: "needs_human", budget: { scope: "usd", path: "", spent_usd: 5, cap_usd: 5, unknown_launches: 0 } }, /spend cap reached$/, null],
+    ["token_budget stop", { status: "needs_human", budget: { scope: "tokens", path: "", spent_tokens: 9, cap_tokens: 9 } }, /spend cap reached$/, null],
+    ["daily stop", { status: "needs_human", budget: { scope: "daily", spent_usd: 5, cap_usd: 5 } }, /spend cap reached$/, null],
     ["paused", { status: "paused" }, /paused at verify$/, "Resume"],
     // N of M · title, with no bare task noun in front
     ["running", { status: "active", progress: { current: 3, total: 6, title: "wire the store" } }, /(?<!task )3 of 6 · wire the store$/i, null],
