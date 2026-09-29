@@ -38,7 +38,10 @@ changes, new features and fixes.
 
 It refuses to run until `test` has passed on the commit being released. Then it
 builds the wheel, smoke-tests it, pushes the tag, creates the GitHub Release
-with the wheel attached, and publishes to PyPI. The tag is created locally
+with the wheel attached, and publishes to PyPI. A stable release also dispatches
+the `docs` workflow, so the docs site's default version switches to the new
+tag. If the run shows a "docs rebuild not dispatched" warning, run **docs** by
+hand from the Actions tab on `main`. The tag is created locally
 before the build (setuptools-scm reads the version from it) and pushed only
 after the smoke test passes, so a failed build leaves nothing behind.
 

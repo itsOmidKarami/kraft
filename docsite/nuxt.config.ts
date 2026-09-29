@@ -1,7 +1,10 @@
 // GitHub Pages serves this repo at /kraft/, not the domain root -- every
 // Nuxt-generated asset URL (_nuxt/*, _payload.json, the _ipx image proxy)
 // needs that prefix or it 404s and the page loads unstyled.
-const baseURL = '/kraft/'
+// dev/build_docs_site.sh builds main's docs a second time under /kraft/next/.
+const baseURL = process.env.KRAFT_DOCS_BASE || '/kraft/'
+// stable, next, or empty: a local or PR build shows no version UI.
+const channel = process.env.KRAFT_DOCS_CHANNEL || ''
 // The bare origin. Site config joins app.baseURL onto it itself, so an origin
 // that already ends in /kraft/ doubles the prefix (og:image at /kraft/kraft/).
 const origin = 'https://itsomidkarami.github.io'
@@ -18,6 +21,9 @@ export default defineNuxtConfig({
   site: {
     url: origin,
     name: 'Kraft',
+    // Only the release docs belong in search results. @nuxtjs/robots writes
+    // the robots meta tag from this; a tag in app.head would be overridden.
+    ...(channel === 'next' ? { indexable: false } : {}),
   },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
   // only reads one at the domain root anyway. public/robots.txt is ours.
@@ -29,6 +35,17 @@ export default defineNuxtConfig({
     // site.url and takes a host only from NUXT_SITE_URL, which would also
     // override site.url above.
     sitemapBase: `${origin}${baseURL.replace(/\/$/, '')}`,
+    public: {
+      // Read by the version switch and the /next/ banner. The bases are full
+      // paths, not router paths: each version is a separate build, so a link
+      // to the other one must leave this build's router.
+      docs: {
+        channel,
+        stableVersion: process.env.KRAFT_DOCS_STABLE_VERSION || '',
+        stableBase: '/kraft/',
+        nextBase: '/kraft/next/',
+      },
+    },
   },
   // The IPX image proxy double-prefixes app.baseURL for content images
   // (/kraft/_ipx/_/kraft/assets/...), 404ing every screenshot. These are
@@ -45,5 +62,13 @@ export default defineNuxtConfig({
       { name: 'IBM Plex Mono', weights: [400, 500, 600], styles: ['normal'] },
       { name: 'IBM Plex Sans', weights: [400, 500], styles: ['normal'] },
     ],
+  },
+  // The version switch links to the other build's root, which the crawler
+  // would take for one of this build's own pages and fail as a 404. Exactly
+  // that path: a prefix match on /kraft/ would skip every page.
+  nitro: {
+    prerender: {
+      ignore: channel ? [new RegExp(`^${channel === 'next' ? '/kraft/' : '/kraft/next/'}$`)] : [],
+    },
   },
 })
