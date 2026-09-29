@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 21:47 +0000
+            created at 2026-09-29 23:04 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -273,7 +273,7 @@
     <p class="run run2"><span class="n"><a id="t191" href="#t191">191</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t192" href="#t192">192</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t193" href="#t193">193</a></span><span class="t">    <span class="key">async</span> <span class="key">def</span> <span class="nam">run</span><span class="op">(</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t194" href="#t194">194</a></span><span class="t">        <span class="nam">repo</span> <span class="op">=</span> <span class="nam">ns</span><span class="op">.</span><span class="nam">repo</span> <span class="key">or</span> <span class="key">await</span> <span class="nam">client</span><span class="op">.</span><span class="nam">resolve_repo</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t194" href="#t194">194</a></span><span class="t">        <span class="nam">repo</span> <span class="op">=</span> <span class="nam">client</span><span class="op">.</span><span class="nam">absolute_path</span><span class="op">(</span><span class="nam">ns</span><span class="op">.</span><span class="nam">repo</span><span class="op">)</span> <span class="key">if</span> <span class="nam">ns</span><span class="op">.</span><span class="nam">repo</span> <span class="key">else</span> <span class="key">await</span> <span class="nam">client</span><span class="op">.</span><span class="nam">resolve_repo</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t195" href="#t195">195</a></span><span class="t">        <span class="nam">drawn</span> <span class="op">=</span> <span class="num">0</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t196" href="#t196">196</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t197" href="#t197">197</a></span><span class="t">        <span class="key">async</span> <span class="key">def</span> <span class="nam">frame</span><span class="op">(</span><span class="nam">drawn</span><span class="op">:</span> <span class="nam">int</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">tuple</span><span class="op">[</span><span class="nam">int</span><span class="op">,</span> <span class="nam">int</span><span class="op">]</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -484,7 +484,7 @@
             <a class="nav" href="z_c1fa784957154a5e___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 21:47 +0000
+            created at 2026-09-29 23:04 +0000
         </p>
     </div>
 </footer>
