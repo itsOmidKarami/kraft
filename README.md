@@ -12,6 +12,8 @@ stopping only when a decision is yours.**
 Hand Claude Code (or another coding agent) a spec and walk away. It's for
 developers tired of babysitting a session to the end of a task.
 
+![A 30-second tour: file a work item, read the spec an agent wrote at its gate, and look at a finished item's diff](https://github.com/user-attachments/assets/34d3197d-b07b-4f9a-a13b-04f0c377230e)
+
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
   request for your approval; reject with a note and the step that wrote it
   tries again.
