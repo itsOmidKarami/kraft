@@ -39,10 +39,14 @@ def assert_no_operation(worktree: Path, *, allow: Collection[str] = ()) -> None:
     if gitdir is None:
         return
     for name in OPERATION_STATE:
-        if name not in allow and os.path.lexists(Path(gitdir, name)):
+        planted = Path(gitdir, name)
+        if name not in allow and os.path.lexists(planted):
+            # Never "abort it": aborting a planted rebase is the attack. Nor
+            # "Kraft did not start it": Kraft's own timed-out abort can leave
+            # a `rebase-merge/` behind too.
             raise ForgeError(
-                f"{worktree} has a {name} Kraft did not start; "
-                "finish or abort it by hand, then retry"
+                f"{worktree} has a {name} in progress: inspect it, then delete {planted} "
+                "(do not run git rebase/merge --abort or --continue) and retry"
             )
 
 

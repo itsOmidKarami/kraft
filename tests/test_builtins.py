@@ -728,7 +728,9 @@ async def test_kraft_refuses_to_act_on_an_operation_in_progress(kind, database, 
     with pytest.raises(RuntimeError) as stopped:
         await kraft_builtins.refresh_worktree_base(worktree, repo, branch, base="main")
 
-    assert f"has a {kind} Kraft did not start" in str(stopped.value)
+    assert f"has a {kind} in progress: inspect it, then delete {gitdir / kind} (do not run" in str(
+        stopped.value
+    )
     assert git_read(worktree, "rev-parse", "HEAD") == head, "no rebase ran"
     assert (gitdir / kind).exists(), "the state is left for a person"
 
