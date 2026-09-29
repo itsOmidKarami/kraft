@@ -1,4 +1,24 @@
-import type { KraftEvent, LogLine, WorkerSession } from "./types";
+import type { BudgetStop, KraftEvent, LogLine, WorkerSession } from "./types";
+
+/** For a spend-cap stop Raise budget cannot lift (Kraft-9efnk.28), which cap
+ *  stopped it and how to raise that one; null for the item's own cap. Wording
+ *  from the docs' caps-and-budgets page, "Raising a cap". */
+export function otherCapHint(budget: BudgetStop, id: string): string | null {
+  const setPolicy = (key: string) =>
+    `a ${key} stopped it, not the item's own cap: raise it with ` +
+    `kraft item set-policy ${id} --policy ${key}=N (item-wide, up to maxima.work_item) ` +
+    "or in policy.yaml, then retry";
+  switch (budget.scope) {
+    case "work_item":
+      return null;
+    case "usd":
+      return setPolicy("budget_usd");
+    case "tokens":
+      return setPolicy("token_budget");
+    case "daily":
+      return "the daily cap stopped it: raise budget.daily_usd in policy.yaml, or wait for local midnight, then retry";
+  }
+}
 
 /** A log line's one-line text. `summary` is a server-rendered stream-json
  *  line; but the server's own summariser (logs.py summary()) falls back to

@@ -6,7 +6,7 @@ import * as api from "../../../api";
 import { itemMenuItems } from "../../../components/itemMenu";
 import { OverflowMenu, StatusGlyph, type OverflowItem } from "../../../components/ui";
 import { deriveState } from "../../../deriveState";
-import { ago, clock, elapsedBetween, judgeReasoning, tokenSplit, tokenTotal as sum, tokens, until, usd, waitingSince } from "../../../format";
+import { ago, clock, elapsedBetween, judgeReasoning, otherCapHint, tokenSplit, tokenTotal as sum, tokens, until, usd, waitingSince } from "../../../format";
 import type { KraftEvent, WorkerSession, WorkItem } from "../../../types";
 import { PhoneComposer } from "../PhoneComposer";
 import type { InspectorTab } from "../selection";
@@ -427,11 +427,21 @@ export function ItemCard({
     }
     case "budget": {
       title = "spend cap reached";
-      sub.push(nodeCode, waited, item.budget && `cap $${item.budget.cap_usd} refused the next task`);
+      // Raise budget lifts only the item's own cap; any other cap's stop
+      // names that cap and its own way up instead (Kraft-9efnk.28).
+      const other = item.budget && otherCapHint(item.budget, item.id);
+      sub.push(
+        nodeCode,
+        waited,
+        other ?? (item.budget?.scope === "work_item" && `cap $${item.budget.cap_usd} refused the next task`),
+      );
+      if (!other)
+        row.push(
+          <button key="raise" className="btn btn-primary" onClick={() => openComposer("budget")}>
+            Raise budget
+          </button>,
+        );
       row.push(
-        <button key="raise" className="btn btn-primary" onClick={() => openComposer("budget")}>
-          Raise budget
-        </button>,
         <button key="escalate" className="btn btn-secondary" onClick={() => openComposer("escalate")}>
           Escalate
         </button>,
@@ -616,8 +626,8 @@ export function ItemCard({
       composer = (
         <BudgetComposer
           itemId={item.id}
-          capUsd={item.budget?.cap_usd ?? 0}
-          spentUsd={item.budget?.spent_usd}
+          capUsd={item.budget?.scope === "work_item" ? item.budget.cap_usd : 0}
+          spentUsd={item.budget?.scope === "work_item" ? item.budget.spent_usd : undefined}
           busy={busy}
           err={err}
           run={submit}
