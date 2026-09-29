@@ -200,10 +200,7 @@ async def create_work_item(body: NewWorkItem, request: Request):
             "an agent cannot start the work it files: file it paused (no autostart) "
             "and a human starts it from the board",
         )
-    chain_template = deps.chain_template_for(
-        deps.connected_or_422(st, body.repo), body.chain_template
-    )
-    chain = deps.resolve_chain_or_422(st, chain_template)
+    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
     # Before `executor.intake`, which no longer 502s on a bd failure (Kraft-7gy)
     # and would file the item with no bead and a warning nobody reads. An
     # explicit check rather than `Field(max_length=...)`: pydantic's 422 body is
@@ -396,10 +393,7 @@ async def fire_trigger(body: TriggerBody, request: Request):
     if st.invalid_policy:
         detail = "; ".join(st.invalid_policy)
         raise HTTPException(503, f"policy config invalid, refusing work: {detail}")
-    chain_template = deps.chain_template_for(
-        deps.connected_or_422(st, body.repo), body.chain_template
-    )
-    chain = deps.resolve_chain_or_422(st, chain_template)
+    chain_template, chain = deps.intake_chain_or_422(st, body.repo, body.chain_template)
     if len(body.title) > beads_mod.MAX_TITLE:
         raise HTTPException(
             422,

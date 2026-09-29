@@ -53,6 +53,7 @@ def test_sigterm_shuts_down_cleanly_mid_task(tmp_path):
                 "title": "make the failing test pass",
                 "repo": str(repo),
                 "chain_template": "quick-task",
+                "autostart": True,
             },
         ).json()["id"]
         deadline = time.monotonic() + 20

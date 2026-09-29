@@ -417,6 +417,15 @@ def resolve_chain_or_422(st, chain_template: str | None):
         raise HTTPException(422, f"chain template {name!r}: {exc}") from exc
 
 
+def intake_chain_or_422(st, repo: str, chain_template: str | None):
+    """`(stored, chain)` for an intake door: `chain_template_for`'s value, to
+    store, and the chain it resolves. The library is checked first, so a broken
+    one answers 503 before the repo lookup can answer 422."""
+    library_or_503(st)
+    stored = chain_template_for(connected_or_422(st, repo), chain_template)
+    return stored, resolve_chain_or_422(st, stored)
+
+
 def repos_path(st) -> Path:
     return st.templates_dir / "repos.yaml"
 
