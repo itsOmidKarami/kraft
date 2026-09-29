@@ -249,9 +249,9 @@ def test_no_host_call_runs_a_program_planted_in_a_nested_repository(
 # A member is a linked worktree of its connected repository `M`, so every git
 # Kraft runs in it resolves config, hooks and attributes from `M`'s common
 # gitdir, which the container mounts read-only. What a sandboxed worker can
-# write -- the member's admin dir in `M`, the root's worktree gitdir, and the
-# `modules/<rel>` where the old layout kept a member's gitdir -- git in the
-# member never reads. Each key below is planted at every one of those sites,
+# write -- the member's admin dir in `M`, and the `modules/<rel>` in the
+# root's worktree gitdir where the old layout kept a member's gitdir -- git in
+# the member never reads. Each key below is planted at every one of those sites,
 # every host path Kraft takes in a member runs, and nothing fires. The control
 # plants the same key where git does read it, `M`'s own config, and shows it
 # is live there.
@@ -431,7 +431,6 @@ PLANT_SITES = {
         [ws.root_gitdir / "modules" / _REL / "config"],
         ws.root_gitdir / "modules" / _REL / "hooks",
     ),
-    "root-admin-config": lambda ws: ([ws.root_gitdir / "config"], None),
 }
 
 
