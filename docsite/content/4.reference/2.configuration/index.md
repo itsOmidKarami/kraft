@@ -17,6 +17,10 @@ equally supported.
 - `kraft admin templates lint` checks the whole library and every chain at
   once, and writes nothing.
 
+`KRAFT_HOME` and `KRAFT_TEMPLATES_DIR` move this directory. See
+[Environment variables](/reference/configuration/environment-variables) for
+those and every other variable Kraft reads.
+
 Kraft validates each file when it loads it, and reports a file that fails with
 the offending key named. A chain component may only `extends` a library
 component of its own kind, and a `reject_to` may only name a node before the
@@ -47,5 +51,5 @@ them by hand, but nothing else in this section depends on them.
 
 | File | Fields |
 |---|---|
-| `notify.yaml` | `enabled`; `url`, the webhook Kraft posts to, which is a secret and is never shown back; `base_url`, the address links in a notification use; and `events`, the event types that send one. |
+| `notify.yaml` | `enabled`; `url`, the webhook Kraft posts to, which is a secret and is never shown back; `base_url`, the address links in a notification use; and `events`, the event types that send one. See [Notifications](/reference/events#notifications) for the payload and every event type. |
 | `theme.yaml` | `palette` (`nocturne`, `rose`, `forest`, `amber` or `slate`; default `nocturne`); `mode` (`light`, `dark` or `system`; default `dark`); `density` (`compact` or `comfortable`; default `compact`); and `board` with `group_by` (`status`, `repo` or `template`), `show_done` (default `5`) and `open_in` (`peek` or `full`). |

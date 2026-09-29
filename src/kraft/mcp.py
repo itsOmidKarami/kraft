@@ -125,9 +125,9 @@ def build() -> MCPServer:
         gate: str | None = None, work_item_id: str | None = None, digest: str | None = None
     ) -> dict:
         """Approve the human gate a Kraft work item is waiting on, letting the
-        chain continue. With no gate name, approves whichever gate is pending.
-        Gates are spec_approval, plan_approval, chain_finalized, and
-        human_review_approval. A chain revision gate also needs the `digest`
+        chain continue. With no gate name, approves whichever gate is pending;
+        the shipped chains' gates are spec_approval, plan_approval and
+        chain_revision_approval. A chain revision gate also needs the `digest`
         get_gate_artifact returned with the revision the human reviewed. Only a
         human should decide this — ask first."""
         return await client.approve_gate(gate, work_item_id, digest=digest)
