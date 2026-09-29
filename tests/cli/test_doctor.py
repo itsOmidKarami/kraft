@@ -65,8 +65,7 @@ def test_doctor_flags_a_dead_pidfile(app, tmp_path):
 def test_a_world_readable_token_fails(app, tmp_path, file):
     (_prime(tmp_path).parent / file).chmod(0o644)
     row = _by_name(asyncio.run(doctor.run_checks()), file.replace("-", " "))
-    assert not row["ok"]
-    assert "0644" in row["detail"]
+    assert not row["ok"] and "0644" in row["detail"], row
 
 
 def test_doctor_reports_a_missing_bd_without_failing(app, tmp_path, monkeypatch):
