@@ -32,4 +32,13 @@ export default defineNuxtConfig({
   image: {
     provider: 'none',
   },
+  // IBM Plex for hero.css. @nuxt/fonts (through Docus) fetches these at build
+  // time and serves them from /_fonts/, so a reader's browser never calls
+  // Google Fonts. Only the weights hero.css uses.
+  fonts: {
+    families: [
+      { name: 'IBM Plex Mono', weights: [400, 500, 600], styles: ['normal'] },
+      { name: 'IBM Plex Sans', weights: [400, 500], styles: ['normal'] },
+    ],
+  },
 })
