@@ -1,7 +1,7 @@
 export default defineAppConfig({
   seo: {
     title: 'Kraft',
-    description: 'A local orchestrator that runs your coding agent from spec to pull request, each task in its own git worktree, and stops only when a decision is yours.',
+    description: 'Your coding agent, from spec to pull request, on your machine. It stops only when a decision is yours.',
   },
   header: {
     title: 'Kraft',
