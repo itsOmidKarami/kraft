@@ -42,11 +42,13 @@ capabilities:
   allowed_tools:    { cli: ["--allowedTools", "{csv}"] }
   restrict_tools:   { cli: ["--tools", "{csv}"] }
   permission_mode:  { cli: ["--permission-mode", "{value}"], values: [acceptEdits, auto, bypassPermissions, manual, dontAsk, plan], always: auto, under_allowlist: manual }
-  # The CLI calls this MCP tool instead of prompting a human. Where no `kraft`
-  # MCP server is registered the CLI exits 1 at start naming the missing tool
-  # (spike 5.5, claude 2.1.281; 2.1.260 had completed normally). A sandbox
-  # without `network:` has none -- its HOME is the item's own -- so Kraft
-  # refuses that launch before it starts, naming `network:` as the fix.
+  # The CLI calls this MCP tool instead of prompting a human. This is the name
+  # a direct registration gives it; on the host the launch uses whichever name
+  # `registration.permission_tool` finds (the Kraft plugin's is namespaced,
+  # `mcp__plugin_kraft_kraft__...`) and is refused when nothing registers the
+  # server, since a missing tool fails the first permission ask (claude
+  # 2.1.281). A sandbox without `network:` has none -- its HOME is the item's
+  # own -- so Kraft refuses that launch before it starts, naming `network:`.
   approval_channel: { cli: ["--permission-prompt-tool", "{value}"], always: mcp__kraft__permission_request }
   # Kraft sets it only in a sandbox under `network:`, where the host's
   # registration of the tool above is out of reach: the session's own MCP

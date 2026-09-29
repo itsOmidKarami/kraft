@@ -10,7 +10,6 @@ only thing that stops a doctor command from growing output nobody reads
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import shutil
 import stat
@@ -19,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from kraft import auth, capabilities, client, config, harness
+from kraft import auth, capabilities, client, config, harness, registration
 from kraft.adapters import forge
 from kraft.executor import fallback
 from kraft.paths import (
@@ -423,56 +422,36 @@ def _selected_profiles(live: Path) -> set[str]:
     }
 
 
-#: Where `claude mcp add --scope user` records its servers -- what
-#: `init.install` runs for a user-scope install (init.py:122).
-CLAUDE_USER_CONFIG = ".claude.json"
-
-
-def _names_kraft(path: Path) -> bool:
-    """Does this agent config register a server called `kraft`?
-
-    The file is read directly rather than shelling out to `claude mcp list`: the
-    subprocess's output format is not ours to depend on, and the file it reads
-    is right there.
-    """
-    try:
-        return "kraft" in (json.loads(path.read_text()).get("mcpServers") or {})
-    except OSError, ValueError, AttributeError:
-        return False
-
-
 async def _mcp_check(server_up: bool) -> dict:
     """Is the Kraft MCP server registered with the agent CLI?
 
     Next to `_agent_checks` because it answers the same question: can this
-    machine actually launch a worker. Every launch passes
-    `--permission-prompt-tool mcp__kraft__permission_request`
-    (`adapters/agent.py`), and on an install where `kraft admin init` was never
-    run that tool does not exist -- the CLI exits 0 and ignores the flag, and
-    permission asks go silently unanswered with nothing reporting it.
+    machine actually launch a worker. Every unsandboxed Claude launch names
+    Kraft's permission tool, by the name `registration.permission_tool`
+    resolves -- direct (`kraft admin init`, a committed `.mcp.json`) or the
+    Kraft plugin's -- and a launch with none registered is refused by name. A
+    plugin-only install passes: no `kraft admin init` needed.
 
     `ok=False`, unlike `bd` or shell completion: those are choices an operator
-    made, this one silently breaks a chain that is already running.
+    made, this one stops every Claude worker.
 
     Rejected, as the bead records: passing `--mcp-config` on every launch, which
     would make Kraft write the operator's agent config.
     """
-    user = Path.home() / CLAUDE_USER_CONFIG
-    if _names_kraft(user):
-        return _check("mcp server", True, f"registered in {user}")
-    if not server_up:
-        # The repo-scope half needs `GET /repos`, like every other
-        # server-dependent check here.
-        return _check("mcp server", True, "skipped: no server", skipped=True)
-    for repo in await client.repos():
-        path = Path(repo["path"]) / ".mcp.json"
-        if _names_kraft(path):
-            return _check("mcp server", True, f"registered in {path}")
+    found = registration.permission_tool(None)
+    if found is None:
+        if not server_up:
+            # The repo-scope half needs `GET /repos`, like every other
+            # server-dependent check here.
+            return _check("mcp server", True, "skipped: no server", skipped=True)
+        repos = [Path(r["path"]) for r in await client.repos()]
+        found = next(filter(None, map(registration.permission_tool, repos)), None)
+    if found:
+        return _check("mcp server", True, f"{found[0]}, registered in {found[1]}")
     return _check(
         "mcp server",
         False,
-        "no kraft MCP server registered — workers' permission prompts go unanswered; "
-        "run `kraft admin init`",
+        f"no kraft MCP server registered, so Claude workers are refused; {registration.FIX}",
     )
 
 

@@ -541,24 +541,39 @@ def test_mcp_check_passes_on_a_user_scope_registration(app, tmp_path):
     assert ".claude.json" in check["detail"]
 
 
-def test_mcp_check_passes_on_a_repo_scope_mcp_json(app, tmp_path):
-    """What `kraft admin init --repo` writes (init._write_repo_mcp_json)."""
+def test_mcp_check_passes_on_a_committed_repo_scope_mcp_json(app, tmp_path):
+    """What `kraft admin init --repo` writes (init._write_repo_mcp_json), once
+    committed: a worktree checks out HEAD."""
+    (Path.home() / ".claude.json").unlink()
     repo = make_repo(tmp_path)
     asyncio.run(client.ensure_repo(str(repo)))
     (repo / ".mcp.json").write_text(json.dumps({"mcpServers": {"kraft": {"command": "kraft"}}}))
+    subprocess.run(["git", "add", ".mcp.json"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "mcp"], cwd=repo, check=True)
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is True
     assert ".mcp.json" in check["detail"]
 
 
+def test_mcp_check_passes_on_the_plugin_alone(app):
+    """The recommended install: the plugin plus `/kraft:onboard`, no `kraft
+    admin init`."""
+    home = Path.home()
+    (home / ".claude.json").unlink()
+    (home / ".claude").mkdir()
+    (home / ".claude" / "settings.json").write_text('{"enabledPlugins": {"kraft@kraft": true}}')
+    check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
+    assert check["ok"] is True
+    assert "mcp__plugin_kraft_kraft__permission_request" in check["detail"]
+
+
 def test_mcp_check_fails_when_nothing_registers_kraft(app, tmp_path):
-    """A real failure, not an advisory like `bd` or shell completion: every
-    worker launch passes `--permission-prompt-tool mcp__kraft__permission_request`,
-    and with no registration the agent CLI exits 0 ignoring the flag while a
-    running chain's permission asks go unanswered."""
+    """A real failure, not an advisory like `bd` or shell completion: a Claude
+    launch with no `kraft` server is refused."""
+    (Path.home() / ".claude.json").unlink()
     check = _by_name(asyncio.run(doctor.run_checks()), "mcp server")
     assert check["ok"] is False
-    assert "kraft admin init" in check["detail"]
+    assert "kraft admin init" in check["detail"] and "Kraft plugin" in check["detail"]
 
 
 def test_path_check_fails_when_another_kraft_shadows_this_one(monkeypatch):

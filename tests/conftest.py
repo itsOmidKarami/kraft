@@ -333,6 +333,11 @@ def _isolated_kraft_home(tmp_path, monkeypatch):
     # (make_repo, _bd_template), so bd's `--actor` default never needs the real
     # `$HOME`'s global one.
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # What `kraft admin init` registers: a Claude launch with no `kraft` MCP
+    # server is refused (`registration.permission_tool`), and the throwaway
+    # home would otherwise refuse every one. A test of that refusal removes it.
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / ".claude.json").write_text('{"mcpServers": {"kraft": {}}}')
     # `_serve()` dup2s real fds 1/2 to server.log unless told not to -- fine for
     # a real process, but it would stomp pytest's own fd-level capture (and
     # every test after it, in-process) if a `_serve()` call reached that far.

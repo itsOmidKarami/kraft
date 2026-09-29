@@ -11,6 +11,7 @@ from typing import NamedTuple
 from kraft import harness as _harness
 from kraft import permission_rules as _permission_rules
 from kraft import policy as _policy
+from kraft import registration as _registration
 from kraft import skill as _skill
 from kraft.adapters import artifact_notes as _artifact_notes
 from kraft.adapters import hook_install as _hook_install
@@ -947,6 +948,17 @@ async def run_agent_task(
         # host's registration is not in the sandbox (spike 5.5).
         url = f"{_callback.address(sandbox['kind'])}/mcp"
         options["mcp_config"] = json.dumps({"mcpServers": {"kraft": {"type": "http", "url": url}}})
+    elif not sandbox and asks is not None and asks.always == _registration.DIRECT:
+        # On the host the tool's name is whatever registered the server: a
+        # plugin-only install namespaces it, and a name that does not exist
+        # fails the session's first permission ask, not its start.
+        found = await asyncio.to_thread(_registration.permission_tool, Path(cwd))
+        if found is None:
+            raise LaunchRefused(
+                f"harness {harness!r} asks Kraft's permission gate through the `kraft` MCP "
+                f"server, and nothing registers it for Claude Code: {_registration.FIX}"
+            )
+        options["approval_channel"] = found[0]
     cmd = _harness.build_argv(
         h,
         command=command or None,
