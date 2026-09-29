@@ -93,7 +93,8 @@ class SandboxBackend(Protocol):
         before it starts, to the channel listening at `sock_path`
         (`worker.channel`), None under the "tls" transport: docker starts a
         relay the worker joins. Returns
-        the environment the launch must add (its proxy); `{}` for a sandbox
+        the environment the launch must add (its proxy, and a PATH with the
+        `kraft` shim first); `{}` for a sandbox
         with no `network`. Raises `worker.sandbox.SandboxNotReady` when the
         route cannot be made (`config_error`), never opens egress instead."""
 

@@ -26,13 +26,14 @@ Answer = Literal["allow", "deny", "no_opinion"]
 
 @dataclass(frozen=True)
 class Translator:
-    #: stdin -> (CLI tool name, its input, the CLI's id for this call or
-    #: None), or None for a call that is not the worker's: no opinion, unasked.
-    parse: Callable[[str], tuple[str, dict, str | None] | None]
+    #: (stdin, sandboxed) -> (CLI tool name, its input, the CLI's id for
+    #: this call or None), or None for a call that is not the worker's: no
+    #: opinion, unasked.
+    parse: Callable[[str, bool], tuple[str, dict, str | None] | None]
     render: Callable[[Answer, str], tuple[str, int]]
 
 
-def _cursor_parse(stdin: str) -> tuple[str, dict, str | None]:
+def _cursor_parse(stdin: str, sandboxed: bool = False) -> tuple[str, dict, str | None]:
     payload = json.loads(stdin)
     tool, input = payload["tool_name"], payload.get("tool_input") or {}
     if not isinstance(tool, str) or not isinstance(input, dict):
@@ -56,14 +57,21 @@ def _cursor_render(answer: Answer, reason: str) -> tuple[str, int]:
     return json.dumps(body), 0
 
 
-def _codex_parse(stdin: str) -> tuple[str, dict, str | None] | None:
+def _codex_parse(stdin: str, sandboxed: bool = False) -> tuple[str, dict, str | None] | None:
     """Claude-shaped, tool names already Kraft's (codex-cli 0.155.0 probe).
     The hook also fires for codex's own background agents (the memory agent
     runs in ~/.codex/memories): a call whose cwd is inside codex's home
     ($CODEX_HOME, else ~/.codex) is none of Kraft's business. Only there --
     anywhere else, the worktree or not, is asked, so a worker can't step out
-    of policy by working from another directory."""
+    of policy by working from another directory.
+
+    `sandboxed`: answered by the daemon for a container, whose cwd is a
+    container path this process's home says nothing about, and whose codex
+    home is the worker's own to name. Nothing is exempt there: codex's own
+    agents are asked like the worker, and under an allowlist may be denied."""
     call = _cursor_parse(stdin)
+    if sandboxed:
+        return call
     cwd = json.loads(stdin).get("cwd")
     home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").resolve()
     if isinstance(cwd, str) and Path(cwd).resolve().is_relative_to(home):
@@ -101,17 +109,18 @@ async def answer(
     *,
     fail_closed: bool,
     ask: Ask,
+    sandboxed: bool = False,
 ) -> tuple[str, int]:
     """Answer one hook call, asking the gate through `ask`. `unresolved` (the
     gate could not read the task's policy, and was not told `fail_closed`)
     is no opinion; a Kraft that cannot be reached (`unavailable`), an
     unreadable payload or any other failure is deny when `fail_closed`, else
     no opinion. The daemon's own entry point (a sandboxed session's hook,
-    through the worker API); `answer_hook` is the host's."""
+    through the worker API, `sandboxed`); `answer_hook` is the host's."""
     t = TRANSLATORS[harness]
     failed: Answer = "deny" if fail_closed else "no_opinion"
     try:
-        call = t.parse(stdin)
+        call = t.parse(stdin, sandboxed)
     except Exception as exc:  # noqa: BLE001 -- a hook must answer, whatever it was given
         print(f"kraft permission-hook: unreadable {harness} payload: {exc}", file=sys.stderr)
         return t.render(failed, "Kraft could not read this call")

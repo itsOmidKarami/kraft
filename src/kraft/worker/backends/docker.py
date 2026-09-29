@@ -32,6 +32,7 @@ from kraft.paths import RunDirs, default_run_dir, default_templates_dir, kraft_h
 from kraft.worker import ca as _ca
 from kraft.worker import channel as _channel
 from kraft.worker import refstore as _refstore
+from kraft.worker import shim as _shim
 from kraft.worker.backends import docker_forward as _forward
 from kraft.worker.sandbox import (
     _HARDENED_GIT_CONFIG,
@@ -679,7 +680,9 @@ def docker_argv(
     namespace (`relay_argv`), where loopback is its only interface, and
     none of the daemon's proxy variables is forwarded -- its proxy is the
     relay, set by the caller from `open_session`. Without a `relay` it is
-    refused, never run on the default bridge.
+    refused, never run on the default bridge. Such a launch also mounts the
+    `kraft` shim read-only at `shim.CONTAINER_DIR`: its route to the worker
+    API, and its permission hook's command.
     """
     try:
         host = runtime()
@@ -721,6 +724,11 @@ def docker_argv(
     argv += _gitdir_mounts(Path(cwd), refstore)
     for path in ro_paths:
         argv += ["-v", f"{path}:{path}:ro"]
+    if network:
+        # Whatever this launch's policy: a hook command that is not there
+        # runs the call (codex treats an unrunnable hook as allow), and a
+        # sibling launch in the worktree may need the hook this one does not.
+        argv += ["-v", f"{_shim.HOST_DIR}:{_shim.CONTAINER_DIR}:ro"]
     if home is not None:
         argv += ["-v", f"{home}:{home}", "-e", f"HOME={home}"]
     if name is not None:
@@ -988,6 +996,25 @@ async def sweep_volumes(keep: Iterable[str] = ()) -> list[str]:
     return orphans
 
 
+#: A container's PATH when its image sets none: the runtime's own default.
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+async def image_path(image: str) -> str | None:
+    """The PATH `image` gives its containers (its `Config.Env`), the
+    runtime's default when it sets none; None when it could not be read. A
+    launch under `network:` puts the `kraft` shim first on it: `-e PATH`
+    replaces the image's, it does not extend it."""
+    inspected = await docker_call("image", "inspect", "--format", "{{json .Config.Env}}", image)
+    if inspected is None or inspected[0] != 0:
+        return None
+    try:
+        env = json.loads(inspected[1]) or []
+    except ValueError:
+        return None
+    return next((e[5:] for e in env if e.startswith("PATH=")), DEFAULT_PATH)
+
+
 #: `(image, executable)` pairs an image was seen to hold. Only a hit is
 #: remembered: an operator who fixes the image need not restart Kraft.
 _HAS_EXECUTABLE: set[tuple[str, str]] = set()
@@ -1193,6 +1220,14 @@ class DockerBackend:
         if not sandbox.get("network"):
             return {}
         image, host = await self._relay_image()
+        # ponytail: replaces a repository's own literal `env: PATH` under
+        # `network:`; prepend to that instead if a repository ever needs one.
+        path = await image_path(sandbox["image"])
+        if path is None:
+            raise SandboxNotReady(
+                f"could not read image {sandbox['image']!r}'s PATH to put the `kraft` shim "
+                "first on it (the image is not pulled, or the runtime did not answer)"
+            )
         try:
             if sock_path is None:
                 await self._open_relay_b(session_id, image, host)
@@ -1201,7 +1236,7 @@ class DockerBackend:
             await self.close_session(session_id)
             raise SandboxNotReady(str(exc)) from exc
         await self._run_or_remove(session_id, argv, f"the sandbox's egress relay from {image!r}")
-        return dict(RELAY_PROXY_ENV)
+        return {**RELAY_PROXY_ENV, "PATH": f"{_shim.CONTAINER_DIR}:{path}"}
 
     async def _open_relay_b(self, session_id: str, image: str, host: Runtime) -> None:
         """The TLS transport's half: the session's volume, its client

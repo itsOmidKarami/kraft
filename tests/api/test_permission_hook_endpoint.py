@@ -40,8 +40,11 @@ def _hook(client, harness, stdin, sid="s1"):
     ids=["cursor", "codex"],
 )
 def test_the_hook_is_answered_in_the_harness_own_shape_from_the_session_policy(
-    client, harness, payload, decision
+    client, monkeypatch, harness, payload, decision
 ):
+    # The container's cwd inside the daemon's own codex home: no exemption,
+    # since that home says nothing about a container's paths.
+    monkeypatch.setenv("CODEX_HOME", _CODEX_BASH["cwd"])
     seed_session(policy={"deny_tools": ["Bash"]})
     reply = _hook(client, harness, json.dumps(payload))
     assert reply.status_code == 200, reply.text

@@ -649,6 +649,7 @@ def _install_hook(
     allowed: tuple[str, ...] | None,
     deny: tuple[str, ...],
     grants: tuple[str, ...],
+    sandbox: dict | None,
 ) -> None:
     """Kraft's pre-tool hook in the worktree when there is policy to enforce
     (Kraft-4in7z). The entry is the same for every launch and never removed:
@@ -661,7 +662,7 @@ def _install_hook(
     # far as the gate's denies go; its launch-time allow rule is Kraft-4in7z.6.
     if h.permission_hook == "cursor":
         try:
-            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id))
+            _hook_install.install_cursor_hook(cwd, _hook_install.hook_argv(h.id, sandbox))
         except _hook_install.HookFileError as exc:
             # Its policy needs the hook; without it the launch runs unenforced.
             raise LaunchRefused(str(exc)) from exc
@@ -793,14 +794,22 @@ async def run_agent_task(
             f"in its hook, so it cannot deny {blind!r} as this launch's policy requires; "
             f"list them in allowed_tools and keep them out of deny_tools, or use another harness"
         )
-    if sandbox and hooked and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
-        # The hook is a host command answering over Kraft's local API, and a
-        # container has neither: it would crash, and a crashed hook allows the
-        # call (codex, measured; cursor by its docs).
+    channel = bool(sandbox and sandbox.get("network"))
+    if (
+        sandbox
+        and not channel
+        and hooked
+        and _hook_install.needs_hook(allowed_tools, deny_tools, grants)
+    ):
+        # The hook reaches Kraft only through the session's channel (the
+        # `kraft` shim), and a sandbox without `network:` has none: it would
+        # crash, and a crashed hook allows the call (codex, measured; cursor
+        # by its docs).
         raise LaunchRefused(
             f"harness {harness!r} holds this launch's tool policy with Kraft's permission "
-            f"hook, which cannot run inside a sandbox, and a sandboxed launch never runs "
-            f"with its policy unenforced; use a harness whose own rules the container "
+            f"hook, which cannot run inside a sandbox without `network:` (its only route "
+            f"to Kraft), and a sandboxed launch never runs with its policy unenforced; "
+            f"give the sandbox a `network:`, use a harness whose own rules the container "
             f"holds (amp, opencode), or remove the tool policy (allowed_tools, "
             f"deny_tools, or a grant beyond git-commit) at the layer that sets it"
         )
@@ -818,13 +827,13 @@ async def run_agent_task(
         if options.get("permission_mode") in (None, *defaults):
             options["permission_mode"] = h.container_permission_mode
     if hooked:
-        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants)
+        _install_hook(h, Path(cwd), allowed_tools, deny_tools, grants, sandbox)
     hook_argv: tuple[str, ...] = ()
     if h.permission_hook == "codex" and _hook_install.needs_hook(allowed_tools, deny_tools, grants):
         exe = shlex.split(command) if command else [h.command[0]]
         try:
             hook_argv = await _hook_install.codex_hook_flags(
-                exe, _hook_install.hook_argv(h.id), Path(cwd)
+                exe, _hook_install.hook_argv(h.id, sandbox), Path(cwd)
             )
         except _hook_install.CodexTrustError as exc:
             # Never launched unenforced, never with every hook trusted.

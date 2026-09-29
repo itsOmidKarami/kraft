@@ -2,6 +2,7 @@
 (Kraft-4in7z). answer_hook never raises: a failure is no opinion, or deny
 when the launch installed the hook --fail-closed."""
 
+import asyncio
 import json
 
 import pytest
@@ -246,6 +247,21 @@ def test_codex_s_own_background_agents_are_not_asked(worktree, fail_closed):
         permission_mode="bypassPermissions",
     )
     assert (out, seen) == (("{}", 0), [])
+
+
+def test_a_sandboxed_codex_s_home_is_not_exempt(worktree):
+    """Answered in the daemon for a container, the payload's cwd is a
+    container path this process's codex home says nothing about: asked,
+    like any other call (errs restrictive)."""
+    seen = []
+    stdin = json.dumps({**CODEX_BASH, "cwd": str(worktree.parent / "codex-home/memories")})
+    out = asyncio.run(
+        ph.answer(
+            "codex", stdin, CODEX_NAMES, fail_closed=False, ask=_asker("deny", seen), sandboxed=True
+        )
+    )
+    assert len(seen) == 1
+    assert json.loads(out[0])["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_codex_calls_anywhere_but_codex_s_home_are_asked(worktree, tmp_path):

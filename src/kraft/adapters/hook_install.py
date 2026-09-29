@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from kraft.worker import shim as _shim
+
 _REL = ".cursor/hooks.json"
 _EXCLUDE_LINE = f"/{_REL}"
 #: On its own line: gitignore has no trailing comments, a `# ...` after a
@@ -44,7 +46,12 @@ def needs_hook(allowed_tools, deny_tools, grants) -> bool:
 FAIL_CLOSED_ENV = "KRAFT_PERMISSION_FAIL_CLOSED"
 
 
-def hook_argv(harness_id: str) -> list[str]:
+def hook_argv(harness_id: str, sandbox: dict | None = None) -> list[str]:
+    """The hook's command. In a sandbox under `network:`, the `kraft` shim at
+    its fixed container path, answered by the daemon through the session's
+    channel: never the host's interpreter, which the container has not got."""
+    if sandbox and sandbox.get("network"):
+        return [f"{_shim.CONTAINER_DIR}/kraft", "admin", "permission-hook", harness_id]
     return [sys.executable, "-m", "kraft", "admin", "permission-hook", harness_id]
 
 

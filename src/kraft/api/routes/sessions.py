@@ -302,6 +302,7 @@ async def permission_hook(sid: str, body: HookCall, request: Request):
         provider.tool_names if provider is not None else {},
         fail_closed=fail_closed,
         ask=ask,
+        sandboxed=True,
     )
     return {"body": out, "code": code}
 

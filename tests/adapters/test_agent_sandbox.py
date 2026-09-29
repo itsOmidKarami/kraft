@@ -19,10 +19,12 @@ DOCKER = {"kind": "docker", "image": "x"}
     ],
     ids=["deny", "allowlist"],
 )
-def test_a_hook_enforced_policy_is_refused_in_a_sandbox(run, tmp_path, harness, policy):
-    """The hook is a host command calling Kraft's local API; in a container it
-    crashes, and a crashed hook lets the call through."""
-    with pytest.raises(LaunchRefused, match="cannot run inside a sandbox"):
+def test_a_hook_enforced_policy_is_refused_in_a_sandbox_without_network(
+    run, tmp_path, harness, policy
+):
+    """The hook reaches Kraft only through the session's channel; without one
+    it crashes, and a crashed hook lets the call through. `network:` is the fix."""
+    with pytest.raises(LaunchRefused, match="cannot run inside a sandbox without `network:`"):
         run(
             harness=harness,
             command=harness,

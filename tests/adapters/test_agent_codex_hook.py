@@ -78,3 +78,12 @@ def test_a_codex_launch_that_must_deny_web_search_is_refused(run, tmp_path, poli
     """Codex's web search runs on OpenAI's side; its hook never sees it."""
     with pytest.raises(LaunchRefused, match="WebSearch"):
         _codex(run, tmp_path, **policy)
+
+
+def test_a_sandboxed_codex_under_network_hooks_through_the_shim(run, tmp_path):
+    """Its channel is the hook's route to Kraft: the launch runs, its hook the
+    shim at its fixed container path, never the host's interpreter."""
+    networked = {"kind": "docker", "image": "x", "network": {"runtime": {"allow": ["x.io"]}}}
+    hook, _ = _hook_flags(_codex(run, tmp_path, deny_tools=("Bash",), sandbox=networked)["cmd"])
+    assert '"/opt/kraft/bin/kraft admin permission-hook codex"' in hook
+    assert sys.executable not in hook
