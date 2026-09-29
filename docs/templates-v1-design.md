@@ -271,7 +271,7 @@ tasks:
     policy:
       # One run's running time. Every successful implementer run on record
       # finished inside 96 minutes (p99 73), so this binds only a run that has
-      # already gone wrong (Kraft-nxqft), and stops it for a person.
+      # already gone wrong, and stops it for a person.
       time_cap_minutes: 120
 
   verify_changed_scopes:
@@ -317,11 +317,11 @@ tasks:
     skill: kraft:fix-loop-judge
     inputs: [review_package]
 
-  # Kraft-3llig: rebase onto the item's base branch right before the draft MR
+  # Rebase onto the item's base branch right before the draft MR
   # opens, so it targets where the base actually is rather than wherever it
   # was when the worktree was cut. `scope: once` -- not `each_repository` --
   # deliberately: `builtins.mr_rebase` walks a workspace's changed members
-  # itself (Kraft-ei38e), each onto its own default branch, then the root,
+  # itself, each onto its own default branch, then the root,
   # the same way `open_draft_mr`'s forge handler walks every repository.
   mr_rebase:
     kind: builtin
@@ -537,7 +537,7 @@ nodes:
     artifact: plan
     reject_to: plan
 
-  # Kraft-oydes: the chain was chosen at intake, before the spec and plan
+  # The chain was chosen at intake, before the spec and plan
   # existed. Now both are approved, one agent reads them against the nodes
   # still to run and proposes a change set -- or, usually, none, which passes
   # the gate below without asking anyone.
@@ -579,7 +579,7 @@ nodes:
       - id: author
         extends: describe_mr
 
-  # Kraft-3llig: `steps`, not the `tasks` shorthand -- a `tasks` group is one
+  # `steps`, not the `tasks` shorthand -- a `tasks` group is one
   # concurrent group (`exec-node-orders-concurrent-task-groups`), and the
   # rebase must finish before `open` runs, not race it.
   - id: draft_merge_request
