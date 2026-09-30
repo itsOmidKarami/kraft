@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The shipped `default` chain (templates/chains/default.yaml), simplified for
-// an overview: one verb per step, and only the final review marked as a stop.
+// an overview: one verb per stage, and only the final review marked as a stop.
 // The real chain has more nodes and approval gates than this. A stop is
 // marked in words, not colour alone.
 const stages: { name: string, stop?: string }[] = [
@@ -16,7 +16,7 @@ const stages: { name: string, stop?: string }[] = [
 
 <template>
   <figure class="hero-mono stage-strip">
-    <div role="list" aria-label="The default chain's steps, in order" class="stage-strip__nodes">
+    <div role="list" aria-label="The default chain's stages, in order" class="stage-strip__nodes">
       <span class="stage-strip__prompt" aria-hidden="true">›</span>
       <template v-for="(stage, i) in stages" :key="stage.name">
         <span role="listitem" :class="{ 'stage-strip__stop': stage.stop }">
@@ -26,7 +26,7 @@ const stages: { name: string, stop?: string }[] = [
       </template>
     </div>
     <figcaption class="stage-strip__caption">
-      The default chain, simplified: some steps and approval gates are left out.
+      The default chain, simplified: some nodes and approval gates are left out.
     </figcaption>
   </figure>
 </template>

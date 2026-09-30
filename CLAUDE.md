@@ -41,8 +41,10 @@ item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
 ### The `kraft` command
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
-non-MCP agent gets the same surface; `item abandon` is the one subcommand with
-no tool. `--json` on any verb prints the raw API payload.
+non-MCP agent gets the same surface; `item abandon` is the one `item` verb with
+no tool. `--json` prints the raw API payload on every verb except the `admin`
+ones that manage the server process (`start`, `stop`, `restart`, the service
+verbs, `update`, `mcp`, `permission-hook`).
 
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
