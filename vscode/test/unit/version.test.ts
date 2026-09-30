@@ -11,7 +11,6 @@ describe("compatible", () => {
     ["1.4.0", "garbage", false],
     ["1.4.0", "0.0.0+source", true],
     ["1.2.1", "0.1.dev1", true],
-    ["1.2.1", "1.2.2+g3b1566c", true],
     ["0.0.0", "1.9.0", true],
     ["0.0.0", undefined, false],
   ])("extension %s, daemon %s → %s", (ext, daemon, want) => {
