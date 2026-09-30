@@ -42,7 +42,7 @@ from pydantic.alias_generators import to_camel
 
 from kraft.paths import RunDirs, default_run_dir
 from kraft.policy import HostPattern, SandboxPolicy
-from kraft.worker.backends import docker
+from kraft.worker.backends import docker, docker_forward
 from kraft.worker.ca import write_whole
 
 #: The upstream `docker/sandbox-kit-spec` release this reader follows (e502d26).
@@ -640,26 +640,57 @@ def _digest(ref: str) -> str:
     return digest
 
 
-async def _inspect(ref: str) -> dict:
-    answer = await docker.docker_ask("manifest", "inspect", ref, limit=MAX_MANIFEST)
+#: What podman (6.1) answers `manifest inspect` of a single manifest, which
+#: it reads only as an index.
+_SINGLE = "Treating single images as manifest lists is not implemented"
+#: A pull's bound: an image, not a manifest.
+PULL_TIMEOUT_S = 600
+
+
+async def _ask(*args: str, timeout: float | None = None) -> str:
+    """The CLI's stdout for `args`, or `KitRefused` quoting what it said."""
+    said = f"`{' '.join(args[:2])} {args[-1]}`"
+    answer = await docker.docker_ask(*args, timeout=timeout, limit=MAX_MANIFEST)
     if answer is None:
-        raise KitRefused(f"`manifest inspect {ref}` did not answer")
+        raise KitRefused(f"{said} did not answer")
     code, out, err = answer
     # First: past the limit the client was killed, and whether it had
     # exited 0 before the kill landed is only timing.
     if len(out) > MAX_MANIFEST:
-        raise KitRefused(f"`manifest inspect {ref}` answered over {MAX_MANIFEST} bytes")
+        raise KitRefused(f"{said} answered over {MAX_MANIFEST} bytes")
     if code != 0:
-        raise KitRefused(
-            f"`manifest inspect {ref}` failed: {(err or out).strip() or f'exit {code}'}"
-        )
+        raise KitRefused(f"{said} failed: {(err or out).strip() or f'exit {code}'}")
+    return out
+
+
+def _json_mapping(out: str, what: str, noun: str) -> dict:
     try:
-        manifest = json.loads(out)
+        value = json.loads(out)
     except (ValueError, RecursionError):
-        manifest = None
-    if not isinstance(manifest, dict):
-        raise KitRefused(f"`manifest inspect {ref}` answered no manifest")
-    return manifest
+        value = None
+    if not isinstance(value, dict):
+        raise KitRefused(f"{what} answered no {noun}")
+    return value
+
+
+async def _inspect(ref: str) -> dict | None:
+    """`ref`'s manifest, or None where the CLI reads only an index (podman)."""
+    try:
+        out = await _ask("manifest", "inspect", ref)
+    except KitRefused as exc:
+        if _SINGLE in str(exc):
+            return None
+        raise
+    return _json_mapping(out, f"`manifest inspect {ref}`", "manifest")
+
+
+async def _pulled_annotation(ref: str) -> str | None:
+    """A single manifest's annotation where the CLI will not inspect one
+    (spec §9.2): the image pulled by digest, whose annotations are its
+    manifest's."""
+    await _ask("pull", "-q", ref, timeout=PULL_TIMEOUT_S)
+    out = await _ask("image", "inspect", "--format", "{{json .Annotations}}", ref)
+    return _annotation({"annotations": _json_mapping(out, f"`image inspect {ref}`", "annotations")})
 
 
 def _mapping(value: object, what: str) -> dict:
@@ -679,12 +710,15 @@ async def fetch(ref: str) -> Fetched:
     inspect` drops index annotations) falls back to a platform manifest, by
     digest, as SPEC §9.3 makes mandatory: the first that is not an
     attestation (`unknown` os), since the frontend annotates every platform's
-    alike. Kraft relies on the CLI's own by-digest verification of what the
-    registry served, and does not check the digest again."""
+    alike. A CLI that will not inspect a single manifest (podman) has the
+    image pulled by digest and its annotations read. Kraft relies on the
+    CLI's own by-digest verification of what the registry served, and does
+    not check the digest again."""
     manifest = _digest(ref)
     top = await _inspect(ref)
-    text = _annotation(top)
-    if text is None:
+    if top is None:
+        text = await _pulled_annotation(ref)
+    elif (text := _annotation(top)) is None:
         repository = ref.rpartition("@")[0]
         for entry in top.get("manifests") or ():
             entry = _mapping(entry, "an index entry")
@@ -696,7 +730,12 @@ async def fetch(ref: str) -> Fetched:
             manifest = entry.get("digest")
             if not isinstance(manifest, str):
                 raise KitRefused(f"{ref}'s index names a platform manifest with no digest")
-            text = _annotation(await _inspect(f"{repository}@{manifest}"))
+            platform = await _inspect(f"{repository}@{manifest}")
+            text = (
+                _annotation(platform)
+                if platform is not None
+                else await _pulled_annotation(f"{repository}@{manifest}")
+            )
             break
     if text is None:
         raise KitRefused(f"{ref} is not a Kit: no {ANNOTATION} annotation")
@@ -735,3 +774,26 @@ async def ensure(ref: str) -> Fetched:
         path, json.dumps({"manifest": fetched.manifest, "descriptor": fetched.text}).encode(), 0o644
     )
     return fetched
+
+
+# --- resolve ---------------------------------------------------------------------------
+
+
+def bindings() -> Mapping[str, str]:
+    """`sandbox.yaml`'s `credentials:`, each service's daemon variable.
+    Raises `ConfigError` for a `sandbox.yaml` that does not parse."""
+    return docker_forward._sandbox_host(os.environ).credentials
+
+
+def lowered(ref: str) -> Lowered | None:
+    """`ref` lowered from the cache alone, or None when it was never
+    fetched. `KitRefused` and `ConfigError` as `lower` and `bindings`."""
+    hit = cached(ref)
+    return None if hit is None else lower(ref, hit.descriptor(), bindings())
+
+
+async def resolve(ref: str) -> tuple[Fetched, Lowered]:
+    """`ref` fetched when it is not cached, then lowered: what the walk,
+    dispatch and doctor ask before a Kit may run."""
+    fetched = await ensure(ref)
+    return fetched, lower(ref, fetched.descriptor(), bindings())

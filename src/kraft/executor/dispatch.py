@@ -63,6 +63,7 @@ from kraft.templates.models import (
     SubprocessTask,
     TaskScope,
 )
+from kraft.worker import kit as _kit
 from kraft.worker import sandbox as _sandbox
 from kraft.worker import steering as _steering
 
@@ -329,6 +330,64 @@ class SandboxUnresolved(RuntimeError):
 
 
 def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
+    """`_item_policy` as every launch runs it: a `kind: kit` lowered from
+    the cache to the `kind: docker` policy that runs it, plus `kit: <ref>`
+    (spec §9.4). A Kit never fetched (`ensure_kit`) or refused is
+    `SandboxUnresolved` naming it, so nothing launches."""
+    policy = _item_policy(row, launch)
+    if policy is None or policy.kind != "kit":
+        return policy.model_dump() if policy is not None else None
+    try:
+        lowered = _kit.lowered(policy.kit)
+    except (_kit.KitRefused, _config.ConfigError) as exc:
+        raise SandboxUnresolved(f"the Kit {policy.kit} cannot be used: {exc}") from exc
+    if lowered is None:
+        raise SandboxUnresolved(
+            f"the Kit {policy.kit} has not been fetched here yet; retry the item to fetch it"
+        )
+    return {**lowered.policy.model_dump(), "kit": policy.kit}
+
+
+async def ensure_kit(row, launch: LaunchContext | None) -> tuple[_kit.Fetched, _kit.Lowered] | None:
+    """Fetch and lower the item's Kit, if it runs in one, before anything
+    reads its sandbox: the walk before the worktree, dispatch before a
+    launch (spec §9.5). `SandboxUnresolved` naming the Kit and why."""
+    policy = _item_policy(row, launch)
+    if policy is None or policy.kind != "kit":
+        return None
+    try:
+        return await _kit.resolve(policy.kit)
+    except (_kit.KitRefused, _config.ConfigError, OSError) as exc:
+        raise SandboxUnresolved(f"the Kit {policy.kit} cannot be used: {exc}") from exc
+
+
+async def record_kit(db, work_item_id: str, fetched: _kit.Fetched, lowered: _kit.Lowered) -> None:
+    """`sandbox_kit_resolved`, once per item and Kit: what it was read from,
+    and what of it Kraft skipped or ignored (SPEC §7.3's record)."""
+
+    def write(conn) -> None:
+        if conn.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = 'sandbox_kit_resolved' "
+            "AND json_extract(payload, '$.kit') = ?",
+            (work_item_id, lowered.kit),
+        ).fetchone():
+            return
+        events.append(
+            conn,
+            work_item_id,
+            "sandbox_kit_resolved",
+            {
+                "kit": lowered.kit,
+                "manifest": fetched.manifest,
+                "skipped": list(lowered.skipped),
+                "ignored": list(lowered.ignored),
+            },
+        )
+
+    await db.write(write)
+
+
+def _item_policy(row, launch: LaunchContext | None) -> _policy.SandboxPolicy | None:
     """The sandbox every project-controlled launch of this item runs in, or
     None for an item nothing sandboxes -- the one resolution (Ruling 189).
     Every task, recovery, judge, escalation turn, gate review, test scope,
@@ -346,7 +405,7 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
     try:
         frozen = snapshot.item_sandbox() if snapshot is not None else None
         if frozen is not None:
-            return frozen.model_dump()
+            return frozen
         # Every repository the item launches against, members included: a
         # member's live sandbox wraps the root's runs too.
         entries = [launch.repo_entry, *launch.repositories.values()] if launch else []
@@ -359,7 +418,7 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
             f"{[s.model_dump() for s in live]!r} in repos.yaml: "
             "a sandbox wraps the whole work item, so they must agree"
         )
-    return live[0].model_dump() if live else None
+    return live[0] if live else None
 
 
 def frozen_steering(row) -> dict:
@@ -653,6 +712,14 @@ async def _dispatch_task(
         round=round,
         head_sha=_config.git_read(Path(worktree), "rev-parse", "HEAD"),
     )
+    # A Kit fetched again if its cache went (a retry), before anything below
+    # reads the sandbox; a Kit that cannot be used launches nothing.
+    try:
+        resolved = await ensure_kit(work_item_row, launch)
+    except SandboxUnresolved as exc:
+        return await config_error_session(db, run_dirs, common, f"{task.path}: {exc}\n")
+    if resolved is not None:
+        await record_kit(db, work_item_row["id"], *resolved)
     # Before any task runs host git here: a sandboxed worker earlier in this
     # walk may have left a repository of its own in the worktree (Kraft-nx4id).
     # `rev-parse` above reads HEAD alone and never looks at a gitlink.

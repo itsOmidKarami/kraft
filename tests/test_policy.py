@@ -749,13 +749,20 @@ def test_the_meet_of_repository_layers_is_the_tightest_of_each_field():
     assert policy.TemplatePolicyOverride.meet([]) == policy.TemplatePolicyOverride()
 
 
-def test_repository_layers_with_two_different_sandboxes_have_no_meet():
+_KIT = {"kind": "kit", "runtime": "docker", "kit": "k@sha256:" + "a" * 64}
+
+
+@pytest.mark.parametrize(
+    ("one", "other"),
+    [(_SANDBOX, {**_SANDBOX, "image": "other"}), (_KIT, {**_KIT, "kit": "k@sha256:" + "b" * 64})],
+    ids=["images", "kits"],
+)
+def test_repository_layers_with_two_different_sandboxes_have_no_meet(one, other):
     """No process can run in two containers; which one wins would be a guess."""
-    other = {**_SANDBOX, "image": "other"}
     with pytest.raises(policy.PolicyError, match="sandbox") as refused:
         policy.TemplatePolicyOverride.meet(
             [
-                policy.TemplatePolicyOverride(sandbox=_SANDBOX),
+                policy.TemplatePolicyOverride(sandbox=one),
                 policy.TemplatePolicyOverride(sandbox=other),
             ]
         )
