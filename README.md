@@ -33,7 +33,7 @@
 | src/kraft/api/routes/check.py                |       20 |        0 |    100% |           |
 | src/kraft/api/routes/gates.py                |      133 |        9 |     93% |109, 112, 120, 299, 321, 354-355, 380-381 |
 | src/kraft/api/routes/harnesses.py            |       86 |        1 |     99% |       204 |
-| src/kraft/api/routes/lifecycle.py            |      628 |       35 |     94% |144, 147-148, 153-154, 239-240, 262, 293, 325, 343, 467, 563-564, 574, 719-720, 773, 816, 821, 852, 861, 920, 1015-1016, 1241, 1271-1272, 1335, 1355-1356, 1478-1479, 1518, 1528 |
+| src/kraft/api/routes/lifecycle.py            |      628 |       35 |     94% |144, 147-148, 153-154, 239-240, 262, 293, 325, 343, 467, 563-564, 574, 719-720, 773, 816, 821, 852, 861, 920, 1015-1016, 1243, 1273-1274, 1337, 1357-1358, 1480-1481, 1520, 1530 |
 | src/kraft/api/routes/repos.py                |      180 |        6 |     97% |85-89, 126, 145, 282-283 |
 | src/kraft/api/routes/review.py               |      291 |       40 |     86% |46, 51, 83, 108, 142-145, 148, 150, 160, 171-172, 185-190, 195-211, 216-219, 227, 336-337, 382-383, 452, 484 |
 | src/kraft/api/routes/search.py               |      117 |       14 |     88% |47-48, 74-77, 80, 107-111, 134, 140-141, 171 |
@@ -124,7 +124,7 @@
 | src/kraft/templates/environment.py           |      247 |        2 |     99% |  468, 470 |
 | src/kraft/templates/forks.py                 |      100 |        0 |    100% |           |
 | src/kraft/templates/library.py               |      359 |        5 |     99% |192, 194, 206, 213, 574 |
-| src/kraft/templates/models.py                |      673 |        8 |     99% |97, 100, 482, 572, 659, 1230-1231, 1493 |
+| src/kraft/templates/models.py                |      673 |        8 |     99% |97, 100, 482, 572, 659, 1230-1231, 1492 |
 | src/kraft/templates/positions.py             |       57 |        1 |     98% |        54 |
 | src/kraft/templates/retry.py                 |      100 |       11 |     89% |183, 185-191, 193-194, 201 |
 | src/kraft/templates/revision.py              |      248 |        8 |     97% |216, 249, 298, 448, 489-490, 492, 506 |
