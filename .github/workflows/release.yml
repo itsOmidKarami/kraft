@@ -326,3 +326,32 @@ jobs:
             Formula/kraft.rb
           git -c user.email=ci@kraft.invalid -c user.name="Kraft CI" commit -am "kraft ${TAG#v}"
           git push
+
+      - name: check PyPI serves this release
+        # v1.2.0 reached GitHub but never PyPI, and nothing said so. A publish
+        # step that "passed" is not the same as the version being installable.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+        run: |
+          for _ in $(seq 60); do
+            curl -sfo /dev/null "https://pypi.org/pypi/kraft-sdlc/${TAG#v}/json" && exit 0
+            sleep 10
+          done
+          echo "::error::kraft-sdlc ${TAG#v} is not on PyPI after 10 minutes"
+          exit 1
+
+      - name: check the Marketplace lists this release
+        # Warns only: the Marketplace can take a while to index a publish.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
+        env:
+          TAG: ${{ steps.impact.outputs.tag }}
+        run: |
+          for _ in $(seq 30); do
+            curl -sf https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery \
+              -H 'Content-Type: application/json' -H 'Accept: application/json;api-version=3.0-preview.1' \
+              -d '{"filters":[{"criteria":[{"filterType":7,"value":"kraft-sdlc.kraft"}]}],"flags":1}' \
+              | jq -e --arg v "${TAG#v}" 'any(.results[0].extensions[0].versions[]?; .version == $v)' >/dev/null && exit 0
+            sleep 10
+          done
+          echo "::warning::kraft-sdlc.kraft ${TAG#v} is not on the Marketplace after 5 minutes; check it by hand"
