@@ -68,7 +68,7 @@ def _dir(run_dirs) -> Path:
     return directory
 
 
-def _write(path: Path, data: bytes, mode: int) -> None:
+def write_whole(path: Path, data: bytes, mode: int) -> None:
     """`data` at `path` whole or not at all: written to a file of its own,
     created `mode` (a key's 0600 never readable by anyone else even for an
     instant), then renamed over `path`. A reader never sees half a file,
@@ -89,11 +89,11 @@ def _write_key(path: Path, key: ec.EllipticCurvePrivateKey) -> None:
     pem = key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
     )
-    _write(path, pem, 0o600)
+    write_whole(path, pem, 0o600)
 
 
 def _write_cert(path: Path, cert: x509.Certificate) -> None:
-    _write(path, cert.public_bytes(serialization.Encoding.PEM), 0o666)
+    write_whole(path, cert.public_bytes(serialization.Encoding.PEM), 0o666)
 
 
 def _name(cn: str) -> x509.Name:

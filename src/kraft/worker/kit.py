@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -44,7 +43,7 @@ from pydantic.alias_generators import to_camel
 from kraft.paths import RunDirs, default_run_dir
 from kraft.policy import HostPattern, SandboxPolicy
 from kraft.worker.backends import docker
-from kraft.worker.ca import _write
+from kraft.worker.ca import write_whole
 
 #: The upstream `docker/sandbox-kit-spec` release this reader follows (e502d26).
 SPEC_TAG = "v3.0.0-m.7"
@@ -53,6 +52,8 @@ ANNOTATION = "vnd.docker.sandbox.kit.descriptor"
 #: Kraft's own limit, the number SPEC §9.4 makes a publish-time error;
 #: upstream sets no consumer-side one.
 MAX_DESCRIPTOR = 512 * 1024
+#: The most `manifest inspect` may print: a registry's own ceiling (~4 MB).
+MAX_MANIFEST = 4 * 1024 * 1024
 
 _NS = "com.docker.sandbox/"
 NETWORK = _NS + "network-policy@1"
@@ -148,13 +149,6 @@ class CredentialConfig(_Strict):
     def _one_or_a_list(cls, value: object) -> object:
         return [value] if isinstance(value, str) else value
 
-    @field_validator("phase")
-    @classmethod
-    def _distinct(cls, value: list[str]) -> list[str]:
-        if len(set(value)) != len(value):
-            raise ValueError(f"phase {value} lists a phase twice")
-        return value
-
     @model_validator(mode="after")
     def _presents_somehow(self) -> CredentialConfig:
         if self.api_key is None and self.oauth is None:
@@ -169,22 +163,14 @@ class ResourcesConfig(_Strict):
 
 
 class SessionsConfig(_Strict):
-    """agent-sessions@1: checked as upstream checks it, then not applied."""
+    """agent-sessions@1: its keys checked, nothing applied. Upstream's verb
+    and placeholder rules are left out: the harness drives the CLI, so a
+    malformed verb here reaches nothing."""
 
     prompt: list[str] | None = None
     resume: list[str] | None = None
     continue_: list[str] | None = Field(default=None, alias="continue")
     list_: str | list[str] | None = Field(default=None, alias="list")
-
-    @model_validator(mode="after")
-    def _says_something(self) -> SessionsConfig:
-        if not (self.prompt or self.resume or self.continue_ or self.list_):
-            raise ValueError("agent-sessions declares no verbs")
-        if self.prompt and not any("{{.Prompt}}" in a for a in self.prompt):
-            raise ValueError("prompt must reference {{.Prompt}}")
-        if self.resume and not any("{{.SessionID}}" in a for a in self.resume):
-            raise ValueError("resume must reference {{.SessionID}}")
-        return self
 
 
 # --- capability items ------------------------------------------------------------------
@@ -398,7 +384,14 @@ def _json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 class _StrictYaml(yaml.SafeLoader):
-    """A SafeLoader that refuses a mapping stating one key twice."""
+    """A SafeLoader that refuses a mapping stating one key twice, and any
+    alias: a few hundred bytes of nested aliases expand to billions of nodes,
+    and a descriptor is decoded again on every read."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise KitRefused("the YAML descriptor uses an alias (`*name`); Kraft reads none")
+        return super().compose_node(parent, index)
 
     def construct_mapping(self, node, deep=False):
         keys = [self.construct_object(k, deep=True) for k, _ in node.value]
@@ -411,6 +404,14 @@ def _path(loc: tuple) -> str:
     return ".".join(str(p) for p in loc if p not in _TAG_NAMES)
 
 
+def _explained(exc: ValidationError) -> str:
+    return "; ".join(
+        # A rule on the whole descriptor names its own path.
+        ": ".join(filter(None, (_path(e["loc"]), e["msg"].removeprefix("Value error, "))))
+        for e in exc.errors()
+    )
+
+
 def decode(text: str) -> Descriptor:
     """The annotation's text as a `Descriptor`, or `KitRefused`. Compact
     JSON is the published form; only text that is not JSON at all is read
@@ -420,22 +421,18 @@ def decode(text: str) -> Descriptor:
     if len(text.encode()) > MAX_DESCRIPTOR:
         raise KitRefused(f"the descriptor is over {MAX_DESCRIPTOR // 1024} KiB")
     try:
-        data = json.loads(text, object_pairs_hook=_json_pairs)
-    except json.JSONDecodeError:
         try:
-            data = yaml.load(text, _StrictYaml)  # noqa: S506 -- a SafeLoader
-        except yaml.YAMLError as exc:
-            raise KitRefused(f"the descriptor is neither JSON nor YAML: {exc}") from exc
-    try:
+            data = json.loads(text, object_pairs_hook=_json_pairs)
+        except json.JSONDecodeError:
+            try:
+                data = yaml.load(text, _StrictYaml)  # noqa: S506 -- a SafeLoader
+            except yaml.YAMLError as exc:
+                raise KitRefused(f"the descriptor is neither JSON nor YAML: {exc}") from exc
         return Descriptor.model_validate(data)
     except ValidationError as exc:
-        raise KitRefused(
-            "; ".join(
-                # A rule on the whole descriptor names its own path.
-                ": ".join(filter(None, (_path(e["loc"]), e["msg"].removeprefix("Value error, "))))
-                for e in exc.errors()
-            )
-        ) from exc
+        raise KitRefused(_explained(exc)) from exc
+    except RecursionError as exc:
+        raise KitRefused("the descriptor is nested too deeply") from exc
 
 
 # --- claims ----------------------------------------------------------------------------
@@ -605,7 +602,7 @@ def lower(ref: str, descriptor: Descriptor, bindings: Mapping[str, str]) -> Lowe
                     k: v
                     for k, v in {
                         # SPEC: unset, and so 0, is no constraint.
-                        "cpu": float(resources.cpu) if resources and resources.cpu else None,
+                        "cpu": resources.cpu or None if resources else None,
                         "memory": _memory(resources.memory)
                         if resources and resources.memory
                         else None,
@@ -615,7 +612,7 @@ def lower(ref: str, descriptor: Descriptor, bindings: Mapping[str, str]) -> Lowe
             }
         )
     except ValidationError as exc:
-        raise KitRefused(f"lowers to a sandbox Kraft refuses: {exc}") from exc
+        raise KitRefused(f"lowers to a sandbox Kraft refuses: {_explained(exc)}") from exc
     return Lowered(policy, ref, tuple(skipped), found.ignored)
 
 
@@ -643,16 +640,8 @@ def _digest(ref: str) -> str:
     return digest
 
 
-def _platform() -> tuple[str, str]:
-    """The runtime's platform as an OCI index names it.
-    ponytail: the host's own architecture, which Docker Desktop's and podman
-    machine's VMs share; a remote daemon of another one would need asking."""
-    arch = platform.machine().lower()
-    return "linux", {"x86_64": "amd64", "aarch64": "arm64"}.get(arch, arch)
-
-
 async def _inspect(ref: str) -> dict:
-    answer = await docker.docker_ask("manifest", "inspect", ref)
+    answer = await docker.docker_ask("manifest", "inspect", ref, limit=MAX_MANIFEST)
     if answer is None:
         raise KitRefused(f"`manifest inspect {ref}` did not answer")
     code, out, err = answer
@@ -660,37 +649,53 @@ async def _inspect(ref: str) -> dict:
         raise KitRefused(
             f"`manifest inspect {ref}` failed: {(err or out).strip() or f'exit {code}'}"
         )
+    if len(out) > MAX_MANIFEST:
+        raise KitRefused(f"`manifest inspect {ref}` answered over {MAX_MANIFEST} bytes")
     try:
         manifest = json.loads(out)
-    except ValueError:
+    except (ValueError, RecursionError):
         manifest = None
     if not isinstance(manifest, dict):
         raise KitRefused(f"`manifest inspect {ref}` answered no manifest")
     return manifest
 
 
+def _mapping(value: object, what: str) -> dict:
+    if not isinstance(value, dict):
+        raise KitRefused(f"{what} is not a mapping: {str(value)[:80]!r}")
+    return value
+
+
 def _annotation(manifest: dict) -> str | None:
-    text = (manifest.get("annotations") or {}).get(ANNOTATION)
+    text = _mapping(manifest.get("annotations") or {}, "a manifest's annotations").get(ANNOTATION)
     return text if isinstance(text, str) else None
 
 
 async def fetch(ref: str) -> Fetched:
     """The descriptor on `ref`'s index or manifest, through the runtime's
     own CLI and registry login. An index without it (docker 29's `manifest
-    inspect` drops index annotations) falls back to the manifest for the
-    runtime's platform, by digest, as SPEC §9.3 makes mandatory."""
+    inspect` drops index annotations) falls back to a platform manifest, by
+    digest, as SPEC §9.3 makes mandatory: the first that is not an
+    attestation (`unknown` os), since the frontend annotates every platform's
+    alike. Kraft relies on the CLI's own by-digest verification of what the
+    registry served, and does not check the digest again."""
     manifest = _digest(ref)
     top = await _inspect(ref)
     text = _annotation(top)
     if text is None:
-        os_, arch = _platform()
         repository = ref.rpartition("@")[0]
         for entry in top.get("manifests") or ():
-            given = entry.get("platform") or {}
-            if (given.get("os"), given.get("architecture")) == (os_, arch):
-                manifest = entry.get("digest", "")
-                text = _annotation(await _inspect(f"{repository}@{manifest}"))
-                break
+            entry = _mapping(entry, "an index entry")
+            if _mapping(entry.get("platform") or {}, "an index entry's platform").get("os") in (
+                None,
+                "unknown",
+            ):
+                continue
+            manifest = entry.get("digest")
+            if not isinstance(manifest, str):
+                raise KitRefused(f"{ref}'s index names a platform manifest with no digest")
+            text = _annotation(await _inspect(f"{repository}@{manifest}"))
+            break
     if text is None:
         raise KitRefused(f"{ref} is not a Kit: no {ANNOTATION} annotation")
     return Fetched(ref, manifest, text)
@@ -704,11 +709,16 @@ def _cache(ref: str) -> Path:
 def cached(ref: str) -> Fetched | None:
     """`ref`'s descriptor as `ensure` stored it, or None. Never stale: the
     key is the digest `ref` pins."""
+    # Anything unreadable is a miss, so `ensure` fetches it again rather
+    # than keep a corrupted entry for good.
     try:
         stored = json.loads(_cache(ref).read_text())
-    except FileNotFoundError:
+        manifest, text = stored["manifest"], stored["descriptor"]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
-    return Fetched(ref, stored["manifest"], stored["descriptor"])
+    if not (isinstance(manifest, str) and isinstance(text, str)):
+        return None
+    return Fetched(ref, manifest, text)
 
 
 async def ensure(ref: str) -> Fetched:
@@ -718,7 +728,7 @@ async def ensure(ref: str) -> Fetched:
     fetched = await fetch(ref)
     path = _cache(ref)
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write(
+    write_whole(
         path, json.dumps({"manifest": fetched.manifest, "descriptor": fetched.text}).encode(), 0o644
     )
     return fetched

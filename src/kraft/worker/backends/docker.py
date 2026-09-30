@@ -15,6 +15,7 @@ the design this implements.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -1122,14 +1123,22 @@ async def docker_call(
     return None if answer is None else answer[:2]
 
 
-async def docker_ask(*args: str, timeout: float | None = None) -> tuple[int, str, str] | None:
+async def docker_ask(
+    *args: str, timeout: float | None = None, limit: int | None = None
+) -> tuple[int, str, str] | None:
     """`docker_call` keeping stderr too, `(returncode, stdout, stderr)`: for
-    a refusal that quotes what the CLI said (`kraft.worker.kit`)."""
-    return await _docker(args, timeout, None, subprocess.PIPE)
+    a refusal that quotes what the CLI said (`kraft.worker.kit`). Past
+    `limit` bytes of stdout the client is killed and stdout cut at
+    `limit + 1`, so a caller sees it overflowed without holding it all."""
+    return await _docker(args, timeout, None, subprocess.PIPE, limit)
 
 
 async def _docker(
-    args: tuple[str, ...], timeout: float | None, env: dict[str, str] | None, stderr: int
+    args: tuple[str, ...],
+    timeout: float | None,
+    env: dict[str, str] | None,
+    stderr: int,
+    limit: int | None = None,
 ) -> tuple[int, str, str] | None:
     try:
         cli = (await asyncio.to_thread(runtime)).cli
@@ -1148,8 +1157,25 @@ async def _docker(
         )
     except OSError:
         return None
+
+    async def bounded() -> tuple[bytes, bytes]:
+        out = bytearray()
+
+        async def read_out() -> None:
+            while len(out) <= limit and (chunk := await proc.stdout.read(65536)):
+                out.extend(chunk)
+            if len(out) > limit:
+                with contextlib.suppress(ProcessLookupError):  # it finished meanwhile
+                    proc.kill()
+
+        _, err = await asyncio.gather(read_out(), proc.stderr.read())
+        await proc.wait()
+        return bytes(out[: limit + 1]), err
+
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout or DOCKER_CALL_TIMEOUT_S)
+        out, err = await asyncio.wait_for(
+            proc.communicate() if limit is None else bounded(), timeout or DOCKER_CALL_TIMEOUT_S
+        )
     except TimeoutError:
         proc.kill()
         await proc.wait()

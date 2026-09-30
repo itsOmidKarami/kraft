@@ -104,6 +104,15 @@ def test_a_workload_kit_claims_what_it_declares(fixture):
         ),
         (_kit().replace('"3"', '"2"', 1), r"^schemaVersion: Input should be '3'"),
         (_kit(description="x" * kit.MAX_DESCRIPTOR), "over 512 KiB"),
+        ("schemaVersion: '3'\nkind: &k workload\ndisplayName: *k\n", "uses an alias"),
+        ("[" * 100_000, "nested too deeply"),
+        (_kit({"type": kit.CREDENTIAL, "config": {"service": "x", "phase": "runtime"}}), "neither"),
+        (_kit({"type": "com.docker.sandbox/sbx@1", "config": {}}), "sbx@1 takes no config"),
+        (_kit(*[{"type": "example.com/thing@1", "optional": True}] * 2), "repeats capabilities.1"),
+        (
+            _kit({"type": "com.docker.sandbox/network-policy@2", "optional": True}),
+            "network-policy@1 and network-policy@2",
+        ),
     ],
     ids=[
         "unknown-top-level-key",
@@ -117,6 +126,12 @@ def test_a_workload_kit_claims_what_it_declares(fixture):
         "inject-domain-not-allowed",
         "schema-version-2",
         "oversized",
+        "yaml-alias",
+        "nested-too-deep",
+        "credential-with-neither-apikey-nor-oauth",
+        "config-on-a-configless-type",
+        "exact-duplicate",
+        "network-policy-1-and-2",
     ],
 )
 def test_a_descriptor_decodes_strictly(text, refusal):
@@ -178,6 +193,12 @@ def test_a_descriptor_decodes_strictly(text, refusal):
             ),
             r"capabilities\.1\.config\.p holds",
         ),
+        (
+            _kit(
+                {"type": "example.com/thing@1", "optional": True, "config": {"${{kit.args.k}}": 1}}
+            ),
+            r"capabilities\.1\.config\.\$\{\{kit\.args\.k\}\} holds",
+        ),
         (_kit(args={"level": {"default": "1", "env": "LEVEL"}}), "arg 'level' exports LEVEL"),
         (
             _kit({"type": kit.RESOURCES, "config": {"cpu": 1}}, network=False),
@@ -198,6 +219,7 @@ def test_a_descriptor_decodes_strictly(text, refusal):
         "group",
         "arg-reference",
         "env-reference",
+        "reference-in-a-key",
         "args-with-env-export",
         "no-network-policy",
     ],
