@@ -27,6 +27,13 @@ describe("timelineHelpers: judge_verdict", () => {
   });
 });
 
+describe("timelineHelpers: spend_unpriced", () => {
+  it("says why the dollar caps cannot count a session's spend", () => {
+    const e = ev({ type: "spend_unpriced", payload: { message: "codex reported no cost" } });
+    expect(detailOf(e)).toBe("codex reported no cost");
+  });
+});
+
 describe("timelineHelpers: plan_progress", () => {
   it("titles a plan_progress event with the plan task's own title, no bare 'task' noun", () => {
     const e = ev({ type: "plan_progress", payload: { node_id: "implementation", task: 3, total: 6, title: "wire the thing" } });
