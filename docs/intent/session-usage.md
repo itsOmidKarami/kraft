@@ -29,6 +29,16 @@ WHILE a work item has a running session with an estimated cost, the system SHALL
 enforced-by: tests/store/test_budget.py::test_budget_spend_includes_a_running_sessions_estimate, tests/executor/test_budget_caps.py::test_a_running_sessions_estimate_trips_a_usd_cap
 origin: src/kraft/store/budget.py §budget_spend, src/kraft/caps.py §budget_breach (Kraft-wz83s)
 
+## REQ a-session-is-priced-on-its-launch-model
+WHEN an agent session's output names no model, or only a display name ("Auto"), the system SHALL price it, and record it, on the model Kraft launched it with, and SHALL NOT replace a model the output did name.
+enforced-by: tests/store/test_sessions.py::test_a_session_is_priced_on_its_launch_model_when_its_output_names_none[no-model], tests/store/test_sessions.py::test_a_session_is_priced_on_its_launch_model_when_its_output_names_none[display-name], tests/store/test_sessions.py::test_a_session_is_priced_on_its_launch_model_when_its_output_names_none[reported], tests/adapters/test_agent_launch_model.py::test_an_agent_launch_hands_its_model_to_the_session, tests/adapters/test_agent_launch_model.py::test_run_task_records_the_launch_model_on_the_row, tests/executor/test_budget_caps.py::test_a_codex_session_counts_toward_the_item_cap_at_its_launch_models_estimate
+origin: src/kraft/store/sessions.py §_with_launch_model (Kraft-9efnk.10, option A2)
+
+## REQ unpriced-spend-warns-and-never-stops-the-instance-caps
+IF a finished session spent tokens with no reported cost and no `prices.json` rate for its model, THEN `budget.work_item_usd` and `budget.daily_usd` SHALL count it as $0 and SHALL NOT stop for it, the system SHALL append one `spend_unpriced` event per work item saying so, and `kraft admin doctor` SHALL warn for each no-cost harness the chains launch on an unpriced model or none. A per-scope `budget_usd` keeps refusing on it (`scope-budgets-cap-their-own-spend`).
+enforced-by: tests/executor/test_budget_caps.py::test_unpriced_spend_warns_once_and_never_stops_the_item_or_daily_cap, tests/test_agent_profiles.py::test_doctor_warns_per_no_cost_harness_launched_on_an_unpriced_model
+origin: src/kraft/store/sessions.py §_warn_unpriced, src/kraft/doctor.py §_cost_checks (Kraft-9efnk.10, option A2)
+
 ## REQ rollups-expose-that-a-total-includes-an-estimate
 WHEN any session folded into a usage rollup is still running on an estimated cost, the system SHALL mark that rollup's total `cost_estimated`, distinct from `cost_complete`, so a reader can render the figure as an estimate rather than a settled total.
 enforced-by: tests/test_usage.py::test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess
