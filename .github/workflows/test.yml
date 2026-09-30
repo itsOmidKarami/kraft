@@ -131,6 +131,29 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  test-gate:
+    # One check named exactly `test`, for branch protection to require. The matrix
+    # above reports as `test (python 3.12)`, `test (python 3.13)`, ... so a rule
+    # naming each leg has to be edited whenever the supported range changes; a
+    # rule naming this job never does.
+    #
+    # `if: always()` is load-bearing. A job skipped because its `needs` failed
+    # reports "skipped", and a skipped required check passes -- so without it a
+    # red matrix would leave this check green. The shell test below is what
+    # turns a failed or cancelled matrix into a failed check.
+    name: test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      MATRIX_RESULT: ${{ needs.test.result }}
+    steps:
+      - run: |
+          if [ "$MATRIX_RESULT" != "success" ]; then
+            echo "::error::the test matrix finished '$MATRIX_RESULT', not 'success'"
+            exit 1
+          fi
+
   e2e-cli:
     # The e2e tier (Ruling 153): tests that run a real external CLI to check
     # its contract -- today bd's argv, subcommands and --json shape, and the

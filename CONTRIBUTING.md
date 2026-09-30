@@ -171,6 +171,7 @@ order, on the full suite.
 |---|---|---|
 | `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
 | `test (python 3.12 / 3.13 / 3.14)` | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
+| `test` | passes only when every `test (python …)` leg does; the one check branch protection requires, so the supported range can change without editing repo settings | nothing to run |
 | `e2e (real CLIs)` | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
 | `frontend` | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |
