@@ -196,7 +196,10 @@ parametrizing a pinned test means repointing it in the same change. Run
 - `just test <paths>` (testmon), never raw pytest. `just test-ui` for the
   frontend.
 - The full suite runs in CI, so push and read CI rather than running it
-  locally.
+  locally. CI runs the unit tier on every supported Python (3.12, 3.13, 3.14);
+  `just test-py 3.12` reproduces one version's failure locally, in its own
+  environment. A test must pass on the floor, so it never relies on a newer
+  stdlib API or on 3.14's lazy annotations.
 - Only one heavy local test run at a time on a shared machine.
 
 ## Enforced mechanically
