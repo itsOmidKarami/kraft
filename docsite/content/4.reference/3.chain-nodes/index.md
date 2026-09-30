@@ -21,6 +21,7 @@ see [Library and chains](/reference/configuration/library-and-chains).
 | Key | Meaning |
 |---|---|
 | `id` | The chain's name. Defaults to the file name. |
+| `description` | One line saying what the chain is for, shown in the chain list. Listed even for a chain that does not resolve. |
 | `nodes` | The ordered list of nodes. At least one. |
 | `policy` | The chain's layer of the [policy](/reference/configuration/policy). |
 
@@ -49,6 +50,7 @@ An exec node declares `tasks` or `steps`, never both.
 | `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a person is asked. |
 | `on_base_changed` | What to re-run when a rebase moves the base. `restart_from` names an earlier node. `on_conflict` names the task or steps that resolve a conflicting rebase. |
 | `read_only` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
+| `icon` | The [icon](#icons) the board draws for the node. |
 
 A recovery that concludes no repair can help reports `failed` with a
 `suggested_action` (`skip`, `retry` or `abandon`, with a reason) in its
@@ -65,17 +67,24 @@ suggests `retry`.
 | `policy` | This step's policy layer. |
 | `skippable` | `false` refuses an operator's skip. |
 | `read_only` | `true` verifies the step's tasks leave the worktree as they found it. See [read_only](#read_only). |
+| `icon` | The [icon](#icons) the board draws for the step. |
 
 ### Gate node keys
 
 | Key | Meaning |
 |---|---|
 | `message` | The text shown to the reviewer. |
-| `artifact` | The document the reviewer decides on. |
-| `reject_to` | The node a rejection re-enters, with the reviewer's note. It must come before the gate. |
+| `artifact` | The document the reviewer decides on: a kind an earlier node `produces`. |
+| `artifact_required` | `true` refuses approval while the `artifact` document is missing, with a `422` that says to retry the node that owes it. Needs an `artifact`. Default `false`. |
+| `reject_to` | The node a rejection re-enters, with the reviewer's note. It must be an exec node before the gate. Without it, a rejection re-enters the nearest exec node before the gate, or re-opens the gate when there is none. |
 | `timeout` | How long the gate waits for a decision. It may not exceed the `total_time_cap_minutes` around it. |
 | `auto_review` | An agent task that may report a verdict first. It takes no `fallback`. |
-| `chain_finalized` | `true` marks the final review, which cannot be approved without its document. |
+| `chain_finalized` | `true` marks the final review. |
+
+A `chain_finalized` gate cannot be approved without its document either,
+whether or not it sets `artifact_required`. Dropping that rule would make every
+existing final gate, the shipped `default` chain's included, approvable with
+nothing to read. A gate takes no `icon`.
 
 ## Task keys
 
@@ -91,6 +100,7 @@ Every task takes these keys, then the keys of its kind.
 | `on_failure` | mapping | A recovery pass for this task alone. Allowed only on a task in one of an exec node's own steps. |
 | `policy` | mapping | This task's own policy layer. |
 | `skippable` | boolean | `false` refuses an operator's skip. Default `true`. |
+| `icon` | string | The [icon](#icons) the board draws for the task. Refused on a fix loop's `judge`, whose icon is fixed. |
 
 A task takes no `read_only`. Set it on the step or node instead.
 
@@ -141,6 +151,19 @@ is refused at load.
   repository it did not create. That repository is the reported change.
 - **Default.** Off. No shipped chain sets it. Setting it on both a node and its
   steps is allowed and redundant.
+
+## Icons
+
+An `icon` is the kebab-case name of a [Lucide](https://lucide.dev/icons) icon,
+such as `file-text` or `circle-check`. It is optional on an exec node, a step
+and a task, library components included. A name that is not kebab-case is a
+schema error.
+
+A kebab-case name that Kraft's Lucide version does not have still loads, and
+the chain runs. `kraft admin templates lint` and a draft's problems report it
+as `unknown icon`, at the component that sets it, and a save on the Settings
+screens refuses it like any other issue. The board draws the kind's default
+icon in its place.
 
 ## The library and extends
 

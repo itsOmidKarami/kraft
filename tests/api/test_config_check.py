@@ -144,3 +144,39 @@ def test_lint_reports_a_profile_its_harness_has_no_model_for(tmp_path):
     assert any(
         "profile 'fast' has no model for provider 'codex'" in i["message"] for i in report["issues"]
     )
+
+
+def _with_icon(icon):
+    return GOOD_CHAIN.replace("      - id: t\n", f"      - id: t\n        icon: {icon}\n")
+
+
+def test_an_unknown_icon_is_a_lint_issue_at_its_path_and_a_known_one_is_not(ctx, client):
+    """R32: lint, not a load failure -- the model takes any kebab-case name."""
+    assert config_check.check("chains/solo.yaml", _with_icon("hammer"), ctx) == []
+    [issue] = config_check.check("chains/solo.yaml", _with_icon("no-such-icon"), ctx)
+    assert issue.message == "run.main.t: unknown icon 'no-such-icon'"
+    assert issue.loc == ("nodes", 0, "tasks", 0, "icon")
+    saved = client.put("/api/templates/chains/solo", json={"text": _with_icon("no-such-icon")})
+    assert saved.status_code == 422
+    assert saved.json()["detail"] == issue.message
+
+
+def _library_with_icon(templates_dir):
+    text = (templates_dir / "library.yaml").read_text()
+    return text.replace("  implementer:\n", "  implementer:\n    icon: gone\n", 1)
+
+
+def test_a_library_icon_is_linted_as_its_component(ctx):
+    [issue] = config_check.check("library.yaml", _library_with_icon(ctx.templates_dir), ctx)
+    assert issue.message == "tasks.implementer: unknown icon 'gone'"
+
+
+def test_lint_reports_an_unknown_icon_in_a_chain_and_in_the_library(tmp_path):
+    shutil.copytree(Path(__file__).resolve().parents[2] / "templates", tmp_path, dirs_exist_ok=True)
+    (tmp_path / "chains" / "solo.yaml").write_text(_with_icon("no-such-icon"))
+    (tmp_path / "library.yaml").write_text(_library_with_icon(tmp_path))
+    messages = {i["message"] for i in config_check.lint_report(tmp_path)["issues"]}
+    assert messages == {
+        "run.main.t: unknown icon 'no-such-icon'",
+        "tasks.implementer: unknown icon 'gone'",
+    }

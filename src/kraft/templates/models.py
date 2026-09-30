@@ -88,6 +88,12 @@ AUTO_REVIEW_SEGMENT = "auto_review"
 #: rule -- a task's `harness:` and the profile id it names. Not imported from
 #: `kraft.templates`, whose equivalent is private to a module V1 replaces.
 
+#: A Lucide icon name as the UI draws it (`circle-check`). Only the shape is
+#: checked here: whether the installed Lucide has the name is a lint problem
+#: (`config_check.icon_issues`), never a load failure, so an icon set dropping a
+#: name cannot stop a chain over a cosmetic field (R32).
+Icon = Annotated[StrictStr, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")]
+
 _DURATION = re.compile(r"^(\d+)(s|m|h|d)$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -387,6 +393,7 @@ class TaskBase(BaseModel):
     #: `task-step-and-node-are-skippable-by-default`: an operator may skip this
     #: component unless it says `false` here.
     skippable: StrictBool = True
+    icon: Icon | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -535,6 +542,7 @@ class Step(BaseModel):
     #: The step's tasks must leave the worktree as they found it, checked
     #: around all of them together (`executor.read_only`).
     read_only: StrictBool = False
+    icon: Icon | None = None
 
     @model_validator(mode="after")
     def _local_identifiers(self) -> Self:
@@ -718,6 +726,8 @@ class FixLoop(ExecutionShape):
     def _no_nested_handler(self) -> Self:
         _refuse_nested_handlers("a fix loop", self)
         _refuse_handler_on("a fix loop's judge", self.judge)
+        if self.judge is not None and self.judge.icon is not None:
+            raise ValueError("a fix loop's judge has a fixed icon")
         return self
 
 
@@ -748,6 +758,7 @@ class ExecNode(ExecutionShape):
     #: The node's own steps must leave the worktree as they found it, checked
     #: from before its first step to after its last (`executor.read_only`).
     read_only: StrictBool = False
+    icon: Icon | None = None
 
     @model_validator(mode="after")
     def _read_only_has_no_fix_loop(self) -> Self:
@@ -778,6 +789,10 @@ class GateNode(BaseModel):
     kind: Literal[NodeKind.GATE]
     message: StrictStr | None = None
     artifact: Identifier | None = None
+    #: Approval refuses while `artifact`'s document is missing
+    #: (`api.routes.gates.apply_approval`), as it always does for a
+    #: `chain_finalized` gate.
+    artifact_required: StrictBool = False
     reject_to: Identifier | None = None
     timeout: Duration | None = None
     #: The task that reviews this gate before a human sees it
@@ -812,6 +827,8 @@ class GateNode(BaseModel):
 
     @model_validator(mode="after")
     def _no_handler(self) -> Self:
+        if self.artifact_required and self.artifact is None:
+            raise ValueError("artifact_required needs an artifact")
         _refuse_handler_on("a gate's auto_review task", self.auto_review)
         if self.auto_review is not None and self.auto_review.fallback:
             # `gate_review` launches its reviewer once; a list it never walks
@@ -838,6 +855,7 @@ class Chain(BaseModel):
     model_config = _CONFIG
 
     id: Identifier | None = None
+    description: StrictStr | None = None
     nodes: list[AnyNode] = Field(min_length=1)
     policy: TemplatePolicyOverride | None = None
 

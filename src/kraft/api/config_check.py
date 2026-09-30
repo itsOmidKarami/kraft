@@ -4,10 +4,12 @@ call the same functions, so a check and a save cannot disagree."""
 
 from __future__ import annotations
 
+import functools
 import re
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,11 +31,14 @@ from kraft.templates.environment import (
 from kraft.templates.library import (
     CHAINS_DIR,
     LIBRARY_FILE,
+    ComponentSource,
+    Namespace,
     TemplateIssue,
     TemplateLibrary,
     TemplateLibraryError,
+    _Resolution,
 )
-from kraft.templates.models import AgentTask, first_error, retired_keys
+from kraft.templates.models import PATH_SEPARATOR, AgentTask, first_error, retired_keys
 from kraft.worker import steering as steering_mod
 
 FILES = frozenset(
@@ -117,6 +122,60 @@ def retired_message(data: dict) -> str | None:
 # ── chains and the library ──
 
 
+@functools.cache
+def lucide_icons() -> frozenset[str]:
+    """The icon names the UI can draw: `lucide_icons.txt`, which `just icons`
+    writes from the installed `lucide-react`."""
+    text = resources.files("kraft.templates").joinpath("lucide_icons.txt").read_text()
+    return frozenset(text.split())
+
+
+def _icons(data: object, loc: tuple[object, ...] = ()) -> Iterator[tuple[tuple[object, ...], str]]:
+    """Every `icon:` string in an authored mapping, with its key path. Only
+    the components the model gives an `icon` can hold one; anywhere else the
+    schema refuses it."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key == "icon" and isinstance(value, str):
+                yield (*loc, key), value
+            else:
+                yield from _icons(value, (*loc, key))
+    elif isinstance(data, list):
+        for index, value in enumerate(data):
+            yield from _icons(value, (*loc, index))
+
+
+def icon_issues(
+    file: Path, chain: str | None, data: dict, where: Callable[[tuple], str | None] = lambda _: None
+) -> list[TemplateIssue]:
+    """Each icon in `data` the UI has no drawing for. A lint problem, never a
+    load failure (R32): the chain still runs, and the UI draws the kind's own
+    icon instead. `where` names the component a key path belongs to."""
+    return [
+        TemplateIssue(
+            file,
+            chain,
+            f"{where(loc) or PATH_SEPARATOR.join(map(str, loc[:-1]))}: unknown icon {name!r}",
+            loc=loc,
+        )
+        for loc, name in _icons(data)
+        if name not in lucide_icons()
+    ]
+
+
+def chain_icon_issues(
+    library: TemplateLibrary, path: Path, tid: str, data: dict
+) -> list[TemplateIssue]:
+    """`icon_issues` for one chain file, each named by its canonical path.
+    Only the icons the file itself writes: an inherited one is the library's."""
+    resolution = _Resolution(library, ComponentSource(path, Namespace.NODES, tid))
+    try:
+        resolution.expand_chain({**data, "id": tid})
+    except TemplateLibraryError:
+        pass  # what it reached still names its paths; why it stopped is lint's
+    return icon_issues(path, tid, data, lambda loc: resolution.split(loc)[0])
+
+
 def chain_issues(
     library: TemplateLibrary | None,
     path: Path,
@@ -142,7 +201,8 @@ def chain_issues(
         candidate, _ = library.with_chain(path, {**data, "id": tid})
     except TemplateLibraryError as exc:
         return [TemplateIssue.from_error(path, tid, exc)]
-    return [i for i in candidate.lint(instance_policy) if i.chain == tid]
+    issues = [i for i in candidate.lint(instance_policy) if i.chain == tid]
+    return issues + chain_icon_issues(candidate, path, tid, data)
 
 
 def _check_chain(path, data, ctx):
@@ -173,6 +233,7 @@ def library_issues(
     except TemplateLibraryError as exc:
         return [TemplateIssue.from_error(path, None, exc)]
     issues = [i for i in candidate.lint(instance_policy) if i.chain not in broken_before]
+    issues += icon_issues(path, None, data)
     # A repository's `steering:` names library profiles too: removing (or
     # over-growing) one it names is refused like a chain it would break.
     profiles = {n: p.instructions for n, p in candidate.steering.items()}
@@ -380,8 +441,9 @@ def lint_report(
     """`kraft admin templates lint`'s answer, from the route and `--dir` alike:
     `TemplateLibrary.lint_dir`, plus each agent task of a resolving chain that
     `harnesses.yaml` could not launch -- a `profile:` with no model for its
-    harness's provider, say (Kraft-9efnk.34). A `harnesses.yaml` that does not
-    load adds nothing: doctor's `harnesses.yaml` row already says why."""
+    harness's provider, say (Kraft-9efnk.34), and each unknown icon
+    (`icon_issues`). A `harnesses.yaml` that does not load adds nothing:
+    doctor's `harnesses.yaml` row already says why."""
     templates_dir = Path(templates_dir)
     report = TemplateLibrary.lint_dir(
         templates_dir, skills_dir=skills_dir, instance_policy=instance_policy
@@ -390,14 +452,25 @@ def lint_report(
     path = templates_dir / "harnesses.yaml"
     providers = harness_mod.load(None).valid
     try:
-        table = HarnessProfileTable.from_yaml(path, harnesses=providers)
         library = TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir)
-    except (TemplateEnvironmentError, TemplateLibraryError):
+    except TemplateLibraryError:
         library = None
     if library is not None:
-        for (chain, _), why in sorted(
-            launch_problems(selections(library), table, path, providers).items()
-        ):
+        library_path = templates_dir / LIBRARY_FILE
+        issues += icon_issues(library_path, None, yaml.safe_load(library_path.read_text()) or {})
+        for chain in library.chain_ids:
+            file = library.chain_file(chain)
+            issues += chain_icon_issues(library, file, chain, dict(library.chain_data(chain)))
+        try:
+            table = HarnessProfileTable.from_yaml(path, harnesses=providers)
+        except TemplateEnvironmentError:
+            table = None
+        problems = (
+            launch_problems(selections(library), table, path, providers)
+            if table is not None
+            else {}
+        )
+        for (chain, _), why in sorted(problems.items()):
             issues.append(TemplateIssue(templates_dir / CHAINS_DIR / f"{chain}.yaml", chain, why))
     failed = {issue.chain for issue in issues}
     return {

@@ -24,7 +24,7 @@ from kraft.templates.library import (
     TemplateLibrary,
     TemplateLibraryError,
 )
-from kraft.templates.models import ResolvedChain
+from kraft.templates.models import GateNode, ResolvedChain
 
 # ══ settings (design 5a–5e) ═════════════════════════════════════════════════
 #
@@ -39,14 +39,17 @@ def _chain_summary(library: TemplateLibrary, id: str) -> dict:
     `covered_by` an attachment strikes by. A chain that does not resolve is
     listed with its error rather than dropped, so the Chains screen can still
     open it to fix it. `uses` names, per node id, the library components that
-    node is built from, which is what the screen links each node to."""
+    node is built from, which is what the screen links each node to.
+    `description` is read as authored, so a broken chain still shows it."""
     uses = {node: sorted(refs) for node, refs in library.references(id).items() if refs}
+    description = library.chain_data(id).get("description")
+    listed = {"id": id, "description": description if isinstance(description, str) else None}
     try:
         nodes = [store.node_view(n) for n in library.resolve_chain(id).nodes]
     except TemplateLibraryError as exc:
-        return {"id": id, "nodes": [], "gates": 0, "error": str(exc), "uses": uses}
+        return {**listed, "nodes": [], "gates": 0, "error": str(exc), "uses": uses}
     gates = sum(1 for n in nodes if n["kind"] == "gate")
-    return {"id": id, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
+    return {**listed, "nodes": nodes, "gates": gates, "error": None, "uses": uses}
 
 
 @api_router.get("/templates/chains")
@@ -137,13 +140,24 @@ def _resolved_view(chain: ResolvedChain) -> dict:
     -- what the author wrote plus what it inherited, no defaults filled in --
     its canonical task paths, the steering text it selects, and the nodes in
     the SPA's `ChainNode` shape. Nothing per work item: no target, no policy,
-    no attachment trim (`resolved-template-is-deterministic`)."""
+    no attachment trim (`resolved-template-is-deterministic`).
+
+    `documents` lists, per gate, the kinds the execution nodes before it
+    produce, in chain order: what that gate's `artifact` can name."""
+    documents: dict[str, list[str]] = {}
+    produced: list[str] = []
+    for node in chain.nodes:
+        if isinstance(node.node, GateNode):
+            documents[node.id] = list(produced)
+        else:
+            produced += sorted(node.produces() - {None} - set(produced))
     return {
         "id": chain.id,
         "chain": chain.chain.model_dump(mode="json", exclude_unset=True),
         "task_paths": list(chain.task_paths),
         "steering": chain.steering or {},
         "nodes": [store.node_view(n) for n in chain.nodes],
+        "documents": documents,
     }
 
 

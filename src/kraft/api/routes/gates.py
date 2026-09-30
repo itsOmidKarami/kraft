@@ -65,7 +65,10 @@ async def apply_approval(
     contract still leaves a decidable gate), but the whole subject of this one is
     the review it names, so approving it with no document approves nothing.
     Kraft-iv4y's posture: a clear 422 telling the human to `kraft item retry` the
-    node that owed the document, not a 200 that changed nothing.
+    node that owed the document, not a 200 that changed nothing. Any other gate
+    opts into the same refusal with `artifact_required: true`; the final gate
+    keeps it without one, so no shipped final gate becomes approvable with
+    nothing to read (R31).
 
     **A gate about a `chain_revision` revises the chain** (Kraft-oydes): its
     change set is applied to the item's chain and the result replaces it
@@ -77,9 +80,15 @@ async def apply_approval(
     nodes = gate_nodes(st, row)
     node = _gate_or_404(nodes, gate)
     await artifacts._ingest_approved_gate_artifact(st, row, gate)
-    if node.node.chain_finalized and executor.gate_artifact(st.run_dirs, row, gate) is None:
+    missing = executor.gate_artifact(st.run_dirs, row, gate) is None
+    if node.node.chain_finalized and missing:
         return None, (
             f"{gate}: the final review document is missing; the node that owed it did not write one"
+        )
+    if node.node.artifact_required and missing:
+        return None, (
+            f"{gate}: the required document {node.node.artifact!r} is missing; "
+            "retry the node that owes it"
         )
     if node.node.artifact == revision.CHAIN_REVISION:
         reason = await _revise(st, row, gate, viewer=viewer, seen=seen)

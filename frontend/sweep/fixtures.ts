@@ -683,9 +683,9 @@ export function settingsFor(variant: Variant, theme: { mode?: string; density?: 
     ...(long ? { "on.security.scan": { kind: "subprocess", command: ["semgrep", "--config", "auto"] }, "on.test.fix": { kind: "agent", command: "claude" } } : {}),
   };
   const templates = empty ? [] : [
-    { id: "default", nodes: DEFAULT_NODES, gates: 4 },
-    { id: "quick-task", nodes: QUICK_NODES, gates: 0 },
-    ...(long ? [{ id: "a-very-long-template-name-for-hotfixes-in-production", nodes: QUICK_NODES, gates: 0 }, { id: "docs-only", nodes: [QUICK_NODES[0]], gates: 0 }] : []),
+    { id: "default", description: "Spec, plan, implement and review, with a person at each gate.", nodes: DEFAULT_NODES, gates: 4 },
+    { id: "quick-task", description: null, nodes: QUICK_NODES, gates: 0 },
+    ...(long ? [{ id: "a-very-long-template-name-for-hotfixes-in-production", description: "A hotfix chain whose description runs on well past the width of any column that tries to show it in full.", nodes: QUICK_NODES, gates: 0 }, { id: "docs-only", description: null, nodes: [QUICK_NODES[0]], gates: 0 }] : []),
   ];
   return {
     repos, hooks, templates,

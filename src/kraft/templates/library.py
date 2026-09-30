@@ -354,6 +354,10 @@ class TemplateLibrary:
     def chain_ids(self) -> tuple[str, ...]:
         return tuple(self._chains)
 
+    def chain_data(self, id: str) -> Mapping[str, object]:
+        """Chain `id` as authored, before `extends` expansion or validation."""
+        return self._chains[id].data
+
     def chain_file(self, id: str) -> Path:
         """The file chain `id` was read from -- what an edit of it rewrites."""
         return self._chains[id].source.file
