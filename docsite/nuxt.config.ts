@@ -19,6 +19,11 @@ export default defineNuxtConfig({
     url: origin,
     name: 'Kraft',
   },
+  // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
+  // only reads one at the domain root anyway. public/robots.txt is ours.
+  robots: {
+    robotsTxt: false,
+  },
   runtimeConfig: {
     // Read by server/plugins/sitemap.ts. Docus's sitemap route ignores
     // site.url and takes a host only from NUXT_SITE_URL, which would also

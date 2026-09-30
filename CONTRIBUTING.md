@@ -70,8 +70,8 @@ just docs       # cd docsite && npm ci && npm run dev
 ```
 
 The site is served at <http://localhost:3000/kraft/>, not at the root: it is
-built for GitHub Pages under `/kraft/`. The dev server logs a `@nuxt/robots`
-ERROR and a few warnings as it starts; the site works regardless.
+built for GitHub Pages under `/kraft/`. The dev server logs a few warnings as it
+starts; the site works regardless.
 
 ## Finding something to work on
 
