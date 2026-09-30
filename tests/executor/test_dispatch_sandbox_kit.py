@@ -122,9 +122,8 @@ async def test_a_kit_that_cannot_be_used_stops_the_item(
         status, evts, *_ = await v1_walk(
             tmp_path, v1_chain(_TASK, repo=repo), repo=repo, repo_entry=entry
         )
-        stop = next(e["payload"] for e in evts if e["type"] == "work_item_needs_human")
-        assert status == "needs_human"
-        told = json.dumps(stop)
+        assert (status, seen) == ("needs_human", [])
+        told = json.dumps([e["payload"] for e in evts if e["type"] == "work_item_needs_human"])
     else:
         it = await item_on(_TASK, "work")
         node = it.chain.chain.nodes[0]
@@ -137,12 +136,10 @@ async def test_a_kit_that_cannot_be_used_stops_the_item(
             it.repo,
             launch=executor.LaunchContext(repo_entry=entry),
         )
-        [session] = it.sessions()
-        assert (status, session["status"]) == ("config_error", "config_error")
-        told = Path(session["log_path"]).read_text()
+        assert (status, seen) == ("config_error", [])
+        told = Path(it.sessions()[0]["log_path"]).read_text()
     assert REF in told
     assert reason in told
-    assert seen == []
 
 
 async def test_a_caller_outside_the_walk_and_dispatch_with_no_cached_kit_stops(item_on):
