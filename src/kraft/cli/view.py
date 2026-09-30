@@ -10,6 +10,18 @@ import sys
 from kraft import client, render, usage
 from kraft.cli import common
 
+#: `work_items.status`'s CHECK in `db.SCHEMA_SQL`, which a test holds this to:
+#: without `choices=` a typo answered with an empty board, not an error.
+STATUSES = (
+    "active",
+    "waiting",
+    "rate_limited",
+    "needs_human",
+    "paused",
+    "completed",
+    "abandoned",
+)
+
 _LIST_COLUMNS = [
     ("ID", "id"),
     ("STATUS", "status"),
@@ -181,10 +193,6 @@ def _cmd_events(ns: argparse.Namespace) -> None:
 
 
 def _cmd_watch(ns: argparse.Namespace) -> None:
-    if ns.json:
-        raise ValueError(
-            "watch has no --json; use `kraft view events --json` to stream structured output"
-        )
     if not sys.stdout.isatty():
         raise ValueError(
             "watch needs a terminal to redraw in — try `kraft view events -f` in a pipe"
@@ -301,7 +309,7 @@ def _cmd_artifact(ns: argparse.Namespace) -> None:
 def _add_view(subs, common: argparse.ArgumentParser) -> None:
     """The verbs that only read: the board, one item, its documents and its streams."""
     listing = subs.add_parser("list", parents=[common], help="the board")
-    listing.add_argument("--status", help="active, needs_human, paused or completed")
+    listing.add_argument("--status", choices=STATUSES, metavar="STATUS", help="one of: %(choices)s")
     listing.add_argument("--repo", help="only this repo (default: the repo you are standing in)")
     listing.add_argument("--all", action="store_true", help="every repo, ignoring the cwd")
     # Not folded into --all: that one widens the *repo* scope, and abandoning is
@@ -341,7 +349,9 @@ def _add_view(subs, common: argparse.ArgumentParser) -> None:
     )
     events_p.set_defaults(func=_cmd_events)
 
-    watch = subs.add_parser("watch", parents=[common], help="a live board, redrawn on each event")
+    # No `--json` (no parent parser): a redrawn board has no payload to print;
+    # `view events -f --json` is the structured stream.
+    watch = subs.add_parser("watch", help="a live board, redrawn on each event")
     watch.add_argument("--repo", help="default: the repo you are standing in")
     watch.set_defaults(func=_cmd_watch, all=False)
 
