@@ -165,7 +165,9 @@ def test_stream_usage_takes_model_from_the_init_line():
     )
     assert init == Usage(tokens_in=0, tokens_out=0, cost_usd=None, model="claude-opus-5")
     later = usage.from_stream([_assistant("req_1", 7, 3)], seen)
-    assert later == Usage(tokens_in=7, tokens_out=None, cost_usd=None, model="claude-opus-5")
+    assert later == Usage(
+        tokens_in=7, tokens_out=None, cost_usd=None, model="claude-opus-5", peak_context=7
+    )
 
 
 def test_stream_usage_ignores_noise_and_reports_nothing_from_nothing():

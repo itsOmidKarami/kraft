@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -1193,6 +1194,18 @@ class TemplatePolicyOverride(TaskPolicyOverride):
 _ORDERLESS_SAFETY_FIELDS = ("allowed_tools", "grants", *BUDGET_FIELDS, *CAP_FIELDS)
 
 
+#: An item-wide `budget_usd` of `"none"`: no dollar cap on the work item, nor
+#: on any scope under it the chain set none for, the way an item-wide number
+#: replaces theirs -- still under `maxima`, which refuses it where one is set
+#: (Kraft-tugdf.12). The one door past an unknown-spend stop from a chain,
+#: repository or `policy.yaml` default cap. Resolved, it is infinity.
+NO_CAP = "none"
+
+
+def _cap(value: object) -> object:
+    return math.inf if value == NO_CAP else value
+
+
 class WorkItemPolicy(TemplatePolicyOverride):
     """One work item's own override (Kraft-ab1bh): item-wide fields, plus
     `paths` -- an override for one node, step or task, keyed by its canonical
@@ -1202,6 +1215,8 @@ class WorkItemPolicy(TemplatePolicyOverride):
     scope the chain authored (`apply_to`, Ruling 188)."""
 
     paths: dict[StrictStr, TemplatePolicyOverride] = Field(default_factory=dict)
+    #: Item-wide it may also be `"none"` (`NO_CAP`), never on a path.
+    budget_usd: PositiveUsd | Literal["none"] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1259,7 +1274,7 @@ class WorkItemPolicy(TemplatePolicyOverride):
         for where, layer in self.layers_at(path):
             if where == "policy":
                 for name in SCOPE_CAP_FIELDS:
-                    value = getattr(layer, name)
+                    value = _cap(getattr(layer, name))
                     if value is not None and name not in own:
                         policy = dataclasses.replace(policy, **{name: value})
             policy = policy.apply_template_override(
@@ -1282,7 +1297,7 @@ class WorkItemPolicy(TemplatePolicyOverride):
                     policy, grants=tuple(g for g in policy.grants if g in layer.grants)
                 )
             for name in (*BUDGET_FIELDS, *CAP_FIELDS):
-                value, current = getattr(layer, name), getattr(policy, name)
+                value, current = _cap(getattr(layer, name)), getattr(policy, name)
                 if value is not None:
                     policy = dataclasses.replace(
                         policy, **{name: min(current, value) if current is not None else value}

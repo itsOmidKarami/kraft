@@ -85,6 +85,7 @@ describe("ItemCard (W11 · A)", () => {
 
   it.each<[string, WorkItem["budget"], RegExp]>([
     ["budget_usd", { scope: "usd", path: "", spent_usd: 5, cap_usd: 5, unknown_launches: 0 }, /a budget_usd stopped it.*set-policy w1 --policy budget_usd=N.*policy\.yaml only applies to items filed after/],
+    ["budget_usd on unknown spend", { scope: "usd", path: "", spent_usd: 1, cap_usd: 5, unknown_launches: 2 }, /a budget_usd stopped it on spend a harness never reported.*set-policy w1 --policy budget_usd=none/],
     ["token_budget", { scope: "tokens", path: "", spent_tokens: 9, cap_tokens: 9 }, /a token_budget stopped it.*set-policy w1 --policy token_budget=N.*policy\.yaml only applies to items filed after/],
     ["daily", { scope: "daily", spent_usd: 5, cap_usd: 5 }, /daily cap stopped it: raise budget\.daily_usd in policy\.yaml, or wait for local midnight/],
   ])("budget stopped by %s: no Raise budget, and the card names the cap and its way up (Kraft-9efnk.28)", (_, budget, hint) => {

@@ -36,8 +36,15 @@ _AMP_RUN = [
     '"result":"Two files: index.js and README.md","session_id":"' + _THREAD + '"}',
 ]
 
-#: Both requests' usage, summed.
-_SPENT = Usage(tokens_in=17, tokens_out=124, tokens_cache_write=13283, tokens_cache_read=13150)
+#: Both requests' usage, summed; the second request's context, 7 + 133 +
+#: 13150, the largest one sent (Kraft-tugdf.14).
+_SPENT = Usage(
+    tokens_in=17,
+    tokens_out=124,
+    tokens_cache_write=13283,
+    tokens_cache_read=13150,
+    peak_context=13290,
+)
 
 
 def _log(tmp_path, lines):
@@ -96,3 +103,15 @@ def test_an_amp_error_result_fails_the_session(tmp_path):
         ],
     )
     assert agent._envelope_is_error("done", log, 0, "amp-stream-json") == "failed"
+
+
+def test_netting_a_resumed_thread_keeps_its_own_largest_context(tmp_path):
+    """Kraft-tugdf.14: what picks a long-context tier survives netting a
+    resume against the thread's earlier session."""
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    own = usage.read(_log(tmp_path, _AMP_RUN), tmp_path / "none.json", "amp-stream-json")
+    netted, _ = usage.net_of_earlier(
+        own, tmp_path / "amp.log", _log(earlier, _AMP_RUN), _THREAD, "amp-stream-json"
+    )
+    assert netted.peak_context == 13290

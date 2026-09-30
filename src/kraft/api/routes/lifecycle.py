@@ -1090,6 +1090,14 @@ _NOT_ITEM_CAP = {
         "in policy.yaml, or wait for local midnight, then retry"
     ),
 }
+#: A `budget_usd` stop on unknown spend, which no higher cap passes
+#: (Kraft-tugdf.12).
+_UNKNOWN_SPEND = (
+    "a budget_usd stopped this item on spend a harness never reported, which no "
+    "higher cap passes: clear it item-wide with `kraft item set-policy ID --policy "
+    "budget_usd=none` (refused under a maxima.work_item.budget_usd; a cap the chain "
+    "set on a node, step or task stays), then retry, or skip the node"
+)
 
 
 @api_router.post("/work-items/{wid}/budget/raise")
@@ -1115,10 +1123,14 @@ async def raise_budget(wid: str, body: RaiseBudget, request: Request):
     row = deps._live_work_item_row(st, wid)
     if row["status"] != "needs_human":
         raise HTTPException(409, "work item is not stopped")
-    scope = ((board._current_stop(st, wid) or {}).get("budget") or {}).get("scope")
+    stop = (board._current_stop(st, wid) or {}).get("budget") or {}
+    scope = stop.get("scope")
     if scope != "work_item":
         raise HTTPException(
-            409, _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap")
+            409,
+            _UNKNOWN_SPEND
+            if stop.get("unknown_launches")
+            else _NOT_ITEM_CAP.get(scope, "work item was not stopped by a spend cap"),
         )
     await st.db.write(lambda c: store.raise_budget(c, wid, body.budget_usd))
     return await retry_work_item(wid, Retry(steer=None), request)

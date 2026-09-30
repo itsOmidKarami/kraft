@@ -333,7 +333,9 @@ def build() -> MCPServer:
         own work ran on -- the caps `time_cap_minutes`,
         `total_time_cap_minutes` (a wait's total cap is its timeout),
         `token_budget` and `budget_usd`, which item-wide may exceed the
-        chain's up to the work-item maximum and on a path only tighten, and
+        chain's up to the work-item maximum and on a path only tighten --
+        item-wide `budget_usd` may be "none", no dollar cap, the way past a
+        stop on unknown spend -- and
         the fields that only tighten: `allowed_tools`, `deny_tools`,
         `sandbox`) and `paths`, a map from a canonical path
         (`node`, `node.step` or `node.step.task`) to the same fields for that
