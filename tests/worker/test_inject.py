@@ -179,10 +179,13 @@ def _request(*headers: str, target="/v1/messages", body=b"", host=API) -> bytes:
     return ("\r\n".join(lines) + "\r\n\r\n").encode() + body
 
 
-def test_the_upstream_context_verifies_strictly_on_every_python():
-    """`ssl.create_default_context` turns VERIFY_X509_STRICT on only from Python
-    3.13; the injector sets it by hand, so 3.12 verifies no more loosely."""
-    assert inject._client_context({}).verify_flags & ssl.VERIFY_X509_STRICT
+def test_the_upstream_context_has_the_3_13_verify_flags_on_every_python():
+    """`ssl.create_default_context` sets VERIFY_X509_STRICT and
+    VERIFY_X509_PARTIAL_CHAIN only from Python 3.13; the injector sets them by
+    hand, so 3.12 verifies the same way -- notably a sandbox `ca_bundle` that
+    is an intermediate, not a self-signed root, still anchors a chain."""
+    wanted = ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
+    assert inject._client_context({}).verify_flags & wanted == wanted
 
 
 async def test_the_sentinel_is_swapped_for_the_real_value_on_every_request(

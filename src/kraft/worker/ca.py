@@ -37,9 +37,12 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 
 def strict(context: ssl.SSLContext) -> ssl.SSLContext:
-    """`context` with VERIFY_X509_STRICT on: the default of `ssl.create_default_context`
-    from Python 3.13, set by hand so 3.12 verifies no more loosely."""
-    context.verify_flags |= ssl.VERIFY_X509_STRICT
+    """`context` with the two verify flags `ssl.create_default_context` sets only
+    from Python 3.13, set by hand so 3.12 behaves the same as 3.13 and 3.14:
+    VERIFY_X509_STRICT (nothing looser than the RFC 5280 checks) and
+    VERIFY_X509_PARTIAL_CHAIN (a trusted intermediate is enough of an anchor,
+    which a sandbox `ca_bundle` that is not a self-signed root relies on)."""
+    context.verify_flags |= ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
     return context
 
 

@@ -35,11 +35,13 @@ def short_run():
     shutil.rmtree(base, ignore_errors=True)
 
 
-async def test_the_listeners_context_verifies_strictly_on_every_python(registry, short_run):
-    """`ssl.create_default_context` turns VERIFY_X509_STRICT on only from Python
-    3.13; the listener sets it by hand, so 3.12 verifies no more loosely."""
+async def test_the_listeners_context_has_the_3_13_verify_flags_on_every_python(registry, short_run):
+    """`ssl.create_default_context` sets VERIFY_X509_STRICT and
+    VERIFY_X509_PARTIAL_CHAIN only from Python 3.13; the listener sets them by
+    hand, so 3.12 verifies the same way."""
     context = channel.TLSListener(registry, short_run)._context()
-    assert context.verify_flags & ssl.VERIFY_X509_STRICT
+    wanted = ssl.VERIFY_X509_STRICT | ssl.VERIFY_X509_PARTIAL_CHAIN
+    assert context.verify_flags & wanted == wanted
 
 
 @pytest.fixture
