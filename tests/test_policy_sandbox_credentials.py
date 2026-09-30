@@ -112,10 +112,20 @@ def _phased(phase, env="REGISTRY_TOKEN") -> dict:
 def test_a_phased_credential_needs_its_host_allowed_in_each_phase():
     """credential@1: an inject domain is allowed in the phase that grants
     it. The runtime list alone names this host, so a credential scoped to
-    both phases is refused, and one scoped to `runtime` loads."""
+    `install` is refused, and one scoped to `runtime` loads."""
     policy.SandboxPolicy.model_validate(_with(credentials=[_phased(["runtime"])]))
     with pytest.raises(ValidationError, match="does not allow by name in its phase install"):
-        policy.SandboxPolicy.model_validate(_with(credentials=[_phased(["install", "runtime"])]))
+        policy.SandboxPolicy.model_validate(_with(credentials=[_phased(["install"])]))
+
+
+def test_a_phase_has_one_way_to_be_written():
+    """Sorted and unique, both phases the same as unset: a policy is hashed
+    and compared whole, so two spellings of one scope must not differ."""
+    both = [policy.SandboxCredential(**_phased(p)) for p in (["runtime", "install"], None)]
+    both.append(policy.SandboxCredential(**_phased(["install", "install", "runtime"])))
+    assert both[0] == both[1] == both[2] and len({*both}) == 1
+    assert both[0].model_dump() == both[1].model_dump()
+    assert policy.SandboxCredential(**_phased(["install", "install"])).phase == ("install",)
 
 
 @pytest.mark.parametrize("second_env", ["REGISTRY_TOKEN", "OTHER"], ids=["env", "header"])

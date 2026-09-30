@@ -896,6 +896,13 @@ class SandboxCredential(BaseModel):
     #: never the worker env. Unset: the worker env's `env`.
     source: Annotated[StrictStr, AfterValidator(_env_name)] | None = None
 
+    @field_validator("phase")
+    @classmethod
+    def _one_way_to_write_a_phase(cls, phase):
+        """Sorted and unique; both phases is the same as unset."""
+        phase = tuple(sorted(set(phase))) if phase else phase
+        return None if phase == ("install", "runtime") else phase
+
     def phases(self) -> tuple[str, ...]:
         return self.phase or ("install", "runtime")
 
@@ -986,10 +993,9 @@ class SandboxPolicy(BaseModel):
                 raise ValueError(f"credential {cred.env!r} is listed twice in one phase")
             seen.update((cred.env, p) for p in phases)
             for rule in cred.inject:
-                # A phased credential needs its host in every phase it
-                # lists; an unphased one in either.
-                allowed = [_allows(getattr(self.network, p), rule.domain) for p in phases]
-                if not (all(allowed) if cred.phase else any(allowed)):
+                # A phased credential (one phase: both is unset) needs its
+                # host in that phase; an unphased one in either.
+                if not any(_allows(getattr(self.network, p), rule.domain) for p in phases):
                     where = f"in its phase {', '.join(phases)}" if cred.phase else "in either phase"
                     raise ValueError(
                         f"credential {cred.env!r} goes to {rule.domain!r}, which 'network' "
