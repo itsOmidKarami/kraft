@@ -101,7 +101,7 @@ def _is_loopback(value: str) -> bool:
         return False
     # An IPv4-mapped `::ffff:127.0.0.1` is unwrapped by hand: `is_loopback` and
     # `is_unspecified` read through `ipv4_mapped` themselves only from Python
-    # 3.13, and from a late 3.12.x / 3.11.x patch release.
+    # 3.13, and from a late 3.12.x patch release.
     if getattr(address, "ipv4_mapped", None) is not None:
         address = address.ipv4_mapped
     return address.is_loopback or address.is_unspecified

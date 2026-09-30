@@ -38,7 +38,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 def strict(context: ssl.SSLContext) -> ssl.SSLContext:
     """`context` with VERIFY_X509_STRICT on: the default of `ssl.create_default_context`
-    from Python 3.13, set by hand so 3.11 and 3.12 verify no more loosely."""
+    from Python 3.13, set by hand so 3.12 verifies no more loosely."""
     context.verify_flags |= ssl.VERIFY_X509_STRICT
     return context
 

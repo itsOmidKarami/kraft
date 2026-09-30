@@ -179,6 +179,12 @@ def _request(*headers: str, target="/v1/messages", body=b"", host=API) -> bytes:
     return ("\r\n".join(lines) + "\r\n\r\n").encode() + body
 
 
+def test_the_upstream_context_verifies_strictly_on_every_python():
+    """`ssl.create_default_context` turns VERIFY_X509_STRICT on only from Python
+    3.13; the injector sets it by hand, so 3.12 verifies no more loosely."""
+    assert inject._client_context({}).verify_flags & ssl.VERIFY_X509_STRICT
+
+
 async def test_the_sentinel_is_swapped_for_the_real_value_on_every_request(
     proxy, internet, run_dirs
 ):

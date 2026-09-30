@@ -71,7 +71,7 @@ def is_plugin_ref(value: str) -> bool:
 
 def _is_file(path: Path) -> bool:
     """`Path.is_file()`, but a name too long for the filesystem is "no such file"
-    on every Python: 3.14 answers False, 3.11-3.13 raise ENAMETOOLONG."""
+    on every Python: 3.14 answers False, 3.12 and 3.13 raise ENAMETOOLONG."""
     try:
         return path.is_file()
     except OSError:
