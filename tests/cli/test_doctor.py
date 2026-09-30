@@ -204,6 +204,8 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     chains = _by_name(rows, "chain_templates")
     assert chains["ok"] is True and chains["skipped"] is True
     assert _by_name(rows, "chains")["skipped"] is True
+    # Not the upgrade guide: a home never seeded has nothing to upgrade.
+    assert _by_name(rows, "capabilities")["detail"] == "skipped: no templates dir"
 
 
 def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):

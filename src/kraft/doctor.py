@@ -153,7 +153,9 @@ def _config_checks() -> list[dict]:
             ),
             _chain_templates_check(),
             _check("chains", True, "skipped: no templates dir", skipped=True),
-            _capabilities_check(),
+            # Nothing seeded yet, so nothing to upgrade: the first start seeds
+            # every capability and stamps the version.
+            _check("capabilities", True, "skipped: no templates dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
