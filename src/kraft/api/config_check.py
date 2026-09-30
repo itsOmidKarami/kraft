@@ -392,7 +392,7 @@ def lint_report(
     try:
         table = HarnessProfileTable.from_yaml(path, harnesses=providers)
         library = TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir)
-    except TemplateEnvironmentError, TemplateLibraryError:
+    except (TemplateEnvironmentError, TemplateLibraryError):
         library = None
     if library is not None:
         for (chain, _), why in sorted(

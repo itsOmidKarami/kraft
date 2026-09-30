@@ -138,7 +138,7 @@ def adopted(capability: Capability, live_dir: Path) -> bool:
     file, *keys = capability.present
     try:
         node = yaml.safe_load((live_dir / file).read_text())
-    except OSError, yaml.YAMLError:
+    except (OSError, yaml.YAMLError):
         return False
     for key in keys:
         if not isinstance(node, dict) or key not in node:
