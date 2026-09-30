@@ -18,3 +18,15 @@ export function parseReviewUri(path: string): { id: string; file: string } {
   const [, id, ...rest] = path.split("/");
   return { id, file: rest.join("/") };
 }
+
+type UriLike = { scheme: string; path: string };
+
+// The item a command acts on: an id, a board node, or a kraft-* document. From an editor's
+// title bar VS Code passes the tab's Uri; with no argument, fall back to the active editor.
+export function commandItemId(arg: unknown, active: UriLike | undefined, schemes: readonly string[]): string | undefined {
+  if (typeof arg === "string") return arg;
+  const node = (arg as { item?: { id?: string } } | undefined)?.item?.id;
+  if (node) return node;
+  const uri = typeof (arg as UriLike | undefined)?.scheme === "string" ? (arg as UriLike) : active;
+  return uri && schemes.includes(uri.scheme) ? parseReviewUri(uri.path).id || undefined : undefined;
+}

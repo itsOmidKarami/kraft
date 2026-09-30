@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import detail from "./fixtures/detail-with-findings.json";
-import { findingsOf, showsFindings } from "../../src/core/findings";
+import { findingsByUri, findingsOf, showsFindings } from "../../src/core/findings";
 
 describe("findingsOf", () => {
   const { located, unlocated } = findingsOf(detail as any);
@@ -30,4 +30,11 @@ it("shows findings only while a decision is pending", () => {
   expect(showsFindings({ pending_gate: "review" } as any)).toBe(true);
   expect(showsFindings({ status: "paused" } as any)).toBe(true);
   expect(showsFindings({ status: "active" } as any)).toBe(false);
+});
+
+it("puts each finding on the diff's right side only, so Problems lists it once", () => {
+  const d = { deferred_findings: [{ severity: "minor", message: "a", file: "src/x.py", line: 2, source_plugin: "p" }, { severity: "minor", message: "b", file: "src/x.py", line: 5, source_plugin: "p" }] } as any;
+  const byUri = findingsByUri("K-1", d);
+  expect([...byUri.keys()]).toEqual(["kraft-wt:/K-1/src/x.py"]);
+  expect(byUri.get("kraft-wt:/K-1/src/x.py")!.map((f) => f.message)).toEqual(["a", "b"]);
 });

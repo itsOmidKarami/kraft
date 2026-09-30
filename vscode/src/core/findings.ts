@@ -1,4 +1,5 @@
 import type { Finding, WorkItemDetail } from "./api";
+import { rightUri } from "./review";
 
 export type Severity = "error" | "warning" | "information";
 export interface LocatedFinding { file: string; line: number; severity: Severity; message: string; source: string }
@@ -17,6 +18,17 @@ export function findingsOf(detail: WorkItemDetail) {
     }
   }
   return { located, unlocated };
+}
+
+// Grouped by the diff's right-side URI only: that copy shows on the diff's lines, and a second
+// copy on the worktree's file path would list every finding twice in Problems.
+export function findingsByUri(id: string, detail: WorkItemDetail): Map<string, LocatedFinding[]> {
+  const byUri = new Map<string, LocatedFinding[]>();
+  for (const f of findingsOf(detail).located) {
+    const uri = rightUri(id, f.file);
+    byUri.set(uri, [...(byUri.get(uri) ?? []), f]);
+  }
+  return byUri;
 }
 
 export const showsFindings = (d: WorkItemDetail) => Boolean(d.pending_gate) || d.status === "paused";
