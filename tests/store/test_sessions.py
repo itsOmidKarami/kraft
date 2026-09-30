@@ -733,3 +733,21 @@ async def test_pause_with_no_reported_cost_keeps_an_estimate_from_final_tokens(d
     row = _row(database, "s1", "cost_usd, cost_estimated")
     assert row["cost_usd"] == pytest.approx(2.005)
     assert row["cost_estimated"] == 1
+
+
+@pytest.mark.parametrize(
+    "reported,recorded,cost",
+    # gpt-5.6-sol: $4/M input; claude-sonnet-5: $2/M (prices.json).
+    [(None, "gpt-5.6-sol", 4.0), ("Auto", "gpt-5.6-sol", 4.0), ("claude-sonnet-5",) * 2 + (2.0,)],
+    ids=["no-model", "display-name", "reported"],
+)
+async def test_a_session_is_priced_on_its_launch_model_when_its_output_names_none(
+    database, reported, recorded, cost
+):
+    """Codex and Cursor report tokens under no model (Cursor's "Auto" is a
+    display name): the model Kraft launched with prices them. A model the
+    output did name is never replaced (Kraft-9efnk.10)."""
+    await _session(database, "s1", model="gpt-5.6-sol")
+    await _exit(database, "s1", "done", None, Usage(tokens_in=1_000_000, model=reported))
+    row = _row(database, "s1", "model, cost_usd")
+    assert (row["model"], row["cost_usd"]) == (recorded, pytest.approx(cost))

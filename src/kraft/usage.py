@@ -110,6 +110,12 @@ def _prices() -> dict:
         return {}
 
 
+def priced(model: str | None) -> bool:
+    """Whether `prices.json` has a rate for `model`: `estimate_cost` gives it
+    a figure rather than `None`."""
+    return isinstance(_prices().get(model or ""), dict)
+
+
 def estimate_cost(usage: Usage, model: str | None, *, include_output: bool = False) -> float | None:
     """A session's cost, estimated from its tokens against `prices.json`.
 
@@ -1027,6 +1033,10 @@ class Reader:
     #: What each background job still running when the last turn ended was
     #: running (Kraft-xvugd). `[]` for a schema that cannot tell.
     unfinished_jobs: Callable[[Path], list[str]] = lambda _log_path: []
+    #: False for a schema that carries tokens but never a cost (codex, cursor,
+    #: amp): its sessions are priced from `prices.json` or not at all, which
+    #: `kraft admin doctor` checks per harness (Kraft-9efnk.10).
+    reports_cost: bool = True
 
 
 READERS: dict[str, Reader] = {
@@ -1044,6 +1054,7 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_codex,
         rate_limit=_rate_limit_codex,
         session_id=_session_id_codex,
+        reports_cost=False,
     ),
     # Cursor's `agent -p --output-format stream-json` (Kraft-bosip). Its
     # `system`/`init` line is claude's shape, so the chat id reads the same.
@@ -1056,6 +1067,7 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_cursor,
         rate_limit=lambda _log_path: None,
         session_id=_session_id_claude,
+        reports_cost=False,
     ),
     # Amp's `--stream-json` is Claude Code's shape (ampcode.com/docs/cli/
     # streaming-json, Kraft-gvrke): live progress off `assistant` lines and the
@@ -1071,6 +1083,7 @@ READERS: dict[str, Reader] = {
         envelope=_envelope_amp,
         rate_limit=lambda _log_path: None,
         session_id=_session_id_claude,
+        reports_cost=False,
     ),
     "opencode-json": Reader(
         name="opencode-json",

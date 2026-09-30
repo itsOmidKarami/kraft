@@ -1018,5 +1018,6 @@ async def run_agent_task(
         files=files,
         rate_limit_key={"harness": harness_id, "model": model} if harness_id else None,
         harness=harness,
+        model=model,
         ro_paths=rules_files,
     )

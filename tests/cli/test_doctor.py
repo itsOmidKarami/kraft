@@ -456,7 +456,8 @@ def test_doctor_checks_every_selected_profile(tmp_path, monkeypatch):
     codex task must be told about codex, not reassured about claude."""
     _live(tmp_path, monkeypatch, {"a": "claude", "b": "codex"}, ["a", "b"])
     rows = doctor._agent_checks()
-    assert {r["name"] for r in rows} == {"agent: a", "agent: b"}
+    # b is codex on its default model, which prices.json cannot price.
+    assert {r["name"] for r in rows} == {"agent: a", "agent: b", "cost: b"}
 
 
 def test_doctor_does_not_check_a_profile_nothing_selects(tmp_path, monkeypatch):
