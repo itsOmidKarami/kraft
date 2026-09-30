@@ -251,7 +251,29 @@ export interface Theme {
   mode: ThemeMode;
   density: "compact" | "comfortable";
   board: { group_by: BoardGroupBy; show_done: number; open_in: BoardOpenIn };
+  // The new UI's colour model (UX V2, under /ng). `GET` always fills the
+  // three; `derived` says they came from `palette`, not from the file.
+  surface?: Surface;
+  accent?: Accent;
+  colour_amount?: ColourAmount;
+  derived?: boolean;
+  code_scheme?: {
+    light: "auto" | "none" | "solarized-light";
+    dark: "auto" | "none" | "solarized-dark" | "monokai" | "dracula";
+  };
+  diff?: {
+    layout: "unified" | "split";
+    colours: "theme" | "safe" | "plain";
+    show_whitespace: boolean;
+    word_highlight: boolean;
+    wrap_lines: boolean;
+    one_file_at_a_time: boolean;
+  };
 }
+
+export type Surface = "graphite" | "slate" | "ink" | "sand" | "moss";
+export type Accent = "none" | "blue" | "violet" | "green" | "amber" | "rose";
+export type ColourAmount = "mono" | "subtle" | "full";
 
 export interface Access {
   bind: string;

@@ -1025,6 +1025,33 @@ class BoardPrefs(_Model):
     open_in: Literal["peek", "full"] = "peek"
 
 
+#: The V2 look an old `palette` stands for until the file names its own
+#: (surface, accent), always at `colour_amount: full`, so nobody's theme
+#: changes on upgrade. The accent is the nearest to the palette's old one.
+PALETTE_V2 = {
+    "nocturne": ("ink", "violet"),
+    "rose": ("ink", "violet"),
+    "forest": ("moss", "green"),
+    "amber": ("sand", "amber"),
+    "slate": ("slate", "blue"),
+}
+THEME_V2_KEYS = ("surface", "accent", "colour_amount")
+
+
+class CodeScheme(_Model):
+    light: Literal["auto", "none", "solarized-light"] = "auto"
+    dark: Literal["auto", "none", "solarized-dark", "monokai", "dracula"] = "auto"
+
+
+class DiffPrefs(_Model):
+    layout: Literal["unified", "split"] = "unified"
+    colours: Literal["theme", "safe", "plain"] = "theme"
+    show_whitespace: bool = True
+    word_highlight: bool = True
+    wrap_lines: bool = False
+    one_file_at_a_time: bool = True
+
+
 class Theme(_Model):
     FILE = "theme.yaml"
 
@@ -1032,6 +1059,12 @@ class Theme(_Model):
     mode: Literal["light", "dark", "system"] = "dark"
     density: Literal["compact", "comfortable"] = "compact"
     board: BoardPrefs = BoardPrefs()
+    # The new UI's colour model (UX V2). Unset means derived from `palette`.
+    surface: Literal["graphite", "slate", "ink", "sand", "moss"] | None = None
+    accent: Literal["none", "blue", "violet", "green", "amber", "rose"] | None = None
+    colour_amount: Literal["mono", "subtle", "full"] | None = None
+    code_scheme: CodeScheme = CodeScheme()
+    diff: DiffPrefs = DiffPrefs()
 
     @field_validator("palette")
     @classmethod
@@ -1039,3 +1072,31 @@ class Theme(_Model):
         if v not in PALETTE_IDS:
             raise ValueError(f"unknown palette: {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _mono_has_no_accent(self) -> Self:
+        if self.colour_amount == "mono" and self.accent not in (None, "none"):
+            raise ValueError(
+                f"accent {self.accent!r} needs colour_amount subtle or full; mono has no accent"
+            )
+        return self
+
+    def save(self, path: str | Path) -> None:
+        # An unset V2 key stays out of the file, so it keeps deriving.
+        write_yaml(path, self.model_dump(exclude_none=True))
+
+    def effective(self) -> dict:
+        """What `GET /theme` answers: every V2 key filled, from `palette` when
+        the file names no surface (`derived: true`)."""
+        out = self.model_dump()
+        derived = self.surface is None
+        if derived:
+            surface, accent = PALETTE_V2[self.palette]
+            amount = self.colour_amount or "full"
+        else:
+            surface, accent, amount = self.surface, "none", self.colour_amount or "subtle"
+        out["surface"] = surface
+        out["colour_amount"] = amount
+        out["accent"] = self.accent or ("none" if amount == "mono" else accent)
+        out["derived"] = derived
+        return out

@@ -31,11 +31,106 @@
       },
       "title": "BoardPrefs",
       "type": "object"
+    },
+    "CodeScheme": {
+      "additionalProperties": false,
+      "properties": {
+        "dark": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "none",
+            "solarized-dark",
+            "monokai",
+            "dracula"
+          ],
+          "title": "Dark",
+          "type": "string"
+        },
+        "light": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "none",
+            "solarized-light"
+          ],
+          "title": "Light",
+          "type": "string"
+        }
+      },
+      "title": "CodeScheme",
+      "type": "object"
+    },
+    "DiffPrefs": {
+      "additionalProperties": false,
+      "properties": {
+        "colours": {
+          "default": "theme",
+          "enum": [
+            "theme",
+            "safe",
+            "plain"
+          ],
+          "title": "Colours",
+          "type": "string"
+        },
+        "layout": {
+          "default": "unified",
+          "enum": [
+            "unified",
+            "split"
+          ],
+          "title": "Layout",
+          "type": "string"
+        },
+        "one_file_at_a_time": {
+          "default": true,
+          "title": "One File At A Time",
+          "type": "boolean"
+        },
+        "show_whitespace": {
+          "default": true,
+          "title": "Show Whitespace",
+          "type": "boolean"
+        },
+        "word_highlight": {
+          "default": true,
+          "title": "Word Highlight",
+          "type": "boolean"
+        },
+        "wrap_lines": {
+          "default": false,
+          "title": "Wrap Lines",
+          "type": "boolean"
+        }
+      },
+      "title": "DiffPrefs",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "accent": {
+      "anyOf": [
+        {
+          "enum": [
+            "none",
+            "blue",
+            "violet",
+            "green",
+            "amber",
+            "rose"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Accent"
+    },
     "board": {
       "$ref": "#/$defs/BoardPrefs",
       "default": {
@@ -43,6 +138,30 @@
         "open_in": "peek",
         "show_done": 5
       }
+    },
+    "code_scheme": {
+      "$ref": "#/$defs/CodeScheme",
+      "default": {
+        "dark": "auto",
+        "light": "auto"
+      }
+    },
+    "colour_amount": {
+      "anyOf": [
+        {
+          "enum": [
+            "mono",
+            "subtle",
+            "full"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Colour Amount"
     },
     "density": {
       "default": "compact",
@@ -52,6 +171,17 @@
       ],
       "title": "Density",
       "type": "string"
+    },
+    "diff": {
+      "$ref": "#/$defs/DiffPrefs",
+      "default": {
+        "colours": "theme",
+        "layout": "unified",
+        "one_file_at_a_time": true,
+        "show_whitespace": true,
+        "word_highlight": true,
+        "wrap_lines": false
+      }
     },
     "mode": {
       "default": "dark",
@@ -67,6 +197,25 @@
       "default": "nocturne",
       "title": "Palette",
       "type": "string"
+    },
+    "surface": {
+      "anyOf": [
+        {
+          "enum": [
+            "graphite",
+            "slate",
+            "ink",
+            "sand",
+            "moss"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Surface"
     }
   },
   "title": "Kraft theme",
