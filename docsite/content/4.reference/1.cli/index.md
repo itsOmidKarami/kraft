@@ -40,5 +40,5 @@ has no end on which to close an array.
 ## Shell completion
 
 `kraft` completes verbs with [`argcomplete`](https://github.com/kislyuk/argcomplete),
-in any shell `argcomplete` supports. Register it with
-`register-python-argcomplete kraft`.
+in any shell `argcomplete` supports. Register it by adding
+`eval "$(register-python-argcomplete kraft)"` to your shell's rc file.
