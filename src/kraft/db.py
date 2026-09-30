@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -113,6 +113,11 @@ CREATE TABLE work_items (
   -- (`RunFork.materialized_chain`, copied here so every reader of the row
   -- gets it). NULL until the first retry: the intake snapshot is the run.
   run_chain        TEXT,
+  -- the reason a `needs_human`/`waiting`/`rate_limited` row is stopped
+  -- (`store.StopKind`, Kraft UI v2 · B1). NULL for a row stopped before this
+  -- column existed. `work_items_stop_kind_clear` clears it the moment the
+  -- row leaves that set, so it can never point at a stop that is over.
+  stop_kind        TEXT,
   created_at       TEXT NOT NULL,
   updated_at       TEXT NOT NULL
 );
@@ -320,6 +325,17 @@ _RUN_FORK_TRIGGERS = [
     "CREATE TRIGGER run_forks_undeletable BEFORE DELETE ON run_forks "
     "BEGIN SELECT RAISE(ABORT, 'a run fork is immutable'); END",
 ]
+
+#: `stop_kind` is only meaningful while a row is stopped -- this clears it the
+#: instant the row's status leaves the stop set, so a resumed/cancelled/done
+#: item can never be read as still pointing at its last stop's kind. Shared
+#: between the fresh-install path and migration 44, which both need the exact
+#: same trigger body.
+_WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER = (
+    "CREATE TRIGGER work_items_stop_kind_clear AFTER UPDATE OF status ON work_items "
+    "WHEN NEW.status NOT IN ('needs_human', 'waiting', 'rate_limited') "
+    "BEGIN UPDATE work_items SET stop_kind = NULL WHERE id = NEW.id; END"
+)
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -952,6 +968,12 @@ FROM worker_sessions""",
     ],
     42: ["ALTER TABLE worker_sessions ADD COLUMN sandbox TEXT"],
     43: ["ALTER TABLE worker_sessions ADD COLUMN egress TEXT"],
+    # Stop kinds (Kraft UI v2 · B1): NULL for every existing row, since none of
+    # them recorded why they stopped.
+    44: [
+        "ALTER TABLE work_items ADD COLUMN stop_kind TEXT",
+        _WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER,
+    ],
 }
 
 # Two branches picking the same migration key merges as a silent last-write-wins
@@ -1014,6 +1036,7 @@ def migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(stmt)
         for stmt in _RUN_FORK_TRIGGERS:
             conn.execute(stmt)
+        conn.execute(_WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     except BaseException:

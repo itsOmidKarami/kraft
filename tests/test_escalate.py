@@ -61,7 +61,7 @@ async def _seed_needs_human(database, rd, wid: str, chain=None) -> None:
     await database.write(lambda c: store.enter_node(c, wid, "implementation"))
     await database.write(
         lambda c: store.mark_needs_human(
-            c, wid, "implementation", "task failed in node implementation"
+            c, wid, "implementation", "task failed in node implementation", kind="failed"
         )
     )
 

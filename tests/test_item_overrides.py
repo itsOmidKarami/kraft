@@ -543,7 +543,9 @@ def _budget_stopped_item(client, repo, breach: dict) -> str:
         conn.execute(
             "UPDATE work_items SET current_node_id = 'implementation' WHERE id = ?", (wid,)
         )
-        store.mark_needs_human(conn, wid, "implementation", "budget cap reached", None, breach)
+        store.mark_needs_human(
+            conn, wid, "implementation", "budget cap reached", None, breach, kind="budget"
+        )
     return wid
 
 

@@ -26,8 +26,9 @@ async def _stuck(item_on, reason="task failed in node implementation"):
 
 
 async def _stop(it, reason, *, stuck=True):
+    kind = "stuck" if stuck else "failed"
     await it.database.write(
-        lambda c: store.mark_needs_human(c, it.id, "implementation", reason, stuck=stuck)
+        lambda c: store.mark_needs_human(c, it.id, "implementation", reason, stuck=stuck, kind=kind)
     )
 
 

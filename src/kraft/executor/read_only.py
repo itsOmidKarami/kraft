@@ -138,5 +138,7 @@ async def stop(db, work_item_id: str, node_id: str) -> str:
     more = len(files) - _NAMED
     named = ", ".join(files[:_NAMED]) + (f" and {more} more" if more > 0 else "")
     reason = f"{payload['scope']} is read_only, but it changed the worktree: {named}"
-    await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+    await db.write(
+        lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="failed")
+    )
     return "needs_human"

@@ -56,7 +56,9 @@ async def _instruction(monkeypatch, tmp_path, database, run_dirs, *, auto=False,
     )
     await database.write(lambda c: store.enter_node(c, "w1", "implementation"))
     await database.write(
-        lambda c: store.mark_needs_human(c, "w1", "implementation", "failed", suggested=SKIP)
+        lambda c: store.mark_needs_human(
+            c, "w1", "implementation", "failed", suggested=SKIP, kind="failed"
+        )
     )
     if paused:
         await database.write(lambda c: store.pause_work_item(c, "w1", []))

@@ -170,6 +170,7 @@ async def test_restarts_are_bounded_by_the_nodes_own_counter(item_on, script):
     assert len(it.events("base_change_restart")) == 1
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason == "rebase.on_base_changed exhausted after 1 restart(s) from 'verify'"
+    assert it.row()["stop_kind"] == "cap"
 
 
 async def test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure(item_on, script):
@@ -181,6 +182,7 @@ async def test_a_conflict_without_an_explicit_handler_is_an_ordinary_failure(ite
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.startswith("task failed in node rebase: sync [forge]")
     assert not it.events("node_recovery_started")
+    assert it.row()["stop_kind"] == "failed"
 
 
 def _with_handler():
@@ -250,16 +252,16 @@ async def test_a_conflict_handler_s_concerns_do_not_stop_its_resolved_rebase(ite
 
 
 @pytest.mark.parametrize(
-    ("ending", "reason"),
+    ("ending", "reason", "kind"),
     [
-        ("done", "the conflict handler in node rebase finished without rebasing onto"),
-        ("failed", "the conflict handler in node rebase could not resolve it: "),
-        ("needs_context", "needs_context: "),
+        ("done", "the conflict handler in node rebase finished without rebasing onto", "conflict"),
+        ("failed", "the conflict handler in node rebase could not resolve it: ", "conflict"),
+        ("needs_context", "needs_context: ", "question"),
     ],
     ids=["did-not-rebase", "failed", "asked"],
 )
 async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
-    item_on, script, ending, reason
+    item_on, script, ending, reason, kind
 ):
     """A handler reporting success is believed only once the worktree sits on
     the upstream tip; one that failed stops naming the conflict, and one that
@@ -280,6 +282,7 @@ async def test_a_conflict_handler_that_did_not_resolve_it_stops_for_a_human(
     assert await _walk(it) == "needs_human"
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"].startswith(reason)
     assert not it.events("base_change_restart")
+    assert it.row()["stop_kind"] == kind
 
 
 async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
@@ -301,6 +304,7 @@ async def test_a_conflict_with_its_base_branch_gone_is_a_stop_naming_it(
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert "cannot be resolved" in reason and "base branch" in reason
     assert not it.events("node_recovery_started"), "no handler ran against a missing base"
+    assert it.row()["stop_kind"] == "config"
 
 
 async def test_a_conflict_handler_is_judged_against_the_items_base_branch(
@@ -406,6 +410,7 @@ async def test_a_conflict_at_the_door_with_no_handler_stops_for_a_human(item_on,
     assert script.calls == []
     assert it.events("work_item_needs_human")[-1]["payload"]["reason"] == "rebase failed for x"
     assert it.row()["pending_steer_context"] == "mind the auth"
+    assert it.row()["stop_kind"] == "conflict"
 
 
 async def _prepared(it):

@@ -191,6 +191,7 @@ async def apply_rejection(
             nodes[gate_index].id,
             f"{key} exhausted after {count - 1} rejection(s)",
             {"cycles": count - 1, "attempts": cap.attempts},
+            kind="cap",
         )
     )
     return None
@@ -490,7 +491,7 @@ async def review_gates(
                 if approved is None:
                     await db.write(
                         lambda c, reason=reason, node=row["current_node_id"]: (
-                            store.mark_needs_human(c, work_item_id, node, reason)
+                            store.mark_needs_human(c, work_item_id, node, reason, kind="config")
                         )
                     )
                     return "needs_human"
@@ -1130,7 +1131,9 @@ async def resume_after_escalation(
             )
         except RuntimeError as exc:
             reason = str(exc)
-            await db.write(lambda c: store.mark_needs_human(c, work_item_id, node_id, reason))
+            await db.write(
+                lambda c: store.mark_needs_human(c, work_item_id, node_id, reason, kind="infra")
+            )
             return status_of(db, work_item_id)
         # `refresh_worktree_base` reports the upstream head even when the
         # branch already contained it (Kraft-jypzx); skip the write when it

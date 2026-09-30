@@ -397,6 +397,7 @@ def test_judge_stop_needs_human_preempts_the_cap(tmp_path, monkeypatch):
     needs_human = next(e for e in evts if e["type"] == "work_item_needs_human")
     assert needs_human["payload"]["reason"] == "judge: recurring, not converging"
     assert "capped" not in needs_human["payload"]  # this is not a cap breach
+    assert row["stop_kind"] == "stuck"
 
 
 def test_judge_stop_downgrade_exits_the_loop_clean(tmp_path, monkeypatch):

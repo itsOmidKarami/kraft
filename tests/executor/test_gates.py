@@ -134,6 +134,7 @@ async def test_apply_rejection_returns_the_reentry_index_then_stops_at_the_cap(i
     # The third breaches attempts=2: no re-entry, and the item is parked.
     assert results == [0, 0, None]
     assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "cap"
 
 
 async def test_gate_rejection_follows_its_own_reject_to(item_on):
@@ -901,3 +902,24 @@ async def test_gate_review_that_cannot_locate_its_gate_stops_rather_than_leaving
     assert it.status() == "needs_human", (
         "the gate was cleared and the item left claimed 'active' with no walk behind it"
     )
+
+
+async def test_review_gates_stops_config_when_on_approve_refuses(item_on, monkeypatch):
+    """`review_gates`' approve branch, when `on_approve` itself reports the
+    approval could not apply (`approved is None`) -- the gate route's own
+    refusal path (`kraft.api.routes.gates.apply_approval`), reached here
+    through the escalation/auto-review door instead of a person's click."""
+    it = await item_on(_reviewed(), auto_gate=True)
+    monkeypatch.setattr(
+        gates_module.gate_review, "review", lambda *a, **kw: _resolved(("approve", None))
+    )
+
+    async def _on_approve(row, gate, **_kw):
+        return None, "the artifact changed since the review ran"
+
+    await _requested(it)
+    result = await _review(it, on_approve=_on_approve)
+
+    assert result == "needs_human"
+    assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "config"

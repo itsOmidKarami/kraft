@@ -263,6 +263,7 @@ def test_unchanged_findings_escalate_before_the_cap(tmp_path, monkeypatch):
     )
     assert out["result"] == "needs_human"
     assert _needs_human_reason(out).startswith("stuck:")
+    assert out["row"]["stop_kind"] == "stuck"
     assert _cycles(out) < 5  # escalated at cycle 1, well short of the cap
 
 

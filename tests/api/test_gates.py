@@ -196,7 +196,9 @@ def test_chain_review_missing_artifact_stops_at_needs_human(client, repo, tmp_pa
 
     r = _approve_gate(client, wid, "chain_review")
     assert r.status_code == 422, r.text
-    assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
+    item = client.get(f"/api/work-items/{wid}").json()
+    assert item["status"] == "needs_human"
+    assert item["stop_kind"] == "config"
 
 
 @_REVIEW

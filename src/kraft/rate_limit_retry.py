@@ -82,7 +82,11 @@ async def _retry_one(app, row) -> bool:
     if count > cap.attempts:
         await st.db.write(
             lambda c: store.mark_needs_human(
-                c, wid, node_id, f"rate_limit retries exhausted after {count - 1} attempt(s)"
+                c,
+                wid,
+                node_id,
+                f"rate_limit retries exhausted after {count - 1} attempt(s)",
+                kind="cap",
             )
         )
         return False

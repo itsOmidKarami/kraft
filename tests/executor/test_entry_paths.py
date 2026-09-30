@@ -190,7 +190,7 @@ async def test_no_entry_into_the_walk_runs_an_ended_item(
 #: Every store write that moves an item to a status other than an ending one.
 _NOW = "2000-01-01T00:00:00+00:00"
 STATUS_WRITES = {
-    "mark_needs_human": lambda c, wid: store.mark_needs_human(c, wid, "n", "stop"),
+    "mark_needs_human": lambda c, wid: store.mark_needs_human(c, wid, "n", "stop", kind="failed"),
     "mark_rate_limited": lambda c, wid: store.mark_rate_limited(c, wid, "n", _NOW),
     "mark_waiting": lambda c, wid: store.mark_waiting(c, wid, "n", _NOW),
     "mark_blocked_by_dependency": lambda c, wid: store.mark_blocked_by_dependency(

@@ -662,7 +662,9 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
             # must not leave it stranded there with no walk behind it.
             reason = str(exc)
             await st.db.write(
-                lambda c: store.mark_needs_human(c, wid, row["current_node_id"], reason)
+                lambda c: store.mark_needs_human(
+                    c, wid, row["current_node_id"], reason, kind="infra"
+                )
             )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
@@ -967,7 +969,9 @@ async def retry_work_item(wid: str, body: Retry, request: Request):
             new_base, conflict = None, str(exc)
         except RuntimeError as exc:
             reason = str(exc)
-            await st.db.write(lambda c: store.mark_needs_human(c, wid, node_id, reason))
+            await st.db.write(
+                lambda c: store.mark_needs_human(c, wid, node_id, reason, kind="infra")
+            )
             # Not escalated: a git failure is not in the stuck set (Ruling 176).
             return {k: v for k, v in dict(deps._work_item_row(st, wid)).items()}
         # See the matching comment in `resume_work_item` (Kraft-jypzx): an

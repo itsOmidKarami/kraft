@@ -204,6 +204,23 @@ async def test_guard_reraises_assertionerror_instead_of_marking_needs_human():
     assert calls == []  # never tried to mark_needs_human for this
 
 
+async def test_guard_marks_needs_human_infra_on_an_ordinary_crash(item_on):
+    """An executor task crashing outside `AssertionError` is `infra`
+    (Kraft UI v2 · B1): nothing about the code is wrong, the daemon just
+    dropped its own task."""
+    it = await item_on(
+        "[{id: implementation, kind: exec, tasks: [{id: t, kind: subprocess, command: 'true'}]}]"
+    )
+
+    async def boom():
+        raise ValueError("executor exploded")
+
+    await deps.guard(it.database, it.id, boom())
+
+    assert it.status() == "needs_human"
+    assert it.row()["stop_kind"] == "infra"
+
+
 def test_load_library_resolves_skills_against_the_operator_overlay(tmp_path):
     """Kraft-vhcop: a chain's `skill:` is checked when the chain resolves, so
     the app's library must know the operator's overlay -- or a method only the

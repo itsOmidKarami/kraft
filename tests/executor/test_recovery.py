@@ -358,3 +358,4 @@ async def test_a_repair_with_concerns_stops_for_a_human_rather_than_re_measuring
     assert script.calls == ["a", "fix"]
     reason = it.events("work_item_needs_human")[-1]["payload"]["reason"]
     assert reason.endswith(f"was not measured again: fix: {doubt}")
+    assert it.row()["stop_kind"] == "stuck"
