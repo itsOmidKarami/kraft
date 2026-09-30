@@ -47,7 +47,7 @@ no tool. `--json` on any verb prints the raw API payload.
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate] [--autostart]  # files it paused unless --autostart
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
