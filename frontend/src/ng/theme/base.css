@@ -1,3 +1,14 @@
 /* The new UI's base. Colours come from theme.css, keyed on <html>'s data attributes (applyTheme.ts). */
 body { margin: 0; padding: 16px 24px; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* Decisions §13 and R4: one neutral 2px ring on keyboard focus, everywhere. */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Decisions §9: every scroll area gets the same thin scrollbar. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
