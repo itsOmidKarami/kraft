@@ -43,14 +43,11 @@ def fetch(url: str = SOURCE) -> dict:
 CACHE_WRITE_MULTIPLE = 2
 
 
-def _rates(provider: str, cost: dict) -> dict:
-    """One model's rates. Anthropic's cache write is derived (see
+def _flat(provider: str, cost: dict) -> dict:
+    """One price tier's rates. Anthropic's cache write is derived (see
     `CACHE_WRITE_MULTIPLE`); every other provider's are models.dev's own, a
     missing cache-read rate billed as plain input and a missing cache-write
-    rate as none.
-
-    ponytail: the base tier only. models.dev's `tiers` (a higher rate past a
-    long context) are ignored, so a long-context session estimates low."""
+    rate as none."""
     if provider == "anthropic":
         cache_write = cost["input"] * CACHE_WRITE_MULTIPLE
     else:
@@ -61,6 +58,20 @@ def _rates(provider: str, cost: dict) -> dict:
         "cache_read": cost.get("cache_read", cost["input"]),
         "cache_write": cache_write,
     }
+
+
+def _rates(provider: str, cost: dict) -> dict:
+    """One model's base rates, and its long-context tiers (models.dev's
+    `tiers` of type `context`, e.g. OpenAI's past 272k) under `tiers`, each
+    with the context size it applies `above`, lowest first
+    (`usage.estimate_cost`)."""
+    tiers = [
+        {"above": t["tier"]["size"], **_flat(provider, t)}
+        for t in cost.get("tiers", ())
+        if t.get("tier", {}).get("type") == "context"
+    ]
+    rates = _flat(provider, cost)
+    return {**rates, "tiers": sorted(tiers, key=lambda t: t["above"])} if tiers else rates
 
 
 def build(catalog: dict, providers: tuple[str, ...] = PROVIDERS) -> dict:
@@ -78,7 +89,8 @@ def build(catalog: dict, providers: tuple[str, ...] = PROVIDERS) -> dict:
             "input); Claude Code writes 1-hour entries, billed at 2x input (see "
             "CACHE_WRITE_MULTIPLE in dev/refresh_prices.py for the derivation "
             "and the proof from a real session's total_cost_usd). Other "
-            "providers' rates are models.dev's own, base tier only. Refresh "
+            "providers' rates are models.dev's own. tiers: the rates a session "
+            "is billed at once one request's context passes `above` tokens. Refresh "
             "with: just refresh-prices (dev/refresh_prices.py)."
         ),
         "models": {

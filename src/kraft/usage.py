@@ -67,6 +67,12 @@ class Usage:
     model: str | None = None
     tokens_cache_write: int = 0
     tokens_cache_read: int = 0
+    #: The largest context one request sent (its uncached input, cache reads
+    #: and cache writes), which picks a long-context price tier
+    #: (`estimate_cost`). Only a log with a line per request shows it
+    #: (claude's and Amp's stream); 0 for one that reports running totals
+    #: (codex, cursor, an exit envelope), which prices at the base tier.
+    peak_context: int = 0
 
     @property
     def total(self) -> int:
@@ -144,6 +150,11 @@ def estimate_cost(usage: Usage, model: str | None, *, include_output: bool = Fal
     rates = _prices().get(model or "")
     if not isinstance(rates, dict):
         return None
+    # A long-context tier bills the whole session once one request's context
+    # passes it (OpenAI's pricing past 272k); the highest one passed wins.
+    for tier in list(rates.get("tiers", ())):
+        if usage.peak_context > tier["above"]:
+            rates = tier
     per_million = (
         usage.tokens_in * rates.get("input", 0)
         + usage.tokens_cache_read * rates.get("cache_read", 0)
@@ -183,6 +194,7 @@ def _from_usage_block(block: object, model: object, *, live: bool = False) -> Us
         tokens_cache_read=_int(
             block.get("cache_read_input_tokens", block.get("tokens_cache_read"))
         ),
+        peak_context=_int(block.get("peak_context")),
     )
     return u if u.total else None
 
@@ -366,6 +378,9 @@ def from_stream(lines: Iterable[str], seen: dict[str, Usage], *, live: bool = Tr
         # and that line names the session's real model. This is already right
         # and must not be "fixed" to match the envelope path.
         model=next((u.model for u in seen.values() if u.model), None),
+        peak_context=max(
+            u.tokens_in + u.tokens_cache_read + u.tokens_cache_write for u in seen.values()
+        ),
     )
 
 
@@ -594,6 +609,7 @@ def net_of_earlier(
             **{k: max(getattr(mine, k) - getattr(before, k), 0) for k in KINDS},
             cost_usd=cost,
             model=own.model,
+            peak_context=own.peak_context,
         ),
         False,
     )
@@ -855,7 +871,10 @@ def _envelope_amp(log_path: Path) -> dict | None:
     u = from_stream(lines, {}, live=False)
     if u is None:
         return None
-    return {"usage": {k: getattr(u, k) for k in KINDS}, "model": u.model}
+    return {
+        "usage": {**{k: getattr(u, k) for k in KINDS}, "peak_context": u.peak_context},
+        "model": u.model,
+    }
 
 
 def _step_opencode(obj: dict) -> tuple[str, Usage] | None:

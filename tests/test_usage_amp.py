@@ -36,8 +36,15 @@ _AMP_RUN = [
     '"result":"Two files: index.js and README.md","session_id":"' + _THREAD + '"}',
 ]
 
-#: Both requests' usage, summed.
-_SPENT = Usage(tokens_in=17, tokens_out=124, tokens_cache_write=13283, tokens_cache_read=13150)
+#: Both requests' usage, summed; the second request's context, 7 + 133 +
+#: 13150, the largest one sent (Kraft-tugdf.14).
+_SPENT = Usage(
+    tokens_in=17,
+    tokens_out=124,
+    tokens_cache_write=13283,
+    tokens_cache_read=13150,
+    peak_context=13290,
+)
 
 
 def _log(tmp_path, lines):

@@ -27,6 +27,15 @@ def test_estimate_cost_prices_live_tokens_for_a_known_model():
     assert usage.estimate_cost(live, "claude-sonnet-5") == pytest.approx(6.20)
 
 
+@pytest.mark.parametrize(("peak", "usd"), [(272_000, 4.0), (272_001, 8.0)])
+def test_a_request_past_272k_prices_the_session_at_the_long_context_tier(peak, usd):
+    """Kraft-tugdf.14: gpt-5.6-sol is $4/M input, and $8/M for a session one
+    of whose requests sent more than 272k tokens of context (prices.json,
+    from models.dev's `tiers`)."""
+    spent = Usage(tokens_in=1_000_000, peak_context=peak)
+    assert usage.estimate_cost(spent, "gpt-5.6-sol") == pytest.approx(usd)
+
+
 def test_estimate_cost_is_none_for_an_unpriced_model():
     live = Usage(tokens_in=1_000_000, model="a-model-no-snapshot-has-ever-priced")
     assert usage.estimate_cost(live, "a-model-no-snapshot-has-ever-priced") is None
