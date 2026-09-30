@@ -50,6 +50,14 @@ _BOUND = _OWN | {"source": "BOUND_KEY"}
             False,
             "no value for BOUND_KEY",
         ),
+        ([_BOUND], {}, {"BOUND_KEY": ""}, False, "no value for BOUND_KEY"),
+        (
+            [_OWN | {"phase": ["runtime"]}],
+            {"env": {"MY_KEY": "k"}},
+            {},
+            True,
+            "MY_KEY (runtime only) on a.io",
+        ),
     ],
     ids=[
         "none",
@@ -60,6 +68,8 @@ _BOUND = _OWN | {"source": "BOUND_KEY"}
         "declared-nowhere",
         "bound-under-source",
         "bound-under-env-only",
+        "bound-empty-source",
+        "phased",
     ],
 )
 def test_doctor_lists_a_sandboxs_proxy_managed_credentials(

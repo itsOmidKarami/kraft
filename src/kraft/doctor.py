@@ -700,11 +700,16 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
         dict.fromkeys(
             c.source or c.env
             for c in policy.credentials
-            if (c.source not in os.environ if c.source else c.env not in environ)
+            # Set but empty is missing too: the launch refuses it the same.
+            if (not os.environ.get(c.source) if c.source else c.env not in environ)
         )
     )
+    phases: dict[str, set[str]] = {c.env: set() for c in policy.credentials}
+    for c in policy.credentials:
+        phases[c.env].update(c.phases())
     detail = "proxy-managed: " + "; ".join(
-        f"{name} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
+        f"{name}{f' ({phases[name].pop()} only)' if len(phases[name]) == 1 else ''}"
+        f" on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
         for name, on in hosts.items()
     )
     if passing:

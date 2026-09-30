@@ -118,8 +118,9 @@ class InjectRule:
 
 def _value(env: str, source: str | None, environ: Mapping[str, str]) -> str | None:
     """A bound credential's value is the daemon's under `source` alone,
-    never the worker env's; an unbound one is `environ`'s under `env`."""
-    return os.environ.get(source) if source else environ.get(env)
+    never the worker env's, and set but empty is none; an unbound one is
+    `environ`'s under `env`."""
+    return (os.environ.get(source) or None) if source else environ.get(env)
 
 
 def rules(credentials: Iterable, environ: Mapping[str, str]) -> tuple[InjectRule, ...]:

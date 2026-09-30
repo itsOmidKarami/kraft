@@ -417,5 +417,7 @@ def test_a_bound_credential_reads_the_daemon_env_under_its_source_alone(monkeypa
     worker = {"API_KEY": "from-the-worker-env", "BOUND_KEY": "worker-env-under-source"}
 
     assert [r.value for r in inject.rules([bound], worker)] == [None]
+    monkeypatch.setenv("BOUND_KEY", "")  # set but empty is none, as absent is
+    assert [r.value for r in inject.rules([bound], worker)] == [None]
     monkeypatch.setenv("BOUND_KEY", "from-the-daemon")
     assert [r.value for r in inject.rules([bound], worker)] == ["from-the-daemon"]
