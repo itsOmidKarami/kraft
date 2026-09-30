@@ -15,7 +15,7 @@ developers tired of babysitting a session to the end of a task.
 ![A 30-second tour: file a work item, read the spec an agent wrote at its gate, and look at a finished item's diff](https://github.com/user-attachments/assets/34d3197d-b07b-4f9a-a13b-04f0c377230e)
 
 - **Gates where a human decides.** Kraft pauses at a spec, a plan, or a merge
-  request for your approval; reject with a note and the step that wrote it
+  request for your approval; reject with a note and the node that wrote it
   tries again.
 - **Capped retries, not runaway loops.** Attempts, wall-clock time, and spend
   are all bounded. Hit a cap and the item stops and hands you the full trace
@@ -54,8 +54,8 @@ then approve, or reject with a note that re-runs the node that wrote it.
 
 Each work item follows a
 [chain](https://itsomidkarami.github.io/kraft/concepts/vocabulary): a list of
-steps such as write the spec, write the plan, implement, verify and open the
-pull request. Some steps run your coding agent, some run a command, and some
+nodes such as write the spec, write the plan, implement, verify and open the
+pull request. Some nodes run your coding agent, some run a command, and some
 stop and wait for you. Chains are YAML files you can edit. How the pieces fit
 together is in
 [Architecture](https://itsomidkarami.github.io/kraft/project/architecture).
@@ -71,7 +71,7 @@ together is in
   fails; `uv self update` upgrades it. Or Homebrew on macOS.
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, installed
   and logged in. Every agent task in the shipped chains runs on it.
-- **`gh` or `glab`**, logged in, for the steps that open and merge the pull
+- **`gh` or `glab`**, logged in, for the nodes that open and merge the pull
   request on GitHub or GitLab.
 
 **Supported agents:** Claude Code, Codex, Cursor, Gemini, OpenCode and Amp all
@@ -120,7 +120,11 @@ asks. It needs the server running:
 ```
 
 To clear gates and review diffs from VS Code, install the
-[Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode).
+[Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode) from the
+VS Code Marketplace (publisher `kraft-sdlc`), or download `kraft-<version>.vsix`
+from a [GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
+`code --install-extension kraft-<version>.vsix`. Open VSX (VSCodium, Cursor)
+is coming; until then, use the `.vsix`.
 
 Every install path, connecting your agent, and updating with
 `kraft admin update` are in the

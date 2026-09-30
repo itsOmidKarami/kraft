@@ -41,13 +41,15 @@ item title containing `KRAFT_FAIL` or `KRAFT_SLOW` steers its own fake agent.
 ### The `kraft` command
 
 Every MCP tool but `permission_request` is also a subcommand, so a hook or a
-non-MCP agent gets the same surface; `item abandon` is the one subcommand with
-no tool. `--json` on any verb prints the raw API payload.
+non-MCP agent gets the same surface; `item abandon` is the one `item` verb with
+no tool. `--json` prints the raw API payload on every verb except the `admin`
+ones that manage the server process (`start`, `stop`, `restart`, the service
+verbs, `update`, `mcp`, `permission-hook`).
 
 ```bash
 kraft view list [--all] [--status=paused]   # the board, scoped to the cwd's repo
 kraft view show [ID]                        # ID defaults to the worktree you are in
-kraft item create "title" [--description "..."] [--spec P] [--plan P] [--auto-gate] [--autostart]  # files it paused unless --autostart
+kraft item create "title" [--description "..."] [--spec P] [--plan P] [--no-auto-gate] [--autostart]  # files it paused unless --autostart; auto-gate is on unless --no-auto-gate
 kraft item set-attachments [ID] [--spec P] [--plan P] [--drop KIND]  # revise a not-yet-started item's documents
 kraft item approve [ID] / kraft item reject [ID] --note "why"
 kraft item pause [ID] / kraft item resume [ID] --steer "..."
