@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 47
+SCHEMA_VERSION = 48
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -332,6 +332,22 @@ CREATE TABLE review_comments (
 );
 
 CREATE INDEX idx_review_comments_thread ON review_comments(thread_id, created_at)
+;
+
+CREATE TABLE config_drafts (
+  area       TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  -- {file: text | null}, null: the file is deleted on publish (`kraft.drafts`)
+  files      TEXT NOT NULL,
+  -- {file: sha256 | null} of the published text when the file joined the draft
+  base       TEXT NOT NULL,
+  serialized TEXT NOT NULL DEFAULT '[]',
+  history    TEXT NOT NULL DEFAULT '[]',
+  changes    INTEGER NOT NULL DEFAULT 0,
+  problems   INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (area, key)
+)
 """
 
 #: A trigger body holds `;`, which the naive split of `SCHEMA_SQL` would cut, so
@@ -1017,6 +1033,23 @@ FROM worker_sessions""",
   viewed_at    TEXT NOT NULL,
   PRIMARY KEY (work_item_id, file_path, to_sha)
 )""",
+    ],
+    # The Templates editor's drafts (UX V2 W9).
+    47: [
+        """CREATE TABLE config_drafts (
+  area       TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  -- {file: text | null}, null: the file is deleted on publish (`kraft.drafts`)
+  files      TEXT NOT NULL,
+  -- {file: sha256 | null} of the published text when the file joined the draft
+  base       TEXT NOT NULL,
+  serialized TEXT NOT NULL DEFAULT '[]',
+  history    TEXT NOT NULL DEFAULT '[]',
+  changes    INTEGER NOT NULL DEFAULT 0,
+  problems   INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (area, key)
+)"""
     ],
 }
 

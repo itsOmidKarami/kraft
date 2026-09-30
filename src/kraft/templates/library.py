@@ -67,7 +67,9 @@ _UNION_TAGS = frozenset({*TaskKind, *NodeKind})
 class TemplateLibraryError(Exception):
     """A library or chain that cannot be used, and -- when the raise site knows
     it -- where: `loc` is a key path into the file the message names, `related`
-    the `(file, key path)` of a definition inherited from `library.yaml`."""
+    the `(file, key path)` of a definition inherited from `library.yaml`.
+    `errors` is every schema failure, not only the one the message names:
+    `(key path into the chain file, message)` each (the drafts' problem list)."""
 
     def __init__(
         self,
@@ -75,10 +77,12 @@ class TemplateLibraryError(Exception):
         *,
         loc: tuple[object, ...] | None = None,
         related: tuple[Path, tuple[object, ...]] | None = None,
+        errors: tuple[tuple[tuple[object, ...], str], ...] = (),
     ) -> None:
         super().__init__(message)
         self.loc = loc
         self.related = related
+        self.errors = errors
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,8 @@ class TemplateIssue:
     related: tuple[Path, tuple[object, ...]] | None = None
     #: The YAML parser's own position, for a file that does not parse.
     mark: Position | None = None
+    #: `TemplateLibraryError.errors`: every schema failure, when there were several.
+    errors: tuple[tuple[tuple[object, ...], str], ...] = ()
 
     def __str__(self) -> str:
         return f"{self.chain or self.file}: {self.message}"
@@ -109,6 +115,7 @@ class TemplateIssue:
             loc=getattr(exc, "loc", None),
             related=getattr(exc, "related", None),
             mark=positions.yaml_mark(exc),
+            errors=getattr(exc, "errors", ()),
         )
 
 
@@ -443,7 +450,12 @@ class TemplateLibrary:
             chain = Chain.model_validate(expanded)
         except ValidationError as exc:
             raise TemplateLibraryError(
-                resolution.explain(exc), **resolution.error_location(exc)
+                resolution.explain(exc),
+                **resolution.error_location(exc),
+                errors=tuple(
+                    (tuple(p for p in e["loc"] if p not in _UNION_TAGS), e["msg"])
+                    for e in exc.errors()
+                ),
             ) from exc
         resolved = ResolvedChain.from_chain(chain)
         for node in resolved.nodes:
@@ -788,6 +800,12 @@ class _Resolution:
         if key is None:
             return {"loc": loc}
         return self._at(key, loc[len(key) :])
+
+    def split(self, loc: tuple[object, ...]) -> tuple[str | None, tuple[object, ...]]:
+        """The canonical path of the deepest expanded component `loc` walks to,
+        and the rest of `loc` below it; `None` and all of `loc` for none."""
+        key = next((k for k in _prefixes(loc) if k in self._located), None)
+        return (None, loc) if key is None else (self._located[key].path, loc[len(key) :])
 
     def path_location(self, path: str) -> dict[str, object]:
         """`loc`/`related` for the component at canonical `path`."""
