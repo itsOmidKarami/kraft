@@ -27,8 +27,10 @@
   ],
   "keywords": [
     "kraft",
+    "agent",
     "coding agent",
     "ai agents",
+    "claude",
     "claude code",
     "codex",
     "orchestrator",
@@ -37,6 +39,8 @@
     "pull request",
     "merge request",
     "spec",
+    "sdlc",
+    "agentic-sdlc",
     "workflow",
     "human in the loop",
     "approval"
