@@ -47,6 +47,11 @@ def test_changelog_section_is_the_entry():
     assert plan_release.changelog_entry(pr(12, "patch", body)) == "- Fix: the thing works. (#12)"
 
 
+def test_a_trailing_attribution_line_stays_out_of_the_entry():
+    body = "## Changelog\n\nFix: the thing works.\n\n\U0001f916 Generated with [Claude Code](https://claude.com/claude-code)\n\n"
+    assert plan_release.changelog_entry(pr(5, "patch", body)) == "- Fix: the thing works. (#5)"
+
+
 def test_no_changelog_section_falls_back_to_the_title():
     body = "## Changelog\n\n<!-- left empty -->\n"
     assert plan_release.changelog_entry(pr(3, "patch", body, title="fix: x")) == "- fix: x (#3)"
