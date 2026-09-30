@@ -1,5 +1,7 @@
 ---
 title: Chain nodes
+navigation:
+  title: Overview
 description: Node keys, task kinds, read_only, extends, and canonical paths in chain files.
 ---
 
@@ -7,6 +9,12 @@ The keys a chain file under `templates/chains/` accepts, and the keys of every
 task kind. For what a chain, node, task, and gate are, see
 [Concepts](/concepts/vocabulary). For the reusable components a chain extends,
 see [Library and chains](/reference/configuration/library-and-chains).
+
+## In this section
+
+- [Subprocess tasks](/reference/chain-nodes/subprocess-tasks): what Kraft passes a command, and how its exit code becomes a status.
+- [Fix loop and judge](/reference/chain-nodes/fix-loop): when a fix loop opens, what each cycle does, and what the judge's verdicts mean.
+- [Result file](/reference/chain-nodes/result-file): the JSON a task writes at `$KRAFT_RESULT_PATH`, field by field.
 
 ## Chain keys
 
@@ -37,14 +45,14 @@ An exec node declares `tasks` or `steps`, never both.
 | `tasks` | Shorthand for one step named `main`. Its tasks are dispatched together, and the node is measured once all have settled. |
 | `steps` | Steps that run in order. A later step is not dispatched if an earlier one fails, and it sees what the earlier one left behind. |
 | `on_failure` | A recovery pass: tasks or steps that run once after the node failed, before it is measured again. A task or step may carry its own `on_failure`; the nearest one to the failure wins. |
-| `fix_loop` | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes, up to `max_attempts` and the wall clock that `policy.yaml` gives the loop (`<node>.fix_loop`). |
+| `fix_loop` | Repair tasks or steps, an optional `judge` task, and an optional `max_attempts`. It re-runs until the node passes, up to `max_attempts` and the wall clock that `policy.yaml` gives the loop (`<node>.fix_loop`). See [Fix loop and judge](/reference/chain-nodes/fix-loop). |
 | `escalation` | An agent task dispatched when the node is stuck after recovery and the fix loop, before a person is asked. |
 | `on_base_changed` | What to re-run when a rebase moves the base. `restart_from` names an earlier node. `on_conflict` names the task or steps that resolve a conflicting rebase. |
 | `read_only` | `true` makes Kraft verify that the node's steps leave the worktree as they found it. Refused on a node with a `fix_loop`. See [read_only](#read_only). |
 
 A recovery that concludes no repair can help reports `failed` with a
-`suggested_action` (`skip`, `retry` or `abandon`, with a reason) in its result
-file. `kraft view show` prints the one command that takes it. An infra stop
+`suggested_action` (`skip`, `retry` or `abandon`, with a reason) in its
+[result file](/reference/chain-nodes/result-file). `kraft view show` prints the one command that takes it. An infra stop
 suggests `retry`.
 
 ### Step keys
@@ -105,7 +113,7 @@ A task takes no `read_only`. Set it on the step or node instead.
 
 | Kind | Key | Meaning |
 |---|---|---|
-| `subprocess` | `command` | The command to run in the worktree. It is split into arguments like a shell would, but runs with no shell, so `&&` and pipes need `sh -c '...'`. Exit 0 is `done`. See [How the lint node runs](/guides/write-your-own-chain#how-the-lint-node-runs). |
+| `subprocess` | `command` | The command to run in the worktree. It is split into arguments like a shell would, but runs with no shell, so `&&` and pipes need `sh -c '...'`. Exit 0 is `done`. See [Subprocess tasks](/reference/chain-nodes/subprocess-tasks). |
 | `builtin` | `ref` | The work Kraft does itself: `kraft.verify_changed_test_scopes` (the repo's own test scopes) or `kraft.mr_rebase` (rebase the worktree onto the item's base branch). |
 | `builtin` | `execution` | `sequential` (default) or `parallel`. |
 | `forge` | `target` | A merge-request action on GitHub or GitLab, resolved from the `forge` in the repo's `repos.yaml` entry: `mr.open_draft`, `mr.sync`, `mr.ci`, `mr.automated_review`, `mr.mark_ready`, `mr.external_approval`, `mr.merge` or `mr.post_merge_ci`. |

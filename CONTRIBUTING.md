@@ -292,7 +292,9 @@ Page rules:
 |---|---|
 | A `kraft` subcommand or flag (`src/kraft/cli/*.py`) | `docsite/content/4.reference/1.cli/` |
 | A `library.yaml` component key, or a `policy.yaml` / `repos.yaml` / `access.yaml` / `intake.yaml` field (`src/kraft/templates/models.py`, `library.py`, `config.py`, `policy.py`) | `docsite/content/4.reference/2.configuration/` |
-| A chain template's node fields | `docsite/content/4.reference/3.chain-nodes.md` |
+| A chain template's node fields | `docsite/content/4.reference/3.chain-nodes/index.md` |
+| How a subprocess task runs, or a result-file field (`src/kraft/adapters/subprocess.py`, `findings.py`, `usage.py`) | `docsite/content/4.reference/3.chain-nodes/2.subprocess-tasks.md`, `4.result-file.md` |
+| The fix loop or its judge (`src/kraft/executor/walk.py`, `dispatch.py`) | `docsite/content/4.reference/3.chain-nodes/3.fix-loop.md` |
 | A new default chain, or a change to the core vocabulary | `docsite/content/2.concepts/1.vocabulary.md` |
 | Trigger behaviour (`src/kraft/triggers.py`) | `docsite/content/4.reference/6.triggers.md` |
 | The permission gate (`src/kraft/harnesses/*.yaml`, `permissions`) | `docsite/content/4.reference/4.permissions.md` |
@@ -305,9 +307,11 @@ Page rules:
 | `access.yaml` / remote-access behaviour | `docsite/content/3.guides/03.remote-access.md`, and `SECURITY.md` if it's security-relevant |
 
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
-a page that doesn't parse, but it does not validate every internal link or
-anchor: a link to a page or heading that no longer exists renders instead of
-failing the build. Nothing catches "this paragraph no longer describes the
+a page that doesn't parse, but a link to a page or heading that no longer
+exists renders instead of failing the build. The docs workflow catches those:
+on a pull request it runs [lychee](https://lychee.cli.rs) over the built
+pages and their Markdown, and fails on a broken internal link, a missing anchor, or an external
+link that does not answer. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
 
