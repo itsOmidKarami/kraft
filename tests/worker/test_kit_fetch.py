@@ -122,3 +122,24 @@ async def test_a_cached_kit_is_not_fetched_again(registry, tmp_path, monkeypatch
     first = await kit.ensure(REF)
     assert (await kit.ensure(REF), kit.cached(REF)) == (first, first)
     assert len(calls.read_text().splitlines()) == 2  # the index and its platform manifest
+
+
+async def test_a_single_manifest_podman_will_not_inspect_is_read_from_the_pulled_image(
+    monkeypatch,
+):
+    """podman 6.1 reads `manifest inspect` only as an index; the pulled
+    image's annotations are its manifest's (the P7b-2 e2e settled it)."""
+    asked = []
+
+    async def docker_ask(*args, timeout=None, limit=None):
+        asked.append(args[:2])
+        if args[0] == "manifest":
+            return 125, "", f"Error: parsing manifest blob: {kit._SINGLE}"
+        return 0, json.dumps(ANNOTATED) if args[0] == "image" else "", ""
+
+    monkeypatch.setattr(docker, "docker_ask", docker_ask)
+
+    fetched = await kit.fetch(REF)
+
+    assert (fetched.manifest, fetched.descriptor().kind) == (REF.rpartition("@")[2], "workload")
+    assert asked == [("manifest", "inspect"), ("pull", "-q"), ("image", "inspect")]
