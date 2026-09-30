@@ -258,7 +258,14 @@ jobs:
         working-directory: vscode
       - run: npm test
         working-directory: vscode
-      - run: xvfb-run -a npm run test:integration
+      # VS Code's window sometimes hangs under xvfb ("CodeWindow: detected
+      # unresponsive", exit 1, no assertion failed). The tests are stateful, so
+      # a retry restarts the whole runner: fresh daemon, fresh seed.
+      - run: |
+          xvfb-run -a npm run test:integration || {
+            echo "::warning::vscode integration failed once; retrying on a fresh daemon"
+            xvfb-run -a npm run test:integration
+          }
         working-directory: vscode
 
   e2e:
