@@ -44,7 +44,8 @@ def _daily_breached(db, budget: policy_mod.Budget) -> bool:
     # The work-item argument is irrelevant to the daily figure; pass a value that
     # matches nothing rather than inventing an overload.
     _item, daily = db.read(lambda c: store.budget_spend(c, "", since=since))
-    return daily >= budget.daily_usd
+    _item, unknown = db.read(lambda c: store.unknown_spend(c, "", since=since))
+    return bool(unknown) or daily >= budget.daily_usd
 
 
 async def tick(app) -> list[str]:

@@ -117,10 +117,19 @@ def budget_breach(
         return None
     since = store.local_midnight_utc() if budget.daily_usd is not None else None
     item_usd, daily_usd = db.read(lambda c: store.budget_spend(c, work_item_id, since=since))
-    if budget.work_item_usd is not None and item_usd >= budget.work_item_usd:
-        return WorkItemBreach(scope="work_item", spent_usd=item_usd, cap_usd=budget.work_item_usd)
-    if budget.daily_usd is not None and daily_usd >= budget.daily_usd:
-        return DailyBreach(scope="daily", spent_usd=daily_usd, cap_usd=budget.daily_usd)
+    item_unknown, daily_unknown = db.read(
+        lambda c: store.unknown_spend(c, work_item_id, since=since)
+    )
+    cap = budget.work_item_usd
+    if cap is not None and (item_unknown or item_usd >= cap):
+        return WorkItemBreach(
+            scope="work_item", spent_usd=item_usd, cap_usd=cap, unknown_launches=item_unknown
+        )
+    cap = budget.daily_usd
+    if cap is not None and (daily_unknown or daily_usd >= cap):
+        return DailyBreach(
+            scope="daily", spent_usd=daily_usd, cap_usd=cap, unknown_launches=daily_unknown
+        )
     return None
 
 
@@ -147,6 +156,19 @@ def budget_reason(breach: Breach) -> str:
     where = (
         "this work item" if isinstance(breach, WorkItemBreach) else "today, across every work item"
     )
+    if breach.unknown_launches:
+        fix = (
+            "remove this item's cap (Raise budget: no cap)"
+            if isinstance(breach, WorkItemBreach)
+            else "clear budget.daily_usd in policy.yaml"
+        )
+        return (
+            f"budget cap cannot be checked: {breach.unknown_launches} launch(es) on {where} "
+            f"reported no cost and could not be estimated from prices.json, and unknown spend "
+            f"is never counted as free (${breach.spent_usd:.2f} known, cap "
+            f"${breach.cap_usd:.2f}). Bound that harness's spend with a token_budget "
+            f"instead and {fix}, then retry." + tail
+        )
     return (
         f"budget cap reached: ${breach.spent_usd:.2f} spent on {where}, "
         f"cap ${breach.cap_usd:.2f}." + tail

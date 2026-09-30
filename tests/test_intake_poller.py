@@ -89,7 +89,7 @@ async def _file(app, *, bead_id: str, status: str) -> str:
     return wid
 
 
-async def _spend(app, usd: float) -> None:
+async def _spend(app, usd: float | None, tokens: int = 0) -> None:
     """A finished session that cost `usd`, as usage capture would have left it.
 
     Sessions are foreign-keyed to a work item, so this parks one in needs_human:
@@ -110,7 +110,8 @@ async def _spend(app, usd: float) -> None:
     )
     await app.state.db.write(
         lambda c: c.execute(
-            "UPDATE worker_sessions SET cost_usd = ?, status = 'done' WHERE id = ?", (usd, sid)
+            "UPDATE worker_sessions SET cost_usd = ?, tokens_in = ?, status = 'done' WHERE id = ?",
+            (usd, tokens, sid),
         )
     )
 
@@ -289,6 +290,18 @@ async def test_does_not_run_while_the_daily_budget_is_breached(tmp_path, monkeyp
     await _spend(app, 5.0)
     assert await intake_mod.tick(app) == []
     assert [r["bead_id"] for r in _work_items(app)] == ["SPENT-1"]
+
+
+async def test_does_not_run_while_todays_spend_is_unknown(tmp_path, monkeypatch, stub_app):
+    """A finished session that spent tokens and has no dollar figure is unknown
+    spend, never free: the daily cap cannot be shown to hold (Kraft-9efnk.10)."""
+    monkeypatch.setattr(
+        intake_mod.beads, "ready", _ready([{"id": "B-1", "title": "t", "priority": 3}])
+    )
+
+    app = stub_app(**_state(tmp_path, budget=policy.Budget(daily_usd=1.0)))
+    await _spend(app, None, tokens=10)
+    assert await intake_mod.tick(app) == []
 
 
 async def test_starts_when_the_daily_budget_is_not_reached(tmp_path, monkeypatch, stub_app):

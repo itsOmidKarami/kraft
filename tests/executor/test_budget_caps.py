@@ -231,6 +231,60 @@ async def test_a_daily_breach_reports_todays_number_not_the_work_items(item_on):
     )
 
 
+async def _exited(it, sid: str, path: str, model: str) -> None:
+    """A finished session on `model` that spent 1M input tokens and reported no
+    cost -- a Codex, Cursor or Amp launch -- through the real session writer."""
+    await it.session(sid, path)
+    spent = usage.Usage(tokens_in=1_000_000, tokens_out=0, model=model)
+    await it.database.write(lambda c: store.session_exited(c, sid, "done", None, spent))
+
+
+@pytest.mark.parametrize(
+    "model,cost,known,unknown",
+    # claude-sonnet-5: $2/M input in prices.json, so 1M tokens estimate $2.00.
+    [("claude-sonnet-5", 2.0, 2.0, 0), ("no-such-model", None, 0.0, 1)],
+    ids=["priced", "unpriced"],
+)
+async def test_the_item_cap_counts_an_unreported_cost_by_estimate_or_as_unknown(
+    item_on, model, cost, known, unknown
+):
+    """Kraft-9efnk.10: a finished session with tokens and no reported cost
+    counts toward `work_item_usd` at its `prices.json` estimate; on a model
+    the table does not price its spend is unknown, never $0, and the cap
+    stops the item saying it cannot be checked. The NULL stays NULL."""
+    it = await item_on(_chain())
+    await _exited(it, "s", "ship.main.go", model)
+    assert it.sessions()[0]["cost_usd"] == (pytest.approx(cost) if cost else None)
+
+    breach = stops.budget_breach(it.database, it.id, _policy.Budget(work_item_usd=2))
+
+    assert breach.model_dump() == {
+        "scope": "work_item",
+        "spent_usd": pytest.approx(known),
+        "cap_usd": 2.0,
+        "unknown_launches": unknown,
+    }
+    reason = stops.budget_reason(breach)
+    assert ("cannot be checked: 1 launch(es) on this work item" in reason) == bool(unknown)
+    assert ("remove this item's cap" in reason) == bool(unknown)
+
+
+async def test_the_daily_cap_stops_on_any_items_unknown_spend_today(item_on):
+    other = await item_on(_chain(), wid="w2")
+    it = await item_on(_chain())
+    await other.session("r", "ship.main.go", running=(1, 1.0))
+    live = usage.Usage(tokens_in=10, tokens_out=None, model="no-such-model")
+    await it.database.write(lambda c: store.session_progress(c, "r", live))
+    daily = _policy.Budget(daily_usd=100)
+    assert stops.budget_breach(it.database, it.id, daily) is None, "a running session is unknown"
+
+    await _exited(other, "s", "build.run.other", "no-such-model")
+
+    breach = stops.budget_breach(it.database, it.id, daily)
+    assert breach == DailyBreach(scope="daily", spent_usd=0.0, cap_usd=100.0, unknown_launches=1)
+    assert "clear budget.daily_usd" in stops.budget_reason(breach)
+
+
 @pytest.mark.parametrize(
     "breach_cls,fields",
     [
@@ -245,8 +299,14 @@ async def test_a_daily_breach_reports_todays_number_not_the_work_items(item_on):
                 "unknown_launches": 0,
             },
         ),
-        (WorkItemBreach, {"scope": "work_item", "spent_usd": 1.0, "cap_usd": 2.0}),
-        (DailyBreach, {"scope": "daily", "spent_usd": 1.0, "cap_usd": 2.0}),
+        (
+            WorkItemBreach,
+            {"scope": "work_item", "spent_usd": 1.0, "cap_usd": 2.0, "unknown_launches": 0},
+        ),
+        (
+            DailyBreach,
+            {"scope": "daily", "spent_usd": 1.0, "cap_usd": 2.0, "unknown_launches": 1},
+        ),
     ],
     ids=["tokens", "usd", "work_item", "daily"],
 )

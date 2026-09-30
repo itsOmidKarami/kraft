@@ -403,6 +403,9 @@ class WorkItemBreach(BaseModel):
     scope: Literal["work_item"]
     spent_usd: float
     cap_usd: float
+    #: Finished sessions whose spend is unknown (`store.unknown_spend`): when
+    #: nonzero, the cap was refused because it cannot be checked, not reached.
+    unknown_launches: int = 0
 
 
 class DailyBreach(BaseModel):
@@ -413,6 +416,9 @@ class DailyBreach(BaseModel):
     scope: Literal["daily"]
     spent_usd: float
     cap_usd: float
+    #: Finished sessions whose spend is unknown (`store.unknown_spend`): when
+    #: nonzero, the cap was refused because it cannot be checked, not reached.
+    unknown_launches: int = 0
 
 
 #: The four shapes a budget breach can take, tagged on `scope` so a reader

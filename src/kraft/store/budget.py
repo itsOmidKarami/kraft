@@ -156,6 +156,36 @@ def budget_spend(
     return float(item), float(daily)
 
 
+#: A finished session that spent tokens and has no dollar figure: the agent
+#: reported none and `_settle_cost` could not estimate one (a model
+#: `prices.json` does not price, or a resume whose netting failed). Same test
+#: as `caps.budget_breach`'s `unknown`; a pending or running one has not
+#: settled yet.
+_UNKNOWN = (
+    "cost_usd IS NULL AND status NOT IN ('pending', 'running') AND "
+    + " + ".join(f"COALESCE({k}, 0)" for k in KINDS)
+    + " > 0"
+)
+
+
+def unknown_spend(
+    conn: sqlite3.Connection, work_item_id: str, *, since: str | None = None
+) -> tuple[int, int]:
+    """`(sessions on this work item, sessions instance-wide since `since`)`
+    whose spend is unknown (`_UNKNOWN`). `budget_spend` counts them as zero,
+    so a dollar cap cannot be shown to hold while any exist: unknown spend is
+    never free (Kraft-9efnk.10)."""
+    item = conn.execute(
+        f"SELECT COUNT(*) FROM worker_sessions WHERE work_item_id = ? AND {_UNKNOWN}",
+        (work_item_id,),
+    ).fetchone()[0]
+    daily = conn.execute(
+        f"SELECT COUNT(*) FROM worker_sessions WHERE created_at >= ? AND {_UNKNOWN}",
+        (since or "",),
+    ).fetchone()[0]
+    return item, daily
+
+
 def effective_work_item_cap(row, policy_budget) -> tuple[float | None, str]:
     """`(cap_usd, source)` for one work item -- `source` is `"item"` when the
     item has its own cap (set or explicitly cleared to "no cap"), else

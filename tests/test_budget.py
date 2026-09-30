@@ -158,6 +158,7 @@ async def test_over_the_cap_refuses_the_next_launch(
         "scope": "work_item",
         "spent_usd": 25.0,
         "cap_usd": 20.0,
+        "unknown_launches": 0,
     }
     assert "budget" in payload["reason"] and "20" in payload["reason"]
 
@@ -216,7 +217,12 @@ async def test_the_daily_cap_stops_an_item_that_has_spent_nothing(
     result = await _run(database, run_dirs, tracker, wid, _policy(daily_usd=100.0))
     assert result == "needs_human"
     payload = _needs_human_payload(database, wid)
-    assert payload["budget"] == {"scope": "daily", "spent_usd": 150.0, "cap_usd": 100.0}
+    assert payload["budget"] == {
+        "scope": "daily",
+        "spent_usd": 150.0,
+        "cap_usd": 100.0,
+        "unknown_launches": 0,
+    }
 
 
 async def test_yesterdays_spend_does_not_count_against_todays_daily_cap(
