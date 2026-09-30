@@ -12,8 +12,6 @@ import yaml
 
 from kraft import client, render
 from kraft.cli import common
-from kraft.templates import positions
-from kraft.templates.library import TemplateLibrary
 
 
 def _render_lint(report: dict) -> str:
@@ -26,18 +24,15 @@ def _render_lint(report: dict) -> str:
 
 
 def _lint_dir_report(path: str) -> dict:
-    """`--dir`'s in-process answer: `TemplateLibrary.lint_dir` over `path`,
+    """`--dir`'s in-process answer: the route's `lint_report` over `path`,
     never the daemon. No `skills_dir` -- an operator's `~/.kraft/skills`
     overlay is that instance's, not the checkout's, so this only sees bundled
     skills. No `instance_policy` either -- that is this run's `policy.yaml`,
     also instance state, so a chain past that instance's `maxima:` ceiling
     will not show up here even though the server route would catch it."""
-    report = TemplateLibrary.lint_dir(path)
-    return {
-        "valid": report.valid,
-        "chains": list(report.chains),
-        "issues": [positions.issue_view(i) for i in report.issues],
-    }
+    from kraft.api.config_check import lint_report  # the daemon's modules, only for --dir
+
+    return lint_report(path)
 
 
 def _cmd_lint(ns: argparse.Namespace) -> None:

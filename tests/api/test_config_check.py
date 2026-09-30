@@ -3,6 +3,9 @@ it would be, with nothing written."""
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import pytest
 
 from kraft.api import config_check
@@ -124,3 +127,20 @@ def test_a_library_check_without_a_running_library_still_resolves_the_chains(ctx
     ctx = config_check.CheckContext(**{**ctx.__dict__, "library": None})
     issues = config_check.check("library.yaml", "tasks: {}\n", ctx)
     assert "default" in {i.chain for i in issues}
+
+
+def test_lint_reports_a_profile_its_harness_has_no_model_for(tmp_path):
+    """`profile: fast` has no Codex model: a task pairing it with a codex
+    harness used to lint clean and fail only at launch (Kraft-9efnk.34)."""
+    shutil.copytree(Path(__file__).resolve().parents[2] / "templates", tmp_path, dirs_exist_ok=True)
+    library = tmp_path / "library.yaml"
+    text = library.read_text()
+    assert "harness: claude\n    profile: strong" in text
+    library.write_text(
+        text.replace("harness: claude\n    profile: strong", "harness: codex\n    profile: fast", 1)
+    )
+    report = config_check.lint_report(tmp_path)
+    assert report["valid"] is False
+    assert any(
+        "profile 'fast' has no model for provider 'codex'" in i["message"] for i in report["issues"]
+    )
