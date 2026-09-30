@@ -5,6 +5,17 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.3.0
+
+### New
+
+- Kraft now runs on Python 3.12 and 3.13 as well as 3.14. (#316)
+
+### Fixes
+
+- The seeded `policy.yaml` and `quick-task.yaml` comments now describe each setting in user terms, with no internal notes. Existing installs keep their own copies.
+- Troubleshooting now covers the `budget_usd cannot be checked` stop, and a `budget_usd` cap set on one node, step or task. (#313)
+
 ## 1.2.2
 
 ### Fixes
