@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_0ef1867aa7884983___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -159,7 +159,7 @@
     <p class="run run2"><span class="n"><a id="t77" href="#t77">77</a></span><span class="t">            <span class="nam">capture_output</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t78" href="#t78">78</a></span><span class="t">            <span class="nam">text</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t79" href="#t79">79</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t80" href="#t80">80</a></span><span class="t">    <span class="key">except</span> <span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t80" href="#t80">80</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t81" href="#t81">81</a></span><span class="t">        <span class="key">return</span> <span class="op">[</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t82" href="#t82">82</a></span><span class="t">    <span class="key">if</span> <span class="nam">proc</span><span class="op">.</span><span class="nam">returncode</span> <span class="op">!=</span> <span class="num">0</span> <span class="key">or</span> <span class="str">&quot;[&quot;</span> <span class="key">not</span> <span class="key">in</span> <span class="nam">proc</span><span class="op">.</span><span class="nam">stdout</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t83" href="#t83">83</a></span><span class="t">        <span class="key">return</span> <span class="op">[</span><span class="op">]</span>&nbsp;</span><span class="r"></span></p>
@@ -195,7 +195,7 @@
     <p class="run run2"><span class="n"><a id="t113" href="#t113">113</a></span><span class="t">            <span class="nam">capture_output</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t114" href="#t114">114</a></span><span class="t">            <span class="nam">text</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t115" href="#t115">115</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">    <span class="key">except</span> <span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">        <span class="com"># OSError: bd is not installed / cwd does not exist. ValueError: text=True</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t118" href="#t118">118</a></span><span class="t">        <span class="com"># decodes stdout as UTF-8, which raises UnicodeDecodeError (a ValueError</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t119" href="#t119">119</a></span><span class="t">        <span class="com"># subclass) on a bd that emits invalid bytes.</span>&nbsp;</span><span class="r"></span></p>
@@ -247,7 +247,7 @@
     <p class="run run2"><span class="n"><a id="t165" href="#t165">165</a></span><span class="t">            <span class="nam">capture_output</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t166" href="#t166">166</a></span><span class="t">            <span class="nam">text</span><span class="op">=</span><span class="key">True</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t167" href="#t167">167</a></span><span class="t">        <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t168" href="#t168">168</a></span><span class="t">    <span class="key">except</span> <span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t168" href="#t168">168</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">OSError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t169" href="#t169">169</a></span><span class="t">        <span class="com"># OSError: bd is not installed / cwd does not exist. ValueError:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t170" href="#t170">170</a></span><span class="t">        <span class="com"># text=True decodes stdout as UTF-8, which raises UnicodeDecodeError</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t171" href="#t171">171</a></span><span class="t">        <span class="com"># (a ValueError subclass) on a bd that emits invalid bytes. Same</span>&nbsp;</span><span class="r"></span></p>
@@ -279,7 +279,7 @@
             <a class="nav" href="z_0ef1867aa7884983___init___py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
     </div>
 </footer>

@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -196,7 +196,7 @@
     <p class="run"><span class="n"><a id="t114" href="#t114">114</a></span><span class="t">        <span class="key">return</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t115" href="#t115">115</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t116" href="#t116">116</a></span><span class="t">        <span class="nam">os</span><span class="op">.</span><span class="nam">killpg</span><span class="op">(</span><span class="nam">os</span><span class="op">.</span><span class="nam">getpgid</span><span class="op">(</span><span class="nam">pid</span><span class="op">)</span><span class="op">,</span> <span class="nam">signal</span><span class="op">.</span><span class="nam">SIGINT</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">    <span class="key">except</span> <span class="nam">ProcessLookupError</span><span class="op">,</span> <span class="nam">PermissionError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t117" href="#t117">117</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">ProcessLookupError</span><span class="op">,</span> <span class="nam">PermissionError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t118" href="#t118">118</a></span><span class="t">        <span class="key">pass</span>  <span class="com"># already gone, or not ours &#8212; the row still moves to paused</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t119" href="#t119">119</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t120" href="#t120">120</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
@@ -220,7 +220,7 @@
     <p class="run"><span class="n"><a id="t138" href="#t138">138</a></span><span class="t">    <span class="key">for</span> <span class="nam">proc</span> <span class="key">in</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">process_iter</span><span class="op">(</span><span class="op">[</span><span class="str">&quot;pid&quot;</span><span class="op">]</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t139" href="#t139">139</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t140" href="#t140">140</a></span><span class="t">            <span class="nam">cwd</span> <span class="op">=</span> <span class="nam">proc</span><span class="op">.</span><span class="nam">cwd</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t141" href="#t141">141</a></span><span class="t">        <span class="key">except</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">NoSuchProcess</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">AccessDenied</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">ZombieProcess</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t141" href="#t141">141</a></span><span class="t">        <span class="key">except</span> <span class="op">(</span><span class="nam">psutil</span><span class="op">.</span><span class="nam">NoSuchProcess</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">AccessDenied</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">ZombieProcess</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t142" href="#t142">142</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t143" href="#t143">143</a></span><span class="t">        <span class="key">if</span> <span class="key">not</span> <span class="nam">cwd</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t144" href="#t144">144</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
@@ -232,7 +232,7 @@
     <p class="run"><span class="n"><a id="t150" href="#t150">150</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t151" href="#t151">151</a></span><span class="t">        <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t152" href="#t152">152</a></span><span class="t">            <span class="nam">proc</span><span class="op">.</span><span class="nam">terminate</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="mis show_mis"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t">        <span class="key">except</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">NoSuchProcess</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">AccessDenied</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="mis show_mis"><span class="n"><a id="t153" href="#t153">153</a></span><span class="t">        <span class="key">except</span> <span class="op">(</span><span class="nam">psutil</span><span class="op">.</span><span class="nam">NoSuchProcess</span><span class="op">,</span> <span class="nam">psutil</span><span class="op">.</span><span class="nam">AccessDenied</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="mis show_mis"><span class="n"><a id="t154" href="#t154">154</a></span><span class="t">            <span class="key">continue</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t155" href="#t155">155</a></span><span class="t">        <span class="nam">killed</span><span class="op">.</span><span class="nam">append</span><span class="op">(</span><span class="nam">proc</span><span class="op">.</span><span class="nam">pid</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t156" href="#t156">156</a></span><span class="t">    <span class="key">return</span> <span class="nam">killed</span>&nbsp;</span><span class="r"></span></p>
@@ -1630,7 +1630,7 @@
             <a class="nav" href="z_e76ffebab55e5b0a_repos_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
     </div>
 </footer>

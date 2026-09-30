@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_323e79e8bb4dca6e_intent_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -274,7 +274,7 @@
     <p class="run"><span class="n"><a id="t192" href="#t192">192</a></span><span class="t">    <span class="nam">raw</span> <span class="op">=</span> <span class="nam">app</span><span class="op">.</span><span class="nam">state</span><span class="op">.</span><span class="nam">intake</span><span class="op">.</span><span class="nam">get</span><span class="op">(</span><span class="str">&quot;interval_s&quot;</span><span class="op">,</span> <span class="nam">config_mod</span><span class="op">.</span><span class="nam">INTAKE_DEFAULT</span><span class="op">[</span><span class="str">&quot;interval_s&quot;</span><span class="op">]</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t193" href="#t193">193</a></span><span class="t">    <span class="key">try</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t194" href="#t194">194</a></span><span class="t">        <span class="nam">interval</span> <span class="op">=</span> <span class="nam">max</span><span class="op">(</span><span class="num">30</span><span class="op">,</span> <span class="nam">int</span><span class="op">(</span><span class="nam">raw</span><span class="op">)</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t195" href="#t195">195</a></span><span class="t">    <span class="key">except</span> <span class="nam">TypeError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t195" href="#t195">195</a></span><span class="t">    <span class="key">except</span> <span class="op">(</span><span class="nam">TypeError</span><span class="op">,</span> <span class="nam">ValueError</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t196" href="#t196">196</a></span><span class="t">        <span class="com"># Nothing validates a hand-edited intake.yaml, and raising here would</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t197" href="#t197">197</a></span><span class="t">        <span class="com"># kill the poller task at birth &#8212; the operator would see a poller they</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t198" href="#t198">198</a></span><span class="t">        <span class="com"># just enabled quietly never pick anything up.</span>&nbsp;</span><span class="r"></span></p>
@@ -297,7 +297,7 @@
             <a class="nav" href="z_323e79e8bb4dca6e_intent_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 15:02 +0000
+            created at 2026-09-30 16:58 +0000
         </p>
     </div>
 </footer>
