@@ -101,6 +101,13 @@ async function composer(c: Ctx, st: DisplayState, open: RegExp, fill: boolean) {
     await settle(c.page);
   }
 }
+/** A /ng page under a given look: the mock's theme is what GET /theme answers. */
+async function ng(c: Ctx, url: string, look: Record<string, unknown>) {
+  Object.assign(c.S.settings.theme, look);
+  await c.page.goto(url);
+  await c.page.locator("main h1").first().waitFor({ timeout: 8000 });
+  await settle(c.page, 600);
+}
 async function settings(c: Ctx, to: string) {
   await c.page.goto(`/settings/${to}`);
   await c.page.locator("main").waitFor();
@@ -224,6 +231,15 @@ const CASES: Case[] = [
 
   // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
   { screen: "ng-shell", variant: "stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+  // W1: the token sheet per surface (both modes via the ~light shell), and Appearance's colour section.
+  ...["graphite", "slate", "ink", "sand", "moss"].map((surface): Case => ({ screen: "ng-tokens", variant: surface, data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface }) })),
+  { screen: "ng-tokens", variant: "moss-mono", data: "default", widths: [1280], shells: [{ mode: "light" }], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { surface: "moss", colour_amount: "mono" }) },
+  { screen: "ng-tokens", variant: "graphite-violet-full", data: "default", widths: [1920], fullPage: true, run: (c) => ng(c, "/ng/_tokens", { accent: "violet", colour_amount: "full" }) },
+  { screen: "ng-appearance", variant: "default", data: "default", widths: [1280, 1024], run: (c) => ng(c, "/ng/settings/appearance", {}) },
+  { screen: "ng-appearance", variant: "mono", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ng(c, "/ng/settings/appearance", { colour_amount: "mono" }) },
+  { screen: "ng-appearance", variant: "blue-full", data: "default", widths: [1280], run: (c) => ng(c, "/ng/settings/appearance", { surface: "slate", accent: "blue", colour_amount: "full" }) },
+  // An old theme.yaml with only `palette`: GET /theme derives the look (rule A.3).
+  { screen: "ng-appearance", variant: "derived", data: "default", widths: [1280], run: (c) => ng(c, "/ng/settings/appearance", { palette: "forest", surface: "moss", accent: "green", colour_amount: "full", derived: true }) },
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },

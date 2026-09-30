@@ -1,0 +1,25 @@
+/* The prototype's ThemeCard at 250 × 150, scaled by the card's width. */
+.theme-card-box { container-type: inline-size; }
+.theme-card { display: flex; aspect-ratio: 5 / 3; overflow: hidden; box-sizing: border-box; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 2.8cqi; }
+.tc-side { flex: none; width: 19%; display: flex; flex-direction: column; gap: .4em; padding: 1.1em .7em; border-right: 1px solid var(--line); background: var(--side); }
+.tc-brand { padding: 0 .4em .6em; font-weight: 600; }
+.tc-row { padding: .1em .4em; border-radius: .4em; color: var(--text-muted); }
+.tc-row-on { background: var(--line); color: var(--text); }
+.tc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .7em; padding: 1.1em 1.4em; }
+.tc-top, .tc-actions, .tc-chain { display: flex; align-items: center; gap: .6em; }
+.tc-crumb { flex: 1; color: var(--text-muted); white-space: nowrap; }
+.tc-title { font-size: 1.5em; font-weight: 500; }
+.tc-chain { gap: 0; }
+.tc-node { flex: none; width: 3.4em; height: 2.1em; box-sizing: border-box; border: 1px solid var(--text-sub); border-radius: .55em; background: var(--surface); }
+.tc-cur { border-color: var(--accent); box-shadow: 0 0 0 .2em var(--bg), 0 0 0 .35em var(--accent); }
+.tc-todo { border: 1px dashed var(--border); background: transparent; }
+.tc-ln { flex: 1; height: 1px; background: var(--border); }
+.tc-card { display: flex; flex-direction: column; gap: .7em; padding: .85em 1em; border: 1px solid var(--border); border-radius: .85em; background: var(--surface); }
+.tc-txt { color: var(--text-sub); }
+.tc-link { color: var(--accent); text-decoration: underline; }
+.tc-actions .tc-chip { margin-left: auto; }
+.tc-btn { padding: .1em .85em; border-radius: .4em; background: var(--text); color: var(--bg); font-weight: 600; }
+.tc-ghost { padding: .1em .85em; border: 1px solid var(--border); border-radius: .4em; color: var(--text-sub); }
+.tc-chip { padding: 0 .55em; border-radius: .4em; font-weight: 600; white-space: nowrap; }
+.tc-ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.tc-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }

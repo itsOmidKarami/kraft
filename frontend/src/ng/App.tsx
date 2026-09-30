@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { legacyPath } from "./legacyPath";
+import { AppearancePage } from "./settings/AppearancePage";
+import { TokenSheet } from "./theme/TokenSheet";
+import { Toaster } from "./ui/Toast";
 
 const currentUi = () => legacyPath(window.location);
 
 function Stub() {
   return (
-    <main>
+    <main style={{ padding: "16px 24px" }}>
       <h1>Kraft next</h1>
       <p>This is the UX V2 build, in progress.</p>
       <a href={currentUi()}>Current UI ↗</a>
@@ -26,8 +29,11 @@ export function App({ initiallyLocked = false }: { initiallyLocked?: boolean }) 
   return (
     <BrowserRouter basename="/ng">
       <Routes>
+        <Route path="/settings/appearance" element={<AppearancePage />} />
+        <Route path="/_tokens" element={<TokenSheet />} />
         <Route path="*" element={<Stub />} />
       </Routes>
+      <Toaster />
     </BrowserRouter>
   );
 }

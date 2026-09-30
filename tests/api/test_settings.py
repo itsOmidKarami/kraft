@@ -31,8 +31,8 @@ def test_put_theme_round_trips_through_the_yaml(client, templates_dir):
         "board": {"group_by": "repo", "show_done": 10, "open_in": "full"},
     }
     assert client.put("/api/theme", json=body).status_code == 200
-    assert client.get("/api/theme").json() == body
-    assert yaml.safe_load((templates_dir / "theme.yaml").read_text()) == body
+    assert client.get("/api/theme").json().items() >= body.items()
+    assert yaml.safe_load((templates_dir / "theme.yaml").read_text()).items() >= body.items()
 
 
 def test_put_theme_defaults_density_and_board_when_omitted(client):
@@ -45,12 +45,15 @@ def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir)
     # An operator's theme.yaml from before this change — no density/board keys.
     (templates_dir / "theme.yaml").write_text("palette: rose\nmode: light\n")
     body = client.get("/api/theme").json()
-    assert body == {
-        "palette": "rose",
-        "mode": "light",
-        "density": "compact",
-        "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
-    }
+    assert (
+        body.items()
+        >= {
+            "palette": "rose",
+            "mode": "light",
+            "density": "compact",
+            "board": {"group_by": "status", "show_done": 5, "open_in": "peek"},
+        }.items()
+    )
 
 
 @pytest.mark.parametrize(
@@ -69,6 +72,48 @@ def test_get_theme_fills_defaults_for_a_pre_existing_file(client, templates_dir)
 def test_put_theme_rejects_an_unknown_value(client, body):
     assert client.put("/api/theme", json=body).status_code == 422
     assert client.get("/api/theme").json()["palette"] == "nocturne"
+
+
+def test_put_theme_merges_and_keeps_keys_the_body_leaves_out(client, templates_dir):
+    # The new UI sends one key per change; the shipped UI's palette stays.
+    client.put("/api/theme", json={"palette": "amber", "density": "comfortable"})
+    resp = client.put("/api/theme", json={"surface": "moss"})
+    assert resp.status_code == 200
+    on_disk = yaml.safe_load((templates_dir / "theme.yaml").read_text())
+    assert on_disk["palette"] == "amber"
+    assert on_disk["density"] == "comfortable"
+    assert on_disk["surface"] == "moss"
+    assert resp.json()["derived"] is False
+
+
+def test_put_theme_shipped_full_object_keeps_the_v2_keys(client, templates_dir):
+    # The shipped Appearance page spreads the loaded theme and PUTs all of it.
+    client.put("/api/theme", json={"surface": "slate", "accent": "rose", "colour_amount": "full"})
+    loaded = client.get("/api/theme").json()
+    assert client.put("/api/theme", json={**loaded, "palette": "forest"}).status_code == 200
+    body = client.get("/api/theme").json()
+    assert (body["palette"], body["surface"], body["accent"], body["colour_amount"]) == (
+        "forest",
+        "slate",
+        "rose",
+        "full",
+    )
+
+
+def test_put_theme_echo_of_a_derived_get_stays_derived(client, templates_dir):
+    loaded = client.get("/api/theme").json()
+    assert loaded["derived"] is True
+    client.put("/api/theme", json={**loaded, "palette": "forest"})
+    assert "surface" not in yaml.safe_load((templates_dir / "theme.yaml").read_text())
+    body = client.get("/api/theme").json()
+    assert (body["surface"], body["accent"], body["derived"]) == ("moss", "green", True)
+
+
+def test_put_theme_refuses_an_accent_at_mono(client, templates_dir):
+    resp = client.put("/api/theme", json={"colour_amount": "mono", "accent": "blue"})
+    assert resp.status_code == 422
+    assert "mono has no accent" in resp.json()["detail"]
+    assert not (templates_dir / "theme.yaml").exists()
 
 
 def test_changing_theme_does_not_report_health_as_degraded(client):

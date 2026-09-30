@@ -612,7 +612,8 @@ export function settingsFor(variant: Variant, theme: { mode?: string; density?: 
       budget: { work_item_usd: 5, daily_usd: long ? 250 : null },
       max_concurrent: 3, rate_limit_retries: 5,
     },
-    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" } },
+    // The UX V2 keys as GET /theme answers them (B30): an explicit look, not derived from `palette`.
+    theme: { palette: "nocturne", mode: theme.mode ?? "dark", density: theme.density ?? "compact", board: { group_by: theme.group_by ?? "status", show_done: 5, open_in: "peek" }, surface: "graphite", accent: "none", colour_amount: "subtle", derived: false } as Record<string, unknown>,
     steering: { files: empty ? [] : [
       { name: "house-style", bytes: 1412 }, { name: "commit-messages", bytes: 388 },
       ...(long ? [{ name: "a-steering-file-with-a-very-long-name-that-will-not-fit-in-the-list-column", bytes: 8190 }, { name: "empty", bytes: 0 }, { name: "unknown-size", bytes: null }] : []),

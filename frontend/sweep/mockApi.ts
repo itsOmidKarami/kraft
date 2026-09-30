@@ -153,7 +153,8 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/registry") return json(route, { hooks: st.hooks, invalid_templates: {} });
     if ((m = p.match(/^\/registry\/([^/]+)\/runs$/))) return json(route, { runs: Object.values(S.bundles).slice(0, 8).map((b, i) => ({ work_item_id: b.item.id, node_id: b.item.current_node_id ?? "verify", round: i % 3, status: ["done", "failed", "done", "capped_out"][i % 4], wall_ms: 120_000 + i * 40_000, created_at: b.item.updated_at })) });
     if (p === "/policy") return json(route, st.policy);
-    if (p === "/theme") return json(route, method === "PUT" ? req.postDataJSON() : st.theme);
+    // PUT merges over the file, as the real route does since B30.
+    if (p === "/theme") return json(route, method === "PUT" ? Object.assign(st.theme, req.postDataJSON(), { derived: false }) : st.theme);
     if (p === "/steering") return json(route, st.steering);
     if ((m = p.match(/^\/steering\/([^/]+)$/))) return method === "DELETE" ? json(route, { deleted: m[1] }) : json(route, st.steeringBody(decodeURIComponent(m[1])));
     if (p === "/intake") return json(route, st.intake);

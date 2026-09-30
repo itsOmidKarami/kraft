@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from kraft import auth as auth_mod
 from kraft import config as config_mod
@@ -415,14 +415,36 @@ async def put_policy(body: PolicyBody, request: Request):
 @api_router.get("/theme")
 async def get_theme(request: Request):
     st = request.app.state
-    return config_mod.Theme.load(st.templates_dir / "theme.yaml").model_dump()
+    return config_mod.Theme.load(st.templates_dir / "theme.yaml").effective()
 
 
 @api_router.put("/theme")
-async def put_theme(body: config_mod.Theme, request: Request):
+async def put_theme(body: dict, request: Request):
+    """Merged over the file top-level key by key, as `PUT /policy` is, so
+    neither UI wipes the keys only the other one edits; a key sent as `null`
+    is removed. A body still marked `derived` is the echo of a `GET` whose V2
+    values came from `palette`, and they are dropped so they keep deriving:
+    the shipped Appearance page sends back the whole object it loaded."""
     st = request.app.state
-    body.save(st.templates_dir / "theme.yaml")
-    return body.model_dump()
+    path = st.templates_dir / "theme.yaml"
+    try:
+        data = config_mod.read_yaml(path, {})
+    except config_mod.ConfigError:
+        data = {}
+    if body.pop("derived", False):
+        for key in config_mod.THEME_V2_KEYS:
+            body.pop(key, None)
+    for key, value in body.items():
+        if value is None:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    try:
+        theme = config_mod.Theme.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(422, config_mod.first_error(exc, config_mod.Theme.FILE)) from exc
+    theme.save(path)
+    return theme.effective()
 
 
 @api_router.get("/intake")

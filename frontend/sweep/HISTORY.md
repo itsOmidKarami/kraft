@@ -1271,3 +1271,13 @@ Baseline on `main` `ca727572`, shot with the pre-W0 workaround: 724 tests, 1167 
 - **First paint:** the entry split let the shipped CSS paint before the saved theme applied (`board/default@1280~light-firstpaint` dark in 4 of 5 runs). `main.tsx` now applies the saved theme on the shipped path before the dynamic import: 5 of 5 identical to the baseline.
 - **New screen:** `ng-shell` (`stub` at 1280 and 390). **New key:** `ux2-W0`.
 - Kraft-br5t1 and Kraft-zclvt (the 8 regressions on main) stay open, not fixed here.
+
+## ux2-W1 — colour model and tokens (`ux2/W1`)
+
+Baseline on `main` `c9ba7e4c`: 1170 cells, 179 flagged. Final on the branch rebased onto `0c40c966`. Full notes: `e2e-shots/DIFF-ux2-W1.md`.
+
+- `node sweep/wave.mjs ux2-W1`: **4/4 rules pass** (no contrast, console or offscreen flag on `^ng-`, no newly flagged cells). 20 new cells, all clean.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1190 cells, 179 flagged, 0 newly flagged. Flag tallies are unchanged from the baseline (ellipsis 154, nested-scroll 24, console 7, clipped-v 4, target<44 4, setup 1).
+- **169 changed:** 20 new `ng-` cells; `ng-shell/stub@1280~light` (the stub now follows the theme's mode); 148 shipped item-page cells from wall-clock text and main's #330 copy. The same 11 screens shot on `c9ba7e4c` and on the branch back to back: 853 of 854 identical, the one difference being the `flow-log-maximize` wheel flake.
+- **New screens:** `ng-tokens` (five surfaces at 1280 in both modes, Moss Mono in both, violet Full at 1920) and `ng-appearance` (default at 1280 in both modes and at 1024, Mono in both modes, slate/blue/Full, derived). **New key:** `ux2-W1`.
+- **Mock:** the theme fixture carries `surface`, `accent`, `colour_amount` and `derived`; `PUT /theme` merges, as the real route does since B30.
