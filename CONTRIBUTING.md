@@ -73,6 +73,10 @@ The site is served at <http://localhost:3000/kraft/>, not at the root: it is
 built for GitHub Pages under `/kraft/`. The dev server logs a few warnings as it
 starts; the site works regardless.
 
+`just docs` serves `main`'s pages alone. To see the site as it publishes, with
+the latest release at <http://localhost:8000/kraft/> and `main` at
+<http://localhost:8000/kraft/next/>, run `just docs-site`.
+
 ## Finding something to work on
 
 Issues labelled
@@ -169,7 +173,7 @@ order, on the full suite.
 | `playwright` | the browser e2e suite against a fixture server | `just e2e-ci` |
 | `removals declared` | `dev/check_removals.py` against the PR description | see below |
 | `release impact declared` | exactly one `release::*` label | see [Pull requests and release labels](#pull-requests-and-release-labels) |
-| `docs` (only when `docsite/` changes) | `npm ci && npx nuxt generate` in `docsite/` | the same, in `docsite/` |
+| `docs` (only when `docsite/` changes) | `dev/build_docs_site.sh`: the latest release's pages and `main`'s, both with this branch's site code | `just docs-site` |
 | `docs nudge` | a comment when source moved without its docs page; never fails | nothing to run |
 | `codeql` | GitHub's static analysis | nothing to run |
 
@@ -300,6 +304,22 @@ anchor: a link to a page or heading that no longer exists renders instead of
 failing the build. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
+
+### Two versions of the docs
+
+The site publishes two versions: the latest stable release's pages at
+[`/kraft/`](https://itsomidkarami.github.io/kraft/), and `main`'s at
+[`/kraft/next/`](https://itsomidkarami.github.io/kraft/next/). Write docs on
+`main`, in the same pull request as the code. They appear at `/next/` when it
+merges and become the default at the next stable release. There is nothing
+else to do. Link to `/kraft/next/` for a feature that hasn't shipped in a
+release yet.
+
+Both versions are built with `main`'s site code (`docsite/app`,
+`nuxt.config.ts`), so a theme or component fix reaches the release docs
+without a release, while their text stays what the release shipped. The flip
+side is that a docs-only fix to a released page, such as a typo, waits for the
+next release too.
 
 ## The model price table
 

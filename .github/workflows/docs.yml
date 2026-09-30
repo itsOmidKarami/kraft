@@ -1,8 +1,12 @@
-# Builds docsite/ with Nuxt/Docus on every PR that touches it (a broken
-# build fails the PR, not a merge to main after the fact) and publishes to
-# GitHub Pages on push to main. Separate from test.yml/release.yml: a
-# docs-only change should not wait on the backend/frontend test matrix, and a
-# docs build failure should not block a release.
+# Builds the docs site with dev/build_docs_site.sh: the latest stable release's
+# pages at /kraft/ and main's at /kraft/next/, both with main's site code. Runs
+# on every PR that touches it, building both versions, so a change to
+# docsite/app that breaks the release's older pages fails the PR, not a merge
+# to main after the fact. Publishes to GitHub Pages on push to main and on a
+# manual run, which release.yml dispatches after a stable release so /kraft/
+# switches to the new tag. Separate from test.yml/release.yml: a docs-only
+# change should not wait on the backend/frontend test matrix, and a docs build
+# failure should not block a release.
 name: docs
 
 on:
@@ -14,6 +18,7 @@ on:
       # rebuild.
       - ".github/assets/**"
       - "frontend/public/icon.svg"
+      - "dev/build_docs_site.sh"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
@@ -32,30 +37,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The stable build reads the latest release tag's pages, and a
+          # shallow clone has no tags.
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: docsite/package-lock.json
 
-      - name: build the site
+      - name: build both versions
         run: |
-          npm ci
-          npx nuxt generate
-        working-directory: docsite
+          npm ci --prefix docsite
+          dev/build_docs_site.sh "$RUNNER_TEMP/site"
 
       # Pages setup only makes sense for the thing that's about to deploy --
       # a PR build stops here, checked but not published.
-      - if: github.event_name == 'push'
+      - if: github.event_name != 'pull_request'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - if: github.event_name == 'push'
+      - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: docsite/.output/public
+          path: ${{ runner.temp }}/site
 
   deploy:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       pages: write

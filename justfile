@@ -291,3 +291,11 @@ docs-diagrams:
 docs:
     cd docsite && [ -d node_modules ] || npm ci
     cd docsite && npm run dev
+
+# Build the published site (latest release at /kraft/, main at /kraft/next/)
+# and serve it at http://localhost:8000/kraft/
+docs-site:
+    cd docsite && [ -d node_modules ] || npm ci
+    rm -rf docsite/dist-site
+    dev/build_docs_site.sh docsite/dist-site/kraft
+    python3 -m http.server 8000 -d docsite/dist-site
