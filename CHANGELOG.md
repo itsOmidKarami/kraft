@@ -5,6 +5,16 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.2.2
+
+### Fixes
+
+- The VS Code extension no longer goes read-only when it connects to a Kraft daemon running from a source checkout (a `.devN` or `+local` version). (#308)
+
+- `/api/health`, the sidebar and the empty board now show the address the server actually listens on. Before, a server started with `--port` or `KRAFT_PORT` still showed `access.yaml`'s port.
+- `kraft admin start --port N` now says when other `kraft` commands will still dial a different port, and how to reach this instance (`KRAFT_PORT=N`, or `port: N` in `access.yaml`).
+- `kraft admin doctor` on a home where Kraft has never run now says so first. Its `harnesses.yaml` row says to start `kraft` once instead of showing a raw file-not-found error. (#310)
+
 ## 1.2.1
 
 ### Fixes
