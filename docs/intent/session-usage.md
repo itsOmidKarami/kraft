@@ -29,6 +29,11 @@ WHILE a work item has a running session with an estimated cost, the system SHALL
 enforced-by: tests/store/test_budget.py::test_budget_spend_includes_a_running_sessions_estimate, tests/executor/test_budget_caps.py::test_a_running_sessions_estimate_trips_a_usd_cap
 origin: src/kraft/store/budget.py §budget_spend, src/kraft/caps.py §budget_breach (Kraft-wz83s)
 
+## REQ instance-dollar-caps-stop-on-unknown-spend
+IF a finished session spent tokens and has no `cost_usd`, reported or estimated, THEN `budget.work_item_usd` (or the item's own cap) and `budget.daily_usd` SHALL count its spend as unknown, never as free, and SHALL stop the next launch for human action saying the cap cannot be checked, as a per-scope `budget_usd` does; auto-intake SHALL start nothing while today's spend includes one.
+enforced-by: tests/executor/test_budget_caps.py::test_the_item_cap_counts_an_unreported_cost_by_estimate_or_as_unknown[priced], tests/executor/test_budget_caps.py::test_the_item_cap_counts_an_unreported_cost_by_estimate_or_as_unknown[unpriced], tests/executor/test_budget_caps.py::test_the_daily_cap_stops_on_any_items_unknown_spend_today, tests/test_intake_poller.py::test_does_not_run_while_todays_spend_is_unknown
+origin: src/kraft/store/budget.py §unknown_spend, src/kraft/executor/stops.py §budget_breach (Kraft-9efnk.10)
+
 ## REQ rollups-expose-that-a-total-includes-an-estimate
 WHEN any session folded into a usage rollup is still running on an estimated cost, the system SHALL mark that rollup's total `cost_estimated`, distinct from `cost_complete`, so a reader can render the figure as an estimate rather than a settled total.
 enforced-by: tests/test_usage.py::test_rollup_marks_the_total_estimated_when_a_running_session_has_a_guess

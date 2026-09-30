@@ -138,7 +138,8 @@ def budget_spend(
     truth and a parallel counter is a second thing to get wrong. A NULL
     `cost_usd` — a session still running, or a subprocess or builtin task that
     has no cost — contributes zero, so this is a floor on in-flight spend by
-    construction.
+    construction. A finished session with tokens and a NULL is unknown spend
+    (`unknown_spend`), which a cap checks for apart from this sum.
     """
     item = conn.execute(
         "SELECT COALESCE(SUM(cost_usd), 0.0) FROM worker_sessions WHERE work_item_id = ?",
