@@ -55,7 +55,7 @@ dev = [
 kraft = "kraft.cli:main"
 
 [build-system]
-requires = ["setuptools>=77", "setuptools-scm>=8"]
+requires = ["setuptools>=77", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 # The version is the git tag, so a release cannot ship a number nobody bumped.
