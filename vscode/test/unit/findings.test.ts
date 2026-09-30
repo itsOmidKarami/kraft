@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import detail from "./fixtures/detail-with-findings.json";
-import { findingsByUri, findingsOf, showsFindings } from "../../src/core/findings";
+import { findingsByUri, findingsOf, marksBySeverity, showsFindings } from "../../src/core/findings";
 
 describe("findingsOf", () => {
   const { located, unlocated } = findingsOf(detail as any);
@@ -37,4 +37,12 @@ it("puts each finding on the diff's right side only, so Problems lists it once",
   const byUri = findingsByUri("K-1", d);
   expect([...byUri.keys()]).toEqual(["kraft-wt:/K-1/src/x.py"]);
   expect(byUri.get("kraft-wt:/K-1/src/x.py")!.map((f) => f.message)).toEqual(["a", "b"]);
+});
+
+it("marks every finding on the diff by its severity, minor ones included", () => {
+  const d = { deferred_findings: [{ severity: "minor", message: "a", file: "x.py", line: 2, source_plugin: "p" }, { severity: "critical", message: "b", file: "x.py", line: 5, source_plugin: "p" }] } as any;
+  const marks = marksBySeverity(findingsByUri("K-1", d).get("kraft-wt:/K-1/x.py"));
+  expect(marks.information.map((f) => f.message)).toEqual(["a"]);
+  expect(marks.error.map((f) => f.message)).toEqual(["b"]);
+  expect(marks.warning).toEqual([]);
 });
