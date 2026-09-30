@@ -989,7 +989,7 @@
     },
     "SandboxPolicy": {
       "additionalProperties": false,
-      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`), with `credentials` managed by the egress\nproxy. A permission-shaped safety field (Ruling 105): once a layer sets\none, no narrower layer may change or remove it -- the whole value,\n`resources`, `network` and `credentials` included.",
+      "description": "Where a task's process runs: `kind: docker` in `image`, within\n`resources` and reaching only what `network` allows\n(`kraft.worker.backends`), with `credentials` managed by the egress\nproxy; or `kind: kit`, a Kit pinned by digest that sets all of those\nitself and is lowered to `kind: docker` at launch (`worker.kit.lower`).\nA permission-shaped safety field (Ruling 105): once a layer sets one, no\nnarrower layer may change or remove it -- the whole value, `resources`,\n`network`, `credentials` and a Kit's reference included.",
       "properties": {
         "credentials": {
           "anyOf": [
@@ -1007,14 +1007,38 @@
           "title": "Credentials"
         },
         "image": {
-          "minLength": 1,
-          "title": "Image",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
         },
         "kind": {
-          "const": "docker",
+          "enum": [
+            "docker",
+            "kit"
+          ],
           "title": "Kind",
           "type": "string"
+        },
+        "kit": {
+          "anyOf": [
+            {
+              "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kit"
         },
         "network": {
           "anyOf": [
@@ -1037,6 +1061,19 @@
             }
           ],
           "default": null
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "const": "docker",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime"
         }
       },
       "title": "SandboxPolicy",

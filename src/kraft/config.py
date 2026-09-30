@@ -932,6 +932,14 @@ class SandboxHost(_Model):
         "5ffbd6ae916cbad86a58fabe0d6d5a6fd5c2b47ddf031e82996baac9300e732f",
         min_length=1,
     )
+    #: A `kind: kit` credential's value, by its credential@1 `service`: the
+    #: name of the daemon's own environment variable holding it. A Kit never
+    #: picks a host variable itself (credential@1: host environment variables
+    #: never auto-inject).
+    credentials: dict[
+        Annotated[str, Field(pattern=r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")],
+        Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")],
+    ] = {}
 
     @field_validator("ca_bundle")
     @classmethod

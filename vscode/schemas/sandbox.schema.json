@@ -31,6 +31,17 @@
       "default": null,
       "title": "Cli"
     },
+    "credentials": {
+      "default": {},
+      "patternProperties": {
+        "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "type": "string"
+        }
+      },
+      "title": "Credentials",
+      "type": "object"
+    },
     "relay_image": {
       "default": "docker.io/alpine/socat@sha256:5ffbd6ae916cbad86a58fabe0d6d5a6fd5c2b47ddf031e82996baac9300e732f",
       "minLength": 1,

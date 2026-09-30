@@ -930,18 +930,33 @@ def _allows(phase: NetworkPhase, domain: str) -> bool:
     return named(phase.allow) and not named(phase.deny)
 
 
+#: A Kit reference pinned by digest: `<name>[:<tag>]@sha256:<64 hex>`.
+KIT_REF = r"^[^@\s]+@sha256:[0-9a-f]{64}$"
+#: What `kind: kit` refuses beside the Kit.
+_KIT_REFUSES = ("image", "network", "resources", "credentials")
+
+
 class SandboxPolicy(BaseModel):
     """Where a task's process runs: `kind: docker` in `image`, within
     `resources` and reaching only what `network` allows
     (`kraft.worker.backends`), with `credentials` managed by the egress
-    proxy. A permission-shaped safety field (Ruling 105): once a layer sets
-    one, no narrower layer may change or remove it -- the whole value,
-    `resources`, `network` and `credentials` included."""
+    proxy; or `kind: kit`, a Kit pinned by digest that sets all of those
+    itself and is lowered to `kind: docker` at launch (`worker.kit.lower`).
+    A permission-shaped safety field (Ruling 105): once a layer sets one, no
+    narrower layer may change or remove it -- the whole value, `resources`,
+    `network`, `credentials` and a Kit's reference included."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
-    kind: Literal["docker"]
-    image: StrictStr = Field(min_length=1)
+    #: `docker` runs `image` under this policy's own fields; `kit` runs a
+    #: Docker Sandbox Kit, lowered to `docker` at launch (`worker.kit`).
+    kind: Literal["docker", "kit"]
+    #: `kind: docker` only.
+    image: StrictStr | None = Field(default=None, min_length=1)
+    #: `kind: kit` only: the runtime that runs the Kit.
+    runtime: Literal["docker"] | None = None
+    #: `kind: kit` only: the Kit image, pinned by digest (spec §9.3).
+    kit: StrictStr | None = Field(default=None, pattern=KIT_REF)
     #: CPU, memory and process limits on every sandboxed run, the setup
     #: command's included.
     resources: SandboxResources | None = None
@@ -1032,6 +1047,23 @@ class SandboxPolicy(BaseModel):
         known = sorted(get_args(cls.model_fields["kind"].annotation))
         if data.get("kind") not in known:
             raise ValueError(f"kind {data.get('kind')!r} is not supported; known: {known}")
+        if data["kind"] == "kit":
+            # The Kit is the single source of what the sandbox reaches and
+            # holds (spec §9.3, open question 4).
+            if local := [k for k in _KIT_REFUSES if data.get(k) is not None]:
+                raise ValueError(
+                    f"kind: kit takes no {', '.join(map(repr, local))}: the Kit sets it"
+                )
+            if data.get("runtime") is None:
+                raise ValueError("kind: kit needs 'runtime' (docker)")
+            if not isinstance(data.get("kit"), str) or not re.fullmatch(KIT_REF, data["kit"]):
+                raise ValueError(
+                    f"kind: kit needs 'kit' pinned by digest, <name>[:<tag>]@sha256:<64 hex>, "
+                    f"not {data.get('kit')!r}"
+                )
+            return data
+        if local := [k for k in ("runtime", "kit") if data.get(k) is not None]:
+            raise ValueError(f"kind: docker takes no {', '.join(map(repr, local))}")
         if not isinstance(data.get("image"), str) or not data["image"]:
             raise ValueError("needs a non-empty string 'image'")
         return data
