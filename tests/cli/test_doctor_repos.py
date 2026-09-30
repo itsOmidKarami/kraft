@@ -44,21 +44,39 @@ def test_doctor_reports_a_connected_repo_with_no_setup_command(app, tmp_path):
     assert "setup_command" in row["detail"]
 
 
-@pytest.mark.parametrize("order", ["member-first", "clone-first"])
-def test_doctor_warns_on_two_entries_for_one_repository(app, tmp_path, order):
-    """Kraft-d7aj3: a member connected on its own and a clone of it (the
-    root's submodule checkout) already both in repos.yaml. Either order:
-    the clone's origin is the member."""
+@pytest.mark.parametrize(
+    ("order", "clone_managed", "flagged"),
+    [
+        ("member-first", False, True),
+        ("clone-first", False, True),
+        ("member-first", True, False),
+    ],
+    ids=["member-first", "clone-first", "two-clones-a-person-connected"],
+)
+def test_doctor_warns_on_a_member_and_its_detected_stub(
+    app, tmp_path, order, clone_managed, flagged
+):
+    """Kraft-d7aj3: a member connected on its own and a detected stub of it
+    (the root's submodule checkout) already both in repos.yaml. Either order:
+    the stub's origin is the member. Two clones a person connected are
+    deliberate, and not flagged."""
     member = make_repo(tmp_path, name="member")
     clone = tmp_path / "clone"
     subprocess.run(["git", "clone", "-q", str(member), str(clone)], check=True)
     for repo in (member, clone) if order == "member-first" else (clone, member):
         asyncio.run(client.ensure_repo(str(repo)))
+    path = tmp_path / "templates" / "repos.yaml"
+    data = yaml.safe_load(path.read_text())
+    next(r for r in data["repos"] if r["name"] == "clone")["managed"] = clone_managed
+    path.write_text(yaml.safe_dump(data))
 
-    (row,) = [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("duplicate ")]
+    rows = [r for r in asyncio.run(doctor.run_checks()) if r["name"].startswith("duplicate ")]
 
-    assert row["warn"], row
-    assert str(member.resolve()) in row["detail"] and str(clone.resolve()) in row["detail"]
+    assert len(rows) == flagged
+    if flagged:
+        assert rows[0]["warn"], rows[0]
+        assert str(member.resolve()) in rows[0]["detail"]
+        assert str(clone.resolve()) in rows[0]["detail"]
 
 
 def test_doctor_fails_a_repo_entry_carrying_an_unrecognised_key(app, tmp_path):

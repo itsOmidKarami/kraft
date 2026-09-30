@@ -97,6 +97,35 @@ def test_a_member_connected_before_its_root_is_the_workspace_member(tmp_path, cl
     assert entries[str(member.resolve())]["test_command"] == "make test"
 
 
+@pytest.mark.parametrize("shape", ["the-root-itself", "another-roots-submodule"])
+def test_a_submodule_is_not_matched_to_an_entry_nobody_connected_for_it(tmp_path, client, shape):
+    """Only a member a person connected is reused. A root that mounts its own
+    repository (a docs branch), or a library another root already mounts, is
+    no such member: the submodule gets its own entry, as before Kraft-d7aj3."""
+    lib = make_repo(tmp_path, name="lib")
+    if shape == "the-root-itself":
+        root = make_repo(tmp_path, name="ws")
+        _git(root, "remote", "add", "origin", str(root))
+        _git(root, "submodule", "add", "-q", str(root), "docs")
+        rel = "docs"
+    else:
+        other = make_repo(tmp_path, name="other")
+        _git(other, "submodule", "add", "-q", str(lib), "libs/lib")
+        _git(other, "commit", "-q", "-m", "add submodule")
+        client.post("/api/repos", json={"path": str(other), "enabled": False})
+        root = make_repo(tmp_path, name="ws")
+        _git(root, "submodule", "add", "-q", str(lib), "libs/lib")
+        rel = "libs/lib"
+    _git(root, "commit", "-q", "-m", "add submodule")
+    client.post("/api/repos", json={"path": str(root), "enabled": False})
+
+    body = client.get("/api/repos").json()
+    ws = next(w for w in body["workspaces"].values() if w["root"] == "ws")
+    (member,) = ws["members"].values()
+    entry = next(r for r in body["repos"] if r["id"] == member["repository"])
+    assert entry["path"] == str((root / rel).resolve())
+
+
 def test_disconnecting_a_repository_a_workspace_mounts_is_refused(tmp_path, client, templates_dir):
     root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
     client.post("/api/repos", json={"path": str(root), "enabled": False})

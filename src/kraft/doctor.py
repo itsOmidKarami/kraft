@@ -755,9 +755,11 @@ async def _repo_checks() -> list[dict]:
 
 
 def _duplicate_repo_checks(repos: list[config.RepoEntry]) -> list[dict]:
-    """One warning per pair of entries that are one repository -- a member
-    connected on its own and the root's submodule checkout of it, from before
-    connecting learned to tell (Kraft-d7aj3). A workspace naming the
+    """One warning per pair of entries that are one repository, one a person
+    connected and the other a detected submodule checkout -- a member
+    connected on its own and its root's stub of it, from before connecting
+    learned to tell (Kraft-d7aj3). Two stubs under two roots, or two clones
+    a person connected, are deliberate. A workspace naming the
     auto-connected one runs its member with none of the other's settings."""
     ids = [
         (repo, config.repository_identity(repo.path)) for repo in repos if Path(repo.path).is_dir()
@@ -772,7 +774,8 @@ def _duplicate_repo_checks(repos: list[config.RepoEntry]) -> list[dict]:
         )
         for i, (a, ida) in enumerate(ids)
         for b, idb in ids[i + 1 :]
-        if config.same_repository(ida, idb) or config.same_repository(idb, ida)
+        if a.managed != b.managed
+        and (config.same_repository(ida, idb) or config.same_repository(idb, ida))
     ]
 
 

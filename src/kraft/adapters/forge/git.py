@@ -340,7 +340,10 @@ async def push(repo: Path, branch: str) -> None:
     env = sandbox.unhardened_git_env()
     pushed_ref = f"{PUSHED_REFS}/{branch}"
     head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
-    listed = await run_git(repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"], env=env)
+    # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
+    # somewhere other than where `origin` fetches from.
+    target = git_read(repo, "remote", "get-url", "--push", "origin") or "origin"
+    listed = await run_git(repo, ["git", "ls-remote", target, f"refs/heads/{branch}"], env=env)
     remote = listed.split()[0] if listed.split() else ""
     ours = next(
         (
@@ -367,11 +370,18 @@ async def push(repo: Path, branch: str) -> None:
             f"Kraft will not overwrite them: pull them into the item's worktree (git pull "
             f"--rebase origin {branch}), then retry"
         )
+    if not remote and ours:
+        # Merged, or deleted with its merge request: recreating it would
+        # reopen work someone closed (Kraft-7itv).
+        raise ForgeError(
+            f"origin no longer has {branch}, which Kraft pushed; it was merged or "
+            "deleted. To publish this item's branch again, run `git update-ref -d "
+            f"{pushed_ref}` and `git update-ref -d refs/remotes/origin/{branch}` in "
+            "the item's worktree, then retry"
+        )
     args = ["git", "push"]
-    # A branch Kraft pushed that origin no longer has leases on Kraft's record,
-    # so the push is refused rather than recreating a deleted branch (Kraft-7itv).
-    if expect := remote or ours:
-        args.append(f"--force-with-lease={branch}:{expect}")
+    if remote:
+        args.append(f"--force-with-lease={branch}:{remote}")
     args += ["-u", "origin", branch]
     await run_git(repo, args, env=env)
     await run_git(repo, ["git", "update-ref", pushed_ref, head])

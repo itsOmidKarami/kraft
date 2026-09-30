@@ -70,6 +70,14 @@ def _auto_connect_children(
     """
     known = {r["path"]: r for r in repos}
     children: dict[str, dict] = {}
+    # Only an entry a person connected, and never the root itself: a repo
+    # mounting its own URL (a docs branch), or another root's stub of a
+    # shared library, is not the member connected on its own.
+    connected = [
+        (r, config_mod.repository_identity(r["path"]))
+        for r in repos
+        if r is not parent and r.get("managed", True)
+    ]
     for rel in submodule_paths:
         child_path = Path(parent["path"]) / rel
         try:
@@ -86,11 +94,7 @@ def _auto_connect_children(
         # checkout is another clone of it, and the member is the entry the
         # workspace must name, not a second, empty one (Kraft-d7aj3).
         identity = config_mod.repository_identity(probed["path"])
-        same = [
-            r
-            for r in repos
-            if config_mod.same_repository(identity, config_mod.repository_identity(r["path"]))
-        ]
+        same = [r for r, other in connected if config_mod.same_repository(identity, other)]
         if len(same) == 1:
             children[rel] = same[0]
             continue

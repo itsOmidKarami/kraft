@@ -159,18 +159,24 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab):
     assert glab.argv("glab")[:2] == ["mr", "merge"]
 
 
-def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch):
+@pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "pushed-before-the-record"])
+def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, recorded):
     """Kraft-z6i8. A rebase moves the branch off of what origin last saw --
     here, `main` gaining a commit and the branch rebasing onto it -- and a
     plain `push -u` would die non-fast-forward. `forge.push`'s
     `--force-with-lease` must still publish it. A fix Kraft pushed before
     the rebase is Kraft's own work, not someone else's, so it is no reason
-    to refuse."""
+    to refuse. A branch pushed before Kraft kept that record is judged by
+    the remote-tracking ref instead, as every branch was."""
     repo = _repo_with_origin(tmp_path)
     (repo / "fix.txt").write_text("a verify fix\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "a verify fix")
-    asyncio.run(forge.push(repo, BRANCH))
+    if recorded:
+        asyncio.run(forge.push(repo, BRANCH))
+    else:
+        _git(repo, "update-ref", "-d", f"{git.PUSHED_REFS}/{BRANCH}")
+        _git(repo, "push", "-q", "origin", BRANCH)
     origin = tmp_path / "origin.git"
     main_clone = tmp_path / "main-clone"
     _git(tmp_path, "clone", "-q", str(origin), str(main_clone))
@@ -235,6 +241,36 @@ def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, fetched):
         asyncio.run(forge.push(repo, BRANCH))
 
     assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == theirs
+
+
+def test_push_refuses_to_recreate_a_branch_origin_deleted(tmp_path):
+    """Kraft-7itv: origin dropping a branch Kraft pushed means it was merged
+    or closed; a push must not quietly bring it back."""
+    repo = _repo_with_origin(tmp_path)
+    _git(tmp_path / "origin.git", "branch", "-q", "-D", BRANCH)
+
+    with pytest.raises(forge.ForgeError, match="origin no longer has"):
+        asyncio.run(forge.push(repo, BRANCH))
+
+    assert _git(tmp_path / "origin.git", "branch", "--list", BRANCH) == ""
+
+
+def test_push_reads_the_tip_where_it_pushes(tmp_path):
+    """A `pushurl` sends pushes somewhere other than where `origin` fetches
+    from; the tip judged is the one the push would replace."""
+    repo = _repo_with_origin(tmp_path)
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    _git(repo, "remote", "set-url", "origin", str(mirror))
+    _git(repo, "remote", "set-url", "--push", "origin", str(tmp_path / "origin.git"))
+    (repo / "fix.txt").write_text("a fix\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a fix")
+
+    asyncio.run(forge.push(repo, BRANCH))
+
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == head
 
 
 def test_push_publishes_once_someone_elses_commits_are_pulled_in(tmp_path):
