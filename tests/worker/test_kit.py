@@ -87,7 +87,7 @@ def test_a_workload_kit_claims_what_it_declares(fixture):
             r"^capabilities\.0\.config\.runtime\.allowed: Extra inputs",
         ),
         (_kit({"type": "Example/thing@1", "optional": True}), r"^capabilities\.1\.type: String"),
-        (_kit({"type": kit.RESOURCES}, {"type": kit.RESOURCES, "config": {}}), "also at"),
+        (_kit({"type": kit.RESOURCES}, {"type": kit.RESOURCES, "config": {"cpu": 1}}), "also at"),
         ('{"schemaVersion": "3", "kind": "workload", "kind": "mixin"}', "JSON descriptor repeats"),
         ("schemaVersion: '3'\nkind: workload\nkind: mixin\n", "YAML descriptor repeats"),
         (
