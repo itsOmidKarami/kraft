@@ -318,8 +318,8 @@ async def _run_one(
             # source branch deleted with it (`force_remove_source_branch`),
             # and the push below then dies `! [rejected] ... (stale info)`
             # against a remote ref that no longer exists (Kraft-7itv): the
-            # lease targets the sha origin last showed us, and origin has no
-            # ref at all to compare it to. Same shortcut `sync_mr` and
+            # lease expects the sha Kraft last pushed, and origin has no ref
+            # at all to compare it to. Same shortcut `sync_mr` and
             # `merge` already take for the identical race -- nothing here is
             # left to check once the forge itself says merged.
             existing = await forge.find_mr(repo=repo, branch=branch)
@@ -521,8 +521,8 @@ async def _run_one(
             # An MR merged outside Kraft -- a human merging by hand and
             # skipping `human_review` -- usually has its source branch
             # deleted with it, and then this node's push dies `! [rejected]
-            # ... (stale info)`: the lease expects the sha origin last showed
-            # us, origin has no ref at all, and the item stops one node from
+            # ... (stale info)`: the lease expects the sha Kraft last pushed,
+            # origin has no ref at all, and the item stops one node from
             # the end with the work already on main (Kraft-7itv). Same
             # shortcut `merge` takes, for the same reason: pushing to and
             # re-describing a merged MR has nothing left to accomplish.

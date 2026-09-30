@@ -451,14 +451,14 @@ async def test_glab_find_mr_picks_the_branch_s_merge_request(cli, tmp_path, mr_l
 
 
 async def test_push_sets_the_upstream_on_the_work_item_branch(cli, tmp_path):
-    """No `origin/kraft/abc` remote-tracking ref exists in this stubbed repo
-    (the `rev-parse --verify` probe returns nothing), so `_push` has no lease
-    to attach and falls back to the plain fast-forward push (Kraft-z6i8)."""
+    """Origin has no `kraft/abc` yet and Kraft never pushed it (every probe
+    in this stubbed repo answers nothing), so there is no lease to attach
+    and the push is the plain fast-forward one (Kraft-z6i8)."""
     cli.stub("git", "")
 
     await forge.GlabCli().push(repo=tmp_path, branch="kraft/abc")
 
-    assert cli.argv("git")[-4:] == ["push", "-u", "origin", "kraft/abc"]
+    assert [c for c in cli.calls("git") if c.startswith("push")] == ["push -u origin kraft/abc"]
 
 
 async def test_glab_merge_uses_the_number_when_one_is_known(cli, tmp_path):
