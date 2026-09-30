@@ -337,7 +337,8 @@ export const getPolicy = () => req<Policy>("/policy");
 export const putPolicy = (policy: Policy) => req<Policy>("/policy", json("PUT", policy));
 
 export const getTheme = () => req<Theme>("/theme");
-export const putTheme = (theme: Theme) => req<Theme>("/theme", json("PUT", theme));
+// The server merges the body over theme.yaml, so a partial one is a patch.
+export const putTheme = (theme: Partial<Theme>) => req<Theme>("/theme", json("PUT", theme));
 
 export const getIntake = () => req<Intake>("/intake");
 export const putIntake = (intake: Intake) => req<Intake>("/intake", json("PUT", intake));
