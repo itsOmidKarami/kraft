@@ -45,7 +45,7 @@ dependencies = [
 [project.optional-dependencies]
 # Semantic search (Effort 4C). Optional: without it FTS still works, hybrid
 # degrades to fts, and mode=vector 422s. Keeps a ~130MB model download opt-in.
-vector = ["fastembed>=0.8"]
+vector = ["fastembed>=0.8.1"]
 
 [dependency-groups]
 dev = [
