@@ -16,6 +16,7 @@ import time
 
 import pytest
 
+from kraft import policy
 from kraft.paths import RunDirs
 from kraft.worker import ca, egress, inject
 
@@ -403,3 +404,18 @@ def test_a_host_leaf_is_loaded_whole_while_another_connect_re_mints_it(run_dirs,
         finish.set()
         other[0].join()
     assert got_in == [False]
+
+
+def test_a_bound_credential_reads_the_daemon_env_under_its_source_alone(monkeypatch):
+    """credential@1: a bound credential's value is the daemon's under its
+    `source`; the worker env's value under `env` is never used, even as a
+    fallback."""
+    bound = policy.SandboxCredential(
+        env="API_KEY", source="BOUND_KEY", sentinel="s", inject=[{"domain": API, "header": "x"}]
+    )
+    monkeypatch.delenv("BOUND_KEY", raising=False)
+    worker = {"API_KEY": "from-the-worker-env", "BOUND_KEY": "worker-env-under-source"}
+
+    assert [r.value for r in inject.rules([bound], worker)] == [None]
+    monkeypatch.setenv("BOUND_KEY", "from-the-daemon")
+    assert [r.value for r in inject.rules([bound], worker)] == ["from-the-daemon"]
