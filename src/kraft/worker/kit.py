@@ -40,9 +40,9 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
-from kraft.paths import RunDirs, default_run_dir, default_templates_dir
+from kraft.paths import RunDirs, default_run_dir
 from kraft.policy import HostPattern, SandboxPolicy
-from kraft.worker.backends import docker
+from kraft.worker.backends import docker, docker_forward
 from kraft.worker.ca import write_whole
 
 #: The upstream `docker/sandbox-kit-spec` release this reader follows (e502d26).
@@ -782,10 +782,7 @@ async def ensure(ref: str) -> Fetched:
 def bindings() -> Mapping[str, str]:
     """`sandbox.yaml`'s `credentials:`, each service's daemon variable.
     Raises `ConfigError` for a `sandbox.yaml` that does not parse."""
-    from kraft import config
-
-    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
-    return config.SandboxHost.load(templates / config.SandboxHost.FILE).credentials
+    return docker_forward._sandbox_host(os.environ).credentials
 
 
 def lowered(ref: str) -> Lowered | None:

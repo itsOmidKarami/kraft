@@ -91,6 +91,9 @@ async def test_a_fresh_kit_item_gets_past_the_walk(tmp_path, repo, monkeypatch, 
     assert status == "completed", [e["payload"] for e in evts if "needs_human" in e["type"]]
     assert fetched == [REF]
     assert seen == [("setup", LOWERED), ("setup", LOWERED), ("task", LOWERED)]
+    assert [e["payload"] for e in evts if e["type"] == "sandbox_kit_resolved"] == [
+        {"kit": REF, "manifest": REF.rpartition("@")[2], "skipped": [], "ignored": []}
+    ]
 
 
 async def _cannot_fetch(ref):

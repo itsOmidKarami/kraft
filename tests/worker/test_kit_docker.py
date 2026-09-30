@@ -121,9 +121,11 @@ async def test_a_kit_runs_from_its_digest_with_its_surface_alone(
     real key injected, (c) the host the harness requires and the Kit does
     not refused (403) and recorded."""
     try:
-        fetched, lowered = await kit.resolve(kit_ref)
+        fetched = await kit.ensure(kit_ref)
     except kit.KitRefused as exc:
         _unavailable(runtime.cli, f"e2e: {runtime.cli} cannot fetch the test Kit here: {exc}")
+    # Outside the try: a lowering bug fails, never skips.
+    lowered = kit.lower(kit_ref, fetched.descriptor(), kit.bindings())
     port, seen = await api("allowed.test", "x-api-key")
     sandbox = {**lowered.policy.model_dump(), "kit": kit_ref}
     assert (sandbox["image"], fetched.manifest) == (kit_ref, kit_ref.rpartition("@")[2])
