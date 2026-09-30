@@ -9,7 +9,7 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 ### Fixes
 
-- Security: updates urllib3 to 2.8.0, which fixes two high-severity and one medium-severity advisory (HTTPS proxy TLS settings ignored or overridden, an unbounded chunk-size line buffered in memory, and a chunked-deflate infinite loop). It is only installed with the optional `vector` extra. (#318)
+- Repo lockfile update (urllib3 2.8.0). No change to the installed package. (#318)
 
 ## 1.3.0
 
