@@ -684,7 +684,7 @@ async def make_item(
 
 
 #: A harness definition for the fake agent: the same shape `src/kraft/harnesses/
-#: claude.yaml` declares (so `fixtures/fake_agent.py` sees the flags it already
+#: claude.yaml` declares (so `tests/support/fake_agent.py` sees the flags it already
 #: parses), with `command` pointed at the fake and `usage` read from the result
 #: file so no envelope has to be faked.
 _FAKE_HARNESS = """

@@ -8,6 +8,7 @@ Everything goes through `just` — run `just` for the list.
 just setup      # uv sync + npm ci
 just test       # backend tests affected by your changes (testmon); --no-testmon for all
 just test-ui    # frontend unit tests
+just test-py 3.12  # the unit tier on another Python (CI runs 3.12, 3.13, 3.14); `requires-python` is the floor
 just lint       # ruff check + format check
 ```
 

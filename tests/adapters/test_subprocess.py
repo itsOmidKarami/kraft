@@ -471,7 +471,7 @@ async def test_cancelling_run_task_reaps_the_leader_instead_of_paying_the_grace(
     await _cancelled(task)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 2.0, f"cancel paid the group-kill grace ({elapsed:.1f}s)"
+    assert elapsed < 4.0, f"cancel paid the grace ({elapsed:.1f}s)"  # healthy <2.1s, bug >5s
     try:
         leftover = psutil.Process(pid).status()
     except psutil.NoSuchProcess:
