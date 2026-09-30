@@ -775,6 +775,31 @@ def _probe_test_scopes(
     return root_command or nested[0][1], scopes, markers
 
 
+def repository_identity(path: str | Path) -> tuple[str, str]:
+    """`path` resolved, and its origin's URL as `same_repository` compares
+    them: a local origin resolved like a path (its `.git` directory is the
+    repository), a remote one without a trailing `/` or `.git`, empty with
+    no origin."""
+    path = Path(path).resolve()
+    url = (git_read(path, "remote", "get-url", "origin", expected_failure=True) or "").rstrip("/")
+    if url.startswith(("/", "file://")):
+        local = Path(url.removeprefix("file://")).resolve()
+        url = str(local.parent if local.name == ".git" else local)
+    else:
+        url = url.removesuffix(".git")
+    return url, str(path)
+
+
+def same_repository(a: tuple[str, str], b: tuple[str, str]) -> bool:
+    """Whether two `repository_identity`s are two checkouts of one repository:
+    `b` is `a`'s origin, or both share an origin. A root's submodule
+    checkout and the member connected on its own are the usual pair."""
+    (origin_a, path_a), (origin_b, path_b) = a, b
+    if path_a == path_b:
+        return False
+    return bool(origin_a) and origin_a in (origin_b, path_b)
+
+
 def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
     """What Kraft can tell about a candidate repo without changing anything.
 

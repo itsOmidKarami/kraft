@@ -733,3 +733,30 @@ def test_the_seeded_repos_yaml_connects_nothing():
     smoke-test one at a path that does not exist on the machine."""
     seeded = Path(__file__).resolve().parents[1] / "templates" / "repos.yaml"
     assert config.load_repos(seeded) == []
+
+
+@pytest.mark.parametrize(
+    ("origin_a", "origin_b"),
+    [
+        ("git@example.com:o/pkg.git", "git@example.com:o/pkg"),
+        ("https://example.com/o/pkg/", "https://example.com/o/pkg.git"),
+        ("{link}", "{real}"),
+        ("file://{real}", "{real}/.git"),
+    ],
+    ids=["dot-git", "trailing-slash", "symlinked-path", "file-url"],
+)
+def test_two_spellings_of_one_origin_are_the_same_repository(tmp_path, origin_a, origin_b):
+    """Kraft-d7aj3: a root's submodule checkout is matched to the member
+    connected on its own by origin, however the clone command spelled it."""
+    real = tmp_path / "pkg.git"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    a, b = make_repo(tmp_path, name="a"), make_repo(tmp_path, name="b")
+    for repo, url in ((a, origin_a), (b, origin_b)):
+        subprocess.run(
+            ["git", "remote", "add", "origin", url.format(link=tmp_path / "link", real=real)],
+            cwd=repo,
+            check=True,
+        )
+
+    assert config.same_repository(config.repository_identity(a), config.repository_identity(b))

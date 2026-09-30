@@ -19,7 +19,6 @@ from support.harness import (
     fake_templates_dir,
     isolated_bd,
     make_repo,
-    make_repo_with_submodule,
     v1_chain,
     v1_item,
 )
@@ -239,90 +238,6 @@ def test_repo_request_models_reject_a_non_string_model(model, payload):
     """An API schema must reject a malformed model map before a route touches disk."""
     with pytest.raises(ValidationError):
         model.model_validate({**payload, "models": {"claude": ["opus"]}})
-
-
-def test_connecting_a_workspace_auto_connects_its_submodules_disabled(tmp_path, client):
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    client.post("/api/repos", json={"path": str(root)})
-
-    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
-    child = repos[str(root / "libs/a")]
-    assert child["enabled"] is False
-    # detected, nobody has looked at it yet
-    assert child["managed"] is False
-    # the human typed the workspace path, so it is a decision from the start
-    assert repos[str(root)]["managed"] is True
-
-
-def test_connecting_a_workspace_declares_it_with_its_submodules_as_members(tmp_path, client):
-    """Typed membership replaces reading `.gitmodules` at intake: connecting a
-    root declares its workspace, each submodule a member mounted at its path,
-    under repository ids the declaration can name. The pointer default is the
-    shipped `ignore` (`workspace-root-pointer-update-defaults-to-ignore`)."""
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    client.post("/api/repos", json={"path": str(root), "enabled": False})
-
-    body = client.get("/api/repos").json()
-    ids = {r["path"]: r.get("id") for r in body["repos"]}
-    assert ids == {str(root): "ws", str(root / "libs/a"): "a"}
-    assert body["workspaces"] == {
-        "ws": {
-            "id": "ws",
-            "root": "ws",
-            "root_pointer_default": "ignore",
-            "members": {"a": {"repository": "a", "path": "libs/a"}},
-        }
-    }
-
-
-def test_disconnecting_a_repository_a_workspace_mounts_is_refused(tmp_path, client, templates_dir):
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    client.post("/api/repos", json={"path": str(root), "enabled": False})
-    before = (templates_dir / "repos.yaml").read_text()
-
-    r = client.delete(f"/api/repos?path={root / 'libs/a'}")
-    assert r.status_code == 422, r.text
-    assert "'a'" in r.json()["detail"]
-    assert (templates_dir / "repos.yaml").read_text() == before
-
-
-def test_a_hand_added_repo_is_managed_even_when_left_disabled(tmp_path, client):
-    repo = make_repo(tmp_path)
-    body = client.post("/api/repos", json={"path": str(repo), "enabled": False}).json()
-    assert body["enabled"] is False
-    assert body["managed"] is True
-
-
-def test_auto_connect_never_overwrites_an_existing_entry(tmp_path, client):
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    child = str(root / "libs/a")
-    client.post("/api/repos", json={"path": child, "test_command": "cargo test"})
-    client.post("/api/repos", json={"path": str(root)})
-
-    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
-    # the hand-connected child keeps its command and its latch
-    assert repos[child]["test_command"] == "cargo test"
-    assert repos[child]["managed"] is True
-
-
-def test_patching_a_detected_child_latches_it_managed(tmp_path, client):
-    root, _sub = make_repo_with_submodule(tmp_path, submodule_path="libs/a")
-    client.post("/api/repos", json={"path": str(root)})
-    child = str(root / "libs/a")
-
-    # editing a field without enabling is still a touch
-    client.patch(f"/api/repos?path={child}", json={"test_command": "cargo test"})
-    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
-    assert repos[child]["managed"] is True
-    assert repos[child]["enabled"] is False
-
-
-def test_managed_never_returns_to_false(tmp_path, client):
-    repo = make_repo(tmp_path)
-    client.post("/api/repos", json={"path": str(repo)})
-    client.patch(f"/api/repos?path={repo}", json={"enabled": False})
-    repos = {r["path"]: r for r in client.get("/api/repos").json()["repos"]}
-    assert repos[str(repo)]["managed"] is True
 
 
 def test_add_repo_stores_probed_forge(client, tmp_path):

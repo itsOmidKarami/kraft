@@ -64,8 +64,9 @@ def _auto_connect_children(
     rather than inheriting its parent's command.
 
     Never touches an entry that already exists: re-connecting a workspace, or
-    connecting one whose child an operator already added by hand, must not
-    reset that child's latch.
+    connecting one whose child an operator already added by hand -- at the
+    submodule's path, or as its own clone elsewhere -- must not reset that
+    child's latch.
     """
     known = {r["path"]: r for r in repos}
     children: dict[str, dict] = {}
@@ -80,6 +81,18 @@ def _auto_connect_children(
             continue
         if probed["path"] in known:
             children[rel] = known[probed["path"]]
+            continue
+        # The member connected on its own before its root: the submodule
+        # checkout is another clone of it, and the member is the entry the
+        # workspace must name, not a second, empty one (Kraft-d7aj3).
+        identity = config_mod.repository_identity(probed["path"])
+        same = [
+            r
+            for r in repos
+            if config_mod.same_repository(identity, config_mod.repository_identity(r["path"]))
+        ]
+        if len(same) == 1:
+            children[rel] = same[0]
             continue
         child = {
             "path": probed["path"],
