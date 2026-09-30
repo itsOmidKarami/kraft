@@ -9,7 +9,8 @@ suite("review", () => {
     const gate = item.pending_gate!;
     assert.ok(k.gates.announcer.announced.has(`${item.id}:gate:${gate}`), "the gate was announced");
 
-    await vscode.commands.executeCommand("kraft.reviewChanges", item.id);
+    // As the gate document's title bar calls it: with the tab's Uri, not an id.
+    await vscode.commands.executeCommand("kraft.reviewChanges", vscode.Uri.parse(`kraft-artifact:/${item.id}/Spec.md`));
     const opened = await until("the diff to open", () => k.review.lastOpened);
     assert.ok(opened.files.length > 0, "the review lists the branch's files");
 

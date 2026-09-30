@@ -3,6 +3,7 @@ import { reportError } from "./actions";
 import type { Api } from "./core/api";
 import { Announcer } from "./core/announcer";
 import { approveGate } from "./core/approve";
+import { commandItemId } from "./core/review";
 import type { Store } from "./core/store";
 
 export function registerGates(
@@ -21,10 +22,7 @@ export function registerGates(
     }),
   );
 
-  const idOfEditor = () => {
-    const uri = vscode.window.activeTextEditor?.document.uri;
-    return uri?.scheme === "kraft-artifact" ? uri.path.split("/")[1] : undefined;
-  };
+  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"]);
   const gateOf = (id: string) => store.item(id)?.pending_gate ?? undefined;
   const guard = () => {
     if (readOnly()) void vscode.window.showWarningMessage("Kraft is read-only: the daemon's version does not match this extension.");
@@ -32,7 +30,6 @@ export function registerGates(
   };
 
   const openArtifact = async (id?: string) => {
-    id ??= idOfEditor();
     if (!id) return;
     try {
       const a = await api.getArtifact(id);
@@ -47,7 +44,6 @@ export function registerGates(
   };
 
   const approve = async (id?: string, gate?: string) => {
-    id ??= idOfEditor();
     if (!id || !guard()) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
@@ -61,7 +57,6 @@ export function registerGates(
   };
 
   const reject = async (id?: string, gate?: string, note?: string) => {
-    id ??= idOfEditor();
     if (!id || !guard()) return;
     gate ??= gateOf(id);
     if (!gate) return void vscode.window.showInformationMessage(`${id} is not waiting at a gate.`);
@@ -102,9 +97,9 @@ export function registerGates(
   store.onChange(announce);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("kraft.openArtifact", (arg?: string | { item?: { id: string } }) => openArtifact(typeof arg === "string" ? arg : arg?.item?.id)),
-    vscode.commands.registerCommand("kraft.approve", (arg?: string | { item?: { id: string } }, gate?: string) => approve(typeof arg === "string" ? arg : arg?.item?.id, gate)),
-    vscode.commands.registerCommand("kraft.reject", (arg?: string | { item?: { id: string } }, gate?: string, note?: string) => reject(typeof arg === "string" ? arg : arg?.item?.id, gate, note)),
+    vscode.commands.registerCommand("kraft.openArtifact", (arg?: unknown) => openArtifact(idOf(arg))),
+    vscode.commands.registerCommand("kraft.approve", (arg?: unknown, gate?: string) => approve(idOf(arg), gate)),
+    vscode.commands.registerCommand("kraft.reject", (arg?: unknown, gate?: string, note?: string) => reject(idOf(arg), gate, note)),
   );
   return { announcer };
 }

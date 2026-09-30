@@ -5,12 +5,12 @@ import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { reportError } from "../actions";
 import type { Api } from "../core/api";
-import { leftUri, parseReviewUri, reviewFiles, rightUri } from "../core/review";
+import { commandItemId, leftUri, parseReviewUri, reviewFiles, rightUri } from "../core/review";
 import type { Store } from "../core/store";
 
 const run = promisify(execFile);
 
-export function registerDiff(context: vscode.ExtensionContext, store: Store, api: Api) {
+export function registerDiff(context: vscode.ExtensionContext, store: Store, api: Api, runDir: () => string) {
   const state: { lastOpened?: { id: string; files: string[] }; worktrees: Map<string, string> } = { worktrees: new Map() };
 
   const gitShow: vscode.TextDocumentContentProvider = {
@@ -31,8 +31,8 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
   const worktreeFile: vscode.TextDocumentContentProvider = {
     async provideTextDocumentContent(uri) {
       const { id, file } = parseReviewUri(uri.path);
-      const root = state.worktrees.get(id);
-      if (!root) return "";
+      // Before the diff opens (a click on a finding in Problems), the worktree is at its usual place.
+      const root = state.worktrees.get(id) ?? join(runDir(), "worktrees", id);
       try {
         return await readFile(join(root, file), "utf8");
       } catch (e) {
@@ -42,8 +42,7 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
     },
   };
 
-  const open = async (arg?: string | { item?: { id: string } }) => {
-    const id = typeof arg === "string" ? arg : arg?.item?.id;
+  const open = async (id?: string) => {
     if (!id) return;
     try {
       const diff = await api.getDiff(id);
@@ -67,11 +66,9 @@ export function registerDiff(context: vscode.ExtensionContext, store: Store, api
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider("kraft-git", gitShow),
     vscode.workspace.registerTextDocumentContentProvider("kraft-wt", worktreeFile),
-    vscode.commands.registerCommand("kraft.reviewChanges", (arg?: string | { item?: { id: string } }) => {
-      // From an artifact tab: the id is the first path segment.
-      const uri = vscode.window.activeTextEditor?.document.uri;
-      return open(arg ?? (uri?.scheme === "kraft-artifact" ? uri.path.split("/")[1] : undefined));
-    }),
+    vscode.commands.registerCommand("kraft.reviewChanges", (arg?: unknown) =>
+      open(commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-artifact"])),
+    ),
   );
   return state;
 }

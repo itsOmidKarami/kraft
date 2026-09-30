@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { reportError } from "../actions";
 import { ApiError, type Api } from "../core/api";
 import { composeNote, destinationOf, type Draft, type DraftComment } from "../core/note";
-import { parseReviewUri } from "../core/review";
+import { commandItemId, parseReviewUri } from "../core/review";
 import type { Store } from "../core/store";
 
 export function registerComments(context: vscode.ExtensionContext, store: Store, api: Api, readOnly: () => boolean) {
@@ -76,22 +76,17 @@ export function registerComments(context: vscode.ExtensionContext, store: Store,
     return true;
   };
 
-  const idOfEditor = () => {
-    const uri = vscode.window.activeTextEditor?.document.uri;
-    return uri && (uri.scheme === "kraft-wt" || uri.scheme === "kraft-git" || uri.scheme === "kraft-artifact")
-      ? uri.path.split("/")[1]
-      : undefined;
-  };
+  const idOf = (arg: unknown) => commandItemId(arg, vscode.window.activeTextEditor?.document.uri, ["kraft-wt", "kraft-git", "kraft-artifact"]);
   context.subscriptions.push(
-    vscode.commands.registerCommand("kraft.review.submit", async (arg?: string | { item?: { id: string } }) => {
-      const id = typeof arg === "string" ? arg : (arg?.item?.id ?? idOfEditor());
+    vscode.commands.registerCommand("kraft.review.submit", async (arg?: unknown) => {
+      const id = idOf(arg);
       if (!id) return;
       const summary = await vscode.window.showInputBox({ prompt: "Overall comment (optional)" });
       if (summary === undefined) return;
       await submit(id, summary);
     }),
-    vscode.commands.registerCommand("kraft.review.discard", async (arg?: string | { item?: { id: string } }) => {
-      const id = typeof arg === "string" ? arg : (arg?.item?.id ?? idOfEditor());
+    vscode.commands.registerCommand("kraft.review.discard", async (arg?: unknown) => {
+      const id = idOf(arg);
       if (id) await clear(id);
     }),
   );
