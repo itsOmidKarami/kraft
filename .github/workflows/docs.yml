@@ -52,12 +52,32 @@ jobs:
           npm ci --prefix docsite
           dev/build_docs_site.sh "$RUNNER_TEMP/site"
 
-      # Every link in main's built pages (/kraft/next/), internal and external,
-      # anchors included. PRs only: a link that rots between PRs must not block
-      # the Pages deploy on push, and the next docs PR catches it instead.
-      # The pages link to /kraft/..., so a root with kraft/ pointing at the
-      # built site resolves them. Checked from the HTML, not the Markdown,
-      # because a page's route is its folder minus the number prefixes.
+      # Every link on main's pages (/kraft/next/), internal and external,
+      # anchors included. PRs only: a link that rots between PRs must not
+      # block the Pages deploy on push; the next docs PR catches it instead.
+      #
+      # Two inputs. The built HTML, for internal links and anchors: a page's
+      # route is its folder minus the number prefixes, which only the build
+      # knows. The Markdown, for external links: Docus marks every content
+      # link rel="nofollow", and lychee skips those in HTML. The Markdown's
+      # own /... links are left to the HTML (the linkroot exclude below).
+      #
+      # The pages link to /kraft/..., so --root-dir is a directory whose
+      # kraft/ is the built site. A route like /kraft/next/guides/vscode is a
+      # directory (holding only _payload.json) beside vscode.html, the file
+      # Pages serves for it: --index-files index.html,. with
+      # --fallback-extensions html resolves it the same way.
+      #
+      # Excluded: the site outside /kraft/next/. The "Docs for the release"
+      # banner links every page to its release twin, which a page new on main
+      # does not have yet (VersionBanner.vue says so). The example domains
+      # the docs use (example.com and the like) lychee skips on its own.
+      #
+      # Remapped to local files instead of fetched: the site's own URLs
+      # (canonical, og:url), which the live site lacks for a page this PR
+      # adds; and the repo's blob/tree/edit links on main, to this checkout,
+      # for the same reason and because github.com rate-limits a runner that
+      # fetches dozens of them.
       - name: link root
         if: github.event_name == 'pull_request'
         run: mkdir -p "$RUNNER_TEMP/linkroot" && ln -s "$RUNNER_TEMP/site" "$RUNNER_TEMP/linkroot/kraft"
@@ -65,30 +85,18 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          # --index-files index.html,. with --fallback-extensions html: a
-          # route like /kraft/next/guides/vscode is a directory (holding only
-          # _payload.json) next to vscode.html, the file Pages serves for it.
-          #
-          # Excluded, and why:
-          # - /kraft/ outside /kraft/next/: the "Docs for the release" banner
-          #   links every page to its release twin, which a page new on main
-          #   does not have yet. The banner says so (VersionBanner.vue).
-          # Remapped to local files instead of fetched: the site's own URLs
-          # (canonical and og:url), which the live site lacks for a page this
-          # PR adds; and the repo's blob/tree/edit links on main, to this
-          # checkout, for the same reason and because github.com rate-limits
-          # a runner that fetches dozens of them.
           args: >-
             --no-progress
             --include-fragments
             --root-dir ${{ runner.temp }}/linkroot
             --index-files index.html,.
             --fallback-extensions html
-            --exclude '^file:///.*/linkroot/kraft/'
+            --exclude '^file:///.*/linkroot/'
             --include '^file:///.*/linkroot/kraft/next(/|#|$)'
             --remap 'https://itsomidkarami\.github\.io/kraft/ file://${{ runner.temp }}/linkroot/kraft/'
             --remap 'https://github\.com/itsOmidKarami/kraft/(?:blob|tree|edit)/main/ file://${{ github.workspace }}/'
             '${{ runner.temp }}/linkroot/kraft/next/**/*.html'
+            'docsite/content/**/*.md'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

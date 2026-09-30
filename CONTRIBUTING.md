@@ -309,8 +309,8 @@ Page rules:
 Run `npm ci && npx nuxt generate` in `docsite/` before you push. It fails on
 a page that doesn't parse, but a link to a page or heading that no longer
 exists renders instead of failing the build. The docs workflow catches those:
-on a pull request it runs [lychee](https://lychee.cli.rs) over `main`'s built
-pages and fails on a broken internal link, a missing anchor, or an external
+on a pull request it runs [lychee](https://lychee.cli.rs) over the built
+pages and their Markdown, and fails on a broken internal link, a missing anchor, or an external
 link that does not answer. Nothing catches "this paragraph no longer describes the
 code", and `docs/intent/`'s `enforced-by:` pinning doesn't either. Read the
 page you're touching, not just the code.
