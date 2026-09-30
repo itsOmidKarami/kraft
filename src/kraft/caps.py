@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -476,7 +477,8 @@ def budget_breach(conn, row, path: str) -> TokenBreach | UsdBreach | None:
         ]
         for name in BUDGET_FIELDS:
             cap = getattr(policy, name)
-            if cap is None or (above[name] is not None and cap >= above[name]):
+            # Infinity is an item's `budget_usd: none` (`policy.NO_CAP`): no cap.
+            if cap in (None, math.inf) or (above[name] is not None and cap >= above[name]):
                 continue
             above[name] = cap
             if name == "token_budget":

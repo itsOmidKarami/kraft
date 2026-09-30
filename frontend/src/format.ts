@@ -12,6 +12,14 @@ export function otherCapHint(budget: BudgetStop, id: string): string | null {
     case "work_item":
       return null;
     case "usd":
+      // Unknown spend: no higher cap passes it (Kraft-tugdf.12).
+      if (budget.unknown_launches)
+        return (
+          "a budget_usd stopped it on spend a harness never reported, which no higher cap passes: " +
+          `clear it item-wide with kraft item set-policy ${id} --policy budget_usd=none ` +
+          "(refused under a maxima.work_item.budget_usd; a cap the chain set on a node, step or task stays), " +
+          "then retry, or skip the node"
+        );
       return setPolicy("budget_usd");
     case "tokens":
       return setPolicy("token_budget");

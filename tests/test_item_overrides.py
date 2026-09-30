@@ -613,6 +613,20 @@ def test_raise_budget_refusal_for_a_policy_cap_points_at_set_policy_not_a_frozen
     assert "policy.yaml" in daily_detail
 
 
+def test_raise_budget_refusal_for_unknown_spend_points_at_clearing_the_cap(client, repo):
+    """Kraft-tugdf.12: no higher `budget_usd` passes unknown spend, so the
+    refusal names the one door that does, not `budget_usd=N`."""
+    wid = _budget_stopped_item(
+        client,
+        repo,
+        {"scope": "usd", "path": "", "spent_usd": 1.0, "cap_usd": 5.0, "unknown_launches": 2},
+    )
+    detail = client.post(f"/api/work-items/{wid}/budget/raise", json={"budget_usd": 50.0}).json()[
+        "detail"
+    ]
+    assert "--policy budget_usd=none" in detail and "budget_usd=N" not in detail
+
+
 def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):
     wid = client.post(
         "/api/work-items",

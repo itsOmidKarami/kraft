@@ -47,6 +47,7 @@ from pydantic import (
 from kraft.cap_levels import LEVEL_OF
 from kraft.policy import (
     FROZEN,
+    NO_CAP,
     RETIRED_WAIT_TIMEOUT,
     SCOPE_CAP_FIELDS,
     InstancePolicy,
@@ -1328,12 +1329,14 @@ class ResolvedChain:
                 continue
             bound = policy.maxima.nearest("work_item", name)
             wide = getattr(item, name)
-            if wide is not None and bound is not None and wide > bound[1]:
+            if wide is not None and bound is not None and (wide == NO_CAP or wide > bound[1]):
                 raise PolicyError(
                     f"'{name}' {wide} cannot exceed the administrator maximum {bound[1]}",
                     field=name,
                     path="",
                 )
+            # The cap an item-wide value gives a scope that set none (`NO_CAP`: no cap).
+            given = root if wide is None else None if wide == NO_CAP else wide
             for path, _, scope in scopes:
                 if path not in item.paths or getattr(item.paths[path], name) is None:
                     continue
@@ -1347,7 +1350,7 @@ class ResolvedChain:
                             for layer in reversed(scope.scopes)
                             if (v := getattr(layer, name)) is not None
                         ),
-                        wide if wide is not None else root,
+                        given,
                     ),
                     *(
                         getattr(layer, name)

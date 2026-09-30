@@ -179,6 +179,45 @@ async def test_unknown_spend_is_never_counted_as_free(item_on):
     assert "unknown spend is never counted as free" in stops.budget_reason(breach)
 
 
+def _capped_everywhere(maxima: dict | None = None):
+    """A chain whose own `policy:` and whose `policy.yaml` node default both
+    set `budget_usd`, over optional `maxima`."""
+    nodes = [{"id": "build", "kind": "exec", "tasks": [_agent("impl")]}]
+    raw = {"defaults": {"nodes": {"budget_usd": 3}}, "maxima": maxima or {}}
+    return ResolvedChain.from_chain(
+        Chain.model_validate({"id": "c", "policy": {"budget_usd": 5}, "nodes": nodes})
+    ).materialize(
+        target=WorkItemTarget.for_repository("target"),
+        effective_policy=InstancePolicy.from_input(InstancePolicyInput.model_validate(raw)),
+    )
+
+
+@pytest.mark.parametrize(
+    ("override", "stops"),
+    [(None, True), ({"budget_usd": 50}, True), ({"budget_usd": "none"}, False)],
+    ids=["no-override", "raised", "cleared"],
+)
+async def test_only_an_item_wide_budget_usd_of_none_passes_unknown_spend(item_on, override, stops):
+    """Kraft-tugdf.12: no dollar figure passes unknown spend, so a stop on it
+    from a chain's cap or a level default is passed by clearing the cap
+    item-wide, `budget_usd: none`, which clears both."""
+    it = await item_on(_capped_everywhere(), policy_override=override)
+    await _spent(it, "build.main.impl", tokens=10, usd=None)
+
+    assert (_breach(it, "build.main.impl") is not None) is stops
+
+
+def test_budget_usd_none_is_item_wide_and_under_no_maximum():
+    """Clearing is raising without bound: refused where a work-item maximum
+    is set, and never on a path, where a work item's cap only tightens."""
+    assert _capped_everywhere().with_item_policy({"budget_usd": "none"}).item_policy
+    capped = _capped_everywhere({"work_item": {"budget_usd": 100}})
+    with pytest.raises(_policy.PolicyError, match="cannot exceed the administrator maximum 100"):
+        capped.with_item_policy({"budget_usd": "none"})
+    with pytest.raises(_policy.PolicyError, match=r"policy\.paths\.build\.budget_usd"):
+        _capped_everywhere().with_item_policy({"paths": {"build": {"budget_usd": "none"}}})
+
+
 async def test_a_running_sessions_estimate_trips_a_usd_cap(item_on):
     """Kraft-wz83s: `caps.budget_breach` sums `cost_usd` with no notion of
     "estimated" vs settled -- `session_progress`'s guess for a running
