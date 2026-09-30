@@ -16,11 +16,27 @@ def test_the_table_lists_each_profile_its_provider_and_the_tasks_using_it(app, c
     monkeypatch.setenv("COLUMNS", "400")
     cli.main(["admin", "harnesses"])
     lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
-    assert lines[0].split() == ["ID", "PROVIDER", "ENABLED", "USED", "BY"]
+    assert lines[0].split() == ["ID", "PROVIDER", "ENABLED", "CHAINS", "USED", "BY"]
     rows = {line.split()[0]: line.split() for line in lines[1:]}
-    assert rows["codex"][1:] == ["fake", "yes", "-"]
-    assert rows["claude"][1:3] == ["fake", "yes"]
+    assert rows["codex"][1:] == ["fake", "yes", "-", "-"]
+    assert rows["claude"][1:5] == ["fake", "yes", "default,", "quick-task"]
     assert "tasks.implementer," in rows["claude"]
+
+
+def test_the_table_names_a_chain_that_selects_a_profile_on_its_own_task():
+    """A chain setting `harness:` on its own task has no library task to show
+    under USED BY; its CHAINS cell names it (Kraft-9efnk.35)."""
+    from kraft.cli import templates
+
+    profile = {
+        "id": "codex",
+        "provider": "codex",
+        "enabled": True,
+        "used_by": [],
+        "chains": ["mine"],
+    }
+    out = templates._render_profiles({"profiles": [profile], "error": None})
+    assert out.splitlines()[1].split() == ["codex", "codex", "yes", "mine", "-"]
 
 
 def test_the_agent_profiles_follow_with_their_model_per_provider(app, capsys, monkeypatch):

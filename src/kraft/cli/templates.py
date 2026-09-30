@@ -73,13 +73,26 @@ def _cmd_library(ns: argparse.Namespace) -> None:
 
 
 def _render_profiles(payload: dict) -> str:
+    # CHAINS as well as USED BY: a chain can set `harness:` on its own task,
+    # which no library task records (Kraft-9efnk.35).
     rows = [
-        {**p, "enabled": "yes" if p["enabled"] else "no", "used_by": ", ".join(p["used_by"]) or "-"}
+        {
+            **p,
+            "enabled": "yes" if p["enabled"] else "no",
+            "used_by": ", ".join(p["used_by"]) or "-",
+            "chains": ", ".join(p["chains"]) or "-",
+        }
         for p in payload["profiles"]
     ]
     table = render.table(
         rows,
-        [("ID", "id"), ("PROVIDER", "provider"), ("ENABLED", "enabled"), ("USED BY", "used_by")],
+        [
+            ("ID", "id"),
+            ("PROVIDER", "provider"),
+            ("ENABLED", "enabled"),
+            ("CHAINS", "chains"),
+            ("USED BY", "used_by"),
+        ],
     )
     if payload["error"]:
         return f"{payload['file']}: {payload['error']}"
