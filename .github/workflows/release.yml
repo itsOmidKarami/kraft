@@ -208,7 +208,10 @@ jobs:
           npm ci
           npm run build
           # vsce wants semver, which has no aN/bN/rcN; a pre-release packs as its base.
-          npx vsce package "$(echo "${TAG#v}" | sed -E 's/(a|b|rc)[0-9]+$//')" --no-update-package-json --out "../dist/kraft-${TAG#v}.vsix"
+          # Not in dist/: the PyPI publish step uploads everything there, and
+          # PyPI rejects a .vsix (v1.2.0 stopped on exactly that).
+          mkdir -p "$RUNNER_TEMP/vsix"
+          npx vsce package "$(echo "${TAG#v}" | sed -E 's/(a|b|rc)[0-9]+$//')" --no-update-package-json --out "$RUNNER_TEMP/vsix/kraft-${TAG#v}.vsix"
 
       - name: push the tag and create the release
         if: steps.impact.outputs.tag != ''
@@ -218,7 +221,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push origin "$TAG"
-          gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl dist/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" $([ "$PRE" != none ] && echo --prerelease) dist/*.whl "$RUNNER_TEMP"/vsix/*.vsix --title "Kraft $TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
       - name: rebuild the docs for this release
         # The docs site serves the latest stable tag's pages at /kraft/. The
@@ -245,7 +248,7 @@ jobs:
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
-          VSIX=$(ls dist/*.vsix)
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
           npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
           if [ -n "$OVSX_PAT" ]; then npx --prefix vscode ovsx publish "$VSIX" -p "$OVSX_PAT"; fi
 
