@@ -104,7 +104,14 @@ export interface WorkItemAttachment {
 /** The breach a spend-cap stop recorded (`kraft.caps.Breach`), tagged on
  *  `scope`. Only `work_item` is the item's own cap, the one Raise budget raises. */
 export type BudgetStop =
-  | { scope: "work_item" | "daily"; spent_usd: number; cap_usd: number }
+  | {
+      scope: "work_item" | "daily";
+      spent_usd: number;
+      cap_usd: number;
+      /** Nonzero: stopped because spend it could not price is unknown, not
+       *  because the cap was reached. Absent on a stop recorded before it. */
+      unknown_launches?: number;
+    }
   | { scope: "usd"; path: string; spent_usd: number; cap_usd: number; unknown_launches: number }
   | { scope: "tokens"; path: string; spent_tokens: number; cap_tokens: number };
 

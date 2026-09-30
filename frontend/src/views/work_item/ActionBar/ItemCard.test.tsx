@@ -390,6 +390,15 @@ describe("ItemCard (W11 · A)", () => {
     expect(raise).toHaveBeenCalledWith("w1", 10);
   });
 
+  it.each([
+    ["work_item", /remove the cap, or bound that harness with a token_budget$/, true],
+    ["daily", /clear budget\.daily_usd in policy\.yaml and bound that harness/, false],
+  ] as const)("budget: a %s cap stopped on unknown spend names its way out", (scope, sub, raise) => {
+    renderCard(item({ status: "needs_human", budget: { scope, spent_usd: 0, cap_usd: 5, unknown_launches: 1 } }));
+    expect(document.querySelector(".item-card-sub")?.textContent).toMatch(sub);
+    expect(screen.queryByRole("button", { name: /raise budget/i }) !== null).toBe(raise);
+  });
+
   it("question: the question shows in full; Answer quotes it and stays disabled until text is entered", async () => {
     const spy = vi.spyOn(api, "resumeWorkItem").mockResolvedValue({ id: "w1", node_id: "v", steer: "42" });
     renderCard(item({ status: "needs_human", needs_context_question: "which backoff?" }));

@@ -16,6 +16,8 @@ export function otherCapHint(budget: BudgetStop, id: string): string | null {
     case "tokens":
       return setPolicy("token_budget");
     case "daily":
+      if (budget.unknown_launches)
+        return "today's spend includes a launch with no cost it could price: clear budget.daily_usd in policy.yaml and bound that harness with a token_budget, then retry";
       return "the daily cap stopped it: raise budget.daily_usd in policy.yaml, or wait for local midnight, then retry";
   }
 }

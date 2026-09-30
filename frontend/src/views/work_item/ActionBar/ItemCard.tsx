@@ -433,7 +433,11 @@ export function ItemCard({
       sub.push(
         nodeCode,
         waited,
-        other ?? (item.budget?.scope === "work_item" && `cap $${item.budget.cap_usd} refused the next task`),
+        other ??
+          (item.budget?.scope === "work_item" &&
+            (item.budget.unknown_launches
+              ? `${item.budget.unknown_launches} launch(es) with no cost it could price: remove the cap, or bound that harness with a token_budget`
+              : `cap $${item.budget.cap_usd} refused the next task`)),
       );
       if (!other)
         row.push(
