@@ -120,7 +120,11 @@ asks. It needs the server running:
 ```
 
 To clear gates and review diffs from VS Code, install the
-[Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode).
+[Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode) from the
+VS Code Marketplace (publisher `kraft-sdlc`), or download `kraft-<version>.vsix`
+from a [GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
+`code --install-extension kraft-<version>.vsix`. Open VSX (VSCodium, Cursor)
+is coming; until then, use the `.vsix`.
 
 Every install path, connecting your agent, and updating with
 `kraft admin update` are in the
