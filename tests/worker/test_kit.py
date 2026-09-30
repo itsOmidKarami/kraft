@@ -264,5 +264,8 @@ def test_cpu_zero_is_no_limit():
 @pytest.mark.parametrize("memory", ["2gb", "1.5g"])
 def test_a_memory_spelling_kraft_cannot_read_refuses_the_kit(memory):
     text = _kit({"type": kit.RESOURCES, "config": {"memory": memory}})
-    with pytest.raises(kit.KitRefused, match=f"memory '{memory}' is not a size"):
+    with pytest.raises(
+        kit.KitRefused,
+        match=rf"^lowers to a sandbox Kraft refuses: resources\.memory: memory '{memory}' is not",
+    ):
         kit.lower(REF, kit.decode(text), {})

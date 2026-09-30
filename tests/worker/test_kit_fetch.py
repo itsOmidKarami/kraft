@@ -103,7 +103,7 @@ async def test_a_cli_that_fails_is_a_refusal_quoting_it(registry, monkeypatch, c
 
 
 @pytest.mark.parametrize(
-    "stored", [None, "not json", '{"manifest": 1}'], ids=["none", "garbage", "bad-entry"]
+    "stored", [None, "not json", '{"manifest": 1}'], ids=["none", "garbage", "wrong-shape"]
 )
 async def test_a_cached_kit_is_not_fetched_again(registry, tmp_path, monkeypatch, stored):
     """Keyed by the pinned digest, so never stale and fetched once. An

@@ -713,12 +713,13 @@ def cached(ref: str) -> Fetched | None:
     # than keep a corrupted entry for good.
     try:
         stored = json.loads(_cache(ref).read_text())
-        manifest, text = stored["manifest"], stored["descriptor"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError):
         return None
-    if not (isinstance(manifest, str) and isinstance(text, str)):
+    if not isinstance(stored, dict) or not all(
+        isinstance(stored.get(k), str) for k in ("manifest", "descriptor")
+    ):
         return None
-    return Fetched(ref, manifest, text)
+    return Fetched(ref, stored["manifest"], stored["descriptor"])
 
 
 async def ensure(ref: str) -> Fetched:
