@@ -126,6 +126,12 @@ class RunDirs:
         (`worker.ca`); the egress TLS listener's persisted port."""
         return self.base / "ca"
 
+    @property
+    def kit(self) -> Path:
+        """Each Kit's descriptor as fetched, `<digest hex>.json`
+        (`worker.kit`): keyed by the digest a policy pins, so never stale."""
+        return self.base / "kit"
+
     def ensure(self) -> RunDirs:
         """Also makes the run dir private (Kraft-9efnk.18): it holds whole
         agent sessions. The chmod tightens an install made before this, and

@@ -15,6 +15,7 @@ the design this implements.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -1118,6 +1119,27 @@ async def docker_call(
     """Run `docker args...`; `(returncode, stdout)`, or None when docker is
     missing or did not answer in time (its client is then killed). `env`
     overlays the client's own environment, for a bare `-e NAME` to copy."""
+    answer = await _docker(args, timeout, env, subprocess.DEVNULL)
+    return None if answer is None else answer[:2]
+
+
+async def docker_ask(
+    *args: str, timeout: float | None = None, limit: int | None = None
+) -> tuple[int, str, str] | None:
+    """`docker_call` keeping stderr too, `(returncode, stdout, stderr)`: for
+    a refusal that quotes what the CLI said (`kraft.worker.kit`). Past
+    `limit` bytes of stdout the client is killed and stdout cut at
+    `limit + 1`, so a caller sees it overflowed without holding it all."""
+    return await _docker(args, timeout, None, subprocess.PIPE, limit)
+
+
+async def _docker(
+    args: tuple[str, ...],
+    timeout: float | None,
+    env: dict[str, str] | None,
+    stderr: int,
+    limit: int | None = None,
+) -> tuple[int, str, str] | None:
     try:
         cli = (await asyncio.to_thread(runtime)).cli
     except (ConfigError, OSError):
@@ -1130,18 +1152,35 @@ async def docker_call(
             shutil.which(cli) or cli,
             *args,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr,
             env=None if env is None else {**os.environ, **env},
         )
     except OSError:
         return None
+
+    async def bounded() -> tuple[bytes, bytes]:
+        out = bytearray()
+
+        async def read_out() -> None:
+            while len(out) <= limit and (chunk := await proc.stdout.read(65536)):
+                out.extend(chunk)
+            if len(out) > limit:
+                with contextlib.suppress(ProcessLookupError):  # it finished meanwhile
+                    proc.kill()
+
+        _, err = await asyncio.gather(read_out(), proc.stderr.read())
+        await proc.wait()
+        return bytes(out[: limit + 1]), err
+
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout or DOCKER_CALL_TIMEOUT_S)
+        out, err = await asyncio.wait_for(
+            proc.communicate() if limit is None else bounded(), timeout or DOCKER_CALL_TIMEOUT_S
+        )
     except TimeoutError:
         proc.kill()
         await proc.wait()
         return None
-    return proc.returncode, out.decode(errors="replace")
+    return proc.returncode, out.decode(errors="replace"), (err or b"").decode(errors="replace")
 
 
 async def sweep_orphans(keep: Iterable[str] = ()) -> list[str]:

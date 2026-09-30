@@ -1,0 +1,90 @@
+# What Kraft makes of each descriptor in this directory
+# (tests/worker/test_kit.py).
+#
+# upstream: the capability layer (`kit.capability_claims`) on each upstream
+# fixture's capability list -- what Kraft enforces, skips or ignores, or
+# `refused:`, a string the refusal must contain. Run below the kind and
+# network-policy checks: all but two are mixins, and those two declare no
+# network policy, so `claims` refuses every one whole.
+upstream:
+  agent-sessions:
+    ignored: [com.docker.sandbox/agent-sessions@1]
+  credential:
+    refused: "com.docker.sandbox/credential@1 kit-tck: not proxyManaged"
+  credential-inject-only:
+    network: {runtime: {allow: [example.com]}}
+    skipped: ["com.docker.sandbox/credential@1 kit-tck: inject-only, no apiKey.name"]
+  credential-phases-both:
+    refused: "com.docker.sandbox/credential@1 kit-tck: no inject rules"
+  credential-phases-install:
+    refused: "com.docker.sandbox/credential@1 kit-tck: no inject rules"
+  credential-phases-runtime:
+    refused: "com.docker.sandbox/credential@1 kit-tck: no inject rules"
+  egress:
+    network: {runtime: {allow: [example.com]}}
+  groups:
+    refused: com.docker.sandbox/lifecycle@1
+  hooks:
+    refused: com.docker.sandbox/lifecycle@1
+  ordinary-optional:
+    skipped: [com.docker.sandbox/lifecycle@1]
+  privileged:
+    refused: com.docker.sandbox/privileged@1
+  resources:
+    resources: {memory: 2g}
+  sbx-workload:
+    refused: com.docker.sandbox/sbx@1
+  scoped-egress-v2:
+    skipped: [com.docker.sandbox/network-policy@2, com.docker.sandbox/lifecycle@1]
+  unknown-required-capability:
+    refused: invalid.example/nothing-implements-this@1
+  workload:
+    skipped: [com.docker.sandbox/agent-context@1]
+
+# kraft: Kraft's own workloads, decoded, claimed and lowered with `bindings`
+# from the Kit `registry.example.com/acme/kraft-worker@sha256:a...a`.
+kraft:
+  egress-credential-resources:
+    bindings: {anthropic: KRAFT_ANTHROPIC_KEY}
+    policy:
+      kind: docker
+      image: registry.example.com/acme/kraft-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      resources: {cpu: 2.0, memory: 2g}
+      network:
+        install: {}
+        runtime: {allow: [api.anthropic.com, statsig.anthropic.com]}
+      credentials:
+        - env: ANTHROPIC_API_KEY
+          service: anthropic
+          inject: [{domain: api.anthropic.com, header: x-api-key}]
+          phase: [runtime]
+          source: KRAFT_ANTHROPIC_KEY
+    skipped: []
+    ignored: []
+  phased-credential:
+    bindings: {github: KRAFT_GH_TOKEN, npm: KRAFT_NPM_TOKEN}
+    policy:
+      kind: docker
+      image: registry.example.com/acme/kraft-worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      network:
+        install: {allow: [registry.npmjs.org, api.github.com]}
+        runtime:
+          allow: [api.github.com, "*.githubusercontent.com"]
+          deny: [uploads.github.com]
+      credentials:
+        - env: GH_TOKEN
+          service: github
+          inject: [{domain: api.github.com, header: Authorization, format: "Bearer %s"}]
+          phase: [install, runtime]
+          source: KRAFT_GH_TOKEN
+        - env: NPM_TOKEN
+          service: npm
+          inject: [{domain: registry.npmjs.org, header: Authorization, format: "Bearer %s"}]
+          phase: [install]
+          source: KRAFT_NPM_TOKEN
+    skipped:
+      - com.docker.sandbox/lifecycle@1
+      - "com.docker.sandbox/credential@1 sentry: no binding"
+    ignored:
+      - com.docker.sandbox/credential@1 github oauth
+      - com.docker.sandbox/agent-sessions@1
