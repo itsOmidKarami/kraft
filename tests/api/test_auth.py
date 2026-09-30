@@ -53,6 +53,14 @@ def test_health_reports_port_and_version(client):
     assert isinstance(h["version"], str) and h["version"]
 
 
+@pytest.mark.api_client(host="localhost", env={"KRAFT_PORT": "18772"})
+def test_health_reports_the_bound_address_not_access_yaml(client):
+    """`admin start --port`/`--host` reach the server as KRAFT_PORT/KRAFT_HOST;
+    access.yaml still says 127.0.0.1:8765, and health must not."""
+    h = client.get("/api/health").json()
+    assert (h["bind"], h["port"]) == ("localhost", 18772)
+
+
 @pytest.mark.api_client(peer=("10.0.0.5", 54321))
 def test_login_rejects_with_the_new_copy(client, monkeypatch):
     st = client.app.state

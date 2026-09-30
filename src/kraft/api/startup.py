@@ -193,6 +193,7 @@ async def lifespan(app: FastAPI):
     # What the server is really listening on. __main__ reads access.yaml for this,
     # so they normally agree — until someone saves a new bind and has not restarted.
     app.state.bound_host = os.environ.get("KRAFT_HOST") or access["bind"]
+    app.state.bound_port = int(os.environ.get("KRAFT_PORT") or access["port"])
     app.state.invalid_policy = invalid_policy
     app.state.reattach_summary = summary
 
@@ -219,7 +220,7 @@ async def lifespan(app: FastAPI):
     notifier = notify_mod.Notifier(
         database,
         templates_dir / "notify.yaml",
-        fallback_base_url=f"http://{app.state.bound_host}:{access['port']}",
+        fallback_base_url=f"http://{app.state.bound_host}:{app.state.bound_port}",
     )
     await notifier.start(cursor=notify_cursor)
     database.set_on_commit(lambda: (broadcaster.notify(), indexer.notify(), notifier.notify()))

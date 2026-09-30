@@ -799,6 +799,14 @@ function BoardRow({
  *  otherwise own that dialog's open state. */
 function FreshInstallBoard({ onNewWorkItem }: { onNewWorkItem?: () => void }) {
   const [copied, setCopied] = useState(false);
+  // The address the server is really on (`--port`, KRAFT_PORT), not a default.
+  const [address, setAddress] = useState<string | null>(null);
+  useEffect(() => {
+    api
+      .getHealth()
+      .then((h) => h.bind && h.port != null && setAddress(`${h.bind}:${h.port}`))
+      .catch(() => {});
+  }, []);
   const copyCommand = async () => {
     try {
       await navigator.clipboard.writeText("kraft admin init");
@@ -811,7 +819,7 @@ function FreshInstallBoard({ onNewWorkItem }: { onNewWorkItem?: () => void }) {
     <div className="board-empty">
       <h1>Nothing on the board yet</h1>
       <p>
-        Kraft is running at <code>127.0.0.1:8765</code> with the default chain and
+        Kraft is running{address && <> at <code>{address}</code></>} with the default chain and
         policy. Connect a repo and file the first work item; it is created paused, so
         nothing runs until you start it.
       </p>

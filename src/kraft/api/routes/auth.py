@@ -117,9 +117,11 @@ async def health(request: Request):
         "invalid_policy": invalid_policy,
         "reattach_summary": asdict(st.reattach_summary),
         "index": st.indexer.health(),
-        # public: the login screen says which address it is asking a password for
-        "bind": st.access["bind"],
-        "port": st.access["port"],
+        # public: the login screen says which address it is asking a password for.
+        # What the server is listening on, not access.yaml: `--port` or
+        # KRAFT_PORT can differ, and these fields identify the instance.
+        "bind": st.bound_host,
+        "port": st.bound_port,
         # public: which instance this is -- a monitor, or a human's CLI, needs
         # this to tell a real answer from an impostor on the same port
         # (Kraft-kquf: "status ok, documents 2" from somebody's e2e fixture).
