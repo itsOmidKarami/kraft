@@ -324,13 +324,15 @@ next release too.
 ## The model price table
 
 `src/kraft/prices.json` is what Kraft prices a *running* agent session with,
-until the agent reports its own cost when it exits. It is a snapshot of
+until the agent reports its own cost when it exits, and a finished one whose
+agent reported none (Codex, Cursor, Amp). It is a snapshot of
 models.dev's Anthropic listing, with cache writes priced at the one-hour tier
 Claude Code uses (2x input). Nothing refreshes it automatically: when
 Anthropic's prices change, or a harness starts running a model the file does
 not list, run `just refresh-prices`, review the diff, and commit it. A model
 missing from the file gets no estimate, so its running sessions count as
-unpriced towards the budget until they exit.
+unpriced towards the budget until they exit, and a finished one that reported
+no cost is unknown spend: a dollar cap stops on it.
 
 ## Design documents
 
