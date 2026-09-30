@@ -357,7 +357,7 @@ def item_sandbox(row, launch: LaunchContext | None) -> dict | None:
         raise SandboxUnresolved(
             f"{row['id']}'s repositories set different sandboxes "
             f"{[s.model_dump() for s in live]!r} in repos.yaml: "
-            "a sandbox wraps the whole work item (Ruling 189), so they must agree"
+            "a sandbox wraps the whole work item, so they must agree"
         )
     return live[0].model_dump() if live else None
 

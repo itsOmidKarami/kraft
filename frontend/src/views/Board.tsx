@@ -438,7 +438,7 @@ export function Board({ onNewWorkItem }: { onNewWorkItem?: () => void } = {}) {
               )}
               {g.id === "done" && (
                 <span className="group-head-note">
-                  · completed and abandoned items · auto-archive after 30 days
+                  · completed and abandoned items · auto-archived after the configured period
                 </span>
               )}
             </div>

@@ -693,7 +693,7 @@ async def test_two_scopes_asking_for_different_sandboxes_are_refused_at_build(
     chain = _sandboxed_elsewhere(_SANDBOX)
     where(chain)
 
-    with pytest.raises(_policy.PolicyError, match="Ruling 189") as refused:
+    with pytest.raises(_policy.PolicyError, match="a sandbox wraps the whole work item") as refused:
         await item_on(chain)
 
     assert refused.value.field == "sandbox"
@@ -735,5 +735,5 @@ async def test_a_work_items_own_sandbox_wraps_the_whole_item(item_on):
 async def test_a_work_items_sandbox_that_conflicts_with_the_chains_is_refused(item_on):
     it = await item_on(_sandboxed_elsewhere(_SANDBOX))
 
-    with pytest.raises(_policy.PolicyError, match="Ruling 189"):
+    with pytest.raises(_policy.PolicyError, match="a sandbox wraps the whole work item"):
         it.chain.with_item_policy({"paths": {"d.main.later": {"sandbox": _OTHER}}})

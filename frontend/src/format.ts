@@ -6,8 +6,8 @@ import type { BudgetStop, KraftEvent, LogLine, WorkerSession } from "./types";
 export function otherCapHint(budget: BudgetStop, id: string): string | null {
   const setPolicy = (key: string) =>
     `a ${key} stopped it, not the item's own cap: raise it with ` +
-    `kraft item set-policy ${id} --policy ${key}=N (item-wide, up to maxima.work_item) ` +
-    "or in policy.yaml, then retry";
+    `kraft item set-policy ${id} --policy ${key}=N (item-wide, up to maxima.work_item), ` +
+    "then retry -- policy.yaml only applies to items filed after it changes";
   switch (budget.scope) {
     case "work_item":
       return null;
