@@ -36,7 +36,20 @@ function collect() {
 // A trailing `*` (W11's "el-*") is a prefix: every screen that starts with what comes before it.
 const inScope = (e) => !screens || screens.some((s) => s.endsWith("*") ? e.screen.startsWith(s.slice(0, -1)) : e.screen === s || e.screen.startsWith(s + "-") || e.id.startsWith(s));
 
+function shoot() {
+  const env = { ...process.env };
+  if (screens) env.SWEEP_SCREEN = screens.map((s) => s.replace(/\*$/, "")).join(",");
+  const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
+  for (const spec of specs) {
+    try { execSync(`npx playwright test -c sweep/playwright.sweep.config.ts sweep/${spec}`, { stdio: "inherit", env }); }
+    catch { /* the specs never assert; a non-zero exit is a harness crash and is visible in the list reporter */ }
+  }
+}
+
 if (BASELINE) {
+  // A fresh worktree has nothing shot yet: shoot first. With shots present,
+  // snapshot them as they are, so a baseline right after a sweep does not shoot twice.
+  if (!fs.existsSync(path.join(OUT, "manifest.jsonl"))) shoot();
   const m = collect();
   fs.rmSync(BASE, { recursive: true, force: true });
   fs.mkdirSync(BASE, { recursive: true });
@@ -53,13 +66,7 @@ if (BASELINE) {
 }
 
 // 1. Re-shoot the wave's screens.
-const env = { ...process.env };
-if (screens) env.SWEEP_SCREEN = screens.map((s) => s.replace(/\*$/, "")).join(",");
-const specs = wave?.specs && wave.specs !== "all" ? wave.specs : ["sweep.spec.ts", "elements.spec.ts", "interactions.spec.ts"];
-for (const spec of specs) {
-  try { execSync(`npx playwright test -c sweep/playwright.sweep.config.ts sweep/${spec}`, { stdio: "inherit", env }); }
-  catch { /* the specs never assert; a non-zero exit is a harness crash and is visible in the list reporter */ }
-}
+shoot();
 const m = collect();
 const after = m.entries.filter(inScope);
 const baseM = fs.existsSync(path.join(BASE, "manifest.json")) ? JSON.parse(fs.readFileSync(path.join(BASE, "manifest.json"), "utf8")) : null;

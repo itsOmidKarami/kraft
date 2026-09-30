@@ -222,6 +222,9 @@ const CASES: Case[] = [
   { screen: "settings-steering", variant: "file-open", data: "long", widths: KEY, run: async (c) => { await settings(c, "steering"); await c.page.locator("main").getByText(/house-style/).first().click().catch(() => {}); await settle(c.page, 600); } },
   { screen: "settings-index", variant: "default", data: "default", widths: [390, 1280], run: async (c) => { await c.page.goto("/settings"); await settle(c.page, 600); } },
 
+  // UX V2 under /ng. At 390 the phone redirect lands on the shipped board; the entry's `url` records where.
+  { screen: "ng-shell", variant: "stub", data: "default", widths: [1280, 390], run: async (c) => { await c.page.goto("/ng"); await c.page.locator('h1, [data-testid="board-card"], .board-row').first().waitFor({ timeout: 8000 }); await settle(c.page); } },
+
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
   { screen: "login", variant: "filled", data: "default", widths: [390, 1280], locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 600); await c.page.locator('input[type="password"]').fill("hunter2").catch(() => {}); await settle(c.page); } },

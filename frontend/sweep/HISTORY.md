@@ -1249,3 +1249,25 @@ Commits:
 - **Beads:** Kraft-059md closed as accepted (native selects stay). Kraft-1s6u2 re-scoped to "Non-agent hooks do not write summaries — by design; UI explains it".
 - **MR:** `main`'s `frontend/` matched the W13 tip, so the W14 commits were cherry-picked onto `origin/main` as `ui-waves-w14`; its `frontend/` is identical to `wave/W14`. Branch checks: `npm ci`, tsc, 713 unit tests and build all pass. No local e2e run; CI's `frontend-e2e` covers it. **!224** opened against `main` (`release::patch`, squash, delete source branch).
 - **Merged:** !224's pipeline 2847730490 passed (`frontend`, `frontend-e2e`, `release-impact`), so the merge went through as soon as it was requested, at 2026-09-14T15:05Z: squash `b0883700`, merge `b3b51010`, source branch deleted. `main`'s `frontend/` equals `wave/W14` plus `01652a5f` (PeekPane shows the first node for a never-started item, from `fix/peek-pane-not-started-node`), which landed on `main` separately. The local MR worktree and branch are removed.
+
+## ux2-W0 — UX V2 plumbing: `/ng` stub, harness fixes (`ux2/W0`)
+
+Baseline on `main` `ca727572`, shot with the pre-W0 workaround: 724 tests, 1167 cells, 805 flagged (645 console). Final on the branch rebased onto `d52101d4`. Full notes: `e2e-shots/DIFF-ux2-W0.md`.
+
+- `node sweep/wave.mjs ux2-W0`: **2/2 rules pass** (no console on `^ng-`, no newly flagged cells). `ng-shell/stub@1280` shows the stub; `ng-shell/stub@390` lands on `/`, the shipped board.
+- `node sweep/wave.mjs all`: **1/1 rules pass**, 1170 cells, 179 flagged, 0 newly flagged, 387 changed (content the mocks now return, plus wall-clock text drift).
+
+| flag | baseline | ux2-W0 |
+|---|---|---|
+| flagged | 805 | 179 |
+| console | 645 | 7 (`login/` only) |
+| ellipsis | 153 | 154 (+`ng-shell/stub@390`, the shipped board's own) |
+| nested-scroll | 17 | 24 (Chains YAML textarea at 390, unmasked: Kraft-b5n3g) |
+| clipped-v | 4 | 4 (Kraft-br5t1) |
+| target<44 | 4 | 4 (Kraft-zclvt) |
+| setup | 1 | 1 (Kraft-k08aw) |
+
+- **Harness fixes (A, Kraft-83sn7):** `vite preview --host 127.0.0.1`; `--baseline` shoots when there is no `manifest.jsonl`; mocks for `GET /templates/chains/{id}/resolved`, `text`/`file` on `GET /templates/chains/{id}`, and `GET /templates/library` (the steering cells' 21 console flags, not in the gap inventory).
+- **First paint:** the entry split let the shipped CSS paint before the saved theme applied (`board/default@1280~light-firstpaint` dark in 4 of 5 runs). `main.tsx` now applies the saved theme on the shipped path before the dynamic import: 5 of 5 identical to the baseline.
+- **New screen:** `ng-shell` (`stub` at 1280 and 390). **New key:** `ux2-W0`.
+- Kraft-br5t1 and Kraft-zclvt (the 8 regressions on main) stay open, not fixed here.

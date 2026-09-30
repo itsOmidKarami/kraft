@@ -62,6 +62,8 @@ cd frontend
 node sweep/wave.mjs all --baseline     # full sweep, snapshot → e2e-shots/baseline/all/
 ```
 
+`--baseline` shoots first when `e2e-shots/sweep/manifest.jsonl` does not exist (a fresh worktree), and otherwise snapshots the shots already there without shooting again.
+
 ## Before an MR
 
 ```bash
@@ -71,6 +73,10 @@ node sweep/wave.mjs all                # re-shoot, pixel-diff against the baseli
 `all` has one rule: no newly flagged cells. A cell with no flags in the baseline (`nested-scroll` aside) must not gain any. Read `DIFF-all.md` and look at the PNGs under "Regressions" and "Still flagged": a passing rule is not a passing change. `node sweep/wave.mjs <Wn>` runs one wave's screens with that rule plus the wave's own rules from `waves.json` (`no-flag` for `offscreen`, `clipped-v`, `target<44`; `no-console`; `flow-completes`; …).
 
 When a case records `setupError`, fix the selector or fixture in `sweep/`, never `src/`. The spec never asserts; a red test means the harness threw.
+
+## UX V2 (`/ng`)
+
+The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the keys `ux2-W<n>` in `waves.json` (the plain `W0`–`W14` keys are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
 
 ## History and briefs
 
