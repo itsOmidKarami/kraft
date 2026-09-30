@@ -401,6 +401,15 @@ def test_a_document_navigation_cannot_slip_past_the_bearer_check(client):
     assert r.status_code == 401
 
 
+def test_a_document_navigation_under_ng_gets_the_spa_shell(dist, client):
+    """UX V2 serves the new UI under /ng from the same index.html; a refresh on
+    any /ng/... URL must get the shell, uncached, like any client-side route."""
+    r = client.get("/ng/work-items/abc", headers={"sec-fetch-dest": "document"})
+    assert r.status_code == 200, r.text
+    assert r.text == (dist / "index.html").read_text()
+    assert r.headers["cache-control"] == "no-store"
+
+
 @pytest.mark.parametrize("path", ["/docs", "/redoc"])
 def test_a_browser_navigation_to_fastapis_docs_gets_them_not_the_board(dist, client, path):
     """Kraft-9efnk.24: the SPA-shell fast path answered every non-/api
