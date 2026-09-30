@@ -6,6 +6,11 @@ export interface MockOptions {
   locked?: boolean;
 }
 
+/** A chain file as its author would write it: one mapping per node, nulls left out. */
+const chainYaml = (nodes: Record<string, unknown>[]) =>
+  "nodes:\n" + nodes.map((n) => Object.entries(n).filter(([, v]) => v != null)
+    .map(([k, v], i) => `${i ? "    " : "  - "}${k}: ${Array.isArray(v) ? `[${v.join(", ")}]` : v}`).join("\n")).join("\n") + "\n";
+
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
@@ -125,10 +130,25 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     if (p === "/templates/chains") return json(route, st.templates);
     if (p === "/templates/parse") return json(route, { nodes: st.templates[0]?.nodes ?? [], error: null });
     if ((m = p.match(/^\/templates\/([^/]+)\/validate$/))) return json(route, { id: m[1], valid: true, error: null, unresolved: [] });
+    if ((m = p.match(/^\/templates\/chains\/([^/]+)\/resolved$/))) {
+      const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1]));
+      if (!tpl) return json(route, { detail: `unknown chain template ${JSON.stringify(m[1])}` }, 404);
+      return json(route, { id: tpl.id, chain: { nodes: tpl.nodes }, task_paths: [], steering: {}, nodes: tpl.nodes });
+    }
     if ((m = p.match(/^\/templates\/chains\/([^/]+)$/))) {
       const tpl = st.templates.find((x) => x.id === decodeURIComponent(m![1])) ?? st.templates[0];
       if (!tpl) return json(route, { detail: "template not found" }, 404);
-      return json(route, { id: tpl.id, nodes: tpl.nodes });
+      // The real route returns the file's text, which is what the Chains editor shows.
+      return json(route, { id: tpl.id, file: `templates/chains/${tpl.id}.yaml`, text: chainYaml(tpl.nodes), chain: { nodes: tpl.nodes }, nodes: tpl.nodes });
+    }
+    // The Library screen (where Settings > Steering redirects): the scenario's hooks as its tasks.
+    if (p === "/templates/library" && method === "GET") {
+      const hooks = Object.entries(st.hooks);
+      const components = hooks.map(([name, definition]) => ({
+        id: `tasks.${name}`, kind: "tasks", name, definition, issues: [],
+        used_by: st.templates.filter((t) => t.nodes.some((n: any) => n.tasks?.includes(name))).map((t) => t.id),
+      }));
+      return json(route, { file: "templates/library.yaml", text: `tasks:\n${hooks.map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join("\n")}\n`, components });
     }
     if (p === "/registry") return json(route, { hooks: st.hooks, invalid_templates: {} });
     if ((m = p.match(/^\/registry\/([^/]+)\/runs$/))) return json(route, { runs: Object.values(S.bundles).slice(0, 8).map((b, i) => ({ work_item_id: b.item.id, node_id: b.item.current_node_id ?? "verify", round: i % 3, status: ["done", "failed", "done", "capped_out"][i % 4], wall_ms: 120_000 + i * 40_000, created_at: b.item.updated_at })) });

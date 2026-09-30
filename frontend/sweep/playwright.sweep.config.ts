@@ -10,6 +10,8 @@ import { defineConfig } from "@playwright/test";
  * port is its own (SWEEP_PORT, default 4317) and `--strictPort` fails loudly
  * if it is taken. SWEEP_DIST serves an already-built dist instead of
  * building this checkout (used to shoot a baseline from a clean worktree).
+ * `--host 127.0.0.1`: without it `vite preview` can bind `::1` only (where
+ * `localhost` resolves to IPv6 first) and the wait on 127.0.0.1 times out.
  */
 const PORT = Number(process.env.SWEEP_PORT ?? 4317);
 const DIST = process.env.SWEEP_DIST;
@@ -35,8 +37,8 @@ export default defineConfig({
   },
   webServer: {
     command: DIST
-      ? `npx vite preview --port ${PORT} --strictPort --outDir ${JSON.stringify(DIST)}`
-      : `npm run build && npx vite preview --port ${PORT} --strictPort`,
+      ? `npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort --outDir ${JSON.stringify(DIST)}`
+      : `npm run build && npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: false,
     timeout: 180_000,

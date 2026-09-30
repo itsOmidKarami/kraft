@@ -62,6 +62,8 @@ cd frontend
 node sweep/wave.mjs all --baseline     # full sweep, snapshot → e2e-shots/baseline/all/
 ```
 
+`--baseline` shoots first when `e2e-shots/sweep/manifest.jsonl` does not exist (a fresh worktree), and otherwise snapshots the shots already there without shooting again.
+
 ## Before an MR
 
 ```bash
