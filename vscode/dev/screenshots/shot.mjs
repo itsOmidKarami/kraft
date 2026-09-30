@@ -133,8 +133,8 @@ try {
 
 // ---- the demo: plain titles, a spec, a change and three minor findings on the gate item.
 async function stage() {
-  const items = await (await fetch(`${api}/work-items`)).json();
-  const gate = (items.work_items ?? items).find((i) => i.title === "Design the caching layer");
+  const { items } = await (await fetch(`${api}/work-items`)).json();
+  const gate = items.find((i) => i.title === "Design the caching layer");
   if (!gate) throw new Error("the seed made no gate item");
   const wt = join(home, "run", "worktrees", gate.id);
   const specs = join(wt, ".engineering", "specs");
@@ -200,8 +200,12 @@ async function drive(app) {
   await page.click('.activitybar [aria-label^="Kraft"]');
   await pause(3000);
   await shot("screenshot-board", { x: 48, y: 32, width: 304, height: 168 });
+  // Only the gate's toast: close any other (the Red Hat YAML nudge) that would stack on it.
+  const others = page.locator(".notification-toast").filter({ hasNotText: "spec_approval" });
+  while (await others.count()) await others.first().locator(".codicon-notifications-clear").click();
   const toast = page.locator(".notification-toast", { hasText: "spec_approval" });
-  await shot("screenshot-gate-notification", { x: 1136, y: 816, width: 460, height: 100 });
+  await page.mouse.move(0, 0); // off the close button it just clicked
+  await shot("screenshot-gate-notification", await toast.boundingBox());
   await toast.getByRole("button", { name: "Open" }).click();
   await pause(2500);
   await shot("screenshot-gate", { x: 0, y: 0, width: 1600, height: 576 });
@@ -214,7 +218,6 @@ async function drive(app) {
   await pause(1500);
   await page.locator(".view-line", { hasText: "hit = self._entries.get(key)" }).last().click();
   await palette("View: Focus Problems");
-  await page.keyboard.type("!**/worktrees/**");
   await pause(1500);
   await shot("screenshot-review", { x: 0, y: 0, width: 1600, height: 712 });
 

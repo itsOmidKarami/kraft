@@ -18,7 +18,7 @@ export function registerFindings(context: vscode.ExtensionContext, store: Store)
   const collection = vscode.languages.createDiagnosticCollection("kraft-findings");
   const owned = new Map<string, string[]>();
   const byUri = new Map<string, LocatedFinding[]>();
-  // A left bar, an overview-ruler tick and the message after the line, in the severity's colour:
+  // A left bar, an overview-ruler tick and the message after the line, in the severity's color:
   // an Information squiggle does not render on the diff's added lines at all (Kraft-tugdf.20).
   const styles = Object.fromEntries(
     (Object.keys(COLOR) as Severity[]).map((s) => {
