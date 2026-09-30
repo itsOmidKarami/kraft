@@ -466,11 +466,23 @@ async def _mcp_check(server_up: bool) -> dict:
         per_repo = {repo: registration.permission_tool(repo) for repo in repos}
         refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
         if refused:
+            # A warning, not a failure (Kraft-9efnk.31): the launch refuses
+            # only an unsandboxed task on a harness asking through the direct
+            # tool, and whether a repo's items ever launch one depends on
+            # chain, sandbox and item overrides doctor does not resolve.
+            asking = sorted(
+                h.id
+                for h in harness.load(None).valid.values()
+                if (c := h.capabilities.get("approval_channel")) is not None
+                and c.always == registration.DIRECT
+            )
             return _check(
                 "mcp server",
-                False,
-                f"no kraft MCP server registered for Claude workers in {', '.join(refused)}, "
-                f"so they are refused; {registration.FIX}",
+                True,
+                f"no kraft MCP server registered for Claude workers in {', '.join(refused)}: "
+                f"an unsandboxed task there on harness {' or '.join(asking)} is refused; "
+                f"{registration.FIX}",
+                warn=True,
             )
         found = found or next(iter(per_repo.values()), None)
     elif found is None:
