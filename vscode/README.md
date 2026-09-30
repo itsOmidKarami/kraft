@@ -57,8 +57,8 @@ bar. A reject asks for a reason, which goes to the agent.
 
 ![A work item's branch in the multi-file diff editor, with review findings listed in the Problems panel](https://github.com/itsOmidKarami/kraft/raw/HEAD/vscode/media/screenshot-review.png)
 
-Run **Review Changes** from an item's menu on the board to open its branch in
-the multi-file diff editor. Findings from the review agents show as diagnostics
+Run **Review Changes** from an item's menu on the board, or from a gate
+document's title bar, to open its branch in the multi-file diff editor. Findings from the review agents show as diagnostics
 on the lines they name, and in the Problems panel. Comment on any line, then run
 **Submit Review**: your comments reach the agent as one note, as a reject at a
 gate or as a steer on a paused item. Approving instead asks before it discards
