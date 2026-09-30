@@ -10,3 +10,4 @@ node_modules/**
 .vscode/**
 .gitignore
 contract/**
+media/screenshot-*.png
