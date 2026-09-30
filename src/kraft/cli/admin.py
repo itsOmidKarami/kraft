@@ -619,7 +619,15 @@ def _cmd_start(ns: argparse.Namespace) -> None:
     place for that check to be forgotten.
     """
     if ns.host:
+        # Same gap as --port below. A wildcard bind is dialled on loopback
+        # (`client.base_url`), so only a different concrete host needs saying.
+        dialled = httpx.URL(client.base_url()).host
         os.environ["KRAFT_HOST"] = ns.host
+        if ns.host not in (dialled, "0.0.0.0", "::"):
+            print(
+                f"kraft: other kraft commands still dial host {dialled}; reach this "
+                f"instance with KRAFT_HOST={ns.host}, or set `bind: {ns.host}` in access.yaml"
+            )
     if ns.port:
         # Not written to access.yaml: a flag silently rewriting config would
         # surprise more than it helps. Say so instead, while the port every
