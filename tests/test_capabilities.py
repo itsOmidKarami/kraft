@@ -125,3 +125,19 @@ def test_the_never_signal_steering_entry_gives_the_exact_shipped_yaml():
     # repo whose tests start servers should name it.
     assert "no longer" in entry.what and "automatically" in entry.what
     assert "start servers of their own should name it" in entry.what
+
+
+def test_the_shipped_templates_have_adopted_every_capability():
+    """What a fresh seed gets, so each entry's `present` must name what the
+    edit adds: doctor stops listing it once an operator hand-merges it
+    (Kraft-9efnk.36)."""
+    for c in capabilities.MANIFEST:
+        assert capabilities.adopted(c, ROOT / "templates"), c.name
+
+
+def test_a_live_dir_without_the_key_has_not_adopted_it(tmp_path):
+    (tmp_path / "harnesses.yaml").write_text("harnesses: {}\n")
+    c = Capability(version="1", name="p", what="w", how="h", present=("harnesses.yaml", "profiles"))
+    assert not capabilities.adopted(c, tmp_path)
+    (tmp_path / "harnesses.yaml").write_text("harnesses: {}\nprofiles: {}\n")
+    assert capabilities.adopted(c, tmp_path)

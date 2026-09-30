@@ -293,7 +293,7 @@ def _capabilities_check() -> dict:
         # Seeded before stamping existed, or unreadable. Either way the home
         # knows nothing about itself; `added_since(None)` says everything.
         stamp = None
-    missing = capabilities.added_since(stamp)
+    missing = [c for c in capabilities.added_since(stamp) if not capabilities.adopted(c, live_dir)]
     seeded = f"seeded at {stamp}" if stamp else "seeded before versions were recorded"
     if not missing:
         return _check("capabilities", True, f"{seeded}; up to date")
