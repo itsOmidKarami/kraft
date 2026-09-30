@@ -463,6 +463,13 @@ describe("Board", () => {
     expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
   });
 
+  it("Done group note says items auto-archive, without naming a fixed day count (Kraft-tugdf.10)", async () => {
+    setItems(wi({ id: "w1", status: "completed" }));
+    renderBoard();
+    expect(within(group("Done")).getByText(/auto-archived after the configured period/i)).toBeInTheDocument();
+    expect(within(group("Done")).queryByText(/30 days/i)).toBeNull();
+  });
+
   it("Archive on the floating bar calls the API for every selected id and clears the selection", async () => {
     const spy = vi
       .spyOn(api, "archiveWorkItem")

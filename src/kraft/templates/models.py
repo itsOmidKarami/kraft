@@ -1254,7 +1254,7 @@ class ResolvedChain:
             (first, where), (second, other) = sandboxes[:2]
             raise PolicyError(
                 f"{where} runs in sandbox {first.model_dump()!r} and {other} in "
-                f"{second.model_dump()!r}: a sandbox wraps the whole work item (Ruling 189), "
+                f"{second.model_dump()!r}: a sandbox wraps the whole work item, "
                 "so every scope that sets one must set the same one",
                 field="sandbox",
             )
@@ -1298,7 +1298,7 @@ class ResolvedChain:
                 return None
             return (
                 f"{named(path)} sets {name} {value} > the administrator maximum {bound[1]} "
-                f"(maxima.{bound[0]}.{name}; Ruling 211)"
+                f"(maxima.{bound[0]}.{name})"
             )
 
         chain_own = self.chain.policy
@@ -1316,7 +1316,7 @@ class ResolvedChain:
                     whose = f"its {named(parent)}'s" if parent else "the chain's"
                     raise PolicyError(
                         f"{path}: {named(path)} sets {name} {value} > {whose} {authored[parent]}: "
-                        "a scope's cap cannot exceed its parent's (Rulings 194, 195)",
+                        "a scope's cap cannot exceed its parent's",
                         field=name,
                         path=path,
                     )
@@ -1359,8 +1359,7 @@ class ResolvedChain:
                 if below is not None and own > below:
                     raise PolicyError(
                         f"the work item's override sets {name} {own} on {named(path)}, above the "
-                        f"{below} it already has: a work item's override only tightens a cap "
-                        "(Rulings 194, 195)",
+                        f"{below} it already has: a work item's override only tightens a cap",
                         field=name,
                         path=path,
                     )
@@ -1381,7 +1380,7 @@ class ResolvedChain:
                 raise PolicyError(
                     f"gate {node.id}'s timeout {_duration_text(node.node.timeout)} > its "
                     f"total_time_cap_minutes {cap}: a gate's timeout sits under the total caps "
-                    "around it (Ruling 195)",
+                    "around it",
                     field="timeout",
                     path=node.id,
                 )
@@ -1577,7 +1576,7 @@ class MaterializedChain:
             raise PolicyError(
                 "its scopes freeze different sandboxes "
                 + ", ".join(f"{where}: {s.model_dump()!r}" for s, where in found.items())
-                + "; a sandbox wraps the whole work item (Ruling 189)",
+                + "; a sandbox wraps the whole work item",
                 field="sandbox",
             )
         return next(iter(found), None)
@@ -1633,7 +1632,7 @@ class MaterializedChain:
             if retired := retired_keys(raw):
                 where = f"policy.{retired[0]}"
                 raise PolicyError(
-                    f"{where}: retired (Ruling 196): a wait's timeout is its task's own "
+                    f"{where}: retired: a wait's timeout is its task's own "
                     "total_time_cap_minutes, so set that on the wait task's path",
                     field=where,
                 )

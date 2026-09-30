@@ -585,6 +585,34 @@ def test_raise_budget_endpoint_409s_when_another_cap_stopped_the_item(client, re
     assert client.get(f"/api/work-items/{wid}").json()["status"] == "needs_human"
 
 
+def test_raise_budget_refusal_for_a_policy_cap_points_at_set_policy_not_a_frozen_policy_yaml(
+    client, repo
+):
+    """Kraft-tugdf.9: a stopped item's policy is frozen at filing, so editing
+    policy.yaml cannot raise its cap -- only `set-policy` on this item does.
+    The daily cap is instance-wide, not frozen, so it alone still names
+    policy.yaml."""
+    usd_wid = _budget_stopped_item(
+        client,
+        repo,
+        {"scope": "usd", "path": "", "spent_usd": 5.0, "cap_usd": 5.0, "unknown_launches": 0},
+    )
+    detail = client.post(
+        f"/api/work-items/{usd_wid}/budget/raise", json={"budget_usd": 50.0}
+    ).json()["detail"]
+    assert "set-policy" in detail
+    assert "policy.yaml only applies to items filed after" in detail
+    assert "or in policy.yaml, then retry" not in detail
+
+    daily_wid = _budget_stopped_item(
+        client, repo, {"scope": "daily", "spent_usd": 5.0, "cap_usd": 5.0}
+    )
+    daily_detail = client.post(
+        f"/api/work-items/{daily_wid}/budget/raise", json={"budget_usd": 50.0}
+    ).json()["detail"]
+    assert "policy.yaml" in daily_detail
+
+
 def test_raise_budget_endpoint_409s_when_the_item_is_not_stopped(client, repo):
     wid = client.post(
         "/api/work-items",

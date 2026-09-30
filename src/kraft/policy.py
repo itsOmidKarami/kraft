@@ -1197,7 +1197,7 @@ class WorkItemPolicy(TemplatePolicyOverride):
             return data
         if not (info.context or {}).get("frozen"):
             raise ValueError(
-                f"{where[0]} is retired (Ruling 196): a wait's timeout is its task's own "
+                f"{where[0]} is retired: a wait's timeout is its task's own "
                 "total_time_cap_minutes, so set that on the wait task's path"
             )
         if RETIRED_WAIT_TIMEOUT in data:

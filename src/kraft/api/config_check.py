@@ -108,7 +108,7 @@ def _first_loc(
 def retired_message(data: dict) -> str | None:
     if retired := retired_keys(data):
         return (
-            f"{retired[0]} is retired (Ruling 196): a wait's timeout is its task's own "
+            f"{retired[0]} is retired: a wait's timeout is its task's own "
             "policy.total_time_cap_minutes"
         )
     return None

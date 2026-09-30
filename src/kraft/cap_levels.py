@@ -86,7 +86,7 @@ class CapLevels(BaseModel):
         if not (info.context or {}).get("frozen"):
             s, n = cls.section, flat[0]
             raise ValueError(
-                f"{s}.{n} is set per level since Ruling 211: use {s}.tasks.{n} "
+                f"{s}.{n} cannot be set flat, only per level: use {s}.tasks.{n} "
                 "(or work_item, nodes, steps)"
             )
         data = dict(data)
@@ -108,7 +108,7 @@ class CapLevels(BaseModel):
                     s = self.section
                     raise ValueError(
                         f"{s}.{level}.{name} {value} exceeds {s}.{above[0]}.{name} {above[1]}: "
-                        "a narrower level's cap cannot exceed a broader one's (Ruling 211)"
+                        "a narrower level's cap cannot exceed a broader one's"
                     )
                 above = (level, value)
         return self

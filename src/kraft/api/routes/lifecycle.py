@@ -1076,12 +1076,14 @@ _NOT_ITEM_CAP = {
     "usd": (
         "a policy budget_usd stopped this item, not its own cap: raise it with "
         "`kraft item set-policy ID --policy budget_usd=N` (item-wide, up to "
-        "maxima.work_item) or in policy.yaml, then retry"
+        "maxima.work_item), then retry -- policy.yaml only applies to items "
+        "filed after it changes"
     ),
     "tokens": (
         "a token_budget stopped this item, not its own cap: raise it with "
         "`kraft item set-policy ID --policy token_budget=N` (item-wide, up to "
-        "maxima.work_item) or in policy.yaml, then retry"
+        "maxima.work_item), then retry -- policy.yaml only applies to items "
+        "filed after it changes"
     ),
     "daily": (
         "the daily cap stopped this item, not its own cap: raise budget.daily_usd "
