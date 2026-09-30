@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_cf999581e38b9e91_hook_install_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 23:38 +0000
+            created at 2026-09-30 09:45 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -400,8 +400,8 @@
     <p class="pln"><span class="n"><a id="t318" href="#t318">318</a></span><span class="t">            <span class="com"># source branch deleted with it (`force_remove_source_branch`),</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t319" href="#t319">319</a></span><span class="t">            <span class="com"># and the push below then dies `! [rejected] ... (stale info)`</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t320" href="#t320">320</a></span><span class="t">            <span class="com"># against a remote ref that no longer exists (Kraft-7itv): the</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t321" href="#t321">321</a></span><span class="t">            <span class="com"># lease targets the sha origin last showed us, and origin has no</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t322" href="#t322">322</a></span><span class="t">            <span class="com"># ref at all to compare it to. Same shortcut `sync_mr` and</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t321" href="#t321">321</a></span><span class="t">            <span class="com"># lease expects the sha Kraft last pushed, and origin has no ref</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t322" href="#t322">322</a></span><span class="t">            <span class="com"># at all to compare it to. Same shortcut `sync_mr` and</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t323" href="#t323">323</a></span><span class="t">            <span class="com"># `merge` already take for the identical race -- nothing here is</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t324" href="#t324">324</a></span><span class="t">            <span class="com"># left to check once the forge itself says merged.</span>&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t325" href="#t325">325</a></span><span class="t">            <span class="nam">existing</span> <span class="op">=</span> <span class="key">await</span> <span class="nam">forge</span><span class="op">.</span><span class="nam">find_mr</span><span class="op">(</span><span class="nam">repo</span><span class="op">=</span><span class="nam">repo</span><span class="op">,</span> <span class="nam">branch</span><span class="op">=</span><span class="nam">branch</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
@@ -603,8 +603,8 @@
     <p class="pln"><span class="n"><a id="t521" href="#t521">521</a></span><span class="t">            <span class="com"># An MR merged outside Kraft -- a human merging by hand and</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t522" href="#t522">522</a></span><span class="t">            <span class="com"># skipping `human_review` -- usually has its source branch</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t523" href="#t523">523</a></span><span class="t">            <span class="com"># deleted with it, and then this node&#x27;s push dies `! [rejected]</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t524" href="#t524">524</a></span><span class="t">            <span class="com"># ... (stale info)`: the lease expects the sha origin last showed</span>&nbsp;</span><span class="r"></span></p>
-    <p class="pln"><span class="n"><a id="t525" href="#t525">525</a></span><span class="t">            <span class="com"># us, origin has no ref at all, and the item stops one node from</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t524" href="#t524">524</a></span><span class="t">            <span class="com"># ... (stale info)`: the lease expects the sha Kraft last pushed,</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t525" href="#t525">525</a></span><span class="t">            <span class="com"># origin has no ref at all, and the item stops one node from</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t526" href="#t526">526</a></span><span class="t">            <span class="com"># the end with the work already on main (Kraft-7itv). Same</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t527" href="#t527">527</a></span><span class="t">            <span class="com"># shortcut `merge` takes, for the same reason: pushing to and</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t528" href="#t528">528</a></span><span class="t">            <span class="com"># re-describing a merged MR has nothing left to accomplish.</span>&nbsp;</span><span class="r"></span></p>
@@ -1604,7 +1604,7 @@
             <a class="nav" href="z_cf999581e38b9e91_hook_install_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-29 23:38 +0000
+            created at 2026-09-30 09:45 +0000
         </p>
     </div>
 </footer>
