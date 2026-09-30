@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ import pytest
 from support.harness import make_repo
 from support.server import child_env
 
-from kraft import client, mcp
+from kraft import client, db, mcp
 
 
 def _tools():
@@ -102,6 +103,14 @@ def test_every_tool_has_a_description_an_agent_can_act_on():
     A one-word description is a tool that never gets used correctly."""
     for tool in _tools():
         assert tool.description and len(tool.description) > 30, tool.name
+
+
+def test_list_work_items_names_every_status_the_schema_allows():
+    """The filter is an exact match, so a status the description leaves out is
+    one an agent never asks for, and one it invents always returns []."""
+    allowed = set(re.findall(r"'(\w+)'", re.search(r"status IN\s*\(([^)]*)\)", db.SCHEMA_SQL)[1]))
+    listing = next(t for t in _tools() if t.name == "list_work_items")
+    assert set(re.findall(r'"(\w+)"', listing.description)) == allowed
 
 
 @pytest.mark.slow

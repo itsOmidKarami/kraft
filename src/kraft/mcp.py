@@ -24,9 +24,10 @@ def build() -> MCPServer:
 
     @server.tool()
     async def list_work_items(status: str | None = None) -> list[dict]:
-        """List Kraft work items — the board. Optionally filter by status
-        ("active", "paused", "completed", "failed"). Returns id, title, repo,
-        status, current node, and any gate waiting on a human."""
+        """List Kraft work items — the board. Optionally filter by one exact
+        status: "paused", "active", "waiting", "rate_limited", "needs_human",
+        "completed" or "abandoned". Returns id, title, repo, status, current
+        node, and any gate waiting on a human."""
         return await client.list_work_items(status)
 
     @server.tool()
