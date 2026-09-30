@@ -1,7 +1,7 @@
 {
   "name": "kraft",
   "displayName": "Kraft",
-  "description": "Clear what your Kraft agents are waiting on you for \u2014 gates, review, config \u2014 without leaving the editor.",
+  "description": "For Kraft, the local orchestrator for coding agents: clear what your agents are waiting on you for (gates, diff review, config) without leaving the editor.",
   "version": "1.3.1",
   "publisher": "kraft-sdlc",
   "license": "SEE LICENSE IN LICENSE",
@@ -10,11 +10,36 @@
     "type": "git",
     "url": "https://github.com/itsOmidKarami/kraft"
   },
+  "homepage": "https://itsomidkarami.github.io/kraft/guides/vscode",
+  "bugs": {
+    "url": "https://github.com/itsOmidKarami/kraft/issues"
+  },
+  "qna": "https://github.com/itsOmidKarami/kraft/issues",
+  "galleryBanner": {
+    "color": "#161826",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other"
+    "AI"
+  ],
+  "keywords": [
+    "kraft",
+    "coding agent",
+    "ai agents",
+    "claude code",
+    "codex",
+    "orchestrator",
+    "agent orchestration",
+    "code review",
+    "pull request",
+    "merge request",
+    "spec",
+    "workflow",
+    "human in the loop",
+    "approval"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
@@ -28,7 +53,7 @@
         "kraft.url": {
           "type": "string",
           "default": "",
-          "description": "Kraft daemon URL. Empty: read $KRAFT_HOME/templates/access.yaml."
+          "description": "Kraft daemon URL. Empty: read KRAFT_HOST and KRAFT_PORT, then bind and port from $KRAFT_HOME/templates/access.yaml."
         },
         "kraft.notifications": {
           "type": "string",
