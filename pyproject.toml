@@ -5,6 +5,20 @@ description = "A local orchestrator that takes your coding agent from spec to pu
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+keywords = [
+    "coding-agent",
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "orchestrator",
+    "agent-orchestration",
+    "sdlc",
+    "code-review",
+    "pull-request",
+    "merge-request",
+    "human-in-the-loop",
+    "git-worktree",
+]
 authors = [{ name = "Omid Karami", email = "itsomidkarami@gmail.com" }]
 requires-python = ">=3.12"
 # No License :: classifier: setuptools>=77 refuses one next to the PEP 639
@@ -12,13 +26,20 @@ requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Environment :: Web Environment",
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Version Control :: Git",
 ]
 dependencies = [
     "pyyaml>=6",
@@ -145,3 +166,5 @@ Homepage = "https://itsomidkarami.github.io/kraft/"
 Documentation = "https://itsomidkarami.github.io/kraft/"
 Source = "https://github.com/itsOmidKarami/kraft"
 Issues = "https://github.com/itsOmidKarami/kraft/issues"
+Releases = "https://github.com/itsOmidKarami/kraft/releases"
+"VS Code extension" = "https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft"

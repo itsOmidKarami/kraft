@@ -3,7 +3,7 @@
 [![test](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml/badge.svg)](https://github.com/itsOmidKarami/kraft/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/kraft-sdlc)](https://pypi.org/project/kraft-sdlc/)
 [![Latest release](https://img.shields.io/github/v/release/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/releases)
-[![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](LICENSE)
+[![License](https://img.shields.io/github/license/itsOmidKarami/kraft)](https://github.com/itsOmidKarami/kraft/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-itsomidkarami.github.io%2Fkraft-blue)](https://itsomidkarami.github.io/kraft/)
 
 **A local orchestrator that takes your coding agent from spec to pull request,
@@ -33,7 +33,7 @@ developers tired of babysitting a session to the end of a task.
 
 New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraft) covers what it does that a session, a loop or a skill does not, and when not to use it.
 
-![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](.github/assets/board.png)
+![The Kraft board: work items grouped by Needs you, Running, Not started, and Done](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/board.png)
 
 <table>
 <tr>
@@ -42,7 +42,7 @@ New here? [Why Kraft](https://itsomidkarami.github.io/kraft/get-started/why-kraf
 **A gate stops the chain where a human decides.** Read what the agent wrote,
 then approve, or reject with a note that re-runs the node that wrote it.
 
-![A spec an agent wrote, waiting for your approval in the item's detail view](.github/assets/gate.png)
+![A spec an agent wrote, waiting for your approval in the item's detail view](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/gate.png)
 
 </td>
 <td width="35%">
@@ -50,7 +50,7 @@ then approve, or reject with a note that re-runs the node that wrote it.
 **Same board, phone-sized.** Reach it from another device through a tunnel; see
 [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access).
 
-![The board at a 390px phone viewport, with bottom tab navigation](.github/assets/mobile.png)
+![The board at a 390px phone viewport, with bottom tab navigation](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/mobile.png)
 
 </td>
 </tr>
@@ -145,7 +145,7 @@ Lead time, cost, and where both go — by node, by repo, over whatever window
 you pick. Built from the same events the board renders live, not a separate
 pipeline.
 
-![The Analytics view: completed count, median lead time, cost; throughput by week; cost share by node; per-repo totals; why items stopped for a person](.github/assets/analytics.png)
+![The Analytics view: completed count, median lead time, cost; throughput by week; cost share by node; per-repo totals; why items stopped for a person](https://raw.githubusercontent.com/itsOmidKarami/kraft/main/.github/assets/analytics.png)
 
 ## Where to go next
 
@@ -155,7 +155,7 @@ pipeline.
 - [Agent integration](https://itsomidkarami.github.io/kraft/guides/agent-integration): MCP tools and skills.
 - [Remote access](https://itsomidkarami.github.io/kraft/guides/remote-access): reach the board from a phone or another machine.
 - [Triggers](https://itsomidkarami.github.io/kraft/reference/triggers): start a chain from a schedule or an HTTP call.
-- [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](SECURITY.md).
+- [Security](https://itsomidkarami.github.io/kraft/project/security): threat model; report vulnerabilities per [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md).
 
 Kraft Lite (`plugins/kraft-lite/`) runs a chain inside a single agent session
 with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraft/guides/kraft-lite).
@@ -164,11 +164,11 @@ with no service; see the [Kraft Lite guide](https://itsomidkarami.github.io/kraf
 
 Kraft is young. Expect rough edges and frequent releases. Report bugs and ask
 questions in [GitHub issues](https://github.com/itsOmidKarami/kraft/issues).
-Report security problems as [SECURITY.md](SECURITY.md) describes.
+Report security problems as [SECURITY.md](https://github.com/itsOmidKarami/kraft/blob/main/SECURITY.md) describes.
 
 ## Contributing
 
 Set-up, the `just` recipes, tests, and the pull request rules are in
-[CONTRIBUTING.md](CONTRIBUTING.md). Releases are described in
-[RELEASING.md](RELEASING.md). Everyone taking part follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+[CONTRIBUTING.md](https://github.com/itsOmidKarami/kraft/blob/main/CONTRIBUTING.md). Releases are described in
+[RELEASING.md](https://github.com/itsOmidKarami/kraft/blob/main/RELEASING.md). Everyone taking part follows the
+[Code of Conduct](https://github.com/itsOmidKarami/kraft/blob/main/CODE_OF_CONDUCT.md).
