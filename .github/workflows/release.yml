@@ -244,15 +244,20 @@ jobs:
 
       - name: publish the VS Code extension
         # Only once the maintainer has created the Marketplace publisher and
-        # added VSCE_PAT (and, for Open VSX, OVSX_PAT); until then the .vsix
-        # is still attached to the GitHub Release.
+        # added VSCE_PAT; until then the .vsix is still attached to the
+        # GitHub Release.
         if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none' && env.VSCE_PAT != ''
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
           npx --prefix vscode vsce publish --packagePath "$VSIX" -p "$VSCE_PAT"
-          if [ -n "$OVSX_PAT" ]; then npx --prefix vscode ovsx publish "$VSIX" -p "$OVSX_PAT"; fi
+
+      - name: publish the VS Code extension to Open VSX
+        # No token: Open VSX trusted publishing, registered for kraft-sdlc.kraft
+        # against this workflow and the `release` environment.
+        if: steps.impact.outputs.tag != '' && steps.impact.outputs.pre == 'none'
+        run: |
+          VSIX=$(ls "$RUNNER_TEMP"/vsix/*.vsix)
+          npx --prefix vscode ovsx publish "$VSIX" --trusted-publishing
 
       - name: mint a token to open the stamp PR
         # The default GITHUB_TOKEN deliberately can't do this part: GitHub
