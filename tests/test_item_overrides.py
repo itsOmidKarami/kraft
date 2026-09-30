@@ -471,7 +471,12 @@ async def test_an_item_budget_overrides_a_looser_policy_default(
     assert result == "needs_human"
     evts = database.read(lambda c: events.read_after(c, 0, wid))
     payload = next(e["payload"] for e in reversed(evts) if e["type"] == "work_item_needs_human")
-    assert payload["budget"] == {"scope": "work_item", "spent_usd": 6.0, "cap_usd": 5.0}
+    assert payload["budget"] == {
+        "scope": "work_item",
+        "spent_usd": 6.0,
+        "cap_usd": 5.0,
+        "unknown_launches": 0,
+    }
 
 
 async def test_an_item_explicit_no_cap_overrides_a_capped_policy(
