@@ -202,6 +202,37 @@ The value is read the way the rest of the worker's environment is: the daemon's 
 - **Listing a credential does not clean the item's `HOME`.** A sandboxed item keeps one `HOME`, `$KRAFT_HOME/run/sandbox-home/<work item id>`, across its sessions. A session that ran before the variable was listed had the real value, and its CLI may have saved it there, in a login or config file. To start clean, pause the item and delete that directory; Kraft makes an empty one at the next session, and that session starts without the CLI's saved state, so it cannot resume the earlier one. `kraft view show` prints the work item id.
 - **After a daemon restart,** a running session's credentials are restored with the rules it launched with and their values read again through the repository entry it launched with. If that repository has been disconnected, its `repos.yaml` no longer loads, or the value is gone, its requests carrying the sentinel are refused until the item is retried.
 
+### Kits
+
+**Operator-authored Kits only.** Docker's published Kits (`docker/sbx-kit-shell`, `docker/sbx-kit-claude`) require capabilities Kraft does not enforce, so Kraft refuses them. Build a Kit for Kraft instead: [Build a worker Kit](/guides/worker-kit) gives one for Claude.
+
+```yaml
+sandbox:
+  kind: kit
+  runtime: docker
+  kit: registry.example.com/acme/kraft-worker-claude@sha256:<64 hex>
+```
+
+A [Docker Sandbox Kit](https://github.com/docker/sandbox-kit-spec) is an image whose manifest carries a descriptor of what its workload may reach and hold. Kraft reads Kits written to the spec's `v3.0.0-m.7`. Under `kind: kit` the Kit is the whole sandbox: `runtime` and `kit` are required, and `image`, `network`, `resources` and `credentials` are refused. `kit` must be pinned by digest (`<name>[:<tag>]@sha256:<64 hex>`); a tag alone is refused when repos.yaml loads. Like any sandbox, a chain, node or task cannot change it, and a chain's or library's policy can set it too.
+
+Kraft runs exactly one Kit, a `kind: workload`, and composes nothing:
+
+| Capability | What Kraft does |
+|---|---|
+| `network-policy@1` | Enforced, as the [network policy](#network-policy), phase for phase. Required: a Kit without one is refused. |
+| `credential@1` | Enforced for a proxy-managed `apiKey` with a `name` and header `inject` rules, as a [credential](#credentials) scoped to its `phase`. Its value is the daemon's variable that [sandbox.yaml](/reference/configuration/sandbox)'s `credentials` binds to its `service`. An `oauth` beside the `apiKey` is recorded as ignored. |
+| `resources@1` | Enforced: `cpu` and `memory` as the [resource limits](#resource-limits) (`2gib` is `2g`, `cpu: 0` is no limit). `gpu` is not. |
+| `agent-sessions@1` | Accepted and not applied: the harness file builds the command, as for `kind: docker`. |
+| Any other type, or a form above Kraft does not enforce | Refused when required, naming it. Skipped when `optional`. |
+
+A `kind: mixin`, a `requires`, a capability group, a `${{ }}` reference in a capability, an `args` entry exported to `env`, and a descriptor over 512 KiB are refused too.
+
+**What a launch runs.** The Kit, lowered to the `kind: docker` sandbox it describes: the Kit's image by digest, its network lists, its credentials and its limits, and nothing else. The harness's `network.requires` hosts are not added, so a host the Kit leaves out is refused and recorded like any other. The image's `Entrypoint` is kept and the harness's command replaces its `Cmd`, so a Kit whose entrypoint is the agent CLI itself does not work. The worker session records `docker` as its backend.
+
+**When it is read.** Kraft reads the descriptor with your runtime's own CLI and registry login (`docker manifest inspect`; Podman, which reads only an index that way, pulls a single-manifest Kit and reads its image), before an item's worktree is made, and caches it under `$KRAFT_HOME/run/kit/` by its digest. A Kit that cannot be fetched or is refused stops the item for you, naming the Kit and why: see [Troubleshooting](/get-started/troubleshooting#a-kit-is-refused). Each task dispatched under it records a [`sandbox_kit_resolved`](/reference/events) event once per Kit, with what was skipped or ignored.
+
+**Doctor.** `kraft admin doctor` fetches and lowers each Kit repository's Kit, fails its sandbox row when it cannot, and runs the sandbox, egress, proxy and credentials rows on what it lowers to. It warns about each harness host the Kit does not allow (`kit hosts`) and each credential service with no binding (`kit credentials`).
+
 ## Automated review
 
 `automated_review` names exactly one reviewer, one of two ways. It is the reviewer a chain's `mr.automated_review` task waits for.

@@ -269,3 +269,16 @@ def test_a_memory_spelling_kraft_cannot_read_refuses_the_kit(memory):
         match=rf"^lowers to a sandbox Kraft refuses: resources\.memory: memory '{memory}' is not",
     ):
         kit.lower(REF, kit.decode(text), {})
+
+
+def test_the_documented_worker_kit_lowers_as_the_guide_says():
+    """The guide's descriptor is the fixture `test_a_workload_kit_claims_what_
+    it_declares` lowers, so what the docs show is what is pinned."""
+    guide = (Path(__file__).parents[2] / "docsite/content/3.guides/13.worker-kit.md").read_text()
+    shown = next(
+        block.removeprefix("yaml\n")
+        for block in guide.split("```")
+        if block.startswith("yaml\n# syntax=docker/sandbox-kit:3")
+    )
+    fixture = FIXTURES / "kraft" / "egress-credential-resources.yaml"
+    assert kit.decode(shown) == kit.decode(fixture.read_text())
