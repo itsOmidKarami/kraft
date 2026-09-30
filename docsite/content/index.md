@@ -7,7 +7,7 @@ description: 'A local orchestrator that takes your coding agent from spec to pul
 ---
 headline: '$ uv tool install kraft-sdlc && kraft'
 title: 'A local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours.'
-description: "Hand Claude Code (or another coding agent) a spec and walk away. It's for developers tired of babysitting a session to the end of a task. Retries and spend are capped."
+description: "Use Kraft when you want agent work to run while you are not watching, and to stop only where a person should decide. Use an interactive session for everything else. Hand Claude Code (or another coding agent) a spec and walk away. It's for developers tired of babysitting a session to the end of a task. Retries and spend are capped."
 links:
   - label: Get started
     to: /get-started
