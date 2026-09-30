@@ -593,6 +593,16 @@ def git_read(
     return out.stdout.strip() if strip else out.stdout
 
 
+#: Roots Kraft itself writes into and never means to commit. `.engineering/`
+#: is session notes and gate artifacts (`agent.py:artifact_path`); `docs/
+#: superpowers/` is the legacy convention the same content used to live under
+#: (CLAUDE.md) -- both gitignored on `main`, both still landing in a spec/plan
+#: attachment a stale worktree copies in (Kraft-vu26). An untracked path under
+#: one is Kraft's own: `forge.git` keeps it out of every commit and
+#: `review.read_change` out of every diff (Kraft-tugdf.22).
+KRAFT_ROOTS = (".engineering", "docs/superpowers")
+
+
 @contextmanager
 def base_ignore_args(repo: Path, base: str) -> Iterator[list[str]]:
     """`-c core.excludesFile=<scratch>`, naming a temp file holding `origin/

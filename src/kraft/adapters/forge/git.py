@@ -11,7 +11,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from kraft.adapters.forge.models import ForgeError
-from kraft.config import base_ignore_args, git_read
+from kraft.config import KRAFT_ROOTS, base_ignore_args, git_read
 from kraft.worker import sandbox
 
 
@@ -115,16 +115,8 @@ async def run_git(
     return done.stdout
 
 
-#: Roots Kraft itself writes into and never means to commit. `.engineering/`
-#: is session notes and gate artifacts (`agent.py:artifact_path`); `docs/
-#: superpowers/` is the legacy convention the same content used to live under
-#: (CLAUDE.md) -- both gitignored on `main`, both still landing in a spec/plan
-#: attachment a stale worktree copies in (Kraft-vu26).
-_KRAFT_ROOTS = (".engineering", "docs/superpowers")
-
-
 async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
-    """Untracked paths under `_KRAFT_ROOTS` -- Kraft's own artifacts and
+    """Untracked paths under `KRAFT_ROOTS` -- Kraft's own artifacts and
     session notes, which hooks write straight to disk and never `git add`.
 
     Deliberately not a static pathspec: a path this repo already tracked
@@ -150,7 +142,7 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
                 "--porcelain",
                 sandbox.SUBMODULES_UNENTERED,
                 "--",
-                *_KRAFT_ROOTS,
+                *KRAFT_ROOTS,
             ],
         )
     return [line[3:] for line in raw.splitlines() if line.startswith("??")]
@@ -158,7 +150,7 @@ async def _kraft_written_paths(repo: Path, base: str) -> list[str]:
 
 async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     """`.`, plus an exclusion for every path Kraft itself wrote into
-    `_KRAFT_ROOTS` -- session summaries, spec/plan/chain_review/review_brief,
+    `KRAFT_ROOTS` -- session summaries, spec/plan/chain_review/review_brief,
     and a spec/plan attachment copied in under `docs/superpowers/`. None of
     it is the agent's work product, so neither the clean check nor the
     straggler sweep may treat it as such: it is ingested straight into the
@@ -170,7 +162,7 @@ async def work_product_pathspec(repo: Path, base: str) -> list[str]:
     (`_kraft_written_paths`), which no static pathspec can know.
 
     Individual paths rather than a `.gitignore` line or a blanket
-    `:(exclude).engineering`: this repo ignores both `_KRAFT_ROOTS` for
+    `:(exclude).engineering`: this repo ignores both `KRAFT_ROOTS` for
     exactly this reason, but a repo Kraft was pointed at five minutes ago does
     not, and Kraft must not put its own bookkeeping into that repo's first
     merge request — or refuse to open one over it (Kraft-z8gj, widened: the

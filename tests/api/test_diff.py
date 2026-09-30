@@ -44,7 +44,7 @@ def seeded_item(client, tmp_path):
     `verify` node's `python -m pytest` run drops a `.pytest_cache/`, and the
     agent adapter writes a `.engineering/sessions/*.md` summary per session (04
     §6). The cache dir is pure noise, so it is swept here; the session summary
-    is real, untracked content and is left for the endpoint to report.
+    is left in place, for the endpoint to leave out (Kraft-tugdf.22).
     """
     repo = connected_repo(tmp_path)
     wid = client.post(
@@ -166,14 +166,23 @@ def test_diff_keeps_a_trailing_blank_context_line(client, seeded_item, worktree)
 def test_diff_lists_untracked_without_adding_them(client, seeded_item, worktree):
     _write(worktree / "new_file.py", "x = 1\n")
     body = client.get(f"/api/work-items/{seeded_item}/diff").json()
-    # not equality: the real agent's own .engineering/sessions/*.md summary is
-    # also legitimately untracked at this point.
     assert "new_file.py" in body["untracked"]
     assert "new_file.py" not in body["diff"]
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only"], cwd=worktree, capture_output=True, text=True
     )
     assert staged.stdout.strip() == ""  # read-only: nothing was staged
+
+
+def test_diff_leaves_out_krafts_own_untracked_notes(client, seeded_item, worktree):
+    # The commit path never carries these into the merge request, so the
+    # review diff must not show them as changed files (Kraft-tugdf.22).
+    for note in (".engineering/sessions/note.md", "docs/superpowers/plan.md"):
+        (worktree / note).parent.mkdir(parents=True, exist_ok=True)
+        _write(worktree / note, "notes\n")
+    _write(worktree / "new_file.py", "x = 1\n")
+    body = client.get(f"/api/work-items/{seeded_item}/diff").json()
+    assert body["untracked"] == ["new_file.py"]
 
 
 def test_diff_lists_untracked_files_inside_a_new_directory(client, seeded_item, worktree):
