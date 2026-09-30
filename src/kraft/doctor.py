@@ -31,7 +31,7 @@ from kraft.paths import (
 from kraft.templates.environment import HarnessProfileTable, TemplateEnvironmentError
 from kraft.templates.library import CHAINS_DIR, TemplateLibrary, TemplateLibraryError
 from kraft.templates.models import AgentTask, ForgeTask
-from kraft.worker import backends, channel
+from kraft.worker import backends, channel, egress, kit
 from kraft.worker import steering as steering_mod
 from kraft.worker.backends import docker_forward
 from kraft.worker.env import worker_env
@@ -619,6 +619,61 @@ async def _sandbox_check(repo: config.RepoEntry, policy) -> dict:
     return _check(f"sandbox {_label(repo)}", ok, detail)
 
 
+async def _kit_checks(repo: config.RepoEntry, policy) -> tuple[object, list[dict]]:
+    """A `kind: kit` sandbox fetched and lowered, as the walk does before an
+    item starts, and the lowered policy for the rows after it; or None and
+    a failed sandbox row naming the Kit and why. Warns of each harness host
+    the Kit leaves out (its sessions are refused them, spec §9.4) and each
+    optional credential with no binding (skipped)."""
+    name = _label(repo)
+    try:
+        fetched, lowered = await kit.resolve(policy.kit)
+        bound = kit.bindings()
+    except (kit.KitRefused, config.ConfigError, OSError) as exc:
+        return None, [_check(f"sandbox {name}", False, f"the Kit {policy.kit} is refused: {exc}")]
+    checks = []
+    runtime = lowered.policy.network.runtime
+    allow, deny = (runtime.allow, runtime.deny) if runtime else ((), ())
+    left_out = {
+        i: missing
+        for i, h in harness.load(None).valid.items()
+        if (
+            missing := [
+                host
+                for host in h.network_requires
+                if not egress.match(host.split(":")[0], 443, allow, deny).allowed
+            ]
+        )
+    }
+    if left_out:
+        said = "; ".join(f"{i} requires {', '.join(hosts)}" for i, hosts in left_out.items())
+        checks.append(
+            _check(
+                f"kit hosts {name}",
+                True,
+                f"the Kit does not allow what these harnesses need, so their sessions "
+                f"are refused it: {said}",
+                warn=True,
+            )
+        )
+    unbound = sorted(
+        c.config.service
+        for c in kit.claims(fetched.descriptor()).credentials
+        if c.config.service not in bound
+    )
+    if unbound:
+        checks.append(
+            _check(
+                f"kit credentials {name}",
+                True,
+                f"no binding for {', '.join(unbound)}, so it is skipped: add "
+                "`<service>: <DAEMON_ENV_NAME>` under sandbox.yaml's credentials",
+                warn=True,
+            )
+        )
+    return lowered.policy, checks
+
+
 def _egress_check(repo: config.RepoEntry, policy) -> dict | None:
     """A warning when a sandbox sets no `network:`: its tasks can reach
     anywhere, the cloud metadata address included (spec §1: open stays the
@@ -825,7 +880,11 @@ async def _repo_checks() -> list[dict]:
                     f"repos.yaml keys nothing reads: {', '.join(unrecognised)} -- remove them",
                 )
             )
-        if (policy := repo.effective_sandbox) is not None:
+        if (policy := repo.effective_sandbox) is not None and policy.kind == "kit":
+            # The rows below read the docker policy it lowers to.
+            policy, found = await _kit_checks(repo, policy)
+            checks.extend(found)
+        if policy is not None:
             checks.append(await _sandbox_check(repo, policy))
             networked = networked or policy.network is not None
             for extra in (
