@@ -1166,6 +1166,10 @@ class ResolvedChain:
         `repository_steering` is `MaterializedChain.repository_steering`,
         resolved by the caller (`api.deps.repository_steering`).
         """
+        # An operator's skip, refused as `kraft item skip` and a revision's
+        # skip are; the attachment trim below is the chain's own, not a skip.
+        if refused := [n.id for n in self.nodes if n.id in skip_nodes and not n.node.skippable]:
+            raise ValueError(f"skip_nodes: {', '.join(map(repr, refused))} does not allow skipping")
         policy = self.chain_policy(effective_policy)
         per_repository = {
             rid: self.chain_policy(p) for rid, p in (repository_policies or {}).items()
