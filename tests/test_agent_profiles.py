@@ -461,3 +461,15 @@ def test_write_harness_profiles_keeps_the_profiles_section(tmp_path):
     (tmp_path / "harnesses.yaml").write_text(json.dumps({"harnesses": {}, "profiles": PROFILES}))
     write_harness_profiles(tmp_path, {"claude": {"provider": "claude"}})
     assert yaml.safe_load((tmp_path / "harnesses.yaml").read_text())["profiles"] == PROFILES
+
+
+def test_doctor_warns_per_no_cost_harness_launched_on_an_unpriced_model(tmp_path, monkeypatch):
+    """Kraft-9efnk.10: codex reports no cost, so a launch on no model (its
+    CLI's default) has no dollar figure; gpt-5.6-sol is priced, and claude
+    reports its own cost whatever its model."""
+    bare = {"kind": "agent", "harness": "codex", "prompt": "p"}
+    _live(tmp_path, monkeypatch, {**PAIRED, "codex_bare": bare})
+    rows = [r for r in doctor._agent_checks() if r["name"].startswith("cost")]
+    assert [(r["name"], r["ok"], r["warn"]) for r in rows] == [("cost: codex", True, True)]
+    assert "no rate for (its default)" in rows[0]["detail"]
+    assert "token_budget" in rows[0]["detail"]

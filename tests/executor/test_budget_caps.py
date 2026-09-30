@@ -339,3 +339,38 @@ async def test_each_levels_default_budget_caps_every_scope_of_its_kind(item_on):
 
     await _spent(it, "build.main.other", tokens=60)
     assert _breach(it, "build.main.impl").path == "build"
+
+
+async def _codex_exited(it, sid: str, launched: str | None) -> None:
+    """A finished codex session launched on `launched`: 1M input tokens, and
+    its output names no model and no cost -- through the real session writer."""
+    await it.session(sid, "ship.main.go", harness="codex", model=launched)
+    spent = usage.Usage(tokens_in=1_000_000, tokens_out=0)
+    await it.database.write(lambda c: store.session_exited(c, sid, "done", None, spent))
+
+
+async def test_a_codex_session_counts_toward_the_item_cap_at_its_launch_models_estimate(item_on):
+    """Kraft-9efnk.10 (A2): gpt-5.6-sol is $4/M input in prices.json, so 1M
+    tokens estimate $4.00 against a $4 cap."""
+    it = await item_on(_chain())
+    await _codex_exited(it, "s", "gpt-5.6-sol")
+
+    breach = stops.budget_breach(it.database, it.id, _policy.Budget(work_item_usd=4))
+
+    assert breach.scope == "work_item" and breach.spent_usd == pytest.approx(4.0)
+    assert it.events("spend_unpriced") == []
+
+
+async def test_unpriced_spend_warns_once_and_never_stops_the_item_or_daily_cap(item_on):
+    """Spend with no dollar figure counts $0 toward `work_item_usd` and
+    `daily_usd`: the item's timeline says so, once, naming the harness and a
+    `token_budget` -- it does not stop the item."""
+    it = await item_on(_chain())
+    await _codex_exited(it, "s1", None)
+    await _codex_exited(it, "s2", "no-such-model")
+
+    caps = _policy.Budget(work_item_usd=0.01, daily_usd=0.01)
+    assert stops.budget_breach(it.database, it.id, caps) is None
+    [warned] = it.events("spend_unpriced")
+    assert warned["payload"]["harness"] == "codex" and warned["payload"]["model"] is None
+    assert "token_budget" in warned["payload"]["message"]

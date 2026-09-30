@@ -379,7 +379,55 @@ def _agent_checks() -> list[dict]:
         checks.append(_check(f"agent: {pid}", True, detail))
     for hid, reason in sorted(harnesses.invalid.items()):
         checks.append(_check(f"harness: {hid}", False, reason))
-    return checks + _pairing_checks(live, table, harnesses)
+    return checks + _pairing_checks(live, table, harnesses) + _cost_checks(live, harnesses)
+
+
+def _cost_checks(live: Path, harnesses) -> list[dict]:
+    """One warning per harness whose output carries no cost (codex, cursor,
+    amp) and that the chains launch on a model `prices.json` does not price,
+    or on no model at all (Kraft-9efnk.10). Its spend then has no dollar
+    figure: the item and daily dollar caps count it as $0, and a per-scope
+    `budget_usd` stops on it. Resolved per launch, fallbacks included, the way
+    `resolve_agent_task` does it; a repo's `models:` or an item's override is
+    not seen here. A launch that cannot resolve has its own row above."""
+    from kraft import usage
+    from kraft.adapters import agent
+
+    unpriced: dict[str, set[str]] = {}
+    table = None
+    for chain in _resolved_chains(live):
+        for node in chain.nodes:
+            for t in node.tasks():
+                if not isinstance(t.task, AgentTask):
+                    continue
+                try:
+                    table = table or agent.harness_table(harnesses)[0]
+                    candidates = fallback.candidates(t.task, table)
+                except agent.HarnessUnavailable:
+                    return []
+                for c in candidates:
+                    try:
+                        inv = agent.resolve_agent_task(
+                            c, None, None, harnesses=harnesses, steering=chain.steering
+                        )
+                    except (agent.HarnessUnavailable, steering_mod.SteeringError):
+                        continue
+                    reader = harnesses.valid[inv.harness].capabilities["usage"].reader
+                    if reader in usage.READERS and not usage.READERS[reader].reports_cost:
+                        if not usage.priced(inv.model):
+                            # Named by its harnesses.yaml profile, as a person set it up.
+                            unpriced.setdefault(c.harness, set()).add(inv.model or "(its default)")
+    return [
+        _check(
+            f"cost: {h}",
+            True,
+            f"reports no cost, and prices.json has no rate for {', '.join(sorted(models))}: "
+            "the item and daily dollar caps count its spend as $0, and a budget_usd stops "
+            "on it. Bound it with a token_budget.",
+            warn=True,
+        )
+        for h, models in sorted(unpriced.items())
+    ]
 
 
 def _pairing_checks(live: Path, table: HarnessProfileTable, harnesses) -> list[dict]:

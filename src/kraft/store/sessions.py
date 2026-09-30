@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from kraft import events
@@ -39,6 +40,10 @@ def create_session(
     #: The `kraft.worker.backends` kind a sandboxed session runs in; None
     #: unsandboxed.
     sandbox: str | None = None,
+    #: The model an agent session was launched with (its `--model`), kept so a
+    #: harness whose output names none (codex, cursor) can still be priced
+    #: (`_with_launch_model`). None when the launch passed none.
+    model: str | None = None,
 ) -> tuple[str, str, str]:
     """`round` is the fix-cycle index this session was dispatched in (0 = first pass).
 
@@ -76,10 +81,11 @@ def create_session(
     conn.execute(
         "INSERT INTO worker_sessions (id, work_item_id, node_id, hook_point, pid, "
         "pid_start_time, log_path, result_path, status, attempt, created_at, exited_at, "
-        "round, head_sha, thread, command, started_at, harness, sandbox) "
+        "round, head_sha, thread, command, started_at, harness, sandbox, model) "
         "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 'pending', "
         "(SELECT COUNT(*) + 1 FROM worker_sessions "
-        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
+        "WHERE work_item_id = ? AND node_id = ? AND hook_point = ?), "
+        "?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id,
             work_item_id,
@@ -98,6 +104,7 @@ def create_session(
             now,
             harness,
             sandbox,
+            model,
         ),
     )
     (attempt,) = conn.execute("SELECT attempt FROM worker_sessions WHERE id = ?", (id,)).fetchone()
@@ -432,6 +439,60 @@ def _tokens(usage: Usage) -> tuple[int, ...]:
     return tuple(getattr(usage, k) for k in _usage.KINDS)
 
 
+#: A model name a harness reports that is a display name, not a model: Cursor's
+#: `init.model` reads "Auto" (`usage._envelope_cursor`).
+_DISPLAY_MODELS = {"auto"}
+
+#: The timeline event for a session whose spend no dollar cap can count.
+UNPRICED = "spend_unpriced"
+
+
+def _with_launch_model(conn: sqlite3.Connection, session_id, usage: Usage | None):
+    """`usage` with the model the session was launched with (`create_session`)
+    when its own output named none, or only a display name -- codex and cursor
+    report tokens under no model, and pricing needs one (Kraft-9efnk.10). A
+    model the output did name is never replaced."""
+    if usage is None or (usage.model and usage.model.lower() not in _DISPLAY_MODELS):
+        return usage
+    row = conn.execute("SELECT model FROM worker_sessions WHERE id = ?", (session_id,)).fetchone()
+    return replace(usage, model=row["model"] if row is not None else None)
+
+
+def _warn_unpriced(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
+    """Say once per item that a session's spend has no dollar figure: no
+    reported cost and no `prices.json` rate for its model (or no model). The
+    item and daily dollar caps count it as $0 -- it warns, never stops
+    (Kraft-9efnk.10, option A2); a per-scope `budget_usd` refuses on it
+    (`caps.budget_breach`)."""
+    row = conn.execute(
+        "SELECT work_item_id, harness FROM worker_sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    if (
+        row is None
+        or conn.execute(
+            "SELECT 1 FROM events WHERE work_item_id = ? AND type = ? LIMIT 1",
+            (row["work_item_id"], UNPRICED),
+        ).fetchone()
+    ):
+        return
+    what = f"model {usage.model!r}" if usage.model else "no model"
+    events.append(
+        conn,
+        row["work_item_id"],
+        UNPRICED,
+        {
+            "session_id": session_id,
+            "harness": row["harness"],
+            "model": usage.model,
+            "message": (
+                f"{row['harness'] or 'a harness'} reported no cost, and prices.json has no "
+                f"rate for {what}: the item and daily dollar caps count this spend as $0. "
+                "Bound it with a token_budget."
+            ),
+        },
+    )
+
+
 def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None:
     """Live token counts, model and an estimated cost for a session that is
     still running (Kraft-54dk, Kraft-wz83s).
@@ -457,6 +518,7 @@ def session_progress(conn: sqlite3.Connection, session_id, usage: Usage) -> None
     update: a paused or finished session's numbers are settled, and a late
     progress write must not reopen them.
     """
+    usage = _with_launch_model(conn, session_id, usage)
     estimate = _usage.estimate_cost(usage, usage.model)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
@@ -586,9 +648,12 @@ def record_pause_usage(
     `'running'`: a row that has moved on has settled numbers.
     """
     usage, netted_unknown = _own_share(conn, session_id, usage, reader)
+    usage = _with_launch_model(conn, session_id, usage)
     if usage is None:
         return
     cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
+    if cost is None and not netted_unknown and usage.total:
+        _warn_unpriced(conn, session_id, usage)
     conn.execute(
         f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
         "cost_estimated = ? WHERE id = ? AND status = 'paused'",
@@ -648,6 +713,7 @@ def session_exited(
     if question:
         payload["question"] = question
     usage, netted_unknown = _own_share(conn, session_id, usage, reader)
+    usage = _with_launch_model(conn, session_id, usage)
     if usage is not None:
         # The exit envelope's own figure settles the row when it reported one
         # (`_settle_cost`); when it did not, a fresh final-tokens estimate
@@ -657,6 +723,8 @@ def session_exited(
         # session's cumulative ones and an estimate off them would double the
         # earlier turn's own spend (`_settle_cost`'s docstring).
         cost, estimated = _settle_cost(usage, netted_unknown=netted_unknown)
+        if cost is None and not netted_unknown and usage.total:
+            _warn_unpriced(conn, session_id, usage)
         conn.execute(
             f"UPDATE worker_sessions SET model = ?, {_SET_TOKENS}, cost_usd = ?, "
             "cost_estimated = ?, wall_ms = ? WHERE id = ?",

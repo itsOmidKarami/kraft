@@ -619,6 +619,9 @@ async def run_task(
     #: The `harnesses.yaml` harness this session runs on, recorded on its row
     #: for `worker.reattach` (Kraft-9elw1). Only `run_agent_task` sets it.
     harness: str | None = None,
+    #: The model this launch passed (`--model`), recorded on its row for a
+    #: harness whose output names none. Only `run_agent_task` sets it.
+    model: str | None = None,
     #: Host paths a sandboxed launch also mounts read-only at the same path (a
     #: rules file its CLI must read and never rewrite). Ignored unsandboxed.
     ro_paths: tuple[str, ...] = (),
@@ -664,6 +667,7 @@ async def run_task(
             command=command_ran,
             harness=harness,
             sandbox=backend.kind if backend is not None else None,
+            model=model,
         )
     )
 

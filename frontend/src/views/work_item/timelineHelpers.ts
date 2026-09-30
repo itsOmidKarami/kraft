@@ -34,6 +34,7 @@ export function detailOf(e: KraftEvent): string | null {
     return `${p.task} of ${p.total}`;
   }
   if (e.type === "gate_rejected" && typeof p.note === "string") return p.note;
+  if (e.type === "spend_unpriced" && typeof p.message === "string") return p.message;
   if (e.type === "work_item_needs_human" && typeof p.reason === "string") return p.reason;
   if (e.type === "work_item_rate_limited" && typeof p.retry_at === "string") {
     return `retries at ${p.retry_at}`;

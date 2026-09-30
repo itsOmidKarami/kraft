@@ -60,6 +60,9 @@ export function ConfigPane({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [editingBudget, setEditingBudget] = useState(false);
+  // What the item's cap counts: an estimate where an agent reported no cost.
+  const used = (n: number) =>
+    usd(n, item.usage?.total.cost_complete ?? true, item.usage?.total.cost_estimated ?? false);
   const [budgetDraft, setBudgetDraft] = useState(() =>
     String(item.budget_cap?.cap_usd ?? ""),
   );
@@ -125,8 +128,8 @@ export function ConfigPane({
           <dt>budget</dt>
           <dd>
             {item.budget_cap?.cap_usd != null
-              ? `${usd(item.budget_cap.cap_usd)} · ${usd(item.budget_cap.spent_usd)} used`
-              : `no cap · ${usd(item.budget_cap?.spent_usd ?? 0)} used`}
+              ? `${usd(item.budget_cap.cap_usd)} · ${used(item.budget_cap.spent_usd)} used`
+              : `no cap · ${used(item.budget_cap?.spent_usd ?? 0)} used`}
             {!editingBudget && (
               <button
                 className="btn btn-ghost"
