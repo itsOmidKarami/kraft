@@ -1,0 +1,16 @@
+{
+  "name": "kraft-vscode-screenshots",
+  "private": true,
+  "description": "Retakes the Marketplace screenshots in vscode/media/. Its own package so the extension ships none of it.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "shot": "node shot.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.63.0",
+    "sharp": "^0.34.0"
+  }
+}
