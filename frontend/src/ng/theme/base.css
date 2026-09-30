@@ -1,3 +1,4 @@
 /* The /ng shell's base. W1 replaces the look with the generated tokens. */
 :root { color-scheme: light dark; }
-body { margin: 0; font: 14px/1.5 system-ui, sans-serif; }
+/* Explicit system colours: a transparent body reads as white to the sweep's contrast check. */
+body { margin: 0; padding: 16px 24px; font: 14px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }

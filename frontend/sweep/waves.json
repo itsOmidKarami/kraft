@@ -139,5 +139,13 @@
       { "kind": "no-console", "match": "^(?!login/)" },
       { "kind": "flow-completes", "match": "^flow-inspector-tabs-selection/" }
     ]
+  },
+  "ux2-W0": {
+    "title": "UX V2 plumbing: /ng stub, phone redirect",
+    "screens": ["ng-shell"],
+    "specs": ["sweep.spec.ts"],
+    "rules": [
+      { "kind": "no-console", "match": "^ng-" }
+    ]
   }
 }

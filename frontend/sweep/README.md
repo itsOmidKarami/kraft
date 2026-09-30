@@ -74,6 +74,10 @@ node sweep/wave.mjs all                # re-shoot, pixel-diff against the baseli
 
 When a case records `setupError`, fix the selector or fixture in `sweep/`, never `src/`. The spec never asserts; a red test means the harness threw.
 
+## UX V2 (`/ng`)
+
+The new UI is served under `/ng` beside the shipped one. Its screens use the prefix `ng-` (`ng-shell`, `ng-board`, …) and `goto("/ng/...")`. Its waves are the keys `ux2-W<n>` in `waves.json` (the plain `W0`–`W14` keys are the finished fix programme), so a wave runs as `node sweep/wave.mjs ux2-W<n>` and writes `e2e-shots/DIFF-ux2-W<n>.md`.
+
 ## History and briefs
 
 - `sweep/HISTORY.md`: the receipts of W0–W14. For each wave: its rules, the cells it changed, cleared or regressed, its commits, open questions and MRs. A new wave appends here.
