@@ -387,6 +387,32 @@ async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     assert remote.probed_env == {}  # the repo's `env:` literal, not even for the probe
 
 
+async def test_an_install_only_credential_is_absent_from_an_agent_session(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch
+):
+    """credential@1's phase scoping: an agent session gets neither the
+    sentinel nor an inject rule of a credential scoped to `install`, and its
+    value stays out of the container all the same."""
+    entry = entry_of({"path": "/r", "env": {"REG_TOKEN": "reg-real-VALUE"}})
+    remote.transport = "tls"
+    seen = {}
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+        seen.update(sentinels=kw["sentinels"], rules=channels.tls_session(session_id).credentials)
+        return Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    credential = {"env": "REG_TOKEN", "phase": ["install"]}
+    credential["inject"] = [{"domain": "a.io", "header": "x-key"}]
+    network = {**_POLICED["network"], "install": {"allow": ["a.io"]}}
+    sandbox = {**_POLICED, "network": network, "credentials": [credential]}
+
+    await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
+
+    assert seen == {"sentinels": {}, "rules": ()}
+    assert remote.probed_env == {}
+
+
 @pytest.mark.parametrize("missing", ["channel", "route"])
 async def test_network_without_a_channel_or_a_route_never_launches(
     database, run_dirs, tmp_path, remote, channels, missing
@@ -519,6 +545,24 @@ async def test_reattach_re_registers_a_tls_session_with_no_socket(
     assert not channels.socket_path("s1").parent.exists()
     release.set()
     await tasks["s1"]
+
+
+async def test_reattach_reads_a_bound_credential_under_its_source(channels, monkeypatch):
+    """As its launch read it: the daemon's own env under `source`, never the
+    repo entry's value under `env`."""
+    monkeypatch.setenv("BOUND_KEY", "sk-bound")
+    rule = {"env": "ANTHROPIC_API_KEY", "domain": "a.io", "header": "x-api-key"}
+    rule |= {"sentinel": "sk-sentinel", "format": "%s", "source": "BOUND_KEY"}
+    egress = {"phase": "runtime", "allow": [], "deny": ["**"], "transport": "tls"}
+    egress |= {"credentials": [rule], "repo": "/r"}
+    entry = entry_of({"path": "/r", "env": {"ANTHROPIC_API_KEY": "sk-repo-env"}})
+
+    await reattach._reopen_egress(
+        "s1", "w1", json.dumps(egress), lambda path: LaunchContext(repo_entry=entry)
+    )
+
+    (injected,) = channels.tls_session("s1").credentials
+    assert (injected.to_json(), injected.value) == (rule, "sk-bound")
 
 
 async def test_reattach_closes_a_dead_sessions_route_only_if_it_had_one(
