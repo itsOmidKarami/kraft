@@ -65,7 +65,7 @@
             <a id="nextFileLink" class="nav" href="z_f793c2de04763fd3_callback_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 22:40 +0000
+            created at 2026-09-30 22:49 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -150,7 +150,7 @@
     <p class="run"><span class="n"><a id="t68" href="#t68">68</a></span><span class="t">    <span class="key">return</span> <span class="nam">directory</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t69" href="#t69">69</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t70" href="#t70">70</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t71" href="#t71">71</a></span><span class="t"><span class="key">def</span> <span class="nam">_write</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">Path</span><span class="op">,</span> <span class="nam">data</span><span class="op">:</span> <span class="nam">bytes</span><span class="op">,</span> <span class="nam">mode</span><span class="op">:</span> <span class="nam">int</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t71" href="#t71">71</a></span><span class="t"><span class="key">def</span> <span class="nam">write_whole</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">Path</span><span class="op">,</span> <span class="nam">data</span><span class="op">:</span> <span class="nam">bytes</span><span class="op">,</span> <span class="nam">mode</span><span class="op">:</span> <span class="nam">int</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t72" href="#t72">72</a></span><span class="t">    <span class="str">&quot;&quot;&quot;`data` at `path` whole or not at all: written to a file of its own,</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t73" href="#t73">73</a></span><span class="t"><span class="str">    created `mode` (a key&#x27;s 0600 never readable by anyone else even for an</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t74" href="#t74">74</a></span><span class="t"><span class="str">    instant), then renamed over `path`. A reader never sees half a file,</span>&nbsp;</span><span class="r"></span></p>
@@ -171,11 +171,11 @@
     <p class="run"><span class="n"><a id="t89" href="#t89">89</a></span><span class="t">    <span class="nam">pem</span> <span class="op">=</span> <span class="nam">key</span><span class="op">.</span><span class="nam">private_bytes</span><span class="op">(</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t90" href="#t90">90</a></span><span class="t">        <span class="nam">serialization</span><span class="op">.</span><span class="nam">Encoding</span><span class="op">.</span><span class="nam">PEM</span><span class="op">,</span> <span class="nam">serialization</span><span class="op">.</span><span class="nam">PrivateFormat</span><span class="op">.</span><span class="nam">PKCS8</span><span class="op">,</span> <span class="nam">serialization</span><span class="op">.</span><span class="nam">NoEncryption</span><span class="op">(</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t91" href="#t91">91</a></span><span class="t">    <span class="op">)</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t92" href="#t92">92</a></span><span class="t">    <span class="nam">_write</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">pem</span><span class="op">,</span> <span class="num">0o600</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t92" href="#t92">92</a></span><span class="t">    <span class="nam">write_whole</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">pem</span><span class="op">,</span> <span class="num">0o600</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t93" href="#t93">93</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t94" href="#t94">94</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t95" href="#t95">95</a></span><span class="t"><span class="key">def</span> <span class="nam">_write_cert</span><span class="op">(</span><span class="nam">path</span><span class="op">:</span> <span class="nam">Path</span><span class="op">,</span> <span class="nam">cert</span><span class="op">:</span> <span class="nam">x509</span><span class="op">.</span><span class="nam">Certificate</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t96" href="#t96">96</a></span><span class="t">    <span class="nam">_write</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">cert</span><span class="op">.</span><span class="nam">public_bytes</span><span class="op">(</span><span class="nam">serialization</span><span class="op">.</span><span class="nam">Encoding</span><span class="op">.</span><span class="nam">PEM</span><span class="op">)</span><span class="op">,</span> <span class="num">0o666</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t96" href="#t96">96</a></span><span class="t">    <span class="nam">write_whole</span><span class="op">(</span><span class="nam">path</span><span class="op">,</span> <span class="nam">cert</span><span class="op">.</span><span class="nam">public_bytes</span><span class="op">(</span><span class="nam">serialization</span><span class="op">.</span><span class="nam">Encoding</span><span class="op">.</span><span class="nam">PEM</span><span class="op">)</span><span class="op">,</span> <span class="num">0o666</span><span class="op">)</span>&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t97" href="#t97">97</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="pln"><span class="n"><a id="t98" href="#t98">98</a></span><span class="t">&nbsp;</span><span class="r"></span></p>
     <p class="run"><span class="n"><a id="t99" href="#t99">99</a></span><span class="t"><span class="key">def</span> <span class="nam">_name</span><span class="op">(</span><span class="nam">cn</span><span class="op">:</span> <span class="nam">str</span><span class="op">)</span> <span class="op">-&gt;</span> <span class="nam">x509</span><span class="op">.</span><span class="nam">Name</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
@@ -404,7 +404,7 @@
             <a class="nav" href="z_f793c2de04763fd3_callback_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.16.1">coverage.py v7.16.1</a>,
-            created at 2026-09-30 22:40 +0000
+            created at 2026-09-30 22:49 +0000
         </p>
     </div>
 </footer>
