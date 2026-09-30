@@ -96,6 +96,9 @@ async def test_a_cli_that_fails_is_a_refusal_quoting_it(registry, monkeypatch, c
         monkeypatch.setenv("FAKE_DOCKER_HANG", "1")
         monkeypatch.setattr(docker, "DOCKER_CALL_TIMEOUT_S", 0.5)
     if case == "oversized":
+        # Still running when the limit kills it, as a slow client would be:
+        # its exit code is then the kill's, never 0.
+        monkeypatch.setenv("FAKE_DOCKER_LINGER", "1")
         monkeypatch.setattr(kit, "MAX_MANIFEST", 64)
         registry(REF, {"layers": [], "annotations": ANNOTATED})
     with pytest.raises(kit.KitRefused, match=f"^`manifest inspect {REF}` {refusal}"):

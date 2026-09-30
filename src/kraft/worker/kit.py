@@ -645,12 +645,14 @@ async def _inspect(ref: str) -> dict:
     if answer is None:
         raise KitRefused(f"`manifest inspect {ref}` did not answer")
     code, out, err = answer
+    # First: past the limit the client was killed, and whether it had
+    # exited 0 before the kill landed is only timing.
+    if len(out) > MAX_MANIFEST:
+        raise KitRefused(f"`manifest inspect {ref}` answered over {MAX_MANIFEST} bytes")
     if code != 0:
         raise KitRefused(
             f"`manifest inspect {ref}` failed: {(err or out).strip() or f'exit {code}'}"
         )
-    if len(out) > MAX_MANIFEST:
-        raise KitRefused(f"`manifest inspect {ref}` answered over {MAX_MANIFEST} bytes")
     try:
         manifest = json.loads(out)
     except (ValueError, RecursionError):

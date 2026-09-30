@@ -20,7 +20,8 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     prints until then (`true 33554432`: a 32m limit OOM-killed it).
     `docker manifest inspect REF` prints `$FAKE_DOCKER_MANIFESTS/<REF with
     / : @ as _>.json`, or fails on stderr when there is none, or hangs when
-    `$FAKE_DOCKER_HANG` is set. Every call appends its arguments to
+    `$FAKE_DOCKER_HANG` is set, or lingers after answering when
+    `$FAKE_DOCKER_LINGER` is. Every call appends its arguments to
     `$FAKE_DOCKER_CALLS` when set.
     """
     bin_dir = tmp_path / "fake-docker-bin"
@@ -39,7 +40,9 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         '  [ -z "${FAKE_DOCKER_HANG:-}" ] || exec sleep 60\n'
         '  answer="${FAKE_DOCKER_MANIFESTS:-/nonexistent}/$(printf %s "$3" | tr "/:@" ___).json"\n'
         '  [ -f "$answer" ] || { echo "manifest unknown: $3" >&2; exit 1; }\n'
-        '  cat "$answer"; exit 0\n'
+        '  cat "$answer"\n'
+        '  [ -z "${FAKE_DOCKER_LINGER:-}" ] || exec sleep 60\n'
+        "  exit 0\n"
         "fi\n"
         '[ "$1" = ps ] && { [ -z "${FAKE_DOCKER_PS:-}" ] || cat "$FAKE_DOCKER_PS"; exit 0; }\n'
         '[ "$1" = info ] && exit 0\n'
