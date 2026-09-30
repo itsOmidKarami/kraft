@@ -40,7 +40,7 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
-from kraft.paths import RunDirs, default_run_dir
+from kraft.paths import RunDirs, default_run_dir, default_templates_dir
 from kraft.policy import HostPattern, SandboxPolicy
 from kraft.worker.backends import docker
 from kraft.worker.ca import write_whole
@@ -735,3 +735,29 @@ async def ensure(ref: str) -> Fetched:
         path, json.dumps({"manifest": fetched.manifest, "descriptor": fetched.text}).encode(), 0o644
     )
     return fetched
+
+
+# --- resolve ---------------------------------------------------------------------------
+
+
+def bindings() -> Mapping[str, str]:
+    """`sandbox.yaml`'s `credentials:`, each service's daemon variable.
+    Raises `ConfigError` for a `sandbox.yaml` that does not parse."""
+    from kraft import config
+
+    templates = Path(os.environ.get("KRAFT_TEMPLATES_DIR") or default_templates_dir())
+    return config.SandboxHost.load(templates / config.SandboxHost.FILE).credentials
+
+
+def lowered(ref: str) -> Lowered | None:
+    """`ref` lowered from the cache alone, or None when it was never
+    fetched. `KitRefused` and `ConfigError` as `lower` and `bindings`."""
+    hit = cached(ref)
+    return None if hit is None else lower(ref, hit.descriptor(), bindings())
+
+
+async def resolve(ref: str) -> tuple[Fetched, Lowered]:
+    """`ref` fetched when it is not cached, then lowered: what the walk,
+    dispatch and doctor ask before a Kit may run."""
+    fetched = await ensure(ref)
+    return fetched, lower(ref, fetched.descriptor(), bindings())

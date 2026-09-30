@@ -757,7 +757,10 @@ async def run_task(
         proxy_env: dict[str, str] = {}
         if network:
             # Before the worker exists: it has no route but this one.
-            lists = PhaseLists.of(sandbox["network"], "runtime", network_requires)
+            # Under a Kit its lists alone: the harness's hosts are not added
+            # (spec §9.4, open question 8).
+            requires = () if sandbox.get("kit") else network_requires
+            lists = PhaseLists.of(sandbox["network"], "runtime", requires)
             try:
                 proxy_env = await open_egress(
                     db,

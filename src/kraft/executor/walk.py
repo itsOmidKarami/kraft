@@ -1752,6 +1752,10 @@ async def run_once(
     # failed to start" -- node_started, then needs_human naming it -- should
     # not disappear just because the failure now happens a moment earlier.
     try:
+        # A Kit is fetched and lowered first: every read of the sandbox below
+        # reads it from the cache, so a fresh Kit could never start without
+        # this (spec §9.5).
+        await dispatch.ensure_kit(row, launch)
         # Before the worktree is touched at all: host git in a member or a
         # nested repository runs what a sandboxed worker planted in its
         # config (Kraft-nx4id, Kraft-ju36l).

@@ -342,6 +342,20 @@ async def test_a_session_under_network_gets_its_route_before_it_is_wrapped(
     assert not channels.socket_path("s1").exists()
 
 
+async def test_a_launch_under_a_kit_gets_its_lists_without_the_harness_hosts(
+    database, run_dirs, tmp_path, remote, channels
+):
+    """Spec §9.4: the Kit's surface is what is enforced, so a host its
+    harness requires and the Kit leaves out is refused like any other."""
+    kit = {**_POLICED, "kit": "k@sha256:" + "a" * 64}
+    await _run_on_remote(database, run_dirs, tmp_path, kit, network_requires=("api.anthropic.com",))
+
+    row = database.read(
+        lambda c: c.execute("SELECT egress FROM worker_sessions WHERE id = 's1'").fetchone()
+    )
+    assert json.loads(row["egress"])["allow"] == ["a.io"]
+
+
 async def test_a_managed_credentials_value_reaches_only_the_sessions_proxy(
     database, run_dirs, tmp_path, remote, channels, monkeypatch
 ):
