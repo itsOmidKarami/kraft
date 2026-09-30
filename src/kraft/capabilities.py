@@ -20,6 +20,9 @@ failure this exists to close.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,10 @@ class Capability:
     what: str
     #: One line: the edit that adopts it.
     how: str
+    #: The file under the live templates dir, then the key path in it, that
+    #: exists once the edit is made: a hand-merged capability is not listed
+    #: again. Empty means adoption cannot be told.
+    present: tuple[str, ...] = ()
 
 
 def _key(version: str) -> tuple[int, ...]:
@@ -61,6 +68,7 @@ MANIFEST: tuple[Capability, ...] = (
         "instead of spelling out model/effort",
         how="copy the `profiles:` section of the shipped harnesses.yaml into yours, then "
         "set `profile: strong` on a task in place of its `model:`/`effort:`",
+        present=("harnesses.yaml", "profiles"),
     ),
     Capability(
         version="1.0.3",
@@ -83,6 +91,7 @@ MANIFEST: tuple[Capability, ...] = (
             "          - id: open\n"
             "            extends: open_draft_mr"
         ),
+        present=("library.yaml", "tasks", "mr_rebase"),
     ),
     Capability(
         version="1.1.0",
@@ -115,8 +124,27 @@ MANIFEST: tuple[Capability, ...] = (
             "servers:\n"
             "    steering: [never-signal-processes-you-didnt-start]"
         ),
+        present=("library.yaml", "steering", "never-signal-processes-you-didnt-start"),
     ),
 )
+
+
+def adopted(capability: Capability, live_dir: Path) -> bool:
+    """Whether the live templates already hold what `capability` adds: its
+    `present` key path exists. An unreadable file is not adopted, so the row
+    says too much rather than too little."""
+    if not capability.present:
+        return False
+    file, *keys = capability.present
+    try:
+        node = yaml.safe_load((live_dir / file).read_text())
+    except (OSError, yaml.YAMLError):
+        return False
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return True
 
 
 def added_since(version: str | None) -> list[Capability]:

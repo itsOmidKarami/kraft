@@ -26,9 +26,11 @@ from kraft.templates.library import CHAINS_DIR, LIBRARY_FILE, TemplateLibrary, T
 from kraft.templates.models import (
     AgentTask,
     BuiltinTask,
+    Chain,
     ForgeTask,
     GateNode,
     MaterializedChain,
+    ResolvedChain,
     SubprocessTask,
     TaskKind,
 )
@@ -367,6 +369,22 @@ def test_materialization_freezes_chain_policy_and_target():
     assert materialized.target == target
     assert materialized.policy == effective
     assert materialized.task_paths == resolved.task_paths
+
+
+def test_filing_refuses_to_skip_a_node_that_does_not_allow_skipping():
+    """`--skip-nodes` is an operator's skip, held to `skippable: false` as
+    `kraft item skip` is (Kraft-9efnk.33); intake answers the ValueError 422."""
+    tasks = [{"id": "t", "kind": "subprocess", "command": "true"}]
+    nodes = [
+        {"id": "lint", "kind": "exec", "skippable": False, "tasks": tasks},
+        {"id": "build", "kind": "exec", "tasks": tasks},
+    ]
+    resolved = ResolvedChain.from_chain(Chain.model_validate({"id": "c", "nodes": nodes}))
+    target, effective = repository_target(), policy()
+    kept = resolved.materialize(target, effective, skip_nodes=frozenset({"build"}))
+    assert [n.id for n in kept.chain.nodes] == ["lint"]
+    with pytest.raises(ValueError, match="'lint' does not allow skipping"):
+        resolved.materialize(target, effective, skip_nodes=frozenset({"lint"}))
 
 
 def test_a_materialized_chain_cannot_be_changed_while_the_item_executes():

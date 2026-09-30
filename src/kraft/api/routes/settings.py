@@ -153,17 +153,12 @@ async def lint_templates(request: Request):
     who just edited it is asking about -- read into a scratch library, never
     into `st.library` (`template-lint-reports-library-validity`)."""
     st = request.app.state
-    report = await asyncio.to_thread(
-        TemplateLibrary.lint_dir,
+    return await asyncio.to_thread(
+        config_check.lint_report,
         st.templates_dir,
         skills_dir=st.skills_dir,
         instance_policy=getattr(st, "instance_policy", None),
     )
-    return {
-        "valid": report.valid,
-        "chains": list(report.chains),
-        "issues": [positions.issue_view(i) for i in report.issues],
-    }
 
 
 @api_router.get("/templates/chains/{tid}/resolved")

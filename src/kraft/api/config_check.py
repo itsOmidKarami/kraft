@@ -371,6 +371,42 @@ def launch_problems(
     return problems
 
 
+def lint_report(
+    templates_dir: Path,
+    *,
+    skills_dir: Path | None = None,
+    instance_policy: policy_mod.InstancePolicy | None = None,
+) -> dict:
+    """`kraft admin templates lint`'s answer, from the route and `--dir` alike:
+    `TemplateLibrary.lint_dir`, plus each agent task of a resolving chain that
+    `harnesses.yaml` could not launch -- a `profile:` with no model for its
+    harness's provider, say (Kraft-9efnk.34). A `harnesses.yaml` that does not
+    load adds nothing: doctor's `harnesses.yaml` row already says why."""
+    templates_dir = Path(templates_dir)
+    report = TemplateLibrary.lint_dir(
+        templates_dir, skills_dir=skills_dir, instance_policy=instance_policy
+    )
+    issues = list(report.issues)
+    path = templates_dir / "harnesses.yaml"
+    providers = harness_mod.load(None).valid
+    try:
+        table = HarnessProfileTable.from_yaml(path, harnesses=providers)
+        library = TemplateLibrary.from_yaml_dir(templates_dir, skills_dir=skills_dir)
+    except (TemplateEnvironmentError, TemplateLibraryError):
+        library = None
+    if library is not None:
+        for (chain, _), why in sorted(
+            launch_problems(selections(library), table, path, providers).items()
+        ):
+            issues.append(TemplateIssue(templates_dir / CHAINS_DIR / f"{chain}.yaml", chain, why))
+    failed = {issue.chain for issue in issues}
+    return {
+        "valid": not issues,
+        "chains": [id for id in report.chains if id not in failed],
+        "issues": [positions.issue_view(i) for i in issues],
+    }
+
+
 def route_problem(task: AgentTask, harness, table: HarnessProfileTable, providers) -> str | None:
     """Why `task`'s route (its agent profile, or its own model/effort) cannot
     run on `harness`, or None."""

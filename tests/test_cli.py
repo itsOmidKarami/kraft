@@ -217,6 +217,22 @@ def test_serve_port_flag_matching_what_clients_dial_prints_no_hint(monkeypatch, 
     assert "KRAFT_PORT" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("host", "hint"), [("192.0.2.10", True), ("0.0.0.0", False)], ids=["other-host", "wildcard"]
+)
+def test_serve_host_flag_says_how_other_commands_reach_it(
+    monkeypatch, tmp_path, capsys, host, hint
+):
+    """--host is not persisted either; a wildcard bind is still reached on the
+    loopback address every other verb dials, so it needs no hint."""
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\npassword_hash: x\n")
+    monkeypatch.setattr(uvicorn, "Config", lambda app, **kw: None)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
+    cli.main(["admin", "start", "--host", host])
+    out = capsys.readouterr().out
+    assert ("still dial host 127.0.0.1; reach this instance with KRAFT_HOST=" in out) is hint
+
+
 def test_serve_flag_beats_env(monkeypatch, tmp_path):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     monkeypatch.setenv("KRAFT_PORT", "9002")

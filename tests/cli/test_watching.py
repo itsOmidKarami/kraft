@@ -252,12 +252,15 @@ def test_watch_refuses_a_pipe(app, capsys, monkeypatch):
     assert "events" in capsys.readouterr().err
 
 
-def test_watch_has_no_json_mode(app, capsys, monkeypatch):
-    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
+def test_watch_has_no_json_mode(capsys):
+    """Not offered in `--help`, so not accepted either."""
     with pytest.raises(SystemExit) as caught:
         cli.main(["view", "watch", "--json"])
-    assert caught.value.code == 1
-    assert "--json" in capsys.readouterr().err
+    assert caught.value.code == 2
+    assert "unrecognized arguments: --json" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        cli.main(["view", "watch", "--help"])
+    assert "--json" not in capsys.readouterr().out
 
 
 def test_redraw_returns_the_new_line_count():

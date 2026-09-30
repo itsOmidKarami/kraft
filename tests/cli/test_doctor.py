@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import os
 import subprocess
@@ -204,6 +205,8 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     chains = _by_name(rows, "chain_templates")
     assert chains["ok"] is True and chains["skipped"] is True
     assert _by_name(rows, "chains")["skipped"] is True
+    # Not the upgrade guide: a home never seeded has nothing to upgrade.
+    assert _by_name(rows, "capabilities")["detail"] == "skipped: no templates dir"
 
 
 def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
@@ -533,6 +536,14 @@ def test_capabilities_row_is_quiet_when_the_stamp_is_current(tmp_path, monkeypat
     row = doctor._capabilities_check()
     assert row["ok"] is True
     assert "up to date" in row["detail"]
+
+
+def test_capabilities_row_leaves_out_one_the_live_templates_already_hold(tmp_path, monkeypatch):
+    held = dataclasses.replace(_MANIFEST[0], present=("harnesses.yaml", "profiles"))
+    monkeypatch.setattr(capabilities, "MANIFEST", (held,))
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path))
+    (tmp_path / "harnesses.yaml").write_text("profiles: {}\n")
+    assert "up to date" in doctor._capabilities_check()["detail"]
 
 
 def test_an_unstamped_home_is_told_everything_rather_than_erroring(tmp_path, monkeypatch):

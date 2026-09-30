@@ -95,11 +95,6 @@ def _cmd_disconnect(ns: argparse.Namespace) -> None:
 
 
 def _cmd_path(ns: argparse.Namespace) -> None:
-    if ns.json:
-        # Inherited from the shared parent parser, and meaningless here: one bare
-        # line is the contract that makes `cd "$(kraft repo path ID)"` work. Rejected
-        # rather than ignored, the way `watch` rejects it.
-        raise ValueError("path has no --json; it prints one line — use `kraft view show --json`")
     if ns.shell:
         print(SHELL_WRAPPER, end="")
         return
@@ -132,9 +127,9 @@ def _add_repo(subs, common: argparse.ArgumentParser) -> None:
     disconnect.add_argument("path", nargs="?", help="default: the current directory")
     disconnect.set_defaults(func=_cmd_disconnect)
 
-    path = subs.add_parser(
-        "path", aliases=["cd"], parents=[common], help="print a work item's worktree path"
-    )
+    # No `--json` (no parent parser): one bare line is the contract that makes
+    # `cd "$(kraft repo path ID)"` work; `view show --json` has the payload.
+    path = subs.add_parser("path", aliases=["cd"], help="print a work item's worktree path")
     path.add_argument("id", nargs="?")
     path.add_argument("--shell", action="store_true", help="print a shell function that cds")
     path.set_defaults(func=_cmd_path)

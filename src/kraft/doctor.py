@@ -153,7 +153,9 @@ def _config_checks() -> list[dict]:
             ),
             _chain_templates_check(),
             _check("chains", True, "skipped: no templates dir", skipped=True),
-            _capabilities_check(),
+            # Nothing seeded yet, so nothing to upgrade: the first start seeds
+            # every capability and stamps the version.
+            _check("capabilities", True, "skipped: no templates dir", skipped=True),
             _token_check(),
             _token_check("trigger token", auth.TRIGGER_TOKEN_FILE),
         ]
@@ -291,7 +293,7 @@ def _capabilities_check() -> dict:
         # Seeded before stamping existed, or unreadable. Either way the home
         # knows nothing about itself; `added_since(None)` says everything.
         stamp = None
-    missing = capabilities.added_since(stamp)
+    missing = [c for c in capabilities.added_since(stamp) if not capabilities.adopted(c, live_dir)]
     seeded = f"seeded at {stamp}" if stamp else "seeded before versions were recorded"
     if not missing:
         return _check("capabilities", True, f"{seeded}; up to date")
@@ -464,11 +466,23 @@ async def _mcp_check(server_up: bool) -> dict:
         per_repo = {repo: registration.permission_tool(repo) for repo in repos}
         refused = [str(repo) for repo, tool in per_repo.items() if tool is None]
         if refused:
+            # A warning, not a failure (Kraft-9efnk.31): the launch refuses
+            # only an unsandboxed task on a harness asking through the direct
+            # tool, and whether a repo's items ever launch one depends on
+            # chain, sandbox and item overrides doctor does not resolve.
+            asking = sorted(
+                h.id
+                for h in harness.load(None).valid.values()
+                if (c := h.capabilities.get("approval_channel")) is not None
+                and c.always == registration.DIRECT
+            )
             return _check(
                 "mcp server",
-                False,
-                f"no kraft MCP server registered for Claude workers in {', '.join(refused)}, "
-                f"so they are refused; {registration.FIX}",
+                True,
+                f"no kraft MCP server registered for Claude workers in {', '.join(refused)}: "
+                f"an unsandboxed task there on harness {' or '.join(asking)} is refused; "
+                f"{registration.FIX}",
+                warn=True,
             )
         found = found or next(iter(per_repo.values()), None)
     elif found is None:

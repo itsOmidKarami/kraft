@@ -177,11 +177,14 @@ def test_path_rejects_json_rather_than_ignoring_it(app, capsys, make_item, repo)
     wid = make_item(repo)
     with pytest.raises(SystemExit) as caught:
         cli.main(["repo", "path", wid, "--json"])
-    assert caught.value.code == 1
+    assert caught.value.code == 2
     captured = capsys.readouterr()
-    assert "kraft view show --json" in captured.err
+    assert "unrecognized arguments: --json" in captured.err
     # nothing on stdout: a caller that piped this must not get a path anyway
     assert captured.out == ""
+    with pytest.raises(SystemExit):
+        cli.main(["repo", "path", "--help"])
+    assert "--json" not in capsys.readouterr().out
 
 
 def test_repos_says_disabled_in_words_not_only_in_colour(app, tmp_path, monkeypatch, capsys):
