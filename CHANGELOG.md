@@ -5,6 +5,12 @@ section from the `## Changelog` part of the pull requests it ships; do not
 edit this file by hand. Releases before 1.0.0 are
 listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/releases).
 
+## 1.2.1
+
+### Fixes
+
+- Fix: a release publishes to PyPI, the VS Code Marketplace and Homebrew again. v1.2.0 reached only the GitHub release, because PyPI rejected the extension package the release put next to the wheel. (#305)
+
 ## 1.1.0
 
 ### New
