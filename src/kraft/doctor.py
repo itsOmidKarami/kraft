@@ -707,9 +707,9 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     phases: dict[str, set[str]] = {c.env: set() for c in policy.credentials}
     for c in policy.credentials:
         phases[c.env].update(c.phases())
+    only = {name: f" ({p} only)" for name, ps in phases.items() if len(ps) == 1 for p in ps}
     detail = "proxy-managed: " + "; ".join(
-        f"{name}{f' ({phases[name].pop()} only)' if len(phases[name]) == 1 else ''}"
-        f" on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
+        f"{name}{only.get(name, '')} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
         for name, on in hosts.items()
     )
     if passing:

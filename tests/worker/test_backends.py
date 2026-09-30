@@ -403,8 +403,8 @@ async def test_an_install_only_credential_is_absent_from_an_agent_session(
         return ["sh", "-c", 'echo "reg=${REG_TOKEN-unset}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
-    credential = {"env": "REG_TOKEN", "phase": ["install"]}
-    credential["inject"] = [{"domain": "a.io", "header": "x-key"}]
+    inject = [{"domain": "a.io", "header": "x-key"}]
+    credential = {"env": "REG_TOKEN", "phase": ["install"], "inject": inject}
     network = {**_POLICED["network"], "install": {"allow": ["a.io"]}}
     sandbox = {**_POLICED, "network": network, "credentials": [credential]}
 
@@ -435,8 +435,8 @@ async def test_a_bound_credentials_source_is_absent_from_an_agent_session(
         return ["sh", "-c", f'echo "src=${{{source}-unset}}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
-    credential = {"env": "CLAUDE_API_KEY", "source": source}
-    credential["inject"] = [{"domain": "a.io", "header": "x-key"}]
+    inject = [{"domain": "a.io", "header": "x-key"}]
+    credential = {"env": "CLAUDE_API_KEY", "source": source, "inject": inject}
     sandbox = {**_POLICED, "credentials": [credential]}
 
     await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
