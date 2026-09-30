@@ -315,6 +315,16 @@ _HOOK_CAPS = (
             "capabilities:\n" + _HOOK_CAPS,
             "credential 'K' goes to 'y.io', which is not one of its 'network.requires'",
         ),
+        *(
+            (
+                "id: x\nkind: cli\ncommand: [x]\nnetwork: { requires: [x.io] }\n"
+                "credentials: [{env: K, service: s, sentinel: v,"
+                f" inject: [{{domain: x.io, header: k}}], {field}}}]\n"
+                "capabilities:\n" + _HOOK_CAPS,
+                "credential 'K' cannot set 'phase' or 'source'",
+            )
+            for field in ("phase: [runtime]", "source: OTHER_KEY")
+        ),
         (
             "id: x\nkind: cli\ncommand: [x]\nmin_version: '2.0'\ncapabilities:\n" + _HOOK_CAPS,
             "min_version '2.0' is not N.N.N",

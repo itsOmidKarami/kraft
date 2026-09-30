@@ -337,6 +337,13 @@ class Harness:
                     f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
                     "and where to 'inject' it"
                 )
+            # A repository scopes and binds its own credentials; a harness's
+            # would merge into an entry naming just `env` and redirect it.
+            if cred.phase is not None or cred.source is not None:
+                raise HarnessError(
+                    f"{where}: credential {cred.env!r} cannot set 'phase' or 'source'; "
+                    "a repository's sandbox credentials do"
+                )
             for rule in cred.inject:
                 if rule.domain not in requires:
                     raise HarnessError(
