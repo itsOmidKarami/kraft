@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "kraft",
-  "description": "Kraft and Kraft Lite: run agent work as a chain, with or without the orchestrator.",
+  "description": "Kraft, a local orchestrator that takes your coding agent from spec to pull request, stopping only when a decision is yours; and Kraft Lite, its chains without the orchestrator.",
   "owner": {
     "name": "Omid Karami",
     "url": "https://github.com/itsOmidKarami"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "kraft",
-      "description": "Drive Kraft from an agent session: file work, read the board, act on gates.",
+      "description": "Drive Kraft from an agent session: file work, read the board, act on gates, recover stopped work.",
       "source": "./plugins/kraft",
       "category": "productivity"
     },

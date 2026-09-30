@@ -31,6 +31,9 @@ GROUPS = {"major": "Breaking changes", "minor": "New", "patch": "Fixes"}
 
 _SECTION = re.compile(r"^##\s+Changelog\s*$(.*?)(?=^##\s|\Z)", re.MULTILINE | re.DOTALL)
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+#: The attribution line a PR body ends with; with no heading after `## Changelog`
+#: it would otherwise land in the release notes.
+_ATTRIBUTION = re.compile(r"^(?:\U0001f916\s*)?Generated with \[?Claude Code\b.*$", re.MULTILINE)
 
 
 def impact_of(pr: dict) -> str:
@@ -56,7 +59,7 @@ def release_impact(prs: list[dict]) -> str:
 def changelog_entry(pr: dict) -> str:
     """The PR's `## Changelog` section as a list item, or its title without one."""
     match = _SECTION.search(pr.get("body") or "")
-    text = _COMMENT.sub("", match.group(1)).strip() if match else ""
+    text = _ATTRIBUTION.sub("", _COMMENT.sub("", match.group(1))).strip() if match else ""
     text = text or pr["title"]
     if not text.startswith(("- ", "* ")):
         text = f"- {text}"
