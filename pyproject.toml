@@ -27,7 +27,7 @@ dependencies = [
     "psutil>=5",
     "argcomplete>=3",
     "fastapi>=0.141.1",
-    "uvicorn>=0.52.4",
+    "uvicorn>=0.54.0",
     "websockets>=15",
     "sqlite-vec>=0.1.9",
     # client.py imports these at runtime, not just under test. httpx was a dev
@@ -45,12 +45,12 @@ dependencies = [
 [project.optional-dependencies]
 # Semantic search (Effort 4C). Optional: without it FTS still works, hybrid
 # degrades to fts, and mode=vector 422s. Keeps a ~130MB model download opt-in.
-vector = ["fastembed>=0.8"]
+vector = ["fastembed>=0.8.1"]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "ruff>=0.16.6",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
+    "ruff>=0.16.9",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.6",
@@ -66,7 +66,7 @@ dev = [
 kraft = "kraft.cli:main"
 
 [build-system]
-requires = ["setuptools>=77", "setuptools-scm>=8"]
+requires = ["setuptools>=84.0.0", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 # The version is the git tag, so a release cannot ship a number nobody bumped.

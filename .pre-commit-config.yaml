@@ -9,7 +9,7 @@ repos:
     # Keep in step with the `ruff` floor in pyproject.toml: an older ruff here
     # does not know PEP 758 (py3.14 unparenthesized `except A, B:`) and fails
     # valid source the project formatter just produced.
-    rev: v0.16.6
+    rev: v0.16.9
     hooks:
       - id: ruff
         args: [--fix]
