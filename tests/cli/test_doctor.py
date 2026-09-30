@@ -206,6 +206,20 @@ def test_every_config_check_reports_even_with_no_templates_dir(tmp_path, monkeyp
     assert _by_name(rows, "chains")["skipped"] is True
 
 
+def test_doctor_on_a_never_started_home_says_so(tmp_path, monkeypatch):
+    """A newcomer's first `doctor`: a line up front saying no server has run
+    here, and the harnesses row pointing at `kraft` like the others, not a raw
+    ENOENT."""
+    monkeypatch.setenv("KRAFT_TEMPLATES_DIR", str(tmp_path / "templates"))
+    monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(doctor, "BUNDLED", tmp_path / "absent")
+
+    rows = asyncio.run(doctor.run_checks())
+    assert rows[0]["name"] == "home" and rows[0]["warn"]
+    assert "until `kraft` has started once" in rows[0]["detail"]
+    assert "start `kraft` once to seed it" in _by_name(rows, "harnesses.yaml")["detail"]
+
+
 def _chains(root: Path) -> Path:
     d = root / "chains"
     d.mkdir(parents=True)

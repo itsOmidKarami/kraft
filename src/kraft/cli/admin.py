@@ -621,7 +621,16 @@ def _cmd_start(ns: argparse.Namespace) -> None:
     if ns.host:
         os.environ["KRAFT_HOST"] = ns.host
     if ns.port:
+        # Not written to access.yaml: a flag silently rewriting config would
+        # surprise more than it helps. Say so instead, while the port every
+        # other verb dials is still the one without the flag.
+        dialled = httpx.URL(client.base_url()).port
         os.environ["KRAFT_PORT"] = str(ns.port)
+        if ns.port != dialled:
+            print(
+                f"kraft: other kraft commands still dial port {dialled}; reach this "
+                f"instance with KRAFT_PORT={ns.port}, or set `port: {ns.port}` in access.yaml"
+            )
     if ns.detach:
         _start_detached()
         return

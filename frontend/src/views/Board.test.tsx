@@ -534,6 +534,14 @@ describe("Board", () => {
     expect(await screen.findByText(/nothing on the board yet/i)).toBeInTheDocument();
   });
 
+  it("the fresh-install card names the address health reports, not a default", async () => {
+    vi.spyOn(api, "getRepos").mockResolvedValue({ repos: [] });
+    vi.spyOn(api, "getHealth").mockResolvedValue({ bind: "127.0.0.1", port: 18772 } as never);
+    setItems();
+    renderBoard();
+    expect(await screen.findByText("127.0.0.1:18772")).toBeInTheDocument();
+  });
+
   it("keeps rendering the board, not the fresh-install card, when getRepos fails", async () => {
     vi.spyOn(api, "getRepos").mockRejectedValue(new Error("boom"));
     renderBoard();
