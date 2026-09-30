@@ -72,13 +72,9 @@ async def test_a_sandboxed_setup_command_launches_through_docker(tmp_path, monke
     assert call["env"] == worker_env(entry)
 
 
-async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path, monkeypatch):
-    """Spec §6 in the install phase: each listed variable holds a sentinel
-    (no harness says more), the docker client holds no value, the bundle
-    trusts the Kraft CA, and a repository's own credential is injected
-    where `install` names its host."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
-    monkeypatch.setenv("REG_TOKEN", "reg-real-VALUE")
+def _record_egress(tmp_path, monkeypatch) -> tuple[list, list]:
+    """The inject rules each egress channel opens with, and the Kraft CA
+    each bundle is prepared with, recorded; nothing listens."""
     monkeypatch.setenv("KRAFT_RUN_DIR", str(tmp_path / "run"))
     opened, bundled = [], []
 
@@ -95,6 +91,17 @@ async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path,
     monkeypatch.setattr(kraft_builtins._subprocess, "open_egress", open_egress)
     monkeypatch.setattr(kraft_builtins._subprocess, "close_egress", close_egress)
     monkeypatch.setattr(docker_backend._forward, "prepare", prepare)
+    return opened, bundled
+
+
+async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path, monkeypatch):
+    """Spec §6 in the install phase: each listed variable holds a sentinel
+    (no harness says more), the docker client holds no value, the bundle
+    trusts the Kraft CA, and a repository's own credential is injected
+    where `install` names its host."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-VALUE")
+    monkeypatch.setenv("REG_TOKEN", "reg-real-VALUE")
+    opened, bundled = _record_egress(tmp_path, monkeypatch)
     calls = _record_run(monkeypatch)
     registry = {"domain": "registry.corp", "header": "authorization", "format": "Bearer %s"}
     sandbox = {
@@ -117,6 +124,31 @@ async def test_a_setup_commands_managed_credentials_cross_as_sentinels(tmp_path,
     [(rule,)] = opened
     assert (rule.domain, rule.carrying(rule.value)) == ("registry.corp", "Bearer reg-real-VALUE")
     assert bundled == [ca.ensure_ca(RunDirs(tmp_path / "run"))[0]]
+
+
+async def test_a_runtime_only_credential_is_absent_from_the_setup_command(tmp_path, monkeypatch):
+    """credential@1's phase scoping: the install phase gets neither the
+    sentinel of a credential scoped to `runtime` nor an inject rule, and its
+    value stays out of the container all the same."""
+    monkeypatch.setenv("REG_TOKEN", "reg-real-VALUE")
+    opened, _ = _record_egress(tmp_path, monkeypatch)
+    calls = _record_run(monkeypatch)
+    registry = {"domain": "registry.corp", "header": "authorization"}
+    sandbox = {
+        **_SANDBOX,
+        "network": {"runtime": {"allow": ["registry.corp"]}},
+        "credentials": [{"env": "REG_TOKEN", "phase": ["runtime"], "inject": [registry]}],
+    }
+    entry = entry_of({"setup_command": _SETUP, "env_passthrough": ["REG_TOKEN"]})
+
+    await kraft_builtins.run_setup_command(
+        tmp_path, tmp_path, entry, sandbox=sandbox, checkout=Checkout(tmp_path, {})
+    )
+
+    [call] = calls
+    assert not [a for a in call["args"] if a.startswith("REG_TOKEN=")]
+    assert opened == [()]
+    assert "REG_TOKEN" not in call["env"]
 
 
 async def test_an_unsandboxed_setup_command_still_runs_on_the_host(tmp_path, monkeypatch):
