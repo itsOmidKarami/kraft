@@ -20,7 +20,10 @@ TAG=${KRAFT_DOCS_STABLE_TAG:-$(git -C "$ROOT" tag --list | grep -E '^v[0-9]+\.[0
 generate() { # DOCSITE_DIR BASE CHANNEL DEST
   (cd "$1" && KRAFT_DOCS_BASE=$2 KRAFT_DOCS_CHANNEL=$3 KRAFT_DOCS_STABLE_VERSION=$TAG npx nuxt generate)
   mkdir -p "$4"
-  cp -R "$1/.output/public/." "$4/"
+  # -L: docsite/public holds symlinks (icon.svg, assets), and the stable
+  # build's point into a temp dir deleted on exit; copied as links they
+  # dangle and the Pages upload's tar fails on them.
+  cp -RL "$1/.output/public/." "$4/"
 }
 
 if [ -z "$TAG" ]; then
