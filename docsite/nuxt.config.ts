@@ -25,6 +25,12 @@ export default defineNuxtConfig({
     // the robots meta tag from this; a tag in app.head would be overridden.
     ...(channel === 'next' ? { indexable: false } : {}),
   },
+  // nuxt-llms writes no llms.txt or llms-full.txt without a domain, and Docus
+  // infers none on GitHub Pages. Its links are the domain plus a router path,
+  // so the domain carries this build's base (/kraft or /kraft/next).
+  llms: {
+    domain: `${origin}${baseURL.replace(/\/$/, '')}`,
+  },
   // @nuxtjs/robots refuses to write robots.txt under a base URL, and a crawler
   // only reads one at the domain root anyway. public/robots.txt is ours.
   robots: {
