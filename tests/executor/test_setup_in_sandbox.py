@@ -151,6 +151,36 @@ async def test_a_runtime_only_credential_is_absent_from_the_setup_command(tmp_pa
     assert "REG_TOKEN" not in call["env"]
 
 
+@pytest.mark.parametrize(
+    ("source", "passthrough"),
+    [("ANTHROPIC_API_KEY", []), ("BOUND_KEY", ["BOUND_KEY"])],
+    ids=["forwarded", "env-passthrough"],
+)
+async def test_a_bound_credentials_source_is_absent_from_the_setup_command(
+    tmp_path, monkeypatch, source, passthrough
+):
+    """The daemon's variable a credential is bound to holds the real value,
+    so the docker client never holds it, even where the worker env would
+    forward it by name."""
+    monkeypatch.setenv(source, "sk-real-VALUE")
+    calls = _record_run(monkeypatch)
+    _record_egress(tmp_path, monkeypatch)
+    registry = {"domain": "registry.corp", "header": "authorization"}
+    sandbox = {
+        **_SANDBOX,
+        "network": {"install": {"allow": ["registry.corp"]}},
+        "credentials": [{"env": "REG_TOKEN", "source": source, "inject": [registry]}],
+    }
+    entry = entry_of({"setup_command": _SETUP, "env_passthrough": passthrough})
+
+    await kraft_builtins.run_setup_command(
+        tmp_path, tmp_path, entry, sandbox=sandbox, checkout=Checkout(tmp_path, {})
+    )
+
+    [call] = calls
+    assert source not in call["env"]
+
+
 async def test_an_unsandboxed_setup_command_still_runs_on_the_host(tmp_path, monkeypatch):
     entry = entry_of({"setup_command": _SETUP})
     calls = _record_run(monkeypatch)

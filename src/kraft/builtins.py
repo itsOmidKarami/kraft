@@ -836,10 +836,12 @@ async def run_setup_command(
         # and nothing injects it; a repository's own credential is injected
         # where the install phase names its host. One scoped to `runtime`
         # alone is not here at all, and its value stays out all the same.
+        # A bound credential's `source` is withheld as its `env` is: it holds
+        # the daemon's real value under that name.
         every = _harness.sandbox_credentials(sandbox)
         credentials = _harness.manage(every, phase="install")
         sentinels = {c.env: c.sentinel for c in credentials}
-        withheld = {c.env for c in every}
+        withheld = {n for c in every for n in (c.env, c.source) if n}
         try:
             kraft_ca = _ca.ensure_ca(RunDirs(run_base))[0] if credentials else None
             ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)

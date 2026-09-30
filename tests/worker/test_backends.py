@@ -399,7 +399,8 @@ async def test_an_install_only_credential_is_absent_from_an_agent_session(
 
     def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
         seen.update(sentinels=kw["sentinels"], rules=channels.tls_session(session_id).credentials)
-        return Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        return ["sh", "-c", 'echo "reg=${REG_TOKEN-unset}"; exec "$@"', "sh", *inner]
 
     monkeypatch.setattr(remote, "wrap", wrap)
     credential = {"env": "REG_TOKEN", "phase": ["install"]}
@@ -410,7 +411,37 @@ async def test_an_install_only_credential_is_absent_from_an_agent_session(
     await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
 
     assert seen == {"sentinels": {}, "rules": ()}
+    assert "reg=unset" in (run_dirs.logs / "s1.log").read_text()
     assert remote.probed_env == {}
+
+
+@pytest.mark.parametrize(
+    ("source", "passthrough"),
+    [("ANTHROPIC_API_KEY", []), ("BOUND_KEY", ["BOUND_KEY"])],
+    ids=["forwarded", "env-passthrough"],
+)
+async def test_a_bound_credentials_source_is_absent_from_an_agent_session(
+    database, run_dirs, tmp_path, remote, channels, monkeypatch, source, passthrough
+):
+    """The daemon's variable a credential is bound to holds the real value,
+    so it is withheld as the credential's own name is, even where the worker
+    env would forward it by name."""
+    monkeypatch.setenv(source, "sk-real-VALUE")
+    entry = entry_of({"path": "/r", "env_passthrough": passthrough})
+    remote.transport = "tls"
+
+    def wrap(cmd, cwd, sandbox, results_dir, env=None, *, session_id=None, **kw):
+        inner = Remote.wrap(remote, cmd, cwd, sandbox, results_dir, env, session_id=session_id)
+        return ["sh", "-c", f'echo "src=${{{source}-unset}}"; exec "$@"', "sh", *inner]
+
+    monkeypatch.setattr(remote, "wrap", wrap)
+    credential = {"env": "CLAUDE_API_KEY", "source": source}
+    credential["inject"] = [{"domain": "a.io", "header": "x-key"}]
+    sandbox = {**_POLICED, "credentials": [credential]}
+
+    await _run_on_remote(database, run_dirs, tmp_path, sandbox, repo_entry=entry)
+
+    assert "src=unset" in (run_dirs.logs / "s1.log").read_text()
 
 
 @pytest.mark.parametrize("missing", ["channel", "route"])

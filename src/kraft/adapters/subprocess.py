@@ -679,10 +679,12 @@ async def run_task(
     # code the worker wrote, as an agent does.
     # One scoped to `install` alone is not here at all, and its value stays
     # out all the same.
+    # A bound credential's `source` is withheld as its `env` is: it holds
+    # the daemon's real value under that name.
     every = _harness.sandbox_credentials(sandbox) if backend is not None else ()
     credentials = _harness.manage(every, declared, phase="runtime")
     sentinels = {c.env: c.sentinel for c in credentials}
-    withheld = {c.env for c in every}
+    withheld = {n for c in every for n in (c.env, c.source) if n}
     rules = _inject.rules(credentials, full_env)
     full_env = {k: v for k, v in full_env.items() if k not in withheld}
     refs: Sequence = ()
