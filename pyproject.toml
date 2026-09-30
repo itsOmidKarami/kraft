@@ -27,7 +27,7 @@ dependencies = [
     "psutil>=5",
     "argcomplete>=3",
     "fastapi>=0.141.1",
-    "uvicorn>=0.52.4",
+    "uvicorn>=0.54.0",
     "websockets>=15",
     "sqlite-vec>=0.1.9",
     # client.py imports these at runtime, not just under test. httpx was a dev
