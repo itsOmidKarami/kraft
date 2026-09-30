@@ -190,7 +190,7 @@ def test_serve_verb_reaches_uvicorn_with_the_configured_bind(monkeypatch, tmp_pa
     assert seen["port"] == 8765
 
 
-def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
+def test_serve_flags_override_access_yaml(monkeypatch, tmp_path, capsys):
     _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 8765\n")
     seen = {}
 
@@ -203,6 +203,18 @@ def test_serve_flags_override_access_yaml(monkeypatch, tmp_path):
     cli.main(["admin", "start", "--port", "9001"])
     assert seen["port"] == 9001
     assert seen["host"] == "127.0.0.1"  # untouched: only the flag given changes
+    # --port is not persisted, so every other verb would still dial 8765: say so.
+    assert (
+        "still dial port 8765; reach this instance with KRAFT_PORT=9001" in capsys.readouterr().out
+    )
+
+
+def test_serve_port_flag_matching_what_clients_dial_prints_no_hint(monkeypatch, tmp_path, capsys):
+    _servable_home(monkeypatch, tmp_path, "bind: 127.0.0.1\nport: 9001\n")
+    monkeypatch.setattr(uvicorn, "Config", lambda app, **kw: None)
+    monkeypatch.setattr(cli.admin._SignalLoggingServer, "run", lambda self, *a, **k: None)
+    cli.main(["admin", "start", "--port", "9001"])
+    assert "KRAFT_PORT" not in capsys.readouterr().out
 
 
 def test_serve_flag_beats_env(monkeypatch, tmp_path):
