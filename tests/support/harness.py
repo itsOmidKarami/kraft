@@ -205,6 +205,10 @@ def fake_docker_bin(tmp_path: Path) -> Path:
     rm -f NAME` -- `docker.teardown` -- appends `NAME` to `$FAKE_DOCKER_RM_LOG`
     when set, and deletes `$FAKE_DOCKER_INSPECT`, which `docker inspect`
     prints until then (`true 33554432`: a 32m limit OOM-killed it).
+    `docker manifest inspect REF` prints `$FAKE_DOCKER_MANIFESTS/<REF with
+    / : @ as _>.json`, or fails on stderr when there is none, or hangs when
+    `$FAKE_DOCKER_HANG` is set. Every call appends its arguments to
+    `$FAKE_DOCKER_CALLS` when set.
     """
     bin_dir = tmp_path / "fake-docker-bin"
     bin_dir.mkdir(exist_ok=True)
@@ -217,6 +221,13 @@ def fake_docker_bin(tmp_path: Path) -> Path:
         '# "the real command ran because nothing wrapped it at all" -- the two\n'
         "# look identical from the marker file the real command itself writes.\n"
         'if [ -n "${FAKE_DOCKER_CALLED:-}" ]; then : > "$FAKE_DOCKER_CALLED"; fi\n'
+        'if [ -n "${FAKE_DOCKER_CALLS:-}" ]; then echo "$*" >> "$FAKE_DOCKER_CALLS"; fi\n'
+        'if [ "$1" = manifest ]; then\n'
+        '  [ -z "${FAKE_DOCKER_HANG:-}" ] || exec sleep 60\n'
+        '  answer="${FAKE_DOCKER_MANIFESTS:-/nonexistent}/$(printf %s "$3" | tr "/:@" ___).json"\n'
+        '  [ -f "$answer" ] || { echo "manifest unknown: $3" >&2; exit 1; }\n'
+        '  cat "$answer"; exit 0\n'
+        "fi\n"
         '[ "$1" = ps ] && { [ -z "${FAKE_DOCKER_PS:-}" ] || cat "$FAKE_DOCKER_PS"; exit 0; }\n'
         '[ "$1" = info ] && exit 0\n'
         '[ "$1" = inspect ] && { cat "${FAKE_DOCKER_INSPECT:-/nonexistent}"; exit; }\n'
