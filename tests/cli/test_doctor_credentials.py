@@ -15,6 +15,8 @@ from kraft import client, doctor
 # `app` fixture: tests/conftest.py. It wires client.transport.http() to the ASGI app.
 
 _OWN = {"env": "MY_KEY", "inject": [{"domain": "a.io", "header": "x-key"}]}
+# Its value is the daemon's under `source` alone, as a launch reads it.
+_BOUND = _OWN | {"source": "BOUND_KEY"}
 
 
 @pytest.mark.parametrize(
@@ -40,8 +42,35 @@ _OWN = {"env": "MY_KEY", "inject": [{"domain": "a.io", "header": "x-key"}]}
             "OPENAI_API_KEY is managed but no harness declares how to inject it, so it is "
             "only a sentinel; claude declares ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN; ",
         ),
+        ([_BOUND], {"env_passthrough": ["MY_KEY"]}, {"BOUND_KEY": "k"}, True, "MY_KEY on a.io"),
+        (
+            [_BOUND],
+            {"env_passthrough": ["MY_KEY"]},
+            {"MY_KEY": "k"},
+            False,
+            "no value for BOUND_KEY",
+        ),
+        ([_BOUND], {}, {"BOUND_KEY": ""}, False, "no value for BOUND_KEY"),
+        (
+            [_OWN | {"phase": ["runtime"]}],
+            {"env": {"MY_KEY": "k"}},
+            {},
+            True,
+            "MY_KEY (runtime only) on a.io",
+        ),
     ],
-    ids=["none", "named", "no-value", "value-from-repo-env", "its-own", "declared-nowhere"],
+    ids=[
+        "none",
+        "named",
+        "no-value",
+        "value-from-repo-env",
+        "its-own",
+        "declared-nowhere",
+        "bound-under-source",
+        "bound-under-env-only",
+        "bound-empty-source",
+        "phased",
+    ],
 )
 def test_doctor_lists_a_sandboxs_proxy_managed_credentials(
     app, tmp_path, monkeypatch, credentials, repo, daemon, ok, said
@@ -49,12 +78,19 @@ def test_doctor_lists_a_sandboxs_proxy_managed_credentials(
     """Each managed name with its hosts, every other name a harness declares
     as passing through, a failure for a managed name with no value where
     its launch would read one (`worker_env`, doctor's own env for the
-    daemon's), and a warning for a name only, which no harness declares
-    (codex's is CODEX_API_KEY, not OPENAI_API_KEY)."""
+    daemon's; a bound one under its `source` alone), and a warning for a
+    name only, which no harness declares (codex's is CODEX_API_KEY, not
+    OPENAI_API_KEY)."""
     monkeypatch.setattr(
         "kraft.worker.backends.docker.DockerBackend.health", AsyncMock(return_value=(True, "ok"))
     )
-    for name in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MY_KEY", "OPENAI_API_KEY"):
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "MY_KEY",
+        "OPENAI_API_KEY",
+        "BOUND_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
     for name, value in daemon.items():
         monkeypatch.setenv(name, value)

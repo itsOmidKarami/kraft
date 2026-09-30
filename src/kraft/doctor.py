@@ -683,9 +683,9 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
     hosts (as each harness resolves them), and which
     names a harness declares still pass through. A managed name with no value
     fails: the proxy refuses every request that should carry it. The value is
-    looked for as a launch reads it, `worker_env` of this entry, in doctor's
-    own environment, which is the daemon's when both were started from the
-    same shell."""
+    looked for as a launch reads it, `worker_env` of this entry (or, for one
+    bound to a `source`, that name alone), in doctor's own environment, which
+    is the daemon's when both were started from the same shell."""
     if not policy.credentials:
         return None
     harnesses = harness.load(None).valid.values()
@@ -695,9 +695,21 @@ def _credential_check(repo: config.RepoEntry, policy) -> dict | None:
             hosts[cred.env].update(rule.domain for rule in cred.inject)
     passing = sorted({c.env for h in harnesses for c in h.credentials} - hosts.keys())
     environ = worker_env(repo)
-    missing = [name for name in hosts if name not in environ]
+    # A bound credential's value is the daemon's under its `source` alone.
+    missing = list(
+        dict.fromkeys(
+            c.source or c.env
+            for c in policy.credentials
+            # Set but empty is missing too: the launch refuses it the same.
+            if (not os.environ.get(c.source) if c.source else c.env not in environ)
+        )
+    )
+    phases: dict[str, set[str]] = {c.env: set() for c in policy.credentials}
+    for c in policy.credentials:
+        phases[c.env].update(c.phases())
+    only = {name: f" ({p} only)" for name, ps in phases.items() if len(ps) == 1 for p in ps}
     detail = "proxy-managed: " + "; ".join(
-        f"{name} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
+        f"{name}{only.get(name, '')} on {', '.join(sorted(on)) or 'no host (sentinel only)'}"
         for name, on in hosts.items()
     )
     if passing:

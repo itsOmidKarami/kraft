@@ -64,27 +64,37 @@ def test_the_shipped_harnesses_declare_how_their_keys_are_proxy_managed():
 
 def test_a_repository_names_a_credential_and_its_harness_says_how():
     """Ruling E2: `- env: NAME` takes the harness's declaration, anything it
-    sets itself winning; a repository's own credential stands as written;
-    one this harness does not declare still keeps its value out, a sentinel
-    in its place and nothing injecting it."""
+    sets itself winning; one this harness does not declare still keeps its
+    value out, a sentinel in its place and nothing injecting it."""
     claude = harness.load(None).valid["claude"]
-    # Named in full, so the repository's own even where claude has one.
-    own = policy.SandboxCredential(
-        env="CLAUDE_CODE_OAUTH_TOKEN",
-        inject=[{"domain": "registry.example.com", "header": "authorization"}],
-    )
     wanted = (
         policy.SandboxCredential(env="ANTHROPIC_API_KEY", sentinel="mine"),
-        own,
         policy.SandboxCredential(env="OPENAI_API_KEY"),
     )
 
     managed = claude.managed_credentials(wanted)
 
     assert managed[0] == claude.credentials[0].model_copy(update={"sentinel": "mine"})
-    assert managed[1] == own.model_copy(update={"sentinel": policy.DEFAULT_SENTINEL})
-    assert (managed[2].sentinel, managed[2].inject) == (policy.DEFAULT_SENTINEL, ())
+    assert (managed[1].sentinel, managed[1].inject) == (policy.DEFAULT_SENTINEL, ())
     assert claude.managed_credentials(None) == ()
+
+
+def test_a_credential_with_inject_rules_takes_its_harness_sentinel():
+    """A repository's own credential, saying where it goes, stands as
+    written but for a sentinel it does not name: its harness's declared one
+    for that env name, else `DEFAULT_SENTINEL`."""
+    claude = harness.load(None).valid["claude"]
+    [declared] = [c for c in claude.credentials if c.env == "CLAUDE_CODE_OAUTH_TOKEN"]
+    registry = [{"domain": "registry.example.com", "header": "authorization"}]
+    own = policy.SandboxCredential(env="CLAUDE_CODE_OAUTH_TOKEN", inject=registry)
+    other = policy.SandboxCredential(env="REG_TOKEN", inject=registry)
+
+    managed = claude.managed_credentials((own, other))
+
+    assert managed == (
+        own.model_copy(update={"sentinel": declared.sentinel}),
+        other.model_copy(update={"sentinel": policy.DEFAULT_SENTINEL}),
+    )
 
 
 def test_claude_declares_the_leaked_claude_isms():
@@ -304,6 +314,16 @@ _HOOK_CAPS = (
             " inject: [{domain: y.io, header: k}]}]\n"
             "capabilities:\n" + _HOOK_CAPS,
             "credential 'K' goes to 'y.io', which is not one of its 'network.requires'",
+        ),
+        *(
+            (
+                "id: x\nkind: cli\ncommand: [x]\nnetwork: { requires: [x.io] }\n"
+                "credentials: [{env: K, service: s, sentinel: v,"
+                f" inject: [{{domain: x.io, header: k}}], {field}}}]\n"
+                "capabilities:\n" + _HOOK_CAPS,
+                "credential 'K' cannot set 'phase' or 'source'",
+            )
+            for field in ("phase: [runtime]", "source: OTHER_KEY")
         ),
         (
             "id: x\nkind: cli\ncommand: [x]\nmin_version: '2.0'\ncapabilities:\n" + _HOOK_CAPS,

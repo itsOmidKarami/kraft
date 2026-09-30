@@ -103,3 +103,51 @@ def test_a_narrower_layer_cannot_change_inherited_credentials(credentials):
     managed = instance.apply_template_override({"sandbox": _SANDBOX})
     with pytest.raises(policy.PolicyError, match="sandbox"):
         managed.apply_template_override({"sandbox": changed})
+
+
+def _phased(phase, env="REGISTRY_TOKEN") -> dict:
+    return {**_OWN, "env": env, **({"phase": phase} if phase else {})}
+
+
+def test_a_phased_credential_needs_its_host_allowed_in_each_phase():
+    """credential@1: an inject domain is allowed in the phase that grants
+    it. The runtime list alone names this host, so a credential scoped to
+    both phases is refused, and one scoped to `runtime` loads."""
+    policy.SandboxPolicy.model_validate(_with(credentials=[_phased(["runtime"])]))
+    with pytest.raises(ValidationError, match="does not allow by name in its phase install"):
+        policy.SandboxPolicy.model_validate(_with(credentials=[_phased(["install", "runtime"])]))
+
+
+def test_a_phase_has_one_way_to_be_written():
+    """Sorted and unique: a policy is hashed and compared whole, so two
+    spellings of one scope must not differ."""
+    a, b = (
+        policy.SandboxCredential(**_phased(p))
+        for p in (["runtime", "install"], ["install", "install", "runtime"])
+    )
+    assert a == b and a.phase == ("install", "runtime")
+    assert policy.SandboxCredential(**_phased(["install", "install"])).phase == ("install",)
+
+
+@pytest.mark.parametrize("second_env", ["REGISTRY_TOKEN", "OTHER"], ids=["env", "header"])
+@pytest.mark.parametrize(
+    ("first", "second", "loads"),
+    [
+        (["install"], ["runtime"], True),
+        (["install", "runtime"], ["runtime"], False),
+        (None, ["install"], False),
+    ],
+    ids=["disjoint-loads", "overlapping-refused", "unphased-overlaps"],
+)
+def test_one_name_in_two_phases(first, second, loads, second_env):
+    """credential@1 allows one service in two entries whose phases do not
+    overlap: the same `env`, or the same header on the same host, is refused
+    only where both entries are in one phase (an unphased entry is in both)."""
+    both = {"install": _NETWORK["runtime"], "runtime": _NETWORK["runtime"]}
+    data = _with(network=both, credentials=[_phased(first), _phased(second, second_env)])
+    if loads:
+        policy.SandboxPolicy.model_validate(data)
+    else:
+        expect = "listed twice" if second_env == "REGISTRY_TOKEN" else "two credentials set header"
+        with pytest.raises(ValidationError, match=expect):
+            policy.SandboxPolicy.model_validate(data)

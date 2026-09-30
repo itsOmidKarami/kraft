@@ -514,7 +514,8 @@ def _launch_environ(row: dict, launch_factory) -> dict[str, str]:
     with (`row['repo']`), so a value only that repo's `env:` or
     `env_passthrough` supplied is found again. An entry since disconnected
     or unreadable supplies none: its credentials are refused, never guessed
-    from the daemon's own env."""
+    from the daemon's own env. A bound one (`source`) never read this env:
+    it is read again from the daemon's under its source, as it launched."""
     if "repo" not in row:
         return worker_env(None)  # launched with no repo entry
     try:

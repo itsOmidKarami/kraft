@@ -337,6 +337,13 @@ class Harness:
                     f"{where}: credential {cred.env!r} needs a 'service', a 'sentinel' "
                     "and where to 'inject' it"
                 )
+            # A repository scopes and binds its own credentials; a harness's
+            # would merge into an entry naming just `env` and redirect it.
+            if cred.phase is not None or cred.source is not None:
+                raise HarnessError(
+                    f"{where}: credential {cred.env!r} cannot set 'phase' or 'source'; "
+                    "a repository's sandbox credentials do"
+                )
             for rule in cred.inject:
                 if rule.domain not in requires:
                     raise HarnessError(
@@ -401,22 +408,29 @@ class Harness:
 
 
 def manage(
-    wanted: tuple[SandboxCredential, ...] | None, declared: tuple[SandboxCredential, ...] = ()
+    wanted: tuple[SandboxCredential, ...] | None,
+    declared: tuple[SandboxCredential, ...] = (),
+    phase: str | None = None,
 ) -> tuple[SandboxCredential, ...]:
     """A sandbox's `credentials` as a launch manages them, each with a
     sentinel: an entry naming just `env` takes the `declared` one of that
-    name (its harness's), its own fields winning. One not declared -- or
-    any, for a launch with no harness (a setup command) -- still holds only
-    a sentinel -- the repository said its value stays out of the container
-    -- with nothing injecting it unless it says where itself."""
+    name (its harness's), its own fields winning; one saying where it goes
+    takes only the declared sentinel, when it names none. One not declared
+    -- or any, for a launch with no harness (a setup command) -- still holds
+    only a sentinel -- the repository said its value stays out of the
+    container -- with nothing injecting it unless it says where itself.
+    Given a launch's `phase`, an entry scoped to other phases is left out."""
     by_env = {c.env: c for c in declared}
     managed = []
     for entry in wanted or ():
-        base = by_env.get(entry.env) if not entry.inject else None
-        if base is not None:
+        if phase is not None and phase not in entry.phases():
+            continue
+        base = by_env.get(entry.env)
+        if base is not None and not entry.inject:
             entry = base.model_copy(update={k: getattr(entry, k) for k in entry.model_fields_set})
         if entry.sentinel is None:
-            entry = entry.model_copy(update={"sentinel": DEFAULT_SENTINEL})
+            sentinel = base.sentinel if base is not None else None
+            entry = entry.model_copy(update={"sentinel": sentinel or DEFAULT_SENTINEL})
         managed.append(entry)
     return tuple(managed)
 

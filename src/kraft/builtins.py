@@ -813,7 +813,7 @@ async def run_setup_command(
     if not cmd:
         return ""
     client_env = worker_env(repo_entry)
-    sentinels: dict[str, str] = {}
+    withheld: set[str] = set()
     if sandbox and checkout is None:
         # Fails closed for a caller that forgot, as `run_task` does: a member
         # left unmounted has a `.git` the container can rewrite (Kraft-ju36l).
@@ -834,9 +834,14 @@ async def run_setup_command(
         backend = _backends.for_sandbox(sandbox)
         # No harness here: an entry naming just `env` holds its sentinel
         # and nothing injects it; a repository's own credential is injected
-        # where the install phase names its host.
-        credentials = _harness.manage(_harness.sandbox_credentials(sandbox))
+        # where the install phase names its host. One scoped to `runtime`
+        # alone is not here at all, and its value stays out all the same.
+        # A bound credential's `source` is withheld as its `env` is: it holds
+        # the daemon's real value under that name.
+        every = _harness.sandbox_credentials(sandbox)
+        credentials = _harness.manage(every, phase="install")
         sentinels = {c.env: c.sentinel for c in credentials}
+        withheld = {n for c in every for n in (c.env, c.source) if n}
         try:
             kraft_ca = _ca.ensure_ca(RunDirs(run_base))[0] if credentials else None
             ca_bundle = await backend.prepare(sandbox, kraft_ca=kraft_ca)
@@ -905,7 +910,7 @@ async def run_setup_command(
             subprocess.run,
             **run,
             # A managed credential's value is the egress proxy's alone.
-            env={k: v for k, v in client_env.items() if k not in sentinels},
+            env={k: v for k, v in client_env.items() if k not in withheld},
             capture_output=True,
             text=True,
         )

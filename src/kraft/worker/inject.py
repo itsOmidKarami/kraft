@@ -56,6 +56,7 @@ What holds, and why:
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import ssl
 from collections.abc import Iterable, Mapping
@@ -90,6 +91,9 @@ class InjectRule:
     format: str = "%s"
     #: The daemon's own value; None when it has none. In memory only.
     value: str | None = field(default=None, repr=False, compare=False)
+    #: The daemon variable a bound credential's value is read from
+    #: (`SandboxCredential.source`); None reads the worker env's `env`.
+    source: str | None = None
 
     def carrying(self, value: str) -> str:
         return self.format.replace("%s", value, 1)
@@ -102,16 +106,27 @@ class InjectRule:
             "header": self.header,
             "sentinel": self.sentinel,
             "format": self.format,
+            **({"source": self.source} if self.source else {}),
         }
 
     @classmethod
     def from_json(cls, data: dict, environ: Mapping[str, str]) -> InjectRule:
-        return cls(**data, value=environ.get(data["env"]))
+        """Read again as the launch read it: `source` from the daemon's
+        own env, else `env` from `environ` (the launch's worker env)."""
+        return cls(**data, value=_value(data["env"], data.get("source"), environ))
+
+
+def _value(env: str, source: str | None, environ: Mapping[str, str]) -> str | None:
+    """A bound credential's value is the daemon's under `source` alone,
+    never the worker env's, and set but empty is none; an unbound one is
+    `environ`'s under `env`."""
+    return (os.environ.get(source) or None) if source else environ.get(env)
 
 
 def rules(credentials: Iterable, environ: Mapping[str, str]) -> tuple[InjectRule, ...]:
     """One rule per place each managed credential (`SandboxCredential`,
-    its sentinel set) goes, its value `environ`'s."""
+    its sentinel set) goes, its value `environ`'s, or the daemon's under
+    its `source`."""
     return tuple(
         InjectRule(
             cred.env,
@@ -119,7 +134,8 @@ def rules(credentials: Iterable, environ: Mapping[str, str]) -> tuple[InjectRule
             rule.header.lower(),
             cred.sentinel,
             rule.format or "%s",
-            environ.get(cred.env),
+            _value(cred.env, cred.source, environ),
+            cred.source,
         )
         for cred in credentials
         for rule in cred.inject

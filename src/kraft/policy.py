@@ -886,6 +886,24 @@ class SandboxCredential(BaseModel):
     #: harness's, else `DEFAULT_SENTINEL`.
     sentinel: StrictStr | None = Field(default=None, min_length=1)
     inject: tuple[CredentialInject, ...] = Field(default=(), strict=False)
+    #: The phases whose launches get this credential: the setup command
+    #: (`install`), an agent session (`runtime`). Unset: both. A launch in
+    #: another phase gets neither its sentinel nor its value.
+    phase: tuple[Literal["install", "runtime"], ...] | None = Field(
+        default=None, min_length=1, strict=False
+    )
+    #: The daemon's own variable the value is read from (`os.environ`),
+    #: never the worker env. Unset: the worker env's `env`.
+    source: Annotated[StrictStr, AfterValidator(_env_name)] | None = None
+
+    @field_validator("phase")
+    @classmethod
+    def _one_way_to_write_a_phase(cls, phase):
+        """Sorted and unique."""
+        return tuple(sorted(set(phase))) if phase else phase
+
+    def phases(self) -> tuple[str, ...]:
+        return self.phase or ("install", "runtime")
 
     @model_serializer(mode="wrap")
     def _dump(self, handler) -> dict:
@@ -964,26 +982,31 @@ class SandboxPolicy(BaseModel):
             return self
         if self.network is None:
             raise ValueError("'credentials' needs 'network': only the egress proxy injects one")
-        seen: set[str] = set()
-        targets: set[tuple[str, str]] = set()
+        # Per phase: credential@1 lets one name serve two entries whose
+        # phases do not overlap. An unphased entry is in both.
+        seen: set[tuple[str, str]] = set()
+        targets: set[tuple[str, str, str]] = set()
         for cred in self.credentials:
-            if cred.env in seen:
-                raise ValueError(f"credential {cred.env!r} is listed twice")
-            seen.add(cred.env)
+            phases = cred.phases()
+            if any((cred.env, p) in seen for p in phases):
+                raise ValueError(f"credential {cred.env!r} is listed twice in one phase")
+            seen.update((cred.env, p) for p in phases)
             for rule in cred.inject:
-                if not any(
-                    _allows(p, rule.domain) for p in (self.network.install, self.network.runtime)
-                ):
+                # credential@1: a phased credential needs its host in every
+                # phase it lists; an unphased one in either.
+                allowed = [_allows(getattr(self.network, p), rule.domain) for p in phases]
+                if not (all(allowed) if cred.phase else any(allowed)):
+                    where = f"in its phase {', '.join(phases)}" if cred.phase else "in either phase"
                     raise ValueError(
                         f"credential {cred.env!r} goes to {rule.domain!r}, which 'network' "
-                        "does not allow by name in either phase"
+                        f"does not allow by name {where}"
                     )
                 target = (rule.domain.lower(), rule.header.lower())
-                if target in targets:
+                if any((*target, p) in targets for p in phases):
                     raise ValueError(
                         f"two credentials set header {rule.header!r} on {rule.domain!r}"
                     )
-                targets.add(target)
+                targets.update((*target, p) for p in phases)
         return self
 
     @model_serializer(mode="wrap")
