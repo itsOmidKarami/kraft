@@ -60,6 +60,19 @@ async def run_checks() -> list[dict]:
     """Every check, in the order a human debugs: is it up, is it healthy, is it
     configured, can it launch an agent, is its state on disk still coherent."""
     checks: list[dict] = []
+    run_dir = Path(os.environ.get("KRAFT_RUN_DIR") or default_run_dir())
+    if not run_dir.is_dir():
+        # Said once, up front, so the FAILs below read as "not started yet"
+        # rather than a broken install.
+        checks.append(
+            _check(
+                "home",
+                True,
+                f"{run_dir} does not exist: no server has run on this home, so the "
+                "rows it seeds fail until `kraft` has started once",
+                warn=True,
+            )
+        )
     try:
         health = await client.health()
         checks.append(_check("server", True, client.base_url()))
@@ -322,7 +335,12 @@ def _agent_checks() -> list[dict]:
     try:
         table = HarnessProfileTable.from_yaml(live / "harnesses.yaml", harnesses=harnesses.valid)
     except TemplateEnvironmentError as exc:
-        checks.append(_check("harnesses.yaml", False, str(exc)))
+        detail = (
+            f"{live} does not exist — start `kraft` once to seed it"
+            if not live.is_dir()
+            else str(exc)
+        )
+        checks.append(_check("harnesses.yaml", False, detail))
         table = HarnessProfileTable(profiles={})
     profiles = table.profiles
     for pid in sorted(_selected_profiles(live)):
