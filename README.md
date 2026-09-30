@@ -72,7 +72,7 @@ together is in
 - **`git`.**
 - **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
   already on your machine, or fetches one. Or Homebrew on macOS.
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, installed
+- **[Claude Code](https://code.claude.com/docs)**, installed
   and logged in. Every agent task in the shipped chains runs on it.
 - **`gh` or `glab`**, logged in, for the nodes that open and merge the pull
   request on GitHub or GitLab.
@@ -124,10 +124,12 @@ asks. It needs the server running:
 
 To clear gates and review diffs from VS Code, install the
 [Kraft extension](https://itsomidkarami.github.io/kraft/guides/vscode) from the
-VS Code Marketplace (publisher `kraft-sdlc`), or download `kraft-<version>.vsix`
-from a [GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
-`code --install-extension kraft-<version>.vsix`. Open VSX (VSCodium, Cursor)
-is coming; until then, use the `.vsix`.
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=kraft-sdlc.kraft),
+or from [Open VSX](https://open-vsx.org/extension/kraft-sdlc/kraft) in VSCodium
+and Cursor (publisher `kraft-sdlc` on both). You can also download
+`kraft-<version>.vsix` from a
+[GitHub release](https://github.com/itsOmidKarami/kraft/releases) and run
+`code --install-extension kraft-<version>.vsix`.
 
 Every install path, connecting your agent, and updating with
 `kraft admin update` are in the
