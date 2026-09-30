@@ -205,8 +205,9 @@ def test_only_a_key_with_a_body_is_bound(text):
 
 def test_kl_parses_on_the_oldest_supported_python():
     """kl.py ships into repos with whatever python3 they have, and the plugin's
-    own CI matrix pins the floor at 3.10. The Kraft monorepo requires >=3.14, so
-    `ruff format` will happily rewrite this file into syntax the floor cannot
-    parse -- PEP 758's unparenthesized `except A, B:` is the one that bit."""
+    own CI matrix pins the floor at 3.10. The Kraft monorepo requires >=3.12, so
+    nothing but this test stops a 3.11-or-later construct (PEP 758's
+    unparenthesized `except A, B:` bit once) reaching a file the floor cannot
+    parse."""
     source = (PLUGIN / "kl.py").read_text()
     ast.parse(source, feature_version=(3, 10))

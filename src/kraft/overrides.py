@@ -125,7 +125,7 @@ def harness_refusal(node, fields: dict) -> str | None:
             continue
         try:
             h = harnesses.valid[_agent.harness_profile(resolved.task.harness, harnesses).provider]
-        except _agent.HarnessUnavailable, KeyError:
+        except (_agent.HarnessUnavailable, KeyError):
             continue
         for key, value in asked.items():
             capability = "model" if key == "escalate_model" else key

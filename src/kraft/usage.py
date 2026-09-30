@@ -106,7 +106,7 @@ def _prices() -> dict:
     try:
         text = importlib.resources.files("kraft").joinpath("prices.json").read_text()
         return json.loads(text).get("models", {})
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -920,11 +920,11 @@ def _export_opencode(session_id: str) -> Usage | None:
             text=True,
             timeout=30,
         )
-    except OSError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     try:
         info = json.loads(done.stdout).get("info") if done.returncode == 0 else None
-    except json.JSONDecodeError, AttributeError:
+    except (json.JSONDecodeError, AttributeError):
         return None
     if not isinstance(info, dict):
         return None
@@ -991,7 +991,7 @@ def _rate_limit_opencode(log_path: Path) -> RateLimitInfo | None:
         try:
             retry_after = float(err["data"]["responseHeaders"]["retry-after"])
             resets_at = obj["timestamp"] / 1000 + retry_after
-        except KeyError, TypeError, ValueError:
+        except (KeyError, TypeError, ValueError):
             resets_at = None
         return RateLimitInfo(
             rate_limit_type=err.get("name"),
@@ -1091,7 +1091,7 @@ def read(log_path: Path, result_path: Path, reader: str | None = None) -> Usage 
     """
     try:
         result = json.loads(result_path.read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         result = None
     if isinstance(result, dict):
         u = from_envelope(result)

@@ -77,7 +77,7 @@ async def search(q: str, *, cwd: str | None = None, limit: int = 5) -> list[dict
             capture_output=True,
             text=True,
         )
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return []
     if proc.returncode != 0 or "[" not in proc.stdout:
         return []
@@ -113,7 +113,7 @@ async def ready(*, cwd: str | None = None) -> list[dict]:
             capture_output=True,
             text=True,
         )
-    except OSError, ValueError:
+    except (OSError, ValueError):
         # OSError: bd is not installed / cwd does not exist. ValueError: text=True
         # decodes stdout as UTF-8, which raises UnicodeDecodeError (a ValueError
         # subclass) on a bd that emits invalid bytes.
@@ -165,7 +165,7 @@ async def blocked_by(bead_ids: list[str], *, cwd: str | None = None) -> list[str
             capture_output=True,
             text=True,
         )
-    except OSError, ValueError:
+    except (OSError, ValueError):
         # OSError: bd is not installed / cwd does not exist. ValueError:
         # text=True decodes stdout as UTF-8, which raises UnicodeDecodeError
         # (a ValueError subclass) on a bd that emits invalid bytes. Same

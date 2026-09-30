@@ -6,8 +6,13 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 - [just](https://just.systems), the command runner every step below uses:
   `brew install just`, `cargo install just`, or `uv tool install rust-just`.
-- [uv](https://docs.astral.sh/uv/). If you don't have Python 3.14
-  (`requires-python` in `pyproject.toml`), the first `uv sync` downloads it.
+- [uv](https://docs.astral.sh/uv/). If you don't have a supported Python
+  (3.12 or newer, `requires-python` in `pyproject.toml`), the first `uv sync`
+  downloads one. CI tests 3.12, 3.13 and 3.14; `just test-py 3.12` reproduces
+  one version's failure locally. Code must run on 3.12: no syntax or stdlib
+  API added later (3.13's `Path.read_text(newline=)`, 3.14's t-strings,
+  unparenthesized `except A, B:`), and every module under `src/` starts with
+  `from __future__ import annotations`, which lint enforces.
 - git.
 - Node 22 with npm, for the frontend, the docs site and the VS Code extension.
   CI builds on Node 22; no `package.json` sets an `engines` floor, so use the
@@ -165,7 +170,7 @@ order, on the full suite.
 | CI job | What it runs | Run it locally with |
 |---|---|---|
 | `lint` | ruff check and format, `dev/check_docs_coverage.py`, `dev/check_tests.py` | `just ci-test`, or `just lint` and `just check-tests` |
-| `test` | the unit tier (`-m "not e2e"`), then `python -m kraft.intent` | `just ci-test`, or `just test` and `just intent` |
+| `test (python 3.12 / 3.13 / 3.14)` | the unit tier (`-m "not e2e"`), then `python -m kraft.intent`, on each supported Python | `just ci-test`, or `just test` and `just intent`; `just test-py 3.12` for another version |
 | `e2e (real CLIs)` | the e2e tier against real `bd`, docker and podman | `just test -m e2e --no-testmon`; a test whose CLI is missing skips |
 | `kraft-lite on python 3.10 / 3.14` | `plugins/kraft-lite/tests` with nothing installed but pytest | `just test plugins/kraft-lite/tests` |
 | `frontend` | `npm ci`, `npm run build` (which typechecks), `npm test` | `just test-ui` |

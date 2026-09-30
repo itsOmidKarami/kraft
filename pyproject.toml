@@ -6,7 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Omid Karami", email = "itsomidkarami@gmail.com" }]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 # No License :: classifier: setuptools>=77 refuses one next to the PEP 639
 # `license` expression above, which is what PyPI shows.
 classifiers = [
@@ -15,6 +15,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
 ]
@@ -50,7 +52,7 @@ vector = ["fastembed>=0.8.1"]
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "ruff>=0.16.9",  # PEP 758 aware; keep .pre-commit-config.yaml rev in step
+    "ruff>=0.16.9",  # keep .pre-commit-config.yaml rev in step
     "pre-commit>=4",
     "pytest-testmon>=2.2.0",
     "pytest-xdist>=3.6",
@@ -105,7 +107,7 @@ anyio_mode = "auto"
 # exception, hence the second line (pinned in tests/test_suite_config.py).
 filterwarnings = [
     "error:coroutine .* was never awaited:RuntimeWarning",
-    "error:Exception ignored while finalizing coroutine:pytest.PytestUnraisableExceptionWarning",
+    "error:Exception ignored (in|while finalizing).*coroutine:pytest.PytestUnraisableExceptionWarning",
 ]
 markers = [
     "e2e(*clis): uses a real external CLI (bd, claude, ...) to check a contract; skips unless each named CLI is on PATH (claude also needs KRAFT_E2E=1)",
@@ -126,6 +128,17 @@ extend-exclude = ["docs", "docsite"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+# Python 3.14 evaluates annotations lazily, so a forward reference or a
+# TYPE_CHECKING-only name in an annotation works there and raises NameError at
+# import on 3.12 and 3.13. The future import makes every version behave like 3.14.
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+# The library only: tests never ship, and passed on 3.12 and 3.13 without it.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["I002"]
+"conftest.py" = ["I002"]
 
 [project.urls]
 Homepage = "https://itsomidkarami.github.io/kraft/"

@@ -3,10 +3,11 @@
 # behind. Values mirror the root config deliberately.
 line-length = 100
 
-# The monorepo requires Python >=3.14, but the published plugin must run on
+# The monorepo requires Python >=3.12, but the published plugin must run on
 # whatever python3 its host repo has, and .github/workflows/test.yml pins that
-# floor at 3.10. Without this, `ruff format` rewrites kl.py into 3.14-only
-# syntax (PEP 758 `except A, B:`) that the floor refuses to parse.
+# floor at 3.10. Without this, ruff would format and lint kl.py for 3.12 and
+# accept syntax (PEP 695 `type` aliases, nested f-string quotes) that the floor
+# refuses to parse.
 target-version = "py310"
 
 [lint]

@@ -69,6 +69,15 @@ def is_plugin_ref(value: str) -> bool:
     return not value.startswith(OWN_PLUGIN) and ":" in value
 
 
+def _is_file(path: Path) -> bool:
+    """`Path.is_file()`, but a name too long for the filesystem is "no such file"
+    on every Python: 3.14 answers False, 3.12 and 3.13 raise ENAMETOOLONG."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _local_path(skills_dir: Path | None, name: str, where: str) -> Path:
     if "/" in name or "\\" in name or name in ("", ".", "..") or name.startswith("."):
         raise SkillError(
@@ -77,10 +86,10 @@ def _local_path(skills_dir: Path | None, name: str, where: str) -> Path:
         )
     if skills_dir is not None:
         overlay = Path(skills_dir) / name / "SKILL.md"
-        if overlay.is_file():
+        if _is_file(overlay):
             return overlay
     bundled = BUNDLED / name / "SKILL.md"
-    if bundled.is_file():
+    if _is_file(bundled):
         return bundled
     looked = [str(bundled)]
     if skills_dir is not None:

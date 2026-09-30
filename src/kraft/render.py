@@ -43,7 +43,7 @@ def use_color(stream: TextIO | None = None) -> bool:
         return False
     try:
         return bool(stream.isatty())
-    except AttributeError, ValueError:
+    except (AttributeError, ValueError):
         return False
 
 

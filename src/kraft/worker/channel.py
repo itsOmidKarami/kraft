@@ -216,7 +216,7 @@ def tls_port(run_dirs) -> int | None:
     before it has ever started."""
     try:
         return int((run_dirs.ca / _PORT_FILE).read_text())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return None
 
 
@@ -229,7 +229,7 @@ def tls_listener_problem(run_dirs) -> str | None:
     if port is None or not ca_cert.is_file():
         return f"no egress TLS listener has started under {run_dirs.ca}"
     try:
-        context = ssl.create_default_context(cafile=ca_cert)
+        context = ca.strict(ssl.create_default_context(cafile=ca_cert))
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         with (
             socket.create_connection(("127.0.0.1", port), timeout=5) as raw,
@@ -258,8 +258,8 @@ class TLSListener:
 
     def _context(self) -> ssl.SSLContext:
         ca_cert, _ = ca.ensure_ca(self._run_dirs)
-        # The default context: VERIFY_X509_STRICT stays on.
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert)
+        # VERIFY_X509_STRICT stays on: the default context has it only from 3.13.
+        context = ca.strict(ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert))
         context.load_cert_chain(*ca.server_cert(self._run_dirs))
         context.verify_mode = ssl.CERT_REQUIRED
         context.minimum_version = ssl.TLSVersion.TLSv1_2

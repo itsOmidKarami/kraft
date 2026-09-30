@@ -172,7 +172,7 @@ def _head(repo: Path) -> str | None:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
         )
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):
         return None
     return out.stdout.strip()
 

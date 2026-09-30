@@ -300,7 +300,7 @@ def _selinux_enforcing() -> bool:
 def _run(*argv: str) -> str | None:
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
-    except OSError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout if done.returncode == 0 else None
 
@@ -449,7 +449,7 @@ def _probe_socket_channel(host: Runtime, relay_image: str) -> bool | None:
                 argv = _relabelled(argv)
             try:
                 done = subprocess.run(argv, capture_output=True, timeout=30)
-            except OSError, subprocess.TimeoutExpired:
+            except (OSError, subprocess.TimeoutExpired):
                 return None
     except OSError:
         return None
@@ -1120,7 +1120,7 @@ async def docker_call(
     overlays the client's own environment, for a bare `-e NAME` to copy."""
     try:
         cli = (await asyncio.to_thread(runtime)).cli
-    except ConfigError, OSError:
+    except (ConfigError, OSError):
         # A bad sandbox.yaml: best-effort calls stay quiet, and the launch
         # that needs the runtime says why.
         return None
@@ -1225,7 +1225,7 @@ async def missing_executable(
         return False
     try:
         host = await asyncio.to_thread(runtime)
-    except ConfigError, OSError:
+    except (ConfigError, OSError):
         return False
     env_args = [a for name in (env or {}) for a in ("-e", name)]
     probed = await docker_call(

@@ -319,7 +319,7 @@ def _task_cause(
     )
     try:
         text = Path(row["log_path"]).read_text() if row else ""
-    except OSError, ValueError:  # ValueError: UnicodeDecodeError
+    except (OSError, ValueError):  # ValueError: UnicodeDecodeError
         return ""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # The line Kraft appends after the task's own output when the sandbox's

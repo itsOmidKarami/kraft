@@ -198,7 +198,7 @@ def read_tasks(
     rel = next((a["path"] for a in attachments if a.get("kind") == "plan"), None)
     try:
         return parse_tasks((worktree / (rel or artifact_path("plan", work_item_id))).read_text())
-    except OSError, UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
         return []
 
 

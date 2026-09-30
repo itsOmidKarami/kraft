@@ -209,7 +209,7 @@ def _chain_template_files(directory: Path) -> dict[str, set[str]]:
     for path in sorted(chains.glob("*.yaml")):
         try:
             data = yaml.safe_load(path.read_text())
-        except OSError, ValueError, yaml.YAMLError:
+        except (OSError, ValueError, yaml.YAMLError):
             continue
         if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
             continue

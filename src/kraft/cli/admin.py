@@ -300,7 +300,7 @@ def _carry_policy(old: Path, new: Path, backup: Path) -> CarriedPolicy | None:
     try:
         legacy = yaml.safe_load(old.read_text())
         seed = yaml.safe_load(new.read_text()) or {}
-    except OSError, ValueError, yaml.YAMLError:
+    except (OSError, ValueError, yaml.YAMLError):
         return None
     if not isinstance(legacy, dict):
         return None
@@ -384,7 +384,7 @@ def _read_pid(path: Path) -> int | None:
     # milliseconds, not "always collides silently".
     try:
         pid = int(path.read_text())
-    except FileNotFoundError, ValueError:
+    except (FileNotFoundError, ValueError):
         return None
     try:
         os.kill(pid, 0)

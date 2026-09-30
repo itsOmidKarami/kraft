@@ -70,9 +70,8 @@ together is in
   supports launchd and systemd only. Windows is not supported, and WSL is
   untested.
 - **`git`.**
-- **[uv](https://docs.astral.sh/uv/) 0.9.0 or newer**, which fetches Python
-  3.14 for you. Older uv offers only a 3.14 release candidate and the install
-  fails; `uv self update` upgrades it. Or Homebrew on macOS.
+- **[uv](https://docs.astral.sh/uv/)**, which uses a Python 3.12 or newer
+  already on your machine, or fetches one. Or Homebrew on macOS.
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, installed
   and logged in. Every agent task in the shipped chains runs on it.
 - **`gh` or `glab`**, logged in, for the nodes that open and merge the pull

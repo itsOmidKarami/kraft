@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from kraft.executor.context import *  # noqa: F403
 from kraft.executor.dispatch import *  # noqa: F403
 from kraft.executor.entry import *  # noqa: F403

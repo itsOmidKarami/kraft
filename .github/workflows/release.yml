@@ -188,7 +188,9 @@ jobs:
           # clone, must not become a release. This is the guard that makes
           # `just bundle` living outside the build backend survivable.
           WHEEL=$(ls dist/*.whl)
-          uv venv /tmp/smoke
+          # On the floor Python (`requires-python`), not the newest: one wheel
+          # serves every version, so the oldest is the one it can break on.
+          uv venv --python 3.12 /tmp/smoke
           VIRTUAL_ENV=/tmp/smoke uv pip install "$WHEEL"
           /tmp/smoke/bin/kraft --version | grep -qF "${TAG#v}"
           # Ask the installed package where its bundle is, rather than guessing

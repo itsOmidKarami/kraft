@@ -344,7 +344,7 @@ class EgressProxy:
         """One accepted connection, start to finish; always closes `writer`."""
         try:
             await self._handle(reader, writer, session)
-        except OSError, asyncio.IncompleteReadError, TimeoutError:
+        except (OSError, asyncio.IncompleteReadError, TimeoutError):
             pass
         finally:
             writer.close()

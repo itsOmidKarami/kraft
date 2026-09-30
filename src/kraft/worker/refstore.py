@@ -104,7 +104,7 @@ def _meta_path(shadow: Path) -> Path:
 def _read_meta(shadow: Path) -> dict:
     try:
         data = json.loads(_meta_path(shadow).read_text())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 

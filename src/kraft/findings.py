@@ -167,7 +167,7 @@ def parse_counted(result_path: str | Path) -> tuple[list[Finding], int]:
     """
     try:
         data = json.loads(Path(result_path).read_text())
-    except OSError, json.JSONDecodeError, UnicodeDecodeError:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return [], 0
     if not isinstance(data, dict):
         return [], 0

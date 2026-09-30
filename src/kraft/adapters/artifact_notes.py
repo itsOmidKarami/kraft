@@ -8,6 +8,8 @@ the suite in verification, and there is no human in this session, so that is
 said here, where swapping the method cannot lose it (Kraft-35u4m.3, .4).
 """
 
+from __future__ import annotations
+
 NOTES = {
     "plan": (
         "\n\nThis plan is carried out by Kraft, not in this session: a later "

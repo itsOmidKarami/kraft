@@ -103,7 +103,7 @@ def _resolve_result_file(path: Path) -> str | None:
         return None
     try:
         raw = path.read_text().strip()
-    except OSError, UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
         # UnicodeDecodeError is a ValueError, not an OSError: a plugin that died
         # mid-write leaves bytes that are not valid UTF-8, and reading them must
         # fail the session rather than escape as a raw traceback.
@@ -130,7 +130,7 @@ def _read_str_field(path: Path, key: str) -> str | None:
     """
     try:
         data = json.loads(path.read_text())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
@@ -167,7 +167,7 @@ def read_suggested_action(path: Path) -> dict | None:
     """
     try:
         data = json.loads(path.read_text())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return None
     value = data.get("suggested_action") if isinstance(data, dict) else None
     if not isinstance(value, dict) or value.get("action") not in SUGGESTED_ACTIONS:
@@ -386,7 +386,7 @@ def _resolve_exit_file(path: Path) -> str | None:
     """
     try:
         raw = path.read_text().strip()
-    except OSError, UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
         return None
     if not raw.lstrip("-").isdigit():
         return None
@@ -471,7 +471,7 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
     """
     try:
         os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError, PermissionError:
+    except (ProcessLookupError, PermissionError):
         return
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
@@ -480,11 +480,11 @@ async def _kill_group(pgid: int, grace: float, reap: Callable[[], object] | None
             reap()
         try:
             os.killpg(pgid, 0)
-        except ProcessLookupError, PermissionError:
+        except (ProcessLookupError, PermissionError):
             return
     try:
         os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError, PermissionError:
+    except (ProcessLookupError, PermissionError):
         pass
 
 
