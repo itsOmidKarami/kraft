@@ -677,14 +677,14 @@ async def run_task(
     # docker client does not hold the value either (spec §6). Read off the
     # sandbox here, for every caller: a subprocess task or a test scope runs
     # code the worker wrote, as an agent does.
-    credentials = (
-        _harness.manage(_harness.sandbox_credentials(sandbox), declared)
-        if backend is not None
-        else ()
-    )
+    # One scoped to `install` alone is not here at all, and its value stays
+    # out all the same.
+    every = _harness.sandbox_credentials(sandbox) if backend is not None else ()
+    credentials = _harness.manage(every, declared, phase="runtime")
     sentinels = {c.env: c.sentinel for c in credentials}
+    withheld = {c.env for c in every}
     rules = _inject.rules(credentials, full_env)
-    full_env = {k: v for k, v in full_env.items() if k not in sentinels}
+    full_env = {k: v for k, v in full_env.items() if k not in withheld}
     refs: Sequence = ()
     root, members = checkout if checkout is not None else (Path(cwd), {})
     if backend is not None:
@@ -737,7 +737,7 @@ async def run_task(
             sandbox,
             cmd[0],
             # A managed name never crosses, not even into the probe.
-            {k: v for k, v in repo_entry.env.items() if k not in sentinels}
+            {k: v for k, v in repo_entry.env.items() if k not in withheld}
             if repo_entry is not None
             else None,
         ):

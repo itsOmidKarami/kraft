@@ -909,6 +909,26 @@
           "title": "Inject",
           "type": "array"
         },
+        "phase": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "install",
+                  "runtime"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase"
+        },
         "sentinel": {
           "anyOf": [
             {
@@ -934,6 +954,18 @@
           ],
           "default": null,
           "title": "Service"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
         }
       },
       "title": "SandboxCredential",
