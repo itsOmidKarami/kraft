@@ -135,8 +135,9 @@ def _gateway(cli: str) -> str:
 async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     """`launch(script, network)`: `script` run by `run_task` in a sandbox
     with `network`, beside a host server listening on every address
-    (`upstream=(host, port)` sends `host` to that port on this host instead, and
-    `image=` and the rest are `run_task`'s). Returns
+    (`upstream=(host, port)` sends `host` to that port on this host instead,
+    `sandbox=` replaces the one built from `network` and `image=`, and the
+    rest are `run_task`'s). Returns
     `(what the script wrote to ./out, the refusal events, the NetworkMode
     of the relay and of relay B while it ran, and the transport)`; a launch
     that never ran fails with its log."""
@@ -195,7 +196,16 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
 
-    async def go(script: str, network: dict, *, image=IMAGE, upstream=None, credentials=(), **kw):
+    async def go(
+        script: str,
+        network: dict,
+        *,
+        image=IMAGE,
+        upstream=None,
+        credentials=(),
+        sandbox=None,
+        **kw,
+    ):
         routed[:] = upstream or ("allowed.test", port)
         status = await sp.run_task(
             database,
@@ -206,7 +216,8 @@ async def launch(probed, runtime, database, short_run, tmp_path, monkeypatch):
             hook_point="on.test.run",
             cmd=["sh", "-c", script.format(gateway=_gateway(runtime.cli), port=port)],
             cwd=work,
-            sandbox={
+            sandbox=sandbox
+            or {
                 "kind": "docker",
                 "image": image,
                 "network": network,
