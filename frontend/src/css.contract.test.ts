@@ -74,17 +74,18 @@ describe("styles.css specificity", () => {
 
 // Kraft-9fj8: ES imports execute depth-first in source order, so App's whole
 // import graph (every views/**/*.css page stylesheet) runs before whatever
-// main.tsx imports after App. styles.css used to be one of those "after"
+// boot.tsx imports after App. styles.css used to be one of those "after"
 // imports, making it the last stylesheet bundled -- it won every equal-
 // specificity tie against a page rule, silently. jsdom can't exercise the
 // cascade itself (no layout engine), so this pins the one thing that can
-// regress it back: the source order of the two import lines.
-describe("main.tsx import order", () => {
+// regress it back: the source order of the two import lines. The shipped
+// boot moved from main.tsx to boot.tsx in UX V2 W0.
+describe("boot.tsx import order", () => {
   it("imports styles.css before App, so App's page stylesheets are bundled first", () => {
-    const main = readFileSync(join(here, "main.tsx"), "utf-8");
+    const boot = readFileSync(join(here, "boot.tsx"), "utf-8");
 
-    const stylesPos = main.indexOf('import "./styles.css"');
-    const appPos = main.indexOf('import { App } from "./App"');
+    const stylesPos = boot.indexOf('import "./styles.css"');
+    const appPos = boot.indexOf('import { App } from "./App"');
 
     expect(stylesPos).toBeGreaterThan(-1);
     expect(appPos).toBeGreaterThan(-1);
@@ -132,12 +133,38 @@ function cssFiles(dir: string): string[] {
 describe("CSS breakpoints (W2.1)", () => {
   it("uses only the 767 / 1023 / 1279 max-width queries and the 719 max-height query", () => {
     const bad: string[] = [];
-    for (const file of cssFiles(here)) {
+    const files = cssFiles(here);
+    // The new UI's stylesheets (UX V2) follow the same ladder.
+    expect(files.some((f) => f.startsWith(join(here, "ng") + "/"))).toBe(true);
+    for (const file of files) {
       // Comments may name old breakpoints; only real at-rules count.
       const css = readFileSync(file, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
       for (const m of css.matchAll(/@media\s*([^{]+)\{/g)) {
         const query = m[1].trim();
         if (!ALLOWED.has(query)) bad.push(`${file.slice(here.length + 1)}: @media ${query}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sourceFiles(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : [],
+  );
+}
+
+// UX V2 spec §3: the two UIs never share a page, so neither imports the
+// other's stylesheets -- a stray import would load one UI's CSS on the other.
+describe("CSS between the shipped UI and ng/", () => {
+  it("imports no ng/ CSS from outside ng/, and no outside CSS from ng/", () => {
+    const ng = join(here, "ng") + "/";
+    const bad: string[] = [];
+    for (const file of sourceFiles(here)) {
+      for (const m of readFileSync(file, "utf-8").matchAll(/import\s+(?:[^"';]*\sfrom\s+)?["']([^"']+\.css)["']/g)) {
+        if (!m[1].startsWith(".")) continue;
+        const target = join(dirname(file), m[1]);
+        if (file.startsWith(ng) !== target.startsWith(ng)) bad.push(`${file.slice(here.length + 1)}: ${m[1]}`);
       }
     }
     expect(bad).toEqual([]);
