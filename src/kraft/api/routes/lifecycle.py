@@ -17,6 +17,7 @@ from kraft import builtins as builtins_mod
 from kraft import escalate, events, executor, node_runs, store
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
+from kraft.adapters.forge.git import PUSHED_REFS
 from kraft.api import api_router, deps
 from kraft.api.routes import board, search
 from kraft.api.routes.search import OpenDocument
@@ -218,6 +219,8 @@ async def _remove_worktree(
         ["git", "worktree", "remove", "--force", str(worktree)],
         ["git", "worktree", "prune"],
         ["git", "branch", "-D", branch],
+        # What Kraft last pushed of it (`forge.git.push`); absent is fine.
+        ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
     ):
         done = await asyncio.to_thread(
             subprocess.run, args, cwd=repo, capture_output=True, text=True
@@ -241,7 +244,8 @@ async def _remove_worktree(
 
 
 async def _remove_member_branch(member: Path, branch: str) -> None:
-    """Prune `member`'s stale worktree entry and delete `branch` there."""
+    """Prune `member`'s stale worktree entry and delete `branch` there, and
+    Kraft's record of pushing it."""
     await asyncio.to_thread(
         subprocess.run, ["git", "worktree", "prune"], cwd=member, capture_output=True
     )
@@ -256,6 +260,12 @@ async def _remove_member_branch(member: Path, branch: str) -> None:
         )
         if done.returncode != 0:
             logger.warning("abandon %s in %s: %s", branch, member, done.stderr.strip())
+    await asyncio.to_thread(
+        subprocess.run,
+        ["git", "update-ref", "-d", f"{PUSHED_REFS}/{branch}"],
+        cwd=member,
+        capture_output=True,
+    )
 
 
 def _connected_members(st, row) -> list[Path]:

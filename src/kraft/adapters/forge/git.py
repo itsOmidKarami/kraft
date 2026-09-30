@@ -298,6 +298,10 @@ async def commit_stragglers(
     return True
 
 
+#: Where `push` records the commit it last pushed for each branch.
+PUSHED_REFS = "refs/kraft/pushed"
+
+
 async def push(repo: Path, branch: str) -> None:
     """`git push -u origin <branch>`, safe to call after a rebase.
 
@@ -309,20 +313,22 @@ async def push(repo: Path, branch: str) -> None:
     not to push (Kraft owns the push), but Kraft's own push then structurally
     cannot publish the very rebase it asked for (Kraft-z6i8).
 
-    `--force-with-lease=<branch>:<remote-sha>` against the remote-tracking
-    ref this worktree last observed publishes the rewritten branch while
-    still refusing if someone else moved the remote branch in between -- a
-    genuine concurrent-writer race stays an error instead of being silently
-    clobbered. The lease value is read locally, not re-fetched:
-    `refs/remotes/origin/<branch>` reflects whatever this worktree's own last
-    push or fetch saw, which is exactly the "last observed" state the lease
-    is meant to protect -- fetching right before the push would instead adopt
-    someone else's concurrent write as the expected value and defeat the
-    check entirely.
+    What origin has for the branch is read fresh (`ls-remote`, which leaves
+    the shared remote-tracking ref alone), and the push goes ahead only when
+    it loses nothing: origin has no such branch, origin's tip is already in
+    the local branch (a fast-forward, including a person's commits the
+    worktree has since pulled), or origin's tip is the commit Kraft itself
+    last pushed, recorded in `refs/kraft/pushed/<branch>` (a rebase of
+    Kraft's own work). Anything else is someone else's commits, and the push
+    refuses rather than overwrite them. The lease on the tip just read keeps
+    a write landing between the read and the push an error too.
 
-    No local remote-tracking ref at all -- the branch has never been pushed
-    from here -- needs no lease: origin has nothing yet for a lease to
-    protect, and a plain push already does the right thing.
+    The remote-tracking ref cannot stand in for Kraft's record: the worktree
+    shares refs with the connected checkout, so a person's plain `git fetch`
+    there moves it onto the commits they pushed to the MR branch, and a
+    lease on it then overwrote them (Kraft-m7ppj). A branch Kraft pushed
+    before the record existed falls back to the remote-tracking ref, as
+    every branch did before.
 
     Run with `sandbox.unhardened_git_env()`, not the inherited, pinned
     process env: by push time the commit is already made, so the pinned
@@ -331,19 +337,54 @@ async def push(repo: Path, branch: str) -> None:
     git-lfs's, from uploading the objects this push's pointers reference
     (Kraft-rki).
     """
-    remote_sha = git_read(
-        repo,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"refs/remotes/origin/{branch}",
-        expected_failure=True,
+    env = sandbox.unhardened_git_env()
+    pushed_ref = f"{PUSHED_REFS}/{branch}"
+    head = git_read(repo, "rev-parse", "--verify", f"refs/heads/{branch}")
+    # Where the push goes, which a `pushurl` or `pushInsteadOf` can make
+    # somewhere other than where `origin` fetches from.
+    target = git_read(repo, "remote", "get-url", "--push", "origin") or "origin"
+    listed = await run_git(repo, ["git", "ls-remote", target, f"refs/heads/{branch}"], env=env)
+    remote = listed.split()[0] if listed.split() else ""
+    ours = next(
+        (
+            sha
+            for ref in (pushed_ref, f"refs/remotes/origin/{branch}")
+            if (
+                sha := git_read(
+                    repo, "rev-parse", "--verify", "--quiet", ref, expected_failure=True
+                )
+            )
+        ),
+        None,
     )
+    # Empty output: every commit of `remote` is already in `head`. None: git
+    # does not even have `remote`, so it certainly is not.
+    if (
+        remote
+        and remote != ours
+        and git_read(repo, "rev-list", "-n1", remote, f"^{head}", expected_failure=True) != ""
+    ):
+        raise ForgeError(
+            f"origin/{branch} is at {remote[:12]}, which Kraft did not push and this "
+            "worktree does not have -- likely a person's commits on the merge request. "
+            f"Kraft will not overwrite them: pull them into the item's worktree (git pull "
+            f"--rebase origin {branch}), then retry"
+        )
+    if not remote and ours:
+        # Merged, or deleted with its merge request: recreating it would
+        # reopen work someone closed (Kraft-7itv).
+        raise ForgeError(
+            f"origin no longer has {branch}, which Kraft pushed; it was merged or "
+            "deleted. To publish this item's branch again, run `git update-ref -d "
+            f"{pushed_ref}` and `git update-ref -d refs/remotes/origin/{branch}` in "
+            "the item's worktree, then retry"
+        )
     args = ["git", "push"]
-    if remote_sha:
-        args.append(f"--force-with-lease={branch}:{remote_sha}")
+    if remote:
+        args.append(f"--force-with-lease={branch}:{remote}")
     args += ["-u", "origin", branch]
-    await run_git(repo, args, env=sandbox.unhardened_git_env())
+    await run_git(repo, args, env=env)
+    await run_git(repo, ["git", "update-ref", pushed_ref, head])
 
 
 async def _assert_pushed(repo: Path, branch: str) -> None:

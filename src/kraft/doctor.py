@@ -748,9 +748,35 @@ async def _repo_checks() -> list[dict]:
             checks.append(_forge_check(repo))
         if repo.steering and profiles is not None:
             checks.append(_steering_check(repo, profiles))
+    checks.extend(_duplicate_repo_checks(repos))
     if networked:
         checks.append(await _tls_listener_check())
     return checks or [_check("repos", True, "none connected")]
+
+
+def _duplicate_repo_checks(repos: list[config.RepoEntry]) -> list[dict]:
+    """One warning per pair of entries that are one repository, one a person
+    connected and the other a detected submodule checkout -- a member
+    connected on its own and its root's stub of it, from before connecting
+    learned to tell (Kraft-d7aj3). Two stubs under two roots, or two clones
+    a person connected, are deliberate. A workspace naming the
+    auto-connected one runs its member with none of the other's settings."""
+    ids = [
+        (repo, config.repository_identity(repo.path)) for repo in repos if Path(repo.path).is_dir()
+    ]
+    return [
+        _check(
+            f"duplicate {_label(a)}",
+            True,
+            f"{a.path} and {b.path} are one repository; keep the one you configured, "
+            "point any workspace member at its id, and disconnect the other",
+            warn=True,
+        )
+        for i, (a, ida) in enumerate(ids)
+        for b, idb in ids[i + 1 :]
+        if a.managed != b.managed
+        and (config.same_repository(ida, idb) or config.same_repository(idb, ida))
+    ]
 
 
 def _library_steering(live: Path) -> dict[str, str] | None:

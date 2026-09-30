@@ -21,6 +21,7 @@ from support.harness import make_repo, make_repo_with_submodule
 
 from kraft import builtins as kraft_builtins
 from kraft.adapters import forge
+from kraft.adapters.forge import git
 from kraft.worker import sandbox
 
 from .outputs import GLAB_MR_VIEW
@@ -55,7 +56,22 @@ def _repo_with_origin(tmp_path: Path) -> Path:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "the work")
     _git(repo, "push", "-q", "-u", "origin", BRANCH)
+    # What `forge.push` records, without its event loop: some callers are async.
+    _git(repo, "update-ref", f"{git.PUSHED_REFS}/{BRANCH}", "HEAD")
     return repo
+
+
+def _someone_else_pushes(tmp_path: Path) -> str:
+    """A commit on BRANCH pushed from another clone, as a person would; its sha."""
+    other_clone = tmp_path / "other-clone"
+    _git(tmp_path, "clone", "-q", "-b", BRANCH, str(tmp_path / "origin.git"), str(other_clone))
+    _git(other_clone, "config", "user.email", "t@t")
+    _git(other_clone, "config", "user.name", "t")
+    (other_clone / "elsewhere.txt").write_text("someone else's commit\n")
+    _git(other_clone, "add", "-A")
+    _git(other_clone, "commit", "-q", "-m", "a concurrent writer")
+    _git(other_clone, "push", "-q", "origin", BRANCH)
+    return _git(other_clone, "rev-parse", "HEAD").strip()
 
 
 @pytest.fixture
@@ -143,12 +159,24 @@ def test_merge_accepts_a_pushed_head_against_real_git(tmp_path, glab):
     assert glab.argv("glab")[:2] == ["mr", "merge"]
 
 
-def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, monkeypatch):
+@pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "pushed-before-the-record"])
+def test_push_publishes_a_rebased_branch_against_real_git(tmp_path, recorded):
     """Kraft-z6i8. A rebase moves the branch off of what origin last saw --
     here, `main` gaining a commit and the branch rebasing onto it -- and a
     plain `push -u` would die non-fast-forward. `forge.push`'s
-    `--force-with-lease` must still publish it."""
+    `--force-with-lease` must still publish it. A fix Kraft pushed before
+    the rebase is Kraft's own work, not someone else's, so it is no reason
+    to refuse. A branch pushed before Kraft kept that record is judged by
+    the remote-tracking ref instead, as every branch was."""
     repo = _repo_with_origin(tmp_path)
+    (repo / "fix.txt").write_text("a verify fix\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a verify fix")
+    if recorded:
+        asyncio.run(forge.push(repo, BRANCH))
+    else:
+        _git(repo, "update-ref", "-d", f"{git.PUSHED_REFS}/{BRANCH}")
+        _git(repo, "push", "-q", "origin", BRANCH)
     origin = tmp_path / "origin.git"
     main_clone = tmp_path / "main-clone"
     _git(tmp_path, "clone", "-q", str(origin), str(main_clone))
@@ -194,31 +222,72 @@ def test_push_still_runs_pre_push_under_harden_host_git_env(tmp_path, monkeypatc
     assert marker.exists()
 
 
-def test_push_refuses_when_the_remote_moved_under_the_lease(tmp_path):
-    """The other half of Kraft-z6i8's fix: a genuine concurrent writer --
-    someone else pushing to the same branch between this worktree's last
-    observation and its own push -- must still be rejected, not silently
-    clobbered."""
+@pytest.mark.parametrize("fetched", [False, True], ids=["unseen", "fetched-by-the-checkout"])
+def test_push_refuses_to_overwrite_someone_elses_commits(tmp_path, fetched):
+    """Kraft-z6i8's other half: a person's commits on the MR branch are
+    never overwritten by a rebased push. `fetched` is Kraft-m7ppj: a plain
+    `git fetch` in the connected checkout moves the remote-tracking ref the
+    worktree shares onto those commits, and a lease on that ref let the push
+    clobber them."""
     repo = _repo_with_origin(tmp_path)
-    origin = tmp_path / "origin.git"
-    other_clone = tmp_path / "other-clone"
-    _git(tmp_path, "clone", "-q", "-b", BRANCH, str(origin), str(other_clone))
-    _git(other_clone, "config", "user.email", "t@t")
-    _git(other_clone, "config", "user.name", "t")
-    (other_clone / "elsewhere.txt").write_text("someone else's commit\n")
-    _git(other_clone, "add", "-A")
-    _git(other_clone, "commit", "-q", "-m", "a concurrent writer")
-    _git(other_clone, "push", "-q", "origin", BRANCH)
-    # This worktree never saw that push -- its own remote-tracking ref is
-    # still the stale sha from `_repo_with_origin`'s own push.
+    theirs = _someone_else_pushes(tmp_path)
+    if fetched:
+        _git(repo, "fetch", "-q", "origin")
     (repo / "work.txt").write_text("rewritten locally\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--amend", "-m", "rewritten")
 
-    with pytest.raises(forge.ForgeError, match="stale info|rejected"):
+    with pytest.raises(forge.ForgeError, match="Kraft did not push"):
         asyncio.run(forge.push(repo, BRANCH))
 
-    assert _git(origin, "rev-parse", BRANCH).strip() != _git(repo, "rev-parse", "HEAD").strip()
+    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == theirs
+
+
+def test_push_refuses_to_recreate_a_branch_origin_deleted(tmp_path):
+    """Kraft-7itv: origin dropping a branch Kraft pushed means it was merged
+    or closed; a push must not quietly bring it back."""
+    repo = _repo_with_origin(tmp_path)
+    _git(tmp_path / "origin.git", "branch", "-q", "-D", BRANCH)
+
+    with pytest.raises(forge.ForgeError, match="origin no longer has"):
+        asyncio.run(forge.push(repo, BRANCH))
+
+    assert _git(tmp_path / "origin.git", "branch", "--list", BRANCH) == ""
+
+
+def test_push_reads_the_tip_where_it_pushes(tmp_path):
+    """A `pushurl` sends pushes somewhere other than where `origin` fetches
+    from; the tip judged is the one the push would replace."""
+    repo = _repo_with_origin(tmp_path)
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    _git(repo, "remote", "set-url", "origin", str(mirror))
+    _git(repo, "remote", "set-url", "--push", "origin", str(tmp_path / "origin.git"))
+    (repo / "fix.txt").write_text("a fix\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a fix")
+
+    asyncio.run(forge.push(repo, BRANCH))
+
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == head
+
+
+def test_push_publishes_once_someone_elses_commits_are_pulled_in(tmp_path):
+    """The way out the refusal names: pull their commits into the worktree
+    and retry. Their tip is now in the branch, so the push fast-forwards."""
+    repo = _repo_with_origin(tmp_path)
+    theirs = _someone_else_pushes(tmp_path)
+    _git(repo, "pull", "-q", "--rebase", "origin", BRANCH)
+    (repo / "fix.txt").write_text("a review fix\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "a review fix")
+
+    asyncio.run(forge.push(repo, BRANCH))
+
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    assert _git(tmp_path / "origin.git", "rev-parse", BRANCH).strip() == head
+    assert _git(repo, "merge-base", "--is-ancestor", theirs, head) == ""
 
 
 def test_commit_stragglers_commits_everything_the_agent_left(tmp_path):
