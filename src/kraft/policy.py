@@ -214,12 +214,7 @@ class PolicyInput(BaseModel):
             if legacy_path.is_file():
                 try:
                     legacy = yaml.safe_load(legacy_path.read_text())
-                # PEP 758 (Python 3.14+): a parenthesized tuple here has no
-                # `as` clause, so `ruff format` rewrites it straight back to
-                # this bare form -- `just lint` fails on the parenthesized
-                # version. The `except (...) as exc:` four lines up keeps its
-                # parens only because `as` still requires them.
-                except OSError, ValueError, yaml.YAMLError:
+                except (OSError, ValueError, yaml.YAMLError):
                     legacy = None
                 if isinstance(legacy, dict) and isinstance(legacy.get("max_concurrent"), int):
                     raw_mc = legacy["max_concurrent"]

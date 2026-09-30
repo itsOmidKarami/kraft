@@ -14,6 +14,7 @@ dist/
 build/
 *.pyc
 .venv/
+.venv-*/
 .pytest_cache/
 .testmondata*
 .ruff_cache/

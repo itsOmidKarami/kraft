@@ -26,6 +26,7 @@ import ipaddress
 import os
 import re
 import shutil
+import ssl
 import threading
 from pathlib import Path
 
@@ -33,6 +34,14 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+
+def strict(context: ssl.SSLContext) -> ssl.SSLContext:
+    """`context` with VERIFY_X509_STRICT on: the default of `ssl.create_default_context`
+    from Python 3.13, set by hand so 3.11 and 3.12 verify no more loosely."""
+    context.verify_flags |= ssl.VERIFY_X509_STRICT
+    return context
+
 
 _CA_DAYS = 3650
 #: The listener's certificate lives as long as the root it is cached beside.

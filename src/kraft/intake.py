@@ -192,7 +192,7 @@ async def poller(app) -> None:
     raw = app.state.intake.get("interval_s", config_mod.INTAKE_DEFAULT["interval_s"])
     try:
         interval = max(30, int(raw))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         # Nothing validates a hand-edited intake.yaml, and raising here would
         # kill the poller task at birth — the operator would see a poller they
         # just enabled quietly never pick anything up.

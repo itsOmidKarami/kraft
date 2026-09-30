@@ -18,7 +18,7 @@ set -eu
 API="https://api.github.com/repos/itsOmidKarami/kraft/releases/latest"
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "installing uv (kraft needs it to fetch a Python 3.14)..."
+    echo "installing uv (kraft needs it to fetch a Python 3.12 or newer)..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
     PATH="$HOME/.local/bin:$PATH"
     export PATH

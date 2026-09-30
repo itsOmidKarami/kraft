@@ -145,6 +145,19 @@ test *ARGS:
     fi
     exit "$status"
 
+# The unit tier on another Python, in its own environment (.venv-<version>) so
+# it never disturbs the default one: `just test-py 3.12`, or add pytest args,
+# `just test-py 3.13 -k search`. CI runs the whole supported range; use this to
+# reproduce one version's failure. Full run, no testmon: its data is per-env.
+[positional-arguments]
+[doc("Unit tier on another Python: just test-py 3.12 [pytest args]")]
+test-py version *ARGS:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    v=$1
+    shift
+    UV_PROJECT_ENVIRONMENT=".venv-$v" uv run --python "$v" pytest -m "not e2e" -n auto "$@"
+
 # Check the intent tree: every enforced-by pin resolves, and list what nothing pins.
 intent:
     uv run python -m kraft.intent

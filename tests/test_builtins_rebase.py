@@ -568,7 +568,7 @@ def _hanging_rebase_hook(repo, tmp_path, phases: str, seconds: float) -> None:
     hook.write_text(
         "#!/bin/sh\n"
         '[ -d "$(git rev-parse --git-dir)/rebase-merge" ] || exit 0\n'
-        'case "$(ps -o args= -p $PPID)" in\n'
+        'case "$(ps -ww -o args= -p $PPID)" in\n'
         '  *"rebase --abort"*) phase=abort ;;\n'
         "  *rebase*) phase=rebase ;;\n"
         "  *) exit 0 ;;\n"

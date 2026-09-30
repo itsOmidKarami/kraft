@@ -156,7 +156,7 @@ def _read_cache(now: float, channel: str) -> Release | None:
         if blob.get("channel", "stable") != channel or now - float(blob["checked_at"]) >= CACHE_TTL:
             return None
         return Release(tag=blob["tag"], wheel_url=blob["wheel_url"])
-    except OSError, ValueError, KeyError, TypeError:
+    except (OSError, ValueError, KeyError, TypeError):
         return None
 
 

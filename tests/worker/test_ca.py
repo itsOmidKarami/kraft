@@ -29,10 +29,10 @@ async def _handshake(
     (`""` for no client certificate), or None when the handshake was
     refused."""
     ca_cert, _ = ca.ensure_ca(server_run)
-    server_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert)
+    server_ctx = ca.strict(ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_cert))
     server_ctx.load_cert_chain(*(server or ca.server_cert(server_run)))
     server_ctx.verify_mode = ssl.CERT_REQUIRED if client else ssl.CERT_NONE
-    client_ctx = ssl.create_default_context(cafile=ca_cert)
+    client_ctx = ca.strict(ssl.create_default_context(cafile=ca_cert))
     # As every CLI's TLS stack does: the name is in the SAN or nowhere.
     client_ctx.hostname_checks_common_name = False
     if client:

@@ -38,7 +38,7 @@ def _span_ms(start: str | None, end: str) -> int | None:
         return int(
             (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds() * 1000
         )
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return None
 
 

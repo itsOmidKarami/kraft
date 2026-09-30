@@ -114,7 +114,7 @@ def _terminate(pid: int | None) -> None:
         return
     try:
         os.killpg(os.getpgid(pid), signal.SIGINT)
-    except ProcessLookupError, PermissionError:
+    except (ProcessLookupError, PermissionError):
         pass  # already gone, or not ours — the row still moves to paused
 
 
@@ -138,7 +138,7 @@ def _kill_orphans_under(worktree: Path) -> list[int]:
     for proc in psutil.process_iter(["pid"]):
         try:
             cwd = proc.cwd()
-        except psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess:
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
         if not cwd:
             continue
@@ -150,7 +150,7 @@ def _kill_orphans_under(worktree: Path) -> list[int]:
             continue
         try:
             proc.terminate()
-        except psutil.NoSuchProcess, psutil.AccessDenied:
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
         killed.append(proc.pid)
     return killed

@@ -9,6 +9,8 @@ a function of the repo instead: a name not listed is simply not there, so
 maintain.
 """
 
+from __future__ import annotations
+
 import os
 from typing import TYPE_CHECKING
 

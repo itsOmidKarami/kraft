@@ -157,7 +157,7 @@ def _client_context(environ: Mapping[str, str]) -> ssl.SSLContext:
     """The daemon's roots plus the sandbox extra CA; verification on."""
     from kraft.worker.backends.docker_forward import extra_ca
 
-    context = ssl.create_default_context()
+    context = ca.strict(ssl.create_default_context())
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     if (extra := extra_ca(environ)) is not None:
         context.load_verify_locations(cadata="\n".join(extra[1]))
@@ -183,7 +183,7 @@ async def terminate(
     writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
     try:
         await asyncio.wait_for(writer.start_tls(context), egress.HEAD_TIMEOUT)
-    except OSError, TimeoutError:
+    except (OSError, TimeoutError):
         if seen and (seen[0] is None or egress._norm(seen[0]) != host):
             name = f"names {seen[0]!r}" if seen[0] else "names no host"
             await proxy.record(session, host, port, f"the worker's TLS {name}, not {host}")

@@ -6,9 +6,8 @@ exclude: '^(\.beads/|\.claude/|uv\.lock$|docs/)'
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Keep in step with the `ruff` floor in pyproject.toml: an older ruff here
-    # does not know PEP 758 (py3.14 unparenthesized `except A, B:`) and fails
-    # valid source the project formatter just produced.
+    # Keep in step with the `ruff` floor in pyproject.toml, so the hook and
+    # `just lint` agree on what is formatted.
     rev: v0.16.9
     hooks:
       - id: ruff

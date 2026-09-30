@@ -47,7 +47,7 @@ def verify_password(password: str, stored: str | None) -> bool:
         if scheme != "scrypt":
             return False
         key = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt_hex), n=_N, r=_R, p=_P)
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return False
     return hmac.compare_digest(key.hex(), key_hex)
 

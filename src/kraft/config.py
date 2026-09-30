@@ -830,7 +830,7 @@ def probe_repo(path: str | Path, *, test_command: str | None = None) -> dict:
             submodules = sorted(
                 parser.get(s, "path") for s in parser.sections() if parser.has_option(s, "path")
             )
-        except ConfigParserError, OSError, ValueError:
+        except (ConfigParserError, OSError, ValueError):
             submodules = []
 
     beads = root / ".beads"

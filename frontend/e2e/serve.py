@@ -51,7 +51,7 @@ def _listeners_on(port: int | str) -> list[str]:
             timeout=5,
         )
         return out.stdout.split()
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return []
 
 
@@ -128,14 +128,14 @@ def _terminate(proc: subprocess.Popen) -> None:
     """Signal the whole process group so detached agent/git children die too."""
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except ProcessLookupError, PermissionError:
+    except (ProcessLookupError, PermissionError):
         proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError, PermissionError:
+        except (ProcessLookupError, PermissionError):
             proc.kill()
         proc.wait()
 

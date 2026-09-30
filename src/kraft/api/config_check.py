@@ -191,7 +191,7 @@ def _chains_on_disk(root: Path) -> list[tuple[Path, dict]]:
     for chain_path in sorted((root / CHAINS_DIR).glob("*.yaml")):
         try:
             body = yaml.safe_load(chain_path.read_text())
-        except OSError, yaml.YAMLError:
+        except (OSError, yaml.YAMLError):
             continue
         if isinstance(body, dict):
             chains.append((chain_path, body))
@@ -417,7 +417,7 @@ def harness_breakage(
 def _check_harnesses(path, data, ctx):
     try:
         current = (yaml.safe_load(path.read_text()) if path.is_file() else None) or {}
-    except OSError, yaml.YAMLError:
+    except (OSError, yaml.YAMLError):
         current = None
     if not isinstance(current, dict):
         current = None

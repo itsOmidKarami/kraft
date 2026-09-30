@@ -161,7 +161,7 @@ def read_times(path: Path) -> dict[int, str]:
     """
     times: dict[int, str] = {}
     try:
-        for line in split_lines(path.read_text(errors="replace", newline="")):
+        for line in split_lines(path.read_bytes().decode(errors="replace")):
             _stamp(line, times, 0)
     except OSError:
         pass

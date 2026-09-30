@@ -102,7 +102,7 @@ def _write_repo_mcp_json(cwd: Path) -> str:
     path = cwd / ".mcp.json"
     try:
         config = json.loads(path.read_text())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         config = {}
     config.setdefault("mcpServers", {})["kraft"] = {"command": "kraft", "args": ["admin", "mcp"]}
     path.write_text(json.dumps(config, indent=2) + "\n")

@@ -27,6 +27,10 @@ permissions:
 
 env:
   BD_VERSION: "1.2.2"
+  # Every job but the `test` matrix runs on the newest supported Python. With a
+  # floor of 3.12, an unpinned `uv sync` would take whatever 3.12+ the runner
+  # has. The matrix names its own with `--python`, which beats this.
+  UV_PYTHON: "3.14"
 
 jobs:
   lint:
@@ -48,7 +52,17 @@ jobs:
       - run: uv run python dev/check_tests.py
 
   test:
+    # The unit tier on every supported Python (`requires-python` in pyproject.toml
+    # is the floor, 3.12; the newest is 3.14). One wheel serves all of them, so
+    # this is the only place a version gap shows. Coverage, junit annotations and
+    # the PR comment come from the newest leg only: one report, not three.
+    # fail-fast off, so one version's failure doesn't hide another's.
+    name: test (python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     # checks: write is action-junit-report's annotations; pull-requests: write
     # is its optional PR comment and the coverage action's PR comment;
     # contents: write is the coverage action pushing history to its own
@@ -75,13 +89,16 @@ jobs:
         run: |
           git config --global user.email ci@kraft.invalid
           git config --global user.name "Kraft CI"
-      - run: uv sync --frozen
-      - run: >
+      - run: uv sync --frozen --python ${{ matrix.python-version }}
+      - if: matrix.python-version == '3.14'
+        run: >
           uv run pytest -m "not e2e" -n auto
           --junitxml=junit.xml --cov=src/kraft --cov-report=xml:coverage.xml
+      - if: matrix.python-version != '3.14'
+        run: uv run pytest -m "not e2e" -n auto
       # ~1s, no tests run: catches a renamed pinned test the suite above would not.
       - run: uv run python -m kraft.intent
-      - if: always()
+      - if: always() && matrix.python-version == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-reports
@@ -92,7 +109,8 @@ jobs:
       # step would just fail. Not gated on the event type -- only relevant on
       # pull_request, and there's no pull_request context on a push to main.
       - if: >-
-          always() && github.event_name == 'pull_request' &&
+          always() && matrix.python-version == '3.14' &&
+          github.event_name == 'pull_request' &&
           github.event.pull_request.head.repo.full_name == github.repository
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
         with:
@@ -101,7 +119,7 @@ jobs:
       # main (writes history + badge to the data branch) -- see the action's
       # own heuristic for picking which. Push to main has no fork to gate on.
       - if: >-
-          always() &&
+          always() && matrix.python-version == '3.14' &&
           (github.event_name == 'push' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: py-cov-action/python-coverage-comment-action@e5fb2218463c3377f3504b0c5b5646ed53da7a2f # v4.5
@@ -153,8 +171,8 @@ jobs:
     # plugins/.github/workflows/test.yml used to run in the published repo --
     # which was one step too late, after a bad publish had reached users.
     #
-    # `--no-project` is required: this repo's pyproject demands >=3.14 and uv
-    # refuses the older interpreter without it. No lockfile and nothing but
+    # `--no-project` is required: this repo's pyproject demands >=3.12 and uv
+    # refuses the 3.10 interpreter without it. No lockfile and nothing but
     # pytest, so a dependency appearing here is the first sign the plugin
     # stopped being stdlib-only.
     name: kraft-lite on python ${{ matrix.python-version }}
@@ -283,8 +301,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # The project's Python, not the runner's 3.12: the tests it parses may
-      # use 3.14-only syntax (Kraft-neyhg). Stdlib only, so nothing is synced.
+      # The project's floor Python, not the runner's default: the tests it parses
+      # must be valid on it (Kraft-neyhg). Stdlib only, so nothing is synced.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       # The body is read live, not off the event payload: a re-run replays the
       # original payload, and re-running this job after editing the body is
@@ -295,7 +313,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body -q .body > "$RUNNER_TEMP/pr-body.md"
-          uv run --python 3.14 --no-project python dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
+          uv run --python 3.12 --no-project python dev/check_removals.py "$BASE" "$RUNNER_TEMP/pr-body.md"
 
   release-impact:
     # Every pull request declares what it ships. The version comes from the git
