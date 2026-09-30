@@ -365,10 +365,9 @@ class Descriptor(_Strict):
         if NETWORK in seen and _NS + "network-policy@2" in seen:
             raise ValueError("network-policy@1 and network-policy@2 are both declared")
         network = next((c.config for _, c in ordinary if isinstance(c, NetworkCap)), None)
+        credentials = [(i, c) for i, c in ordinary if isinstance(c, CredentialCap)]
         owners: dict[tuple[str, str], int] = {}
-        for i, cap in ordinary:
-            if not isinstance(cap, CredentialCap):
-                continue
+        for i, cap in credentials:
             for phase in cap.config.phase:
                 key = (cap.config.service, phase)
                 if key in owners:
@@ -377,6 +376,8 @@ class Descriptor(_Strict):
                         f"is also at capabilities.{owners[key]}"
                     )
                 owners[key] = i
+        for i, cap in credentials:
+            for phase in cap.config.phase:
                 for j, rule in enumerate(cap.config.api_key.inject if cap.config.api_key else ()):
                     if not _allowed(network, phase, rule.domain):
                         raise ValueError(
@@ -407,7 +408,7 @@ class _StrictYaml(yaml.SafeLoader):
 
 
 def _path(loc: tuple) -> str:
-    return ".".join(str(p) for p in loc if p not in _TAG_NAMES) or "descriptor"
+    return ".".join(str(p) for p in loc if p not in _TAG_NAMES)
 
 
 def decode(text: str) -> Descriptor:
@@ -430,7 +431,9 @@ def decode(text: str) -> Descriptor:
     except ValidationError as exc:
         raise KitRefused(
             "; ".join(
-                f"{_path(e['loc'])}: {e['msg'].removeprefix('Value error, ')}" for e in exc.errors()
+                # A rule on the whole descriptor names its own path.
+                ": ".join(filter(None, (_path(e["loc"]), e["msg"].removeprefix("Value error, "))))
+                for e in exc.errors()
             )
         ) from exc
 
