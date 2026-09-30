@@ -11,6 +11,102 @@ listed on the [GitHub releases page](https://github.com/itsOmidKarami/kraft/rele
 
 - Fix: a release publishes to PyPI, the VS Code Marketplace and Homebrew again. v1.2.0 reached only the GitHub release, because PyPI rejected the extension package the release put next to the wheel. (#305)
 
+## 1.2.0
+
+### New
+
+- Four new kraft plugin skills (triage, review, steer, doctor); skill descriptions and guidance corrected: stale CLI verbs, gate/start safety checks. (#221)
+
+- Add: `POST /api/templates/check` validates an unsaved config file as its save would, and template lint issues (API and `kraft admin templates lint`) report line and column. (#232)
+
+- Add: a VS Code extension for Kraft: a sidebar board, gates, diff review with findings and line comments, and config-file diagnostics. (#233)
+
+- New: cut alpha, beta and rc pre-releases from the release workflow, and install them with `kraft admin update --channel`. (#234)
+
+- Add `kraft item reply` and a review-flow API — line-anchored comment threads on a pending gate, review submission with a must-fix gate on approval, a compare endpoint for any two attempts, and an agent that answers threads after a plain "comment" review. (#236)
+
+- Comment and request-changes threads now work at any point in a run, not just at a pending gate; new `kraft view threads`/`compare`, `kraft item comment`/`resolve`/`reopen`, and `kraft item review` verbs (and matching MCP tools) for reviewing a change headlessly. (#240)
+
+- **Behaviour change: the docker sandbox now keeps workers off your other branches and never runs a tool policy unenforced.** A sandboxed worker's ref changes stay in a store of its own, and only its item branch reaches your repository. A sandboxed Cursor or Codex task with `allowed_tools`, `deny_tools` or a grant beyond `git-commit` now stops at launch, because their permission hook cannot run in a container; use Amp or OpenCode for a sandboxed policy, or remove the policy. Sandboxed workers now get their own `HOME`, credentials named in `env_passthrough`, and your git identity, so every shipped harness that can authenticate by env runs in a sandbox. `kraft admin doctor` checks the docker daemon and image. (#245)
+
+- **Sandboxed tasks run on Podman and on rootless Docker and Podman, and on SELinux hosts when you say how.** A new optional `sandbox.yaml` picks the container CLI (`cli: podman`) and what to do where SELinux enforces (`selinux: relabel` or `disable`). Without an answer there, a sandboxed task now stops with a message naming both, instead of failing on denied mounts. On rootless runtimes, what a worker writes is now yours rather than owned by a subordinate uid. A `docker` that is Podman underneath is recognised. `kraft admin doctor` names the runtime it found. (#247)
+
+- **Sandboxed tasks work behind a corporate proxy and CA.** The daemon's proxy settings are forwarded into the container; a proxy on the host's loopback cannot work from a container, and `kraft admin doctor` now says so. An extra root CA, from the new `sandbox.yaml` `ca_bundle` or the daemon's `SSL_CERT_FILE`, is combined with the image's own roots and trusted by every common CLI in the container. Host workers now also keep `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `SSL_CERT_DIR` and `ALL_PROXY`. (#248)
+
+- **Sandboxed tasks can have resource limits.** `sandbox.resources: {cpu, memory, pids}` becomes `--cpus`, `--memory` (swap included where the runtime can limit it) and `--pids-limit`, and every sandboxed run gets a default of 4096 processes. A limit the runtime cannot enforce stops the task with a message naming the fix instead of being silently dropped. A task killed by its memory limit is recorded (`sandbox_oom_killed`) and stops for a person naming the limit, rather than counting as the agent failing. `kraft admin doctor` shows which limits the runtime enforces. (#249)
+
+- Feature: sandboxed workers get deny-by-default egress (`sandbox.network`, including Docker Desktop and podman machine), callbacks to Kraft from inside the container, and proxy-injected credentials (`sandbox.credentials`) so API keys never enter the container. (#256)
+
+- Add `kraft item raise-budget` and the MCP `raise_budget` tool, which raise a stopped item's own dollar cap and retry it, like the board's Raise budget button.
+- Add `ci_checks: false` to `repos.yaml`: on a repo with no CI, the CI waits before and after the merge pass at once instead of waiting on checks that never come. (#279)
+
+- Security: failed logins are throttled per address (429 after 5 in 15 minutes), the session cookie is `Secure` over HTTPS, and a new `run/trigger-token` authenticates `POST /api/triggers` only, for CI and webhooks. (#284)
+
+- Change: workspace members are checked out as worktrees of their connected repositories, and a workspace whose root or members set a sandbox now runs sandboxed (it was refused before). (#289)
+
+- **Changed default:** `POST /api/work-items` now files the item paused unless the body sets `autostart: true`. Before, a raw API caller started the item, and spent tokens, by default. The board, `kraft item create` and the MCP tool are unaffected.
+- **Changed default:** a repo's `default_chain_template` in `repos.yaml` now applies to every way of filing work: `kraft item create`, the MCP `create_work_item` tool, the board's New work item dialog, `POST /api/work-items` and `POST /api/triggers`. Before, it applied only to auto-intake. Naming a chain still wins.
+- Fixed: `kraft repo connect .`, and any other relative path given to `repo connect`/`disconnect`, `item create --repo`, `admin reindex --repo` or `view list`/`watch --repo`, is read from where you stand instead of from the Kraft server's directory. `POST /api/repos` refuses a relative path with a 422. (#290)
+
+### Fixes
+
+- Fix: a database connection could be left open when the writer failed or the search index was corrupt. (#220)
+
+- Fix: the plugin READMEs and skills are corrected and link to the current docs. (#222)
+
+- `findings_measured` events now include a `dropped` count when a reviewer's malformed findings were discarded. Internal skills trimmed of contracts Kraft already injects. (#223)
+
+- Fix: after a gate rejection sends work back to implementation, the item page no longer shows the plan's task list and progress bar for a run that isn't following the plan. (#237)
+
+- Fix: review submission, attempt comparison and the reply agent handle refusals, renamed files and agent failures correctly. (#238)
+
+- Fix: a running agent session's spend now shows as a live estimate (`~$X (est.)`) instead of a stale `$0.666+`, priced correctly against Claude Code's own 1-hour cache-write rate, and a dollar budget cap can stop a long session before it exits -- or after a crash that reported no final cost -- instead of losing that spend to a blank total, without double-counting a paused-then-resumed session's spend. (#239)
+
+- Fix: `base_ref` no longer goes stale on retry/resume after a branch is manually rebased onto a new upstream head outside Kraft. (#242)
+
+- Docs: the Kraft plugin's gates and review skills now leave line-level review threads and submit reviews, and the agent guide lists the review MCP tools. (#243)
+
+- Fix: the chain-review step now raises the implementation time cap when the plan has more tasks than the cap can hold, instead of letting the run stop mid-plan. (#244)
+
+- Fix: Kraft works with only the Claude Code plugin installed, and `kraft admin init` is no longer needed. Workers use the permission tool the plugin registers, and a Claude launch with no Kraft MCP server registered is refused with the fix named instead of stopping with 0 tokens. (#260)
+
+- Fix: Kraft reads a repository's committed Claude Code plugin settings the way Claude Code does, so a repository that disables the Kraft plugin is no longer treated as having it. (#264)
+
+- Fix: a session killed by its sandbox memory limit is no longer sometimes recorded as an ordinary failure. (#265)
+
+- Fix: an escalation turn's `git-push` grant now covers only a push to its work item's own branch, and allows `--force-with-lease` but not a plain `--force`. (#268)
+
+- Fix: the API also refuses a worker session's approve, reject, pause, resume, skip, abandon or retry on its own work item, and the security docs say plainly what that does and does not stop. (#269)
+
+- Fix: a sandboxed worker can no longer move your branches or stash by planting git state in its worktree; Kraft stops for you instead. (#272)
+
+- Fix: `kraft admin start --detach` now waits for the server to actually answer `/api/health`, not just for its pidfile to appear. (#273)
+
+- Fix: opening `/docs` or `/redoc` in a browser shows FastAPI's API docs instead of the board.
+- Fix: the Analytics "Throughput by week" chart says it counts merged items, and reads "nothing merged in this range" instead of contradicting the Completed count.
+- Fix: `$KRAFT_HOME/run` is now `0700`, tightened on every start, and new databases and session logs in it are `0600`. (#275)
+
+- Fix: a session a sandbox memory limit killed is no longer sometimes recorded as an ordinary failure when Docker drops its out-of-memory flag; it stops as an unconfirmed memory-limit kill instead. (#277)
+
+- Fix: the board and docs site no longer load fonts from Google; the API refuses a worker's complete, cancel, escalate and attachment, override, policy and budget changes on its own item; and an escalation turn can no longer approve or reject its own item's gates. (#280)
+
+- Security: bump PyJWT to 2.15.1 (Dependabot #18). (#281)
+
+- Fix: an escalation turn can no longer raise or change its own work item's budget or policy; like a gate, that's a person's decision. (#282)
+
+- Fix: Raise budget appears only when the item's own dollar cap stopped it. A stop on a policy `budget_usd`, a `token_budget` or the daily cap names that cap and how to raise it, and `kraft item raise-budget` refuses it. (#283)
+
+- Fix: Claude workers are no longer refused when Kraft's MCP server is registered at local scope or in a managed `managed-mcp.json`; a Kraft plugin enabled but not installed now counts as not registered, and `kraft admin doctor` checks each connected repo. (#285)
+
+- Fixed: every server route that takes a repo path refuses a relative one instead of reading it against the server's directory: `POST /api/work-items` and `POST /api/triggers` answer 422, `PATCH`/`DELETE /api/repos?path=` answer 404. Fixed: analytics filtered to the `default` chain now counts items filed without naming a chain. (#291)
+
+- Fix: Kraft no longer force-pushes over commits a person pushed to an item's merge request branch; it stops and says how to bring them in. Fix: connecting a workspace root reuses a member you already connected on its own instead of adding an empty entry for its submodule, and `kraft admin doctor` warns about existing duplicates. (#292)
+
+- The `list_work_items` MCP tool now names the statuses you can filter on, including `needs_human`, and no longer lists `failed`, which never matched anything.
+- The docs site's canonical links now point at the real pages under `/kraft/`. The dead "Add MCP Server" and "Copy MCP Server URL" menu items are gone, `robots.txt` exists, and the search dialog has a proper accessible name.
+- The PyPI page lists classifiers: Beta, console, developers, macOS and Linux, Python 3.14.
+- The docs say that `--auto-gate` is on by default, explain how to install the VS Code extension, and cover an agent that isn't logged in and a port that is already in use. (#304)
+
 ## 1.1.0
 
 ### New
