@@ -481,6 +481,8 @@ const CASES: Case[] = [
   { screen: "ng-review", variant: "threads", data: "default", widths: [1280], shells: [{ mode: "light" }], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
   { screen: "ng-review", variant: "composer", data: "default", widths: [1280], run: (c) => ngReview(c, { then: (p) => ngComment(p, "Name the fallback here, so the next reader does not have to find `default=0`.") }) },
   { screen: "ng-review", variant: "suggest", data: "default", widths: [1280], run: (c) => ngReview(c, { then: async (p) => { await ngComment(p, "Say what it returns:"); await p.getByRole("button", { name: "± Suggest change" }).click(); } }) },
+  { screen: "ng-review", variant: "finish", data: "default", widths: [1280, 1920], shells: [{ mode: "light" }], run: (c) => ngReview(c, { then: async (p) => { await p.getByRole("button", { name: "Request changes" }).click(); } }) },
+  { screen: "ng-review", variant: "finish-gateless", data: "default", widths: [1280], run: (c) => ngReview(c, { sc: "running", then: async (p) => { await p.getByRole("button", { name: "Finish review" }).click(); await p.getByText("Why this node").waitFor(); } }) },
   { screen: "ng-review", variant: "long", data: "long", widths: [1280, 1920], run: (c) => ngReview(c, { settings: ["Show one file at a time"] }) },
 
   // Login

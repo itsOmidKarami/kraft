@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReviewOutcome } from "../../types";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
@@ -10,6 +11,7 @@ import { Button } from "../ui/Button";
 import { useComments } from "./Comments";
 import { DiffView, type Pick } from "./DiffView";
 import { FileTree } from "./FileTree";
+import { BottomBar, FinishDialog, useSubmit } from "./FinishReview";
 import { byNodes, folders, unresolved } from "./model";
 import { parsePatch } from "./patch";
 import { useDiffPrefs } from "./prefs";
@@ -60,6 +62,9 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
   // With no file chosen, the tree's first: what one-file mode shows.
   const current = place.file && files.some((f) => f.path === place.file) ? place.file : folders(files)[0]?.files[0]?.path ?? null;
   const comments = useComments({ itemId: item.id, compare: compare.state === "ready" ? compare.data : null, files, patch, threads: threadList, reload: threads.reload });
+  const submit = useSubmit(item, place.gate, threadList, threads.reload);
+  // Finish your review: closed, or open on an outcome (the bar's Request changes opens it there).
+  const [finish, setFinish] = useState<{ outcome?: ReviewOutcome } | null>(null);
   const select = (file: string) => {
     setPlace({ file });
     if (overlay) setTreeOpen(false);
@@ -138,6 +143,8 @@ function Review({ item, reload }: { item: ItemDetail; reload: () => void }) {
           {compare.state === "ready" && comments.elsewhere}
         </section>
       </div>
+      <BottomBar item={item} gate={place.gate} threads={threadList} onFinish={(outcome) => setFinish({ outcome })} submit={submit} />
+      {finish && <FinishDialog item={item} gate={place.gate} threads={threadList} initial={finish.outcome} submit={submit} onClose={() => setFinish(null)} />}
     </div>
   );
 }

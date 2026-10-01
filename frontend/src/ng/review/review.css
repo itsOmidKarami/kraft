@@ -141,3 +141,21 @@
 .rv-suggest .rv-textarea { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 .rv-elsewhere { margin: 0 16px 24px; }
 .rv-elsewhere h2 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+
+/* Bottom bar and Finish your review (prototype 496–526). */
+.rv-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--surface); font-size: 12.5px; }
+.rv-bar > .rv-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-bar-title { color: var(--text); font-weight: 500; white-space: nowrap; }
+.rv-finish { display: flex; flex-direction: column; gap: 12px; }
+.rv-finish-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: 12.5px; }
+.rv-finish-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rv-finish-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-sub); }
+.rv-outcomes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+.rv-outcome { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.rv-outcome.is-on { border-color: var(--text-sub); background: var(--line); }
+.rv-outcome.is-off { cursor: default; opacity: .6; }
+.rv-outcome:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+.rv-outcome input { margin: 3px 0 0; accent-color: var(--text); }
+.rv-outcome-text { display: flex; flex-direction: column; gap: 3px; }
+.rv-outcome-label { color: var(--text); font-weight: 500; font-size: 13px; }
+.rv-outcome-sub { color: var(--text-muted); font-size: 12px; line-height: 1.5; }

@@ -176,6 +176,25 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
       if ("label" in b) t.label = b.label;
       return json(route, t);
     }
+    // A submitted review publishes the drafts; request_changes and approve move the item as the gate call would.
+    if (method === "POST" && (m = p.match(/^\/work-items\/([^/]+)(?:\/gates\/([^/]+))?\/review$/))) {
+      const b = S.bundles[m[1]];
+      if (!b) return json(route, { detail: "work item not found" }, 404);
+      const it = b.item;
+      const { outcome } = req.postDataJSON() ?? {};
+      if (m[2] && it.pending_gate !== m[2]) return json(route, { detail: `gate '${m[2]}' is not pending` }, 409);
+      const list = threadsOf(m[1]);
+      if (outcome === "approve" && list.some((t) => t.label === "must_fix" && t.state !== "resolved"))
+        return json(route, { detail: `must-fix review threads are not resolved: ${list.filter((t) => t.label === "must_fix" && t.state !== "resolved").map((t) => t.id).join(", ")}` }, 409);
+      for (const t of list) { t.draft = false; for (const c of t.comments) if (c.draft) Object.assign(c, { draft: false, review_id: "r2" }); }
+      const gate = m[2] ?? null;
+      if (outcome === "comment") return json(route, { review_id: "r2", outcome, gate, reply_agent: !!gate });
+      const target = outcome === "approve" ? null : it.fix_target?.node ?? fixTargetFor(null).node;
+      Object.assign(it, { status: "active", display_status: "running", stop: null, pending_gate: null, gate_artifact: null, fix_target: null, attempts: [] });
+      if (target) it.current_node_id = target;
+      if (gate) return json(route, { id: it.id, status: "active" });
+      return json(route, { review_id: "r2", outcome, gate: null, target, target_reason: "current node", action: "rerun" });
+    }
     if ((m = p.match(/^\/comments\/([^/]+)$/))) {
       const c = findComment(m[1]);
       if (!c) return json(route, { detail: `unknown comment ${m[1]}` }, 404);
