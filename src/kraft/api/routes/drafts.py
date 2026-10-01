@@ -18,8 +18,9 @@ from kraft import config as config_mod
 from kraft import store as items
 from kraft.api import api_router, deps
 from kraft.api.routes import board
-from kraft.drafts import item, ops, resolve, store
+from kraft.drafts import authored, item, ops, resolve, store
 from kraft.templates import revision
+from kraft.templates.library import LIBRARY_FILE
 
 
 def _area(area: str, key: str) -> store.Area:
@@ -252,6 +253,59 @@ async def publish_draft(area: str, key: str, request: Request):
         await st.db.write(lambda c: store.delete(c, area, key))
     _, _, result = _state(st, area, key, None, [])
     return {"published": sorted(draft["files"]), "result": result}
+
+
+@api_router.post("/drafts/{area}/{key}/rebase")
+async def rebase_draft(area: str, key: str, request: Request):
+    """ "Keep my version" after a publish answered 409: the draft's base becomes
+    what its files are on disk now, so the next publish goes through and
+    overwrites what changed underneath. No undo entry, no change to the draft's
+    text."""
+    st = request.app.state
+    _area(area, key)
+    draft = st.db.read(lambda c: store.get(c, area, key))
+    if draft is None:
+        raise HTTPException(404, f"no draft of {area} {key!r}")
+    published = resolve.published(st.templates_dir, sorted(draft["base"]))
+    base = {f: store.digest(t) for f, t in published.items()}
+    await st.db.write(lambda c: store.rebase(c, area, key, base))
+    draft = st.db.read(lambda c: store.get(c, area, key))
+    files, published, result = _state(st, area, key, draft, draft["history"])
+    return _view(st, area, key, files, published, result)
+
+
+@api_router.get("/drafts/{area}/{key}/fragment")
+async def get_draft_fragment(area: str, key: str, request: Request, path: str | None = None):
+    """The authored component at a canonical `path` as YAML (the serializer a
+    publish uses), from the draft when there is one, else the published file.
+    `set_fragment` is the write side."""
+    st = request.app.state
+    _area(area, key)
+    if path is None:
+        raise HTTPException(400, "path is required")
+    draft = st.db.read(lambda c: store.get(c, area, key))
+    files, published, result = _state(st, area, key, draft, draft["history"] if draft else [])
+    if not files:
+        raise HTTPException(404, f"no {area} {key!r}")
+    model = result["model"]
+    library = model.get(LIBRARY_FILE)
+    if library is None:
+        library = authored.load(resolve.published(st.templates_dir, [LIBRARY_FILE])[LIBRARY_FILE])
+    if area == "library":
+        name, kind = LIBRARY_FILE, authored.LIBRARY
+    else:
+        name, kind = resolve.chain_file(key, files), authored.CHAIN
+    mapping = model.get(name)
+    # A throwaway copy of the request's model: owning what the component
+    # inherits (as `set_fragment` does) writes nothing.
+    found = (
+        authored.at(mapping, path, file=kind, library=library, write=True)
+        if isinstance(mapping, dict)
+        else None
+    )
+    if found is None:
+        raise HTTPException(404, f"nothing at {path!r} in {area} {key!r}")
+    return {"path": path, "text": authored.dump(found)}
 
 
 @api_router.delete("/drafts/{area}/{key}", status_code=204)

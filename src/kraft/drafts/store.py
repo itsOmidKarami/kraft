@@ -92,6 +92,18 @@ def delete(conn: sqlite3.Connection, area: str, key: str) -> bool:
     )
 
 
+def rebase(conn: sqlite3.Connection, area: str, key: str, base: dict[str, str | None]) -> bool:
+    """Replace the draft's stored base: no undo entry, no change to its files.
+    False when there is no draft."""
+    return (
+        conn.execute(
+            "UPDATE config_drafts SET base = ? WHERE area = ? AND key = ?",
+            (json.dumps(base), area, key),
+        ).rowcount
+        == 1
+    )
+
+
 def _store(conn, area, key, files, published, old_base, serialized, history, counts) -> bool:
     """Write the row, or delete it when `files` is back to the published
     state. False when the draft is gone."""
