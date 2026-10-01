@@ -531,6 +531,12 @@ def _capped_item(client, repo, maxima: dict, limit: dict | None) -> dict:
         pytest.param(
             {}, {"path": "", "key": "total_time_cap_minutes", "value": 60}, None, id="no-maximum"
         ),
+        pytest.param(
+            {"work_item": {"budget_usd": 25}},
+            {"path": "", "key": "budget_usd", "value": 5.0},
+            25,
+            id="budget-usd",
+        ),
     ],
 )
 def test_a_cap_stop_names_the_limit_that_raises_it_with_the_administrator_maximum(

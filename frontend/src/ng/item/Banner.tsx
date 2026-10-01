@@ -31,7 +31,7 @@ export function Banner({ item, onOpenGate, onRaise, reload }: { item: ItemDetail
           {stop.node && <> at <code>{stop.node}</code></>}.
         </span>
         {/* A cap that names its limit opens that limit's editor; any other stop opens the Config it can only point at. */}
-        {stop.kind === "cap" && stop.limit
+        {stop.limit
           ? <Button variant="primary" onClick={() => setRaising(true)}>Raise cap</Button>
           : <Button variant="primary" onClick={onRaise}>{stop.kind === "cap" ? "Open config" : "Raise cap"}</Button>}
         {raising && stop.limit && <RaiseLimit itemId={item.id} limit={stop.limit} onClose={() => setRaising(false)} onDone={() => { setRaising(false); reload(); }} />}

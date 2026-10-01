@@ -11,7 +11,7 @@ from kraft import policy as policy_mod
 from kraft import progress as progress_mod
 from kraft.adapters import forge as forge_mod
 from kraft.api import api_router, deps
-from kraft.cap_levels import CAP_FIELDS
+from kraft.cap_levels import SCOPE_CAP_FIELDS
 
 
 def _pending_gate(st, wid: str) -> str | None:
@@ -787,7 +787,7 @@ def _stop_limit(row, stop_payload: dict | None) -> dict | None:
     if limit is None or chain is None:
         return None
     maxima = chain.policy.maxima
-    if limit["key"] in CAP_FIELDS:
+    if limit["key"] in SCOPE_CAP_FIELDS:
         bound = maxima.nearest("work_item", limit["key"])
         maximum = bound[1] if bound else None
     else:

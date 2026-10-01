@@ -5,7 +5,8 @@ import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { act } from "./actions";
 
-const WHAT: Record<StopLimit["key"], { label: (path: string) => string; unit: string }> = {
+const WHAT: Record<StopLimit["key"], { label: (path: string) => string; unit: string; money?: true }> = {
+  budget_usd: { label: () => "Budget cap", unit: "dollars", money: true },
   max_attempts: { label: (p) => `Fix attempts on ${p}`, unit: "attempts" },
   timeout_minutes: { label: (p) => `Fix-loop time on ${p}`, unit: "minutes" },
   time_cap_minutes: { label: () => "Running-time cap", unit: "minutes" },
@@ -17,12 +18,13 @@ export const raiseBody = (limit: StopLimit, n: number) => ({ policy: limit.path 
 
 /** A cap stop's one limit, raised: PATCH the item's policy, then retry the node. */
 export function RaiseLimit({ itemId, limit, onClose, onDone }: { itemId: string; limit: StopLimit; onClose: () => void; onDone: () => void }) {
-  const { label, unit } = WHAT[limit.key];
+  const { label, unit, money } = WHAT[limit.key];
+  const show = (v: number) => (money ? `$${v}` : String(v));
   const [text, setText] = useState(String(limit.value));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const n = Number(text);
-  const valid = Number.isInteger(n) && n > limit.value;
+  const valid = (money ? Number.isFinite(n) : Number.isInteger(n)) && n > limit.value;
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -47,10 +49,10 @@ export function RaiseLimit({ itemId, limit, onClose, onDone }: { itemId: string;
       <form className="rl-form" onSubmit={(e) => { e.preventDefault(); if (valid && !busy) void save(); }}>
         <Field
           label={`${label(limit.path)} (${unit})`}
-          hint={`Now ${limit.value}. ${limit.maximum == null ? "No maximum." : `Maximum ${limit.maximum}.`}`}
+          hint={`Now ${show(limit.value)}. ${limit.maximum == null ? "No maximum." : `Maximum ${show(limit.maximum)}.`}`}
           error={error}
         >
-          <input data-autofocus className="item-input" type="number" inputMode="numeric" min={limit.value + 1} max={limit.maximum ?? undefined} step={1} value={text} onChange={(e) => setText(e.target.value)} />
+          <input data-autofocus className="item-input" type="number" inputMode={money ? "decimal" : "numeric"} min={money ? limit.value : limit.value + 1} max={limit.maximum ?? undefined} step={money ? "any" : 1} value={text} onChange={(e) => setText(e.target.value)} />
         </Field>
       </form>
     </Dialog>

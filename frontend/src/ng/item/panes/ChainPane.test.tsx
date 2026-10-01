@@ -71,6 +71,15 @@ describe("ChainConfig", () => {
     await waitFor(() => expect(posts(calls)).toEqual([{ method: "POST", path: "/work-items/w1/budget/raise", body: { budget_usd: null } }]));
   });
 
+  it("on a policy budget stop raises that policy and retries, with no No-cap pick", async () => {
+    const calls = stubFetch();
+    const { reload } = show({ display_status: "needs_you", stop: { kind: "budget", node: "n", resume_at: null, reason: null, limit: { path: "", key: "budget_usd", value: 5, maximum: 25 } } }, true);
+    expect(screen.queryByRole("button", { name: "No cap" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "+$5" }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(posts(calls)).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { policy: { budget_usd: 10 } } }, { method: "POST", path: "/work-items/w1/retry", body: {} }]);
+  });
+
   it("says nothing changed without overrides, and resets a node override", async () => {
     const { unmount } = render(<ChainConfig item={detail({ node_overrides: {} })} policy={null} reload={() => {}} editBudget={false} onEditBudget={() => {}} />);
     expect(screen.getByText(/Nothing changed/)).toBeInTheDocument();

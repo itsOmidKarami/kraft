@@ -93,6 +93,43 @@ describe("Banner", () => {
     });
   });
 
+  describe("a policy budget_usd stop (Kraft-9d8b2.59)", () => {
+    const budgeted = (limit: object) => detail({ display_status: "needs_you", stop: stop("budget", { reason: "budget_usd reached: $5.00 spent in the work item, cap $5.00", limit }) });
+    const mount = (limit: object, answers = {}) => {
+      const calls = stubFetch(answers);
+      const reload = vi.fn();
+      const onRaise = vi.fn();
+      render(<Banner item={budgeted(limit)} onOpenGate={() => {}} onRaise={onRaise} reload={reload} />);
+      return { calls, reload, onRaise };
+    };
+
+    it("Raise cap opens a dollar editor that patches the policy and retries, never /budget/raise", async () => {
+      const { calls, reload, onRaise } = mount({ path: "", key: "budget_usd", value: 5, maximum: 25 });
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      expect(onRaise).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: "Raise budget cap" })).toHaveTextContent("Now $5. Maximum $25.");
+      const input = screen.getByRole("spinbutton");
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
+      await userEvent.clear(input);
+      await userEvent.type(input, "7.5");
+      await userEvent.click(screen.getByRole("button", { name: "Save & retry" }));
+      await waitFor(() => expect(reload).toHaveBeenCalled());
+      expect(calls.filter((c) => c.method !== "GET")).toEqual([{ method: "PATCH", path: "/work-items/w1", body: { policy: { budget_usd: 7.5 } } }, { method: "POST", path: "/work-items/w1/retry", body: {} }]);
+    });
+
+    it("takes cents, and a value that is not above the current cap stays unsaveable", async () => {
+      mount({ path: "", key: "budget_usd", value: 0.001, maximum: null });
+      await userEvent.click(screen.getByRole("button", { name: "Raise cap" }));
+      const input = screen.getByRole("spinbutton");
+      await userEvent.clear(input);
+      await userEvent.type(input, "0.001");
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeDisabled();
+      await userEvent.clear(input);
+      await userEvent.type(input, "0.05");
+      expect(screen.getByRole("button", { name: "Save & retry" })).toBeEnabled();
+    });
+  });
+
   it.each([
     ["escalated", null],
     // An escalation ran on a cap stop and nobody is needed: only the badge (Decisions §4).

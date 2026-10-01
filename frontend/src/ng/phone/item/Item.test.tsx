@@ -15,7 +15,7 @@ function Where() {
   const l = useLocation();
   return <output aria-label="where">{l.pathname + l.search}</output>;
 }
-function mount(it: ReturnType<typeof detail>, path = "/work-items/w1", answers: Record<string, [number, unknown]> = {}) {
+function mount(it: ReturnType<typeof detail>, path: string | { pathname: string; state: unknown } = "/work-items/w1", answers: Record<string, [number, unknown]> = {}) {
   const calls = stubFetch({
     "GET /work-items/w1": [200, it],
     "GET /work-items/w1/compare": [200, { files: [] }],
@@ -369,10 +369,45 @@ describe("raising the cap that stopped the item (R73)", () => {
     expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]);
   });
 
-  it("a stop.limit on a stop that is not a cap draws nothing", async () => {
-    mount(item("needs_you", { ...stop("budget"), limit: limit() } as WorkItemStop));
-    expect(await screen.findByRole("button", { name: /Raise budget/ })).toBeInTheDocument();
+  it("a stop.limit on a stop that is neither a cap nor a budget draws nothing", async () => {
+    mount(item("needs_you", { ...stop("question"), limit: limit() } as WorkItemStop));
+    await screen.findAllByText(/./);
+    expect(screen.queryByRole("button", { name: /^Raise/ })).toBeNull();
+  });
+});
+
+describe("raising a policy budget_usd that stopped the item (Kraft-9d8b2.59)", () => {
+  const policyStop = () => item("needs_you", { ...stop("budget", { reason: "budget_usd reached: $10.00 spent in the work item, cap $10.00." }), limit: { path: "", key: "budget_usd", value: 10, maximum: 25 } } as WorkItemStop);
+  const sent = (calls: Call[]) => calls.filter((c) => c.method !== "GET").map((c) => `${c.method} ${c.path}`);
+
+  it("Raise budget opens the dollar sheet that patches the policy and retries, not the +$5 sheet", async () => {
+    const calls = mount(policyStop());
+    const raise = await screen.findByRole("button", { name: "Raise budget" });
     expect(screen.queryByRole("button", { name: /^Raise the/ })).toBeNull();
+    await userEvent.click(raise);
+    const sheet = await screen.findByRole("dialog", { name: "Raise the budget cap" });
+    expect(sheet).toHaveTextContent("Now $10. The policy maximum is $25.");
+    expect(screen.queryByRole("button", { name: /\+\$5/ })).toBeNull();
+    const box = screen.getByLabelText("Raise the budget cap", { selector: "input" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "12.5{Enter}");
+    await waitFor(() => expect(sent(calls)).toEqual(["PATCH /work-items/w1", "POST /work-items/w1/retry"]));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ policy: { budget_usd: 12.5 } });
+  });
+
+  it("refuses a figure above the policy maximum before calling", async () => {
+    const calls = mount(policyStop());
+    await userEvent.click(await screen.findByRole("button", { name: "Raise budget" }));
+    const box = await screen.findByLabelText("Raise the budget cap", { selector: "input" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "30{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The policy maximum is $25.");
+    expect(sent(calls)).toEqual([]);
+  });
+
+  it("the board card's Raise budget lands on the same sheet", async () => {
+    mount(policyStop(), { pathname: "/work-items/w1", state: { phSheet: "raise" } });
+    expect(await screen.findByRole("dialog", { name: "Raise the budget cap" })).toBeInTheDocument();
   });
 });
 

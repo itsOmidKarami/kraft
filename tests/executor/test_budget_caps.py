@@ -414,3 +414,54 @@ async def test_unpriced_spend_warns_once_and_never_stops_the_item_or_daily_cap(i
     [warned] = it.events("spend_unpriced")
     assert warned["payload"]["harness"] == "codex" and warned["payload"]["model"] is None
     assert "token_budget" in warned["payload"]["message"]
+
+
+@pytest.mark.parametrize("level", ["item", "chain"])
+async def test_an_item_wide_budget_usd_stop_names_the_limit_that_raises_it(item_on, level):
+    inside = _INSIDE[level][0]
+    it = await _item(item_on, level, {"budget_usd": 2})
+    await _spent(it, inside, tokens=10, usd=2.0)
+    await it.database.write(
+        lambda c: events.append(
+            c, it.id, "scope_budget_reached", {**_breach(it).model_dump(), "task": TASK}
+        )
+    )
+
+    await stops.stop_for_budget(it.database, it.id, it.chain.chain.nodes[0], _policy.NO_BUDGET)
+
+    (stopped,) = it.events("work_item_needs_human")
+    assert stopped["payload"]["limit"] == {"path": "", "key": "budget_usd", "value": 2.0}
+
+
+@pytest.mark.parametrize("level", ["task", "step", "node"])
+async def test_a_scopes_budget_usd_stop_names_no_limit(item_on, level):
+    """A scope's cap is the chain's, which an item override only tightens."""
+    it = await _item(item_on, level, {"budget_usd": 2})
+    await _spent(it, TASK, tokens=10, usd=2.0)
+    await it.database.write(
+        lambda c: events.append(
+            c, it.id, "scope_budget_reached", {**_breach(it).model_dump(), "task": TASK}
+        )
+    )
+
+    await stops.stop_for_budget(it.database, it.id, it.chain.chain.nodes[0], _policy.NO_BUDGET)
+
+    (stopped,) = it.events("work_item_needs_human")
+    assert "limit" not in stopped["payload"]
+
+
+@pytest.mark.parametrize(
+    "breach",
+    [
+        UsdBreach(scope="usd", path="", spent_usd=1.0, cap_usd=2.0, unknown_launches=1),
+        UsdBreach(scope="usd", path="build", spent_usd=2.0, cap_usd=2.0, unknown_launches=0),
+        TokenBreach(scope="tokens", path="", spent_tokens=10, cap_tokens=10),
+        WorkItemBreach(scope="work_item", spent_usd=2.0, cap_usd=2.0),
+        DailyBreach(scope="daily", spent_usd=2.0, cap_usd=2.0),
+    ],
+    ids=["unknown-spend", "a-scope", "tokens", "the-items-own-cap", "daily"],
+)
+def test_no_other_budget_stop_names_a_limit(breach):
+    """Each of these is raised somewhere else (or by no higher cap), so a
+    `limit` would send the UI to an edit that does not move the stop."""
+    assert stops.budget_limit(breach) is None
