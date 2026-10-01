@@ -43,3 +43,43 @@
 .item-panel-item.is-warn:not(:disabled) { color: var(--warn); }
 .item-panel-item.is-bad:not(:disabled) { color: var(--bad); }
 .item-header-error { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Title and brief (Decisions §2): edited in place; the field is low contrast. */
+.item-title-btn { max-width: 100%; margin: 0 -6px; padding: 1px 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: text; }
+.item-title-btn:hover { border-color: var(--line); }
+.item-title-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.item-title-edit { display: flex; align-items: baseline; gap: 12px; }
+.item-title-input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; margin: 0 -6px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text-sub); font-size: 20px; font-weight: 600; }
+.item-title-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.item-brief { max-width: 860px; margin-top: 10px; }
+.item-brief-text { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-sub); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.item-brief-text.is-open { display: block; -webkit-line-clamp: unset; white-space: pre-line; max-height: 22vh; overflow-y: auto; }
+.item-brief-links { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.item-brief-edit { display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin-top: 10px; }
+.item-brief-edit .item-actions .item-muted { margin-right: auto; }
+.item-link { padding: 0; border: 0; background: transparent; color: var(--text-sub); font: inherit; font-size: 12px; cursor: pointer; }
+.item-link:is(:hover, :focus-visible) { color: var(--text); text-decoration: underline; }
+.item-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.item-link.is-strong { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.item-diffline { margin: 10px 0 0; font-size: 12.5px; color: var(--text-sub); }
+.item-add { color: var(--ok); font-family: ui-monospace, Menlo, monospace; }
+.item-del { color: var(--bad); font-family: ui-monospace, Menlo, monospace; }
+
+/* Banner (Decisions §4) and the cards under the brief (§14). */
+.item-banner { flex: none; display: flex; align-items: center; gap: 10px; max-width: 640px; box-sizing: border-box; padding: 8px 8px 8px 14px; border: 1px solid color-mix(in oklab, var(--warn) 45%, transparent); border-radius: 8px; background: color-mix(in oklab, var(--warn) 8%, var(--bg)); font-size: 13px; color: var(--text); }
+.item-banner.is-question { max-width: 760px; }
+.item-banner-glyph { color: var(--warn); }
+.item-banner-text { flex: 1 1 auto; min-width: 0; }
+.item-banner code, .item-card code { font: 12.5px ui-monospace, Menlo, monospace; }
+.item-one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-card { flex: none; display: flex; flex-direction: column; gap: 10px; max-width: 760px; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.item-card.is-warn { border-color: color-mix(in oklab, var(--warn) 45%, transparent); background: color-mix(in oklab, var(--warn) 6%, var(--surface)); }
+.item-card.is-bad { border-color: color-mix(in oklab, var(--bad) 50%, transparent); background: color-mix(in oklab, var(--bad) 6%, var(--surface)); }
+.item-card.is-info { border-color: color-mix(in oklab, var(--info) 55%, transparent); }
+.item-card-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 400; }
+.item-card-title { font-weight: 600; color: var(--text); }
+.item-card-where { color: var(--text-muted); font-size: 12.5px; }
+.item-card.is-warn .item-card-head svg { color: var(--warn); }
+.item-card.is-bad .item-card-head svg { color: var(--bad); }
+.item-card.is-info .item-card-head svg { color: var(--info); }
+.item-quote { margin: 0; font-size: 13px; color: var(--text); }

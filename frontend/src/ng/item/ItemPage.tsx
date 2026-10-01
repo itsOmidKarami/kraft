@@ -2,7 +2,9 @@ import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Placeholder } from "../shell/Placeholder";
 import { usePageItem } from "../shell/pageItem";
+import { Banner, QuestionCard } from "./Banner";
 import { ItemHeader } from "./header/ItemHeader";
+import { Brief, DiffLine, Title } from "./Top";
 import { placeUrl } from "./url";
 import { useItem, type ItemDetail } from "./useItem";
 import "./item.css";
@@ -25,6 +27,7 @@ export function ItemPage() {
 
 function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const navigate = useNavigate();
+  const { node: nodeView } = useParams();
   const settings = () => navigate(placeUrl(item.id, { sel: { kind: "chain" }, tab: "config" }));
   const runLog = () => {
     const node = item.chain_definition.nodes.find((n) => n.id === item.current_node_id);
@@ -37,8 +40,12 @@ function Item({ item, reload }: { item: ItemDetail; reload: () => void }) {
     <div className="item-page">
       <ItemHeader item={item} reload={reload} onSettings={settings} onRunLog={runLog} />
       <div className="item-top">
-        <h1 className="item-title">{item.title}</h1>
+        <Title id={item.id} title={item.title} onSaved={reload} />
+        {!nodeView && <Brief id={item.id} brief={item.description ?? ""} onSaved={reload} />}
+        <DiffLine id={item.id} version={item.updated_at} />
       </div>
+      <Banner item={item} onOpenGate={(gate) => navigate(placeUrl(item.id, { sel: { kind: "node", node: gate } }))} onRaise={settings} />
+      <QuestionCard item={item} compact={!!nodeView} reload={reload} onOpenThread={() => item.stop?.node && navigate(placeUrl(item.id, { node: item.stop.node, sel: { kind: "node", node: item.stop.node }, tab: "thread" }))} />
       <div className="item-canvas" />
     </div>
   );
