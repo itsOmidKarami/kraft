@@ -322,6 +322,19 @@ export interface WorkItem {
   /** The stop `display_status` is reporting on; `null` off `needs_human`,
    *  `waiting` and `rate_limited`. Additive, unread by the shipped UI. */
   stop?: WorkItemStop | null;
+  /** A run's progress at a glance (Kraft UI v2 · B13). Only on the detail
+   *  endpoint. Additive, unread by the shipped UI. */
+  summary?: WorkItemSummary;
+}
+
+/** `GET /work-items/{id}`'s `summary` (B13): nodes done out of the frozen
+ *  chain's total, how many of those were gates, and the current node's step
+ *  (1-based) out of its steps when it declares more than one. */
+export interface WorkItemSummary {
+  nodes_done: number;
+  nodes_total: number;
+  gates_passed: number;
+  step: { index: number; count: number } | null;
 }
 
 export interface Finding {
@@ -396,6 +409,10 @@ export interface KraftEvent {
   work_item_id: string;
   type: string;
   payload: Record<string, unknown>;
+  /** The node this event is about, or `null` for an item-level event (Kraft
+   *  UI v2 · B13). Defaulted server-side from the payload's own `node_id`/
+   *  `node` key, or set explicitly by an emitter that knows its node. */
+  node_id?: string | null;
   created_at: string;
 }
 

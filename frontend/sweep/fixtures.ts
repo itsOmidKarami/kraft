@@ -163,7 +163,7 @@ Related: \`.engineering/specs/2026-09-12-reuse-what-we-measured.md\`, session \`
 
 /* ── builders ────────────────────────────────────────────────────────────── */
 
-type Ev = { seq: number; work_item_id: string; type: string; payload: Record<string, unknown>; created_at: string };
+type Ev = { seq: number; work_item_id: string; type: string; payload: Record<string, unknown>; node_id?: string | null; created_at: string };
 
 export interface ItemBundle {
   item: any;
@@ -215,7 +215,11 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
   let m = 0;
   const ev = (type: string, payload: Record<string, unknown> = {}, dm = 1) => {
     m += dm;
-    events.push({ seq: ++seq, work_item_id: id, type, payload, created_at: t(m) });
+    // Mirrors the server's own default (`events.append`, Kraft UI v2 · B13):
+    // whichever of the payload's `node_id`/`node` keys is a string.
+    const fromPayload = payload.node_id ?? payload.node;
+    const node_id = typeof fromPayload === "string" ? fromPayload : null;
+    events.push({ seq: ++seq, work_item_id: id, type, payload, node_id, created_at: t(m) });
   };
   const sess = (node: string, status: string, over: Record<string, unknown> = {}, hook = HOOK[node] ?? "on.task") => {
     const sid = hex(seed * 100 + sessions.length + 1);
@@ -307,6 +311,13 @@ export function buildItem(state: DisplayState, seed: number, variant: Variant): 
     // rules): data only, the shipped UI still derives its own via
     // `deriveState` and never reads these.
     display_status: "running", stop: null,
+    // Kraft UI v2 · B13: data only, unread by the shipped UI.
+    summary: {
+      nodes_done: Math.max(cur, 0),
+      nodes_total: nodes.length,
+      gates_passed: nodes.slice(0, Math.max(cur, 0)).filter((n) => n.gate_after === n.id).length,
+      step: null,
+    },
   };
 
   const startCurrent = (status: string) => {

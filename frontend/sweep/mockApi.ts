@@ -71,8 +71,16 @@ export async function installMocks(page: Page, S: Scenario, opts: MockOptions = 
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/events$/))) {
       const b = S.bundles[m[1]];
+      const all = b?.events ?? [];
+      const limit = q.get("limit") ? Number(q.get("limit")) : undefined;
+      const before = q.get("before_seq") ? Number(q.get("before_seq")) : undefined;
+      if (before !== undefined) {
+        const page = all.filter((e) => e.seq < before);
+        return json(route, page.slice(-(limit ?? 100)));
+      }
       const after = Number(q.get("after_seq") ?? 0);
-      return json(route, (b?.events ?? []).filter((e) => e.seq > after));
+      const page = all.filter((e) => e.seq > after);
+      return json(route, limit !== undefined ? page.slice(0, limit) : page);
     }
     if ((m = p.match(/^\/work-items\/([^/]+)\/documents$/))) {
       return json(route, { work_item_id: m[1], documents: S.docs[m[1]] ?? [] });

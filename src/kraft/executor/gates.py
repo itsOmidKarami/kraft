@@ -406,6 +406,7 @@ async def review_gates(
                     work_item_id,
                     "gate_auto_review_skipped",
                     {"gate": gate, "reason": "budget"},
+                    node_id=gate,
                 )
             )
             return status
@@ -433,6 +434,7 @@ async def review_gates(
                     work_item_id,
                     "gate_auto_review_discarded",
                     {"gate": gate, "verdict": verdict, "reason": "gate no longer pending"},
+                    node_id=gate,
                 )
             )
             return status_of(db, work_item_id)
@@ -451,6 +453,7 @@ async def review_gates(
                     work_item_id,
                     "gate_auto_review_skipped",
                     {"gate": gate, "reason": "undecided"},
+                    node_id=gate,
                 )
             )
             return status
@@ -956,6 +959,7 @@ async def auto_escalate_stuck(
                     work_item_id,
                     "work_item_auto_escalate_skipped",
                     {"reason": "node_escalation"},
+                    node_id=row["current_node_id"],
                 )
             )
         return status
@@ -979,7 +983,11 @@ async def auto_escalate_stuck(
     if stops.budget_breach(db, work_item_id, budget) is not None:
         await db.write(
             lambda c: events.append(
-                c, work_item_id, "work_item_auto_escalate_skipped", {"reason": "budget"}
+                c,
+                work_item_id,
+                "work_item_auto_escalate_skipped",
+                {"reason": "budget"},
+                node_id=row["current_node_id"],
             )
         )
         return status
@@ -988,7 +996,11 @@ async def auto_escalate_stuck(
     if count >= cap:
         await db.write(
             lambda c: events.append(
-                c, work_item_id, "work_item_auto_escalate_capped", {"cap": cap, "count": count}
+                c,
+                work_item_id,
+                "work_item_auto_escalate_capped",
+                {"cap": cap, "count": count},
+                node_id=row["current_node_id"],
             )
         )
         return status

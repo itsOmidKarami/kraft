@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 _STOP = object()
 
-SCHEMA_VERSION = 45
+SCHEMA_VERSION = 46
 
 SCHEMA_SQL = """
 CREATE TABLE work_items (
@@ -127,11 +127,17 @@ CREATE TABLE events (
   work_item_id TEXT NOT NULL REFERENCES work_items(id),
   type         TEXT NOT NULL,
   payload      TEXT NOT NULL,
+  -- the node this event is about, or NULL for an item-level event
+  -- (`events.append`, Kraft UI v2 · B13). Defaulted from the payload's own
+  -- `node_id`/`node` key, or passed explicitly by an emitter that knows its
+  -- node but does not name it in the payload.
+  node_id      TEXT, -- events.node_id (Kraft UI v2 · B13)
   created_at   TEXT NOT NULL
 );
 
 CREATE INDEX idx_events_work_item ON events(work_item_id, seq);
 CREATE INDEX idx_events_type ON events(type);
+CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq);
 
 CREATE TABLE worker_sessions (
   id             TEXT PRIMARY KEY,
@@ -973,6 +979,21 @@ FROM worker_sessions""",
     44: [
         "ALTER TABLE work_items ADD COLUMN stop_kind TEXT",
         _WORK_ITEMS_STOP_KIND_CLEAR_TRIGGER,
+    ],
+    # Events carry their node (Kraft UI v2 · B13): backfilled from whichever of
+    # the payload's `node_id`/`node` keys is a string -- `json_type(...) =
+    # 'text'` guards against a `node` key some emitter used for something that
+    # is not a node id (a dict, say), which `json_extract` would otherwise
+    # hand back as serialized JSON text indistinguishable from a real id.
+    45: [
+        "ALTER TABLE events ADD COLUMN node_id TEXT",
+        """UPDATE events SET node_id = COALESCE(
+  CASE WHEN json_type(payload, '$.node_id') = 'text'
+       THEN json_extract(payload, '$.node_id') END,
+  CASE WHEN json_type(payload, '$.node') = 'text'
+       THEN json_extract(payload, '$.node') END
+) WHERE node_id IS NULL""",
+        "CREATE INDEX idx_events_node ON events(work_item_id, node_id, seq)",
     ],
 }
 

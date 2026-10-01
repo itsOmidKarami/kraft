@@ -211,6 +211,16 @@ def _build_old_db(conn, version, *, drop_lines=(), skip_stmts=(), replace=()):
             "-- column existed. `work_items_stop_kind_clear` clears it",
             "-- row leaves that set, so it can never point at a stop that is over.",
         )
+    if version < 46:
+        drop_lines = (
+            *drop_lines,
+            "events.node_id (Kraft UI v2",
+            "-- the node this event is about, or NULL for an item-level event",
+            "-- (`events.append`, Kraft UI v2",
+            "-- `node_id`/`node` key, or passed explicitly by an emitter that knows its",
+            "-- node but does not name it in the payload.",
+            "CREATE INDEX idx_events_node",
+        )
     schema = "\n".join(
         rewrite(ln) for ln in db.SCHEMA_SQL.splitlines() if not any(d in ln for d in drop_lines)
     )
@@ -479,6 +489,33 @@ def test_stop_kind_survives_a_move_between_stop_statuses(tmp_path):
     conn.execute("UPDATE work_items SET status = 'needs_human' WHERE id = 'w1'")
     row = conn.execute("SELECT stop_kind FROM work_items WHERE id = 'w1'").fetchone()
     assert row["stop_kind"] == "failed"
+
+
+def test_events_node_id_backfill(tmp_path):
+    """Migration 45 (B13): `events.node_id` is backfilled from whichever of
+    `payload.node_id`/`payload.node` is a string; a row with neither, or a
+    `node` key that holds something other than a string, keeps NULL."""
+    path = tmp_path / "orchestrator.db"
+    conn = db._connect(path)
+    _build_old_db(conn, 45)
+    schema.insert_item(conn)
+    conn.execute(
+        "INSERT INTO events (work_item_id, type, payload, created_at) VALUES "
+        "('w1', 'a', '{\"node_id\": \"spec\"}', 'now'), "
+        "('w1', 'b', '{\"node\": \"implementation\"}', 'now'), "
+        "('w1', 'c', '{\"reason\": \"no node here\"}', 'now'), "
+        "('w1', 'd', '{\"node\": {\"not\": \"a string\"}}', 'now')"
+    )
+    conn.commit()
+    conn.close()
+
+    conn = db._connect(path)
+    db.migrate(conn)
+    rows = {
+        r["type"]: r["node_id"]
+        for r in conn.execute("SELECT type, node_id FROM events ORDER BY seq").fetchall()
+    }
+    assert rows == {"a": "spec", "b": "implementation", "c": None, "d": None}
 
 
 ADDED_COLUMNS = [

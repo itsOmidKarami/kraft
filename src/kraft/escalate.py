@@ -341,7 +341,9 @@ async def _refused(db, run_dirs, *, session_id: str, row, log: str) -> str:
 _RUNTIME = ("command", "harness", "model", "effort", "permission_mode")
 
 
-async def _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime):
+async def _record_message(
+    db, work_item_id, session_id, message, auto, thread, turn, runtime, *, node_id=None
+):
     """The turn's `escalation_message`, before it launches -- a refused launch
     included, so every turn counts toward the auto-escalation bound."""
     payload = {
@@ -353,7 +355,9 @@ async def _record_message(db, work_item_id, session_id, message, auto, thread, t
     }
     if runtime is not None:
         payload["runtime"] = runtime
-    await db.write(lambda c: events.append(c, work_item_id, "escalation_message", payload))
+    await db.write(
+        lambda c: events.append(c, work_item_id, "escalation_message", payload, node_id=node_id)
+    )
 
 
 def _thread_runtime(db, work_item_id: str, thread: int) -> dict | None:
@@ -428,7 +432,17 @@ async def dispatch(
         else None
     )
     if policy is None or breach is not None:
-        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        await _record_message(
+            db,
+            work_item_id,
+            session_id,
+            message,
+            auto,
+            thread,
+            turn,
+            None,
+            node_id=row["current_node_id"],
+        )
         return await _refused(
             db,
             run_dirs,
@@ -449,7 +463,17 @@ async def dispatch(
     if harness_id == _policy.FOLLOW_ITEM:
         harness_id = item_harness(db, row)
         if harness_id is None:
-            await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+            await _record_message(
+                db,
+                work_item_id,
+                session_id,
+                message,
+                auto,
+                thread,
+                turn,
+                None,
+                node_id=row["current_node_id"],
+            )
             return await _refused(
                 db,
                 run_dirs,
@@ -475,7 +499,17 @@ async def dispatch(
         # The item's sandbox, as for every launch of it (Ruling 189).
         sandbox = executor.item_sandbox(row, launch)
     except executor.SandboxUnresolved as exc:
-        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        await _record_message(
+            db,
+            work_item_id,
+            session_id,
+            message,
+            auto,
+            thread,
+            turn,
+            None,
+            node_id=row["current_node_id"],
+        )
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
     task_instruction = _STATE.format(
         opening=_AUTO_OPENING if auto else _MANUAL_OPENING,
@@ -503,7 +537,17 @@ async def dispatch(
             policy=policy,
         )
     except _agent.HarnessUnavailable as exc:
-        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        await _record_message(
+            db,
+            work_item_id,
+            session_id,
+            message,
+            auto,
+            thread,
+            turn,
+            None,
+            node_id=row["current_node_id"],
+        )
         return await _refused(
             db,
             run_dirs,
@@ -516,7 +560,17 @@ async def dispatch(
         # profile the live library no longer defines (`for_repository`'s
         # pre-freeze branch) stops this turn the same clean way a harness
         # problem does, rather than the walk's generic guard catching it.
-        await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+        await _record_message(
+            db,
+            work_item_id,
+            session_id,
+            message,
+            auto,
+            thread,
+            turn,
+            None,
+            node_id=row["current_node_id"],
+        )
         return await _refused(db, run_dirs, session_id=session_id, row=row, log=f"{exc}\n")
     # A turn that resumes a thread runs on the runtime the thread started on
     # (`resumed-escalation-preserves-original-runtime`): the profile may have
@@ -533,12 +587,32 @@ async def dispatch(
     if auto:
         hit = db.read(lambda c: caps.for_turn(c, row, row["current_node_id"]))
         if hit is not None and hit.remaining_s <= 0:
-            await _record_message(db, work_item_id, session_id, message, auto, thread, turn, None)
+            await _record_message(
+                db,
+                work_item_id,
+                session_id,
+                message,
+                auto,
+                thread,
+                turn,
+                None,
+                node_id=row["current_node_id"],
+            )
             return await _refused(
                 db, run_dirs, session_id=session_id, row=row, log=f"not started: {hit.reason}\n"
             )
         time_cap = caps.Deadline(caps.monotonic() + hit.remaining_s, hit) if hit else None
-    await _record_message(db, work_item_id, session_id, message, auto, thread, turn, runtime)
+    await _record_message(
+        db,
+        work_item_id,
+        session_id,
+        message,
+        auto,
+        thread,
+        turn,
+        runtime,
+        node_id=row["current_node_id"],
+    )
     files = thread_files(work_item_id, thread)
     await _archive_last_turn(db, run_dirs, worktree, files)
     try:

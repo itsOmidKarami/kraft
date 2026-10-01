@@ -1602,7 +1602,11 @@ async def _restart_for_base_change(
             if isinstance(gate.node, GateNode) and gates.gate_cleared(db, work_item_id, gate.id):
                 await db.write(
                     lambda c, g=gate.id: events.append(
-                        c, work_item_id, "gate_reopened", {"gate": g, "reason": "conflict_resolved"}
+                        c,
+                        work_item_id,
+                        "gate_reopened",
+                        {"gate": g, "reason": "conflict_resolved"},
+                        node_id=g,
                     )
                 )
     for n in span:
@@ -1868,7 +1872,13 @@ async def run_once(
         return "needs_human"
     if report is not None:
         await db.write(
-            lambda c: events.append(c, work_item_id, "worktree_prepared", {"report": report})
+            lambda c: events.append(
+                c,
+                work_item_id,
+                "worktree_prepared",
+                {"report": report},
+                node_id=nodes[start_index].id,
+            )
         )
 
     i = start_index

@@ -40,7 +40,7 @@ def approve_gate(conn: sqlite3.Connection, work_item_id, gate, *, by: str = "hum
         (_now(), work_item_id),
     ):
         return
-    events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by})
+    events.append(conn, work_item_id, "gate_approved", {"gate": gate, "by": by}, node_id=gate)
     chain.complete_node(conn, work_item_id, gate)
 
 
@@ -50,7 +50,11 @@ def pass_unchanged_revision(conn: sqlite3.Connection, work_item_id, gate, ration
     `chain_revision_unchanged`, then an approval by `kraft` -- neither a person
     nor an agent decided it, so a reader of `by` cannot mistake it for either."""
     events.append(
-        conn, work_item_id, "chain_revision_unchanged", {"gate": gate, "rationale": rationale}
+        conn,
+        work_item_id,
+        "chain_revision_unchanged",
+        {"gate": gate, "rationale": rationale},
+        node_id=gate,
     )
     approve_gate(conn, work_item_id, gate, by="kraft")
 
@@ -80,7 +84,13 @@ def show_revision(conn: sqlite3.Connection, work_item_id, gate, digest: str) -> 
     approval of it must still apply. Once per distinct result, so a board
     polling the document writes nothing new."""
     if shown_revision(conn, work_item_id, gate) != digest:
-        events.append(conn, work_item_id, "chain_revision_shown", {"gate": gate, "digest": digest})
+        events.append(
+            conn,
+            work_item_id,
+            "chain_revision_shown",
+            {"gate": gate, "digest": digest},
+            node_id=gate,
+        )
 
 
 def reject_gate(

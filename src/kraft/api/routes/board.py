@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from kraft import config as config_mod
 from kraft import events, executor, store
@@ -537,6 +537,31 @@ def _stop_task_and_attempt(sessions, node_id: str | None) -> tuple[str | None, i
     return None, None
 
 
+def _summary(st, wid: str, row, chain: dict, sessions) -> dict:
+    """`summary` on the detail response (H.4): a run's progress at a glance --
+    nodes done out of the frozen chain's total, how many of those were gates,
+    and the current node's step (1-based) out of its steps when it declares
+    more than one.
+    """
+    nodes = chain.get("nodes") or []
+    completed = _completed_nodes(st, wid)
+    gates_passed = sum(1 for n in nodes if n["id"] in completed and n.get("gate_after") is not None)
+    step = None
+    node = next((n for n in nodes if n["id"] == row["current_node_id"]), None)
+    steps = node.get("steps") if node else None
+    if steps and len(steps) > 1:
+        task, _attempt = _stop_task_and_attempt(sessions, row["current_node_id"])
+        index = next((i for i, group in enumerate(steps) if task in group), None)
+        if index is not None:
+            step = {"index": index + 1, "count": len(steps)}
+    return {
+        "nodes_done": len(completed),
+        "nodes_total": len(nodes),
+        "gates_passed": gates_passed,
+        "step": step,
+    }
+
+
 def _rate_limit_facts(st, row, task_path: str | None) -> dict:
     """B6: a rate-limited stop's `retries`, plus -- when the stopped task's
     frozen chain names a `fallback:` -- that list and the subset its resolved
@@ -687,6 +712,10 @@ async def get_work_item(wid: str, request: Request):
         # facts} -- `None` off `needs_human`/`waiting`/`rate_limited`.
         "display_status": display_status(row, row["stop_kind"], escalated, pending),
         "stop": _stop(st, row, sessions, pending, stop_payload),
+        # A run's progress at a glance (Kraft UI v2 · B13): nodes done out of
+        # the frozen chain's total, how many were gates, and the current
+        # node's step when it declares more than one.
+        "summary": _summary(st, wid, row, chain, sessions),
         "deferred_findings": _deferred_findings(st, wid),
         "judge_stop_note": _judge_stop_notes(st, wid),
         "concerns": _concerns(st, wid),
@@ -703,11 +732,29 @@ async def get_work_item(wid: str, request: Request):
     }
 
 
+#: The window `before_seq` alone returns, with no `limit` given (rule H.3).
+_DEFAULT_PAGE = 100
+
+
 @api_router.get("/work-items/{wid}/events")
-async def get_events(wid: str, request: Request, after_seq: int = 0):
+async def get_events(
+    wid: str,
+    request: Request,
+    after_seq: int | None = None,
+    before_seq: int | None = None,
+    limit: int | None = None,
+):
     st = request.app.state
     deps._work_item_row(st, wid)
-    return st.db.read(lambda c: events.read_after(c, after_seq, wid))
+    if after_seq is not None and before_seq is not None:
+        raise HTTPException(422, "after_seq and before_seq cannot both be given")
+    if limit is not None and not 1 <= limit <= 500:
+        raise HTTPException(422, "limit must be between 1 and 500")
+    if before_seq is not None:
+        return st.db.read(
+            lambda c: events.read_before(c, before_seq, wid, limit=limit or _DEFAULT_PAGE)
+        )
+    return st.db.read(lambda c: events.read_after(c, after_seq or 0, wid, limit=limit))
 
 
 @api_router.get("/work-items/{wid}/documents")

@@ -738,6 +738,7 @@ async def resume_work_item(wid: str, body: Resume, request: Request):
                     wid,
                     "worktree_rebase_verified",
                     {"reported_head": new_base, "worktree_head": worktree_head},
+                    node_id=row["current_node_id"],
                 )
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
@@ -1052,6 +1053,7 @@ async def _retry(wid: str, body: Retry, request: Request):
                     wid,
                     "worktree_rebase_verified",
                     {"reported_head": new_base, "worktree_head": worktree_head},
+                    node_id=node_id,
                 )
             )
             await st.db.write(lambda c: store.set_base_ref(c, wid, new_base))
@@ -1527,7 +1529,11 @@ async def _close_cancelled_mr(st, wid: str, row) -> dict:
         return {"ok": False, "error": str(exc)}
     await st.db.write(
         lambda c: events.append(
-            c, wid, "mr_closed", {"ref": ref["number"], "url": ref["url"], "by": "cancel"}
+            c,
+            wid,
+            "mr_closed",
+            {"ref": ref["number"], "url": ref["url"], "by": "cancel"},
+            node_id=row["current_node_id"],
         )
     )
     return {"ok": True}
@@ -1562,7 +1568,13 @@ async def reopen_mr(wid: str, request: Request):
     except forge_mod.ForgeError as exc:
         raise HTTPException(502, str(exc)) from None
     await st.db.write(
-        lambda c: events.append(c, wid, "mr_reopened", {"ref": ref["number"], "url": ref["url"]})
+        lambda c: events.append(
+            c,
+            wid,
+            "mr_reopened",
+            {"ref": ref["number"], "url": ref["url"]},
+            node_id=row["current_node_id"],
+        )
     )
     return await _retry(wid, Retry(), request)
 
@@ -1724,7 +1736,9 @@ async def set_mr_labels(wid: str, body: MrLabels, request: Request):
     # never looked at the pipeline this repair created.
     def _record(c):
         store.set_ci_pipeline_ref(c, wid, "")
-        events.append(c, wid, "mr_labels_set", {"labels": list(labels)})
+        events.append(
+            c, wid, "mr_labels_set", {"labels": list(labels)}, node_id=row["current_node_id"]
+        )
 
     await st.db.write(_record)
     return {"work_item_id": wid, "labels": list(labels)}

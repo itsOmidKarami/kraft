@@ -305,7 +305,9 @@ async def _run_one(
             # A multi-repo item's event carries no repo, so each repo's own
             # merge request is recorded on its row too (Kraft-mjsf).
             def _record(c, n=number, u=url):
-                events.append(c, work_item_id, "mr_opened", {"number": n, "url": u})
+                events.append(
+                    c, work_item_id, "mr_opened", {"number": n, "url": u}, node_id=node_id
+                )
                 if repo_row_id is not None:
                     store.update_repo_state(
                         c, repo_row_id, merge_state="open", mr_ref={"number": n, "url": u}
