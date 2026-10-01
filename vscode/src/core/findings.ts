@@ -31,4 +31,11 @@ export function findingsByUri(id: string, detail: WorkItemDetail): Map<string, L
   return byUri;
 }
 
+// Per severity, for the diff's line marks: every finding gets one, whatever its squiggle shows.
+export function marksBySeverity(findings: LocatedFinding[] = []): Record<Severity, LocatedFinding[]> {
+  const marks: Record<Severity, LocatedFinding[]> = { error: [], warning: [], information: [] };
+  for (const f of findings) marks[f.severity].push(f);
+  return marks;
+}
+
 export const showsFindings = (d: WorkItemDetail) => Boolean(d.pending_gate) || d.status === "paused";

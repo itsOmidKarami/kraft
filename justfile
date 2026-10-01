@@ -261,6 +261,14 @@ test-vscode: schemas
     cd vscode && npm run typecheck
     cd vscode && npm test
 
+# Retake the Marketplace screenshots in vscode/media/: packages the extension,
+# runs it in a real VS Code against a seeded Kraft with fake agents.
+[doc("VS Code extension: retake the Marketplace screenshots (args: --out DIR, --vsix FILE, --keep)")]
+vscode-screenshots *args:
+    cd vscode && [ -d node_modules ] || npm ci
+    cd vscode/dev/screenshots && [ -d node_modules ] || npm ci
+    node vscode/dev/screenshots/shot.mjs {{args}}
+
 # Lint + format check
 lint:
     uv run ruff check .

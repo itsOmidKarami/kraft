@@ -69,7 +69,14 @@ def read_change(
         return None
     untracked: list[str] = []
     if head is None:
-        status = _config.git_read(worktree, "status", unentered, "--porcelain", "-uall")
+        # Not Kraft's own untracked notes and artifacts: the commit path
+        # (`forge.git.work_product_pathspec`) keeps them out of the merge
+        # request, so a reviewer must not see them as part of the change
+        # (Kraft-tugdf.22). A tracked file under a root still shows, via `diff`.
+        roots = [f":(exclude){r}" for r in _config.KRAFT_ROOTS]
+        status = _config.git_read(
+            worktree, "status", unentered, "--porcelain", "-uall", "--", ".", *roots
+        )
         if status is None:
             return None
         untracked = [ln[3:] for ln in status.splitlines() if ln.startswith("?? ")]
