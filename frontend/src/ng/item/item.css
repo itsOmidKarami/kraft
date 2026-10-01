@@ -182,3 +182,10 @@ button.ip-recent-line:focus-visible { outline: 2px solid var(--focus); outline-o
 .ip-files li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; color: var(--text-sub); }
 .ip-files .is-mono { overflow-wrap: anywhere; }
 .ip-notes { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--text); }
+
+/* Document viewer (prototype lines 278–283). */
+.dv { display: flex; flex-direction: column; gap: 10px; }
+.dv-path { margin: 0; font-size: 12px; color: var(--text-sub); overflow-wrap: anywhere; }
+.dv-body { max-height: 56vh; overflow: auto; padding-right: 6px; font-size: 13px; line-height: 1.6; color: var(--text); }
+.dv-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dialog:has(.dv) { width: min(760px, 100%); }

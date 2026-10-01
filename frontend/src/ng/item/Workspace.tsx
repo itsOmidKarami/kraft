@@ -12,6 +12,7 @@ import { NodeGraph, type NodeSel } from "../graph/NodeGraph";
 import { paneReducer, type PaneAction, type PaneState, type Sel } from "../graph/usePaneSelection";
 import { useResizable, useWidth } from "../graph/useResizable";
 import { chainGraph } from "./graph";
+import { DocViewer } from "./DocViewer";
 import { gateView } from "./gateView";
 import { nodeGraph } from "./nodeGraph";
 import { taskName } from "./paths";
@@ -44,8 +45,8 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
   const size = useResizable(PAGE, canvasW);
   const events = useEvents(item.id, item.updated_at);
   const docs = useDocuments(item.id, item.updated_at);
-  const [, setDoc] = useState<WorkItemDocument | null>(null);
-  const [, setArtifact] = useState(false);
+  const [doc, setDoc] = useState<WorkItemDocument | null>(null);
+  const [artifact, setArtifact] = useState(false);
   const [policy, setPolicy] = useState<Policy | null>(null);
   useEffect(() => void api.getPolicy().then(setPolicy, () => setPolicy(null)), []);
   const [editBudget, setEditBudget] = useState(false);
@@ -169,6 +170,8 @@ export function Workspace({ item, reload }: { item: ItemDetail; reload: () => vo
           {pane.body}
         </Inspector>
       </div>
+      {doc && <DocViewer source={{ kind: "document", id: doc.document_id, by: [doc.node_id, doc.hook_point?.split(".").at(-1), doc.attempt ? `attempt ${doc.attempt}` : ""].filter(Boolean).join(" › ") }} onClose={() => setDoc(null)} />}
+      {artifact && <DocViewer source={{ kind: "artifact", workItemId: item.id }} onClose={() => setArtifact(false)} />}
     </div>
   );
 }

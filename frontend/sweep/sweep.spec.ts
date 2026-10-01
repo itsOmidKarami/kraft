@@ -443,6 +443,8 @@ const CASES: Case[] = [
   { screen: "ng-item-gate", variant: "view", data: "default", widths: [1024, 1280], run: (c) => ngItem(c, "needs-gate", { tail: "/nodes/final_review" }) },
   { screen: "ng-item-gate", variant: "passed", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { tail: "?sel=plan_approval" }) },
   { screen: "ng-item-gate", variant: "reject", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-gate", { tail: "?sel=final_review", then: async (p) => { await p.getByRole("button", { name: "Reject…" }).click(); } }) },
+  // ux2-W5 J: the document viewer, on the pending gate's document.
+  { screen: "ng-item-doc", variant: "artifact", data: "default", widths: [1280], run: (c) => ngItem(c, "needs-gate", { tail: "?sel=final_review", then: async (p) => { await p.getByRole("button", { name: /^Read / }).click(); await p.getByRole("dialog").waitFor(); } }) },
   // The header's floating parts, opened the way a keyboard user would.
   { screen: "ng-item", variant: "panel", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "More actions" }).focus(); } }) },
   { screen: "ng-item", variant: "kebab", data: "default", widths: [1280], run: (c) => ngItem(c, "running", { then: async (p) => { await p.getByRole("button", { name: "Item menu" }).click(); } }) },
