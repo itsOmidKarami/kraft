@@ -337,3 +337,15 @@ describe("bootstrap", () => {
     expect(hydrate).not.toHaveBeenCalledWith("wb");
   });
 });
+
+describe("display_status freshness (ux2 W5 · A.3)", () => {
+  it("re-reads an item after an event that moves its status, and not after one that doesn't", async () => {
+    const hydrate = vi.spyOn(useStore.getState(), "hydrateItem").mockResolvedValue();
+    useStore.setState({ hydrateItem: hydrate });
+    useStore.getState().applyEvent(ev({ type: "work_item_cancelled", payload: { reason: "r" } }));
+    useStore.getState().applyEvent(ev({ type: "node_completed", payload: { node_id: "env_setup" } }));
+    await Promise.resolve();
+    expect(hydrate).toHaveBeenCalledTimes(1);
+    expect(hydrate).toHaveBeenCalledWith("w1");
+  });
+});

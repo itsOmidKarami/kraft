@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildScenario, settingsFor, STATES, type DisplayState, type Scenario, type Variant } from "./fixtures";
 import { installMocks } from "./mockApi";
+import { NG_NOW, NG_SCENARIOS } from "./ngItems";
 import { chromeRects, runChecks, scrollAllToBottom, type Checks } from "./checks";
 
 /**
@@ -111,6 +112,12 @@ async function ng(c: Ctx, url: string, look: Record<string, unknown>, opts: { si
   await c.page.locator("main h1").first().waitFor({ timeout: 8000 });
   await settle(c.page, 600);
   if (opts.hover) { await c.page.mouse.move(20, 300); await settle(c.page, 500); }
+}
+/** The /ng item page (ux2-W5) for one of ngItems.ts's scenarios, the clock fixed at NG_NOW so elapsed reads the same every run. */
+async function ngItem(c: Ctx, sc: string, opts: { tail?: string; side?: "pinned" | "rail"; then?: (p: Page) => Promise<void> } = {}) {
+  await c.page.clock.setFixedTime(new Date(NG_NOW));
+  await ng(c, `/ng/work-items/${c.S.ng[sc]}${opts.tail ?? ""}`, {}, { side: opts.side ?? "pinned" });
+  if (opts.then) { await opts.then(c.page); await settle(c.page, 400); }
 }
 /** The /ng search overlay: open it with Ctrl+K, optionally type, and wait for the debounced sections. */
 async function ngSearch(c: Ctx, q: string, opts: { docsError?: boolean; noBeads?: boolean } = {}) {
@@ -324,6 +331,14 @@ const CASES: Case[] = [
     await c.page.keyboard.press("Enter");
     await settle(c.page, 300);
   } },
+
+  // ux2-W5: the item page, every scenario the prototype draws (plus paused), at 1280 and with long data.
+  // Three of them also at 1024 and 1920, light and 700px tall.
+  ...NG_SCENARIOS.map<Case>((sc) => {
+    const wide = ["running", "failed", "needs-gate"].includes(sc);
+    return { screen: "ng-item", variant: sc, data: "default", widths: wide ? [1024, 1280, 1920] : [1280], ...(wide ? { shells: [{ mode: "light" }, { short: true }] } : {}), run: (c) => ngItem(c, sc) };
+  }),
+  ...NG_SCENARIOS.map<Case>((sc) => ({ screen: "ng-item", variant: `${sc}-long`, data: "long", widths: [1280], run: (c) => ngItem(c, sc) })),
 
   // Login
   { screen: "login", variant: "default", data: "default", widths: KEY, locked: true, run: async (c) => { await c.page.goto("/"); await settle(c.page, 800); } },
