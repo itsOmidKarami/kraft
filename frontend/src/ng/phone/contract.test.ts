@@ -42,7 +42,6 @@ const ALLOWED = [
   "templates/draft/draftApi",
   "templates/draft/types",
   "apply/store",
-  "analytics/weeks",
   "shell/routes", // the list of /ng pages, as data: Search's Go to rows
 ];
 
