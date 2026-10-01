@@ -194,6 +194,8 @@
 .pane-glyph { width: 26px; height: 28px; display: flex; align-items: center; justify-content: center; flex: none; color: var(--text-sub); }
 .pane-diamond { width: 11px; height: 11px; transform: rotate(45deg); border-radius: 3px; border: 1.5px solid var(--text-sub); }
 .pane-title { flex: 1; min-width: 0; margin: 0; font: 500 16px ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.pane-glyph.is-picker { width: auto; gap: 2px; padding: 0 3px; border: 0; border-radius: 5px; background: none; cursor: pointer; }
+.pane-glyph.is-picker:is(:hover, :focus-visible) { background: var(--surface-2); color: var(--text); }
 .pane-title-btn { margin: -1px -5px; padding: 1px 5px; border: 0; border-radius: 5px; background: none; font: inherit; color: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
 .pane-title-btn:is(:hover, :focus-visible) { background: var(--surface-2); }
 .pane-focus { display: flex; align-items: center; gap: 5px; flex: none; height: 26px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; font-size: 11.5px; color: var(--text-sub); white-space: nowrap; cursor: pointer; }

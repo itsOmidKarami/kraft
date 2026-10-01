@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { Maximize2, NodeIcon, PanelRightClose, PanelRightOpen, type TaskKind } from "../icons";
 import { Tabs } from "../ui/Tabs";
 import type { useResizable } from "./useResizable";
@@ -24,6 +25,8 @@ type Props = {
   onExpand: () => void;
   /** Focus ⤢: opens the node view. */
   onFocus?: () => void;
+  /** The editor's icon picker (Decisions §9 Icons): the glyph becomes "icon ▾". */
+  onIcon?: (el: HTMLElement) => void;
   /** A click on the title (the editor's rename, Decisions §9 Rename); the title is then a button. */
   onTitle?: (el: HTMLElement) => void;
   footer?: ReactNode;
@@ -32,7 +35,7 @@ type Props = {
 
 /** The side pane over a canvas (Inspector.dc.html): crumb, icon and title,
  *  tabs, a body that alone scrolls, a footer; collapses to a 40px rail. */
-export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, footer, children }: Props) {
+export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title, sub, prob, tabs, tab, onTab, onCollapse, onExpand, onFocus, onTitle, onIcon, footer, children }: Props) {
   const railBtn = useRef<HTMLButtonElement>(null);
   const fromKeys = useRef(false);
   // Escape, or the collapse button, lands focus on the rail that replaces the pane.
@@ -76,7 +79,11 @@ export function Inspector({ id, open, size, crumbs, icon, taskKind, gate, title,
       </div>
       <div className="pane-head">
         <div className="pane-title-row">
-          <span className="pane-glyph">{glyph}</span>
+          {onIcon ? (
+            <button type="button" className="pane-glyph is-picker" aria-label={`Icon${icon ? `: ${icon}` : ""}, change`} title="Change the icon" onClick={(e) => onIcon(e.currentTarget)}>
+              {glyph}<ChevronDown size={10} aria-hidden />
+            </button>
+          ) : <span className="pane-glyph">{glyph}</span>}
           <h2 className="pane-title">{onTitle ? <button type="button" className="pane-title-btn" title="Rename" onClick={(e) => onTitle(e.currentTarget)}>{title}</button> : title}</h2>
           {onFocus && <button type="button" className="pane-focus" title="Open the node view (double-click)" onClick={onFocus}>Focus <Maximize2 size={12} /></button>}
         </div>

@@ -650,6 +650,13 @@ const CASES: Case[] = [
     await c.page.getByRole("dialog", { name: /^Change base of/ }).waitFor({ timeout: 4000 });
     await settle(c.page, 300);
   } },
+  { screen: "ng-chains", variant: "icon-picker", data: "default", widths: [1280], run: async (c) => {
+    await ngChains(c, "default");
+    await c.page.getByRole("button", { name: "spec, node" }).click();
+    await c.page.getByRole("button", { name: /^Icon.*, change$/ }).click();
+    await c.page.getByRole("option").first().waitFor({ timeout: 6000 });
+    await settle(c.page, 300);
+  } },
   { screen: "ng-chains", variant: "canvas-empty", data: "default", widths: [1280], run: (c) => ngChains(c, "empty") },
   { screen: "ng-chains", variant: "seam-menu", data: "default", widths: [1280], run: async (c) => {
     await ngChains(c, "default");

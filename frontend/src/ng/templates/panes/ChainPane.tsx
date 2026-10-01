@@ -14,6 +14,7 @@ import { RemoveCard } from "../cards/RemoveCard";
 import { RenameCard } from "../cards/RenameCard";
 import { refsTo } from "../cards/refs";
 import { ExtendMenu } from "../menus/ExtendMenu";
+import { IconPicker } from "../IconPicker";
 import { showToast } from "../../ui/Toast";
 import { detailOf } from "../../http";
 import "./panes.css";
@@ -51,7 +52,7 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
   /** The page asks for the rename card (a click on the selected node's name). */
   renameNow?: { el: HTMLElement; tick: number } | null;
 }) {
-  const [card, setCard] = useState<{ t: "rename" } | { t: "remove" } | { t: "extend" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
+  const [card, setCard] = useState<{ t: "rename" } | { t: "remove" } | { t: "extend" } | { t: "icon" } | { t: "base"; base: string; check: BaseCheck } | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -202,6 +203,8 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
       onExpand={onExpand}
       onFocus={node && onFocus ? onFocus : undefined}
       onTitle={renameable ? (el) => { at(el); setCard({ t: "rename" }); } : undefined}
+      // Nodes, steps and tasks pick an icon; the chain, gates, the fix loop and the judge have fixed ones (Decisions §9 Icons).
+      onIcon={["node", "step", "task", "esc", "review"].includes(d.kind) ? (el) => { at(el); setCard({ t: "icon" }); } : undefined}
       footer={footer}
     >
       {d.kind === "fixloop" ? (
@@ -218,6 +221,12 @@ export function ChainPane({ draft, chain, path, open, size, onCollapse, onExpand
     )}
     {card?.t === "remove" && <RemoveCard anchor={anchor} label={removeLabel} refs={refs} note={inherits ? "This chain will then own the step's list; ↺ on the node restores it." : undefined} onRemove={() => void remove()} onClose={closeCard} />}
     {card?.t === "extend" && <ExtendMenu anchor={anchor} title="Change base" note="Next, you'll see which of this chain's overrides fit the new base." onPick={(b) => void pickBase(b)} onClose={closeCard} />}
+    {card?.t === "icon" && (
+      <IconPicker anchor={anchor} current={typeof own?.icon === "string" ? own.icon : undefined} onClose={closeCard} onPick={(name) => {
+        closeCard();
+        draft.field(path, "icon", name);
+      }} />
+    )}
     {card?.t === "base" && <ChangeBaseCard anchor={anchor} node={path} base={card.base} check={card.check} onApply={() => void applyBase(card.base)} onClose={closeCard} />}
     </>
   );
